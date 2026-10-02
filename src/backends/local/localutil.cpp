@@ -73,7 +73,11 @@ int fstatatFallback(int dirFd, const char *path, int flags, NativeStat *out)
 #ifdef STATX_BTIME
 // statx() is missing on old kernels (ENOSYS) and blocked by some seccomp
 // profiles (EPERM on a path that exists); fstatat() is used from then on.
-std::atomic<bool> g_statxUsable { true };
+std::atomic<bool> &statxUsable()
+{
+    static std::atomic<bool> usable { true };
+    return usable;
+}
 
 void fromStatx(const struct statx &stx, NativeStat *out)
 {
@@ -92,15 +96,15 @@ void fromStatx(const struct statx &stx, NativeStat *out)
 
 int statxAt(int dirFd, const char *path, int flags, NativeStat *out)
 {
-    if (g_statxUsable) {
-        struct statx stx {};
-        if (::statx(dirFd, path, flags | AT_STATX_SYNC_AS_STAT, STATX_BASIC_STATS | STATX_BTIME, &stx) == 0) {
+    if (statxUsable()) {
+        if (struct statx stx {};
+                ::statx(dirFd, path, flags | AT_STATX_SYNC_AS_STAT, STATX_BASIC_STATS | STATX_BTIME, &stx) == 0) {
             fromStatx(stx, out);
             return 0;
         }
         if (errno != ENOSYS && errno != EPERM)
             return errno;
-        g_statxUsable = false;
+        statxUsable() = false;
     }
     return fstatatFallback(dirFd, path, flags, out);
 }
@@ -120,8 +124,7 @@ QString lookupName(Lookup lookup)
     while (size <= MaxNameBuffer) {
         std::vector<char> buffer(size);
         QString name;
-        const int rc = lookup(buffer.data(), buffer.size(), &name);
-        if (rc != ERANGE)
+        if (const int rc = lookup(buffer.data(), buffer.size(), &name); rc != ERANGE)
             return rc == 0 ? name : QString();
         size *= 2;
     }
@@ -247,15 +250,14 @@ QByteArray parentOf(const QByteArray &native)
 
 void syncFolder(const QByteArray &native)
 {
-    const Fd folder(::open(native.constData(), O_RDONLY | O_DIRECTORY | O_CLOEXEC));
-    if (folder.valid() && ::fsync(folder.get()) != 0)
+    if (const Fd folder(::open(native.constData(), O_RDONLY | O_DIRECTORY | O_CLOEXEC));
+            folder.valid() && ::fsync(folder.get()) != 0)
         qCDebug(lcNetVfsLocal) << "fsync of a folder failed:" << std::strerror(errno);
 }
 
 QString AccountNames::user(qint64 uid)
 {
-    const auto cached = m_users.constFind(uid);
-    if (cached != m_users.constEnd())
+    if (const auto cached = m_users.constFind(uid); cached != m_users.constEnd())
         return *cached;
     const QString name = lookupName([uid](char *buffer, size_t size, QString *out) {
         struct passwd pwd {};
@@ -271,8 +273,7 @@ QString AccountNames::user(qint64 uid)
 
 QString AccountNames::group(qint64 gid)
 {
-    const auto cached = m_groups.constFind(gid);
-    if (cached != m_groups.constEnd())
+    if (const auto cached = m_groups.constFind(gid); cached != m_groups.constEnd())
         return *cached;
     const QString name = lookupName([gid](char *buffer, size_t size, QString *out) {
         struct group grp {};
@@ -320,9 +321,9 @@ Result Waiter::wait(int fd, short events) const
 Result readOnce(int fd, qint64 offset, char *buffer, qint64 length, const Waiter &waiter, qint64 *got)
 {
     for (;;) {
-        const ssize_t n = offset >= 0 ? ::pread(fd, buffer, static_cast<size_t>(length), offset)
-                                      : ::read(fd, buffer, static_cast<size_t>(length));
-        if (n >= 0) {
+        if (const ssize_t n = offset >= 0 ? ::pread(fd, buffer, static_cast<size_t>(length), offset)
+                                          : ::read(fd, buffer, static_cast<size_t>(length));
+                n >= 0) {
             *got = n;
             return Result::success();
         }
@@ -360,8 +361,7 @@ Result writeFully(int fd, const char *data, qint64 length, const Waiter &waiter)
     while (done < length) {
         if (const Result r = waiter.check(); !r.ok())   // L-6
             return r;
-        const ssize_t n = ::write(fd, data + done, static_cast<size_t>(qMin(ChunkSize, length - done)));
-        if (n >= 0) {
+        if (const ssize_t n = ::write(fd, data + done, static_cast<size_t>(qMin(ChunkSize, length - done))); n >= 0) {
             done += n;
         } else if (errno == EAGAIN) {
             if (const Result r = waiter.wait(fd, POLLOUT); !r.ok())

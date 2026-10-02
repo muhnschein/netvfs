@@ -9,8 +9,8 @@
   {
     "name": "local: rename(NoReplace) fallback skips the stat check for folders",
     "file": "src/backends/local/localbackend.cpp",
-    "search": "    if (statAt(AT_FDCWD, to, false, &existing) == 0)\n        return alreadyExists(to);",
-    "replace": "    if (statAt(AT_FDCWD, to, false, &existing) == 0 && false)\n        return alreadyExists(to);",
+    "search": "    if (NativeStat existing; statAt(AT_FDCWD, to, false, &existing) == 0)\n        return alreadyExists(to);",
+    "replace": "    if (NativeStat existing; statAt(AT_FDCWD, to, false, &existing) == 0 && false)\n        return alreadyExists(to);",
     "test": "timeout 300 build/tests/conformance/tst_conformance"
   },
   {
@@ -58,15 +58,15 @@
   {
     "name": "local: copy(NoReplace) overwrites",
     "file": "src/backends/local/localio.cpp",
-    "search": "return copyInto(input.get(), target, st, O_CREAT | O_EXCL);",
-    "replace": "return copyInto(input.get(), target, st, O_CREAT | O_TRUNC);",
+    "search": "return copyInto(input.get(), target, st, O_CREAT | O_EXCL, m_context->waiter());",
+    "replace": "return copyInto(input.get(), target, st, O_CREAT | O_TRUNC, m_context->waiter());",
     "test": "timeout 300 build/tests/conformance/tst_conformance"
   },
   {
     "name": "local: copy(Replace) onto a folder",
     "file": "src/backends/local/localio.cpp",
-    "search": "if (statAt(AT_FDCWD, target, false, &existing) == 0 && existing.isDir())",
-    "replace": "if (statAt(AT_FDCWD, target, false, &existing) == 0 && false)",
+    "search": "statAt(AT_FDCWD, target, false, &existing) == 0 && existing.isDir())",
+    "replace": "statAt(AT_FDCWD, target, false, &existing) == 0 && false)",
     "test": "timeout 300 build/tests/conformance/tst_conformance"
   },
   {
@@ -86,8 +86,8 @@
   {
     "name": "local: makeDir ignores exclusive",
     "file": "src/backends/local/localbackend.cpp",
-    "search": "if (error == EEXIST && !exclusive && ",
-    "replace": "if (error == EEXIST && (!exclusive || true) && ",
+    "search": "error == EEXIST && !exclusive && ",
+    "replace": "error == EEXIST && (!exclusive || true) && ",
     "test": "timeout 300 build/tests/conformance/tst_conformance"
   },
   {
@@ -100,8 +100,8 @@
   {
     "name": "local: download ignores cancel between chunks",
     "file": "src/backends/local/localio.cpp",
-    "search": "if (waiter.canceled() || (progress && progress->canceled()))   // L-6: between chunks",
-    "replace": "if (progress && progress->canceled())   // L-6: between chunks",
+    "search": "if (waiter.canceled() || (progress && progress->canceled()))",
+    "replace": "if (progress && progress->canceled())",
     "test": "timeout 300 build/tests/conformance/tst_conformance"
   },
   {
