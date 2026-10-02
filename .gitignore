@@ -12,3 +12,4 @@ Makefile.qmake
 /RPMS/
 compile_commands.json
 coverage*.xml
+/.claude/

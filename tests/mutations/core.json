@@ -1,0 +1,142 @@
+[
+  {
+    "name": "free space check skipped",
+    "file": "src/core/transfer.cpp",
+    "search": "if (r.ok() && available >= 0 && available < size) {",
+    "replace": "if (false) {",
+    "test": "build/tests/unit/transfer/tst_transfer"
+  },
+  {
+    "name": "upload goes straight to final name",
+    "file": "src/core/transfer.cpp",
+    "search": "const QString part = partName(target);\n    CountingReader",
+    "replace": "const QString part = target;\n    CountingReader",
+    "test": "build/tests/unit/transfer/tst_transfer"
+  },
+  {
+    "name": "part not removed after failed upload",
+    "file": "src/core/transfer.cpp",
+    "search": "    const Result r = backend->remove(path);\n    if (!r.ok() && r.error() != Error::NotFound)",
+    "replace": "    const Result r = Result();\n    Q_UNUSED(path)\n    if (!r.ok() && r.error() != Error::NotFound)",
+    "test": "build/tests/unit/transfer/tst_transfer"
+  },
+  {
+    "name": "cancel not reset before cleanup",
+    "file": "src/core/transfer.cpp",
+    "search": "        backend->resetCancel();",
+    "replace": "        ;",
+    "test": "build/tests/unit/transfer/tst_transfer"
+  },
+  {
+    "name": "remote size not compared",
+    "file": "src/core/transfer.cpp",
+    "search": "if (r.ok() && entry.size != reader.count()) {",
+    "replace": "if (false) {",
+    "test": "build/tests/unit/transfer/tst_transfer"
+  },
+  {
+    "name": "stale part age ignored",
+    "file": "src/core/transfer.cpp",
+    "search": "if (!entry.modified.isValid() || entry.modified >= cutoff)",
+    "replace": "if (!entry.modified.isValid())",
+    "test": "build/tests/unit/transfer/tst_transfer"
+  },
+  {
+    "name": "restore writes final name directly",
+    "file": "src/core/transfer.cpp",
+    "search": "    const QString part = partName(localPath);\n    QFile file(part);",
+    "replace": "    const QString part = localPath;\n    QFile file(part);",
+    "test": "build/tests/unit/transfer/tst_transfer"
+  },
+  {
+    "name": "identity not checked before auth",
+    "file": "src/core/identity.cpp",
+    "search": "    r = checkServerIdentity(identity, params.option(QStringLiteral(\"host_key\")));",
+    "replace": "    r = Result();",
+    "test": "build/tests/unit/core/tst_core"
+  },
+  {
+    "name": "changed identity accepted",
+    "file": "src/core/identity.cpp",
+    "search": "if (ServerIdentity::fromPin(pin) == seen)",
+    "replace": "if (true)",
+    "test": "build/tests/unit/core/tst_core"
+  },
+  {
+    "name": "dotdot accepted",
+    "file": "src/core/paths.cpp",
+    "search": "if (part == QLatin1String(\".\") || part == QLatin1String(\"..\"))",
+    "replace": "if (part == QLatin1String(\".\"))",
+    "test": "build/tests/unit/core/tst_core"
+  },
+  {
+    "name": "windows trailing dot accepted",
+    "file": "src/core/paths.cpp",
+    "search": "component.endsWith(QLatin1Char(' ')) || component.endsWith(QLatin1Char('.'))",
+    "replace": "component.endsWith(QLatin1Char(' '))",
+    "test": "build/tests/unit/core/tst_core"
+  },
+  {
+    "name": "secret not wiped",
+    "file": "src/core/secure.cpp",
+    "search": "        wipeBytes(data.data(), static_cast<size_t>(data.size()));\n    data.clear();",
+    "replace": "        (void)0;",
+    "test": "build/tests/unit/core/tst_core"
+  },
+  {
+    "name": "attention does not flag credentials",
+    "file": "src/core/accountstore.cpp",
+    "search": "    account->setValue(QLatin1String(Keys::CredentialsNeedUpdate), true);",
+    "replace": "",
+    "test": "dbus-run-session -- build/tests/unit/accounts/tst_accounts"
+  },
+  {
+    "name": "attention clear keeps seen key",
+    "file": "src/core/accountstore.cpp",
+    "search": "    account->remove(Keys::providerKey(account->providerName(), QLatin1String(Keys::HostKeySeen)));",
+    "replace": "",
+    "test": "dbus-run-session -- build/tests/unit/accounts/tst_accounts"
+  },
+  {
+    "name": "backups_path default lost",
+    "file": "src/core/accountstore.cpp",
+    "search": "        config.backupsPath = QLatin1String(DefaultBackupsPath);",
+    "replace": "",
+    "test": "dbus-run-session -- build/tests/unit/accounts/tst_accounts"
+  },
+  {
+    "name": "probe file left behind",
+    "file": "src/core/probe.cpp",
+    "search": "    r = backend->remove(path);\n    if (!r.ok())\n        return r;",
+    "replace": "",
+    "test": "build/tests/unit/core/tst_core"
+  },
+  {
+    "name": "authorized key duplicated",
+    "file": "src/core/sshkeys.cpp",
+    "search": "        if (keyPart(present) == key)\n            return Result::success();",
+    "replace": "",
+    "test": "build/tests/unit/core/tst_core"
+  },
+  {
+    "name": "authorized_keys overwritten",
+    "file": "src/core/sshkeys.cpp",
+    "search": "    QByteArray updated = existing;",
+    "replace": "    QByteArray updated;",
+    "test": "build/tests/unit/core/tst_core"
+  },
+  {
+    "name": "signond outage flags the account",
+    "file": "src/core/secretsource.cpp",
+    "search": "        return Result(Error::Internal, QStringLiteral(\"The credentials service is not available\"));",
+    "replace": "        return Result(Error::AuthFailed, QStringLiteral(\"The credentials service is not available\"));",
+    "test": "dbus-run-session -- build/tests/unit/accounts/tst_accounts"
+  },
+  {
+    "name": "stale part warning leaks path",
+    "file": "src/core/transfer.cpp",
+    "search": "    qCWarning(lcNetVfsCore) << \"Could not remove\" << what << errorName(r.error());",
+    "replace": "    qCWarning(lcNetVfsCore) << \"Could not remove\" << what << r.toString();",
+    "test": "build/tests/unit/transfer/tst_transfer"
+  }
+]

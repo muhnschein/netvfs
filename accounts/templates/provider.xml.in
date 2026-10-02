@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: LGPL-2.1-or-later -->
+<!-- SPEC 6.1: no user-group tag, so the provider is offered to everyone. -->
+<!DOCTYPE provider>
+<provider version="1.0" id="@PROVIDER@">
+    <name>@NAME@</name>
+    <description>@DESCRIPTION@</description>
+    <icon>image://theme/graphic-service-@PROVIDER@</icon>
+</provider>

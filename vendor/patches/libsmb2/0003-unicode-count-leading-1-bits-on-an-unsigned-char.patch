@@ -1,0 +1,32 @@
+From 5dd96800991440020340f02b0cc0a05848e8dc70 Mon Sep 17 00:00:00 2001
+From: muhnschein <tan_anemone.0l@icloud.com>
+Date: Fri, 2 Oct 2026 13:18:38 +0000
+Subject: [PATCH 3/3] unicode: count leading 1 bits on an unsigned char
+
+Where char is signed, shifting a lead byte >= 0x80 left shifts a
+negative value, which is undefined behaviour (UBSan: shift-base).
+Work on the value as unsigned char.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ lib/unicode.c | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/lib/unicode.c b/lib/unicode.c
+index 78fa7f0..7f524cf 100644
+--- a/lib/unicode.c
++++ b/lib/unicode.c
+@@ -59,10 +59,11 @@
+ static int
+ l1(char c)
+ {
++        unsigned char u = (unsigned char)c;
+         int i = 0;
+-        while (c & 0x80) {
++        while (u & 0x80) {
+                 i++;
+-                c <<= 1;
++                u <<= 1;
+         }
+         return i;
+ }

@@ -1,0 +1,163 @@
+[
+  {
+    "name": "M-11 chunk not capped at 1 MiB",
+    "file": "src/backends/smb/smbutil.cpp",
+    "search": "    return qMin(serverMaximum, MaxChunkSize);",
+    "replace": "    return serverMaximum;",
+    "test": "build/tests/unit/smb/tst_smb chunkSizes"
+  },
+  {
+    "name": "M-8 leading slash kept",
+    "file": "src/backends/smb/smbutil.cpp",
+    "search": "        normalized.remove(0, 1);",
+    "replace": "        normalized.append(QString());",
+    "test": "build/tests/unit/smb/tst_smb paths"
+  },
+  {
+    "name": "M-9 Windows-invalid names accepted",
+    "file": "src/backends/smb/smbutil.cpp",
+    "search": "if (Result r = Paths::checkWindowsPath(normalized); !r.ok())",
+    "replace": "if (Result r = Result(); !r.ok())",
+    "test": "build/tests/unit/smb/tst_smb paths callsBeforeSignIn"
+  },
+  {
+    "name": "LOGON_FAILURE not AuthFailed",
+    "file": "src/backends/smb/smbutil.cpp",
+    "search": "{ SMB2_STATUS_LOGON_FAILURE, Error::AuthFailed,",
+    "replace": "{ SMB2_STATUS_LOGON_FAILURE, Error::PermissionDenied,",
+    "test": "build/tests/unit/smb/tst_smb ntStatus"
+  },
+  {
+    "name": "BAD_NETWORK_NAME not NotFound",
+    "file": "src/backends/smb/smbutil.cpp",
+    "search": "{ SMB2_STATUS_BAD_NETWORK_NAME, Error::NotFound,",
+    "replace": "{ SMB2_STATUS_BAD_NETWORK_NAME, Error::ProtocolError,",
+    "test": "build/tests/unit/smb/tst_smb ntStatus"
+  },
+  {
+    "name": "dropped session not SecurityPolicy",
+    "file": "src/backends/smb/smbutil.cpp",
+    "search": "        return Result(Error::SecurityPolicy, withContext(context, QLatin1String(ServerClosedMessage)));",
+    "replace": "        return Result(Error::ProtocolError, withContext(context, QLatin1String(ServerClosedMessage)));",
+    "test": "build/tests/unit/smb/tst_smb withoutStatus serverClosesDuringSetup"
+  },
+  {
+    "name": "sign-in refusals keep their file-operation meaning",
+    "file": "src/backends/smb/smbutil.cpp",
+    "search": "    return error == Error::AuthFailed || error == Error::NotFound || error == Error::Timeout;",
+    "replace": "    return true;",
+    "test": "build/tests/unit/smb/tst_smb ntStatus"
+  },
+  {
+    "name": "compound-request errno ignored",
+    "file": "src/backends/smb/smbutil.cpp",
+    "search": "    { ENOENT, Error::NotFound, \"no such file or folder\" },",
+    "replace": "    { ENOENT, Error::ProtocolError, \"no such file or folder\" },",
+    "test": "build/tests/unit/smb/tst_smb withoutStatus"
+  },
+  {
+    "name": "M-3 encryption off by default",
+    "file": "src/backends/smb/smbutil.cpp",
+    "search": "options.value(QStringLiteral(\"require_encryption\"), true)",
+    "replace": "options.value(QStringLiteral(\"require_encryption\"), false)",
+    "test": "build/tests/unit/smb/tst_smb encryptionOption"
+  },
+  {
+    "name": "M-1 SMB 2.1 dialect accepted",
+    "file": "src/backends/smb/smbutil.cpp",
+    "search": "    return dialect == SMB2_VERSION_0300 ||",
+    "replace": "    return dialect == SMB2_VERSION_0210 || dialect == SMB2_VERSION_0300 ||",
+    "test": "build/tests/unit/smb/tst_smb dialects"
+  },
+  {
+    "name": "M-10 TCP probe ignores cancel",
+    "file": "src/backends/smb/smbutil.cpp",
+    "search": "        if (cancel)\n            return ECANCELED;",
+    "replace": "        if (false)\n            return ECANCELED;",
+    "test": "build/tests/unit/smb/tst_smb probeHanging"
+  },
+  {
+    "name": "M-12 cancel does not abandon the request",
+    "file": "src/backends/smb/smbbackend.cpp",
+    "search": "        if (wait == Wait::Cancellable && m_cancel) {\n            abandon(call);",
+    "replace": "        if (false) {\n            abandon(call);",
+    "test": "build/tests/unit/smb/tst_smb cancelStalledSignIn"
+  },
+  {
+    "name": "M-5 NTLM_USER_FILE left in place",
+    "file": "src/backends/smb/smbbackend.cpp",
+    "search": "    qunsetenv(UserFileVariable);",
+    "replace": "    qCDebug(lcNetVfsSmb) << UserFileVariable;",
+    "test": "sh tests/interop/smb/run.sh build userFileIgnored"
+  },
+  {
+    "name": "M-3 seal not requested",
+    "file": "src/backends/smb/smbbackend.cpp",
+    "search": "        smb2_set_seal(ctx, 1);",
+    "replace": "        smb2_set_sign(ctx, 1);",
+    "test": "sh tests/interop/smb/run.sh build encryptionRequiredServerOff"
+  },
+  {
+    "name": "M-3 seal turned off instead of left alone",
+    "file": "src/backends/smb/smbbackend.cpp",
+    "search": "    if (requireEncryption(params.options))                                    // M-3; off: not called\n        smb2_set_seal(ctx, 1);",
+    "replace": "    smb2_set_seal(ctx, requireEncryption(params.options) ? 1 : 0);",
+    "test": "sh tests/interop/smb/run.sh build encryptionOffServerRequires"
+  },
+  {
+    "name": "M-2 signing not required",
+    "file": "src/backends/smb/smbbackend.cpp",
+    "search": "    smb2_set_security_mode(ctx, SMB2_NEGOTIATE_SIGNING_ENABLED | SMB2_NEGOTIATE_SIGNING_REQUIRED); // M-2\n    smb2_set_sign(ctx, 1);",
+    "replace": "    smb2_set_security_mode(ctx, SMB2_NEGOTIATE_SIGNING_ENABLED); // M-2\n    smb2_set_sign(ctx, 0);",
+    "test": "sh tests/interop/smb/run.sh build encryptionOffSigned tamperedResponse"
+  },
+  {
+    "name": "M-1 any SMB version offered",
+    "file": "src/backends/smb/smbbackend.cpp",
+    "search": "    smb2_set_version(ctx, SMB2_VERSION_ANY3);",
+    "replace": "    smb2_set_version(ctx, SMB2_VERSION_ANY);",
+    "test": "sh tests/interop/smb/run.sh build smb2OnlyServer"
+  },
+  {
+    "name": "rename does not replace the target",
+    "file": "src/backends/smb/smbbackend.cpp",
+    "search": "    if (r.ok())\n        r = unlinkPath(t, QStringLiteral(\"replace\"));",
+    "replace": "    if (false)\n        r = unlinkPath(t, QStringLiteral(\"replace\"));",
+    "test": "sh tests/interop/smb/run.sh build operations"
+  },
+  {
+    "name": "stage stays at session setup after sign-in",
+    "file": "src/backends/smb/smbbackend.cpp",
+    "search": "    m_stage = Stage::Established;\n    qCDebug",
+    "replace": "    qCDebug",
+    "test": "sh tests/interop/smb/run.sh build operations"
+  },
+  {
+    "name": "upload offset not advanced",
+    "file": "src/backends/smb/smbbackend.cpp",
+    "search": "        offset += quint64(n);",
+    "replace": "        offset += 0;",
+    "test": "sh tests/interop/smb/run.sh build strictServer"
+  },
+  {
+    "name": "lost connection not remembered",
+    "file": "src/backends/smb/smbbackend.cpp",
+    "search": "            continue;\n        m_broken = true;",
+    "replace": "            continue;",
+    "test": "sh tests/interop/smb/run.sh build connectionDropped"
+  },
+  {
+    "name": "free space in allocation units",
+    "file": "src/backends/smb/smbbackend.cpp",
+    "search": ": static_cast<qint64>(units * unit);",
+    "replace": ": static_cast<qint64>(units);",
+    "test": "sh tests/interop/smb/run.sh build fullShare"
+  },
+  {
+    "name": "directory entries . and .. listed",
+    "file": "src/backends/smb/smbbackend.cpp",
+    "search": "        if (name != QLatin1String(\".\") && name != QLatin1String(\"..\"))",
+    "replace": "        if (!name.isNull())",
+    "test": "sh tests/interop/smb/run.sh build cancelUpload"
+  }
+]

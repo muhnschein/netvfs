@@ -1,0 +1,4 @@
+# LeakSanitizer suppressions for third-party libraries only.
+# libaccounts-glib keeps the contents of provider/service XML files it reads
+# (g_file_get_contents inside the library) without freeing them.
+leak:libaccounts-glib.so

@@ -1,0 +1,43 @@
+name: SonarQube
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    types: [opened, synchronize, reopened]
+permissions:
+  contents: read
+jobs:
+  build:
+    name: Analyze
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          fetch-depth: 0  # Shallow clones should be disabled for a better relevancy of analysis
+          submodules: recursive
+      - name: Install dependencies
+        run: ./tools/ci/install-host-deps.sh
+      - name: Build with coverage, run unit and interop tests
+        # bear records compile_commands.json for the C/C++ analysis;
+        # gcovr writes build-coverage/coverage.xml (generic coverage format).
+        run: |
+          make COVERAGE=1 vendor
+          bear --output build-coverage/compile_commands.json -- make COVERAGE=1 -j"$(nproc)"
+          make coverage
+      - name: Cache SonarQube packages
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.sonar/cache
+          key: ${{ runner.os }}-sonar
+          restore-keys: ${{ runner.os }}-sonar
+      - name: SonarQube Scan
+        uses: SonarSource/sonarqube-scan-action@7006c4492b2e0ee0f816d36501671557c97f5995 # v8.1.0
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+      - name: No open issues or hotspots
+        if: success() || failure()  # also list the findings when the gate failed
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_SCOPE: ${{ github.event_name == 'pull_request' && format('pullRequest={0}', github.event.pull_request.number) || format('branch={0}', github.ref_name) }}
+        run: ./tools/ci/sonar-issues.py
