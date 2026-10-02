@@ -270,8 +270,10 @@ private:
     QByteArray stopCapture(const QString &server)
     {
         QTest::qWait(1000);
-        exec(server, { QStringLiteral("pkill"), QStringLiteral("-INT"), QStringLiteral("tcpdump") });
-        QTest::qWait(300);
+        // tcpdump flushes and exits on SIGINT; on a loaded host that takes a while.
+        exec(server, { QStringLiteral("sh"), QStringLiteral("-c"),
+                       QStringLiteral("pkill -INT tcpdump; for i in $(seq 100); do pgrep tcpdump >/dev/null || exit 0; "
+                                      "sleep 0.1; done; exit 1") });
         return exec(server, { QStringLiteral("cat"), QStringLiteral("/srv/work/capture.pcap") });
     }
 

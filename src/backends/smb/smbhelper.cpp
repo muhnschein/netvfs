@@ -18,8 +18,6 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
-extern char **environ;
-
 // smb.pro passes the install path (smbhelper.pri); this is the same default.
 #ifndef NETVFS_SMB_SHARES_HELPER
 #define NETVFS_SMB_SHARES_HELPER "/usr/libexec/netvfs/netvfs-smb-shares"
@@ -191,8 +189,8 @@ Result spawnHelper(const QString &program, Pipe *input, Pipe *output, pid_t *pid
     posix_spawn_file_actions_adddup2(&actions, input->read.get(), STDIN_FILENO);
     posix_spawn_file_actions_adddup2(&actions, output->write.get(), STDOUT_FILENO);
     posix_spawn_file_actions_addopen(&actions, STDERR_FILENO, "/dev/null", O_WRONLY, 0);
-    const QByteArray path = program.toLocal8Bit();
-    std::array<char *, 2> argv = { const_cast<char *>(path.constData()), nullptr };
+    QByteArray path = program.toLocal8Bit();
+    std::array<char *, 2> argv = { path.data(), nullptr };
     const int rc = ::posix_spawn(pid, path.constData(), &actions, nullptr, argv.data(), environ);
     posix_spawn_file_actions_destroy(&actions);
     input->read.reset();
