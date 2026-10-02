@@ -19,6 +19,8 @@ PUBLIC_HEADERS = \
     backend.h \
     backendloader.h \
     boundedpipe.h \
+    discovery.h \
+    discoverytransport.h \
     dnsmessage.h \
     error.h \
     identity.h \
@@ -35,13 +37,17 @@ PUBLIC_HEADERS = \
     types.h \
     url.h
 
-HEADERS = $$PUBLIC_HEADERS
+HEADERS = $$PUBLIC_HEADERS \
+    discoverycache.h
 
 SOURCES = \
     accountsession.cpp \
     accountstore.cpp \
     backend.cpp \
     backendloader.cpp \
+    discovery.cpp \
+    discoverycache.cpp \
+    discoverytransport.cpp \
     dnsmessage.cpp \
     error.cpp \
     identity.cpp \
