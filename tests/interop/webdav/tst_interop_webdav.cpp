@@ -948,9 +948,10 @@ void TestInteropWebDav::cancel()
     reader.reset();
     writer.reset();
     if (operation != QLatin1String("connect") && operation != QLatin1String("authenticate")) {
-        // The backend is usable again after resetCancel().
+        // The backend is usable again after resetCancel(). (The proxy still
+        // delivers the held request, so a canceled MOVE may happen.)
         Entry entry;
-        QVERIFY_OK(backend.stat(dir + QStringLiteral("/f"), &entry));
+        QVERIFY_OK(backend.stat(dir, &entry));
         QVERIFY_OK(backend.removeTreeNative(dir));
     }
 }
