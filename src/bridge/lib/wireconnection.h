@@ -2,11 +2,16 @@
 #ifndef NETVFS_BRIDGE_WIRECONNECTION_H
 #define NETVFS_BRIDGE_WIRECONNECTION_H
 
+// The moc of Qt 5.6 (Sailfish SDK) cannot parse C++17 nested namespaces; it
+// does not need the headers that have them.
+#ifndef Q_MOC_RUN
 #include "wire.h"
+#endif
 
 #include <QtCore/QObject>
 
 #include <functional>
+#include <memory>
 
 struct DBusConnection;
 struct DBusServer;
@@ -29,7 +34,7 @@ public:
     static WireConnection *connectTo(const QString &address, Result *result, QObject *parent = nullptr);
 
     // Takes a new reference on `connection` and integrates it into the event loop.
-    WireConnection(DBusConnection *connection, QObject *parent = nullptr);
+    explicit WireConnection(DBusConnection *connection, QObject *parent = nullptr);
     ~WireConnection() override;
 
     void setHandler(const Handler &handler) { m_handler = handler; }
@@ -63,6 +68,7 @@ private:
     void noteDisconnected();
 
     DBusConnection *m_connection = nullptr;
+    std::unique_ptr<Integration> m_integration;
     Handler m_handler;
     bool m_dispatchScheduled = false;
     bool m_disconnected = false;
@@ -94,6 +100,7 @@ Q_SIGNALS:
 private:
     friend struct Integration;
     DBusServer *m_server = nullptr;
+    std::unique_ptr<Integration> m_integration;
 };
 
 } // namespace Bridge

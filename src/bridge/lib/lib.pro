@@ -20,6 +20,7 @@ HEADERS = \
     bridgeserver.h \
     connector.h \
     consentprompt.h \
+    dbusloop.h \
     fdcheck.h \
     handoff.h \
     knownhosts.h \
@@ -40,6 +41,7 @@ SOURCES = \
     args.cpp \
     bridgeserver.cpp \
     connector.cpp \
+    dbusloop.c \
     consentprompt.cpp \
     fdcheck.cpp \
     handoff.cpp \

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 #include "wireconnection.h"
 
+#include "dbusloop.h"
+
 #include <QtCore/QPointer>
 #include <QtCore/QSocketNotifier>
 #include <QtCore/QTimer>
@@ -8,10 +10,9 @@
 #include <dbus/dbus.h>
 
 #include <array>
-#include <unistd.h>
+#include <memory>
 
-namespace NetVfs {
-namespace Bridge {
+namespace NetVfs::Bridge {
 
 namespace {
 
@@ -22,13 +23,39 @@ constexpr long MaxInboundQueuedBytes = 8 << 20;
 constexpr long MaxInboundMessageFds = 2;
 constexpr long MaxInboundQueuedFds = 8;
 
+} // namespace
+} // namespace NetVfs::Bridge
+
+// What libdbus calls back into: a connection (dispatches its queue, handles
+// its messages) or a server (accepts connections). The libdbus callbacks are
+// in dbusloop.c.
+struct NetVfsLoopOwner {
+    NetVfsLoopOwner() = default;
+    NetVfsLoopOwner(const NetVfsLoopOwner &) = delete;
+    NetVfsLoopOwner &operator=(const NetVfsLoopOwner &) = delete;
+    virtual ~NetVfsLoopOwner() = default;
+
+    // After every watch activation (a connection schedules a dispatch).
+    virtual void afterWatch() = 0;
+    // Connections only: a message arrived.
+    virtual DBusHandlerResult message(DBusMessage *message) = 0;
+    // Connections only: the dispatch queue changed.
+    virtual void dispatchStatus(DBusDispatchStatus status) = 0;
+    // Servers only: a client connected.
+    virtual void accepted(DBusConnection *connection) = 0;
+};
+
+namespace NetVfs::Bridge {
+
+namespace {
+
 // Read and write notifiers of one DBusWatch. Owned through the watch data;
 // deleted later because removal may happen inside its own activation.
 class WatchNotifier : public QObject
 {
 public:
-    WatchNotifier(DBusWatch *watch, std::function<void()> afterHandle)
-        : m_watch(watch), m_afterHandle(std::move(afterHandle))
+    WatchNotifier(DBusWatch *watch, NetVfsLoopOwner *owner)
+        : m_watch(watch), m_owner(owner)
     {
         const int fd = dbus_watch_get_unix_fd(watch);
         const unsigned int flags = dbus_watch_get_flags(watch);
@@ -65,12 +92,11 @@ private:
         if (!m_watch)
             return;
         dbus_watch_handle(m_watch, flags);
-        if (m_afterHandle)
-            m_afterHandle();
+        m_owner->afterWatch();
     }
 
     DBusWatch *m_watch;
-    std::function<void()> m_afterHandle;
+    NetVfsLoopOwner *m_owner;
     QSocketNotifier *m_read = nullptr;
     QSocketNotifier *m_write = nullptr;
 };
@@ -107,81 +133,36 @@ private:
     DBusTimeout *m_timeout;
 };
 
-// libdbus callbacks shared by connections and servers. `afterHandle` runs
-// after every watch activation (a connection schedules a dispatch).
-template <typename Owner>
-struct LoopCallbacks {
-    static dbus_bool_t addWatch(DBusWatch *watch, void *data)
-    {
-        auto *owner = static_cast<Owner *>(data);
-        auto *notifier = new WatchNotifier(watch, [owner]() { owner->afterWatch(); });
-        dbus_watch_set_data(watch, notifier, nullptr);
-        return TRUE;
-    }
-    static void removeWatch(DBusWatch *watch, void *)
-    {
-        if (auto *notifier = static_cast<WatchNotifier *>(dbus_watch_get_data(watch)))
-            notifier->detach();
-        dbus_watch_set_data(watch, nullptr, nullptr);
-    }
-    static void toggleWatch(DBusWatch *watch, void *)
-    {
-        if (auto *notifier = static_cast<WatchNotifier *>(dbus_watch_get_data(watch)))
-            notifier->toggle();
-    }
-    static dbus_bool_t addTimeout(DBusTimeout *timeout, void *)
-    {
-        dbus_timeout_set_data(timeout, new TimeoutTimer(timeout), nullptr);
-        return TRUE;
-    }
-    static void removeTimeout(DBusTimeout *timeout, void *)
-    {
-        if (auto *timer = static_cast<TimeoutTimer *>(dbus_timeout_get_data(timeout)))
-            timer->detach();
-        dbus_timeout_set_data(timeout, nullptr, nullptr);
-    }
-    static void toggleTimeout(DBusTimeout *timeout, void *)
-    {
-        if (auto *timer = static_cast<TimeoutTimer *>(dbus_timeout_get_data(timeout)))
-            timer->toggle();
-    }
-};
-
 bool isLocalDisconnected(DBusMessage *message)
 {
     return dbus_message_is_signal(message, DBUS_INTERFACE_LOCAL, "Disconnected");
-}
-
-// XB-5 first line: only the bridge's own uid authenticates (libdbus would
-// otherwise also accept root).
-dbus_bool_t allowOwnUidOnly(DBusConnection *, unsigned long uid, void *)
-{
-    return uid == static_cast<unsigned long>(::geteuid()) ? TRUE : FALSE;
 }
 
 } // namespace
 
 // -------------------------------------------------------------- connection
 
-struct WireConnection::Integration {
-    WireConnection *owner;
-    void afterWatch() const { owner->scheduleDispatch(); }
+struct WireConnection::Integration final : NetVfsLoopOwner {
+    explicit Integration(WireConnection *connection) : owner(connection) {}
 
-    static DBusHandlerResult filter(DBusConnection *, DBusMessage *message, void *data)
+    void afterWatch() override { owner->scheduleDispatch(); }
+    DBusHandlerResult message(DBusMessage *received) override
     {
-        static_cast<WireConnection *>(data)->handle(message);
+        owner->handle(received);
         return DBUS_HANDLER_RESULT_HANDLED;
     }
-    static void dispatchStatus(DBusConnection *, DBusDispatchStatus status, void *data)
+    void dispatchStatus(DBusDispatchStatus status) override
     {
         if (status == DBUS_DISPATCH_DATA_REMAINS)
-            static_cast<WireConnection *>(data)->scheduleDispatch();
+            owner->scheduleDispatch();
     }
-};
+    void accepted(DBusConnection *) override
+    {
+        // a connection does not accept clients
+    }
 
-namespace {
-using ConnectionLoop = LoopCallbacks<WireConnection::Integration>;
-}
+    WireConnection *owner;
+};
 
 WireConnection *WireConnection::connectTo(const QString &address, Result *result, QObject *parent)
 {
@@ -206,22 +187,23 @@ WireConnection *WireConnection::connectTo(const QString &address, Result *result
 WireConnection::WireConnection(DBusConnection *connection, QObject *parent)
     : QObject(parent)
     , m_connection(dbus_connection_ref(connection))
+    , m_integration(std::make_unique<Integration>(this))
 {
-    auto *integration = new Integration{ this };
+    NetVfsLoopOwner *owner = m_integration.get();
     dbus_connection_set_exit_on_disconnect(m_connection, FALSE);
-    dbus_connection_set_watch_functions(m_connection, ConnectionLoop::addWatch, ConnectionLoop::removeWatch,
-                                        ConnectionLoop::toggleWatch, integration,
-                                        [](void *data) { delete static_cast<Integration *>(data); });
-    dbus_connection_set_timeout_functions(m_connection, ConnectionLoop::addTimeout, ConnectionLoop::removeTimeout,
-                                          ConnectionLoop::toggleTimeout, nullptr, nullptr);
-    dbus_connection_set_dispatch_status_function(m_connection, Integration::dispatchStatus, this, nullptr);
-    dbus_connection_add_filter(m_connection, Integration::filter, this, nullptr);
+    dbus_connection_set_watch_functions(m_connection, netvfs_loop_add_watch, netvfs_loop_remove_watch,
+                                        netvfs_loop_toggle_watch, owner, nullptr);
+    dbus_connection_set_timeout_functions(m_connection, netvfs_loop_add_timeout, netvfs_loop_remove_timeout,
+                                          netvfs_loop_toggle_timeout, nullptr, nullptr);
+    dbus_connection_set_dispatch_status_function(m_connection, netvfs_loop_status, owner, nullptr);
+    dbus_connection_add_filter(m_connection, netvfs_loop_filter, owner, nullptr);
     scheduleDispatch();
 }
 
 WireConnection::~WireConnection()
 {
-    dbus_connection_remove_filter(m_connection, Integration::filter, this);
+    NetVfsLoopOwner *owner = m_integration.get();
+    dbus_connection_remove_filter(m_connection, netvfs_loop_filter, owner);
     dbus_connection_set_dispatch_status_function(m_connection, nullptr, nullptr, nullptr);
     dbus_connection_set_watch_functions(m_connection, nullptr, nullptr, nullptr, nullptr, nullptr);
     dbus_connection_set_timeout_functions(m_connection, nullptr, nullptr, nullptr, nullptr, nullptr);
@@ -323,27 +305,32 @@ void WireConnection::noteDisconnected()
 
 // ------------------------------------------------------------------ server
 
-struct WireServer::Integration {
-    WireServer *owner;
-    void afterWatch() const { Q_UNUSED(owner) }
+struct WireServer::Integration final : NetVfsLoopOwner {
+    explicit Integration(WireServer *server) : owner(server) {}
 
-    static void newConnection(DBusServer *, DBusConnection *connection, void *data)
+    void afterWatch() override
     {
-        auto *server = static_cast<WireServer *>(data);
-        dbus_connection_set_unix_user_function(connection, allowOwnUidOnly, nullptr, nullptr);
+        // a server has no dispatch queue
+    }
+    DBusHandlerResult message(DBusMessage *) override { return DBUS_HANDLER_RESULT_NOT_YET_HANDLED; }
+    void dispatchStatus(DBusDispatchStatus) override
+    {
+        // a server has no dispatch queue
+    }
+    void accepted(DBusConnection *connection) override
+    {
+        dbus_connection_set_unix_user_function(connection, netvfs_loop_own_uid_only, nullptr, nullptr);
         dbus_connection_set_allow_anonymous(connection, FALSE);
         dbus_connection_set_max_message_size(connection, MaxInboundMessageBytes);
         dbus_connection_set_max_received_size(connection, MaxInboundQueuedBytes);
         dbus_connection_set_max_message_unix_fds(connection, MaxInboundMessageFds);
         dbus_connection_set_max_received_unix_fds(connection, MaxInboundQueuedFds);
-        auto *wire = new WireConnection(connection);
-        emit server->newConnection(wire);
+        auto wire = std::make_unique<WireConnection>(connection);
+        emit owner->newConnection(wire.release());   // the receiver owns it
     }
-};
 
-namespace {
-using ServerLoop = LoopCallbacks<WireServer::Integration>;
-}
+    WireServer *owner;
+};
 
 WireServer::WireServer(QObject *parent)
     : QObject(parent)
@@ -369,12 +356,13 @@ Result WireServer::listen(const QString &address)
     }
     std::array<const char *, 2> mechanisms = { { "EXTERNAL", nullptr } };
     dbus_server_set_auth_mechanisms(server, mechanisms.data());
-    auto *integration = new Integration{ this };
-    dbus_server_set_watch_functions(server, ServerLoop::addWatch, ServerLoop::removeWatch, ServerLoop::toggleWatch,
-                                    integration, [](void *data) { delete static_cast<Integration *>(data); });
-    dbus_server_set_timeout_functions(server, ServerLoop::addTimeout, ServerLoop::removeTimeout,
-                                      ServerLoop::toggleTimeout, nullptr, nullptr);
-    dbus_server_set_new_connection_function(server, Integration::newConnection, this, nullptr);
+    m_integration = std::make_unique<Integration>(this);
+    NetVfsLoopOwner *owner = m_integration.get();
+    dbus_server_set_watch_functions(server, netvfs_loop_add_watch, netvfs_loop_remove_watch, netvfs_loop_toggle_watch,
+                                    owner, nullptr);
+    dbus_server_set_timeout_functions(server, netvfs_loop_add_timeout, netvfs_loop_remove_timeout,
+                                      netvfs_loop_toggle_timeout, nullptr, nullptr);
+    dbus_server_set_new_connection_function(server, netvfs_loop_new, owner, nullptr);
     m_server = server;
     return Result::success();
 }
@@ -401,5 +389,62 @@ void WireServer::stop()
     m_server = nullptr;
 }
 
-} // namespace Bridge
-} // namespace NetVfs
+} // namespace NetVfs::Bridge
+
+// The typed side of the libdbus callbacks (dbusloop.c).
+
+dbus_bool_t netvfs_loop_watch_added(DBusWatch *watch, NetVfsLoopOwner *owner)
+{
+    // Owned through the watch data until the watch is removed.
+    auto notifier = std::make_unique<NetVfs::Bridge::WatchNotifier>(watch, owner);
+    dbus_watch_set_data(watch, notifier.release(), nullptr);
+    return TRUE;
+}
+
+void netvfs_loop_watch_removed(DBusWatch *watch)
+{
+    if (auto *notifier = static_cast<NetVfs::Bridge::WatchNotifier *>(dbus_watch_get_data(watch)))
+        notifier->detach();
+    dbus_watch_set_data(watch, nullptr, nullptr);
+}
+
+void netvfs_loop_watch_toggled(DBusWatch *watch)
+{
+    if (auto *notifier = static_cast<NetVfs::Bridge::WatchNotifier *>(dbus_watch_get_data(watch)))
+        notifier->toggle();
+}
+
+dbus_bool_t netvfs_loop_timeout_added(DBusTimeout *timeout)
+{
+    auto timer = std::make_unique<NetVfs::Bridge::TimeoutTimer>(timeout);
+    dbus_timeout_set_data(timeout, timer.release(), nullptr);
+    return TRUE;
+}
+
+void netvfs_loop_timeout_removed(DBusTimeout *timeout)
+{
+    if (auto *timer = static_cast<NetVfs::Bridge::TimeoutTimer *>(dbus_timeout_get_data(timeout)))
+        timer->detach();
+    dbus_timeout_set_data(timeout, nullptr, nullptr);
+}
+
+void netvfs_loop_timeout_toggled(DBusTimeout *timeout)
+{
+    if (auto *timer = static_cast<NetVfs::Bridge::TimeoutTimer *>(dbus_timeout_get_data(timeout)))
+        timer->toggle();
+}
+
+DBusHandlerResult netvfs_loop_message(NetVfsLoopOwner *owner, DBusMessage *message)
+{
+    return owner->message(message);
+}
+
+void netvfs_loop_dispatch_status(NetVfsLoopOwner *owner, DBusDispatchStatus status)
+{
+    owner->dispatchStatus(status);
+}
+
+void netvfs_loop_new_connection(NetVfsLoopOwner *owner, DBusConnection *connection)
+{
+    owner->accepted(connection);
+}

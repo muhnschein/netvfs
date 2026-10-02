@@ -3,8 +3,7 @@
 
 #include <dbus/dbus.h>
 
-namespace NetVfs {
-namespace Bridge {
+namespace NetVfs::Bridge {
 
 void MessageUnref::operator()(DBusMessage *message) const
 {
@@ -140,7 +139,7 @@ Result Decoder::dict(DBusMessageIter *sub, int depth, QVariant *out)
 {
     QVariantMap map;
     int count = 0;
-    for (; dbus_message_iter_get_arg_type(sub) != DBUS_TYPE_INVALID; dbus_message_iter_next(sub)) {
+    while (dbus_message_iter_get_arg_type(sub) != DBUS_TYPE_INVALID) {
         if (++count > m_limits.maxElements)
             return tooComplex();
         DBusMessageIter entry;
@@ -154,6 +153,7 @@ Result Decoder::dict(DBusMessageIter *sub, int depth, QVariant *out)
         if (const Result r = value(&entry, depth, &v); !r.ok())
             return r;
         map.insert(QString::fromUtf8(key), v);
+        dbus_message_iter_next(sub);
     }
     *out = QVariant(map);
     return Result::success();
@@ -162,13 +162,14 @@ Result Decoder::dict(DBusMessageIter *sub, int depth, QVariant *out)
 Result Decoder::list(DBusMessageIter *sub, int depth, QVariant *out)
 {
     QVariantList items;
-    for (; dbus_message_iter_get_arg_type(sub) != DBUS_TYPE_INVALID; dbus_message_iter_next(sub)) {
+    while (dbus_message_iter_get_arg_type(sub) != DBUS_TYPE_INVALID) {
         if (items.size() >= m_limits.maxElements)
             return tooComplex();
         QVariant v;
         if (const Result r = value(sub, depth, &v); !r.ok())
             return r;
         items << v;
+        dbus_message_iter_next(sub);
     }
     *out = QVariant(items);
     return Result::success();
@@ -255,7 +256,8 @@ DBusMessageIter *WireWriter::top()
     return m_stack.back().get();
 }
 
-void WireWriter::appendBasic(int type, const void *value)
+template <typename T>
+void WireWriter::appendBasic(int type, const T *value)
 {
     if (m_ok && top() && !dbus_message_iter_append_basic(top(), type, value))
         m_ok = false;
@@ -416,8 +418,7 @@ WireWriter &WireWriter::variant(const QVariant &v)
 void WireWriter::open(int type, const char *signature)
 {
     std::unique_ptr<DBusMessageIter> sub;
-    DBusMessageIter *parent = top();
-    if (m_ok && parent) {
+    if (DBusMessageIter *parent = top(); m_ok && parent) {
         sub = std::make_unique<DBusMessageIter>();
         if (!dbus_message_iter_open_container(parent, type, signature, sub.get())) {
             m_ok = false;
@@ -455,5 +456,4 @@ WireWriter &WireWriter::close()
     return *this;
 }
 
-} // namespace Bridge
-} // namespace NetVfs
+} // namespace NetVfs::Bridge
