@@ -39,7 +39,11 @@ public:
 // after AUTH TLS, so the identity comes from a probe connection whose TLS
 // handshake the client ends (CurlTls::IdentityProbe). authenticate() then
 // opens the control connection with that identity enforced by libcurl (the
-// pin, or verification when the certificate was system trusted).
+// pin, or verification when the certificate was system trusted). A server
+// with a connection limit may still count the probe when the login
+// connection arrives and greet it with 421 (no credential was sent yet);
+// authenticate() then tries again after 0.1, 0.2, 0.4, 0.8 and 1.6 s
+// (cancel() ends the wait) before it reports TooManyConnections.
 // Relative paths are relative to the login folder (PWD); every command
 // carries an absolute path. FTPS uses TLS 1.2 (see ftpconnection.cpp).
 //
@@ -98,6 +102,7 @@ private:
     class Writes;   // preparation of a write, SITE CHMOD (ftpbackend.cpp)
 
     Result ready() const;
+    Result signIn(QVector<Reply> *replies);
     Result resolve(const QString &path, QByteArray *remote) const;
     Result command(const QList<QByteArray> &commands, QVector<Reply> *replies, const QString &context);
     Result statRemote(const QByteArray &remote, Entry *out);

@@ -5,6 +5,9 @@
 #include "names.h"
 
 #include <QtCore/QIODevice>
+#include <QtCore/QThread>
+
+#include <array>
 
 namespace NetVfs::Ftp {
 
@@ -14,6 +17,11 @@ constexpr int DefaultConnectTimeoutMs = 15000;   // C-14
 constexpr int DefaultRequestTimeoutMs = 60000;   // C-14
 constexpr qint64 UploadChunk = 256 * 1024;
 constexpr int MinBatchSize = 1;
+// F-2: a 421 greeting on the login connection right after connect()'s own
+// probe connection: the server may not have retired the probe session yet
+// (vsftpd max_clients counts it until the session process is reaped).
+constexpr std::array<int, 5> BusyGreetingDelaysMs = { 100, 200, 400, 800, 1600 };
+constexpr int CancelSliceMs = 50;
 
 // The wiping initialisation shared with the WebDAV plugin (SEC-5): libcurl
 // takes the memory callbacks of the first initialisation in the process.
@@ -202,7 +210,7 @@ Result FtpBackend::authenticate(const Credentials &credentials, AuthPrompter *pr
     Result r = m_connection->configure(m_settings, m_params, userName, credentials.secret, m_seen);
     QVector<Reply> replies;
     if (r.ok())
-        r = command({ QByteArrayLiteral("FEAT") }, &replies, QStringLiteral("Signing in"));
+        r = signIn(&replies);
     if (!r.ok()) {
         m_connection.reset();
         return r;
@@ -221,6 +229,26 @@ Result FtpBackend::authenticate(const Credentials &credentials, AuthPrompter *pr
         m_capabilities.flags << Capability::SetModified;
     qCDebug(lcNetVfsFtp) << "Signed in; home" << m_home << "features" << m_features.names.values();
     return Result::success();
+}
+
+// The first request opens the control connection and signs in, then reads
+// FEAT. A server that refuses the connection at the greeting with 421 (and
+// so before any credential was sent) gets a few more tries, BusyGreetingDelaysMs
+// apart: connect() closed its probe connection just before, and a server
+// with a connection limit may still count it. cancel() ends the wait (C-9).
+Result FtpBackend::signIn(QVector<Reply> *replies)
+{
+    Result r = command({ QByteArrayLiteral("FEAT") }, replies, QStringLiteral("Signing in"));
+    for (const int delayMs : BusyGreetingDelaysMs) {
+        const QVector<Reply> &seen = m_connection->replies();
+        if (r.ok() || seen.size() != 1 || seen.first().code != 421)
+            break;
+        qCDebug(lcNetVfsFtp) << "Busy greeting; signing in again in" << delayMs << "ms";
+        for (int waited = 0; waited < delayMs && !m_canceled; waited += CancelSliceMs)
+            QThread::msleep(CancelSliceMs);
+        r = command({ QByteArrayLiteral("FEAT") }, replies, QStringLiteral("Signing in"));
+    }
+    return r;
 }
 
 Capabilities FtpBackend::capabilities() const

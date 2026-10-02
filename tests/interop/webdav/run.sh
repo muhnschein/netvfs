@@ -3,9 +3,12 @@
 # WebDAV interop suite (SPEC-v2 XT-2, XT-5, 6.3): Apache httpd + mod_dav with
 # a self-signed and a test-CA-signed certificate, rclone "serve webdav" for
 # quirk coverage, and the QtTest driver tst_interop_webdav (which starts the
-# stalling proxy httpstall.py itself). Containers are removed on exit.
+# stalling proxy httpstall.py itself), then netvfs-cli against the self-signed
+# Apache. Containers are removed on exit.
 #
 # Usage: run.sh <build dir> [tst_interop_webdav arguments]
+# With driver arguments only the driver runs, not the CLI check. With
+# NETVFS_INTEROP_CLI_ONLY=1 only the CLI check runs.
 set -eu
 
 here=$(cd "$(dirname "$0")" && pwd)
@@ -106,9 +109,94 @@ EOF
 
 export NETVFS_BACKEND_PATH="$build/lib/netvfs/backends"
 export NETVFS_WEBDAV_INTEROP_CONFIG="$config"
-log "running tst_interop_webdav"
-if ! "$build/tests/interop/webdav/tst_interop_webdav" "$@"; then
-    log "Apache error log:"
-    docker logs "$apache" 2>&1 >/dev/null | tail -n 40 >&2
-    exit 1
+if [ -z "${NETVFS_INTEROP_CLI_ONLY:-}" ]; then
+    log "running tst_interop_webdav"
+    if ! "$build/tests/interop/webdav/tst_interop_webdav" "$@"; then
+        log "Apache error log:"
+        docker logs "$apache" 2>&1 >/dev/null | tail -n 40 >&2
+        exit 1
+    fi
+fi
+
+# expect_code <exit code> <command...>: the command must fail with exactly that code.
+expect_code() {
+    want=$1
+    shift
+    set +e
+    "$@" >/dev/null 2>&1
+    got=$?
+    set -e
+    if [ "$got" -ne "$want" ]; then
+        log "expected exit code $want, got $got: $*"
+        return 1
+    fi
+}
+
+# SPEC-v2 XC-CLI against Apache over TLS with the self-signed certificate: the
+# identity flow (identify, pin, refusal without a pin) and the file commands.
+cli_check() {
+    cli="$build/bin/netvfs-cli"
+    url="https://alice@127.0.0.1:$apache_self/dav"
+    export NETVFS_SECRET="$password"
+    log "netvfs-cli end to end"
+    identity=$("$cli" --url "$url" identify)
+    # XC-16: the fingerprint is the SHA-256 of the SubjectPublicKeyInfo, base64 (the curl pin form).
+    spki=$(openssl x509 -in "$work/self.crt" -pubkey -noout | openssl pkey -pubin -outform der \
+        | openssl dgst -sha256 -binary | openssl base64)
+    test "$(echo "$identity" | sed -n 1p)" = "$spki"
+    pin=$(echo "$identity" | sed -n 2p)
+    case "$pin" in "tls-spki-sha256 "*) ;; *) log "not a TLS pin: $pin"; return 1 ;; esac
+    echo "$identity" | grep -q '^system-trusted: no$'
+    echo "$identity" | grep -q '^problems: .*self-signed'
+    echo "$identity" | grep -q '^advice: .*tls_verify_peer'
+    # Not trusted and not pinned: refused before sign-in (14 = ServerIdentityUnknown); a wrong pin: 15.
+    expect_code 14 "$cli" --url "$url" ls ""
+    expect_code 15 "$cli" --url "$url" --host-key "tls-spki-sha256 $(printf '%s' wrong | openssl base64)" ls ""
+    set -- --url "$url" --host-key "$pin"
+    "$cli" "$@" mkdir -p "cli/tree/inner"
+    head -c 300000 /dev/urandom > "$work/cli.bin"
+    "$cli" "$@" put "$work/cli.bin" "cli/cli.bin"
+    "$cli" "$@" ls "cli" | grep -q -- "- 300000 cli.bin\$"
+    "$cli" "$@" ls -l "cli" | grep -Eq -- "^-[-rwx?]+ [^ ]+ [^ ]+ 300000 [0-9T:Z-]+ [-A-Z]+ cli.bin\$"
+    "$cli" "$@" stat --json "cli/cli.bin" | grep -q -- '"size": 300000'
+    "$cli" "$@" caps | grep -q -- "^capabilities: "
+    "$cli" "$@" cat "cli/cli.bin" | cmp - "$work/cli.bin"
+    "$cli" "$@" cat --offset 1000 --length 500 "cli/cli.bin" > "$work/cli.range"
+    tail -c +1001 "$work/cli.bin" | head -c 500 | cmp - "$work/cli.range"
+    "$cli" "$@" touch "cli/empty"
+    "$cli" "$@" stat "cli/empty" | grep -Eq -- "^-[-rwx?]+ .* 0 "
+    # mv and cp do not replace unless asked
+    "$cli" "$@" put "$work/cli.bin" "cli/other.bin"
+    expect_code 20 "$cli" "$@" mv "cli/other.bin" "cli/cli.bin"
+    "$cli" "$@" mv --replace "cli/other.bin" "cli/cli.bin"
+    "$cli" "$@" cp "cli/cli.bin" "cli/copy.bin"
+    "$cli" "$@" cat "cli/copy.bin" | cmp - "$work/cli.bin"
+    expect_code 20 "$cli" "$@" cp "cli/cli.bin" "cli/copy.bin"
+    "$cli" "$@" put "$work/cli.bin" "cli/tree/inner/f"
+    "$cli" "$@" cp -r "cli/tree" "cli/tree2"
+    "$cli" "$@" ls "cli/tree2/inner" | grep -q -- "- 300000 f\$"
+    "$cli" "$@" rm -r "cli/tree"
+    "$cli" "$@" rm -r "cli/tree2"
+    "$cli" "$@" rm "cli/copy.bin"
+    "$cli" "$@" rm "cli/empty"
+    if "$cli" "$@" stat "cli/tree" 2>/dev/null; then
+        log "rm -r left the tree"
+        return 1
+    fi
+    "$cli" "$@" rm "cli/cli.bin"
+    "$cli" "$@" rmdir "cli"
+    # A password in the URL is refused (exit 17); plain http needs the explicit consent option.
+    expect_code 17 "$cli" --url "https://alice:pw@127.0.0.1:$apache_self/dav" ls ""
+    "$cli" --url "dav://alice@127.0.0.1:$apache_http/dav" --option allow_insecure=true ls "" >/dev/null
+    log "netvfs-cli ok"
+}
+
+if [ $# -eq 0 ]; then
+    # A subshell of its own: "set -e" is ignored inside a function that is
+    # called as a condition, and a failed check must stop the CLI run.
+    set +e
+    (set -e; cli_check)
+    cli_status=$?
+    set -e
+    exit $cli_status
 fi

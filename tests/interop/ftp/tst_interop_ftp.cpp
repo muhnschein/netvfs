@@ -263,9 +263,11 @@ private:
     }
 
     // ftpstall.py fake: a recording FTP server with `cert`.
-    std::unique_ptr<Helper> fakeServer(const QString &tls, const QString &cert, const QString &log) const
+    std::unique_ptr<Helper> fakeServer(const QString &tls, const QString &cert, const QString &log,
+                                       const QStringList &extra = QStringList()) const
     {
         QStringList arguments { QStringLiteral("fake"), QStringLiteral("--tls"), tls, QStringLiteral("--log"), log };
+        arguments << extra;
         if (!cert.isEmpty()) {
             arguments << QStringLiteral("--cert") << m_certs + QLatin1Char('/') + cert + QStringLiteral(".crt")
                       << QStringLiteral("--key") << m_certs + QLatin1Char('/') + cert + QStringLiteral(".key");
@@ -305,6 +307,31 @@ private:
         return p;
     }
 
+    // Sessions of the vsftpd instance with `config` that the server has not
+    // retired yet (children of its listener process).
+    int serverSessions(const QString &name, const QString &config) const
+    {
+        const QByteArray out = exec(name,
+                                    QStringLiteral("l=$(ps -eo pid=,ppid=,args= | awk -v c=\"$C\" '$2 == 1 && index($0, c) "
+                                                   "{print $1}'); ps -eo ppid= | awk -v l=\"$l\" '$1 == l' | wc -l"),
+                                    { QStringLiteral("C=") + config })
+                                   .trimmed();
+        return out.isEmpty() ? -1 : out.toInt();
+    }
+
+    // Waits until the server has no session left (polling, no fixed sleep).
+    bool waitIdle(const QString &name, const QString &config) const
+    {
+        QElapsedTimer timer;
+        timer.start();
+        while (timer.elapsed() < 30000) {
+            if (serverSessions(name, config) == 0)
+                return true;
+            QThread::msleep(100);
+        }
+        return false;
+    }
+
 private slots:
     void initTestCase()
     {
@@ -319,7 +346,7 @@ private slots:
         QVERIFY(m_tmp.isValid());
         m_data.resize(int(FileSize));
         for (int i = 0; i < m_data.size(); ++i)
-            m_data[i] = char((i * 7919 + (i >> 9)) & 0xFF);
+            m_data[i] = char((uint(i) * 7919u + (uint(i) >> 9)) & 0xFFu);
         QVERIFY(BackendLoader::isAvailable(QLatin1String(Provider)));
     }
 
@@ -882,22 +909,67 @@ private slots:
         QVERIFY(b->removeFile(file).ok());
     }
 
-    // 421 at the greeting: vsftpd's max_clients.
+    // F-2: the login connection follows connect()'s probe at once; a server
+    // that still counts the probe greets it with 421 (before any credential).
+    // The backend signs in again a few times, with a growing delay.
+    void busyGreeting()
+    {
+        const QString log = m_tmp.filePath(unique(QStringLiteral("fake-")));
+        auto fake = fakeServer(QStringLiteral("none"), QString(), log, { QStringLiteral("--busy"), QStringLiteral("2") });
+        const ConnectionParams p = fakeParams(fake->port(), QStringLiteral("none"));
+        std::unique_ptr<Backend> b = create();
+        Result r = establish(b.get(), p, Credentials(p.username, m_password));
+        QCOMPARE(r.error(), Error::AuthFailed);   // USER/PASS reached on the third login connection
+        QCOMPARE(recorded(log).count(QStringLiteral("BUSY")), 2);
+        QVERIFY(sentUser(recorded(log)));
+
+        // A server that stays busy: TooManyConnections, the 421 in the detail.
+        const QString busyLog = m_tmp.filePath(unique(QStringLiteral("fake-")));
+        fake = fakeServer(QStringLiteral("none"), QString(), busyLog,
+                          { QStringLiteral("--busy"), QStringLiteral("100") });
+        const ConnectionParams busy = fakeParams(fake->port(), QStringLiteral("none"));
+        QElapsedTimer timer;
+        timer.start();
+        r = establish(b.get(), busy, Credentials(busy.username, m_password));
+        QCOMPARE(r.error(), Error::TooManyConnections);
+        QVERIFY2(r.detail().startsWith(QLatin1String("FTP 421")), qPrintable(r.detail()));
+        QCOMPARE(recorded(busyLog).count(QStringLiteral("BUSY")), 6);   // the first try and five more
+        QVERIFY(!sentUser(recorded(busyLog)));
+        QVERIFY(timer.elapsed() >= 3000);
+
+        // cancel() ends the wait between the tries (C-9).
+        const QString cancelLog = m_tmp.filePath(unique(QStringLiteral("fake-")));
+        fake = fakeServer(QStringLiteral("none"), QString(), cancelLog,
+                          { QStringLiteral("--busy"), QStringLiteral("100") });
+        const ConnectionParams stuck = fakeParams(fake->port(), QStringLiteral("none"));
+        Backend *raw = b.get();
+        const qint64 ms = cancelDuring(
+            raw, [&]() { return establish(raw, stuck, Credentials(stuck.username, m_password)); }, &r);
+        QCOMPARE(r.error(), Error::Canceled);
+        QVERIFY2(ms <= CancelBoundMs, qPrintable(QString::number(ms)));
+    }
+
+    // 421 at the greeting from a real server: vsftpd's max_clients=1.
     void tooManyConnections()
     {
-        // The session process of a closed connection may linger a moment.
-        const ConnectionParams p = params(QStringLiteral("vsftpd-limited"));
+        const QString name = QStringLiteral("vsftpd-limited");
+        const QString config = QStringLiteral("/etc/vsftpd-limited.conf");
+        QVERIFY2(waitIdle(name, config), "the server kept an old session");
+        const ConnectionParams p = params(name);
         std::unique_ptr<Backend> first = create();
-        Result login(Error::Internal);
-        for (int attempt = 0; attempt < 20 && !login.ok(); ++attempt) {
-            if (attempt > 0)
-                QThread::msleep(500);
-            login = establish(first.get(), p, Credentials(p.username, m_password));
-        }
-        QVERIFY2(login.ok(), qPrintable(login.toString()));
+        Result r = establish(first.get(), p, Credentials(p.username, m_password));
+        QVERIFY2(r.ok(), qPrintable(r.toString() + QLatin1Char(' ') + r.detail()));
+        QVERIFY(first->keepAlive().ok());
+        QCOMPARE(serverSessions(name, config), 1);
         std::unique_ptr<Backend> second = create();
-        const Result r = second->connect(params(QStringLiteral("vsftpd-limited")), nullptr);
+        r = second->connect(p, nullptr);
         QCOMPARE(r.error(), Error::TooManyConnections);
+        QVERIFY2(r.detail().startsWith(QLatin1String("FTP 421")), qPrintable(r.detail()));
+        // Once the first session is gone, the second backend gets in.
+        first->disconnect();
+        QVERIFY2(waitIdle(name, config), "the server kept the first session");
+        r = establish(second.get(), p, Credentials(p.username, m_password));
+        QVERIFY2(r.ok(), qPrintable(r.toString() + QLatin1Char(' ') + r.detail()));
     }
 
     // ------------------------------------------------------------ C-9, C-14

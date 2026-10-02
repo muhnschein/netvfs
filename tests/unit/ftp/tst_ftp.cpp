@@ -684,6 +684,15 @@ private slots:
     {
         const Reply none;
         QCOMPARE(curlError(CURLE_OPERATION_TIMEDOUT, none, false, QString()).error(), Error::Timeout);
+        // libcurl turns every 421 into CURLE_OPERATION_TIMEDOUT.
+        QCOMPARE(curlError(CURLE_OPERATION_TIMEDOUT, reply({ "421 There are too many connected users, please try later." }),
+                           false, QString())
+                     .error(),
+                 Error::TooManyConnections);
+        QCOMPARE(curlError(CURLE_OPERATION_TIMEDOUT, reply({ "421 Timeout." }), false, QString()).error(),
+                 Error::ConnectionLost);
+        QCOMPARE(curlError(CURLE_OPERATION_TIMEDOUT, reply({ "421 Too many users" }), true, QString()).error(),
+                 Error::Canceled);
         QCOMPARE(curlError(CURLE_COULDNT_CONNECT, none, false, QString()).error(), Error::NetworkUnreachable);
         QCOMPARE(curlError(CURLE_COULDNT_RESOLVE_HOST, none, false, QString()).error(), Error::NetworkUnreachable);
         QCOMPARE(curlError(CURLE_SSL_PINNEDPUBKEYNOTMATCH, none, false, QString()).error(),
