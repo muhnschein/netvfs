@@ -63,7 +63,8 @@ check-interop: all
 
 # SPEC-v2 XP-1: every installed file in exactly one package of rpm/netvfs.spec
 # (the host has no sailfish-svg2png, so no icons; tests install to /usr/tests,
-# package builds skip them). XP-3: no share enumeration in the SMB plugin.
+# package builds skip them). XP-3: no share enumeration in the SMB plugin,
+# and the check does find it in the share helper.
 PACKAGE_ROOT := $(BUILD_DIR)/install-root
 check-packaging: all
 	rm -rf $(PACKAGE_ROOT)
@@ -72,6 +73,7 @@ check-packaging: all
 	./tools/ci/check-files.py --map "$$($(QMAKE) -query QT_INSTALL_LIBS)=/usr/lib64" \
 	    --allow-missing '/usr/share/themes/*' $(PACKAGE_ROOT)
 	./tools/ci/check-noshareenum.sh $(BUILD_DIR)/lib/netvfs/backends/libnetvfs-smb.so
+	! ./tools/ci/check-noshareenum.sh $(BUILD_DIR)/libexec/netvfs/netvfs-smb-shares >/dev/null
 	./tests/packaging/test_packaging.py
 
 coverage:

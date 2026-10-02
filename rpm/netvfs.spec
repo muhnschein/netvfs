@@ -20,10 +20,6 @@
 # tools/ci/check-files.py checks that every installed file belongs to exactly
 # one package.
 
-# SPEC-v2 XM-7, XP-3: the optional share enumeration helper of the SMB
-# backend (netvfs-backend-smb-shares).
-%bcond_with smb_shares
-
 Name:       netvfs
 Version:    0.2.0
 Release:    1
@@ -108,7 +104,6 @@ Requires:   %{name}-core = %{version}-%{release}
 libnetvfs-smb.so: SMB 2/3 over a statically linked libsmb2, without share
 enumeration (SPEC 10.2 gate G-SMB item 4, SPEC-v2 XP-3).
 
-%if %{with smb_shares}
 %package backend-smb-shares
 Summary:    Share enumeration helper for the SMB backend
 Requires:   %{name}-core = %{version}-%{release}
@@ -118,7 +113,6 @@ Requires:   %{name}-backend-smb = %{version}-%{release}
 netvfs-smb-shares (SPEC-v2 XM-7): lists the shares of an SMB server in a
 process of its own, so that the DCE/RPC parser never runs inside the
 backend. Optional (XP-3): without it, shares are entered by name.
-%endif
 
 %package backend-webdav
 Summary:    WebDAV backend for libnetvfs
@@ -320,10 +314,8 @@ systemctl-user daemon-reload || :
 %files backend-smb
 %{_libdir}/netvfs/backends/libnetvfs-smb.so
 
-%if %{with smb_shares}
 %files backend-smb-shares
 %{_prefix}/libexec/netvfs/netvfs-smb-shares
-%endif
 
 %files backend-webdav
 %{_libdir}/netvfs/backends/libnetvfs-webdav.so
