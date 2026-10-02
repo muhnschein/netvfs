@@ -42,8 +42,7 @@ bool parseCount(const QString &text, qint64 *out)
 
 bool parseMode(const QString &text, qint32 *out)
 {
-    static const QRegExp pattern(QStringLiteral("[0-7]{1,4}"));
-    if (!pattern.exactMatch(text))
+    if (static const QRegExp pattern(QStringLiteral("[0-7]{1,4}")); !pattern.exactMatch(text))
         return false;
     *out = text.toInt(nullptr, OctalBase);
     return true;
@@ -76,7 +75,7 @@ RenameMode modeOf(const CommandLine &cmd)
 
 // Raw bytes of `cat` onto the output stream: the underlying device when there
 // is one (stdout), else, for a string-backed stream (tests), Latin-1 text.
-class OutputSink : public QIODevice
+class OutputSink final : public QIODevice
 {
 public:
     explicit OutputSink(QTextStream &out) : m_out(out) { open(QIODevice::WriteOnly); }
@@ -272,8 +271,7 @@ Result cmdCp(const Context &c)
             return located;
     }
     QString destination;
-    const Result resolved = resolvePath(target.basePath, c.cmd.positional.at(1), &destination);
-    if (!resolved.ok())
+    if (const Result resolved = resolvePath(target.basePath, c.cmd.positional.at(1), &destination); !resolved.ok())
         return resolved;
     const QString &source = c.cmd.positional.at(0);
 
@@ -290,8 +288,7 @@ Result cmdCp(const Context &c)
     // XH-5: across two connections, a second one to the same location unless
     // --to-url names another.
     QScopedPointer<Backend> second;
-    const Result opened = c.connector.open(target, &second);
-    if (!opened.ok())
+    if (const Result opened = c.connector.open(target, &second); !opened.ok())
         return opened;
     Ops::CopyAcrossOptions options;
     options.recursive = recursive;
@@ -446,17 +443,15 @@ Result cmdDiscover(const Context &c)
 
 // ----------------------------------------------------------------- checkers
 
-QString checkMkdir(const CommandLine &cmd, Options *options)
+QString checkMkdir(const CommandLine &cmd, const Options &)
 {
-    Q_UNUSED(options)
     if (cmd.has(QStringLiteral("parents")) && cmd.has(QStringLiteral("exclusive")))
         return QStringLiteral("mkdir: -p and --exclusive cannot be combined");
     return QString();
 }
 
-QString checkCat(const CommandLine &cmd, Options *options)
+QString checkCat(const CommandLine &cmd, const Options &)
 {
-    Q_UNUSED(options)
     qint64 value = 0;
     for (const char *key : { "offset", "length" }) {
         if (cmd.values.contains(QLatin1String(key)) && !parseCount(cmd.value(QLatin1String(key)), &value))
@@ -465,35 +460,30 @@ QString checkCat(const CommandLine &cmd, Options *options)
     return QString();
 }
 
-QString checkChmod(const CommandLine &cmd, Options *options)
+QString checkChmod(const CommandLine &cmd, const Options &)
 {
-    Q_UNUSED(options)
-    qint32 mode = 0;
-    if (!parseMode(cmd.positional.at(0), &mode))
+    if (qint32 mode = 0; !parseMode(cmd.positional.at(0), &mode))
         return QStringLiteral("chmod: MODE must be octal permission bits (for example 644)");
     return QString();
 }
 
-QString checkTouch(const CommandLine &cmd, Options *options)
+QString checkTouch(const CommandLine &cmd, const Options &)
 {
-    Q_UNUSED(options)
-    QDateTime time;
-    if (cmd.values.contains(QStringLiteral("mtime")) && !parseTime(cmd.value(QStringLiteral("mtime")), &time))
+    if (QDateTime time;
+        cmd.values.contains(QStringLiteral("mtime")) && !parseTime(cmd.value(QStringLiteral("mtime")), &time))
         return QStringLiteral("touch: --mtime needs an ISO 8601 time such as 2024-05-17T12:30:00Z");
     return QString();
 }
 
-QString checkLn(const CommandLine &cmd, Options *options)
+QString checkLn(const CommandLine &cmd, const Options &)
 {
-    Q_UNUSED(options)
     if (!cmd.has(QStringLiteral("symbolic")) && cmd.positional.at(1).isEmpty())
         return QStringLiteral("ln: the new name must not be empty");
     return QString();
 }
 
-QString checkCp(const CommandLine &cmd, Options *options)
+QString checkCp(const CommandLine &cmd, const Options &)
 {
-    Q_UNUSED(options)
     if (!cmd.values.contains(QStringLiteral("to-url"))) {
         for (const char *key : { "to-secret-env", "to-host-key", "to-option" }) {
             if (cmd.values.contains(QLatin1String(key)))
@@ -507,32 +497,33 @@ QString checkCp(const CommandLine &cmd, Options *options)
     return QString();
 }
 
-QString checkSum(const CommandLine &cmd, Options *options)
+QString checkSum(const CommandLine &cmd, const Options &)
 {
-    Q_UNUSED(options)
     if (cmd.values.contains(QStringLiteral("algo")) && cmd.value(QStringLiteral("algo")).isEmpty())
         return QStringLiteral("sum: --algo needs an algorithm name");
     return QString();
 }
 
-QString checkShares(const CommandLine &cmd, Options *options)
+QString checkShares(const CommandLine &, const Options &options)
 {
-    Q_UNUSED(cmd)
-    if (options->main.params.provider != QLatin1String("smb") && options->url.isEmpty())
+    if (options.main.params.provider != QLatin1String("smb") && options.url.isEmpty())
         return QStringLiteral("shares: only SMB locations have shares (--provider smb)");
-    // The root of a location without a share lists the shares (XM-2).
-    options->overrides.insert(QStringLiteral("share"), QString());
     return QString();
 }
 
-QString checkDiscover(const CommandLine &cmd, Options *options)
+void adjustShares(Options *options)
 {
-    Q_UNUSED(options)
+    // The root of a location without a share lists the shares (XM-2).
+    options->overrides.insert(QStringLiteral("share"), QString());
+}
+
+QString checkDiscover(const CommandLine &cmd, const Options &)
+{
     if (!cmd.values.contains(QStringLiteral("seconds")))
         return QString();
     bool ok = false;
-    const int seconds = cmd.value(QStringLiteral("seconds")).toInt(&ok);
-    if (!ok || seconds < 0 || seconds > MaxDiscoverSeconds)
+    if (const int seconds = cmd.value(QStringLiteral("seconds")).toInt(&ok);
+        !ok || seconds < 0 || seconds > MaxDiscoverSeconds)
         return QStringLiteral("discover: --seconds needs a number from 0 to %1").arg(MaxDiscoverSeconds);
     return QString();
 }
@@ -561,7 +552,7 @@ const std::array<CommandSpec, 22> &table()
         { "df", "all", "r", Needs::Session, cmdDf, nullptr },
         { "sum", "algo=", "r", Needs::Session, cmdSum, checkSum },
         { "caps", "json", "", Needs::Session, cmdCaps, nullptr },
-        { "shares", "json", "", Needs::Session, cmdShares, checkShares },
+        { "shares", "json", "", Needs::Session, cmdShares, checkShares, adjustShares },
         { "discover", "seconds=", "", Needs::Nothing, cmdDiscover, checkDiscover },
     } };
     return commands;
@@ -585,8 +576,7 @@ QVector<FlagSpec> flagsOf(const CommandSpec &spec)
             flag.takesValue = true;
             token.chop(1);
         }
-        const int bar = token.indexOf(QLatin1Char('|'));
-        if (bar > 0) {
+        if (const int bar = token.indexOf(QLatin1Char('|')); bar > 0) {
             flag.shortName = token.at(0);
             token = token.mid(bar + 1);
         }
