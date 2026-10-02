@@ -4,6 +4,8 @@
 # a QML engine).
 INCLUDEPATH += $$PWD
 QT *= concurrent
+CONFIG *= link_pkgconfig
+PKGCONFIG *= accounts-qt5
 
 HEADERS += \
     $$PWD/backendjobs.h \

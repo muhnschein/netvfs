@@ -32,6 +32,7 @@ PUBLIC_HEADERS = \
     probe.h \
     secretsource.h \
     secure.h \
+    servicepolicy.h \
     sshkeys.h \
     transfer.h \
     types.h \
@@ -59,6 +60,7 @@ SOURCES = \
     probe.cpp \
     secretsource.cpp \
     secure.cpp \
+    servicepolicy.cpp \
     sshkeys.cpp \
     transfer.cpp \
     types.cpp \
