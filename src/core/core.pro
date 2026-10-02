@@ -41,17 +41,20 @@ SOURCES = \
     accountstore.cpp \
     backend.cpp \
     backendloader.cpp \
+    boundedpipe.cpp \
     error.cpp \
     identity.cpp \
     logging.cpp \
     names.cpp \
+    ops.cpp \
     paths.cpp \
     probe.cpp \
     secretsource.cpp \
     secure.cpp \
     sshkeys.cpp \
     transfer.cpp \
-    types.cpp
+    types.cpp \
+    url.cpp
 
 target.path = $$[QT_INSTALL_LIBS]
 headers.files = $$PUBLIC_HEADERS

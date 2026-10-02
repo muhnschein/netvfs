@@ -1,0 +1,149 @@
+[
+  {
+    "name": "XH-6 passwords in URLs accepted",
+    "file": "src/core/url.cpp",
+    "search": "        if (userInfo.contains(QLatin1Char(':')))",
+    "replace": "        if (false)",
+    "test": "build/tests/unit/url/tst_url"
+  },
+  {
+    "name": "XH-6 password rejection uses the wrong error",
+    "file": "src/core/url.cpp",
+    "search": "return Result(Error::SecurityPolicy, QStringLiteral(\"passwords in URLs are not accepted\"));",
+    "replace": "return Result(Error::InvalidName, QStringLiteral(\"passwords in URLs are not accepted\"));",
+    "test": "build/tests/unit/url/tst_url"
+  },
+  {
+    "name": "XH-6 default port stored instead of 0",
+    "file": "src/core/url.cpp",
+    "search": "result.port = authority.port == info->defaultPort ? 0 : authority.port;",
+    "replace": "result.port = authority.port;",
+    "test": "build/tests/unit/url/tst_url"
+  },
+  {
+    "name": "XH-6 ftp:// maps to plain FTP",
+    "file": "src/core/url.cpp",
+    "search": "{ \"ftp\", Kind::Ftp, 21, \"explicit\" },",
+    "replace": "{ \"ftp\", Kind::Ftp, 21, \"none\" },",
+    "test": "build/tests/unit/url/tst_url"
+  },
+  {
+    "name": "XH-6 dav:// maps to TLS",
+    "file": "src/core/url.cpp",
+    "search": "{ \"dav\", Kind::WebDav, 80, \"http\" },",
+    "replace": "{ \"dav\", Kind::WebDav, 80, \"https\" },",
+    "test": "build/tests/unit/url/tst_url"
+  },
+  {
+    "name": "XH-6 query and fragment accepted",
+    "file": "src/core/url.cpp",
+    "search": "    if (rest.contains(QLatin1Char('?')) || rest.contains(QLatin1Char('#')))",
+    "replace": "    if (false)",
+    "test": "build/tests/unit/url/tst_url"
+  },
+  {
+    "name": "XH-6 percent escape decoded wrongly",
+    "file": "src/core/url.cpp",
+    "search": "out.append(char(high * 16 + low));",
+    "replace": "out.append(char(high * 8 + low));",
+    "test": "build/tests/unit/url/tst_url"
+  },
+  {
+    "name": "XH-6 path bytes decoded lossily (XC-4)",
+    "file": "src/core/url.cpp",
+    "search": "    *out = Names::decode(bytes);",
+    "replace": "    *out = QString::fromUtf8(bytes);",
+    "test": "build/tests/unit/url/tst_url"
+  },
+  {
+    "name": "XH-6 format leaves reserved characters unescaped",
+    "file": "src/core/url.cpp",
+    "search": "        if (isUnreserved(c) || (keepSlash && c == '/')) {",
+    "replace": "        if (isUnreserved(c) || keepSlash) {",
+    "test": "build/tests/unit/url/tst_url"
+  },
+  {
+    "name": "XH-6 IPv6 literal not bracketed in the URL",
+    "file": "src/core/url.cpp",
+    "search": "    if (params.host.contains(QLatin1Char(':')))\n        out += QLatin1Char('[') + params.host + QLatin1Char(']');",
+    "replace": "    if (false)\n        out += QLatin1Char('[') + params.host + QLatin1Char(']');",
+    "test": "build/tests/unit/url/tst_url"
+  },
+  {
+    "name": "XH-6 file URL with a remote host accepted",
+    "file": "src/core/url.cpp",
+    "search": "    if (!authority.host.isEmpty() && authority.host.toLower() != QLatin1String(\"localhost\"))",
+    "replace": "    if (false)",
+    "test": "build/tests/unit/url/tst_url"
+  },
+  {
+    "name": "XH-6 SMB share not split from the path",
+    "file": "src/core/url.cpp",
+    "search": "    *share = parts.first();",
+    "replace": "    *share = QString();",
+    "test": "build/tests/unit/url/tst_url"
+  },
+  {
+    "name": "XH-6 port range not checked",
+    "file": "src/core/url.cpp",
+    "search": "    return *port >= 1 && *port <= MaxPort;",
+    "replace": "    return *port >= 0 && *port <= MaxPort;",
+    "test": "build/tests/unit/url/tst_url"
+  },
+  {
+    "name": "XC-4 Paths::normalize accepts \"..\" components",
+    "file": "src/core/paths.cpp",
+    "search": "if (part == QLatin1String(\".\") || part == QLatin1String(\"..\"))",
+    "replace": "if (part == QLatin1String(\".\"))",
+    "test": "build/tests/unit/url/tst_url"
+  },
+  {
+    "name": "XC-4 Paths::normalize reports Internal instead of InvalidName for NUL",
+    "file": "src/core/paths.cpp",
+    "search": "return Result(Error::InvalidName, QStringLiteral(\"Path contains a NUL character\"));",
+    "replace": "return Result(Error::Internal, QStringLiteral(\"Path contains a NUL character\"));",
+    "test": "build/tests/unit/url/tst_url"
+  },
+  {
+    "name": "XH-7 reserved device names not avoided",
+    "file": "src/core/paths.cpp",
+    "search": "        if (isReservedDeviceStem(stemOf(result))) {",
+    "replace": "        if (false) {",
+    "test": "build/tests/unit/url/tst_url"
+  },
+  {
+    "name": "XH-7 trailing spaces and dots kept for Windows names",
+    "file": "src/core/paths.cpp",
+    "search": "    if (windows)\n        stripTrailingSpacesAndDots(&result);\n    result = fitBytes(",
+    "replace": "    result = fitBytes(",
+    "test": "build/tests/unit/url/tst_url"
+  },
+  {
+    "name": "XH-7 path separator kept in a proposed name",
+    "file": "src/core/paths.cpp",
+    "search": "    if (c == QLatin1Char('/') || c.unicode() == 0)\n        return true;",
+    "replace": "    if (c.unicode() == 0)\n        return true;",
+    "test": "build/tests/unit/url/tst_url"
+  },
+  {
+    "name": "XH-7 byte limit off by one",
+    "file": "src/core/paths.cpp",
+    "search": "        if (used + bytes > maxBytes)",
+    "replace": "        if (used + bytes >= maxBytes)",
+    "test": "build/tests/unit/url/tst_url"
+  },
+  {
+    "name": "XH-7 truncation splits surrogate pairs",
+    "file": "src/core/paths.cpp",
+    "search": "        const int step = pair ? 2 : 1;",
+    "replace": "        const int step = pair ? 1 : 1;",
+    "test": "build/tests/unit/url/tst_url"
+  },
+  {
+    "name": "XH-7 extension not kept when truncating",
+    "file": "src/core/paths.cpp",
+    "search": "        if (extensionBytes < maxBytes) {",
+    "replace": "        if (false) {",
+    "test": "build/tests/unit/url/tst_url"
+  }
+]

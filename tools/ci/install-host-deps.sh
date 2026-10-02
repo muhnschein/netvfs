@@ -11,4 +11,5 @@ DEBIAN_FRONTEND=noninteractive $sudo apt-get install -y -q --no-install-recommen
     libaccounts-qt5-dev libsignon-qt5-dev signond signon-plugin-password \
     libssl-dev zlib1g-dev \
     dbus dbus-x11 openssh-client smbclient \
-    bear gcovr
+    bear gcovr \
+    clang libclang-rt-dev
