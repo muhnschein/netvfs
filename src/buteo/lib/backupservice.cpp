@@ -5,7 +5,7 @@
 #include <QtDBus/QDBusPendingCallWatcher>
 #include <QtDBus/QDBusPendingReply>
 
-#include <memory>
+#include <algorithm>
 
 namespace NetVfs {
 
@@ -31,6 +31,8 @@ BackupService::BackupService(const QDBusConnection &connection, QObject *parent)
     subscribe("cloudRestoreError", SLOT(onCloudRestoreError(int,QString,QString)));
 }
 
+BackupService::~BackupService() = default;
+
 void BackupService::subscribe(const char *name, const char *slot)
 {
     m_connection.connect(QLatin1String(Service), QLatin1String(ObjectPath), QLatin1String(Interface),
@@ -43,13 +45,27 @@ void BackupService::call(const QString &method, const QVariantList &arguments,
     QDBusMessage message = QDBusMessage::createMethodCall(QLatin1String(Service), QLatin1String(ObjectPath),
                                                           QLatin1String(Interface), method);
     message.setArguments(arguments);
+    // Never the watcher being delivered: that one moves there only after its callback.
+    m_finished.clear();
     auto watcher = std::make_unique<QDBusPendingCallWatcher>(m_connection.asyncCall(message));
-    watcher->setParent(this);
-    QDBusPendingCallWatcher *raw = watcher.release();   // owned by this service
-    connect(raw, &QDBusPendingCallWatcher::finished, this, [raw, done]() {
-        done(raw->reply());
-        raw->deleteLater();
+    const QDBusPendingCallWatcher *key = watcher.get();
+    connect(watcher.get(), &QDBusPendingCallWatcher::finished, this, [this, key, done]() {
+        done(key->reply());
+        retire(key);
     });
+    m_pending.push_back(std::move(watcher));
+}
+
+void BackupService::retire(const QDBusPendingCallWatcher *watcher)
+{
+    const auto it = std::find_if(m_pending.begin(), m_pending.end(),
+                                 [watcher](const std::unique_ptr<QDBusPendingCallWatcher> &pending) {
+                                     return pending.get() == watcher;
+                                 });
+    if (it == m_pending.end())
+        return;
+    m_finished.push_back(std::move(*it));
+    m_pending.erase(it);
 }
 
 void BackupService::backupFileDeviceId(const StringReply &done)

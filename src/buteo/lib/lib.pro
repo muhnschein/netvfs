@@ -11,12 +11,14 @@ CONFIG += staticlib hide_symbols
 
 HEADERS = \
     backupclient.h \
+    backuprun.h \
     backupservice.h \
     backupsteps.h \
     networkjob.h
 
 SOURCES = \
     backupclient.cpp \
+    backuprun.cpp \
     backupservice.cpp \
     backupsteps.cpp \
     networkjob.cpp
