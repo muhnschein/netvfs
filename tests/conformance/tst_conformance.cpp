@@ -129,6 +129,11 @@ private:
     std::unique_ptr<Backend> connectTo(const ConnectionParams &params, Result *result);
     QString p(const QString &name) const { return Paths::join(m_dir, name); }
     QString hostPath(const QString &name) const;
+    // Creates a folder the test also writes into from this host. With a
+    // hostPath it is made here, world-writable, because a folder the server
+    // creates belongs to the server's user and an unprivileged host user
+    // (CI) could not add files to it; without one the backend makes it.
+    bool makeFixtureDir(const QString &hostFolder, const QString &backendPath) const;
     bool has(Capability c) const { return m_caps.has(c); }
     void expectUnsupported(Capability c, const std::function<Result()> &call);
     void checkLink(const QString &link, EntryType targetType);
@@ -174,6 +179,17 @@ QString TestConformance::hostPath(const QString &name) const
         .arg(m_target.hostPath, m_runName, QString::fromLatin1(QTest::currentTestFunction()), name);
 }
 
+bool TestConformance::makeFixtureDir(const QString &hostFolder, const QString &backendPath) const
+{
+    if (m_target.hostPath.isEmpty())
+        return m_backend->makeDir(backendPath, true).ok();
+    if (!QDir().mkpath(hostFolder))
+        return false;
+    return QFile::setPermissions(hostFolder, QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner
+                                                 | QFileDevice::ReadGroup | QFileDevice::WriteGroup | QFileDevice::ExeGroup
+                                                 | QFileDevice::ReadOther | QFileDevice::WriteOther | QFileDevice::ExeOther);
+}
+
 void TestConformance::initTestCase()
 {
     qInfo("Target %s (provider %s)", qPrintable(m_target.name), qPrintable(m_target.params.provider));
@@ -185,7 +201,7 @@ void TestConformance::initTestCase()
     m_runName = QStringLiteral("run-%1-%2").arg(QCoreApplication::applicationPid()).arg(QDateTime::currentMSecsSinceEpoch());
     QCOMPARE(m_backend->makePath(m_target.baseDir), Result::success());
     m_runDir = Paths::join(m_target.baseDir, m_runName);
-    QCOMPARE(m_backend->makeDir(m_runDir, true), Result::success());
+    QVERIFY(makeFixtureDir(m_target.hostPath + QLatin1Char('/') + m_runName, m_runDir));
     m_backend.reset();
 }
 
@@ -209,7 +225,7 @@ void TestConformance::init()
     QVERIFY2(m_backend, qPrintable(r.toString()));
     m_caps = m_backend->capabilities();
     m_dir = Paths::join(m_runDir, function);
-    QCOMPARE(m_backend->makeDir(m_dir, true), Result::success());
+    QVERIFY(makeFixtureDir(m_target.hostPath + QLatin1Char('/') + m_runName + QLatin1Char('/') + function, m_dir));
 }
 
 void TestConformance::cleanup()
@@ -344,7 +360,7 @@ void TestConformance::listBatches()
 {
     const int count = m_target.listCount;
     const QString dir = p(QStringLiteral("many"));
-    QCOMPARE(m_backend->makeDir(dir, true), Result::success());
+    QVERIFY(makeFixtureDir(hostPath(QStringLiteral("many")), dir));
     QStringList expected;
     for (int i = 0; i < count; ++i) {
         const QString name = QStringLiteral("entry-%1").arg(i, 5, 10, QLatin1Char('0'));

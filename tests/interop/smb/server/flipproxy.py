@@ -19,6 +19,12 @@ import sys
 import threading
 
 
+
+def container_address():
+    """The container's own address: published ports are forwarded to it, so
+    the proxy does not need to listen on every interface."""
+    return socket.gethostbyname(socket.gethostname())
+
 def recv_exact(sock, count):
     data = b""
     while len(data) < count:
@@ -79,7 +85,7 @@ def server_to_client(server, client, mode, frame):
 def serve(port, target, mode, frame):
     listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    listener.bind(("0.0.0.0", port))
+    listener.bind((container_address(), port))
     listener.listen(16)
     while True:
         client, _ = listener.accept()
