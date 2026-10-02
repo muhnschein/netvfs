@@ -14,7 +14,6 @@
 #include <QtCore/QStandardPaths>
 #include <QtCore/QTemporaryDir>
 #include <QtCore/QUuid>
-#include <QtConcurrent/QtConcurrentRun>
 #include <QtTest/QtTest>
 
 #include "smb2api.h"
@@ -26,6 +25,7 @@
 #include <chrono>
 #include <cerrno>
 #include <cstring>
+#include <functional>
 #include <memory>
 #include <thread>
 #include <vector>
@@ -185,6 +185,32 @@ Credentials testCredentials()
 {
     return Credentials(QStringLiteral("backup"), QUuid::createUuid().toByteArray());
 }
+
+// A thread that is joined when it goes out of scope; `stop` (for example
+// Backend::cancel) runs first, so a failed check cannot leave it blocked.
+class JoinedThread
+{
+public:
+    template <typename Work>
+    JoinedThread(Work work, std::function<void()> stop) : m_stop(std::move(stop)), m_thread(work) {}
+    ~JoinedThread()
+    {
+        if (m_thread.joinable() && m_stop)
+            m_stop();
+        join();
+    }
+    JoinedThread(const JoinedThread &) = delete;
+    JoinedThread &operator=(const JoinedThread &) = delete;
+    void join()
+    {
+        if (m_thread.joinable())
+            m_thread.join();
+    }
+
+private:
+    std::function<void()> m_stop;
+    std::thread m_thread;
+};
 
 // A stand-in for netvfs-smb-shares: a shell script in `dir`.
 QString writeScript(const QTemporaryDir &dir, const QByteArray &body)
@@ -876,10 +902,10 @@ private slots:
         std::atomic<bool> cancel { false };
         QCOMPARE(runShareHelper(program, &request, 500, cancel, &shares).error(), Error::Timeout);
         QVERIFY2(clock.elapsed() < 2000, qPrintable(QString::number(clock.elapsed())));
-        std::thread canceller([&cancel]() {
+        JoinedThread canceller([&cancel]() {
             std::this_thread::sleep_for(std::chrono::milliseconds(300));
             cancel = true;
-        });
+        }, nullptr);
         clock.restart();
         request = testRequest();
         QCOMPARE(runShareHelper(program, &request, 30000, cancel, &shares).error(), Error::Canceled);
@@ -988,10 +1014,10 @@ private slots:
         QCOMPARE(timedOut.error(), Error::Timeout);
         QVERIFY2(clock.elapsed() >= 450 && clock.elapsed() < 2000, qPrintable(QString::number(clock.elapsed())));
 
-        std::thread canceller([&cancel]() {
+        JoinedThread canceller([&cancel]() {
             std::this_thread::sleep_for(std::chrono::milliseconds(300));
             cancel = true;
-        });
+        }, nullptr);
         clock.restart();
         const Result canceled = probeTcp(QStringLiteral("127.0.0.1"), listener.port(), 15000, cancel, &address);
         canceller.join();
@@ -1149,20 +1175,31 @@ private slots:
     {
         const LocalPeer peer(LocalPeer::Mode::Silent);
         const auto backend = smbBackend();
-        QFuture<Result> future = QtConcurrent::run([&backend, &peer]() {
+        std::atomic<bool> signingIn { false };
+        std::atomic<bool> finished { false };
+        Result result;
+        // Joined on every way out of this function, also when a check below
+        // fails: the worker never outlives the backend or the process.
+        JoinedThread worker([&backend, &peer, &signingIn, &finished, &result]() {
             Result r = backend->connect(localParams(peer.port()), nullptr);
-            if (r.ok())
+            if (r.ok()) {
+                signingIn = true;
                 r = backend->authenticate(testCredentials());
-            return r;
-        });
-        QTest::qWait(500);
-        QVERIFY(future.isRunning());
+            }
+            result = r;
+            finished = true;
+        }, [&backend]() { backend->cancel(); });
+        // Inside the sign-in, waiting for a server that never answers.
+        QTRY_VERIFY_WITH_TIMEOUT(signingIn, 10000);
+        QTest::qWait(300);
+        QVERIFY(!finished);
         QElapsedTimer clock;
         clock.start();
         backend->cancel();
-        future.waitForFinished();
+        QTRY_VERIFY_WITH_TIMEOUT(finished, 2000);   // C-9
+        worker.join();
         QVERIFY2(clock.elapsed() < 2000, qPrintable(QString::number(clock.elapsed())));
-        QCOMPARE(future.result().error(), Error::Canceled);
+        QCOMPARE(result.error(), Error::Canceled);
 
         // Still canceled until resetCancel().
         QCOMPARE(backend->connect(localParams(peer.port()), nullptr).error(), Error::Canceled);
@@ -1208,10 +1245,10 @@ private slots:
         QVERIFY(backend->connect(localParams(peer.port()), nullptr).ok());
         std::atomic<bool> inside { false };
         Result signIn;
-        std::thread other([&backend, &signIn, &inside]() {
+        JoinedThread other([&backend, &signIn, &inside]() {
             inside = true;
             signIn = backend->authenticate(testCredentials());   // stalls: the peer never answers
-        });
+        }, [&backend]() { backend->cancel(); });
         QTRY_VERIFY(inside);
         QTest::qWait(300);
         Entry entry;
