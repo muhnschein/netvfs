@@ -1,0 +1,79 @@
+name: CI
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    types: [opened, synchronize, reopened]
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  check:
+    name: Build and test (host)
+    runs-on: ubuntu-24.04
+    env:
+      QMAKE_ARGS: NETVFS_WERROR=1
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          submodules: recursive
+      - name: Install dependencies
+        run: ./tools/ci/install-host-deps.sh
+      - name: Build
+        run: make -j"$(nproc)"
+      - name: Unit tests
+        run: make check-unit
+      - name: Interop tests
+        run: make check-interop
+
+  sanitize:
+    name: Sanitizers (ASan + UBSan)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          submodules: recursive
+      - name: Install dependencies
+        run: ./tools/ci/install-host-deps.sh
+      - name: Build and test under sanitizers
+        env:
+          ASAN_OPTIONS: detect_leaks=1:abort_on_error=1
+          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+        run: make SANITIZE=1 check
+
+  mutation:
+    name: Tests bite (mutation check)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          submodules: recursive
+      - name: Install dependencies
+        run: ./tools/ci/install-host-deps.sh
+      - name: Build
+        run: make -j"$(nproc)"
+      - name: Mutation check
+        run: ./tools/mutation-check.py --build build
+
+  rpm:
+    name: Sailfish OS 5.2 aarch64 RPMs
+    runs-on: ubuntu-24.04
+    env:
+      SDK_IMAGE: mirror.gcr.io/coderus/sailfishos-platform-sdk-aarch64:5.2.0.15@sha256:e5f7596d14502746b308c3dde36f65fc25d7f76c45a01acaed56a1f55b76f592
+      TARGET: SailfishOS-5.2.0.15-aarch64
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          submodules: recursive
+      - name: Build RPMs in the Sailfish SDK
+        run: ./tools/ci/build-rpm.sh
+      - name: Check installability on the target
+        run: ./tools/ci/check-rpm.sh
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: netvfs-rpms-aarch64
+          path: RPMS/*.rpm
+          if-no-files-found: error

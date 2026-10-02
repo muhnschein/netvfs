@@ -51,7 +51,8 @@ coverage:
 	$(MAKE) COVERAGE=1 check
 	gcovr --root $(CURDIR) --object-directory $(abspath build-coverage) \
 	    --filter '$(CURDIR)/src/' --exclude '.*/moc_.*' \
-	    --gcov-ignore-parse-errors=negative_hits.warn_once_per_file \
+	    --gcov-ignore-parse-errors=negative_hits.warn_once_per_file --gcov-ignore-errors=no_working_dir_found \
+	    --exclude-throw-branches --exclude-unreachable-branches \
 	    --sonarqube $(abspath build-coverage)/coverage.xml --print-summary
 
 clean:
