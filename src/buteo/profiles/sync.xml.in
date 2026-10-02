@@ -1,0 +1,15 @@
+<?xml version=\"1.0\" encoding=\"UTF-8\"?>
+<!-- SPDX-License-Identifier: LGPL-2.1-or-later -->
+<profile name=\"$${NETVFS_SYNC_PROFILE}\" type=\"sync\">
+    <key name=\"destinationtype\" value=\"online\"/>
+    <key name=\"enabled\" value=\"false\"/>
+    <key name=\"hidden\" value=\"true\"/>
+    <key name=\"use_accounts\" value=\"true\"/>
+    <profile type=\"client\" name=\"$${NETVFS_CLIENT_PROFILE}\">
+        <key name=\"Sync Direction\" value=\"one-way\"/>
+        <key name=\"Sync Protocol\" value=\"$${NETVFS_SYNC_PROTOCOL}\"/>
+        <key name=\"Sync Transport\" value=\"HTTP\"/>
+        <key name=\"conflictpolicy\" value=\"prefer remote\"/>
+    </profile>
+    <schedule enabled=\"false\" interval=\"\" days=\"1,2,3,4,5,6,7\" syncconfiguredtime=\"\" time=\"02:00:00\"/>
+</profile>
