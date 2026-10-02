@@ -1,0 +1,12 @@
+# SPDX-License-Identifier: LGPL-2.1-or-later
+# vsftpd (ubuntu:24.04 ships 3.0.5) for the FTP interop suite: explicit FTPS
+# with require_ssl_reuse, implicit FTPS and plain FTP instances. vsftpd has
+# no MLSD, so this image covers the LIST fallback (SPEC-v2 F-3, XT-2).
+ARG BASE=mirror.gcr.io/library/ubuntu:24.04
+FROM ${BASE}
+RUN apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends vsftpd \
+    && rm -rf /var/lib/apt/lists/* \
+    && mkdir -p /var/run/vsftpd/empty
+COPY start-vsftpd.sh /setup/
+CMD ["/setup/start-vsftpd.sh"]
