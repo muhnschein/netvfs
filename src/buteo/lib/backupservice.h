@@ -10,8 +10,12 @@
 
 #include <functional>
 
+#include <memory>
+#include <vector>
+
 QT_BEGIN_NAMESPACE
 class QDBusMessage;
+class QDBusPendingCallWatcher;
 QT_END_NAMESPACE
 
 namespace NetVfs {
@@ -29,6 +33,8 @@ public:
 
     explicit BackupService(const QDBusConnection &connection = QDBusConnection::sessionBus(),
                            QObject *parent = nullptr);
+    ~BackupService() override;
+    Q_DISABLE_COPY(BackupService)
 
     void backupFileDeviceId(const StringReply &done);
     void createBackupForSyncProfile(const QString &profileName, const StringReply &done);
@@ -50,8 +56,11 @@ private:
     void subscribe(const char *name, const char *slot);
     void call(const QString &method, const QVariantList &arguments,
               const std::function<void(const QDBusMessage &)> &done);
+    void retire(const QDBusPendingCallWatcher *watcher);
 
     QDBusConnection m_connection;
+    std::vector<std::unique_ptr<QDBusPendingCallWatcher>> m_pending;
+    std::vector<std::unique_ptr<QDBusPendingCallWatcher>> m_finished;   // delivered, deleted on the next call
 };
 
 } // namespace NetVfs

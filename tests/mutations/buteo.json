@@ -22,7 +22,7 @@
   },
   {
     "name": "B-4 abort does not cancel the worker",
-    "file": "src/buteo/lib/backupclient.cpp",
+    "file": "src/buteo/lib/backuprun.cpp",
     "search": "    if (m_job) {\n        m_job->cancel();\n        return;\n    }\n    finish(Result(Error::Canceled));",
     "replace": "    if (m_job) {\n        return;\n    }\n    finish(Result(Error::Canceled));",
     "test": "dbus-run-session -- build/tests/unit/buteo/tst_buteo"
@@ -37,8 +37,8 @@
   {
     "name": "B-4 later abort overrides the first",
     "file": "src/buteo/lib/backupclient.cpp",
-    "search": "    if (!m_running || m_aborted)\n        return;",
-    "replace": "    if (!m_running)\n        return;",
+    "search": "    if (!isRunning() || m_aborted)\n        return;",
+    "replace": "    if (!isRunning())\n        return;",
     "test": "dbus-run-session -- build/tests/unit/buteo/tst_buteo"
   },
   {
@@ -50,9 +50,9 @@
   },
   {
     "name": "B-7 aborted pre-flight still requests the archive",
-    "file": "src/buteo/lib/backupclient.cpp",
-    "search": "    if (m_aborted) {\n        finish(Result(Error::Canceled));\n        return;\n    }\n    if (!m_override.ok()) {",
-    "replace": "    if (!m_override.ok()) {",
+    "file": "src/buteo/lib/backuprun.cpp",
+    "search": "    if (m_aborted)\n        finish(Result(Error::Canceled));\n    else if (!m_override.ok())",
+    "replace": "    if (!m_override.ok())",
     "test": "dbus-run-session -- build/tests/unit/buteo/tst_buteo"
   },
   {
@@ -71,42 +71,42 @@
   },
   {
     "name": "8.4 other account's status accepted",
-    "file": "src/buteo/lib/backupclient.cpp",
-    "search": "    if (m_operation != Operation::Backup || !m_running || accountId != m_accountId)\n        return;\n    qCDebug(lcNetVfsButeo) << \"Backup status\" << status;",
-    "replace": "    if (m_operation != Operation::Backup || !m_running)\n        return;\n    qCDebug(lcNetVfsButeo) << \"Backup status\" << status;",
+    "file": "src/buteo/lib/backuprun.cpp",
+    "search": "    if (m_spec.operation != BackupOperation::Backup || !m_running || accountId != m_spec.accountId)\n        return;\n    qCDebug(lcNetVfsButeo) << \"Backup status\" << status;",
+    "replace": "    if (m_spec.operation != BackupOperation::Backup || !m_running)\n        return;\n    qCDebug(lcNetVfsButeo) << \"Backup status\" << status;",
     "test": "dbus-run-session -- build/tests/unit/buteo/tst_buteo"
   },
   {
     "name": "8.4 Canceled status ignored",
-    "file": "src/buteo/lib/backupclient.cpp",
+    "file": "src/buteo/lib/backuprun.cpp",
     "search": "    } else if (status == QLatin1String(StatusCanceled)) {",
     "replace": "    } else if (status == QLatin1String(\"never\")) {",
     "test": "dbus-run-session -- build/tests/unit/buteo/tst_buteo"
   },
   {
     "name": "8.4 status before reply loses the upload",
-    "file": "src/buteo/lib/backupclient.cpp",
+    "file": "src/buteo/lib/backuprun.cpp",
     "search": "    if (m_archiveReady)\n        startUpload();",
     "replace": "    Q_UNUSED(m_archiveReady)",
     "test": "dbus-run-session -- build/tests/unit/buteo/tst_buteo"
   },
   {
     "name": "8.4 local archive kept",
-    "file": "src/buteo/lib/backupclient.cpp",
+    "file": "src/buteo/lib/backuprun.cpp",
     "search": "    QFile::remove(archive.absoluteFilePath());",
     "replace": "    Q_UNUSED(archive)",
     "test": "dbus-run-session -- build/tests/unit/buteo/tst_buteo"
   },
   {
     "name": "8.4 empty archive directory kept",
-    "file": "src/buteo/lib/backupclient.cpp",
+    "file": "src/buteo/lib/backuprun.cpp",
     "search": "    QDir().rmdir(archive.absolutePath());   // only when now empty",
     "replace": "",
     "test": "dbus-run-session -- build/tests/unit/buteo/tst_buteo"
   },
   {
     "name": "8.4 archive of an ended run kept",
-    "file": "src/buteo/lib/backupclient.cpp",
+    "file": "src/buteo/lib/backuprun.cpp",
     "search": "        else\n            removeArchive(path);   // the run ended while the request was pending",
     "replace": "",
     "test": "dbus-run-session -- build/tests/unit/buteo/tst_buteo"
@@ -141,16 +141,16 @@
   },
   {
     "name": "8.6 restore Canceled ignored",
-    "file": "src/buteo/lib/backupclient.cpp",
+    "file": "src/buteo/lib/backuprun.cpp",
     "search": "        fail(Result(Error::Canceled, QStringLiteral(\"The backup service canceled the restore\")));",
     "replace": "        qCDebug(lcNetVfsButeo) << \"ignored\";",
     "test": "dbus-run-session -- build/tests/unit/buteo/tst_buteo"
   },
   {
     "name": "8.6 other account's restore status accepted",
-    "file": "src/buteo/lib/backupclient.cpp",
-    "search": "    if (m_operation != Operation::BackupRestore || !m_running || accountId != m_accountId)",
-    "replace": "    if (m_operation != Operation::BackupRestore || !m_running)",
+    "file": "src/buteo/lib/backuprun.cpp",
+    "search": "    if (m_spec.operation != BackupOperation::BackupRestore || !m_running || accountId != m_spec.accountId)",
+    "replace": "    if (m_spec.operation != BackupOperation::BackupRestore || !m_running)",
     "test": "dbus-run-session -- build/tests/unit/buteo/tst_buteo"
   },
   {
@@ -169,28 +169,28 @@
   },
   {
     "name": "8.7 attention not recorded",
-    "file": "src/buteo/lib/backupclient.cpp",
-    "search": "if (const Result stored = AccountStore(m_manager.get()).setAttention(m_accountId, attention, pin); !stored.ok())",
+    "file": "src/buteo/lib/backuprun.cpp",
+    "search": "if (const Result stored = AccountStore(m_manager.get()).setAttention(m_spec.accountId, attention, pin); !stored.ok())",
     "replace": "if (const Result stored = Result(); !stored.ok())",
     "test": "dbus-run-session -- build/tests/unit/buteo/tst_buteo"
   },
   {
     "name": "8.7 host_key_seen recorded for AuthFailed",
-    "file": "src/buteo/lib/backupclient.cpp",
+    "file": "src/buteo/lib/backuprun.cpp",
     "search": "    const QString pin = attention == Attention::ServerIdentityChanged ? m_seenPin : QString();",
     "replace": "    const QString pin = m_seenPin;",
     "test": "dbus-run-session -- build/tests/unit/buteo/tst_buteo"
   },
   {
     "name": "account of another provider accepted",
-    "file": "src/buteo/lib/backupclient.cpp",
-    "search": "accountProvider != m_provider) {",
+    "file": "src/buteo/lib/backuprun.cpp",
+    "search": "accountProvider != m_spec.provider) {",
     "replace": "false) {",
     "test": "dbus-run-session -- build/tests/unit/buteo/tst_buteo"
   },
   {
     "name": "SEC-5 session keeps the secret",
-    "file": "src/buteo/lib/backupclient.cpp",
+    "file": "src/buteo/lib/backuprun.cpp",
     "search": "        m_session->releaseCredentials();   // SEC-5",
     "replace": "        ;",
     "test": "dbus-run-session -- build/tests/unit/buteo/tst_buteo"
