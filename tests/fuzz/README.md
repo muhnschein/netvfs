@@ -18,6 +18,7 @@ budget)".
 | --- | --- |
 | `fuzz_names.cpp` | `Names::encode(Names::decode(x)) == x` for every byte string; UTF-16 input never crashes |
 | `fuzz_url.cpp` | `Url::parse` never crashes; what it accepts survives parse, format, parse unchanged |
+| `fuzz_bridge_args.cpp` | netvfs-bridge argument validation (`validateCall`) on decoded argument tuples never crashes; what it accepts has normalised paths and numbers in range, and secrets only in the `Call` |
 
 ## Adding a harness: one file
 
