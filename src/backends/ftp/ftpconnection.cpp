@@ -94,8 +94,7 @@ bool drive(const Curl::MultiHandle &multi, const Curl::EasyHandle &easy, const s
     curl_multi_add_handle(multi.get(), easy.get());
     bool done = false;
     while (!done) {
-        int running = 0;
-        if (curl_multi_perform(multi.get(), &running) != CURLM_OK) {
+        if (int running = 0; curl_multi_perform(multi.get(), &running) != CURLM_OK) {
             *result = CURLE_FAILED_INIT;
             break;
         }
@@ -378,8 +377,7 @@ bool Connection::beginPump(Result *result)
 // True when pump() is over; *result is then its outcome.
 bool Connection::pumpRound(Result *result, const QString &context)
 {
-    int running = 0;
-    if (curl_multi_perform(m_multi.get(), &running) != CURLM_OK) {
+    if (int running = 0; curl_multi_perform(m_multi.get(), &running) != CURLM_OK) {
         stop();
         *result = Result(Error::Internal, QStringLiteral("libcurl failed"));
         return true;

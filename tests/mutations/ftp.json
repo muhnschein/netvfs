@@ -184,7 +184,7 @@
   {
     "name": "XSEC-2 guard never consulted by the header callback",
     "file": "src/backends/ftp/ftpconnection.cpp",
-    "search": "    if (connection->m_settings.tlsMode == TlsMode::Explicit && !connection->guard(data, length))",
+    "search": "    if (connection->m_settings.tlsMode == NetVfs::Ftp::TlsMode::Explicit && !connection->guard(data, length))",
     "replace": "    if (false && !connection->guard(data, length))",
     "test": "sh tests/interop/ftp/run.sh build signInTlsFailures reconnectKeepsTls"
   },

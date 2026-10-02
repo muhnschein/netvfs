@@ -350,8 +350,7 @@ TlsGuard::Verdict TlsGuard::feed(const char *data, size_t size)
         m_line.clear();
         if (code < 0)
             continue;
-        const Verdict verdict = reply(code);
-        if (verdict != Verdict::Continue)
+        if (const Verdict verdict = reply(code); verdict != Verdict::Continue)
             return verdict;
     }
     return Verdict::Continue;
