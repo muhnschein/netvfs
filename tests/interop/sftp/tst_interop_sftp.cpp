@@ -218,12 +218,15 @@ class SilentPrompter : public AuthPrompter
 public:
     bool answer(const QString &, const QString &, const QVector<AuthPrompt> &, QVector<QByteArray> *) override
     {
+        m_asked.release();
         m_canceled.tryAcquire(1, 10000);
         return false;
     }
     void cancel() override { m_canceled.release(); }
+    bool waitAsked(int ms) { return m_asked.tryAcquire(1, ms); }
 
 private:
+    QSemaphore m_asked;
     QSemaphore m_canceled;
 };
 
@@ -1526,10 +1529,20 @@ private slots:
         QCOMPARE(exec(server, QStringLiteral("stat -c %Y \"$P\""), env), mtime);
         QCOMPARE(b->setAttributes(dir + QStringLiteral("/missing"), changes = AttributeChanges()).error(), Error::NotFound);
 
-        // XS-2: names by users-groups-by-id@openssh.com, never Hidden.
+        // XS-2: names by users-groups-by-id@openssh.com, never Hidden; a
+        // file of another user needs a lookup beyond the start directory's.
+        exec(server, QStringLiteral("touch \"$P\" && chown root:root \"$P\""),
+             { QStringLiteral("P=") + disk + QStringLiteral("/.rootfile") });
         QVector<Entry> entries;
         QVERIFY(b->list(dir, &entries).ok());
         for (const Entry &e : entries) {
+            if (e.name == QLatin1String(".rootfile")) {
+                QCOMPARE(e.uid, qint64(0));
+                if (ownership || !e.owner.isEmpty())
+                    QCOMPARE(e.owner, QStringLiteral("root"));
+                QVERIFY(!e.flags.testFlag(EntryFlag::Hidden));
+                continue;
+            }
             QVERIFY(e.uid > 0 && e.gid > 0);
             // Without the extension libssh may still take names from
             // OpenSSH's "ls -l" style long names in listings.
@@ -1541,6 +1554,10 @@ private slots:
         }
         QVERIFY(b->stat(dir, &entry).ok());
         QCOMPARE(entry.owner, ownership ? QStringLiteral("alice") : QString());
+        // stat has no "ls -l" long name: only the extension names the owner.
+        QVERIFY(b->stat(dir + QStringLiteral("/.rootfile"), &entry).ok());
+        QCOMPARE(entry.owner, ownership ? QStringLiteral("root") : QString());
+        QCOMPARE(entry.group, ownership ? QStringLiteral("root") : QString());
         exec(server, QStringLiteral("rm -rf \"$P\""), { QStringLiteral("P=") + disk });
     }
 
@@ -1907,11 +1924,15 @@ private slots:
 
         // XC-22: cancel() ends a wait in the prompter.
         SilentPrompter nobody;
-        r = Result();
         Backend *raw = b.get();
-        const qint64 ms = runCanceled(raw, [this, raw, &p, &nobody]() { return signIn(raw, p, m_password, &nobody); }, &r);
+        QFuture<Result> future = QtConcurrent::run([this, raw, &p, &nobody]() { return signIn(raw, p, m_password, &nobody); });
+        QVERIFY(nobody.waitAsked(30000));   // the backend waits in the prompter now
+        QElapsedTimer timer;
+        timer.start();
+        raw->cancel();
+        r = future.result();
         QCOMPARE(r.error(), Error::Canceled);
-        QVERIFY2(ms <= CancelBoundMs, qPrintable(QString::number(ms)));
+        QVERIFY2(timer.elapsed() <= CancelBoundMs, qPrintable(QString::number(timer.elapsed())));
         b->resetCancel();
     }
 

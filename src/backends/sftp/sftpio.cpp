@@ -664,7 +664,9 @@ Result SftpBackend::Reader::read(qint64 offset, qint64 maxBytes, QByteArray *out
     const quint64 end = position + static_cast<quint64>(maxBytes);
     plan(position, end);
     takeBuffered(&position, end, &data);
-    if (!m_pending.empty() && m_pending.front().offset != position)
+    // Requests already on their way for other offsets are dropped (a read
+    // the kept chunk answered completely leaves them alone).
+    if (position < end && !m_pending.empty() && m_pending.front().offset != position)
         restartAt(position);
     if (m_pending.empty())
         m_next = position;
