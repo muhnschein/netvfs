@@ -6,8 +6,8 @@
 // flight (XB-17), its locations with their connection pools (XB-7, XB-12),
 // the copy jobs on threads of their own, and the discovery of nearby servers
 // (XD-5). The server owns one of each and hands them to the sessions. Main
-// thread only, except where noted. Included by .cpp files only: it is not a
-// header of a class with Q_OBJECT.
+// thread only, except where noted. Included by .cpp files only (moc of Qt 5.6
+// cannot read its C++17 nested namespace).
 #include "bridgeserver.h"
 #include "connector.h"
 #include "discovery.h"
