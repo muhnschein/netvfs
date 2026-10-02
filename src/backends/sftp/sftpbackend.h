@@ -84,6 +84,8 @@ private:
     Result waitWrite(Pending *pending, const QByteArray &remote) const;
     Result waitRead(Pending *pending, char *buffer, qint64 *received) const;
     Result waitForData(const QElapsedTimer &started) const;
+    Result timedOut() const;
+    bool overdue(const QElapsedTimer &started) const;
     int closeFile(sftp_file file, bool healthy) const;
 
     ssh_session m_session = nullptr;

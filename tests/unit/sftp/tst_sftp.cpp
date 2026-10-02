@@ -21,6 +21,14 @@
 #include <memory>
 
 using namespace NetVfs;
+
+namespace QTest {
+template<>
+char *toString(const NetVfs::Error &error)
+{
+    return qstrdup(qPrintable(NetVfs::errorName(error)));
+}
+} // namespace QTest
 using namespace NetVfs::Sftp;
 
 Q_DECLARE_METATYPE(NetVfs::Error)

@@ -596,14 +596,26 @@ Result SftpBackend::freeSpace(const QString &dir, qint64 *bytes)
 
 // --- transfers --------------------------------------------------------------
 
+Result SftpBackend::timedOut() const
+{
+    return Result(Error::Timeout,
+                  QStringLiteral("The server did not answer within %1 s").arg(m_params.requestTimeoutMs / 1000));
+}
+
+// A blocking read inside libssh that runs into the session timeout (the
+// request timeout) fails without an error message. By then the request is
+// overdue, and that is what the caller needs to know (C-14).
+bool SftpBackend::overdue(const QElapsedTimer &started) const
+{
+    return started.elapsed() >= m_params.requestTimeoutMs;
+}
+
 Result SftpBackend::waitForData(const QElapsedTimer &started) const
 {
     if (m_canceled)
         return Result(Error::Canceled);   // C-9
-    if (started.elapsed() > m_params.requestTimeoutMs) {   // C-14
-        return Result(Error::Timeout, QStringLiteral("The server did not answer within %1 s")
-                                          .arg(m_params.requestTimeoutMs / 1000));
-    }
+    if (overdue(started))
+        return timedOut();
     if (ssh_channel_poll_timeout(m_sftp->channel, PollIntervalMs, 0) == SSH_ERROR)
         return sessionFailure();
     return Result::success();
@@ -623,7 +635,7 @@ Result SftpBackend::waitWrite(Pending *pending, const QByteArray &remote) const
             return r;
         }
         if (rc < 0)
-            return writeFailure(remote, static_cast<qint64>(pending->length));
+            return overdue(started) ? timedOut() : writeFailure(remote, static_cast<qint64>(pending->length));
         if (static_cast<size_t>(rc) != pending->length)
             return Result(Error::ProtocolError, QStringLiteral("The server stored only part of a block"));
         return Result::success();
@@ -644,7 +656,7 @@ Result SftpBackend::waitRead(Pending *pending, char *buffer, qint64 *received) c
             return r;
         }
         if (rc < 0)
-            return sftpFailure(QStringLiteral("read"));
+            return overdue(started) ? timedOut() : sftpFailure(QStringLiteral("read"));
         *received = static_cast<qint64>(rc);
         return Result::success();
     }
