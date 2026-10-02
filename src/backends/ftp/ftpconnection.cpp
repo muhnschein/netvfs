@@ -14,6 +14,7 @@ constexpr long LowSpeedLimit = 1;            // bytes/s; below it for requestTim
 constexpr int MillisecondsPerSecond = 1000;
 constexpr long QuitTimeoutSeconds = 1;
 constexpr const char *Protocols = "ftp,ftps";
+constexpr int MaxSentCommands = 256;
 
 long seconds(int milliseconds)
 {
@@ -257,6 +258,11 @@ Result Connection::applyBase(const QByteArray &url)
         [&] { return curl_easy_setopt(m_easy, CURLOPT_NOPROGRESS, 0L); },
         [&] { return curl_easy_setopt(m_easy, CURLOPT_XFERINFOFUNCTION, &Connection::onProgress); },
         [&] { return curl_easy_setopt(m_easy, CURLOPT_XFERINFODATA, this); },
+        // Only to see the commands libcurl sends (onDebug); with a debug
+        // function set, verbose mode prints nothing.
+        [&] { return curl_easy_setopt(m_easy, CURLOPT_DEBUGFUNCTION, &Connection::onDebug); },
+        [&] { return curl_easy_setopt(m_easy, CURLOPT_DEBUGDATA, this); },
+        [&] { return curl_easy_setopt(m_easy, CURLOPT_VERBOSE, 1L); },
     };
     for (const auto &step : steps) {
         if (code == CURLE_OK)
@@ -340,6 +346,10 @@ Result Connection::start(const Request &request, TransferSink *sink)
     m_reader.reset();
     m_replies.clear();
     m_guardFailure = Result();
+    m_sent.clear();
+    m_quoted.clear();
+    for (const QByteArray &command : request.commands)
+        m_quoted.append(command.startsWith('*') ? command.mid(1) : command);
     // XSEC-2: every request starts in the guard's initial state, whatever
     // became of the previous one (a connection that died half way through a
     // sign-in must not colour the greeting of the next one).
@@ -406,6 +416,7 @@ Result Connection::complete(CURLcode code, const QString &context)
     curl_easy_getinfo(m_easy, CURLINFO_NUM_CONNECTS, &connects);
     m_unexpectedReconnect = connects > 0 && !m_expectReconnect;
     m_replies = m_reader.replies();
+    m_replyBase = m_reader.count() - m_replies.size();
     // libcurl may have closed the connection after an error.
     m_expectReconnect = code != CURLE_OK || m_closesConnection;
     if (!m_guardFailure.ok())
@@ -431,9 +442,25 @@ void Connection::stop()
 QVector<Reply> Connection::lastReplies(int count) const
 {
     QVector<Reply> result(count);
-    const int available = m_replies.size();
-    for (int i = 0; i < count && i < available; ++i)
-        result[count - 1 - i] = m_replies.at(available - 1 - i);
+    const int quoted = m_quoted.size();
+    if (count > quoted)
+        return result;
+    // The quoted commands run back to back; find that run among the commands
+    // libcurl sent (its own sign-in commands come before, its own CWD or
+    // transfer commands after).
+    for (int start = 0; start + quoted <= m_sent.size(); ++start) {
+        int i = 0;
+        while (i < quoted && m_sent.at(start + i).line == m_quoted.at(i))
+            ++i;
+        if (i < quoted)
+            continue;
+        for (int j = 0; j < count; ++j) {
+            const int index = m_sent.at(start + quoted - count + j).replyIndex - m_replyBase;
+            if (index >= 0 && index < m_replies.size())
+                result[j] = m_replies.at(index);
+        }
+        break;
+    }
     return result;
 }
 
@@ -517,6 +544,20 @@ bool Connection::guard(const char *data, size_t size)
         return true;
     m_guardFailure = Result(Error::SecurityPolicy, guardMessage(verdict), lineForLog(m_guard.lastLine()));
     return false;
+}
+
+int Connection::onDebug(CURL *, curl_infotype type, char *data, size_t size, void *self)
+{
+    auto *connection = static_cast<Connection *>(self);
+    if (type != CURLINFO_HEADER_OUT || connection->m_sent.size() >= MaxSentCommands)
+        return 0;
+    SentCommand sent;
+    sent.line = QByteArray(data, int(size)).trimmed();
+    if (sent.line.startsWith("PASS "))   // never keep the secret (SEC-5)
+        sent.line.clear();
+    sent.replyIndex = connection->m_reader.count();
+    connection->m_sent.append(sent);
+    return 0;
 }
 
 int Connection::onProgress(void *self, curl_off_t dlTotal, curl_off_t dlNow, curl_off_t ulTotal, curl_off_t ulNow)
