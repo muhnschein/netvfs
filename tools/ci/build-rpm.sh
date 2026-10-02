@@ -6,7 +6,7 @@ set -eu
 root=$(cd "$(dirname "$0")/../.." && pwd)
 # The SDK runs as mersdk (uid 100000) and builds in the source tree.
 sudo chown -R 100000:100000 "$root"
+trap 'sudo chown -R "$(id -u):$(id -g)" "$root"' EXIT
 docker run --rm -v "$root:/home/mersdk/src" -w /home/mersdk/src "$SDK_IMAGE" \
     bash -euc "mb2 -t '$TARGET' build -j \$(nproc)"
-sudo chown -R "$(id -u):$(id -g)" "$root"
 ls -l "$root"/RPMS

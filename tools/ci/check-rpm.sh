@@ -5,6 +5,7 @@ set -eu
 : "${SDK_IMAGE:?}" "${TARGET:?}"
 root=$(cd "$(dirname "$0")/../.." && pwd)
 sudo chown -R 100000:100000 "$root"
+trap 'sudo chown -R "$(id -u):$(id -g)" "$root"' EXIT
 docker run --rm -v "$root:/home/mersdk/src" -w /home/mersdk/src "$SDK_IMAGE" bash -euc "
     rpms=\$(ls RPMS/*.rpm | grep -v -e debuginfo -e debugsource)
     for r in \$rpms; do echo \"== \$r\"; rpm -qp --requires \"\$r\" | sed 's/^/  requires: /'; done
@@ -18,4 +19,3 @@ docker run --rm -v "$root:/home/mersdk/src" -w /home/mersdk/src "$SDK_IMAGE" bas
     done
     exit \$status
 "
-sudo chown -R "$(id -u):$(id -g)" "$root"

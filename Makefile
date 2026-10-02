@@ -15,6 +15,7 @@ ifeq ($(SANITIZE),1)
 BUILD ?= build-asan
 QMAKE_ARGS += NETVFS_SANITIZE=1
 VENDOR_CFLAGS = -fsanitize=address,undefined -fno-omit-frame-pointer
+export LSAN_OPTIONS := suppressions=$(CURDIR)/tools/sanitizer/lsan.supp:print_suppressions=0
 else ifeq ($(COVERAGE),1)
 BUILD ?= build-coverage
 QMAKE_ARGS += NETVFS_COVERAGE=1
