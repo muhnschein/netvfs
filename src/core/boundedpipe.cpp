@@ -1,30 +1,33 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 #include "boundedpipe.h"
 
-#include <QtCore/QMutex>
-#include <QtCore/QMutexLocker>
-#include <QtCore/QWaitCondition>
-
 #include <algorithm>
+#include <condition_variable>
+#include <mutex>
 
 namespace NetVfs {
 
 // Shared between the two devices and the BoundedPipe; the devices keep it
 // alive, so a device may outlive the BoundedPipe object without dangling.
+// std::mutex and std::condition_variable rather than QMutex/QWaitCondition:
+// ThreadSanitizer understands pthread synchronisation, but the atomics inside
+// an uninstrumented Qt are invisible to it and would be reported as races.
 struct BoundedPipe::State
 {
+    using Lock = std::unique_lock<std::mutex>;
+
     explicit State(qint64 size) : buffer(int(std::max<qint64>(size, 1)), Qt::Uninitialized) {}
 
-    mutable QMutex mutex;
-    QWaitCondition notEmpty;     // data arrived, writer closed or pipe failed
-    QWaitCondition notFull;      // space freed or pipe failed
-    QByteArray buffer;           // ring storage, fixed size
-    qint64 head = 0;             // read position
-    qint64 count = 0;            // bytes held
+    mutable std::mutex mutex;
+    std::condition_variable notEmpty;   // data arrived, writer closed or pipe failed
+    std::condition_variable notFull;    // space freed, reader closed or pipe failed
+    QByteArray buffer;                  // ring storage, fixed size
+    qint64 head = 0;                    // read position
+    qint64 count = 0;                   // bytes held
     qint64 peak = 0;
     bool writerClosed = false;
     bool readerClosed = false;
-    Result failure;              // first fail() wins
+    Result failure;                     // first fail() wins
 
     qint64 capacity() const { return buffer.size(); }
 
@@ -34,8 +37,8 @@ struct BoundedPipe::State
     {
         if (failure.ok())
             failure = result.ok() ? Result(Error::Internal, QStringLiteral("Pipe failed")) : result;
-        notEmpty.wakeAll();
-        notFull.wakeAll();
+        notEmpty.notify_all();
+        notFull.notify_all();
     }
 
     // Called with the mutex held; `maxSize` > 0. Returns the bytes copied out.
@@ -47,7 +50,7 @@ struct BoundedPipe::State
         std::copy_n(buffer.constData(), n - first, data + first);
         head = (head + n) % capacity();
         count -= n;
-        notFull.wakeAll();
+        notFull.notify_all();
         return n;
     }
 
@@ -61,8 +64,20 @@ struct BoundedPipe::State
         std::copy_n(data + first, n - first, buffer.data());
         count += n;
         peak = std::max(peak, count);
-        notEmpty.wakeAll();
+        notEmpty.notify_all();
         return n;
+    }
+
+    // Waits while the reader has nothing to take and nothing can arrive.
+    void waitForDataLocked(Lock *lock)
+    {
+        notEmpty.wait(*lock, [this] { return count > 0 || writerClosed || failedLocked(); });
+    }
+
+    // Waits while the ring is full and the writer may still be served.
+    void waitForSpaceLocked(Lock *lock)
+    {
+        notFull.wait(*lock, [this] { return count < capacity() || failedLocked() || readerClosed; });
     }
 };
 
@@ -85,9 +100,9 @@ public:
     void close() override
     {
         if (isOpen()) {
-            QMutexLocker lock(&m_state->mutex);
+            State::Lock lock(m_state->mutex);
             m_state->writerClosed = true;
-            m_state->notEmpty.wakeAll();
+            m_state->notEmpty.notify_all();
         }
         QIODevice::close();
     }
@@ -98,14 +113,12 @@ protected:
     // Blocks until all of `length` bytes are in the ring (bounded memory).
     qint64 writeData(const char *data, qint64 length) override
     {
-        QMutexLocker lock(&m_state->mutex);
+        State::Lock lock(m_state->mutex);
         qint64 done = 0;
         while (done < length) {
-            while (m_state->count == m_state->capacity() && !m_state->failedLocked() && !m_state->readerClosed)
-                m_state->notFull.wait(&m_state->mutex);
-            if (!m_state->failedLocked() && m_state->readerClosed) {
+            m_state->waitForSpaceLocked(&lock);
+            if (!m_state->failedLocked() && m_state->readerClosed)
                 m_state->failLocked(Result(Error::Canceled, QStringLiteral("The pipe reader was closed")));
-            }
             if (m_state->failedLocked()) {
                 setErrorString(m_state->failure.message());
                 return -1;
@@ -134,16 +147,16 @@ public:
     void close() override
     {
         if (isOpen()) {
-            QMutexLocker lock(&m_state->mutex);
+            State::Lock lock(m_state->mutex);
             m_state->readerClosed = true;
-            m_state->notFull.wakeAll();
+            m_state->notFull.notify_all();
         }
         QIODevice::close();
     }
 
     qint64 bytesAvailable() const override
     {
-        QMutexLocker lock(&m_state->mutex);
+        State::Lock lock(m_state->mutex);
         return m_state->failedLocked() ? 0 : m_state->count + QIODevice::bytesAvailable();
     }
 
@@ -151,8 +164,8 @@ public:
     // deliver data, so that "while (!atEnd())" loops behave on a live pipe.
     bool atEnd() const override
     {
-        QMutexLocker lock(&m_state->mutex);
-        waitForDataLocked();
+        State::Lock lock(m_state->mutex);
+        m_state->waitForDataLocked(&lock);
         return m_state->failedLocked() || m_state->count == 0;
     }
 
@@ -162,8 +175,8 @@ protected:
     {
         if (maxSize <= 0)
             return 0;
-        QMutexLocker lock(&m_state->mutex);
-        waitForDataLocked();
+        State::Lock lock(m_state->mutex);
+        m_state->waitForDataLocked(&lock);
         if (m_state->failedLocked()) {
             setErrorString(m_state->failure.message());
             return -1;
@@ -175,12 +188,6 @@ protected:
     qint64 writeData(const char *, qint64) override { return -1; }
 
 private:
-    void waitForDataLocked() const
-    {
-        while (m_state->count == 0 && !m_state->writerClosed && !m_state->failedLocked())
-            m_state->notEmpty.wait(&m_state->mutex);
-    }
-
     std::shared_ptr<State> m_state;
 };
 
@@ -211,7 +218,7 @@ QIODevice *BoundedPipe::reader()
 
 void BoundedPipe::fail(const Result &result)
 {
-    QMutexLocker lock(&m_state->mutex);
+    State::Lock lock(m_state->mutex);
     m_state->failLocked(result);
 }
 
@@ -222,7 +229,7 @@ void BoundedPipe::cancel()
 
 Result BoundedPipe::result() const
 {
-    QMutexLocker lock(&m_state->mutex);
+    State::Lock lock(m_state->mutex);
     return m_state->failure;
 }
 
@@ -233,13 +240,13 @@ qint64 BoundedPipe::capacity() const
 
 qint64 BoundedPipe::buffered() const
 {
-    QMutexLocker lock(&m_state->mutex);
+    State::Lock lock(m_state->mutex);
     return m_state->count;
 }
 
 qint64 BoundedPipe::peakBuffered() const
 {
-    QMutexLocker lock(&m_state->mutex);
+    State::Lock lock(m_state->mutex);
     return m_state->peak;
 }
 
