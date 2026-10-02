@@ -149,8 +149,8 @@
   {
     "name": "XH-1 direct NoReplace upload truncates",
     "file": "src/core/transfer.cpp",
-    "search": "        ? WriteOptions::Disposition::CreateNew : WriteOptions::Disposition::Truncate;",
-    "replace": "        ? WriteOptions::Disposition::Truncate : WriteOptions::Disposition::Truncate;",
+    "search": "        ? WriteOptions::CreateNew : WriteOptions::Truncate;",
+    "replace": "        ? WriteOptions::Truncate : WriteOptions::Truncate;",
     "test": "build/tests/unit/transfer/tst_transfer"
   },
   {

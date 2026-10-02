@@ -856,11 +856,11 @@ Result FakeBackend::prepareWrite(const QString &key, const WriteOptions &options
     if (exists && (resolved->isEmpty() || m_server->nodes.value(*resolved).isDir()))
         return Result(Error::IsADirectory, QStringLiteral("%1 is a folder").arg(key));
     switch (options.disposition) {
-    case WriteOptions::Disposition::CreateNew:
+    case WriteOptions::CreateNew:
         if (exists)
             return Result(Error::AlreadyExists, QStringLiteral("%1 exists").arg(key));
         break;
-    case WriteOptions::Disposition::Resume:
+    case WriteOptions::Resume:
         if (!has(Capability::WriteResume))
             return unsupported("Resuming writes");
         if (!exists)
@@ -871,7 +871,7 @@ Result FakeBackend::prepareWrite(const QString &key, const WriteOptions &options
                                                     .arg(m_server->nodes.value(*resolved).data.size()));
         }
         return Result::success();
-    case WriteOptions::Disposition::Truncate:
+    case WriteOptions::Truncate:
         break;
     }
     if (exists) {
@@ -908,7 +908,7 @@ Result FakeBackend::openWrite(const QString &path, const WriteOptions &options, 
         r = prepareWrite(k, options, &resolved);
     if (!r.ok())
         return r;
-    const qint64 start = options.disposition == WriteOptions::Disposition::Resume ? options.resumeOffset : 0;
+    const qint64 start = options.disposition == WriteOptions::Resume ? options.resumeOffset : 0;
     *out = new Writer(this, resolved, options, start);
     return r;
 }
@@ -931,7 +931,7 @@ Result FakeBackend::upload(QIODevice *source, const QString &path, const UploadO
         delay = m_server->chunkDelayMs;
         failAfter = m_server->failUploadAfterBytes;
     }
-    const qint64 base = options.write.disposition == WriteOptions::Disposition::Resume ? options.write.resumeOffset : 0;
+    const qint64 base = options.write.disposition == WriteOptions::Resume ? options.write.resumeOffset : 0;
     const qint64 total = base + source->size();
     qint64 done = 0;
     for (;;) {

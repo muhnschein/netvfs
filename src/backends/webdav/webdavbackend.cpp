@@ -832,14 +832,14 @@ private:
 QList<QByteArray> WebDavBackend::Writes::headers(const WriteOptions &options) const
 {
     QList<QByteArray> headers;
-    if (options.disposition == WriteOptions::Disposition::Resume) {
+    if (options.disposition == WriteOptions::Resume) {
         // W-10: sabre/dav partial update.
         headers << "Content-Type: application/x-sabredav-partialupdate" << "X-Update-Range: append";
     } else {
         headers << "Content-Type: application/octet-stream";
     }
     // W-10: the server refuses to replace (412) instead of us checking first.
-    if (options.disposition == WriteOptions::Disposition::CreateNew)
+    if (options.disposition == WriteOptions::CreateNew)
         headers << "If-None-Match: *";
     // W-11
     if (m_b.nextcloud() && options.modified.isValid())
@@ -849,9 +849,9 @@ QList<QByteArray> WebDavBackend::Writes::headers(const WriteOptions &options) co
 
 Result WebDavBackend::Writes::prepare(const QString &path, const WriteOptions &options) const
 {
-    if (options.disposition == WriteOptions::Disposition::Resume)
+    if (options.disposition == WriteOptions::Resume)
         return prepareResume(path, options);
-    if (options.disposition != WriteOptions::Disposition::CreateNew)
+    if (options.disposition != WriteOptions::CreateNew)
         return Result::success();
     // W-10: If-None-Match: * makes the server refuse to replace; some
     // servers (rclone) ignore it, so an existing file is caught here, too.
@@ -893,7 +893,7 @@ Result WebDavBackend::upload(QIODevice *source, const QString &path, const Uploa
     if (Result r = checkUsable(); !r.ok())
         return r;
     const WriteOptions &write = options.write;
-    const bool resume = write.disposition == WriteOptions::Disposition::Resume;
+    const bool resume = write.disposition == WriteOptions::Resume;
     if (Result r = Writes(*this).prepare(path, write); !r.ok())
         return r;
     qint64 size = write.expectedSize;
@@ -923,7 +923,7 @@ Result WebDavBackend::openWrite(const QString &path, const WriteOptions &options
         return r;
     if (m_openWrites >= MaxWriteHandles)
         return Result(Error::TooManyConnections, QStringLiteral("Too many files open for writing"));
-    const bool resume = options.disposition == WriteOptions::Disposition::Resume;
+    const bool resume = options.disposition == WriteOptions::Resume;
     if (Result r = Writes(*this).prepare(path, options); !r.ok())
         return r;
     qint64 size = options.expectedSize;
@@ -956,7 +956,7 @@ Result WebDavBackend::finishWrite(Client::Stream *stream, const QString &path, c
     Response response;
     if (Result r = stream->finish(&response); !r.ok())
         return r;
-    const Method method = options.disposition == WriteOptions::Disposition::Resume ? Method::Patch : Method::Put;
+    const Method method = options.disposition == WriteOptions::Resume ? Method::Patch : Method::Put;
     return Writes(*this).outcome(response, method, path);
 }
 

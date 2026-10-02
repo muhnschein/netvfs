@@ -1472,7 +1472,7 @@ void TestWebDav::uploadHeaders()
     QByteArray other("short");
     QBuffer second(&other);
     second.open(QIODevice::ReadOnly);
-    options.write.disposition = WriteOptions::Disposition::Truncate;
+    options.write.disposition = WriteOptions::Truncate;
     options.write.modified = QDateTime();
     QVERIFY(f.backend.upload(&second, QStringLiteral("u.bin"), options, nullptr).ok());
     QVERIFY(f.server.requests().last().header("if-none-match").isEmpty());
@@ -1513,7 +1513,7 @@ void TestWebDav::uploadChunked()
     // expectedSize gives a Content-Length even for a sequential source.
     SequentialSource again(data);
     UploadOptions options;
-    options.write.disposition = WriteOptions::Disposition::Truncate;
+    options.write.disposition = WriteOptions::Truncate;
     options.write.expectedSize = data.size();
     QVERIFY(f.backend.upload(&again, QStringLiteral("seq"), options, nullptr).ok());
     QCOMPARE(f.server.requests().last().header("content-length"), QByteArray::number(data.size()));
@@ -1560,7 +1560,7 @@ void TestWebDav::errorStatuses()
     QBuffer source(&data);
     source.open(QIODevice::ReadOnly);
     UploadOptions truncate;
-    truncate.write.disposition = WriteOptions::Disposition::Truncate;
+    truncate.write.disposition = WriteOptions::Truncate;
     QCOMPARE(f.backend.upload(&source, QStringLiteral("x"), truncate, nullptr).error(), Error::NoSpace);
     status = 429;
     Result r = f.backend.stat(QStringLiteral("x"), &entry);
@@ -1599,7 +1599,7 @@ void TestWebDav::writeHandle()
     QCOMPARE(put.header("if-none-match"), QByteArray("*"));
 
     // With a known size: Content-Length; several handles at once.
-    options.disposition = WriteOptions::Disposition::Truncate;
+    options.disposition = WriteOptions::Truncate;
     options.expectedSize = 6;
     QVERIFY(f.backend.openWrite(QStringLiteral("one"), options, &raw).ok());
     std::unique_ptr<WriteHandle> one(raw);
@@ -1667,7 +1667,7 @@ void TestWebDav::resumeWithPartialUpdate()
     f.dav.addFile("/part", "hello ");
     QVERIFY(f.signIn().ok());
     WriteOptions options;
-    options.disposition = WriteOptions::Disposition::Resume;
+    options.disposition = WriteOptions::Resume;
     options.resumeOffset = 6;
     WriteHandle *raw = nullptr;
     QCOMPARE(f.backend.openWrite(QStringLiteral("part"), options, &raw).error(), Error::Unsupported);

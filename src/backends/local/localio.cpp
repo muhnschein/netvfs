@@ -152,19 +152,19 @@ Result openForWrite(const QByteArray &native, const WriteOptions &options, Fd *f
 {
     if (options.createMode < -1 || options.createMode > 07777)
         return Result(Error::Internal, QStringLiteral("Invalid mode %1").arg(options.createMode, 0, 8));
-    if (options.disposition == WriteOptions::Disposition::Resume && options.resumeOffset < 0)
+    if (options.disposition == WriteOptions::Resume && options.resumeOffset < 0)
         return Result(Error::Internal, QStringLiteral("Invalid resume offset"));
     int flags = O_WRONLY | O_CLOEXEC | O_NOCTTY | O_NONBLOCK;
-    if (options.disposition == WriteOptions::Disposition::CreateNew)
+    if (options.disposition == WriteOptions::CreateNew)
         flags |= O_CREAT | O_EXCL;
-    else if (options.disposition == WriteOptions::Disposition::Truncate)
+    else if (options.disposition == WriteOptions::Truncate)
         flags |= O_CREAT | O_TRUNC;
     // L-7: Resume opens without truncation.
     const mode_t mode = options.createMode >= 0 ? static_cast<mode_t>(options.createMode) : DefaultFileMode;
     Fd file(::open(native.constData(), flags, mode));
     if (!file.valid())
         return errnoResult(errno, display(native));
-    if (options.disposition == WriteOptions::Disposition::Resume) {
+    if (options.disposition == WriteOptions::Resume) {
         NativeStat st;
         if (const int e = statFd(file.get(), &st); e != 0)
             return errnoResult(e, display(native));
@@ -449,7 +449,7 @@ Result LocalBackend::openWrite(const QString &path, const WriteOptions &options,
     Fd fd;
     if (const Result r = openForWrite(native, options, &fd); !r.ok())
         return r;
-    const qint64 position = options.disposition == WriteOptions::Disposition::Resume ? options.resumeOffset : 0;
+    const qint64 position = options.disposition == WriteOptions::Resume ? options.resumeOffset : 0;
     *out = std::make_unique<LocalWriteHandle>(m_context, std::move(fd), position, options.modified).release();
     return Result::success();
 }
@@ -469,7 +469,7 @@ Result LocalBackend::upload(QIODevice *source, const QString &path, const Upload
         return r;
     const WriteOptions &write = options.write;
     LocalWriteHandle handle(m_context, std::move(fd),
-                            write.disposition == WriteOptions::Disposition::Resume ? write.resumeOffset : 0, write.modified);
+                            write.disposition == WriteOptions::Resume ? write.resumeOffset : 0, write.modified);
     const qint64 total = uploadTotal(write, source);
     QByteArray buffer(static_cast<int>(ChunkSize), Qt::Uninitialized);
     for (;;) {

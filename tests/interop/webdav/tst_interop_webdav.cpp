@@ -594,7 +594,7 @@ void TestInteropWebDav::renameAndCopy()
         QBuffer source(&copy);
         source.open(QIODevice::ReadOnly);
         UploadOptions options;
-        options.write.disposition = WriteOptions::Disposition::Truncate;
+        options.write.disposition = WriteOptions::Truncate;
         return backend->upload(&source, dir + QLatin1Char('/') + name, options, nullptr);
     };
     const auto content = [&](const QString &name) {
@@ -694,7 +694,7 @@ void TestInteropWebDav::handles()
 
     // Resume where the server offers it (sabre/dav), Unsupported elsewhere.
     WriteOptions resume;
-    resume.disposition = WriteOptions::Disposition::Resume;
+    resume.disposition = WriteOptions::Resume;
     resume.resumeOffset = data.size();
     const Result r = backend->openWrite(file, resume, &rawWriter);
     std::unique_ptr<WriteHandle> resumed(rawWriter);
