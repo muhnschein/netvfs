@@ -68,11 +68,14 @@ Result curlError(CURLcode code, const Reply &reply, bool canceled, const QString
 // 8.5.0-2ubuntu10.15, which carries a security backport on connection
 // reuse; vanilla 8.5.0 and 8.20.0 reuse the connection) refuse to reuse an
 // explicit-TLS control connection when TLS is required (CURLUSESSL_ALL), so
-// every request would open a new connection and sign in again. The control
-// connection therefore runs in libcurl's "try" mode, in which libcurl itself
-// carries on in clear text when AUTH TLS or PROT P is refused, and this guard
-// enforces "TLS or nothing" on the server replies, which libcurl hands to
-// the header callback before it acts on them: a greeting must be followed
+// every request would open a new connection and sign in again. On libcurl
+// 8.20.0 and later (tested) the control connection runs in libcurl's "TLS
+// required" mode, which fails by itself when AUTH TLS or PROT P is refused.
+// Before that it runs in "try" mode, in which libcurl carries on in clear
+// text on a refusal. In both modes this guard enforces "TLS or nothing" on
+// the server replies, which libcurl hands to the header callback before it
+// acts on them (alone in try mode, as a second check otherwise): a greeting
+// must be followed
 // by 234 to AUTH TLS (else USER would follow in clear text), and the reply
 // to PROT P must be positive (else data would flow in clear text). A
 // greeting that claims a completed login (230) is refused as well. A

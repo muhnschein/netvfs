@@ -88,7 +88,10 @@ public:
     // Replies of the last request, oldest first.
     const QVector<Reply> &replies() const { return m_replies; }
     // The replies to the last `count` quoted commands (all prefixed with
-    // '*', so each got exactly one reply); invalid entries if missing.
+    // '*', so each got exactly one reply); invalid entries if missing. Each
+    // reply is found through the command that libcurl sent (the debug
+    // callback), not by its place among the replies: libcurl adds commands of
+    // its own around the quoted ones (sign-in, a CWD after them in 8.20).
     QVector<Reply> lastReplies(int count) const;
     // The login folder libcurl found with PWD (raw bytes), empty if unknown.
     QByteArray entryPath() const;
@@ -107,6 +110,7 @@ private:
     static size_t onWrite(char *data, size_t size, size_t count, void *self);
     static size_t onRead(char *buffer, size_t size, size_t count, void *self);
     static size_t onHeader(char *data, size_t size, size_t count, void *self);
+    static int onDebug(CURL *easy, curl_infotype type, char *data, size_t size, void *self);
     static int onProgress(void *self, curl_off_t dlTotal, curl_off_t dlNow, curl_off_t ulTotal, curl_off_t ulNow);
 
     Result applyBase(const QByteArray &url);
@@ -129,6 +133,15 @@ private:
     TlsGuard m_guard;
     Result m_guardFailure;
     QVector<Reply> m_replies;
+    // The commands libcurl sent during the request (never PASS), each with
+    // the number of replies received before it: its reply is the next one.
+    struct SentCommand {
+        QByteArray line;
+        int replyIndex = 0;
+    };
+    QVector<SentCommand> m_sent;
+    QList<QByteArray> m_quoted;         // the request's quoted commands, without '*'
+    int m_replyBase = 0;                // number of replies before m_replies.first()
     bool m_started = false;
     bool m_paused = false;
     bool m_expectReconnect = true;      // the first request connects
