@@ -7,7 +7,6 @@
 #include "davconfig.h"
 #include "davxml.h"
 
-#include <functional>
 #include <memory>
 
 namespace NetVfs::WebDav {
@@ -19,9 +18,10 @@ struct HandleLink;
 //
 // TLS identity (XC-16, W-3, W-4):
 //  - no pin: the chain and host name are verified against the system CAs;
-//    a trusted server needs no prompt. Otherwise a second handshake without
-//    verification (no HTTP request) reports the certificate and its problems
-//    and authenticate() refuses (ServerIdentityUnknown).
+//    a trusted server needs no prompt. Otherwise a second handshake that the
+//    client ends once it has the certificate (no HTTP request, nothing is
+//    sent) reports the certificate and its problems and authenticate()
+//    refuses (ServerIdentityUnknown).
 //  - pin ("host_key" = "tls-spki-sha256 <base64 SPKI>"): every connection
 //    enforces the pin (CURLOPT_PINNEDPUBLICKEY). The account option
 //    "tls_verify_peer" records whether the pinned certificate was system
@@ -46,8 +46,6 @@ class WebDavBackend final : public Backend
 public:
     WebDavBackend();
     ~WebDavBackend() override;
-    WebDavBackend(const WebDavBackend &) = delete;
-    WebDavBackend &operator=(const WebDavBackend &) = delete;
 
     static constexpr int MaxWriteHandles = 8;
     // W-9: after a server ignored a Range header, reads further in than this
@@ -92,25 +90,17 @@ public:
     void writeHandleClosed() { --m_openWrites; }
 
 private:
-    using ResourceCallback = std::function<bool(const DavResource &, const HrefResolver &)>;
+    class Handshake;    // connect: TLS identity, OPTIONS, server features (webdavbackend.cpp)
+    class Writes;       // PUT/PATCH preparation and outcome
+    class Transfers;    // COPY and MOVE
 
     Result checkUsable() const;
     Result urlFor(const QString &path, bool collection, QByteArray *url) const;
     Result send(Request &request, Response *response);
-    Result statusResult(const Response &response, Method method) const;
-    Result propfind(const QByteArray &url, int depth, const ResourceCallback &callback, Response *response);
-    Result statUrl(const QByteArray &url, const QString &name, Entry *out);
-    Result connectTls(ServerIdentity *identity, Response *options);
-    Result fetchOptions(Response *response);
-    void takeFeatures(const Response &options);
+    // Calls callback(resource, resolver) for every resource of the answer; false from it stops.
+    template<typename Callback>
+    Result propfind(const QByteArray &url, int depth, Callback &&callback, Response *response);
     bool nextcloud() const;
-    Result checkReplaceTarget(const QString &to);
-    Result transferTo(Method method, const QString &from, const QString &to, RenameMode mode, const QByteArray &depth);
-    Result multistatusFailure(const Response &response, Method method) const;
-    QList<QByteArray> uploadHeaders(const WriteOptions &options) const;
-    Result prepareWrite(const QString &path, const WriteOptions &options);
-    Result prepareResume(const QString &path, const WriteOptions &options);
-    Result writeTargetResult(const Response &response, Method method, const QString &path);
 
     Client m_client;
     Config m_config;

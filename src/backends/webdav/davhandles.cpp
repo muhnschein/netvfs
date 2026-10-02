@@ -49,8 +49,8 @@ Result DavReadHandle::read(qint64 offset, qint64 maxBytes, QByteArray *out)
     // than asked for is asked again.
     while (want > out->size()) {
         QByteArray chunk;
-        const Result r = m_link->backend->readRange(m_url, offset + out->size(), want - out->size(), &chunk);
-        if (!r.ok()) {
+        if (const Result r = m_link->backend->readRange(m_url, offset + out->size(), want - out->size(), &chunk);
+                !r.ok()) {
             out->clear();
             return r;
         }
@@ -111,8 +111,7 @@ Result DavWriteHandle::write(const char *data, qint64 length)
     Result r = m_stream->write(data, length);
     if (!r.ok() && m_stream->answered()) {
         // The server ended the request early (413, 507, ...): its status says why.
-        const Result answer = m_link->backend->finishWrite(m_stream.get(), m_path, m_options);
-        if (!answer.ok())
+        if (const Result answer = m_link->backend->finishWrite(m_stream.get(), m_path, m_options); !answer.ok())
             r = answer;
     }
     if (!r.ok()) {

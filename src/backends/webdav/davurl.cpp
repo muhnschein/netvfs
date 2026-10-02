@@ -5,6 +5,8 @@
 
 #include <QtCore/QUrl>
 
+#include <algorithm>
+
 namespace NetVfs::WebDav {
 
 namespace {
@@ -30,13 +32,10 @@ bool isIpv6Char(char c)
     return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || c == ':' || c == '.';
 }
 
-bool allOf(const QByteArray &bytes, bool (*predicate)(char))
+template<typename Predicate>
+bool allOf(const QByteArray &bytes, Predicate predicate)
 {
-    for (const char c : bytes) {
-        if (!predicate(c))
-            return false;
-    }
-    return true;
+    return std::all_of(bytes.begin(), bytes.end(), predicate);
 }
 
 // Length of a URI scheme followed by ':' at the start of `reference`, or 0.
@@ -179,10 +178,10 @@ QByteArray encodeSegment(const QByteArray &bytes)
         if (isUnreserved(c)) {
             out += c;
         } else {
-            const auto b = static_cast<uchar>(c);
+            const auto value = static_cast<unsigned>(static_cast<uchar>(c));
             out += '%';
-            out += HexDigits[b >> 4];
-            out += HexDigits[b & 0x0F];
+            out += HexDigits[value >> 4];
+            out += HexDigits[value & 0x0F];
         }
     }
     return out;
@@ -191,8 +190,7 @@ QByteArray encodeSegment(const QByteArray &bytes)
 Result encodeRelativePath(const QString &path, QByteArray *out)
 {
     QString normalized;
-    const Result r = Paths::normalize(path, &normalized);
-    if (!r.ok())
+    if (const Result r = Paths::normalize(path, &normalized); !r.ok())
         return Result(Error::InvalidName, r.message());
     QByteArray encoded;
     for (const QString &component : Paths::components(normalized)) {
@@ -209,8 +207,7 @@ Result encodeRelativePath(const QString &path, QByteArray *out)
 Result encodeBasePath(const QString &basePath, QByteArray *out)
 {
     QByteArray relative;
-    const Result r = encodeRelativePath(basePath, &relative);
-    if (!r.ok())
+    if (const Result r = encodeRelativePath(basePath, &relative); !r.ok())
         return Result(Error::SecurityPolicy, QStringLiteral("Invalid base path: %1").arg(r.message()));
     *out = relative.isEmpty() ? QByteArray("/") : '/' + relative + '/';
     return Result::success();

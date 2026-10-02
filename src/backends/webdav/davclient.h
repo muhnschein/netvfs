@@ -2,9 +2,10 @@
 #ifndef NETVFS_DAVCLIENT_H
 #define NETVFS_DAVCLIENT_H
 
+#include "curlhandles.h"
 #include "davstatus.h"
-#include "tlsidentity.h"
 #include "davurl.h"
+#include "tlsidentity.h"
 
 #include <QtCore/QByteArray>
 #include <QtCore/QMap>
@@ -20,6 +21,10 @@
 namespace NetVfs {
 class Progress;
 }
+
+// The state of one transfer (davclient.cpp); the user data of libcurl's
+// callbacks (davcallbacks.h).
+struct NetVfsDavTransfer;
 
 namespace NetVfs::WebDav {
 
@@ -91,7 +96,7 @@ struct TlsSettings {
     QByteArray caFile;               // test hook only (see webdavbackend.h)
 };
 
-struct Transfer;
+using Transfer = ::NetVfsDavTransfer;
 
 // One libcurl easy handle in a private multi handle (SPEC-v2 W-1), driven by a
 // poll loop so that cancel() ends any wait within C-9's 2 s. Not thread-safe
@@ -110,7 +115,7 @@ public:
 
     Result open(const Origin &origin, int connectTimeoutMs, int requestTimeoutMs);
     void close();
-    bool isOpen() const { return m_easy != nullptr; }
+    bool isOpen() const { return static_cast<bool>(m_easy); }
     const Origin &origin() const { return m_origin; }
 
     void setTls(const TlsSettings &tls) { m_tls = tls; }
@@ -124,9 +129,11 @@ public:
 
     // Sends `request`, following same-origin redirects (W-6).
     Result perform(const Request &request, Response *response);
-    // W-3: a TLS handshake without verification and without any HTTP
-    // request, only to collect the certificate chain.
-    Result probeCertificates(QVector<QByteArray> *chain);
+    // W-3: a TLS handshake that the client ends as soon as it has the
+    // server's certificate chain: libcurl's verification stays on, the
+    // handshake never completes and no HTTP request is sent. `check` says
+    // how the earlier, verifying connection went (ChainCheck).
+    Result probeIdentity(CurlTls::ChainCheck check, ServerIdentity *identity);
     CurlTls::TrustStore trustStore() const;
 
     // Streamed request body (openWrite) on a separate easy handle.
@@ -140,13 +147,13 @@ public:
     bool canceled() const { return m_cancel; }
 
 private:
-    friend struct Transfer;
-    CURL *newEasy();
-    void applyRequest(Transfer *transfer, const Request &request, const QByteArray &url);
-    void applyAuth(CURL *easy) const;
+    Curl::EasyHandle newEasy();
+    void applyRequest(Transfer *transfer, const Request &request, const QByteArray &url) const;
+    void applyAuth(const Curl::EasyHandle &easy) const;
     Result once(const Request &request, const QByteArray &url, Response *response);
-    // Runs the multi handle until `transfer` is done or `until` returns true.
-    Result run(Transfer *transfer, bool (*until)(const Transfer *));
+    // Runs the multi handle until `transfer` is done or `until(transfer)` holds.
+    template<typename Until>
+    Result run(const Transfer *transfer, Until until);
     void drainMessages();
     void detach(Transfer *transfer);
     Result outcome(const Transfer *transfer) const;
@@ -155,10 +162,11 @@ private:
     TlsSettings m_tls;
     int m_connectTimeoutMs = 0;
     int m_requestTimeoutMs = 0;
-    CURLM *m_multi = nullptr;
-    CURLSH *m_share = nullptr;
-    CURL *m_easy = nullptr;
-    enum class AuthMode { None, Password, Token } m_authMode = AuthMode::None;
+    Curl::MultiHandle m_multi = Curl::noMultiHandle();
+    Curl::ShareHandle m_share = Curl::noShareHandle();
+    Curl::EasyHandle m_easy = Curl::noEasyHandle();
+    enum class AuthMode { None, Password, Token };
+    AuthMode m_authMode = AuthMode::None;
     long m_authMask = 0;
     QByteArray m_user;
     QByteArray m_secret;

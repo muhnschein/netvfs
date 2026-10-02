@@ -5,6 +5,7 @@
 
 #include <QtCore/QStringList>
 
+#include <algorithm>
 #include <cctype>
 
 namespace NetVfs::WebDav {
@@ -28,11 +29,8 @@ bool is2xx(int status)
 
 bool isHex(const QString &text)
 {
-    for (const QChar c : text) {
-        if (!std::isxdigit(static_cast<unsigned char>(c.toLatin1())))
-            return false;
-    }
-    return true;
+    return std::all_of(text.begin(), text.end(),
+                       [](QChar c) { return std::isxdigit(static_cast<unsigned char>(c.toLatin1())) != 0; });
 }
 
 qint64 toCount(const QString &text)
@@ -222,8 +220,7 @@ void MultistatusParser::endElement()
     if (m_stack.isEmpty())
         return;
     const int depth = m_stack.size();
-    const bool inResponse = isAt(ResponseDepth, DavNs, "response");
-    if (inResponse && depth == ResponseChildDepth) {
+    if (const bool inResponse = isAt(ResponseDepth, DavNs, "response"); inResponse && depth == ResponseChildDepth) {
         if (isAt(depth, DavNs, "href"))
             m_current.href = m_text.trimmed().toUtf8();
         else if (isAt(depth, DavNs, "status"))
@@ -248,8 +245,7 @@ void MultistatusParser::applyProperty(const Element &element)
 {
     const QString text = m_text.trimmed();
     if (element.ns == QLatin1String(DavNs)) {
-        const QString &name = element.name;
-        if (name == QLatin1String("resourcetype"))
+        if (const QString &name = element.name; name == QLatin1String("resourcetype"))
             m_propstat.typeKnown = true;
         else if (name == QLatin1String("getcontentlength"))
             m_propstat.contentLength = toCount(text);

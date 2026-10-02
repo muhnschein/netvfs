@@ -24,7 +24,10 @@ public:
     DavReadHandle(std::shared_ptr<HandleLink> link, const QByteArray &url, qint64 size);
     qint64 size() const override { return m_size; }
     Result read(qint64 offset, qint64 maxBytes, QByteArray *out) override;
-    void readAhead(qint64, qint64) override {}
+    void readAhead(qint64, qint64) override
+    {
+        // Ranges are requested one by one; there is nothing to prefetch over HTTP.
+    }
     Result close() override;
 
 private:

@@ -2146,6 +2146,8 @@ struct TlsFixture {
     WebDavBackend backend;
 };
 
+constexpr int HandshakeSettleMs = 300;   // time for the server to see a failed handshake
+
 } // namespace
 
 void TestWebDav::tlsUntrustedSendsNothing()
@@ -2160,7 +2162,10 @@ void TestWebDav::tlsUntrustedSendsNothing()
     QCOMPARE(seen.publicKey, cert.spkiDer);
     QVERIFY(!seen.systemTrusted);
     QVERIFY(seen.problems & ServerIdentity::SelfSigned);
-    QTRY_VERIFY(f.server.handshakes() >= 1);
+    // The client ended the handshake once it had the certificate (W-3): none
+    // completed, so nothing could have been sent.
+    QTest::qWait(HandshakeSettleMs);
+    QCOMPARE(f.server.handshakes(), 0);
     QVERIFY(f.server.requests().isEmpty());
     // Calling authenticate() anyway is refused before any request.
     QVERIFY(f.backend.connect(f.params, &seen).ok());

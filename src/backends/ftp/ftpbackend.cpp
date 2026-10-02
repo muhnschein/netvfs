@@ -6,8 +6,6 @@
 
 #include <QtCore/QIODevice>
 
-#include <mutex>
-
 namespace NetVfs::Ftp {
 
 namespace {
@@ -21,9 +19,7 @@ constexpr int MinBatchSize = 1;
 // takes the memory callbacks of the first initialisation in the process.
 bool curlReady()
 {
-    static std::once_flag once;
-    static bool initialized = false;
-    std::call_once(once, [] { initialized = netvfs_curl_global_init() != 0; });
+    static const bool initialized = netvfs_curl_global_init() != 0;
     return initialized;
 }
 
@@ -202,7 +198,7 @@ Result FtpBackend::authenticate(const Credentials &credentials, AuthPrompter *pr
         || credentials.secret.contains('\r') || credentials.secret.contains('\n'))
         return Result(Error::AuthFailed, QStringLiteral("The user name or password contains a line break"));
 
-    m_connection.reset(new Connection(&m_canceled));
+    m_connection = std::make_unique<Connection>(&m_canceled);
     Result r = m_connection->configure(m_settings, m_params, userName, credentials.secret, m_seen);
     QVector<Reply> replies;
     if (r.ok())
@@ -340,31 +336,10 @@ Result FtpBackend::command(const QList<QByteArray> &commands, QVector<Reply> *re
 
 // --- stat -------------------------------------------------------------------
 
-Result FtpBackend::stat(const QString &path, Entry *out)
-{
-    QByteArray remote;
-    Result r = resolve(path, &remote);
-    if (!r.ok())
-        return r;
-    Entry entry;
-    r = statRemote(remote, &entry);
-    if (r.ok() && out)
-        *out = entry;
-    return r;
-}
-
-Result FtpBackend::statRemote(const QByteArray &remote, Entry *out)
-{
-    const Result r = m_features.has("MLST") ? statMlst(remote, out) : statBasic(remote, out);
-    if (r.ok())
-        nameEntry(out, remote);
-    return r;
-}
-
-Result FtpBackend::statMlst(const QByteArray &remote, Entry *out)
+Result FtpBackend::Lookup::statMlst(const QByteArray &remote, Entry *out) const
 {
     QVector<Reply> replies;
-    Result r = command({ "MLST " + remote }, &replies, QStringLiteral("Reading file information"));
+    Result r = m_b.command({ "MLST " + remote }, &replies, QStringLiteral("Reading file information"));
     if (!r.ok())
         return r;
     const Reply &reply = replies.at(0);
@@ -379,16 +354,15 @@ Result FtpBackend::statMlst(const QByteArray &remote, Entry *out)
 }
 
 // Without MLST (F-4): SIZE and MDTM for files, CWD tells folders apart.
-Result FtpBackend::statBasic(const QByteArray &remote, Entry *out)
+Result FtpBackend::Lookup::statBasic(const QByteArray &remote, Entry *out) const
 {
     QVector<Reply> replies;
-    Result r = command({ QByteArrayLiteral("TYPE I"), "SIZE " + remote, "MDTM " + remote, "CWD " + remote },
+    Result r = m_b.command({ QByteArrayLiteral("TYPE I"), "SIZE " + remote, "MDTM " + remote, "CWD " + remote },
                        &replies, QStringLiteral("Reading file information"));
     if (!r.ok())
         return r;
     *out = Entry();
-    const qint64 size = parseSizeReply(replies.at(1));
-    if (size >= 0) {
+    if (const qint64 size = parseSizeReply(replies.at(1)); size >= 0) {
         out->type = EntryType::File;
         out->size = size;
         out->modified = parseMdtmReply(replies.at(2));
@@ -405,7 +379,7 @@ Result FtpBackend::statBasic(const QByteArray &remote, Entry *out)
     return ambiguous ? Result(Error::NotFound, QStringLiteral("Reading file information: not found"), r.detail()) : r;
 }
 
-Result FtpBackend::statViaParent(const QByteArray &remote, Entry *out)
+Result FtpBackend::Lookup::statViaParent(const QByteArray &remote, Entry *out) const
 {
     if (remote == "/") {
         *out = Entry();
@@ -413,8 +387,7 @@ Result FtpBackend::statViaParent(const QByteArray &remote, Entry *out)
         return Result::success();
     }
     CollectSink sink;
-    const Result r = listRemote(remoteParent(remote), &sink, ListOptions().batchSize);
-    if (!r.ok())
+    if (const Result r = listRemote(remoteParent(remote), &sink, ListOptions().batchSize); !r.ok())
         return r;
     const QString name = Names::decode(baseName(remote));
     for (const Entry &entry : sink.collected) {
@@ -426,39 +399,28 @@ Result FtpBackend::statViaParent(const QByteArray &remote, Entry *out)
     return Result(Error::NotFound, QStringLiteral("Reading file information: not found"));
 }
 
-// --- listing ----------------------------------------------------------------
-
-Result FtpBackend::list(const QString &dir, ListSink *sink, const ListOptions &options)
-{
-    QByteArray remote;
-    Result r = resolve(dir, &remote);
-    if (!r.ok())
-        return r;
-    return listRemote(remote, sink, options.batchSize);
-}
-
 // F-3: CWD into the folder (so LIST gets no argument a server could take
 // for options or a glob), then MLSD when MLST is offered, else LIST -a.
-Result FtpBackend::listRemote(const QByteArray &remote, ListSink *sink, int batchSize)
+Result FtpBackend::Lookup::listRemote(const QByteArray &remote, ListSink *sink, int batchSize) const
 {
-    Result r = claim(nullptr);
+    Result r = m_b.claim(nullptr);
     if (!r.ok())
         return r;
-    const bool mlsd = m_features.has("MLST");
+    const bool mlsd = m_b.m_features.has("MLST");
     ListingSink listing(sink, batchSize, mlsd);
     Request request;
     request.kind = Request::Kind::Listing;
-    request.commands = prefixed({ "CWD " + remote });
+    request.commands = m_b.prefixed({ "CWD " + remote });
     request.listCommand = mlsd ? QByteArrayLiteral("MLSD") : QByteArrayLiteral("LIST -a");
-    r = m_connection->run(request, &listing, QStringLiteral("Listing"));
-    requestDone();
+    r = m_b.m_connection->run(request, &listing, QStringLiteral("Listing"));
+    m_b.requestDone();
     if (listing.stopped())
         return Result(Error::Canceled);
     if (!r.ok()) {
         if (r.error() != Error::NotFound && r.error() != Error::PermissionDenied)
             return r;
         Entry entry;
-        const Result s = statRemote(remote, &entry);
+        const Result s = m_b.statRemote(remote, &entry);
         if (s.error() == Error::NotFound)
             return s;
         if (s.ok() && !entry.isDir())
@@ -473,6 +435,73 @@ Result FtpBackend::listRemote(const QByteArray &remote, ListSink *sink, int batc
     }
     return r;
 }
+
+Result FtpBackend::Lookup::uploadFailure(const Result &failure, const QByteArray &remote) const
+{
+    if (failure.error() != Error::NotFound && failure.error() != Error::PermissionDenied
+        && failure.error() != Error::InvalidName)
+        return failure;
+    Entry parent;
+    Result s = m_b.statRemote(remoteParent(remote), &parent);
+    if (s.error() == Error::NotFound)
+        return Result(Error::NotFound, QStringLiteral("Writing: the folder does not exist"), failure.detail());
+    if (s.ok() && !parent.isDir())
+        return Result(Error::NotADirectory, QStringLiteral("Writing: the parent is not a folder"), failure.detail());
+    Entry existing;
+    s = m_b.statRemote(remote, &existing);
+    if (s.ok() && existing.type == EntryType::Directory)
+        return Result(Error::IsADirectory, QStringLiteral("Writing: is a folder"), failure.detail());
+    return failure;
+}
+
+Result FtpBackend::Lookup::readFailure(const Result &failure, const QByteArray &remote) const
+{
+    if (failure.error() != Error::NotFound && failure.error() != Error::PermissionDenied)
+        return failure;
+    Entry existing;
+    const Result s = m_b.statRemote(remote, &existing);
+    if (s.error() == Error::NotFound)
+        return s;
+    if (s.ok() && existing.type == EntryType::Directory)
+        return Result(Error::IsADirectory, QStringLiteral("Reading: is a folder"), failure.detail());
+    return failure;
+}
+
+Result FtpBackend::stat(const QString &path, Entry *out)
+{
+    QByteArray remote;
+    Result r = resolve(path, &remote);
+    if (!r.ok())
+        return r;
+    Entry entry;
+    r = statRemote(remote, &entry);
+    if (r.ok() && out)
+        *out = entry;
+    return r;
+}
+
+Result FtpBackend::statRemote(const QByteArray &remote, Entry *out)
+{
+    const Lookup lookup(*this);
+    const Result r = m_features.has("MLST") ? lookup.statMlst(remote, out) : lookup.statBasic(remote, out);
+    if (r.ok())
+        nameEntry(out, remote);
+    return r;
+}
+
+
+
+
+// --- listing ----------------------------------------------------------------
+
+Result FtpBackend::list(const QString &dir, ListSink *sink, const ListOptions &options)
+{
+    QByteArray remote;
+    if (Result r = resolve(dir, &remote); !r.ok())
+        return r;
+    return Lookup(*this).listRemote(remote, sink, options.batchSize);
+}
+
 
 // --- namespace operations ---------------------------------------------------
 
@@ -541,7 +570,8 @@ Result FtpBackend::removeDir(const QString &path)
     if (r.ok() && !existing.isDir())
         return Result(Error::NotADirectory, QStringLiteral("Removing a folder: not a folder"), failure.detail());
     CollectSink contents;
-    if (r.ok() && listRemote(remote, &contents, ListOptions().batchSize).ok() && !contents.collected.isEmpty())
+    if (r.ok() && Lookup(*this).listRemote(remote, &contents, ListOptions().batchSize).ok()
+        && !contents.collected.isEmpty())
         return Result(Error::DirectoryNotEmpty, QStringLiteral("Removing a folder: not empty"), failure.detail());
     return failure;
 }
@@ -584,21 +614,109 @@ Result FtpBackend::rename(const QString &from, const QString &to, RenameMode mod
     if (!positive(replies.at(0)))
         return replyError(replies.at(0), QStringLiteral("Renaming"));
     if (!positive(replies.at(1)))
-        return uploadFailure(replyError(replies.at(1), QStringLiteral("Renaming")), target);
+        return Lookup(*this).uploadFailure(replyError(replies.at(1), QStringLiteral("Renaming")), target);
     return Result::success();
 }
 
-Result FtpBackend::chmod(const QByteArray &remote, qint32 mode)
+
+// What a write needs before the data goes out (XC-13, XC-23).
+class FtpBackend::Writes
+{
+public:
+    explicit Writes(FtpBackend &backend) : m_b(backend) {}
+
+    Result prepare(const QByteArray &remote, const WriteOptions &options) const;
+    Result chmod(const QByteArray &remote, qint32 mode) const;
+
+private:
+    Result checkTarget(const QByteArray &remote, Entry *existing, bool *exists) const;
+    Result createWithMode(const QByteArray &remote, qint32 mode) const;
+
+    FtpBackend &m_b;
+};
+
+// The target is no folder and its folder exists; `*exists` tells whether
+// the file is there already.
+Result FtpBackend::Writes::checkTarget(const QByteArray &remote, Entry *existing, bool *exists) const
+{
+    Result r = m_b.statRemote(remote, existing);
+    if (!r.ok() && r.error() != Error::NotFound)
+        return r;
+    *exists = r.ok();
+    if ((*exists && existing->type == EntryType::Directory) || remote.endsWith('/'))
+        return Result(Error::IsADirectory, QStringLiteral("Writing: is a folder"));
+    if (*exists)
+        return Result::success();
+    Entry parent;
+    r = m_b.statRemote(remoteParent(remote), &parent);
+    if (r.error() == Error::NotFound)
+        return Result(Error::NotFound, QStringLiteral("Writing: the folder does not exist"));
+    if (!r.ok())
+        return r;
+    if (!parent.isDir())
+        return Result(Error::NotADirectory, QStringLiteral("Writing: the parent is not a folder"));
+    return Result::success();
+}
+
+// Checks and preparations shared by openWrite() and upload().
+Result FtpBackend::Writes::prepare(const QByteArray &remote, const WriteOptions &options) const
+{
+    Entry existing;
+    bool exists = false;
+    if (const Result r = checkTarget(remote, &existing, &exists); !r.ok())
+        return r;
+    switch (options.disposition) {
+    case WriteOptions::CreateNew:
+        if (exists)
+            return Result(Error::AlreadyExists, QStringLiteral("Writing: the file exists"));
+        break;
+    case WriteOptions::Resume:
+        if (!m_b.m_capabilities.has(Capability::WriteResume))
+            return Result(Error::Unsupported, QStringLiteral("The server cannot resume uploads (no REST STREAM)"));
+        if (!exists || existing.size != options.resumeOffset) {
+            return Result(Error::ProtocolError, QStringLiteral("Cannot resume at %1: the partial file has %2 bytes")
+                                                    .arg(options.resumeOffset).arg(exists ? existing.size : 0));
+        }
+        return Result::success();
+    case WriteOptions::Truncate:
+        break;
+    }
+    if (options.createMode < 0 || !m_b.m_capabilities.has(Capability::PosixModes))
+        return Result::success();
+    return createWithMode(remote, options.createMode);
+}
+
+// XC-23: FTP has no mode at creation; create the file empty, set the mode,
+// then the data upload truncates it and keeps the mode.
+Result FtpBackend::Writes::createWithMode(const QByteArray &remote, qint32 mode) const
+{
+    Result r = m_b.claim(nullptr);
+    if (!r.ok())
+        return r;
+    EmptySource empty;
+    Request request;
+    request.kind = Request::Kind::Upload;
+    request.path = remote;
+    request.commands = m_b.prefixed({});
+    r = m_b.m_connection->run(request, &empty, QStringLiteral("Creating the file"));
+    m_b.requestDone();
+    if (!r.ok())
+        return Lookup(m_b).uploadFailure(r, remote);
+    r = chmod(remote, mode);
+    return r.error() == Error::Unsupported ? Result::success() : r;
+}
+
+Result FtpBackend::Writes::chmod(const QByteArray &remote, qint32 mode) const
 {
     QVector<Reply> replies;
-    Result r = command({ "SITE CHMOD " + QByteArray::number(mode & 07777, 8) + ' ' + remote }, &replies,
+    Result r = m_b.command({ "SITE CHMOD " + QByteArray::number(mode & 07777, 8) + ' ' + remote }, &replies,
                        QStringLiteral("Changing permissions"));
     if (!r.ok() || positive(replies.at(0)))
         return r;
     r = replyError(replies.at(0), QStringLiteral("Changing permissions"));
     if (r.error() == Error::Unsupported) {
         // F-4: probed on first use; the capability may only go away.
-        m_capabilities.flags.remove(Capability::PosixModes);
+        m_b.m_capabilities.flags.remove(Capability::PosixModes);
     }
     return r;
 }
@@ -629,13 +747,12 @@ Result FtpBackend::setAttributes(const QString &path, const AttributeChanges &ch
     if (changes.mode >= 0 && !m_capabilities.has(Capability::PosixModes))
         return Result(Error::Unsupported, QStringLiteral("The server cannot change permissions"));
     if (changes.mode >= 0)
-        r = chmod(remote, changes.mode);
+        r = Writes(*this).chmod(remote, changes.mode);
     if (r.ok() && changes.modified.isValid())
         r = applyModified(remote, changes.modified);
     if (r.error() == Error::PermissionDenied || r.error() == Error::NotFound) {
         Entry existing;
-        const Result s = statRemote(remote, &existing);
-        if (s.error() == Error::NotFound)
+        if (const Result s = statRemote(remote, &existing); s.error() == Error::NotFound)
             return s;
     }
     return r;
@@ -643,36 +760,7 @@ Result FtpBackend::setAttributes(const QString &path, const AttributeChanges &ch
 
 // --- transfers --------------------------------------------------------------
 
-Result FtpBackend::readFailure(const Result &failure, const QByteArray &remote)
-{
-    if (failure.error() != Error::NotFound && failure.error() != Error::PermissionDenied)
-        return failure;
-    Entry existing;
-    const Result s = statRemote(remote, &existing);
-    if (s.error() == Error::NotFound)
-        return s;
-    if (s.ok() && existing.type == EntryType::Directory)
-        return Result(Error::IsADirectory, QStringLiteral("Reading: is a folder"), failure.detail());
-    return failure;
-}
 
-Result FtpBackend::uploadFailure(const Result &failure, const QByteArray &remote)
-{
-    if (failure.error() != Error::NotFound && failure.error() != Error::PermissionDenied
-        && failure.error() != Error::InvalidName)
-        return failure;
-    Entry parent;
-    Result s = statRemote(remoteParent(remote), &parent);
-    if (s.error() == Error::NotFound)
-        return Result(Error::NotFound, QStringLiteral("Writing: the folder does not exist"), failure.detail());
-    if (s.ok() && !parent.isDir())
-        return Result(Error::NotADirectory, QStringLiteral("Writing: the parent is not a folder"), failure.detail());
-    Entry existing;
-    s = statRemote(remote, &existing);
-    if (s.ok() && existing.type == EntryType::Directory)
-        return Result(Error::IsADirectory, QStringLiteral("Writing: is a folder"), failure.detail());
-    return failure;
-}
 
 Result FtpBackend::openRead(const QString &path, ReadHandle **out)
 {
@@ -693,61 +781,6 @@ Result FtpBackend::openRead(const QString &path, ReadHandle **out)
     return r;
 }
 
-// Checks and preparations shared by openWrite() and upload().
-Result FtpBackend::prepareWrite(const QByteArray &remote, const WriteOptions &options)
-{
-    Entry existing;
-    Result r = statRemote(remote, &existing);
-    if (!r.ok() && r.error() != Error::NotFound)
-        return r;
-    const bool exists = r.ok();
-    if ((exists && existing.type == EntryType::Directory) || remote.endsWith('/'))
-        return Result(Error::IsADirectory, QStringLiteral("Writing: is a folder"));
-    if (!exists) {
-        Entry parent;
-        r = statRemote(remoteParent(remote), &parent);
-        if (r.error() == Error::NotFound)
-            return Result(Error::NotFound, QStringLiteral("Writing: the folder does not exist"));
-        if (!r.ok())
-            return r;
-        if (!parent.isDir())
-            return Result(Error::NotADirectory, QStringLiteral("Writing: the parent is not a folder"));
-    }
-    switch (options.disposition) {
-    case WriteOptions::CreateNew:
-        if (exists)
-            return Result(Error::AlreadyExists, QStringLiteral("Writing: the file exists"));
-        break;
-    case WriteOptions::Resume:
-        if (!m_capabilities.has(Capability::WriteResume))
-            return Result(Error::Unsupported, QStringLiteral("The server cannot resume uploads (no REST STREAM)"));
-        if (!exists || existing.size != options.resumeOffset) {
-            return Result(Error::ProtocolError, QStringLiteral("Cannot resume at %1: the partial file has %2 bytes")
-                                                    .arg(options.resumeOffset).arg(exists ? existing.size : 0));
-        }
-        return Result::success();
-    case WriteOptions::Truncate:
-        break;
-    }
-    if (options.createMode < 0 || !m_capabilities.has(Capability::PosixModes))
-        return Result::success();
-    // XC-23: FTP has no mode at creation; create the file empty, set the mode,
-    // then the data upload truncates it and keeps the mode.
-    r = claim(nullptr);
-    if (!r.ok())
-        return r;
-    EmptySource empty;
-    Request request;
-    request.kind = Request::Kind::Upload;
-    request.path = remote;
-    request.commands = prefixed({});
-    r = m_connection->run(request, &empty, QStringLiteral("Creating the file"));
-    requestDone();
-    if (!r.ok())
-        return uploadFailure(r, remote);
-    r = chmod(remote, options.createMode);
-    return r.error() == Error::Unsupported ? Result::success() : r;
-}
 
 Result FtpBackend::openWrite(const QString &path, const WriteOptions &options, WriteHandle **out)
 {
@@ -758,7 +791,7 @@ Result FtpBackend::openWrite(const QString &path, const WriteOptions &options, W
     if (r.ok())
         r = ready();
     if (r.ok())
-        r = prepareWrite(remote, options);
+        r = Writes(*this).prepare(remote, options);
     if (!r.ok())
         return r;
     if (out)
@@ -824,7 +857,7 @@ Result FtpBackend::download(const QString &path, QIODevice *sink, const Download
     if (data.writeFailed())
         return Result(Error::Internal, QStringLiteral("Cannot write the local data"));
     if (!r.ok())
-        return readFailure(r, remote);
+        return Lookup(*this).readFailure(r, remote);
     return r;
 }
 

@@ -3,8 +3,6 @@
 
 #include <QtCore/QUrl>
 
-#include <openssl/ssl.h>
-
 namespace NetVfs::CurlTls {
 
 bool isOpenSsl()
@@ -13,7 +11,7 @@ bool isOpenSsl()
     return info && info->ssl_version && QByteArray(info->ssl_version).startsWith("OpenSSL");
 }
 
-TrustStore trustStore(CURL *easy, const QByteArray &testCaFile)
+TrustStore trustStore(const Curl::EasyHandle &easy, const QByteArray &testCaFile)
 {
     TrustStore store;
     if (!testCaFile.isEmpty()) {
@@ -21,70 +19,67 @@ TrustStore trustStore(CURL *easy, const QByteArray &testCaFile)
         return store;
     }
     const char *value = nullptr;
-    if (curl_easy_getinfo(easy, CURLINFO_CAINFO, &value) == CURLE_OK && value)
+    if (curl_easy_getinfo(easy.get(), CURLINFO_CAINFO, &value) == CURLE_OK && value)
         store.caFile = value;
     value = nullptr;
-    if (curl_easy_getinfo(easy, CURLINFO_CAPATH, &value) == CURLE_OK && value)
+    if (curl_easy_getinfo(easy.get(), CURLINFO_CAPATH, &value) == CURLE_OK && value)
         store.caPath = value;
     return store;
 }
 
-CURLcode applyTestCaFile(CURL *easy, const QByteArray &testCaFile)
+CURLcode applyTestCaFile(const Curl::EasyHandle &easy, const QByteArray &testCaFile)
 {
     if (testCaFile.isEmpty())
         return CURLE_OK;
-    const CURLcode code = curl_easy_setopt(easy, CURLOPT_CAINFO, testCaFile.constData());
+    const CURLcode code = curl_easy_setopt(easy.get(), CURLOPT_CAINFO, testCaFile.constData());
     if (code != CURLE_OK)
         return code;
-    return curl_easy_setopt(easy, CURLOPT_CAPATH, static_cast<const char *>(nullptr));
+    return curl_easy_setopt(easy.get(), CURLOPT_CAPATH, static_cast<const char *>(nullptr));
 }
 
-IdentityProbe::IdentityProbe(const QString &host, const TrustStore &store)
-    : m_host(QUrl::toAce(host)), m_store(store)
+IdentityProbe::IdentityProbe(const QString &host, const TrustStore &store, ChainCheck check)
+    : m_host(QUrl::toAce(host)), m_store(store), m_check(check)
 {
     if (m_host.isEmpty())
         m_host = host.toLatin1();   // IP literals
 }
 
-CURLcode IdentityProbe::install(CURL *easy)
+IdentityProbe::~IdentityProbe()
 {
-    // libcurl's own checks are off: the probe's verify callback decides, and
-    // it always ends the handshake.
-    CURLcode code = curl_easy_setopt(easy, CURLOPT_SSL_VERIFYPEER, 0L);
+    netvfs_tls_capture_release(&m_capture);
+}
+
+CURLcode IdentityProbe::install(const Curl::EasyHandle &easy)
+{
+    CURLcode code = curl_easy_setopt(easy.get(), CURLOPT_SSL_SESSIONID_CACHE, 0L);
     if (code == CURLE_OK)
-        code = curl_easy_setopt(easy, CURLOPT_SSL_VERIFYHOST, 0L);
+        code = curl_easy_setopt(easy.get(), CURLOPT_SSL_CTX_FUNCTION, netvfs_tls_capture_ssl_context);
     if (code == CURLE_OK)
-        code = curl_easy_setopt(easy, CURLOPT_SSL_SESSIONID_CACHE, 0L);
-    if (code == CURLE_OK)
-        code = curl_easy_setopt(easy, CURLOPT_SSL_CTX_FUNCTION, &IdentityProbe::sslContext);
-    if (code == CURLE_OK)
-        code = curl_easy_setopt(easy, CURLOPT_SSL_CTX_DATA, this);
+        code = curl_easy_setopt(easy.get(), CURLOPT_SSL_CTX_DATA, &m_capture);
     return code;
 }
 
-CURLcode IdentityProbe::sslContext(CURL *, void *sslCtx, void *self)
+void IdentityProbe::analyse() const
 {
-    auto *ctx = static_cast<SSL_CTX *>(sslCtx);
-    // VERIFY_PEER makes OpenSSL abort the handshake when verify() fails;
-    // with VERIFY_NONE the result would be ignored.
-    SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, nullptr);
-    SSL_CTX_set_cert_verify_callback(ctx, &IdentityProbe::verify, self);
-    SSL_CTX_set_session_cache_mode(ctx, SSL_SESS_CACHE_OFF);
-    return CURLE_OK;
+    if (m_analysed)
+        return;
+    m_analysed = true;
+    m_identity = identityFromCertificates(m_capture.leaf, m_capture.untrusted, m_host, m_check, m_store);
 }
 
-int IdentityProbe::verify(X509_STORE_CTX *store, void *self)
+bool IdentityProbe::captured() const
 {
-    auto *probe = static_cast<IdentityProbe *>(self);
-    probe->m_identity = identityFromCertificates(X509_STORE_CTX_get0_cert(store),
-                                                 X509_STORE_CTX_get0_untrusted(store), probe->m_host,
-                                                 ChainCheck::NotChecked, probe->m_store);
-    probe->m_captured = !probe->m_identity.isEmpty();
-    X509_STORE_CTX_set_error(store, X509_V_ERR_APPLICATION_VERIFICATION);
-    return 0;   // never complete this handshake (C-7)
+    return !identity().isEmpty();
 }
 
-Result applyIdentityPolicy(CURL *easy, const QString &pin, bool verifyPeer, const ServerIdentity &seen)
+const ServerIdentity &IdentityProbe::identity() const
+{
+    analyse();
+    return m_identity;
+}
+
+Result applyIdentityPolicy(const Curl::EasyHandle &easy, const QString &pin, bool verifyPeer,
+                           const ServerIdentity &seen)
 {
     QString pinned;
     bool verify = false;
@@ -108,11 +103,11 @@ Result applyIdentityPolicy(CURL *easy, const QString &pin, bool verifyPeer, cons
         return Result(Error::Internal, QStringLiteral("No server certificate was seen during connect"));
     }
     const QByteArray pinOption = pinned.isEmpty() ? QByteArray() : "sha256//" + pinned.toLatin1();
-    CURLcode code = curl_easy_setopt(easy, CURLOPT_SSL_VERIFYPEER, verify ? 1L : 0L);
+    CURLcode code = curl_easy_setopt(easy.get(), CURLOPT_SSL_VERIFYPEER, verify ? 1L : 0L);
     if (code == CURLE_OK)
-        code = curl_easy_setopt(easy, CURLOPT_SSL_VERIFYHOST, verify ? 2L : 0L);
+        code = curl_easy_setopt(easy.get(), CURLOPT_SSL_VERIFYHOST, verify ? 2L : 0L);
     if (code == CURLE_OK) {
-        code = curl_easy_setopt(easy, CURLOPT_PINNEDPUBLICKEY,
+        code = curl_easy_setopt(easy.get(), CURLOPT_PINNEDPUBLICKEY,
                                 pinOption.isEmpty() ? static_cast<const char *>(nullptr) : pinOption.constData());
     }
     if (code != CURLE_OK)
