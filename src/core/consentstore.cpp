@@ -3,8 +3,8 @@
 #include "logging.h"
 
 #include <QtCore/QDir>
+#include <QtCore/QFile>
 #include <QtCore/QFileInfo>
-#include <QtCore/QRegularExpression>
 #include <QtCore/QSettings>
 #include <QtCore/QStandardPaths>
 
@@ -13,120 +13,203 @@
 namespace NetVfs {
 
 namespace {
+
+const char ConsumersDirDefault[] = "/usr/share/netvfs/consumers";
 const char ConsentGroup[] = "Consent";
-const char ConsumerGroup[] = "Consumer";
-const char ConsumersDirectory[] = "/usr/share/netvfs/consumers";
-const char ConsumersEnv[] = "NETVFS_CONSUMERS_DIR";
-const char Granted[] = "granted";
-const char Denied[] = "denied";
-const char UnknownText[] = "unknown";
+constexpr int MaxIdLength = 64;
+constexpr int MaxPathLength = 1024;
+constexpr qint64 MaxConsumerFileBytes = 16 * 1024;
 
-QString key(const QString &consumerId)
+bool isIdChar(QChar c)
 {
-    return QLatin1String(ConsentGroup) + QLatin1Char('/') + consumerId;
+    const ushort u = c.unicode();
+    return (u >= 'a' && u <= 'z') || (u >= '0' && u <= '9') || u == '-';
 }
 
-bool readConsumer(const QFileInfo &file, ConsumerInfo *info)
+// Characters allowed in paths that end up in systemd unit files (no '%',
+// no whitespace, no quotes, no backslash).
+bool isPathChar(QChar c)
 {
-    QSettings settings(file.filePath(), QSettings::IniFormat);
-    settings.beginGroup(QLatin1String(ConsumerGroup));
-    info->id = settings.value(QStringLiteral("Id")).toString();
-    info->displayName = settings.value(QStringLiteral("DisplayName")).toString().trimmed();
-    info->executable = settings.value(QStringLiteral("Executable")).toString();
-    info->dataDir = settings.value(QStringLiteral("DataDir")).toString();
-    if (info->displayName.isEmpty())
-        info->displayName = info->id;
-    return settings.status() == QSettings::NoError && ConsentStore::isValidConsumerId(info->id)
-            && info->id == file.completeBaseName();
+    const ushort u = c.unicode();
+    return (u >= 'a' && u <= 'z') || (u >= 'A' && u <= 'Z') || (u >= '0' && u <= '9')
+        || u == '/' || u == '.' || u == '_' || u == '-' || u == '+';
 }
+
+bool hasOnlyPathChars(const QString &path)
+{
+    return std::all_of(path.cbegin(), path.cend(), isPathChar);
+}
+
+// No empty, "." or ".." components (a leading '/' is checked by the caller).
+bool hasCleanComponents(const QString &path)
+{
+    const QStringList parts = path.split(QLatin1Char('/'));
+    return std::none_of(parts.cbegin(), parts.cend(), [](const QString &part) {
+        return part.isEmpty() || part == QLatin1String(".") || part == QLatin1String("..");
+    });
+}
+
+Result invalid(const QString &path, const QString &why)
+{
+    return Result(Error::InvalidName, QStringLiteral("Invalid consumer file %1: %2").arg(path, why));
+}
+
 } // namespace
 
-ConsentStore::ConsentStore(const QString &path)
-    : m_path(path.isEmpty() ? defaultPath() : path)
+bool ConsumerInfo::isValidId(const QString &id)
 {
+    return !id.isEmpty() && id.size() <= MaxIdLength && std::all_of(id.cbegin(), id.cend(), isIdChar);
 }
 
-QString ConsentStore::defaultPath()
+bool ConsumerInfo::isValidDataDir(const QString &dataDir)
 {
-    return QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation)
-            + QStringLiteral("/netvfs/bridge.conf");
+    return !dataDir.isEmpty() && dataDir.size() <= MaxPathLength && !dataDir.startsWith(QLatin1Char('/'))
+        && hasOnlyPathChars(dataDir) && hasCleanComponents(dataDir);
 }
 
-bool ConsentStore::isValidConsumerId(const QString &consumerId)
+bool ConsumerInfo::isValidExecutable(const QString &executable)
 {
-    static const QRegularExpression pattern(QStringLiteral("^[A-Za-z0-9._-]+$"));
-    return pattern.match(consumerId).hasMatch();
+    return executable.size() > 1 && executable.size() <= MaxPathLength && executable.startsWith(QLatin1Char('/'))
+        && hasOnlyPathChars(executable) && hasCleanComponents(executable.mid(1));
 }
 
-QString ConsentStore::consentToString(Consent consent)
+QString consentToString(Consent consent)
 {
     switch (consent) {
     case Consent::Granted:
-        return QLatin1String(Granted);
+        return QStringLiteral("granted");
     case Consent::Denied:
-        return QLatin1String(Denied);
+        return QStringLiteral("denied");
     case Consent::Unknown:
         break;
     }
-    return QLatin1String(UnknownText);
+    return QStringLiteral("unknown");
 }
 
-Consent ConsentStore::consentFromString(const QString &value)
+Consent consentFromString(const QString &value)
 {
-    if (value == QLatin1String(Granted))
+    if (value == QLatin1String("granted"))
         return Consent::Granted;
-    if (value == QLatin1String(Denied))
+    if (value == QLatin1String("denied"))
         return Consent::Denied;
     return Consent::Unknown;
 }
 
-Consent ConsentStore::consent(const QString &consumerId) const
+ConsentStore::ConsentStore()
+    : m_path(defaultFilePath())
 {
-    if (!isValidConsumerId(consumerId))
+}
+
+ConsentStore::ConsentStore(const QString &filePath)
+    : m_path(filePath)
+{
+}
+
+QString ConsentStore::defaultFilePath()
+{
+    return QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation)
+        + QStringLiteral("/netvfs/bridge.conf");
+}
+
+Consent ConsentStore::consent(const QString &id) const
+{
+    if (!ConsumerInfo::isValidId(id))
         return Consent::Unknown;
     const QSettings settings(m_path, QSettings::IniFormat);
-    return consentFromString(settings.value(key(consumerId)).toString());
+    return consentFromString(settings.value(QLatin1String(ConsentGroup) + QLatin1Char('/') + id).toString());
 }
 
-bool ConsentStore::setConsent(const QString &consumerId, Consent consent)
+void ConsentStore::setConsent(const QString &id, Consent consent)
 {
-    if (!isValidConsumerId(consumerId))
-        return false;
+    if (!ConsumerInfo::isValidId(id))
+        return;
     QDir().mkpath(QFileInfo(m_path).absolutePath());
     QSettings settings(m_path, QSettings::IniFormat);
+    const QString key = QLatin1String(ConsentGroup) + QLatin1Char('/') + id;
     if (consent == Consent::Unknown)
-        settings.remove(key(consumerId));
+        settings.remove(key);
     else
-        settings.setValue(key(consumerId), consentToString(consent));
-    settings.sync();   // XB-6: a revocation reaches a running bridge now
-    if (settings.status() != QSettings::NoError) {
-        qCWarning(lcNetVfsCore) << "Cannot write the consent file";
-        return false;
-    }
-    qCDebug(lcNetVfsCore) << "Consent of" << consumerId << "is now" << consentToString(consent);
-    return true;
+        settings.setValue(key, consentToString(consent));
+    settings.sync();
+    if (settings.status() != QSettings::NoError)
+        qCWarning(lcNetVfsCore) << "Cannot store the consent of" << id;
 }
 
-QString ConsentStore::consumersDirectory()
+QString ConsentStore::consumersDir()
 {
-    const QString overridden = QString::fromLocal8Bit(qgetenv(ConsumersEnv));
-    return overridden.isEmpty() ? QLatin1String(ConsumersDirectory) : overridden;
+    const QByteArray overridden = qgetenv("NETVFS_CONSUMERS_DIR");
+    return overridden.isEmpty() ? QString::fromLatin1(ConsumersDirDefault) : QString::fromLocal8Bit(overridden);
 }
 
 QVector<ConsumerInfo> ConsentStore::consumers()
 {
     QVector<ConsumerInfo> result;
-    const QFileInfoList files = QDir(consumersDirectory()).entryInfoList({ QStringLiteral("*.conf") }, QDir::Files);
-    for (const QFileInfo &file : files) {
+    const QDir dir(consumersDir());
+    const QStringList files = dir.entryList(QStringList(QStringLiteral("*.conf")), QDir::Files, QDir::Name);
+    for (const QString &file : files) {
         ConsumerInfo info;
-        if (readConsumer(file, &info))
-            result << info;
+        const Result r = parseConsumerFile(dir.filePath(file), &info);
+        if (r.ok())
+            result.append(info);
         else
-            qCWarning(lcNetVfsCore) << "Ignoring consumer registration" << file.fileName();
+            qCWarning(lcNetVfsCore).noquote() << r.message();
     }
-    std::sort(result.begin(), result.end(),
-              [](const ConsumerInfo &a, const ConsumerInfo &b) { return a.id < b.id; });
     return result;
+}
+
+Result ConsentStore::loadConsumer(const QString &id, ConsumerInfo *out)
+{
+    if (!ConsumerInfo::isValidId(id))
+        return Result(Error::InvalidName, QStringLiteral("Invalid consumer id"));
+    return parseConsumerFile(consumersDir() + QLatin1Char('/') + id + QStringLiteral(".conf"), out);
+}
+
+// Strict reader for the [Consumer] group: no QSettings (which would turn
+// "a, b" into a list and accept many syntaxes the generator does not).
+Result ConsentStore::parseConsumerFile(const QString &path, ConsumerInfo *out)
+{
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly))
+        return Result(Error::NotFound, QStringLiteral("Cannot read consumer file %1").arg(path));
+    if (file.size() > MaxConsumerFileBytes)
+        return invalid(path, QStringLiteral("too large"));
+    const QList<QByteArray> lines = file.readAll().split('\n');
+    ConsumerInfo info;
+    bool inGroup = false;
+    for (const QByteArray &raw : lines) {
+        const QString line = QString::fromUtf8(raw).trimmed();
+        if (line.isEmpty() || line.startsWith(QLatin1Char('#')) || line.startsWith(QLatin1Char(';')))
+            continue;
+        if (line.startsWith(QLatin1Char('['))) {
+            inGroup = line == QLatin1String("[Consumer]");
+            continue;
+        }
+        const int eq = line.indexOf(QLatin1Char('='));
+        if (!inGroup || eq <= 0)
+            continue;
+        const QString key = line.left(eq).trimmed();
+        const QString value = line.mid(eq + 1).trimmed();
+        if (key == QLatin1String("Id"))
+            info.id = value;
+        else if (key == QLatin1String("DisplayName"))
+            info.displayName = value;
+        else if (key == QLatin1String("Executable"))
+            info.executable = value;
+        else if (key == QLatin1String("DataDir"))
+            info.dataDir = value;
+    }
+    const QString stem = QFileInfo(path).completeBaseName();
+    if (!ConsumerInfo::isValidId(info.id) || info.id != stem)
+        return invalid(path, QStringLiteral("Id must match [a-z0-9-]+ and the file name"));
+    if (info.displayName.isEmpty())
+        return invalid(path, QStringLiteral("DisplayName is empty"));
+    if (!ConsumerInfo::isValidExecutable(info.executable))
+        return invalid(path, QStringLiteral("Executable must be an absolute path"));
+    if (!ConsumerInfo::isValidDataDir(info.dataDir))
+        return invalid(path, QStringLiteral("DataDir must be relative to the home folder, without \"..\""));
+    if (out)
+        *out = info;
+    return Result::success();
 }
 
 } // namespace NetVfs

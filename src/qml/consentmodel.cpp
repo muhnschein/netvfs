@@ -37,7 +37,7 @@ QVariant ConsentModel::data(const QModelIndex &index, int role) const
     case Qt::DisplayRole:
         return consumer.displayName;
     case ConsentRole:
-        return ConsentStore::consentToString(m_consents.at(index.row()));
+        return consentToString(m_consents.at(index.row()));
     default:
         return QVariant();
     }
@@ -57,7 +57,7 @@ void ConsentModel::reload()
     const int before = count();
     beginResetModel();
     m_consumers = ConsentStore::consumers();
-    const ConsentStore consents(m_storePath);
+    const ConsentStore consents = consentStore();
     m_consents.clear();
     for (const ConsumerInfo &consumer : m_consumers)
         m_consents << consents.consent(consumer.id);
@@ -78,7 +78,7 @@ bool ConsentModel::revoke(const QString &consumerId)
 
 QString ConsentModel::consent(const QString &consumerId) const
 {
-    return ConsentStore::consentToString(ConsentStore(m_storePath).consent(consumerId));
+    return consentToString(consentStore().consent(consumerId));
 }
 
 bool ConsentModel::store(const QString &consumerId, Consent consent)
@@ -86,7 +86,9 @@ bool ConsentModel::store(const QString &consumerId, Consent consent)
     for (int row = 0; row < count(); ++row) {
         if (m_consumers.at(row).id != consumerId)
             continue;
-        if (!ConsentStore(m_storePath).setConsent(consumerId, consent))
+        ConsentStore consents = consentStore();
+        consents.setConsent(consumerId, consent);
+        if (consents.consent(consumerId) != consent)   // not writable
             return false;
         m_consents[row] = consent;
         const QModelIndex changed = index(row);
@@ -94,6 +96,11 @@ bool ConsentModel::store(const QString &consumerId, Consent consent)
         return true;
     }
     return false;   // only registered consumers
+}
+
+ConsentStore ConsentModel::consentStore() const
+{
+    return m_storePath.isEmpty() ? ConsentStore() : ConsentStore(m_storePath);
 }
 
 } // namespace NetVfsUi

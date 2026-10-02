@@ -1,0 +1,6 @@
+<!DOCTYPE RCC>
+<RCC version="1.0">
+    <qresource prefix="/netvfs-bridge">
+        <file>org.netvfs.Bridge1.xml</file>
+    </qresource>
+</RCC>

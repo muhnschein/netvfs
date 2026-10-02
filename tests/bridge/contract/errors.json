@@ -1,0 +1,26 @@
+{
+    "description": "Error names: backend results as org.netvfs.Error.<Name>, malformed calls as InvalidArgs (XB-9, XSEC-7)",
+    "consent": "granted",
+    "files": { "a.txt": "a" },
+    "steps": [
+        { "call": "Hello", "sig": "us", "args": [1, "contract"], "reply": [1, "*", "*"] },
+        { "call": "Stat", "sig": "saybs", "args": ["account:1", { "bytes": "missing" }, true, ""],
+          "error": "org.netvfs.Error.NotFound" },
+        { "call": "Stat", "sig": "saybs", "args": ["account:1", { "bytes": "a/../b" }, true, ""],
+          "error": "org.netvfs.Error.InvalidName" },
+        { "call": "Stat", "sig": "ssbs", "args": ["account:1", "a.txt", true, ""],
+          "error": "org.freedesktop.DBus.Error.InvalidArgs" },
+        { "call": "Stat", "sig": "saybs", "args": ["account:1", { "bytes": "a.txt" }, true, "fast"],
+          "error": "org.freedesktop.DBus.Error.InvalidArgs" },
+        { "call": "Read", "sig": "uxu", "args": [1, 0, 2097152], "error": "org.freedesktop.DBus.Error.InvalidArgs" },
+        { "call": "Read", "sig": "uxu", "args": [1, -1, 1], "error": "org.freedesktop.DBus.Error.InvalidArgs" },
+        { "call": "Close", "sig": "u", "args": [99], "error": "org.netvfs.Error.NotFound" },
+        { "call": "SetAttributes", "sig": "saya{sv}", "args": ["account:1", { "bytes": "a.txt" }, { "owner": "root" }],
+          "error": "org.freedesktop.DBus.Error.InvalidArgs" },
+        { "call": "Frobnicate", "sig": "", "args": [], "error": "org.freedesktop.DBus.Error.UnknownMethod" },
+        { "call": "Stat", "sig": "saybs", "args": ["no such", { "bytes": "" }, true, ""],
+          "error": "org.freedesktop.DBus.Error.InvalidArgs" },
+        { "call": "ConnectAdHoc", "sig": "saya{sv}", "args": ["sftp://user:pw@host/", { "bytes": "" }, {}],
+          "error": "org.netvfs.Error.SecurityPolicy" }
+    ]
+}

@@ -385,34 +385,6 @@
     "test": "build/tests/unit/qml/descriptors/tst_qmldescriptors"
   },
   {
-    "name": "XB-6 revocation not removable",
-    "file": "src/core/consentstore.cpp",
-    "search": "    if (consent == Consent::Unknown)\n        settings.remove(key(consumerId));\n    else\n        settings.setValue",
-    "replace": "    settings.setValue",
-    "test": "build/tests/unit/qml/descriptors/tst_qmldescriptors"
-  },
-  {
-    "name": "XB-6 any consumer id accepted",
-    "file": "src/core/consentstore.cpp",
-    "search": "    if (!isValidConsumerId(consumerId))\n        return false;",
-    "replace": "",
-    "test": "build/tests/unit/qml/descriptors/tst_qmldescriptors"
-  },
-  {
-    "name": "XB-3 registration id not checked against the file name",
-    "file": "src/core/consentstore.cpp",
-    "search": "            && info->id == file.completeBaseName();",
-    "replace": ";",
-    "test": "build/tests/unit/qml/descriptors/tst_qmldescriptors"
-  },
-  {
-    "name": "XB-6 denied read as granted",
-    "file": "src/core/consentstore.cpp",
-    "search": "    if (value == QLatin1String(Denied))\n        return Consent::Denied;",
-    "replace": "    if (value == QLatin1String(Denied))\n        return Consent::Granted;",
-    "test": "build/tests/unit/qml/descriptors/tst_qmldescriptors"
-  },
-  {
     "name": "XB-6 model grants unregistered consumers",
     "file": "src/qml/consentmodel.cpp",
     "search": "        if (m_consumers.at(row).id != consumerId)\n            continue;",

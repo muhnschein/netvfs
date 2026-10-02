@@ -17,7 +17,7 @@ class ConsentModel : public QAbstractListModel
 {
     Q_OBJECT
     Q_DISABLE_COPY(ConsentModel)
-    // Consent file; empty: ConsentStore::defaultPath(). Set by tests.
+    // Consent file; empty: ConsentStore::defaultFilePath(). Set by tests.
     Q_PROPERTY(QString storePath READ storePath WRITE setStorePath NOTIFY storePathChanged)
     Q_PROPERTY(int count READ count NOTIFY countChanged)
 
@@ -48,6 +48,7 @@ Q_SIGNALS:
 
 private:
     bool store(const QString &consumerId, NetVfs::Consent consent);
+    NetVfs::ConsentStore consentStore() const;
 
     QString m_storePath;
     QVector<NetVfs::ConsumerInfo> m_consumers;

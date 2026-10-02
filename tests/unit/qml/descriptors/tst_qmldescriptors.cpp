@@ -457,66 +457,22 @@ private slots:
         QVERIFY(isInsecureConfiguration(params));
     }
 
-    // XB-6: consent store (core) ...
-    void consentStore()
-    {
-        const QString path = configDir.filePath(QStringLiteral("netvfs/bridge.conf"));
-        ConsentStore store(path);
-        QCOMPARE(store.path(), path);
-        QCOMPARE(store.consent(QStringLiteral("lautta")), Consent::Unknown);
-        QVERIFY(store.setConsent(QStringLiteral("lautta"), Consent::Granted));
-        QVERIFY(QFile::exists(path));   // written at once, the folder created
-        QCOMPARE(ConsentStore(path).consent(QStringLiteral("lautta")), Consent::Granted);
-        QVERIFY(store.setConsent(QStringLiteral("other.app"), Consent::Denied));
-        QCOMPARE(ConsentStore(path).consent(QStringLiteral("other.app")), Consent::Denied);
-        QCOMPARE(ConsentStore(path).consent(QStringLiteral("lautta")), Consent::Granted);
-        QVERIFY(store.setConsent(QStringLiteral("lautta"), Consent::Unknown));
-        QCOMPARE(ConsentStore(path).consent(QStringLiteral("lautta")), Consent::Unknown);
-        QFile file(path);
-        QVERIFY(file.open(QIODevice::ReadOnly));
-        const QByteArray content = file.readAll();
-        QVERIFY(content.contains("[Consent]"));
-        QVERIFY(content.contains("other.app=denied"));
-        QVERIFY(!content.contains("lautta"));
-
-        QVERIFY(!store.setConsent(QStringLiteral("../x"), Consent::Granted));
-        QVERIFY(!store.setConsent(QString(), Consent::Granted));
-        QCOMPARE(store.consent(QStringLiteral("a/b")), Consent::Unknown);
-        QVERIFY(ConsentStore::isValidConsumerId(QStringLiteral("org.example-app_2")));
-        QVERIFY(!ConsentStore::isValidConsumerId(QStringLiteral("a b")));
-
-        QCOMPARE(ConsentStore::consentToString(Consent::Granted), QStringLiteral("granted"));
-        QCOMPARE(ConsentStore::consentToString(Consent::Denied), QStringLiteral("denied"));
-        QCOMPARE(ConsentStore::consentToString(Consent::Unknown), QStringLiteral("unknown"));
-        QCOMPARE(ConsentStore::consentFromString(QStringLiteral("granted")), Consent::Granted);
-        QCOMPARE(ConsentStore::consentFromString(QStringLiteral("denied")), Consent::Denied);
-        QCOMPARE(ConsentStore::consentFromString(QStringLiteral("GRANTED")), Consent::Unknown);
-        QVERIFY(ConsentStore::defaultPath().endsWith(QStringLiteral("/netvfs/bridge.conf")));
-        QCOMPARE(ConsentStore().path(), ConsentStore::defaultPath());
-    }
-
+    // XB-3 registrations as the page lists them (the store itself is tested with the bridge).
     void consumers()
     {
         writeFile(consumersDir.filePath(QStringLiteral("lautta.conf")),
                   "[Consumer]\nId=lautta\nDisplayName=Lautta\nExecutable=/usr/bin/harbour-lautta\n"
                   "DataDir=.local/share/org.netvfs/lautta\n");
-        writeFile(consumersDir.filePath(QStringLiteral("aaa.conf")), "[Consumer]\nId=aaa\n");
-        writeFile(consumersDir.filePath(QStringLiteral("mismatch.conf")), "[Consumer]\nId=other\nDisplayName=X\n");
-        writeFile(consumersDir.filePath(QStringLiteral("noid.conf")), "[Consumer]\nDisplayName=X\n");
-        writeFile(consumersDir.filePath(QStringLiteral("bad id.conf")), "[Consumer]\nId=bad id\n");
+        writeFile(consumersDir.filePath(QStringLiteral("aaa.conf")),
+                  "[Consumer]\nId=aaa\nDisplayName=Aaa\nExecutable=/usr/bin/aaa\nDataDir=.local/share/aaa\n");
+        writeFile(consumersDir.filePath(QStringLiteral("mismatch.conf")),
+                  "[Consumer]\nId=other\nDisplayName=X\nExecutable=/usr/bin/x\nDataDir=x\n");
         writeFile(consumersDir.filePath(QStringLiteral("readme.txt")), "[Consumer]\nId=readme\n");
-        QCOMPARE(ConsentStore::consumersDirectory(), consumersDir.path());
+        QCOMPARE(ConsentStore::consumersDir(), consumersDir.path());
         const QVector<ConsumerInfo> list = ConsentStore::consumers();
         QCOMPARE(list.size(), 2);
         QCOMPARE(list.at(0).id, QStringLiteral("aaa"));
-        QCOMPARE(list.at(0).displayName, QStringLiteral("aaa"));
-        QCOMPARE(list.at(1).id, QStringLiteral("lautta"));
         QCOMPARE(list.at(1).displayName, QStringLiteral("Lautta"));
-        QCOMPARE(list.at(1).executable, QStringLiteral("/usr/bin/harbour-lautta"));
-        QCOMPARE(list.at(1).dataDir, QStringLiteral(".local/share/org.netvfs/lautta"));
-        qunsetenv("NETVFS_CONSUMERS_DIR");
-        QCOMPARE(ConsentStore::consumersDirectory(), QStringLiteral("/usr/share/netvfs/consumers"));
-        qputenv("NETVFS_CONSUMERS_DIR", consumersDir.path().toLocal8Bit());
     }
 
     // ... and the model of the page "Apps using network locations".
@@ -524,6 +480,9 @@ private slots:
     {
         const QString path = configDir.filePath(QStringLiteral("model/bridge.conf"));
         ConsentStore(path).setConsent(QStringLiteral("aaa"), Consent::Denied);
+        NetVfsUi::ConsentModel defaults;
+        QVERIFY(defaults.storePath().isEmpty());
+        QCOMPARE(defaults.count(), 2);
         NetVfsUi::ConsentModel model;
         QSignalSpy pathChanged(&model, &NetVfsUi::ConsentModel::storePathChanged);
         model.setStorePath(path);
@@ -539,6 +498,7 @@ private slots:
         QCOMPARE(roles.value(NetVfsUi::ConsentModel::ConsentRole), QByteArray("consent"));
         QCOMPARE(model.data(model.index(1), NetVfsUi::ConsentModel::ConsumerIdRole).toString(), QStringLiteral("lautta"));
         QCOMPARE(model.data(model.index(1), Qt::DisplayRole).toString(), QStringLiteral("Lautta"));
+        QCOMPARE(model.data(model.index(0), NetVfsUi::ConsentModel::DisplayNameRole).toString(), QStringLiteral("Aaa"));
         QCOMPARE(model.data(model.index(1), NetVfsUi::ConsentModel::ConsentRole).toString(), QStringLiteral("unknown"));
         QCOMPARE(model.data(model.index(0), NetVfsUi::ConsentModel::ConsentRole).toString(), QStringLiteral("denied"));
         QVERIFY(!model.data(model.index(5), NetVfsUi::ConsentModel::ConsentRole).isValid());
@@ -567,6 +527,14 @@ private slots:
         model.reload();
         QCOMPARE(model.count(), 1);
         QCOMPARE(countChanged.count(), 1);
+
+        // A consent file that cannot be written is reported.
+        QTemporaryDir blocked;
+        const QString dirAsFile = blocked.filePath(QStringLiteral("file"));
+        writeFile(dirAsFile, "x");
+        model.setStorePath(dirAsFile + QStringLiteral("/bridge.conf"));
+        QVERIFY(!model.grant(QStringLiteral("lautta")));
+        QCOMPARE(model.data(model.index(0), NetVfsUi::ConsentModel::ConsentRole).toString(), QStringLiteral("unknown"));
     }
 };
 
