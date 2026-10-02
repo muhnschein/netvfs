@@ -256,10 +256,12 @@ private slots:
     void handlesAfterDisconnect();
     void invalidNames();
     void unreachable();
+    void ignoresProxyEnvironment();
 
     // backend over HTTPS (XC-16, W-3, W-4, XT-5)
     void tlsUntrustedSendsNothing();
     void tlsPinned();
+    void tlsPinnedOtherName();
     void tlsPinMismatch();
     void tlsPinnedVerifyPeer();
     void tlsSystemTrusted();
@@ -1020,15 +1022,18 @@ void TestWebDav::authenticateFailures()
 
 void TestWebDav::neverNtlm()
 {
-    Fixture f;
-    f.server.setHandler([](const HttpRequestRecord &r) {
-        if (r.method == "OPTIONS")
-            return HttpReply::make(200);
-        return HttpReply::make(401).with("WWW-Authenticate", "NTLM").with("WWW-Authenticate", "Negotiate");
-    });
-    QCOMPARE(f.signIn().error(), Error::AuthFailed);
-    for (const HttpRequestRecord &r : f.server.requests())
-        QVERIFY2(r.header("authorization").isEmpty(), r.header("authorization").constData());
+    // W-5: a server that offers only NTLM or Negotiate gets no credentials.
+    for (const QByteArray &scheme : { QByteArray("NTLM"), QByteArray("Negotiate") }) {
+        Fixture f;
+        f.server.setHandler([scheme](const HttpRequestRecord &r) {
+            if (r.method == "OPTIONS")
+                return HttpReply::make(200);
+            return HttpReply::make(401).with("WWW-Authenticate", scheme);
+        });
+        QCOMPARE(f.signIn().error(), Error::AuthFailed);
+        for (const HttpRequestRecord &r : f.server.requests())
+            QVERIFY2(r.header("authorization").isEmpty(), r.header("authorization").constData());
+    }
 }
 
 void TestWebDav::bearerToken()
@@ -2095,6 +2100,31 @@ void TestWebDav::unreachable()
     QCOMPARE(backend.connect(params, nullptr).error(), Error::NetworkUnreachable);
 }
 
+void TestWebDav::ignoresProxyEnvironment()
+{
+    // XSEC-4: no proxy from the environment.
+    QMap<QByteArray, QByteArray> saved;
+    for (const QByteArray &name : { QByteArray("http_proxy"), QByteArray("HTTP_PROXY"), QByteArray("all_proxy"),
+                                    QByteArray("ALL_PROXY"), QByteArray("no_proxy"), QByteArray("NO_PROXY") }) {
+        if (qEnvironmentVariableIsSet(name.constData()))
+            saved.insert(name, qgetenv(name.constData()));
+        qunsetenv(name.constData());
+    }
+    qputenv("http_proxy", "http://127.0.0.1:1");
+    qputenv("ALL_PROXY", "http://127.0.0.1:1");
+    Fixture f;
+    f.dav.addFile("/f", "x");
+    const Result r = f.signIn();
+    Entry entry;
+    const Result s = f.backend.stat(QStringLiteral("f"), &entry);
+    qunsetenv("http_proxy");
+    qunsetenv("ALL_PROXY");
+    for (auto it = saved.constBegin(); it != saved.constEnd(); ++it)
+        qputenv(it.key().constData(), it.value());
+    QVERIFY2(r.ok(), qPrintable(r.toString()));
+    QVERIFY(s.ok());
+}
+
 // ------------------------------------------------------ backend (HTTPS)
 
 namespace {
@@ -2156,6 +2186,23 @@ void TestWebDav::tlsPinned()
     QVERIFY(entry.isDir());
 }
 
+void TestWebDav::tlsPinnedOtherName()
+{
+    // W-4: without peer verification the host name is not checked either;
+    // the pin alone identifies the server.
+    CertificateOptions options;
+    options.commonName = "nas.example";
+    options.subjectAltNames = "DNS:nas.example";
+    const TestCertificate cert = makeCertificate(options);
+    TlsFixture f(cert);
+    f.params.options.insert(QStringLiteral("host_key"), ServerIdentity::fromTlsSpki(cert.spkiDer).toPin());
+    ServerIdentity seen;
+    const Result r = establish(&f.backend, f.params, Credentials(QStringLiteral("alice"), "secret"), &seen);
+    QVERIFY2(r.ok(), qPrintable(r.toString() + QLatin1Char(' ') + r.detail()));
+    QVERIFY(seen.problems & ServerIdentity::HostnameMismatch);
+    QVERIFY(seen.problems & ServerIdentity::SelfSigned);
+}
+
 void TestWebDav::tlsPinMismatch()
 {
     const TestCertificate cert = makeCertificate(CertificateOptions());
@@ -2189,7 +2236,7 @@ void TestWebDav::tlsPinnedVerifyPeer()
     ServerIdentity seen;
     const Result r = establish(&f.backend, f.params, Credentials(QStringLiteral("alice"), "secret"), &seen);
     QCOMPARE(r.error(), Error::ServerIdentityChanged);
-    QVERIFY(r.message().contains(QLatin1String("no longer trusted")));
+    QVERIFY2(r.message().contains(QLatin1String("pinned")), qPrintable(r.message()));
     QCOMPARE(seen.publicKey, cert.spkiDer);
     QVERIFY(f.server.requests().isEmpty());
 }

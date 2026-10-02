@@ -202,22 +202,16 @@ bool isIpv4Literal(const QByteArray &host)
     return true;
 }
 
-int leafProblems(X509 *leaf, const QByteArray &host, time_t at)
+// Validity times are checked with the chain (X509_STORE_CTX_set_time).
+int hostProblems(X509 *leaf, const QByteArray &host)
 {
-    int problems = 0;
-    if (X509_cmp_time(X509_get0_notAfter(leaf), &at) < 0)
-        problems |= ServerIdentity::Expired;
-    if (X509_cmp_time(X509_get0_notBefore(leaf), &at) > 0)
-        problems |= ServerIdentity::NotYetValid;
     QByteArray name = host;
     if (name.startsWith('[') && name.endsWith(']'))
         name = name.mid(1, name.size() - 2);
     const bool literal = name.contains(':') || isIpv4Literal(name);
     const bool matches = literal ? X509_check_ip_asc(leaf, name.constData(), 0) == 1
                                  : X509_check_host(leaf, name.constData(), size_t(name.size()), 0, nullptr) == 1;
-    if (!matches)
-        problems |= ServerIdentity::HostnameMismatch;
-    return problems;
+    return matches ? 0 : int(ServerIdentity::HostnameMismatch);
 }
 
 } // namespace
@@ -250,10 +244,7 @@ ServerIdentity identityFromChain(const QVector<QByteArray> &pemChain, const QByt
         return identity;
     }
     const time_t at = time_t(now.toMSecsSinceEpoch() / 1000);
-    int problems = leafProblems(leaf, host, at) | chainProblems(chain, store, at);
-    // A self-signed leaf is its own (untrusted) root; report it once.
-    if (problems & ServerIdentity::SelfSigned)
-        problems &= ~int(ServerIdentity::UntrustedRoot);
+    int problems = hostProblems(leaf, host) | chainProblems(chain, store, at);
     if (check == ChainCheck::Failed && problems == 0)
         problems = ServerIdentity::UntrustedRoot;   // libcurl's store disagrees with ours
     identity.problems = problems;

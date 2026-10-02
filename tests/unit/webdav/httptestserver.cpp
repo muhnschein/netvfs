@@ -68,6 +68,9 @@ struct HttpTestServer::Connection {
     int fd = -1;
     SSL *ssl = nullptr;
 
+    Connection() = default;
+    Connection(const Connection &) = delete;
+    Connection &operator=(const Connection &) = delete;
     ~Connection()
     {
         if (ssl) {

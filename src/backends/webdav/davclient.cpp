@@ -129,7 +129,10 @@ struct Transfer {
     bool sourceFailed = false;
     bool paused = false;
 
+    Transfer() = default;
     ~Transfer() { curl_slist_free_all(headers); }
+    Transfer(const Transfer &) = delete;
+    Transfer &operator=(const Transfer &) = delete;
 
     static size_t onHeader(char *data, size_t size, size_t count, void *user);
     static size_t onWrite(char *data, size_t size, size_t count, void *user);

@@ -1,0 +1,282 @@
+[
+  {
+    "name": "C-7 authenticate() without a passed identity check",
+    "file": "src/backends/webdav/webdavbackend.cpp",
+    "search": "    if (!m_identityCheck.ok())\n        return m_identityCheck;",
+    "replace": "    if (false)\n        return m_identityCheck;",
+    "test": "build/tests/unit/webdav/tst_webdav tlsUntrustedSendsNothing tlsPinMismatch"
+  },
+  {
+    "name": "W-4 pin not enforced by libcurl",
+    "file": "src/backends/webdav/webdavbackend.cpp",
+    "search": "        tls.pinnedKey = \"sha256//\" + pinned.fingerprint.toLatin1();",
+    "replace": "        tls.pinnedKey.clear();",
+    "test": "build/tests/unit/webdav/tst_webdav tlsPinMismatch"
+  },
+  {
+    "name": "W-4 tls_verify_peer ignored",
+    "file": "src/backends/webdav/webdavbackend.cpp",
+    "search": "        tls.verifyPeer = m_config.pinVerifyPeer;",
+    "replace": "        tls.verifyPeer = false;",
+    "test": "build/tests/unit/webdav/tst_webdav tlsPinnedVerifyPeer"
+  },
+  {
+    "name": "W-4 pinned key no longer trusted accepted",
+    "file": "src/backends/webdav/webdavbackend.cpp",
+    "search": "    if (verificationFailed && !identity->isEmpty() && *identity == pinned) {",
+    "replace": "    if (false) {",
+    "test": "build/tests/unit/webdav/tst_webdav tlsPinnedVerifyPeer"
+  },
+  {
+    "name": "XC-16 unverified pinned chain reported as system trusted",
+    "file": "src/backends/webdav/webdavbackend.cpp",
+    "search": "tls.verifyPeer ? ChainCheck::Verified : ChainCheck::NotChecked,",
+    "replace": "ChainCheck::Verified,",
+    "test": "build/tests/unit/webdav/tst_webdav tlsPinned"
+  },
+  {
+    "name": "W-4 host name checked without peer verification",
+    "file": "src/backends/webdav/davclient.cpp",
+    "search": "m_tls.verifyPeer ? 2L : 0L",
+    "replace": "2L",
+    "test": "build/tests/unit/webdav/tst_webdav tlsPinnedOtherName"
+  },
+  {
+    "name": "XC-16 failed verification without problems",
+    "file": "src/backends/webdav/davtls.cpp",
+    "search": "    if (check == ChainCheck::Failed && problems == 0)",
+    "replace": "    if (false)",
+    "test": "build/tests/unit/webdav/tst_webdav certificateFromAuthority"
+  },
+  {
+    "name": "XC-16 expiry not reported",
+    "file": "src/backends/webdav/davtls.cpp",
+    "search": "    case X509_V_ERR_CERT_HAS_EXPIRED:\n        return ServerIdentity::Expired;",
+    "replace": "    case X509_V_ERR_CERT_HAS_EXPIRED:\n        return ServerIdentity::UntrustedRoot;",
+    "test": "build/tests/unit/webdav/tst_webdav certificateValidity"
+  },
+  {
+    "name": "XC-16 verification time ignored",
+    "file": "src/backends/webdav/davtls.cpp",
+    "search": "    X509_STORE_CTX_set_time(ctx.get(), 0, at);",
+    "replace": "    X509_STORE_CTX_set_time(ctx.get(), 0, at - at + time(nullptr));",
+    "test": "build/tests/unit/webdav/tst_webdav certificateValidity"
+  },
+  {
+    "name": "XC-16 host name not checked",
+    "file": "src/backends/webdav/davtls.cpp",
+    "search": "    return matches ? 0 : int(ServerIdentity::HostnameMismatch);",
+    "replace": "    return matches ? 0 : 0;",
+    "test": "build/tests/unit/webdav/tst_webdav certificateSelfSigned tlsSystemTrusted"
+  },
+  {
+    "name": "W-6 cross-origin redirect followed",
+    "file": "src/backends/webdav/davurl.cpp",
+    "search": "    if (to != origin) {",
+    "replace": "    if (false) {",
+    "test": "build/tests/unit/webdav/tst_webdav redirectOrigin redirectCrossOrigin"
+  },
+  {
+    "name": "W-6 four redirects",
+    "file": "src/backends/webdav/davclient.h",
+    "search": "static constexpr int MaxRedirects = 3;",
+    "replace": "static constexpr int MaxRedirects = 4;",
+    "test": "build/tests/unit/webdav/tst_webdav redirectLimit"
+  },
+  {
+    "name": "W-7 hrefs of another origin accepted",
+    "file": "src/backends/webdav/davurl.cpp",
+    "search": "|| !splitUrl(resolved, &origin, &path) || origin != m_origin)",
+    "replace": "|| !splitUrl(resolved, &origin, &path))",
+    "test": "build/tests/unit/webdav/tst_webdav hrefClassification"
+  },
+  {
+    "name": "W-8 Overwrite F/T swapped",
+    "file": "src/backends/webdav/webdavbackend.cpp",
+    "search": "mode == RenameMode::Replace ? \"Overwrite: T\" : \"Overwrite: F\"",
+    "replace": "mode == RenameMode::Replace ? \"Overwrite: F\" : \"Overwrite: T\"",
+    "test": "build/tests/unit/webdav/tst_webdav renameModes copyDepth"
+  },
+  {
+    "name": "W-10 no If-None-Match for CreateNew",
+    "file": "src/backends/webdav/webdavbackend.cpp",
+    "search": "        headers << \"If-None-Match: *\";",
+    "replace": "        headers << \"X-Nothing: *\";",
+    "test": "build/tests/unit/webdav/tst_webdav uploadHeaders writeHandle"
+  },
+  {
+    "name": "W-5 no Expect: 100-continue for uploads",
+    "file": "src/backends/webdav/davclient.cpp",
+    "search": "upload ? \"Expect: 100-continue\" : \"Expect:\"",
+    "replace": "upload ? \"Expect:\" : \"Expect:\"",
+    "test": "build/tests/unit/webdav/tst_webdav uploadHeaders uploadCreateNewConflictBeforeBody"
+  },
+  {
+    "name": "W-5 NTLM/Negotiate allowed",
+    "file": "src/backends/webdav/davclient.cpp",
+    "search": "long(CURLAUTH_BASIC | CURLAUTH_DIGEST)",
+    "replace": "long(CURLAUTH_ANY)",
+    "test": "build/tests/unit/webdav/tst_webdav neverNtlm"
+  },
+  {
+    "name": "XSEC-4 proxy from the environment",
+    "file": "src/backends/webdav/davclient.cpp",
+    "search": "    curl_easy_setopt(easy, CURLOPT_NETRC, long(CURL_NETRC_IGNORED));\n    curl_easy_setopt(easy, CURLOPT_PROXY, \"\");",
+    "replace": "    curl_easy_setopt(easy, CURLOPT_NETRC, long(CURL_NETRC_IGNORED));",
+    "test": "build/tests/unit/webdav/tst_webdav ignoresProxyEnvironment"
+  },
+  {
+    "name": "W-16 no cookie engine",
+    "file": "src/backends/webdav/davclient.cpp",
+    "search": "    curl_easy_setopt(easy, CURLOPT_COOKIEFILE, \"\");",
+    "replace": "",
+    "test": "build/tests/unit/webdav/tst_webdav cookiesInMemory"
+  },
+  {
+    "name": "XSEC-3 DOCTYPE accepted",
+    "file": "src/backends/webdav/davxml.cpp",
+    "search": "            fail(QStringLiteral(\"document type declarations are not accepted\"));",
+    "replace": "            m_text.clear();",
+    "test": "build/tests/unit/webdav/tst_webdav multistatusRejectsDoctype listRejectsDoctype"
+  },
+  {
+    "name": "XSEC-3 depth cap off by one",
+    "file": "src/backends/webdav/davxml.cpp",
+    "search": "    if (depth > m_maxDepth) {",
+    "replace": "    if (depth > m_maxDepth + 1) {",
+    "test": "build/tests/unit/webdav/tst_webdav multistatusDepthCap"
+  },
+  {
+    "name": "XSEC-3 size cap off by one",
+    "file": "src/backends/webdav/davxml.cpp",
+    "search": "    if (m_fed > m_maxBytes) {",
+    "replace": "    if (m_fed > m_maxBytes + 1) {",
+    "test": "build/tests/unit/webdav/tst_webdav multistatusSizeCap"
+  },
+  {
+    "name": "W-7 propstat 404 applied",
+    "file": "src/backends/webdav/davxml.cpp",
+    "search": "    if (!m_propstatHasStatus || is2xx(m_propstatStatus))",
+    "replace": "    if (!m_propstatHasStatus || is2xx(m_propstatStatus) || m_propstatStatus == 404)",
+    "test": "build/tests/unit/webdav/tst_webdav multistatusPropstat404 listInBatches"
+  },
+  {
+    "name": "W-9 a 200 answer to a range taken as 206",
+    "file": "src/backends/webdav/davio.cpp",
+    "search": "    m_partial = m_response->status == StatusPartialContent;",
+    "replace": "    m_partial = true;",
+    "test": "build/tests/unit/webdav/tst_webdav readHandleIgnoredRanges downloadRanges"
+  },
+  {
+    "name": "W-9 offset not skipped in a 200 answer",
+    "file": "src/backends/webdav/davio.cpp",
+    "search": "        m_skip = m_offset;",
+    "replace": "        m_skip = 0;",
+    "test": "build/tests/unit/webdav/tst_webdav readHandleIgnoredRanges downloadRanges"
+  },
+  {
+    "name": "W-9 EfficientRanges kept after a 200",
+    "file": "src/backends/webdav/webdavbackend.cpp",
+    "search": "    if (sink.partial()) {\n        m_efficientRanges = true;",
+    "replace": "    if (true) {\n        m_efficientRanges = true;",
+    "test": "build/tests/unit/webdav/tst_webdav readHandleIgnoredRanges"
+  },
+  {
+    "name": "W-9 ranged reads beyond 1 MiB after a 200",
+    "file": "src/backends/webdav/webdavbackend.cpp",
+    "search": "    if (m_rangesIgnored && offset > MaxDiscardForRange) {",
+    "replace": "    if (false) {",
+    "test": "build/tests/unit/webdav/tst_webdav readHandleIgnoredRanges"
+  },
+  {
+    "name": "W-13 412 not AlreadyExists",
+    "file": "src/backends/webdav/davstatus.cpp",
+    "search": "{ 412, Error::AlreadyExists,",
+    "replace": "{ 412, Error::ProtocolError,",
+    "test": "build/tests/unit/webdav/tst_webdav httpStatus"
+  },
+  {
+    "name": "W-13 423 not Locked",
+    "file": "src/backends/webdav/davstatus.cpp",
+    "search": "{ 423, Error::Locked,",
+    "replace": "{ 423, Error::ProtocolError,",
+    "test": "build/tests/unit/webdav/tst_webdav httpStatus errorStatuses"
+  },
+  {
+    "name": "W-13 507 not NoSpace",
+    "file": "src/backends/webdav/davstatus.cpp",
+    "search": "{ 507, Error::NoSpace,",
+    "replace": "{ 507, Error::ProtocolError,",
+    "test": "build/tests/unit/webdav/tst_webdav httpStatus errorStatuses"
+  },
+  {
+    "name": "W-13 405 on MKCOL not AlreadyExists",
+    "file": "src/backends/webdav/davstatus.cpp",
+    "search": "        if (method == Method::Mkcol)",
+    "replace": "        if (method == Method::Put)",
+    "test": "build/tests/unit/webdav/tst_webdav httpStatus makeDirCases"
+  },
+  {
+    "name": "W-13 Retry-After dropped",
+    "file": "src/backends/webdav/davstatus.cpp",
+    "search": "    if (status == StatusTooManyRequests || (status == StatusUnavailable && retryAfterMs >= 0)) {",
+    "replace": "    if (status == StatusTooManyRequests) {",
+    "test": "build/tests/unit/webdav/tst_webdav httpStatus errorStatuses"
+  },
+  {
+    "name": "XC-9 removeFile deletes folders",
+    "file": "src/backends/webdav/webdavbackend.cpp",
+    "search": "    if (entry.isDir())\n        return Result(Error::IsADirectory, QStringLiteral(\"Is a folder\"));\n    Request request;\n    request.method = Method::Delete;",
+    "replace": "    Request request;\n    request.method = Method::Delete;",
+    "test": "build/tests/unit/webdav/tst_webdav removeCases"
+  },
+  {
+    "name": "XC-9 removeDir deletes non-empty folders",
+    "file": "src/backends/webdav/webdavbackend.cpp",
+    "search": "            hasMember = true;",
+    "replace": "            hasMember = false;",
+    "test": "build/tests/unit/webdav/tst_webdav removeCases"
+  },
+  {
+    "name": "XC-10 Replace onto a folder",
+    "file": "src/backends/webdav/webdavbackend.cpp",
+    "search": "    if (r.ok() && target.isDir())",
+    "replace": "    if (false)",
+    "test": "build/tests/unit/webdav/tst_webdav renameModes copyDepth"
+  },
+  {
+    "name": "XC-8 exclusive makeDir on an existing folder",
+    "file": "src/backends/webdav/webdavbackend.cpp",
+    "search": "        if (stat(path, &existing).ok())\n            return Result(Error::AlreadyExists, QStringLiteral(\"The folder already exists\"));",
+    "replace": "        stat(path, &existing);",
+    "test": "build/tests/unit/webdav/tst_webdav serverQuirks"
+  },
+  {
+    "name": "W-10 CreateNew without the existence check",
+    "file": "src/backends/webdav/webdavbackend.cpp",
+    "search": "    if (r.ok())\n        return Result(Error::AlreadyExists, QStringLiteral(\"The file already exists\"));",
+    "replace": "    if (false)\n        return Result(Error::AlreadyExists, QStringLiteral(\"The file already exists\"));",
+    "test": "build/tests/unit/webdav/tst_webdav serverQuirks"
+  },
+  {
+    "name": "C-9 cancel() does nothing",
+    "file": "src/backends/webdav/davclient.cpp",
+    "search": "    m_cancel = true;\n    std::lock_guard<std::mutex> lock(m_wakeLock);",
+    "replace": "    std::lock_guard<std::mutex> lock(m_wakeLock);",
+    "test": "build/tests/unit/webdav/tst_webdav cancelWithinTwoSeconds:stat cancelWithinTwoSeconds:upload"
+  },
+  {
+    "name": "W-2 plain HTTP without consent",
+    "file": "src/backends/webdav/davconfig.cpp",
+    "search": "    if (!params.flag(QStringLiteral(\"allow_insecure\")))",
+    "replace": "    if (false)",
+    "test": "build/tests/unit/webdav/tst_webdav configOptions plainHttpNeedsConsent"
+  },
+  {
+    "name": "W-8 removeDir on a file not NotADirectory",
+    "file": "src/backends/webdav/webdavbackend.cpp",
+    "search": "    if (selfIsFile)\n        return Result(Error::NotADirectory, QStringLiteral(\"Not a folder\"));\n    if (hasMember)",
+    "replace": "    if (hasMember)",
+    "test": "build/tests/unit/webdav/tst_webdav listNotAFolder removeCases"
+  }
+]
