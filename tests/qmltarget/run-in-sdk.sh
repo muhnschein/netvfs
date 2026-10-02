@@ -11,7 +11,8 @@ SDK_IMAGE=${SDK_IMAGE:-sfos:5.2}
 TARGET=${TARGET:-SailfishOS-5.2.0.15-aarch64}
 root=$(cd "$(dirname "$0")/../.." && pwd)
 work=$(mktemp -d)
-trap 'rm -rf "$work"' EXIT
+# Files created in the container belong to mersdk; fall back to sudo on CI.
+trap 'rm -rf "$work" 2>/dev/null || sudo rm -rf "$work"' EXIT
 
 mkdir -p "$work/src" "$work/accounts" "$work/tests"
 cp "$root/common.pri" "$root/.qmake.conf" "$work/"
