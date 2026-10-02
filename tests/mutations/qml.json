@@ -166,5 +166,12 @@
     "search": "NetVfsCreationAgent {",
     "replace": "OnlineSyncAccountCreationAgent {",
     "test": "build/tests/unit/qml/module/tst_qmlmodule"
+  },
+  {
+    "name": "XC-23 verify creates the backups folder with server defaults",
+    "file": "src/qml/netvfsprobe.cpp",
+    "search": "    const ConnectionParams backupParams = withBackupDirMode(params);",
+    "replace": "    const ConnectionParams backupParams = params;",
+    "test": "dbus-run-session -- build/tests/unit/qml/probe/tst_qmlprobe"
   }
 ]

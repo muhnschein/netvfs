@@ -231,7 +231,7 @@ Result sftpStatusFailure(int sftpStatus, const QString &sshMessage, const QStrin
         return Result(Error::Unsupported, QStringLiteral("%1: not supported by the server").arg(context));
     case SSH_FX_NO_CONNECTION:
     case SSH_FX_CONNECTION_LOST:
-        return Result(Error::NetworkUnreachable, QStringLiteral("%1: %2").arg(context, sshMessage));
+        return Result(Error::ConnectionLost, QStringLiteral("%1: %2").arg(context, sshMessage));
     default:
         break;
     }

@@ -44,7 +44,7 @@ Result translatePath(const QString &path, QByteArray *out);
 Result errorForStatus(quint32 ntStatus, int errnoValue, Stage stage, const QString &context);
 
 // The connection broke while a request was outstanding: SecurityPolicy during
-// session setup (the server dropped us), NetworkUnreachable afterwards.
+// session setup (the server dropped us), ConnectionLost afterwards (XC-21).
 Result connectionLost(Stage stage);
 
 // A failed TCP connect (M-10): Timeout, Canceled or NetworkUnreachable.

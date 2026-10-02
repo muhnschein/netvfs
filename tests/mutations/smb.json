@@ -121,8 +121,8 @@
   {
     "name": "rename does not replace the target",
     "file": "src/backends/smb/smbbackend.cpp",
-    "search": "    if (r.ok())\n        r = unlinkPath(t, QStringLiteral(\"replace\"));",
-    "replace": "    if (false)\n        r = unlinkPath(t, QStringLiteral(\"replace\"));",
+    "search": "    if (r.ok())\n        r = unlinkPath(to, QStringLiteral(\"replace\"));",
+    "replace": "    if (false)\n        r = unlinkPath(to, QStringLiteral(\"replace\"));",
     "test": "sh tests/interop/smb/run.sh build operations"
   },
   {
@@ -149,15 +149,64 @@
   {
     "name": "free space in allocation units",
     "file": "src/backends/smb/smbbackend.cpp",
-    "search": ": static_cast<qint64>(units * unit);",
-    "replace": ": static_cast<qint64>(units);",
+    "search": "        out->free = scaled(call->vfs.f_bavail, unit);",
+    "replace": "        out->free = scaled(call->vfs.f_bavail, 1);",
     "test": "sh tests/interop/smb/run.sh build fullShare"
   },
   {
     "name": "directory entries . and .. listed",
     "file": "src/backends/smb/smbbackend.cpp",
-    "search": "        if (name != QLatin1String(\".\") && name != QLatin1String(\"..\"))",
-    "replace": "        if (!name.isNull())",
+    "search": "        if (const QByteArray name(ent->name); name != \".\" && name != \"..\")",
+    "replace": "        if (const QByteArray name(ent->name); !name.isNull())",
     "test": "sh tests/interop/smb/run.sh build cancelUpload"
+  },
+  {
+    "name": "XC-9 removeFile deletes folders",
+    "file": "src/backends/smb/smbbackend.cpp",
+    "search": "    if (r.ok() && (p.isEmpty() || entry.isDir()))\n        return Result(Error::IsADirectory, QStringLiteral(\"remove: a folder\"));",
+    "replace": "",
+    "test": "sh tests/interop/smb/run.sh build v2Namespace"
+  },
+  {
+    "name": "XC-9 removeDir trusts the close",
+    "file": "src/backends/smb/smbbackend.cpp",
+    "search": "    if (r.ok())\n        return Result(Error::DirectoryNotEmpty, QStringLiteral(\"remove folder: the folder is not empty\"));",
+    "replace": "",
+    "test": "sh tests/interop/smb/run.sh build v2Namespace"
+  },
+  {
+    "name": "XC-9 removeDir deletes files",
+    "file": "src/backends/smb/smbbackend.cpp",
+    "search": "    if (r.ok() && !entry.isDir())\n        return Result(Error::NotADirectory, QStringLiteral(\"remove folder: not a folder\"));",
+    "replace": "",
+    "test": "sh tests/interop/smb/run.sh build v2Namespace"
+  },
+  {
+    "name": "XM-5 NoReplace replaces",
+    "file": "src/backends/smb/smbbackend.cpp",
+    "search": "    if (mode == RenameMode::Replace)\n        return renameReplacing(f, t);",
+    "replace": "    if (true)\n        return renameReplacing(f, t);",
+    "test": "sh tests/interop/smb/run.sh build v2Namespace"
+  },
+  {
+    "name": "XC-21 dropped session not ConnectionLost",
+    "file": "src/backends/smb/smbutil.cpp",
+    "search": "    return Result(Error::ConnectionLost, QLatin1String(ConnectionLostMessage));   // XC-21",
+    "replace": "    return Result(Error::NetworkUnreachable, QLatin1String(ConnectionLostMessage));",
+    "test": "build/tests/unit/smb/tst_smb"
+  },
+  {
+    "name": "XC-6 batches ignore batchSize",
+    "file": "src/backends/smb/smbbackend.cpp",
+    "search": "        if (batch.size() < batchSize)\n            continue;",
+    "replace": "        if (true)\n            continue;",
+    "test": "sh tests/interop/smb/run.sh build v2Listing"
+  },
+  {
+    "name": "XC-14 download ignores the offset",
+    "file": "src/backends/smb/smbbackend.cpp",
+    "search": "        r = copyToSink(fh, options.offset, end, sink, progress);",
+    "replace": "        r = copyToSink(fh, 0, end, sink, progress);",
+    "test": "sh tests/interop/smb/run.sh build v2Transfers"
   }
 ]

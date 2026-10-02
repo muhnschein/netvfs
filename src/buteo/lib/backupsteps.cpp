@@ -42,7 +42,7 @@ Result listBackups(Backend *backend, const QString &remoteDir, QStringList *path
 
     QStringList names;
     for (const Entry &entry : entries) {
-        if (!entry.isDir && !entry.name.endsWith(QLatin1String(PartSuffix)))
+        if (!entry.isDir() && !entry.name.endsWith(QLatin1String(PartSuffix)))
             names.append(entry.name);
     }
     names.sort();

@@ -182,11 +182,13 @@ void NetVfsProbe::startVerify(const ConnectionParams &params, const Credentials 
     qCDebug(lcNetVfsUi) << "Verifying" << params.host << backupsPath;
     setState(State::Verifying);
     auto outcome = std::make_shared<ProbeOutcome>();
-    m_jobs.start([backend, params, credentials, backupsPath, outcome](CancelToken *token) {
+    // The verify creates the backups folder the way backups do (S-20).
+    const ConnectionParams backupParams = withBackupDirMode(params);
+    m_jobs.start([backend, backupParams, credentials, backupsPath, outcome](CancelToken *token) {
         // The captured credentials wipe themselves when the job is released (SEC-5).
         std::unique_ptr<Backend> owned(backend);
         token->attach(backend);
-        *outcome = runVerify(backend, params, credentials, backupsPath);
+        *outcome = runVerify(backend, backupParams, credentials, backupsPath);
         token->detach();
     }, [this, outcome]() { finishVerify(*outcome); });
 }

@@ -427,7 +427,7 @@ private slots:
     {
         // U-4: a specific text for every error.
         QSet<QString> texts;
-        const int last = static_cast<int>(Error::Internal);
+        const int last = static_cast<int>(Error::NotModified);
         for (int i = static_cast<int>(Error::Canceled); i <= last; ++i) {
             const QString text = NetVfsUi::userErrorText(static_cast<Error>(i));
             QVERIFY2(!text.isEmpty() && !text.startsWith(QStringLiteral("settings-accounts-")),

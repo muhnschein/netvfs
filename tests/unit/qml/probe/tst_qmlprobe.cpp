@@ -241,7 +241,11 @@ private slots:
         QCOMPARE(log.value(0), QStringLiteral("connect"));
         QCOMPARE(log.value(1), QStringLiteral("authenticate"));
         QVERIFY(logHas(QStringLiteral("upload:Sailfish OS/Backups/.netvfs-probe-")));
-        QVERIFY(logHas(QStringLiteral("remove:Sailfish OS/Backups/.netvfs-probe-")));
+        QVERIFY(logHas(QStringLiteral("removeFile:Sailfish OS/Backups/.netvfs-probe-")));
+        // S-20 via XC-23: the backups folder is created the way backups create it.
+        QCOMPARE(server->lastParams.option(QStringLiteral("dir_mode")), QStringLiteral("0700"));
+        QCOMPARE(server->node(QStringLiteral("Sailfish OS")).mode, 0700);
+        QCOMPARE(server->node(QStringLiteral("Sailfish OS/Backups")).mode, 0700);
         QCOMPARE(log.last(), QStringLiteral("disconnect"));
     }
 
@@ -291,7 +295,7 @@ private slots:
         QTest::addColumn<QString>("text");
         QTest::newRow("wrong secret") << "wrong" << QString() << int(NetVfsProbe::ErrorCode::AuthFailed)
                                       << "The server refused the sign-in. Check the user name and the password or key.";
-        QTest::newRow("no permission") << "secret" << "makePath" << int(NetVfsProbe::ErrorCode::PermissionDenied)
+        QTest::newRow("no permission") << "secret" << "makeDir" << int(NetVfsProbe::ErrorCode::PermissionDenied)
                                        << "The server does not allow writing to the backups folder.";
         QTest::newRow("upload fails") << "secret" << "upload" << int(NetVfsProbe::ErrorCode::PermissionDenied)
                                       << "The server does not allow writing to the backups folder.";
@@ -342,7 +346,7 @@ private slots:
         QCOMPARE(verified.count(), 0);
         QCOMPARE(failed.count(), 0);
         QCOMPARE(probe.state(), NetVfsProbe::State::Idle);
-        QVERIFY(!logHas(QStringLiteral("freeSpace:")));
+        QVERIFY(!logHas(QStringLiteral("spaceInfo:")));
 
         // The probe is usable again afterwards.
         FakeServer::instance()->chunkDelayMs = 0;

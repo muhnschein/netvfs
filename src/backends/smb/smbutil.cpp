@@ -30,7 +30,7 @@ struct StatusEntry {
 
 // SPEC-smb 5, error mapping. Only AuthFailed leads to an attention state,
 // which callers derive with attentionForError().
-const std::array<StatusEntry, 18> statusTable = { {
+const std::array<StatusEntry, 22> statusTable = { {
     { SMB2_STATUS_LOGON_FAILURE, Error::AuthFailed, "the server rejected the user name or password" },
     { SMB2_STATUS_WRONG_PASSWORD, Error::AuthFailed, "the server rejected the password" },
     { SMB2_STATUS_NO_SUCH_USER, Error::AuthFailed, "the server does not know this user" },
@@ -49,6 +49,11 @@ const std::array<StatusEntry, 18> statusTable = { {
     { SMB2_STATUS_DISK_FULL, Error::NoSpace, "the share is full" },
     { SMB2_STATUS_QUOTA_EXCEEDED, Error::NoSpace, "the quota is exceeded" },
     { SMB2_STATUS_IO_TIMEOUT, Error::Timeout, "the server did not answer in time" },
+    // SPEC-v2 XC-9, XC-21
+    { SMB2_STATUS_FILE_IS_A_DIRECTORY, Error::IsADirectory, "this is a folder" },
+    { SMB2_STATUS_NOT_A_DIRECTORY, Error::NotADirectory, "this is not a folder" },
+    { SMB2_STATUS_DIRECTORY_NOT_EMPTY, Error::DirectoryNotEmpty, "the folder is not empty" },
+    { SMB2_STATUS_SHARING_VIOLATION, Error::Locked, "the file is in use" },
 } };
 
 struct ErrnoEntry {
@@ -59,13 +64,16 @@ struct ErrnoEntry {
 
 // The errno values libsmb2's nterror_to_errno() produces for the NT statuses
 // of the table above.
-const std::array<ErrnoEntry, 6> errnoTable = { {
+const std::array<ErrnoEntry, 9> errnoTable = { {
     { ENOENT, Error::NotFound, "no such file or folder" },
     { EACCES, Error::PermissionDenied, "access denied" },
     { EPERM, Error::PermissionDenied, "operation not permitted" },
     { EEXIST, Error::AlreadyExists, "the name already exists" },
     { ENOSPC, Error::NoSpace, "the share is full" },
-    { ENETRESET, Error::NetworkUnreachable, ConnectionLostMessage },
+    { ENETRESET, Error::ConnectionLost, ConnectionLostMessage },
+    { ENOTDIR, Error::NotADirectory, "this is not a folder" },
+    { ENOTEMPTY, Error::DirectoryNotEmpty, "the folder is not empty" },
+    { ETXTBSY, Error::Locked, "the file is in use" },
 } };
 
 QString withContext(const QString &context, const QString &message)
@@ -224,7 +232,7 @@ Result connectionLost(Stage stage)
 {
     if (stage == Stage::SessionSetup)
         return Result(Error::SecurityPolicy, QLatin1String(ServerClosedMessage));
-    return Result(Error::NetworkUnreachable, QLatin1String(ConnectionLostMessage));
+    return Result(Error::ConnectionLost, QLatin1String(ConnectionLostMessage));   // XC-21
 }
 
 Result errorForSocket(int errnoValue, const QString &context)

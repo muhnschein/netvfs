@@ -68,16 +68,57 @@ private:
     sigset_t m_old = {};
 };
 
+QDateTime timeOf(uint64_t seconds, uint64_t nanoseconds)
+{
+    if (seconds == 0 && nanoseconds == 0)
+        return QDateTime();
+    return QDateTime::fromMSecsSinceEpoch(static_cast<qint64>(seconds) * 1000 + static_cast<qint64>(nanoseconds / 1000000),
+                                          Qt::UTC);
+}
+
+EntryType typeOf(uint32_t smbType)
+{
+    switch (smbType) {
+    case SMB2_TYPE_FILE:
+        return EntryType::File;
+    case SMB2_TYPE_DIRECTORY:
+        return EntryType::Directory;
+    case SMB2_TYPE_LINK:
+        return EntryType::Symlink;   // XM-4: a reparse point reported as a link
+    default:
+        return EntryType::Special;
+    }
+}
+
+// XM-4: SMB has no POSIX modes or owners; times and attributes map directly.
 Entry entryFrom(const QString &name, const smb2_stat_64 &st)
 {
     Entry entry;
     entry.name = name;
-    entry.size = static_cast<qint64>(st.smb2_size);
-    entry.isDir = st.smb2_type == SMB2_TYPE_DIRECTORY;
-    entry.modified = QDateTime::fromMSecsSinceEpoch(static_cast<qint64>(st.smb2_mtime) * 1000
-                                                        + static_cast<qint64>(st.smb2_mtime_nsec / 1000000),
-                                                    Qt::UTC);
+    entry.type = typeOf(st.smb2_type);
+    if (entry.type != EntryType::Directory)
+        entry.size = static_cast<qint64>(std::min<uint64_t>(st.smb2_size, std::numeric_limits<qint64>::max()));
+    entry.modified = timeOf(st.smb2_mtime, st.smb2_mtime_nsec);
+    entry.accessed = timeOf(st.smb2_atime, st.smb2_atime_nsec);
+    entry.created = timeOf(st.smb2_btime, st.smb2_btime_nsec);
+    if (st.smb2_attributes & SMB2_FILE_ATTRIBUTE_HIDDEN)
+        entry.flags |= EntryFlag::Hidden;
+    if (st.smb2_attributes & SMB2_FILE_ATTRIBUTE_READONLY)
+        entry.flags |= EntryFlag::ReadOnly;
+    if (st.smb2_attributes & SMB2_FILE_ATTRIBUTE_SYSTEM)
+        entry.flags |= EntryFlag::System;
     return entry;
+}
+
+qint64 scaled(uint64_t units, uint64_t unit)
+{
+    constexpr auto limit = static_cast<uint64_t>(std::numeric_limits<qint64>::max());
+    return static_cast<qint64>((unit && units > limit / unit) ? limit : units * unit);
+}
+
+Result invalidRange()
+{
+    return Result(Error::Internal, QStringLiteral("invalid range"));
 }
 
 } // namespace
@@ -138,8 +179,9 @@ Result SmbBackend::connect(const ConnectionParams &params, ServerIdentity *seen)
     return r;
 }
 
-Result SmbBackend::authenticate(const Credentials &credentials)
+Result SmbBackend::authenticate(const Credentials &credentials, AuthPrompter *prompter)
 {
+    Q_UNUSED(prompter)   // NTLMSSP has no interactive step
     if (!m_probed || m_ctx || std::this_thread::get_id() != m_owner)
         return Result(Error::Internal, QStringLiteral("authenticate() needs a successful connect() on this thread"));
     const QString share = m_params.option(QStringLiteral("share"));
@@ -183,6 +225,63 @@ Result SmbBackend::authenticate(const Credentials &credentials)
 }
 
 
+// XC-13: one open file; reads go through the same cancellable requests as a
+// download (C-9). Pipelining and read-ahead come later (XM-6).
+class SmbBackend::Reader : public ReadHandle
+{
+public:
+    Reader(SmbBackend *backend, smb2fh *fh, qint64 size) : m_b(backend), m_fh(fh), m_size(size) {}
+    Reader(const Reader &) = delete;
+    Reader &operator=(const Reader &) = delete;
+    ~Reader() override { close(); }
+
+    qint64 size() const override { return m_size; }
+    void readAhead(qint64, qint64) override {}
+
+    Result read(qint64 offset, qint64 maxBytes, QByteArray *out) override
+    {
+        if (out)
+            out->clear();
+        if (m_lost)
+            return Result(Error::ConnectionLost, QLatin1String(ConnectionLostMessage));
+        if (!m_fh)
+            return Result(Error::Internal, QStringLiteral("read: the file is closed"));
+        if (offset < 0 || maxBytes < 0 || maxBytes > std::numeric_limits<int>::max())
+            return invalidRange();
+        QByteArray data;
+        const Result r = m_b->readRange(m_fh, offset, maxBytes, &data);
+        if (r.ok() && out)
+            *out = data;
+        return r;
+    }
+
+    Result close() override
+    {
+        if (!m_fh)
+            return m_lost ? Result(Error::ConnectionLost, QLatin1String(ConnectionLostMessage)) : Result();
+        smb2fh *fh = m_fh;
+        m_fh = nullptr;
+        m_b->m_readers.remove(this);
+        // A canceled backend still closes the file, within C-9's bound.
+        return m_b->closeFile(fh, m_b->m_cancel ? Result(Error::Canceled) : Result());
+    }
+
+    smb2fh *handle() const { return m_fh; }
+
+    // The backend's context, and with it the file handle, is gone.
+    void invalidate()
+    {
+        m_fh = nullptr;
+        m_lost = true;
+    }
+
+private:
+    SmbBackend *m_b;
+    smb2fh *m_fh;
+    const qint64 m_size;
+    bool m_lost = false;
+};
+
 Result SmbBackend::checkUsable() const
 {
     if (!m_ctx)
@@ -192,6 +291,20 @@ Result SmbBackend::checkUsable() const
     if (m_broken)
         return connectionLost(Stage::Established);
     return Result::success();
+}
+
+Capabilities SmbBackend::capabilities() const
+{
+    // XC-5: what this backend implements and the interop suite tests.
+    Capabilities caps;
+    if (!m_ctx || m_stage != Stage::Established)
+        return caps;
+    caps.flags << Capability::NativeNoReplace       // XM-5
+               << Capability::ReadHandles << Capability::EfficientRanges
+               << Capability::SpaceInfo << Capability::WindowsNames;   // XM-8, M-9
+    caps.maxReadChunk = chunkSize(smb2_get_max_read_size(m_ctx));
+    caps.maxWriteChunk = chunkSize(smb2_get_max_write_size(m_ctx));
+    return caps;
 }
 
 template <typename Starter>
@@ -254,8 +367,26 @@ void SmbBackend::abandon(std::unique_ptr<Call> &call)
     m_orphans.push_back(std::move(call));
 }
 
+void SmbBackend::releaseReaders()
+{
+    // XC-13: handles end with the connection. Their close requests are
+    // queued without waiting; libsmb2 frees each file handle when its close
+    // completes, at the latest with a shutdown status in
+    // smb2_destroy_context().
+    for (Reader *reader : m_readers) {
+        if (m_ctx && reader->handle()) {
+            auto call = std::make_unique<Call>();
+            if (smb2_close_async(m_ctx, reader->handle(), netvfs_smb_complete_plain, call->completion()) == 0)
+                abandon(call);
+        }
+        reader->invalidate();
+    }
+    m_readers.clear();
+}
+
 void SmbBackend::destroyContext()
 {
+    releaseReaders();
     if (m_ctx) {
         // Pending requests complete with a shutdown status here, so the
         // orphans they refer to must still exist.
@@ -294,102 +425,161 @@ Result SmbBackend::stat(const QString &path, Entry *out)
     return statPath(p, out);
 }
 
-Result SmbBackend::list(const QString &dir, QVector<Entry> *out)
+Result SmbBackend::list(const QString &dir, ListSink *sink, const ListOptions &options)
 {
     QByteArray p;
     if (Result r = translatePath(dir, &p); !r.ok())
         return r;
     auto call = std::make_unique<Call>();
-    const Result r = request(call, [&p](smb2_context *ctx, Call *c) {
+    Result r = request(call, [&p](smb2_context *ctx, Call *c) {
         return smb2_opendir_async(ctx, p.constData(), netvfs_smb_complete_opendir, c->completion());
     }, QStringLiteral("list"));
-    if (!r.ok())
+    if (!r.ok()) {
+        // Samba answers a file with "not found" for some paths; say what it is.
+        if (Entry entry; r.error() != Error::ConnectionLost && statPath(p, &entry).ok() && !entry.isDir())
+            return Result(Error::NotADirectory, QStringLiteral("list: not a folder"));
         return r;
-    QVector<Entry> entries;
+    }
+    // XC-6: libsmb2 collects the QUERY_DIRECTORY responses while opening;
+    // the entries are delivered in batches of batchSize.
+    const int batchSize = qMax(1, options.batchSize);
+    QVector<Entry> batch;
     while (const smb2dirent *ent = smb2_readdir(m_ctx, call->dir)) {
-        const QString name = QString::fromUtf8(ent->name);
-        if (name != QLatin1String(".") && name != QLatin1String(".."))
-            entries.append(entryFrom(name, ent->st));
+        if (const QByteArray name(ent->name); name != "." && name != "..")
+            batch.append(entryFrom(QString::fromUtf8(name), ent->st));
+        if (batch.size() < batchSize)
+            continue;
+        if (m_cancel)
+            r = Result(Error::Canceled);
+        else if (!sink->entries(batch))
+            r = Result(Error::Canceled, QStringLiteral("The listing was stopped"));
+        batch.clear();
+        if (!r.ok())
+            break;
     }
     smb2_closedir(m_ctx, call->dir);
-    if (out)
-        *out = entries;
+    if (r.ok() && !batch.isEmpty() && !sink->entries(batch))
+        r = Result(Error::Canceled, QStringLiteral("The listing was stopped"));
     return r;
 }
 
-Result SmbBackend::makeDir(const QByteArray &path)
+Result SmbBackend::makeDirectory(const QByteArray &path, bool exclusive)
 {
+    auto call = std::make_unique<Call>();
+    Result r = request(call, [&path](smb2_context *ctx, Call *c) {
+        return smb2_mkdir_async(ctx, path.constData(), netvfs_smb_complete_plain, c->completion());
+    }, QStringLiteral("create folder"));
+    if (r.error() != Error::AlreadyExists || exclusive)
+        return r;
+    // XC-8: an existing folder is success (also one created concurrently).
     Entry entry;
-    Result r = statPath(path, &entry);
-    if (r.error() == Error::NotFound) {
-        auto call = std::make_unique<Call>();
-        r = request(call, [&path](smb2_context *ctx, Call *c) {
-            return smb2_mkdir_async(ctx, path.constData(), netvfs_smb_complete_plain, c->completion());
-        }, QStringLiteral("create folder"));
-        if (r.error() != Error::AlreadyExists)
-            return r;
-        r = statPath(path, &entry);     // created concurrently by someone else
-    }
-    if (r.ok() && !entry.isDir)
+    r = statPath(path, &entry);
+    if (r.ok() && !entry.isDir())
         return Result(Error::AlreadyExists, QStringLiteral("create folder: a file has the folder's name"));
     return r;
 }
 
-Result SmbBackend::makePath(const QString &dir)
-{
-    QByteArray p;
-    Result r = translatePath(dir, &p);
-    QByteArray prefix;
-    for (const QByteArray &component : p.split('/')) {
-        if (!r.ok())
-            break;
-        if (component.isEmpty())
-            continue;
-        prefix = prefix.isEmpty() ? component : prefix + '/' + component;
-        r = makeDir(prefix);
-    }
-    return r;
-}
-
-Result SmbBackend::remove(const QString &path)
+Result SmbBackend::makeDir(const QString &path, bool exclusive)
 {
     QByteArray p;
     if (Result r = translatePath(path, &p); !r.ok())
         return r;
-    return unlinkPath(p, QStringLiteral("remove"));
+    if (p.isEmpty())   // the share root exists
+        return exclusive ? Result(Error::AlreadyExists, QStringLiteral("create folder: the share root exists"))
+                         : Result::success();
+    return makeDirectory(p, exclusive);
 }
 
-Result SmbBackend::rename(const QString &from, const QString &to)
+// XC-9: libsmb2 deletes files and folders alike (delete-on-close without
+// FILE_NON_DIRECTORY_FILE or FILE_DIRECTORY_FILE), so the type is checked
+// first; a concurrent replacement in between is a documented race.
+Result SmbBackend::removeFile(const QString &path)
+{
+    QByteArray p;
+    if (Result r = translatePath(path, &p); !r.ok())
+        return r;
+    Entry entry;
+    Result r = p.isEmpty() ? Result::success() : statPath(p, &entry);
+    if (r.ok() && (p.isEmpty() || entry.isDir()))
+        return Result(Error::IsADirectory, QStringLiteral("remove: a folder"));
+    if (r.ok())
+        r = unlinkPath(p, QStringLiteral("remove"));
+    return r;
+}
+
+Result SmbBackend::removeDir(const QString &path)
+{
+    QByteArray p;
+    if (Result r = translatePath(path, &p); !r.ok())
+        return r;
+    if (p.isEmpty())
+        return Result(Error::PermissionDenied, QStringLiteral("remove folder: the share root cannot be removed"));
+    Entry entry;
+    Result r = statPath(p, &entry);
+    if (r.ok() && !entry.isDir())
+        return Result(Error::NotADirectory, QStringLiteral("remove folder: not a folder"));
+    if (!r.ok())
+        return r;
+    auto call = std::make_unique<Call>();
+    r = request(call, [&p](smb2_context *ctx, Call *c) {
+        return smb2_rmdir_async(ctx, p.constData(), netvfs_smb_complete_plain, c->completion());
+    }, QStringLiteral("remove folder"));
+    if (!r.ok())
+        return r;
+    // Samba accepts delete-on-close for a folder that is not empty and then
+    // keeps it, with a successful close: the folder must be gone afterwards.
+    r = statPath(p, nullptr);
+    if (r.ok())
+        return Result(Error::DirectoryNotEmpty, QStringLiteral("remove folder: the folder is not empty"));
+    return r.error() == Error::NotFound ? Result::success() : r;
+}
+
+Result SmbBackend::renamePath(const QByteArray &from, const QByteArray &to)
+{
+    auto call = std::make_unique<Call>();
+    return request(call, [&from, &to](smb2_context *ctx, Call *c) {
+        return smb2_rename_async(ctx, from.constData(), to.constData(), netvfs_smb_complete_plain, c->completion());
+    }, QStringLiteral("rename"));
+}
+
+Result SmbBackend::renameReplacing(const QByteArray &from, const QByteArray &to)
+{
+    // XM-5: libsmb2 renames without ReplaceIfExists, so Replace removes the
+    // target first, as in API v1 (not atomic: no AtomicReplace).
+    Result r = statPath(from, nullptr);
+    if (!r.ok())
+        return r;
+    Entry target;
+    r = statPath(to, &target);
+    if (r.ok() && target.isDir())
+        return Result(Error::AlreadyExists, QStringLiteral("rename: the target is a folder"));
+    if (r.ok())
+        r = unlinkPath(to, QStringLiteral("replace"));
+    if (r.error() == Error::NotFound)
+        r = Result::success();
+    if (!r.ok())
+        return r;
+    return renamePath(from, to);
+}
+
+Result SmbBackend::rename(const QString &from, const QString &to, RenameMode mode)
 {
     QByteArray f;
     QByteArray t;
     Result r = translatePath(from, &f);
     if (r.ok())
         r = translatePath(to, &t);
-    if (r.ok())
-        r = statPath(f, nullptr);
     if (!r.ok())
         return r;
-
-    // libsmb2 renames without ReplaceIfExists: remove the target first.
-    Entry target;
-    r = statPath(t, &target);
-    if (r.ok() && target.isDir)
-        return Result(Error::AlreadyExists, QStringLiteral("rename: the target is a folder"));
-    if (r.ok())
-        r = unlinkPath(t, QStringLiteral("replace"));
-    if (r.error() == Error::NotFound)
-        r = Result::success();
-    if (!r.ok())
-        return r;
-
-    auto call = std::make_unique<Call>();
-    return request(call, [&f, &t](smb2_context *ctx, Call *c) {
-        return smb2_rename_async(ctx, f.constData(), t.constData(), netvfs_smb_complete_plain, c->completion());
-    }, QStringLiteral("rename"));
+    if (f.isEmpty() || t.isEmpty())
+        return Result(Error::PermissionDenied, QStringLiteral("rename: the share root cannot be renamed or replaced"));
+    if (mode == RenameMode::Replace)
+        return renameReplacing(f, t);
+    // XM-5, XC-10: the server refuses an existing target (NativeNoReplace).
+    return renamePath(f, t);
 }
 
-Result SmbBackend::freeSpace(const QString &dir, qint64 *bytes)
+Result SmbBackend::spaceInfo(const QString &dir, SpaceInfo *out)
 {
     QByteArray p;
     if (Result r = translatePath(dir, &p); !r.ok())
@@ -398,13 +588,24 @@ Result SmbBackend::freeSpace(const QString &dir, qint64 *bytes)
     const Result r = request(call, [&p](smb2_context *ctx, Call *c) {
         return smb2_statvfs_async(ctx, p.constData(), &c->vfs, netvfs_smb_complete_plain, c->completion());
     }, QStringLiteral("free space"));
-    if (r.ok() && bytes) {
+    // XM-8: FileFsFullSizeInformation (libsmb2 fills statvfs from it).
+    if (r.ok() && out) {
         const quint64 unit = call->vfs.f_bsize;
-        const quint64 units = call->vfs.f_bavail;
-        constexpr auto limit = quint64(std::numeric_limits<qint64>::max());
-        *bytes = (unit && units > limit / unit) ? std::numeric_limits<qint64>::max()
-                                                : static_cast<qint64>(units * unit);
+        out->free = scaled(call->vfs.f_bavail, unit);
+        out->total = scaled(call->vfs.f_blocks, unit);
+        out->used = call->vfs.f_blocks >= call->vfs.f_bavail ? scaled(call->vfs.f_blocks - call->vfs.f_bavail, unit)
+                                                              : -1;
     }
+    return r;
+}
+
+Result SmbBackend::keepAlive()
+{
+    // XM-8: one SMB2 ECHO round trip.
+    auto call = std::make_unique<Call>();
+    const Result r = request(call, [](smb2_context *ctx, Call *c) {
+        return smb2_echo_async(ctx, netvfs_smb_complete_plain, c->completion());
+    }, QStringLiteral("keep-alive"));
     return r;
 }
 
@@ -451,14 +652,13 @@ Result SmbBackend::writeChunk(smb2fh *fh, const QByteArray &buffer, qint64 lengt
     return Result::success();
 }
 
-Result SmbBackend::writeAll(smb2fh *fh, QIODevice *source, Progress *progress)
+Result SmbBackend::writeAll(smb2fh *fh, QIODevice *source, Progress *progress, quint64 offset)
 {
     const quint32 chunk = chunkSize(smb2_get_max_write_size(m_ctx));     // M-11
     QByteArray buffer(static_cast<int>(chunk), Qt::Uninitialized);
-    const qint64 total = source->size();
-    quint64 offset = 0;
+    const qint64 total = qint64(offset) + source->size();
     for (;;) {
-        if (m_cancel)
+        if (m_cancel || (progress && progress->canceled()))
             return Result(Error::Canceled);
         const qint64 n = source->read(buffer.data(), chunk);
         if (n < 0)
@@ -473,16 +673,47 @@ Result SmbBackend::writeAll(smb2fh *fh, QIODevice *source, Progress *progress)
     }
 }
 
-Result SmbBackend::upload(QIODevice *source, const QString &path, Progress *progress)
+Result SmbBackend::openForUpload(const QByteArray &path, const WriteOptions &options, smb2fh **fh)
+{
+    // XC-14; SMB has no POSIX modes, createMode does not apply.
+    int flags = O_WRONLY;
+    if (options.disposition == WriteOptions::CreateNew)
+        flags |= O_CREAT | O_EXCL;
+    else if (options.disposition == WriteOptions::Truncate)
+        flags |= O_CREAT | O_TRUNC;
+    Result r = openFile(path, flags, fh);
+    if (!r.ok()) {
+        if (Entry entry; r.error() != Error::ConnectionLost && statPath(path, &entry).ok() && entry.isDir())
+            return Result(Error::IsADirectory, QStringLiteral("open: a folder"));
+        return r;
+    }
+    if (options.disposition != WriteOptions::Resume)
+        return r;
+    // Resume: the remote size must be the offset the caller continues at.
+    Entry entry;
+    r = fileStat(*fh, &entry);
+    if (r.ok() && entry.size != options.resumeOffset) {
+        r = Result(Error::ProtocolError, QStringLiteral("Cannot resume at %1: the file has %2 bytes")
+                                             .arg(options.resumeOffset).arg(entry.size));
+    }
+    if (!r.ok()) {
+        closeFile(*fh, r);
+        *fh = nullptr;
+    }
+    return r;
+}
+
+Result SmbBackend::upload(QIODevice *source, const QString &path, const UploadOptions &options, Progress *progress)
 {
     QByteArray p;
     Result r = translatePath(path, &p);
     smb2fh *fh = nullptr;
     if (r.ok())
-        r = openFile(p, O_WRONLY | O_CREAT | O_TRUNC, &fh);
+        r = openForUpload(p, options.write, &fh);
     if (!r.ok())
         return r;
-    r = writeAll(fh, source, progress);
+    const qint64 base = options.write.disposition == WriteOptions::Resume ? options.write.resumeOffset : 0;
+    r = writeAll(fh, source, progress, quint64(base));
     if (r.ok()) {
         // C-12: flush to stable storage before the size check and rename.
         auto call = std::make_unique<Call>();
@@ -510,25 +741,27 @@ Result SmbBackend::readChunk(smb2fh *fh, quint64 offset, quint32 count, QByteArr
     return r;
 }
 
-Result SmbBackend::fileSize(smb2fh *fh, qint64 *size)
+Result SmbBackend::fileStat(smb2fh *fh, Entry *out)
 {
     auto call = std::make_unique<Call>();
     const Result r = request(call, [fh](smb2_context *ctx, Call *c) {
         return smb2_fstat_async(ctx, fh, &c->st, netvfs_smb_complete_plain, c->completion());
     }, QStringLiteral("stat"));
     if (r.ok())
-        *size = static_cast<qint64>(call->st.smb2_size);
+        *out = entryFrom(QString(), call->st);
     return r;
 }
 
-Result SmbBackend::copyToSink(smb2fh *fh, qint64 size, QIODevice *sink, Progress *progress)
+Result SmbBackend::copyToSink(smb2fh *fh, qint64 offset, qint64 end, QIODevice *sink, Progress *progress)
 {
     const quint32 chunk = chunkSize(smb2_get_max_read_size(m_ctx));      // M-11
     QByteArray buffer;
-    qint64 offset = 0;
-    while (offset < size) {
+    const qint64 start = offset;
+    while (offset < end) {
+        if (progress && progress->canceled())
+            return Result(Error::Canceled);
         quint32 got = 0;
-        const auto want = static_cast<quint32>(qMin<qint64>(chunk, size - offset));
+        const auto want = static_cast<quint32>(qMin<qint64>(chunk, end - offset));
         if (Result r = readChunk(fh, quint64(offset), want, &buffer, &got); !r.ok())
             return r;
         if (got == 0)
@@ -537,13 +770,15 @@ Result SmbBackend::copyToSink(smb2fh *fh, qint64 size, QIODevice *sink, Progress
             return Result(Error::Internal, QStringLiteral("Cannot store the downloaded data"));
         offset += got;
         if (progress)
-            progress->update(offset, size);
+            progress->update(offset - start, end - start);
     }
     return Result::success();
 }
 
-Result SmbBackend::download(const QString &path, QIODevice *sink, Progress *progress)
+Result SmbBackend::download(const QString &path, QIODevice *sink, const DownloadOptions &options, Progress *progress)
 {
+    if (options.offset < 0 || options.length < -1)
+        return invalidRange();
     QByteArray p;
     Result r = translatePath(path, &p);
     smb2fh *fh = nullptr;
@@ -551,10 +786,15 @@ Result SmbBackend::download(const QString &path, QIODevice *sink, Progress *prog
         r = openFile(p, O_RDONLY, &fh);
     if (!r.ok())
         return r;
-    qint64 size = 0;
-    r = fileSize(fh, &size);
-    if (r.ok())
-        r = copyToSink(fh, size, sink, progress);
+    Entry entry;
+    r = fileStat(fh, &entry);
+    if (r.ok() && entry.isDir())
+        r = Result(Error::IsADirectory, QStringLiteral("download: a folder"));
+    if (r.ok()) {
+        const qint64 size = qMax<qint64>(entry.size, 0);
+        const qint64 end = options.length < 0 ? size : qMin(size, options.offset + options.length);
+        r = copyToSink(fh, options.offset, end, sink, progress);
+    }
     return closeFile(fh, r);
 }
 
@@ -576,10 +816,9 @@ Result SmbBackend::readRange(smb2fh *fh, qint64 offset, qint64 length, QByteArra
     return Result::success();
 }
 
-Result SmbBackend::read(const QString &path, qint64 offset, qint64 length, QByteArray *out)
+Result SmbBackend::openRead(const QString &path, ReadHandle **out)
 {
-    if (offset < 0 || length < 0 || length > std::numeric_limits<int>::max())
-        return Result(Error::Internal, QStringLiteral("read: invalid range"));
+    *out = nullptr;
     QByteArray p;
     Result r = translatePath(path, &p);
     smb2fh *fh = nullptr;
@@ -587,10 +826,15 @@ Result SmbBackend::read(const QString &path, qint64 offset, qint64 length, QByte
         r = openFile(p, O_RDONLY, &fh);
     if (!r.ok())
         return r;
-    QByteArray data;
-    r = closeFile(fh, readRange(fh, offset, length, &data));
-    if (r.ok() && out)
-        *out = data;
+    Entry entry;
+    r = fileStat(fh, &entry);
+    if (r.ok() && entry.isDir())
+        r = Result(Error::IsADirectory, QStringLiteral("open: a folder"));
+    if (!r.ok())
+        return closeFile(fh, r);
+    auto *reader = new Reader(this, fh, entry.size);
+    m_readers.insert(reader);
+    *out = reader;
     return r;
 }
 
@@ -611,6 +855,7 @@ void SmbBackend::disconnect()
 
 void SmbBackend::shutdown() noexcept
 {
+    releaseReaders();
     if (m_ctx && !m_broken && m_stage == Stage::Established && std::this_thread::get_id() == m_owner) {
         auto call = std::make_unique<Call>();
         request(call, [](smb2_context *ctx, Call *c) {
