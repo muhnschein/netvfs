@@ -6,6 +6,7 @@
 | [SPEC-sftp.md](SPEC-sftp.md) | v1 SFTP account and backend |
 | [SPEC-smb.md](SPEC-smb.md) | v1 SMB account and backend |
 | [SPEC-v2.md](SPEC-v2.md) | API v2: file-browser extensions, new backends, bridge |
+| [SPEC-v2-review.md](SPEC-v2-review.md) | SPEC-v2 checked against the v1 documents (section 0 action item) |
 
 The v1 documents were written under the working name `remotefs`. The project
 is now `netvfs`: read `remotefs`, `RemoteFs`, `libremotefs`,
