@@ -5,7 +5,8 @@ include(../../test.pri)
 CONFIG -= testcase
 TARGET = tst_interop_smb
 INCLUDEPATH += $$NETVFS_ROOT/src/backends/smb $$VENDOR_PREFIX/include
-SOURCES = tst_interop_smb.cpp
+SOURCES = tst_interop_smb.cpp \
+    $$NETVFS_ROOT/src/backends/smb/smbshares.cpp
 # M-T7 and the M-5 check drive libsmb2 directly; the plugin has its own hidden copy.
 LIBS += $$VENDOR_PREFIX/lib/libsmb2.a
 PRE_TARGETDEPS += $$VENDOR_PREFIX/lib/libsmb2.a

@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 #include "smbutil.h"
 #include "smb2api.h"
+#include "smbshares.h"
 
+#include "logging.h"
 #include "paths.h"
 
 #include <QtCore/QElapsedTimer>
@@ -13,6 +15,7 @@
 
 #include <netdb.h>
 #include <poll.h>
+#include <pthread.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
@@ -21,6 +24,9 @@ namespace NetVfs::Smb {
 namespace {
 
 const int PollSliceMs = 100;
+const char *const UserFileVariable = "NTLM_USER_FILE";
+// MS-ERREF; libsmb2 names only STATUS_PATH_NOT_COVERED.
+const quint32 StatusDfsUnavailable = 0xC000026D;
 
 struct StatusEntry {
     quint32 status;
@@ -86,22 +92,35 @@ QString hexStatus(quint32 ntStatus)
     return QStringLiteral("0x%1").arg(ntStatus, 8, 16, QLatin1Char('0'));
 }
 
+// XM-9: DFS referrals are out of scope; the path is on another server.
+Result dfsReferral(const QString &context)
+{
+    return Result(Error::Unsupported,
+                  withContext(context, QStringLiteral("the path is a DFS link to another server, which is not supported")),
+                  QLatin1String(DfsDetail));
+}
+
 Result errorForNtStatus(quint32 ntStatus, const QString &context)
 {
+    if (ntStatus == SMB2_STATUS_PATH_NOT_COVERED || ntStatus == StatusDfsUnavailable)
+        return dfsReferral(context);
+    // XC-24: the status for a "Details" view.
+    const QString detail = QStringLiteral("NT status %1 (%2)").arg(hexStatus(ntStatus), QLatin1String(nterror_to_str(ntStatus)));
     for (const StatusEntry &entry : statusTable) {
         if (entry.status == ntStatus) {
-            return Result(entry.error, withContext(context, QStringLiteral("%1 (NT status %2)")
-                                                                .arg(QLatin1String(entry.message), hexStatus(ntStatus))));
+            return Result(entry.error,
+                          withContext(context, QStringLiteral("%1 (NT status %2)")
+                                                   .arg(QLatin1String(entry.message), hexStatus(ntStatus))),
+                          detail);
         }
     }
-    return Result(Error::ProtocolError,
-                  withContext(context, QStringLiteral("NT status %1 (%2)")
-                                           .arg(hexStatus(ntStatus), QLatin1String(nterror_to_str(ntStatus)))));
+    return Result(Error::ProtocolError, withContext(context, detail), detail);
 }
 
 bool keepsMeaningInSetup(Error error)
 {
-    return error == Error::AuthFailed || error == Error::NotFound || error == Error::Timeout;
+    return error == Error::AuthFailed || error == Error::NotFound || error == Error::Timeout
+        || error == Error::Unsupported;
 }
 
 bool isTransportErrno(int errnoValue)
@@ -172,20 +191,317 @@ quint32 chunkSize(quint32 serverMaximum)
     return qMin(serverMaximum, MaxChunkSize);
 }
 
+namespace {
+
+// M-8: relative to the share root (or, in server mode, to the server).
+QString relativePath(const QString &normalized)
+{
+    return normalized.startsWith(QLatin1Char('/')) ? normalized.mid(1) : normalized;
+}
+
+void appendUtf8(QByteArray *out, uint u)
+{
+    if (u < 0x80) {
+        out->append(static_cast<char>(u));
+    } else if (u < 0x800) {
+        out->append(static_cast<char>(0xc0 | (u >> 6)));
+        out->append(static_cast<char>(0x80 | (u & 0x3f)));
+    } else if (u < 0x10000) {
+        // Also an unpaired surrogate: its 3-byte form (WTF-8).
+        out->append(static_cast<char>(0xe0 | (u >> 12)));
+        out->append(static_cast<char>(0x80 | ((u >> 6) & 0x3f)));
+        out->append(static_cast<char>(0x80 | (u & 0x3f)));
+    } else {
+        out->append(static_cast<char>(0xf0 | (u >> 18)));
+        out->append(static_cast<char>(0x80 | ((u >> 12) & 0x3f)));
+        out->append(static_cast<char>(0x80 | ((u >> 6) & 0x3f)));
+        out->append(static_cast<char>(0x80 | (u & 0x3f)));
+    }
+}
+
+int sequenceLength(uchar lead)
+{
+    if (lead < 0x80)
+        return 1;
+    if ((lead & 0xe0) == 0xc0)
+        return 2;
+    if ((lead & 0xf0) == 0xe0)
+        return 3;
+    if ((lead & 0xf8) == 0xf0)
+        return 4;
+    return 0;
+}
+
+// One code point (surrogates included) of a WTF-8 string, or U+FFFD for a
+// malformed sequence (libsmb2 never produces one); advances `*at`.
+uint nextCodePoint(const uchar *bytes, int size, int *at)
+{
+    constexpr uint Replacement = 0xfffd;
+    constexpr std::array<uint, 5> minimum = { 0, 0, 0x80, 0x800, 0x10000 };
+    const int length = sequenceLength(bytes[*at]);
+    if (length == 0 || *at + length > size) {
+        ++*at;
+        return Replacement;
+    }
+    uint u = bytes[*at] & (0x7fu >> length);
+    if (length == 1)
+        u = bytes[*at];
+    for (int i = 1; i < length; ++i) {
+        const uchar c = bytes[*at + i];
+        if ((c & 0xc0) != 0x80) {
+            ++*at;
+            return Replacement;
+        }
+        u = (u << 6) | (c & 0x3f);
+    }
+    *at += length;
+    return (u < minimum[static_cast<size_t>(length)] || u > 0x10ffff) ? Replacement : u;
+}
+
+} // namespace
+
+QString decodeName(const char *utf8)
+{
+    const auto *bytes = reinterpret_cast<const uchar *>(utf8);
+    const int size = static_cast<int>(std::strlen(utf8));
+    QString name;
+    name.reserve(size);
+    int at = 0;
+    while (at < size) {
+        const uint u = nextCodePoint(bytes, size, &at);
+        if (QChar::requiresSurrogates(u)) {
+            name.append(QChar(QChar::highSurrogate(u)));
+            name.append(QChar(QChar::lowSurrogate(u)));
+        } else {
+            name.append(QChar(static_cast<ushort>(u)));
+        }
+    }
+    return name;
+}
+
+QByteArray encodeName(const QString &name)
+{
+    QByteArray out;
+    out.reserve(name.size() * 3);
+    int i = 0;
+    while (i < name.size()) {
+        const QChar c = name.at(i++);
+        if (c.isHighSurrogate() && i < name.size() && name.at(i).isLowSurrogate())
+            appendUtf8(&out, QChar::surrogateToUcs4(c, name.at(i++)));
+        else
+            appendUtf8(&out, c.unicode());   // a lone surrogate included (WTF-8)
+    }
+    return out;
+}
+
 Result translatePath(const QString &path, QByteArray *out)
 {
     QString normalized;
     if (Result r = Paths::normalize(path, &normalized); !r.ok())
         return r;
-    // M-8: relative to the share root.
-    if (normalized.startsWith(QLatin1Char('/')))
-        normalized.remove(0, 1);
+    normalized = relativePath(normalized);
     // M-9: names Windows servers cannot store are rejected before any request.
     if (Result r = Paths::checkWindowsPath(normalized); !r.ok())
         return r;
-    *out = normalized.toUtf8();
+    *out = encodeName(normalized);
     return Result::success();
 }
+
+Result splitServerPath(const QString &path, QString *share, QByteArray *rest)
+{
+    QString normalized;
+    if (Result r = Paths::normalize(path, &normalized); !r.ok())
+        return r;
+    normalized = relativePath(normalized);
+    const int slash = normalized.indexOf(QLatin1Char('/'));
+    *share = slash < 0 ? normalized : normalized.left(slash);
+    if (!share->isEmpty() && !validShareName(*share))
+        return Result(Error::InvalidName, QStringLiteral("not a valid share name"));
+    const QString inside = slash < 0 ? QString() : normalized.mid(slash + 1);
+    if (Result r = Paths::checkWindowsPath(inside); !r.ok())
+        return r;
+    *rest = encodeName(inside);
+    return Result::success();
+}
+
+void mergeShareNames(QStringList *list, const QStringList &more)
+{
+    for (const QString &name : more) {
+        if (!list->contains(name, Qt::CaseInsensitive))
+            list->append(name);
+    }
+}
+
+QStringList configuredShares(const QVariantMap &options)
+{
+    const QVariant value = options.value(QStringLiteral("shares"));
+    QStringList raw;
+    if (value.type() == QVariant::StringList || value.type() == QVariant::List)
+        raw = value.toStringList();
+    else
+        raw = value.toString().split(QLatin1Char(','));
+    QStringList candidates;
+    for (const QString &item : raw) {
+        const QString name = item.trimmed();
+        if (validShareName(name))
+            candidates.append(name);
+        else if (!name.isEmpty())
+            qCDebug(lcNetVfsSmb) << "Ignoring an invalid share name in the account options:" << name;
+    }
+    QStringList shares;
+    mergeShareNames(&shares, candidates);
+    return shares;
+}
+
+Result profileFromOptions(const QVariantMap &options, Profile *out)
+{
+    const QString name = options.value(QStringLiteral("security_profile")).toString().trimmed();
+    if (name.isEmpty()) {
+        // XM-1: the v1 option keeps its meaning (M-3: default on).
+        const bool encrypt = options.value(QStringLiteral("require_encryption"), true).toBool();
+        *out = encrypt ? Profile::Strict : Profile::Signed;
+        return Result::success();
+    }
+    for (const Profile profile : { Profile::Strict, Profile::Signed, Profile::Legacy, Profile::Guest }) {
+        if (name == profileName(profile)) {
+            *out = profile;
+            return Result::success();
+        }
+    }
+    return Result(Error::SecurityPolicy, QStringLiteral("unknown SMB security profile \"%1\"").arg(name));
+}
+
+ProfileSettings settingsFor(Profile profile)
+{
+    // SPEC-v2 XM-1 table.
+    ProfileSettings s;
+    s.version = SMB2_VERSION_ANY3;
+    switch (profile) {
+    case Profile::Strict:
+        break;
+    case Profile::Signed:
+        s.encryption = Encryption::IfServerAsks;
+        break;
+    case Profile::Legacy:
+        s.version = SMB2_VERSION_ANY;
+        s.encryption = Encryption::IfServerAsks;
+        break;
+    case Profile::Guest:
+        s.version = SMB2_VERSION_ANY;
+        s.signing = false;
+        s.encryption = Encryption::Off;
+        s.guest = true;
+        break;
+    }
+    return s;
+}
+
+QString profileName(Profile profile)
+{
+    switch (profile) {
+    case Profile::Strict:
+        return QStringLiteral("strict");
+    case Profile::Signed:
+        return QStringLiteral("signed");
+    case Profile::Legacy:
+        return QStringLiteral("legacy");
+    case Profile::Guest:
+        return QStringLiteral("guest");
+    }
+    return QString();
+}
+
+bool dialectAllowed(Profile profile, quint16 dialect)
+{
+    if (isSmb3Dialect(dialect))
+        return true;
+    // SMB 2.0.2 and 2.1 only where the profile offered them (SMB2_VERSION_ANY).
+    return settingsFor(profile).version == SMB2_VERSION_ANY
+        && (dialect == SMB2_VERSION_0202 || dialect == SMB2_VERSION_0210);
+}
+
+Result checkSessionFlags(Profile profile, quint16 sessionFlags)
+{
+    if (profile == Profile::Guest)
+        return Result::success();
+    if (sessionFlags & (SMB2_SESSION_FLAG_IS_GUEST | SMB2_SESSION_FLAG_IS_NULL))
+        return Result(Error::SecurityPolicy, QLatin1String(GuestMappedMessage));
+    return Result::success();
+}
+
+void applyProfile(smb2_context *ctx, Profile profile, const QString &user, const QString &domain,
+                  const QByteArray &secret, int requestTimeoutMs)
+{
+    // SPEC-smb section 3, amended by SPEC-v2 XM-1. Nothing is negotiated
+    // down from what the profile says (XSEC-2).
+    const ProfileSettings s = settingsFor(profile);
+    smb2_set_version(ctx, static_cast<smb2_negotiate_version>(s.version));             // M-1
+    if (s.signing) {                                                                  // M-2
+        smb2_set_security_mode(ctx, SMB2_NEGOTIATE_SIGNING_ENABLED | SMB2_NEGOTIATE_SIGNING_REQUIRED);
+        smb2_set_sign(ctx, 1);
+    } else {
+        smb2_set_security_mode(ctx, SMB2_NEGOTIATE_SIGNING_ENABLED);
+        smb2_set_sign(ctx, 0);
+    }
+    if (s.encryption == Encryption::Required)                                         // M-3
+        smb2_set_seal(ctx, 1);
+    else if (s.encryption == Encryption::Off)
+        smb2_set_seal(ctx, 0);
+    smb2_set_authentication(ctx, SMB2_SEC_NTLMSSP);                                    // M-4
+    smb2_set_timeout(ctx, qMax(1, requestTimeoutMs / 1000));                           // M-7
+
+    // M-5: smb2_set_user() and smb2_set_domain() read NTLM_USER_FILE and may
+    // replace the password, so the variable goes first and the password last.
+    neutraliseUserFile();
+    smb2_set_user(ctx, s.guest ? "" : user.toUtf8().constData());
+    if (!s.guest && !domain.isEmpty())
+        smb2_set_domain(ctx, domain.toUtf8().constData());
+    // Guest: no password, which makes libsmb2's NTLMSSP anonymous.
+    smb2_set_password(ctx, s.guest ? nullptr : secret.constData());
+}
+
+Result checkSession(smb2_context *ctx, Profile profile, const Result &signIn)
+{
+    // XM-1: a session the server mapped to guest is never accepted in place
+    // of the account's own, and is named as such also when it made the
+    // sign-in fail (a guest session cannot sign its replies).
+    if (Result r = checkSessionFlags(profile, smb2_get_session_flags(ctx)); !r.ok())
+        return r;
+    if (!signIn.ok())
+        return signIn;
+    const quint16 dialect = smb2_get_dialect(ctx);
+    if (!dialectAllowed(profile, dialect)) {
+        // M-1, defence in depth: never accept a dialect that was not offered.
+        return Result(Error::SecurityPolicy, QStringLiteral("The server negotiated SMB %1, which the %2 profile does not allow")
+                                                 .arg(dialectName(dialect), profileName(profile)));
+    }
+    return Result::success();
+}
+
+void neutraliseUserFile()
+{
+    if (!qEnvironmentVariableIsSet(UserFileVariable))
+        return;
+    qCWarning(lcNetVfsSmb) << "Ignoring NTLM_USER_FILE: the account's own password is used (SPEC-smb M-5)";
+    qunsetenv(UserFileVariable);
+}
+
+SigPipeGuard::SigPipeGuard()
+{
+    sigemptyset(&m_set);
+    sigaddset(&m_set, SIGPIPE);
+    pthread_sigmask(SIG_BLOCK, &m_set, &m_old);
+}
+
+SigPipeGuard::~SigPipeGuard()
+{
+    const timespec zero = { 0, 0 };
+    while (sigtimedwait(&m_set, nullptr, &zero) > 0) {
+        // drain
+    }
+    pthread_sigmask(SIG_SETMASK, &m_old, nullptr);
+}
+
 
 Result errorForStatus(quint32 ntStatus, int errnoValue, Stage stage, const QString &context)
 {
@@ -219,6 +535,9 @@ Result errorForStatus(quint32 ntStatus, int errnoValue, Stage stage, const QStri
     // server's NT status only as -nterror_to_errno(status) and leave
     // smb2_get_nterror() at 0 (vendor/libsmb2 lib/libsmb2.c). That errno is a
     // function of the NT status (lib/errors.c), so it is mapped the same way.
+    // ENOEXEC stands for STATUS_PATH_NOT_COVERED there (XM-9).
+    if (errnoValue == ENOEXEC)
+        return dfsReferral(context);
     for (const ErrnoEntry &entry : errnoTable) {
         if (entry.errnoValue == errnoValue)
             return Result(entry.error, withContext(context, QLatin1String(entry.message)));
@@ -243,11 +562,6 @@ Result errorForSocket(int errnoValue, const QString &context)
     if (errnoValue == ETIMEDOUT)
         return Result(Error::Timeout, withContext(context, reason));
     return Result(Error::NetworkUnreachable, withContext(context, reason));
-}
-
-bool requireEncryption(const QVariantMap &options)
-{
-    return options.value(QStringLiteral("require_encryption"), true).toBool();
 }
 
 bool isSmb3Dialect(quint16 dialect)

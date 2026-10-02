@@ -2,3 +2,11 @@
 # libaccounts-glib keeps the contents of provider/service XML files it reads
 # (g_file_get_contents inside the library) without freeing them.
 leak:libaccounts-glib.so
+# Qt 5 (qthread_unix.cpp): a QThread's QThreadData, allocated in the QThread
+# constructor, is released by the thread's pthread TLS destructor. When the
+# process exits right after QThread::wait() returned (QtTest's WatchDog at
+# the end of qRun, QThreadPool threads at shutdown), that destructor may not
+# have run yet, so LSan reports the 120-byte QThreadData under CPU load.
+# Only allocations made inside QThread's constructor match; a QThread object
+# leaked by netvfs code is allocated by that code and still reported.
+leak:QThread::QThread
