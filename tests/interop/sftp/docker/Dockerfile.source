@@ -1,0 +1,28 @@
+# SPDX-License-Identifier: LGPL-2.1-or-later
+# OpenSSH built from the upstream portable sources in the build context
+# (openssh-portable/, cloned by run.sh at tag V_10_3_P1).
+FROM mirror.gcr.io/library/ubuntu:24.04 AS build
+RUN apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+       build-essential autoconf automake libssl-dev zlib1g-dev \
+    && rm -rf /var/lib/apt/lists/*
+COPY openssh-portable /src/openssh
+WORKDIR /src/openssh
+RUN autoreconf \
+    && ./configure --prefix=/opt/openssh --sysconfdir=/etc/ssh --with-privsep-path=/var/empty/sshd \
+    && make -j"$(nproc)" \
+    && make install-nokeys
+
+FROM mirror.gcr.io/library/ubuntu:24.04
+RUN apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends openssl zlib1g python3 \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd -r -d /var/empty/sshd -s /usr/sbin/nologin sshd \
+    && mkdir -p /var/empty/sshd /etc/ssh \
+    && chmod 755 /var/empty/sshd
+COPY --from=build /opt/openssh /opt/openssh
+RUN /opt/openssh/bin/ssh-keygen -A
+ENV SSHD=/opt/openssh/sbin/sshd SSH_KEYGEN=/opt/openssh/bin/ssh-keygen SFTP=/opt/openssh/bin/sftp \
+    SFTP_SERVER=/opt/openssh/libexec/sftp-server USE_PAM=0 PENALTIES=1 PATH=/opt/openssh/bin:/usr/sbin:/usr/bin:/sbin:/bin
+COPY start-sshd.sh sftpproxy.py /setup/
+CMD ["/setup/start-sshd.sh"]

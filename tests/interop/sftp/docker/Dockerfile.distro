@@ -1,0 +1,15 @@
+# SPDX-License-Identifier: LGPL-2.1-or-later
+# The OpenSSH server of a distribution release (ubuntu:24.04 → 9.6p1,
+# ubuntu:22.04 → 8.9p1), with PAM.
+ARG BASE=mirror.gcr.io/library/ubuntu:24.04
+FROM ${BASE}
+RUN apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+       openssh-server openssh-client python3 \
+    && rm -rf /var/lib/apt/lists/* \
+    && mkdir -p /run/sshd \
+    && ssh-keygen -A
+ENV SSHD=/usr/sbin/sshd SSH_KEYGEN=/usr/bin/ssh-keygen SFTP=/usr/bin/sftp \
+    SFTP_SERVER=/usr/lib/openssh/sftp-server USE_PAM=1
+COPY start-sshd.sh sftpproxy.py /setup/
+CMD ["/setup/start-sshd.sh"]
