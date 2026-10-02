@@ -46,6 +46,7 @@ SOURCES = \
     identity.cpp \
     logging.cpp \
     names.cpp \
+    ops.cpp \
     paths.cpp \
     probe.cpp \
     secretsource.cpp \
