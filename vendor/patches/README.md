@@ -18,6 +18,20 @@ pin bump contains it.
 | `0002-smb3-seal-store-the-session-id-with-memcpy.patch` | `alignment` in `smb3_encrypt_pdu()` |
 | `0003-unicode-count-leading-1-bits-on-an-unsigned-char.patch` | `shift-base` in `l1()` |
 
+Additions for SPEC-v2 §6.2 (accepted per D-1 as amended by the v2 review,
+item 21; to be proposed upstream):
+
+| Patch | Why |
+|---|---|
+| `0004-session-setup-record-the-session-flags.patch` | XM-1: `smb2_get_session_flags()`. A session the server mapped to guest (`SMB2_SESSION_FLAG_IS_GUEST`, or anonymous `_IS_NULL`) is refused for every profile but `guest`. The flags are recorded before the signing checks, so the backend can name the reason also when the (unsignable) guest session made the sign-in fail. |
+| `0005-rename-add-smb2_rename_replace_async.patch` | XM-5, open question 1: `smb2_rename_replace_async()` sends FileRenameInformation with `ReplaceIfExists`, so `rename(Replace)` is one atomic request (`AtomicReplace`) instead of stat + unlink + rename. |
+| `0006-unicode-keep-unpaired-surrogates-as-WTF-8.patch` | XC-4 for SMB: Windows names may hold unpaired UTF-16 surrogates; libsmb2 turned them into U+FFFD, so such files could be listed but not opened, renamed or deleted. They now travel as WTF-8 (the 3-byte form of the surrogate) in both directions; the backend maps that form to the lone `QChar` and back (`decodeName`, `encodeName`). |
+
+`vendor/build-vendor.sh` builds libsmb2 twice from the same pin and patches:
+the plugin's copy without libdcerpc (`<prefix>`, G-SMB item 4 together with
+`src/backends/smb/noshareenum.c`) and, for the share enumeration helper
+`netvfs-smb-shares` only (XM-7), a copy with DCE/RPC (`<prefix>/dcerpc`).
+
 ## libssh (pin `07430deb`, 0.12.2)
 
 | Patch | Why |
