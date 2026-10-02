@@ -26,8 +26,7 @@
 //
 // Arguments: ','-separated typed values "s:text", "i:42", "u:42", "b:true" (no commas
 // inside a value), with the placeholders {accountId} and {provider}.
-namespace NetVfs {
-namespace Bridge {
+namespace NetVfs::Bridge {
 
 struct HandoffCall {
     QString service;
@@ -62,7 +61,6 @@ private:
     Launcher m_launcher;
 };
 
-} // namespace Bridge
-} // namespace NetVfs
+} // namespace NetVfs::Bridge
 
 #endif

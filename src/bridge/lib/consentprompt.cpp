@@ -8,8 +8,7 @@
 #include <QtDBus/QDBusMessage>
 #include <QtDBus/QDBusReply>
 
-namespace NetVfs {
-namespace Bridge {
+namespace NetVfs::Bridge {
 
 namespace {
 const char NotificationsService[] = "org.freedesktop.Notifications";
@@ -101,5 +100,4 @@ void NotificationConsentPrompt::onClosed(uint id, uint reason)
     emit dismissed();
 }
 
-} // namespace Bridge
-} // namespace NetVfs
+} // namespace NetVfs::Bridge

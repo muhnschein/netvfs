@@ -12,8 +12,7 @@
 
 // Streamed signals (ListBatch, WalkBatch): batching per XB-17 and flow control
 // per C-10.
-namespace NetVfs {
-namespace Bridge {
+namespace NetVfs::Bridge {
 
 // Bytes of streamed signals not yet written to the socket. Workers wait while
 // it is above the limit, so a consumer that does not read cannot make the
@@ -95,7 +94,6 @@ private:
     Batcher<Entry> m_batcher;
 };
 
-} // namespace Bridge
-} // namespace NetVfs
+} // namespace NetVfs::Bridge
 
 #endif

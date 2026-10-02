@@ -12,8 +12,7 @@
 #define SO_PEERPIDFD 77   // Linux 6.5
 #endif
 
-namespace NetVfs {
-namespace Bridge {
+namespace NetVfs::Bridge {
 
 namespace {
 
@@ -93,14 +92,14 @@ PeerChecker::PeerChecker(const QString &executable, const Environment &environme
 bool PeerChecker::systemCredentials(int fd, PeerCredentials *out)
 {
     struct ucred cred {};
-    socklen_t length = sizeof(cred);
-    if (::getsockopt(fd, SOL_SOCKET, SO_PEERCRED, &cred, &length) != 0 || length != sizeof(cred))
+    if (socklen_t length = sizeof(cred);
+        ::getsockopt(fd, SOL_SOCKET, SO_PEERCRED, &cred, &length) != 0 || length != sizeof(cred))
         return false;
     out->pid = cred.pid;
     out->uid = cred.uid;
     int pidfd = -1;
-    socklen_t pidfdLength = sizeof(pidfd);
-    if (::getsockopt(fd, SOL_SOCKET, SO_PEERPIDFD, &pidfd, &pidfdLength) == 0 && pidfd >= 0)
+    if (socklen_t pidfdLength = sizeof(pidfd);
+        ::getsockopt(fd, SOL_SOCKET, SO_PEERPIDFD, &pidfd, &pidfdLength) == 0 && pidfd >= 0)
         out->pidfd = pidfd;
     return true;
 }
@@ -164,8 +163,7 @@ Result PeerChecker::checkProcess(pid_t pid, int pidfd) const
     qint64 before = 0;
     if (!startTime(pid, &before))
         return refused(QStringLiteral("peer process %1 is gone").arg(pid));
-    const qint64 now = m_env.bootTicksNow();
-    if (now >= 0 && before > now)
+    if (const qint64 now = m_env.bootTicksNow(); now >= 0 && before > now)
         return refused(QStringLiteral("peer pid %1 was reused").arg(pid));
 
     struct stat exe {};
@@ -174,8 +172,7 @@ Result PeerChecker::checkProcess(pid_t pid, int pidfd) const
     if (m_env.afterExeRead)
         m_env.afterExeRead();
 
-    qint64 after = 0;
-    if (!startTime(pid, &after) || after != before)
+    if (qint64 after = 0; !startTime(pid, &after) || after != before)
         return refused(QStringLiteral("peer pid %1 was reused").arg(pid));
     if (pidfd >= 0 && !pidfdAlive(pidfd, pid))
         return refused(QStringLiteral("peer process %1 exited during the check").arg(pid));
@@ -183,13 +180,12 @@ Result PeerChecker::checkProcess(pid_t pid, int pidfd) const
         return refused(QStringLiteral("cannot read the executable of peer %1").arg(pid));
 
     struct stat expected {};
-    const QByteArray expectedPath = QFile::encodeName(m_executable);
-    if (::stat(expectedPath.constData(), &expected) != 0)
+    if (const QByteArray expectedPath = QFile::encodeName(m_executable);
+        ::stat(expectedPath.constData(), &expected) != 0)
         return refused(QStringLiteral("the registered executable does not exist"));
     if (exe.st_dev != expected.st_dev || exe.st_ino != expected.st_ino)
         return refused(QStringLiteral("peer %1 runs another executable").arg(pid));
     return Result::success();
 }
 
-} // namespace Bridge
-} // namespace NetVfs
+} // namespace NetVfs::Bridge

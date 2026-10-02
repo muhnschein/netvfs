@@ -58,7 +58,7 @@ public:
     using Fetched = std::function<void(const Result &result, const ConnectionParams &params,
                                        const Credentials &credentials)>;
 
-    explicit AccountDirectory(QObject *parent = nullptr) : QObject(parent) {}
+    using QObject::QObject;
     ~AccountDirectory() override;
 
     virtual QVector<AccountLocation> filesAccounts() = 0;

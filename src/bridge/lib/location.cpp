@@ -13,8 +13,7 @@
 
 #include <QtCore/QPointer>
 
-namespace NetVfs {
-namespace Bridge {
+namespace NetVfs::Bridge {
 
 QString LocationSpec::hostKey() const
 {
@@ -32,8 +31,7 @@ QVariantMap LocationSpec::info() const
     if (!params.username.isEmpty())
         map.insert(QStringLiteral("user"), params.username);
     map.insert(QStringLiteral("path"), Names::encode(startPath));
-    const QString url = Url::format(params, startPath);
-    if (!url.isEmpty())
+    if (const QString url = Url::format(params, startPath); !url.isEmpty())
         map.insert(QStringLiteral("url"), url);
     if (kind == LocationKind::Account) {
         map.insert(QStringLiteral("accountId"), accountId);
@@ -57,7 +55,7 @@ QString filesServiceName(const QString &provider)
 }
 
 // The account's Files service, if it has one and it is enabled.
-bool filesServiceEnabled(Accounts::Manager *manager, Accounts::Account *account, QString *filesRoot)
+bool filesServiceEnabled(const Accounts::Manager *manager, Accounts::Account *account, QString *filesRoot)
 {
     const Accounts::Service service = manager->service(filesServiceName(account->providerName()));
     if (!service.isValid())
@@ -88,7 +86,7 @@ LibAccountsDirectory::LibAccountsDirectory(QObject *parent)
     : AccountDirectory(parent)
     , d(std::make_unique<Private>())
 {
-    Accounts::Manager *m = &d->manager;
+    const Accounts::Manager *m = &d->manager;
     connect(m, &Accounts::Manager::accountCreated, this, &AccountDirectory::changed);
     connect(m, &Accounts::Manager::accountRemoved, this, &AccountDirectory::changed);
     connect(m, &Accounts::Manager::accountUpdated, this, &AccountDirectory::changed);
@@ -115,8 +113,7 @@ QVector<AccountLocation> LibAccountsDirectory::filesAccounts()
         location.displayName = config.displayName;
         location.params = config.params;
         location.attention = config.attention;
-        QString normalized;
-        if (Paths::normalize(filesRoot, &normalized).ok())
+        if (QString normalized; Paths::normalize(filesRoot, &normalized).ok())
             location.filesRoot = normalized;
         result.append(location);
     }
@@ -151,5 +148,4 @@ void LibAccountsDirectory::setAttention(int accountId, Attention attention, cons
         qCWarning(lcNetVfsBridge) << "Cannot record the attention state:" << r.toString();
 }
 
-} // namespace Bridge
-} // namespace NetVfs
+} // namespace NetVfs::Bridge

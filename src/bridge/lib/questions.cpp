@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 #include "questions.h"
 
-namespace NetVfs {
-namespace Bridge {
+namespace NetVfs::Bridge {
 
 QString QuestionBroker::ask(quint64 sessionId, const QString &kind, const QVariantMap &details, const Done &done)
 {
@@ -45,5 +44,4 @@ void QuestionBroker::dropSession(quint64 sessionId)
         cancel(id);
 }
 
-} // namespace Bridge
-} // namespace NetVfs
+} // namespace NetVfs::Bridge

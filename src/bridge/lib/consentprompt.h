@@ -14,7 +14,7 @@ class ConsentPrompt : public QObject
 {
     Q_OBJECT
 public:
-    explicit ConsentPrompt(QObject *parent = nullptr) : QObject(parent) {}
+    using QObject::QObject;
     ~ConsentPrompt() override;
 
     // Shows (or replaces) the question for `displayName`.
@@ -35,7 +35,7 @@ Q_SIGNALS:
 // Whether lipstick on Sailfish OS 5.2 shows freedesktop actions and emits
 // ActionInvoked to a process that does not own a bus name is unverified on a
 // device; Settings (netvfs-ui) can always grant or revoke.
-class NotificationConsentPrompt : public ConsentPrompt
+class NotificationConsentPrompt final : public ConsentPrompt
 {
     Q_OBJECT
 public:

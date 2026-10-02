@@ -4,8 +4,7 @@
 #include <QtCore/QCoreApplication>
 #include <QtCore/QEvent>
 
-namespace NetVfs {
-namespace Bridge {
+namespace NetVfs::Bridge {
 
 namespace {
 
@@ -54,5 +53,4 @@ bool MainQueue::event(QEvent *event)
     return QObject::event(event);
 }
 
-} // namespace Bridge
-} // namespace NetVfs
+} // namespace NetVfs::Bridge

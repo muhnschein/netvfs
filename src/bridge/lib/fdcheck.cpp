@@ -10,8 +10,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-namespace NetVfs {
-namespace Bridge {
+namespace NetVfs::Bridge {
 
 namespace {
 
@@ -115,7 +114,7 @@ void FdDevice::close()
         QIODevice::close();
 }
 
-bool FdDevice::waitFor(short events)
+bool FdDevice::waitFor(short events) const
 {
     for (;;) {
         if (canceled())
@@ -167,7 +166,7 @@ qint64 FdDevice::writeData(const char *data, qint64 maxSize)
         // At most PIPE_BUF per poll so a write never blocks beyond the slice.
         if (!waitFor(POLLOUT))
             return -1;
-        const size_t chunk = static_cast<size_t>(std::min<qint64>(maxSize, PIPE_BUF));
+        const auto chunk = static_cast<size_t>(std::min<qint64>(maxSize, PIPE_BUF));
         ssize_t n = 0;
         do {
             n = ::write(m_fd, data, chunk);
@@ -180,7 +179,7 @@ qint64 FdDevice::writeData(const char *data, qint64 maxSize)
     }
     qint64 written = 0;
     while (written < maxSize) {
-        const size_t chunk = static_cast<size_t>(std::min<qint64>(maxSize - written, INT_MAX));
+        const auto chunk = static_cast<size_t>(std::min<qint64>(maxSize - written, INT_MAX));
         const ssize_t n = ::pwrite(m_fd, data + written, chunk, static_cast<off_t>(m_offset + pos() + written));
         if (n < 0 && errno == EINTR)
             continue;
@@ -192,5 +191,4 @@ qint64 FdDevice::writeData(const char *data, qint64 maxSize)
     return written;
 }
 
-} // namespace Bridge
-} // namespace NetVfs
+} // namespace NetVfs::Bridge

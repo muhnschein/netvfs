@@ -6,8 +6,9 @@
 #include <QtDBus/QDBusConnection>
 #include <QtDBus/QDBusMessage>
 
-namespace NetVfs {
-namespace Bridge {
+#include <algorithm>
+
+namespace NetVfs::Bridge {
 
 namespace {
 
@@ -17,17 +18,14 @@ bool isDBusName(const QString &s, QChar separator)
 {
     if (s.isEmpty() || s.size() > 255)
         return false;
-    for (const QChar c : s) {
-        if (!(c.isLetterOrNumber() && c.unicode() < 128) && c != QLatin1Char('_') && c != separator)
-            return false;
-    }
-    return true;
+    return std::all_of(s.cbegin(), s.cend(), [separator](QChar c) {
+        return (c.isLetterOrNumber() && c.unicode() < 128) || c == QLatin1Char('_') || c == separator;
+    });
 }
 
 bool parseArgument(const QString &spec, int accountId, const QString &provider, QVariant *out)
 {
-    const int colon = spec.indexOf(QLatin1Char(':'));
-    if (colon != 1)
+    if (spec.indexOf(QLatin1Char(':')) != 1)
         return false;
     QString value = spec.mid(2);
     value.replace(QStringLiteral("{accountId}"), QString::number(accountId));
@@ -124,5 +122,4 @@ Result Handoff::addAccount(const QString &provider) const
     return run(QStringLiteral("AddAccount"), 0, provider);
 }
 
-} // namespace Bridge
-} // namespace NetVfs
+} // namespace NetVfs::Bridge
