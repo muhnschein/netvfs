@@ -4,4 +4,5 @@ NETVFS_PROVIDER = ftp
 include(../backend.pri)
 
 include(ftp.pri)
+HEADERS += ftpplugin.h
 SOURCES += ftpplugin.cpp
