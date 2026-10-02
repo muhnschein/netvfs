@@ -30,8 +30,10 @@ PUBLIC_HEADERS = \
     ops.h \
     paths.h \
     probe.h \
+    prompter.h \
     secretsource.h \
     secure.h \
+    shellexec.h \
     sshkeys.h \
     transfer.h \
     types.h \
@@ -57,8 +59,10 @@ SOURCES = \
     ops.cpp \
     paths.cpp \
     probe.cpp \
+    prompter.cpp \
     secretsource.cpp \
     secure.cpp \
+    shellexec.cpp \
     sshkeys.cpp \
     transfer.cpp \
     types.cpp \
