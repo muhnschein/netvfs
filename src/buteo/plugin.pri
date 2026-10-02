@@ -23,6 +23,7 @@ DEFINES += \
     NETVFS_BUTEO_OPERATION=$$NETVFS_OPERATION \
     NETVFS_BUTEO_LOADER_IID=\\\"org.netvfs.buteo.$${NETVFS_CLIENT_PROFILE}-client\\\"
 
+HEADERS = $$PWD/loader/loader.h
 SOURCES = $$PWD/loader/loader.cpp
 LIBS += $$netvfsButeoLibs()
 PRE_TARGETDEPS += $$NETVFS_BUTEO_LIB

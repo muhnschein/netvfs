@@ -77,31 +77,37 @@ struct SessionSource
     }
 };
 
-// Records what a plugin reports (B-7: exactly one of success/error).
+// Records what a plugin reports (B-7: exactly one of success/error). Copies
+// share the record, so the connections never outlive it.
 struct Outcome
 {
-    int successes = 0;
-    int errors = 0;
-    int code = -1;
-    QString message;
-    QString profile;
-
-    int total() const { return successes + errors; }
-
-    void watch(Buteo::SyncPluginBase *plugin)
+    struct Record
     {
-        QObject::connect(plugin, &Buteo::SyncPluginBase::success, [this](const QString &p, const QString &m) {
-            ++successes;
-            code = Buteo::SyncResults::NO_ERROR;
-            profile = p;
-            message = m;
+        int successes = 0;
+        int errors = 0;
+        int code = -1;
+        QString message;
+        QString profile;
+    };
+    std::shared_ptr<Record> d = std::make_shared<Record>();
+
+    int total() const { return d->successes + d->errors; }
+
+    void watch(Buteo::SyncPluginBase *plugin) const
+    {
+        const std::shared_ptr<Record> record = d;
+        QObject::connect(plugin, &Buteo::SyncPluginBase::success, plugin, [record](const QString &p, const QString &m) {
+            ++record->successes;
+            record->code = Buteo::SyncResults::NO_ERROR;
+            record->profile = p;
+            record->message = m;
         });
-        QObject::connect(plugin, &Buteo::SyncPluginBase::error,
-                         [this](const QString &p, const QString &m, Buteo::SyncResults::MinorCode c) {
-            ++errors;
-            code = c;
-            profile = p;
-            message = m;
+        QObject::connect(plugin, &Buteo::SyncPluginBase::error, plugin,
+                         [record](const QString &p, const QString &m, Buteo::SyncResults::MinorCode c) {
+            ++record->errors;
+            record->code = c;
+            record->profile = p;
+            record->message = m;
         });
     }
 
@@ -306,6 +312,12 @@ private slots:
         fixture.reset();
     }
 
+    void cleanup()
+    {
+        // Clients of a finished test must not report into the next one.
+        qDeleteAll(findChildren<BackupClient *>(QString(), Qt::FindDirectChildrenOnly));
+    }
+
     void init()
     {
         FakeServer::instance()->reset();
@@ -403,9 +415,9 @@ private slots:
         QVERIFY(plugin->init());
         QVERIFY(plugin->startSync());
         QVERIFY(outcome.wait());
-        QCOMPARE(outcome.errors, 1);
-        QCOMPARE(outcome.code, int(Buteo::SyncResults::AUTHENTICATION_FAILURE));
-        QCOMPARE(outcome.profile, profile.name());
+        QCOMPARE(outcome.d->errors, 1);
+        QCOMPARE(outcome.d->code, int(Buteo::SyncResults::AUTHENTICATION_FAILURE));
+        QCOMPARE(outcome.d->profile, profile.name());
         QCOMPARE(fixture->value(id, QStringLiteral("netvfs/attention")).toString(), QStringLiteral("auth-failed"));
         QVERIFY(plugin->uninit());
     }
@@ -501,9 +513,9 @@ private slots:
         QVERIFY(QFile::exists(archive));
         service->emitBackupStatus(id, QStringLiteral("UploadingBackup"));
         QVERIFY(outcome.wait());
-        QCOMPARE(outcome.successes, 1);
-        QCOMPARE(outcome.errors, 0);
-        QCOMPARE(outcome.profile, profileName(Op::Backup, id));
+        QCOMPARE(outcome.d->successes, 1);
+        QCOMPARE(outcome.d->errors, 0);
+        QCOMPARE(outcome.d->profile, profileName(Op::Backup, id));
 
         const QString remote = dir + QLatin1Char('/') + QFileInfo(archive).fileName();
         QCOMPARE(FakeServer::instance()->fileData(remote), service->archiveContent);
@@ -536,7 +548,7 @@ private slots:
         const int id = createAccount();
         service->statusBeforeReplyAccount = id;
         Outcome outcome = run(makeClient(Op::Backup, id));
-        QCOMPARE(outcome.successes, 1);
+        QCOMPARE(outcome.d->successes, 1);
         QVERIFY(serverHas(QStringLiteral("Backups/device-1/") + QFileInfo(service->lastArchivePath).fileName()));
     }
 
@@ -565,7 +577,7 @@ private slots:
         service->emitBackupStatus(id, QStringLiteral("SomethingElse"));
         service->emitBackupStatus(id, QStringLiteral("UploadingBackup"));
         QVERIFY(outcome.wait());
-        QCOMPARE(outcome.successes, 1);
+        QCOMPARE(outcome.d->successes, 1);
         QVERIFY(!QFile::exists(archive));
         QVERIFY(QFile::exists(sibling));
     }
@@ -600,9 +612,9 @@ private slots:
         else
             service->emitBackupStatus(id, kind);
         QVERIFY(outcome.wait());
-        QCOMPARE(outcome.errors, 1);
-        QCOMPARE(outcome.code, code);
-        QVERIFY2(outcome.message.contains(text), qPrintable(outcome.message));
+        QCOMPARE(outcome.d->errors, 1);
+        QCOMPARE(outcome.d->code, code);
+        QVERIFY2(outcome.d->message.contains(text), qPrintable(outcome.d->message));
         QVERIFY(!QFile::exists(archive));
         QVERIFY(!QFileInfo::exists(QFileInfo(archive).absolutePath()));
         QCOMPARE(serverLog().count(QStringLiteral("connect")), 1);
@@ -628,9 +640,9 @@ private slots:
         service->failCreate = dbusError;
         service->returnEmptyPath = !dbusError;
         Outcome outcome = run(makeClient(Op::Backup, createAccount()));
-        QCOMPARE(outcome.errors, 1);
-        QCOMPARE(outcome.code, int(Buteo::SyncResults::INTERNAL_ERROR));
-        QVERIFY(outcome.message.contains(QStringLiteral("createBackupForSyncProfile")));
+        QCOMPARE(outcome.d->errors, 1);
+        QCOMPARE(outcome.d->code, int(Buteo::SyncResults::INTERNAL_ERROR));
+        QVERIFY(outcome.d->message.contains(QStringLiteral("createBackupForSyncProfile")));
     }
 
     // SPEC 8.4 step 2: a failing pre-flight ends the run before any archive is built.
@@ -659,10 +671,10 @@ private slots:
         FakeServer::instance()->failOps.insert(op, Result(static_cast<Error>(error), QStringLiteral("injected cause")));
         const int id = createAccount();
         Outcome outcome = run(makeClient(Op::Backup, id));
-        QCOMPARE(outcome.errors, 1);
-        QCOMPARE(outcome.code, code);
-        QVERIFY2(outcome.message.contains(QStringLiteral("injected cause")), qPrintable(outcome.message));
-        QVERIFY(outcome.message.contains(errorName(static_cast<Error>(error))));
+        QCOMPARE(outcome.d->errors, 1);
+        QCOMPARE(outcome.d->code, code);
+        QVERIFY2(outcome.d->message.contains(QStringLiteral("injected cause")), qPrintable(outcome.d->message));
+        QVERIFY(outcome.d->message.contains(errorName(static_cast<Error>(error))));
         QVERIFY(service->createCalls.isEmpty());
         QVERIFY(fixture->value(id, QStringLiteral("netvfs/attention")).toString().isEmpty());
         QVERIFY(!fixture->value(id, QStringLiteral("CredentialsNeedUpdate")).toBool());
@@ -675,8 +687,8 @@ private slots:
         FakeServer::instance()->identity = ServerIdentity::fromPin(pinOf('a'));
         const int id = createAccount(QStringLiteral("Backups"), pinOf('a'));
         Outcome outcome = run(makeClient(Op::Backup, id));
-        QCOMPARE(outcome.errors, 1);
-        QCOMPARE(outcome.code, int(Buteo::SyncResults::AUTHENTICATION_FAILURE));
+        QCOMPARE(outcome.d->errors, 1);
+        QCOMPARE(outcome.d->code, int(Buteo::SyncResults::AUTHENTICATION_FAILURE));
         QCOMPARE(fixture->value(id, QStringLiteral("netvfs/attention")).toString(), QStringLiteral("auth-failed"));
         QCOMPARE(fixture->value(id, QStringLiteral("CredentialsNeedUpdate")).toBool(), true);
         QCOMPARE(fixture->value(id, QStringLiteral("CredentialsNeedUpdateFrom")).toString(),
@@ -691,7 +703,7 @@ private slots:
         sessions.secretResult = Result(Error::AuthFailed, QStringLiteral("no identity"));
         const int id = createAccount();
         Outcome outcome = run(makeClient(Op::Backup, id));
-        QCOMPARE(outcome.code, int(Buteo::SyncResults::AUTHENTICATION_FAILURE));
+        QCOMPARE(outcome.d->code, int(Buteo::SyncResults::AUTHENTICATION_FAILURE));
         QCOMPARE(fixture->value(id, QStringLiteral("netvfs/attention")).toString(), QStringLiteral("auth-failed"));
         QVERIFY(serverLog().isEmpty());
     }
@@ -710,7 +722,7 @@ private slots:
         FakeServer::instance()->identity = ServerIdentity::fromPin(pinOf('b'));
         const int id = createAccount(QStringLiteral("Backups"), pin);
         Outcome outcome = run(makeClient(Op::Backup, id));
-        QCOMPARE(outcome.code, int(Buteo::SyncResults::AUTHENTICATION_FAILURE));
+        QCOMPARE(outcome.d->code, int(Buteo::SyncResults::AUTHENTICATION_FAILURE));
         QCOMPARE(fixture->value(id, QStringLiteral("netvfs/attention")).toString(),
                  QStringLiteral("server-identity-changed"));
         QCOMPARE(fixture->value(id, QStringLiteral("netvfs/fake/host_key_seen")).toString(), pinOf('b'));
@@ -741,10 +753,10 @@ private slots:
         const QString archive = service->lastArchivePath;
         service->emitBackupStatus(id, QStringLiteral("UploadingBackup"));
         QVERIFY(outcome.wait());
-        QCOMPARE(outcome.errors, 1);
-        QCOMPARE(outcome.code, int(noSpace ? Buteo::SyncResults::INTERNAL_ERROR : Buteo::SyncResults::CONNECTION_ERROR));
+        QCOMPARE(outcome.d->errors, 1);
+        QCOMPARE(outcome.d->code, int(noSpace ? Buteo::SyncResults::INTERNAL_ERROR : Buteo::SyncResults::CONNECTION_ERROR));
         if (noSpace)
-            QVERIFY(outcome.message.contains(QStringLiteral("NoSpace")));
+            QVERIFY(outcome.d->message.contains(QStringLiteral("NoSpace")));
         const QString remote = QStringLiteral("Backups/device-1/") + QFileInfo(archive).fileName();
         QVERIFY(!serverHas(remote));
         QVERIFY(!serverHas(remote + QStringLiteral(".part")));
@@ -779,8 +791,8 @@ private slots:
         client->abortSync(Sync::SYNC_CONNECTION_ERROR);
         QVERIFY(outcome.wait());
         QVERIFY(timer.elapsed() < 1000);
-        QCOMPARE(outcome.errors, 1);
-        QCOMPARE(outcome.code, int(Buteo::SyncResults::CONNECTION_ERROR));
+        QCOMPARE(outcome.d->errors, 1);
+        QCOMPARE(outcome.d->code, int(Buteo::SyncResults::CONNECTION_ERROR));
         const QString remote = QStringLiteral("Backups/device-1/") + QFileInfo(archive).fileName();
         QVERIFY(!serverHas(remote));
         QVERIFY(!serverHas(remote + QStringLiteral(".part")));
@@ -803,8 +815,8 @@ private slots:
         const QString archive = service->lastArchivePath;
         QTest::qWait(100);   // the reply with the path has arrived
         client->abortSync();
-        QCOMPARE(outcome.errors, 1);
-        QCOMPARE(outcome.code, int(Buteo::SyncResults::ABORTED));
+        QCOMPARE(outcome.d->errors, 1);
+        QCOMPARE(outcome.d->code, int(Buteo::SyncResults::ABORTED));
         QVERIFY(!QFile::exists(archive));
         service->emitBackupStatus(id, QStringLiteral("UploadingBackup"));
         QTest::qWait(100);
@@ -820,8 +832,8 @@ private slots:
         service->onCreate = [client]() { client->abortSync(); };
         Outcome outcome;
         QVERIFY(startBackup(client, &outcome));
-        QCOMPARE(outcome.errors, 1);
-        QCOMPARE(outcome.code, int(Buteo::SyncResults::ABORTED));
+        QCOMPARE(outcome.d->errors, 1);
+        QCOMPARE(outcome.d->code, int(Buteo::SyncResults::ABORTED));
         const QString archive = service->lastArchivePath;
         QTRY_VERIFY(!QFile::exists(archive));
         QVERIFY(!QFileInfo::exists(QFileInfo(archive).absolutePath()));
@@ -852,7 +864,7 @@ private slots:
         QVERIFY(outcome.wait());
         QTest::qWait(100);
         QCOMPARE(outcome.total(), 1);
-        QCOMPARE(outcome.code, int(Buteo::SyncResults::ABORTED));
+        QCOMPARE(outcome.d->code, int(Buteo::SyncResults::ABORTED));
     }
 
     // Abort racing a successful pre-flight: no archive is requested.
@@ -881,7 +893,7 @@ private slots:
         QVERIFY(outcome.wait());
         QTest::qWait(100);
         QCOMPARE(outcome.total(), 1);
-        QCOMPARE(outcome.code, int(Buteo::SyncResults::ABORTED));
+        QCOMPARE(outcome.d->code, int(Buteo::SyncResults::ABORTED));
         QVERIFY(service->createCalls.isEmpty());
     }
 
@@ -897,7 +909,7 @@ private slots:
         QVERIFY(client->startSync());
         QVERIFY(!client->startSync());   // one run at a time
         QVERIFY(outcome.wait());
-        QCOMPARE(outcome.successes, 1);
+        QCOMPARE(outcome.d->successes, 1);
         client->abortSync();
         QTest::qWait(50);
         QCOMPARE(outcome.total(), 1);
@@ -908,7 +920,30 @@ private slots:
         timer.start();
         while (outcome.total() < 2 && timer.elapsed() < 10000)
             QTest::qWait(5);
-        QCOMPARE(outcome.successes, 2);
+        QCOMPARE(outcome.d->successes, 2);
+    }
+
+    // uninit() during an upload stops the worker and removes the archive.
+    void uninitWhileUploading()
+    {
+        const int id = createAccount();
+        service->archiveContent = QByteArray(64 * 1024 * 40, 'u');
+        FakeServer::instance()->chunkDelayMs = 50;
+        BackupClient *client = makeClient(Op::Backup, id);
+        Outcome outcome;
+        QVERIFY(startBackup(client, &outcome));
+        const QString archive = service->lastArchivePath;
+        service->emitBackupStatus(id, QStringLiteral("UploadingBackup"));
+        QVERIFY(waitForLog(QStringLiteral("upload:")));
+        QElapsedTimer timer;
+        timer.start();
+        QVERIFY(client->uninit());
+        QVERIFY(timer.elapsed() < 1000);
+        QCOMPARE(FakeServer::instance()->liveBackends, 0);
+        QVERIFY(!QFile::exists(archive));
+        QTest::qWait(50);
+        QCOMPARE(outcome.total(), 0);
+        QVERIFY(client->uninit());
     }
 
     // Abort while the session is still opening.
@@ -920,8 +955,8 @@ private slots:
         QVERIFY(client->init());
         QVERIFY(client->startSync());
         client->abortSync(Sync::SYNC_PLUGIN_TIMEOUT);
-        QCOMPARE(outcome.errors, 1);
-        QCOMPARE(outcome.code, int(Buteo::SyncResults::PLUGIN_TIMEOUT));
+        QCOMPARE(outcome.d->errors, 1);
+        QCOMPARE(outcome.d->code, int(Buteo::SyncResults::PLUGIN_TIMEOUT));
         QTest::qWait(100);
         QCOMPARE(outcome.total(), 1);
         QVERIFY(serverLog().isEmpty());
@@ -941,7 +976,7 @@ private slots:
         QCOMPARE(outcome.total(), 0);
         service->emitBackupStatus(id, QStringLiteral("UploadingBackup"));
         QVERIFY(outcome.wait());
-        QCOMPARE(outcome.successes, 1);
+        QCOMPARE(outcome.d->successes, 1);
     }
 
     // B-6
@@ -966,7 +1001,7 @@ private slots:
         const int id = createAccount();
         addBackupFiles(QStringLiteral("Backups/device-1"));
         Outcome outcome = run(makeClient(Op::BackupQuery, id));
-        QCOMPARE(outcome.successes, 1);
+        QCOMPARE(outcome.d->successes, 1);
         QCOMPARE(service->cloudBackups.size(), 1);
         QCOMPARE(service->cloudBackups.at(0).first, profileName(Op::BackupQuery, id));
         QCOMPARE(service->cloudBackups.at(0).second,
@@ -982,7 +1017,7 @@ private slots:
         service->deviceId = QStringLiteral("phone-2");
         addBackupFiles(QStringLiteral("srv/backups/phone-2"));
         Outcome outcome = run(makeClient(Op::BackupQuery, id));
-        QCOMPARE(outcome.successes, 1);
+        QCOMPARE(outcome.d->successes, 1);
         QCOMPARE(service->cloudBackups.at(0).second,
                  QStringList() << QStringLiteral("/srv/backups/phone-2/a.tar")
                                << QStringLiteral("/srv/backups/phone-2/b.tar"));
@@ -992,7 +1027,7 @@ private slots:
     {
         const int id = createAccount();
         Outcome outcome = run(makeClient(Op::BackupQuery, id));
-        QCOMPARE(outcome.successes, 1);
+        QCOMPARE(outcome.d->successes, 1);
         QCOMPARE(service->cloudBackups.size(), 1);
         QVERIFY(service->cloudBackups.at(0).second.isEmpty());
         QVERIFY(!serverHas(QStringLiteral("Backups")));   // nothing created
@@ -1003,13 +1038,13 @@ private slots:
         const int id = createAccount();
         FakeServer::instance()->failOps.insert(QStringLiteral("list"), Result(Error::PermissionDenied, QStringLiteral("no")));
         Outcome outcome = run(makeClient(Op::BackupQuery, id));
-        QCOMPARE(outcome.code, int(Buteo::SyncResults::INTERNAL_ERROR));
+        QCOMPARE(outcome.d->code, int(Buteo::SyncResults::INTERNAL_ERROR));
         QVERIFY(service->cloudBackups.isEmpty());
 
         service->failSetCloudBackups = true;
         outcome = run(makeClient(Op::BackupQuery, id));
-        QCOMPARE(outcome.code, int(Buteo::SyncResults::INTERNAL_ERROR));
-        QVERIFY(outcome.message.contains(QStringLiteral("setCloudBackups")));
+        QCOMPARE(outcome.d->code, int(Buteo::SyncResults::INTERNAL_ERROR));
+        QVERIFY(outcome.d->message.contains(QStringLiteral("setCloudBackups")));
     }
 
     void deviceIdFailures_data()
@@ -1030,8 +1065,8 @@ private slots:
         service->failDeviceId = dbusError;
         service->deviceId = deviceId;
         Outcome outcome = run(makeClient(Op::BackupQuery, createAccount()));
-        QCOMPARE(outcome.errors, 1);
-        QCOMPARE(outcome.code, int(Buteo::SyncResults::INTERNAL_ERROR));
+        QCOMPARE(outcome.d->errors, 1);
+        QCOMPARE(outcome.d->code, int(Buteo::SyncResults::INTERNAL_ERROR));
         QVERIFY(serverLog().isEmpty());
     }
 
@@ -1039,12 +1074,12 @@ private slots:
     {
         // No such account.
         Outcome outcome = run(makeClient(Op::BackupQuery, 99999));
-        QCOMPARE(outcome.code, int(Buteo::SyncResults::INTERNAL_ERROR));
+        QCOMPARE(outcome.d->code, int(Buteo::SyncResults::INTERNAL_ERROR));
         // An account of another provider.
         const int sftp = createAccount(QStringLiteral("Backups"), QString(), QStringLiteral("sftp"));
         outcome = run(makeClient(Op::BackupQuery, sftp));
-        QCOMPARE(outcome.code, int(Buteo::SyncResults::INTERNAL_ERROR));
-        QVERIFY2(outcome.message.contains(QStringLiteral("not fake")), qPrintable(outcome.message));
+        QCOMPARE(outcome.d->code, int(Buteo::SyncResults::INTERNAL_ERROR));
+        QVERIFY2(outcome.d->message.contains(QStringLiteral("not fake")), qPrintable(outcome.d->message));
         QVERIFY(serverLog().isEmpty());
     }
 
@@ -1056,7 +1091,7 @@ private slots:
         const QString target = local->path() + QStringLiteral("/restore/b.tar");
         QDir().mkpath(local->path() + QStringLiteral("/restore"));
         Outcome outcome = run(makeClient(Op::BackupRestore, id, target));
-        QCOMPARE(outcome.successes, 1);
+        QCOMPARE(outcome.d->successes, 1);
         QCOMPARE(readFile(target), QByteArray(200 * 1024, 'r'));
         QVERIFY(!QFile::exists(target + QStringLiteral(".part")));
         QVERIFY(serverLog().contains(QStringLiteral("download:Backups/device-1/b.tar")));
@@ -1069,15 +1104,15 @@ private slots:
         const int id = createAccount();
         const QString target = local->path() + QStringLiteral("/missing.tar");
         Outcome outcome = run(makeClient(Op::BackupRestore, id, target));
-        QCOMPARE(outcome.code, int(Buteo::SyncResults::INTERNAL_ERROR));
-        QVERIFY2(outcome.message.contains(QStringLiteral("The backup missing.tar does not exist in Backups/device-1")),
-                 qPrintable(outcome.message));
+        QCOMPARE(outcome.d->code, int(Buteo::SyncResults::INTERNAL_ERROR));
+        QVERIFY2(outcome.d->message.contains(QStringLiteral("The backup missing.tar does not exist in Backups/device-1")),
+                 qPrintable(outcome.d->message));
         QVERIFY(!QFile::exists(target));
         QVERIFY(!QFile::exists(target + QStringLiteral(".part")));
 
         outcome = run(makeClient(Op::BackupRestore, id));
-        QCOMPARE(outcome.code, int(Buteo::SyncResults::INTERNAL_ERROR));
-        QVERIFY(outcome.message.contains(QStringLiteral("No backup file to restore")));
+        QCOMPARE(outcome.d->code, int(Buteo::SyncResults::INTERNAL_ERROR));
+        QVERIFY(outcome.d->message.contains(QStringLiteral("No backup file to restore")));
     }
 
     void restoreCanceledByService_data()
@@ -1112,8 +1147,8 @@ private slots:
         service->emitRestoreStatus(id, status);
         QVERIFY(outcome.wait());
         QVERIFY(timer.elapsed() < 1000);
-        QCOMPARE(outcome.errors, 1);
-        QCOMPARE(outcome.code, code);
+        QCOMPARE(outcome.d->errors, 1);
+        QCOMPARE(outcome.d->code, code);
         QVERIFY(!QFile::exists(target));
         QVERIFY(!QFile::exists(target + QStringLiteral(".part")));
     }
@@ -1129,7 +1164,7 @@ private slots:
         QVERIFY(client->startSync());
         service->emitRestoreStatus(id, QStringLiteral("Canceled"));
         QVERIFY(outcome.wait());
-        QCOMPARE(outcome.code, int(Buteo::SyncResults::ABORTED));
+        QCOMPARE(outcome.d->code, int(Buteo::SyncResults::ABORTED));
         QTest::qWait(100);
         QCOMPARE(outcome.total(), 1);
     }
@@ -1153,7 +1188,7 @@ private slots:
         qInstallMessageHandler(previous);
         QLoggingCategory::setFilterRules(QString());
         QVERIFY(started);
-        QCOMPARE(outcome.successes, 1);
+        QCOMPARE(outcome.d->successes, 1);
         QVERIFY(!capturedMessages().isEmpty());
         for (const QString &message : capturedMessages())
             QVERIFY2(!message.contains(QStringLiteral("s3cr3t")), qPrintable(message));
@@ -1187,7 +1222,7 @@ private slots:
         outcome.wait();
         identity->remove();
         QVERIFY(started);
-        QCOMPARE(outcome.successes, 1);
+        QCOMPARE(outcome.d->successes, 1);
     }
 
     // The worker in isolation.
