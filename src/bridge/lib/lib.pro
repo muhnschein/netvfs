@@ -30,6 +30,7 @@ HEADERS = \
     protocol.h \
     questions.h \
     runtime.h \
+    serverparts.h \
     session.h \
     streaming.h \
     unixfd.h \
@@ -47,11 +48,13 @@ SOURCES = \
     handoff.cpp \
     knownhosts.cpp \
     location.cpp \
+    locationbook.cpp \
     peercheck.cpp \
     pool.cpp \
     protocol.cpp \
     questions.cpp \
     runtime.cpp \
+    serverparts.cpp \
     session.cpp \
     sessionfiles.cpp \
     sessionjobs.cpp \

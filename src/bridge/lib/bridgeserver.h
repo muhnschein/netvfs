@@ -4,13 +4,16 @@
 
 #include "consentstore.h"
 #include "consentprompt.h"
-#include "handoff.h"
-#include "knownhosts.h"
 #include "location.h"
+
+// The moc of Qt 5.6 (Sailfish SDK) cannot parse C++17 nested namespaces; it
+// does not need the headers that have them.
+#ifndef Q_MOC_RUN
+#include "handoff.h"
 #include "peercheck.h"
-#include "pool.h"
 #include "questions.h"
 #include "runtime.h"
+#endif
 #include "wireconnection.h"
 
 #include <QtCore/QFileSystemWatcher>
@@ -19,7 +22,6 @@
 #include <QtCore/QTimer>
 
 #include <functional>
-#include <map>
 #include <memory>
 
 namespace NetVfs {
@@ -30,6 +32,10 @@ struct DiscoveredService;
 namespace NetVfs {
 namespace Bridge {
 
+class CopyJobs;
+class ConsumerQuota;
+class LocationBook;
+class NearbyService;
 class Session;
 
 // XB-17: per-consumer limits.
@@ -59,9 +65,10 @@ struct BridgeConfig {
 };
 
 // The bridge of one consumer (XB-2): listens, checks peers (XB-5), keeps the
-// consent (XB-6), the locations in scope (XB-7) with their connection pools
-// (XB-12), the questions and the per-consumer limits (XB-17), and asks to be
-// shut down 30 s after the last client left and no job runs.
+// consent (XB-6) and the sessions, and asks to be shut down 30 s after the
+// last client left and no job runs. The locations in scope with their
+// connection pools (XB-7, XB-12), the limits (XB-17), the copy jobs and the
+// discovery are parts of its own (serverparts.h).
 class BridgeServer : public QObject
 {
     Q_OBJECT
@@ -73,60 +80,30 @@ public:
     QString address() const { return m_wire.address(); }
 
     // ---- used by sessions (main thread) ----
-    const ConsumerInfo &consumer() const { return m_config.consumer; }
     const BridgeConfig &config() const { return m_config; }
     Consent consent() const { return m_consent; }
     void requestConsent();
-    MainQueue *mainQueue() { return &m_queue; }
+    MainQueue *mainQueue() const { return &m_queue; }   // post() is thread-safe
     QuestionBroker *questions() { return &m_questions; }
     const Handoff &handoff() const { return m_handoff; }
-    HostRegistry *hosts() { return &m_hosts; }
-    Connector *connector() { return m_connector.get(); }
     Session *session(quint64 id) const { return m_sessions.value(id); }
     QString tag() const;               // "[<consumer>]" for log lines
 
-    QVector<LocationSpec> visibleLocations() const;
-    bool findLocation(const QString &id, LocationSpec *out) const;
-    // The pool of a visible location (created on first use), or null with
-    // NotFound; PermissionDenied without consent.
-    Pool *pool(const QString &id, Result *error);
-    Pool *existingPool(const QString &id) const;
-    QString reserveAdHocId();
-    QString addAdHoc(const LocationSpec &spec, std::unique_ptr<Pool> pool);
-    bool forgetAdHoc(const QString &id);
-    void disconnectLocation(const QString &id);
+    ConsumerQuota *quota() const { return m_quota.get(); }
+    LocationBook *locations() const { return m_locations.get(); }
+    CopyJobs *copyJobs() const { return m_copyJobs.get(); }
+    NearbyService *nearby() const { return m_nearby.get(); }
+
     // Cancels the running work whose tokens were set (XB-13).
     void kickAll();
-    void closeWorkerHandle(const QString &loc, Worker *worker, quint32 handle);
-
-    // CopyAcross: two connections on a thread of their own; `done` runs on
-    // the main thread. Over the per-host limit: TooManyConnections.
-    using CopyBody = std::function<Result(Backend *source, Backend *destination, QVariantMap *extra)>;
-    using CopyDone = std::function<void(const Result &result, const QVariantMap &extra)>;
-    void startCopyJob(const LocationSpec &source, const LocationSpec &destination, const TaskContext &task,
-                      const CopyBody &body, const CopyDone &done);
-    void setAttention(int accountId, Attention attention, const QString &seenPin);
-    void fetchAccount(int accountId, const AccountDirectory::Fetched &done);
-    QString pinFor(const LocationSpec &spec) const;
-    bool storePin(const LocationSpec &spec, const QString &pin);
-
-    bool acquireRequest();
-    void releaseRequest();
-    bool acquireHandle();
-    void releaseHandle();
-    bool acquireJob();
-    void releaseJob();
-    int activeRequests() const { return m_requests; }
-    int openHandles() const { return m_handles; }
-    int runningJobs() const { return m_jobs; }
-
-    void setDiscovering(quint64 sessionId, bool on);
-    void noteActivity();
+    // The work in flight or the sessions changed: (re)starts or stops the idle timer.
+    void updateIdleTimer();
+    // Sends the signal `member` to every session that said Hello.
+    void broadcast(const char *member, const std::function<void(WireWriter &writer)> &writer = nullptr) const;
 
 Q_SIGNALS:
     // XB-2: 30 s without clients and jobs.
     void idleTimeout();
-    void consentChanged(NetVfs::Consent consent);
 
 private:
     void onNewConnection(WireConnection *connection);
@@ -134,48 +111,25 @@ private:
     void reloadConsent();
     void applyConsent(Consent consent);
     void onPromptAnswered(bool allow);
-    void refreshAccounts();
-    void broadcast(const char *member);
-    void maintainPools();
-    void updateIdleTimer();
-    void scheduleNearby();
-    void sendNearby();
-    void closeAllSessions();
     void watchConsentFile();
 
     BridgeConfig m_config;
-    MainQueue m_queue;
+    mutable MainQueue m_queue;
     WireServer m_wire;
     ConsentStore m_consentStore;
     Consent m_consent = Consent::Unknown;
     QFileSystemWatcher m_watcher;
     std::unique_ptr<ConsentPrompt> m_prompt;
-    std::unique_ptr<AccountDirectory> m_accounts;
-    QVector<AccountLocation> m_accountList;
-    KnownHosts m_knownHosts;
     QuestionBroker m_questions;
     Handoff m_handoff;
-    HostRegistry m_hosts;
-    std::unique_ptr<Connector> m_connector;
     std::unique_ptr<PeerChecker> m_peerChecker;
-
-    std::map<QString, std::unique_ptr<Pool>> m_pools;    // by location id
-    std::map<QString, LocationSpec> m_adHoc;
-    quint64 m_nextAdHoc = 1;
+    std::unique_ptr<ConsumerQuota> m_quota;
+    std::unique_ptr<LocationBook> m_locations;
+    std::unique_ptr<CopyJobs> m_copyJobs;
+    std::unique_ptr<NearbyService> m_nearby;
 
     QHash<quint64, Session *> m_sessions;
     quint64 m_nextSession = 1;
-    int m_requests = 0;
-    int m_handles = 0;
-    int m_jobs = 0;
-
-    struct CopyJob;
-    std::vector<std::shared_ptr<CopyJob>> m_copyJobs;
-
-    std::unique_ptr<Discovery> m_discovery;
-    QHash<quint64, bool> m_discovering;
-    QTimer m_nearbyTimer;
-
     QTimer m_idleTimer;
     QTimer m_maintenanceTimer;
 };

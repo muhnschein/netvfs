@@ -5,11 +5,11 @@
 #include "bridgeserver.h"
 #include "identity.h"
 #include "secure.h"
+#include "serverparts.h"
 
 #include <QtCore/QCryptographicHash>
 
-namespace NetVfs {
-namespace Bridge {
+namespace NetVfs::Bridge {
 
 namespace {
 
@@ -84,13 +84,13 @@ bool BridgeConnector::ask(const TaskContext &context, const QString &kind, const
                                                     [state](bool answered, QuestionAnswer a) {
                                                         state->rendezvous.set(Asked { answered, std::move(a) });
                                                     });
-        std::lock_guard<std::mutex> lock(state->mutex);
+        std::scoped_lock lock(state->mutex);
         state->id = id;
     });
     Asked asked;
     if (!state->rendezvous.wait(context.token.get(), m_questionTimeoutMs, &asked)) {
         server->mainQueue()->post([server, state]() {
-            std::lock_guard<std::mutex> lock(state->mutex);
+            std::scoped_lock lock(state->mutex);
             if (!state->id.isEmpty())
                 server->questions()->cancel(state->id);
         });
@@ -113,7 +113,7 @@ Result BridgeConnector::establishAccount(Backend *backend, const LocationSpec &s
     BridgeServer *server = m_server;
     const int accountId = spec.accountId;
     server->mainQueue()->post([server, fetched, accountId]() {
-        server->fetchAccount(accountId, [fetched](const Result &r, const ConnectionParams &p, const Credentials &c) {
+        server->locations()->fetch(accountId, [fetched](const Result &r, const ConnectionParams &p, const Credentials &c) {
             auto f = std::make_shared<Fetch>();
             f->result = r;
             f->params = p;
@@ -130,13 +130,12 @@ Result BridgeConnector::establishAccount(Backend *backend, const LocationSpec &s
     ServerIdentity seen;
     const Result r = NetVfs::establish(backend, f->params, f->credentials, &seen, &prompter);
     f->credentials.wipe();
-    const Attention attention = attentionForError(r.error());
-    if (attention != Attention::None) {
+    if (const Attention attention = attentionForError(r.error()); attention != Attention::None) {
         // XB-14: as Buteo does (SPEC 6.4); the pin seen is recorded for review.
         const QString pin = attention == Attention::ServerIdentityChanged || r.error() == Error::ServerIdentityUnknown
             ? seen.toPin() : QString();
         server->mainQueue()->post([server, accountId, attention, pin]() {
-            server->setAttention(accountId, attention, pin);
+            server->locations()->setAttention(accountId, attention, pin);
         });
     }
     return r;
@@ -146,11 +145,10 @@ Result BridgeConnector::checkAdHocIdentity(const ServerIdentity &seen, const Loc
                                            const TaskContext &context)
 {
     const QString key = spec.hostKey();
-    const Result r = checkServerIdentity(seen, m_knownHosts->pin(key));
-    if (r.error() != Error::ServerIdentityUnknown)
+    if (const Result r = checkServerIdentity(seen, m_knownHosts->pin(key)); r.error() != Error::ServerIdentityUnknown)
         return r;
-    QuestionAnswer answer;
-    if (!ask(context, QLatin1String(QuestionKind::IdentityUnknown), identityDetails(seen, spec), &answer)) {
+    if (QuestionAnswer answer;
+        !ask(context, QLatin1String(QuestionKind::IdentityUnknown), identityDetails(seen, spec), &answer)) {
         if (context.canceled())
             return Result(Error::Canceled);
         return Result(Error::ServerIdentityUnknown, QStringLiteral("The server identity was not accepted"));
@@ -211,5 +209,4 @@ bool QuestionPrompter::answer(const QString &name, const QString &instruction, c
     return true;
 }
 
-} // namespace Bridge
-} // namespace NetVfs
+} // namespace NetVfs::Bridge

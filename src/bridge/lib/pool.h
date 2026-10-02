@@ -5,16 +5,15 @@
 #include "worker.h"
 
 #include <QtCore/QHash>
-#include <QtCore/QList>
 
+#include <algorithm>
 #include <memory>
 #include <vector>
 
 // SPEC-v2 XB-12: connection pools per location, with lanes as the consumer
 // hints them: interactive 1, bulk 2, stream 1 connection, and at most 4
 // connections per host across all locations of the consumer.
-namespace NetVfs {
-namespace Bridge {
+namespace NetVfs::Bridge {
 
 class Pool;
 
@@ -38,17 +37,20 @@ public:
     int inUse(const QString &host) const { return m_used.value(host); }
     int perHost() const { return m_perHost; }
 
-    void addPool(Pool *pool) { m_pools.append(pool); }
-    void removePool(Pool *pool) { m_pools.removeAll(pool); }
+    void addPool(Pool *pool) { m_pools.push_back(pool); }
+    void removePool(Pool *pool) noexcept
+    {
+        m_pools.erase(std::remove(m_pools.begin(), m_pools.end(), pool), m_pools.end());
+    }
     // Frees a slot on `host` by closing an idle connection of another pool.
-    bool evictIdle(const QString &host, const Pool *except);
+    bool evictIdle(const QString &host, const Pool *except) const;
     // A slot came free: pools with waiting work retry.
-    void notifyReleased(const QString &host);
+    void notifyReleased(const QString &host) const;
 
 private:
     int m_perHost;
     QHash<QString, int> m_used;
-    QList<Pool *> m_pools;
+    std::vector<Pool *> m_pools;
 };
 
 class Pool
@@ -98,7 +100,6 @@ private:
     std::vector<Pending> m_pending;
 };
 
-} // namespace Bridge
-} // namespace NetVfs
+} // namespace NetVfs::Bridge
 
 #endif

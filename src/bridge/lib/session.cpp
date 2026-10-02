@@ -6,12 +6,12 @@
 #include "bridgeserver.h"
 #include "protocol.h"
 #include "secure.h"
+#include "serverparts.h"
 #include "url.h"
 
 #include <dbus/dbus.h>
 
-namespace NetVfs {
-namespace Bridge {
+namespace NetVfs::Bridge {
 
 namespace {
 
@@ -31,6 +31,20 @@ bool needsInsecureConsent(const ConnectionParams &params)
     return false;
 }
 
+// The URL, the user and the profile of an ad-hoc location; XH-6: a password in
+// the URL is refused.
+Result parseAdHoc(const Call &call, ConnectionParams *params, QString *path)
+{
+    Result r = Url::parse(call.text, params, path);
+    if (r.ok() && params->provider == QLatin1String("local"))
+        r = Result(Error::PermissionDenied, QStringLiteral("The bridge never accesses local files"));   // XB-11
+    if (r.ok() && !BackendLoader::isAvailable(params->provider))
+        r = Result(Error::Unsupported, QStringLiteral("No backend for %1 is installed").arg(params->provider));
+    if (r.ok() && !call.adHoc.securityProfile.isEmpty() && params->provider != QLatin1String("smb"))
+        r = Result(Error::ProtocolError, QStringLiteral("security_profile applies to SMB only"));
+    return r;
+}
+
 QString bytesOf(const char *s)
 {
     return QString::fromUtf8(s ? s : "");
@@ -42,7 +56,6 @@ Session::Session(quint64 id, WireConnection *connection, BridgeServer *server)
     : m_id(id)
     , m_connection(connection)
     , m_server(server)
-    , m_flow(std::make_shared<FlowControl>())
 {
     connection->setParent(this);
     connection->setHandler([this](DBusMessage *message) { onMessage(message); });
@@ -105,8 +118,8 @@ void Session::onMessage(DBusMessage *raw)
         replyError(message, Result(Error::ProtocolError, QStringLiteral("Hello must be the first call")));
         return;
     }
-    const MethodInfo *info = findMethod(member);
-    if (info && info->needsConsent && m_server->consent() != Consent::Granted) {
+    if (const MethodInfo *info = findMethod(member);
+        info && info->needsConsent && m_server->consent() != Consent::Granted) {
         wipeSecrets(&call);
         replyError(message, Result(Error::PermissionDenied,
                                    QStringLiteral("The user has not allowed this app to use network locations")));
@@ -116,61 +129,11 @@ void Session::onMessage(DBusMessage *raw)
     wipeSecrets(&call);
 }
 
-Session::Handler Session::handlerFor(Method method)
-{
-    static const QHash<int, Handler> handlers = {
-        { int(Method::Hello), &Session::onHello },
-        { int(Method::GetConsent), &Session::onGetConsent },
-        { int(Method::RequestConsent), &Session::onRequestConsent },
-        { int(Method::ListLocations), &Session::onListLocations },
-        { int(Method::Capabilities), &Session::onCapabilities },
-        { int(Method::Disconnect), &Session::onDisconnect },
-        { int(Method::ForgetAdHoc), &Session::onForgetAdHoc },
-        { int(Method::Discover), &Session::onDiscover },
-        { int(Method::List), &Session::onList },
-        { int(Method::Stat), &Session::onStat },
-        { int(Method::ReadLink), &Session::onReadLink },
-        { int(Method::SpaceInfo), &Session::onSpaceInfo },
-        { int(Method::Checksum), &Session::onChecksum },
-        { int(Method::MakeDir), &Session::onMakeDir },
-        { int(Method::RemoveFile), &Session::onRemoveFile },
-        { int(Method::RemoveDir), &Session::onRemoveDir },
-        { int(Method::Rename), &Session::onRename },
-        { int(Method::SetAttributes), &Session::onSetAttributes },
-        { int(Method::MakeSymlink), &Session::onMakeSymlink },
-        { int(Method::MakeHardlink), &Session::onMakeHardlink },
-        { int(Method::ServerCopy), &Session::onServerCopy },
-        { int(Method::OpenRead), &Session::onOpenRead },
-        { int(Method::Read), &Session::onRead },
-        { int(Method::ReadAhead), &Session::onReadAhead },
-        { int(Method::Close), &Session::onClose },
-        { int(Method::Upload), &Session::onUpload },
-        { int(Method::Download), &Session::onDownload },
-        { int(Method::CopyAcross), &Session::onCopyAcross },
-        { int(Method::RemoveTree), &Session::onRemoveTree },
-        { int(Method::Walk), &Session::onWalk },
-        { int(Method::Cancel), &Session::onCancel },
-        { int(Method::OpenAccountSettings), &Session::onOpenAccountSettings },
-        { int(Method::AddAccount), &Session::onAddAccount },
-    };
-    return handlers.value(int(method), nullptr);
-}
-
 void Session::dispatch(Call &call, const SharedMessage &message)
 {
-    if (call.method == Method::ConnectAdHoc) {
-        onConnectAdHoc(call, message);
+    if (dispatchAdmin(call, message) || dispatchFiles(call, message) || dispatchJobs(call, message))
         return;
-    }
-    if (call.method == Method::Answer) {
-        onAnswer(call, message);
-        return;
-    }
-    const Handler handler = handlerFor(call.method);
-    if (handler)
-        (this->*handler)(call, message);
-    else
-        replyError(message, Result(Error::Unsupported, QStringLiteral("No such method")), true);
+    replyError(message, Result(Error::Unsupported, QStringLiteral("No such method")), true);
 }
 
 // --------------------------------------------------------------- replies
@@ -248,7 +211,7 @@ TaskContext Session::context(quint64 op) const
 
 bool Session::acquireRequest(const SharedMessage &message)
 {
-    if (m_server->acquireRequest())
+    if (m_server->quota()->acquireRequest())
         return true;
     replyError(message, Result(Error::TooManyConnections, QStringLiteral("Too many requests"), QString(),
                                ConsumerLimits::RetryAfterMs));
@@ -258,7 +221,7 @@ bool Session::acquireRequest(const SharedMessage &message)
 Pool *Session::poolFor(const QString &loc, const SharedMessage &message)
 {
     Result error;
-    Pool *pool = m_server->pool(loc, &error);
+    Pool *pool = m_server->locations()->pool(loc, &error);
     if (!pool)
         replyError(message, error);
     return pool;
@@ -278,13 +241,13 @@ void Session::runOnPool(Pool *pool, Lane lane, const SharedMessage &message, con
         return;
     const quint64 op = newOp(message, 0);
     m_ops[op].completion = completion;
-    BridgeServer *server = m_server;
+    const BridgeServer *server = m_server;
     const quint64 sessionId = m_id;
     pool->submit(lane, context(op), [server, sessionId, op, work](Backend *backend, const Result &ready, Worker *) {
         Writer writer;
         const Result r = ready.ok() ? work(backend, &writer) : ready;
         server->mainQueue()->post([server, sessionId, op, r, writer]() {
-            server->releaseRequest();
+            server->quota()->releaseRequest();
             if (Session *s = server->session(sessionId))
                 s->finishRequest(op, r, writer);
         });
@@ -319,22 +282,14 @@ void Session::cancelAll()
     m_ops.clear();
     m_publicOps.clear();
     for (auto it = m_handles.cbegin(); it != m_handles.cend(); ++it) {
-        m_server->releaseHandle();
-        Pool *pool = m_server->existingPool(it->loc);
-        if (pool && pool->owns(it->worker)) {
-            const quint32 handle = it->workerHandle;
-            Pool::submitTo(it->worker, TaskContext(), [handle](Backend *, const Result &, Worker *worker) {
-                if (worker)
-                    worker->closeHandle(handle);
-                return Result::success();
-            });
-        }
+        m_server->quota()->releaseHandle();
+        m_server->locations()->closeWorkerHandle(it->loc, it->worker, it->workerHandle);
     }
     m_handles.clear();
     m_server->questions()->dropSession(m_id);
     if (m_discovering) {
         m_discovering = false;
-        m_server->setDiscovering(m_id, false);
+        m_server->nearby()->setDiscovering(m_id, false);
     }
     m_server->kickAll();
 }
@@ -348,36 +303,103 @@ void Session::closeConnection()
 
 // ------------------------------------------------------------- handlers
 
-void Session::onHello(const Call &call, const SharedMessage &message)
+// The session, the locations, the questions and the handoff.
+class Session::Admin
 {
-    m_hello = true;
-    qCDebug(lcNetVfsBridge).noquote() << m_server->tag() << "Hello from" << call.text << "protocol" << call.number;
-    reply(message, [](WireWriter &w) {
+public:
+    explicit Admin(Session &session) : m_session(session) {}
+
+    // Handles the calls of this area; false for any other method.
+    bool dispatch(Call &call, const SharedMessage &message) const;
+    // An accepted ad-hoc location: its pool connects first (XB-14).
+    void connectAdHoc(const LocationSpec &specIn, const SharedMessage &message) const;
+
+private:
+    using Handler = void (Admin::*)(const Call &call, const SharedMessage &message) const;
+
+    void onHello(const Call &call, const SharedMessage &message) const;
+    void onGetConsent(const Call &call, const SharedMessage &message) const;
+    void onRequestConsent(const Call &call, const SharedMessage &message) const;
+    void onListLocations(const Call &call, const SharedMessage &message) const;
+    void onCapabilities(const Call &call, const SharedMessage &message) const;
+    void onDisconnect(const Call &call, const SharedMessage &message) const;
+    void onConnectAdHoc(Call &call, const SharedMessage &message) const;   // moves the secret out
+    void onForgetAdHoc(const Call &call, const SharedMessage &message) const;
+    void onDiscover(const Call &call, const SharedMessage &message) const;
+    void onCancel(const Call &call, const SharedMessage &message) const;
+    void onAnswer(Call &call, const SharedMessage &message) const;         // moves the answers out
+    void onOpenAccountSettings(const Call &call, const SharedMessage &message) const;
+    void onAddAccount(const Call &call, const SharedMessage &message) const;
+
+    Session &m_session;
+};
+
+bool Session::dispatchAdmin(Call &call, const SharedMessage &message)
+{
+    return Admin(*this).dispatch(call, message);
+}
+
+bool Session::Admin::dispatch(Call &call, const SharedMessage &message) const
+{
+    if (call.method == Method::ConnectAdHoc) {
+        onConnectAdHoc(call, message);
+        return true;
+    }
+    if (call.method == Method::Answer) {
+        onAnswer(call, message);
+        return true;
+    }
+    static const QHash<int, Handler> handlers = {
+        { static_cast<int>(Method::Hello), &Admin::onHello },
+        { static_cast<int>(Method::GetConsent), &Admin::onGetConsent },
+        { static_cast<int>(Method::RequestConsent), &Admin::onRequestConsent },
+        { static_cast<int>(Method::ListLocations), &Admin::onListLocations },
+        { static_cast<int>(Method::Capabilities), &Admin::onCapabilities },
+        { static_cast<int>(Method::Disconnect), &Admin::onDisconnect },
+        { static_cast<int>(Method::ForgetAdHoc), &Admin::onForgetAdHoc },
+        { static_cast<int>(Method::Discover), &Admin::onDiscover },
+        { static_cast<int>(Method::Cancel), &Admin::onCancel },
+        { static_cast<int>(Method::OpenAccountSettings), &Admin::onOpenAccountSettings },
+        { static_cast<int>(Method::AddAccount), &Admin::onAddAccount },
+    };
+    const auto it = handlers.constFind(static_cast<int>(call.method));
+    if (it == handlers.constEnd())
+        return false;
+    (this->*(it.value()))(call, message);
+    return true;
+}
+
+void Session::Admin::onHello(const Call &call, const SharedMessage &message) const
+{
+    BridgeServer *server = m_session.m_server;
+    m_session.m_hello = true;
+    qCDebug(lcNetVfsBridge).noquote() << server->tag() << "Hello from" << call.text << "protocol" << call.number;
+    m_session.reply(message, [](WireWriter &w) {
         w.uint32(Protocol::Version).string(Protocol::bridgeVersion()).strings(Protocol::features());
     });
-    if (m_server->consent() == Consent::Unknown)
-        m_server->requestConsent();   // XB-6: first Hello while unknown
+    if (server->consent() == Consent::Unknown)
+        server->requestConsent();   // XB-6: first Hello while unknown
 }
 
-void Session::onGetConsent(const Call &, const SharedMessage &message)
+void Session::Admin::onGetConsent(const Call &, const SharedMessage &message) const
 {
-    const QString consent = consentToString(m_server->consent());
-    reply(message, [consent](WireWriter &w) { w.string(consent); });
+    const QString consent = consentToString(m_session.m_server->consent());
+    m_session.reply(message, [consent](WireWriter &w) { w.string(consent); });
 }
 
-void Session::onRequestConsent(const Call &, const SharedMessage &message)
+void Session::Admin::onRequestConsent(const Call &, const SharedMessage &message) const
 {
-    if (m_server->consent() != Consent::Granted)
-        m_server->requestConsent();
-    reply(message);
+    if (m_session.m_server->consent() != Consent::Granted)
+        m_session.m_server->requestConsent();
+    m_session.reply(message);
 }
 
-void Session::onListLocations(const Call &, const SharedMessage &message)
+void Session::Admin::onListLocations(const Call &, const SharedMessage &message) const
 {
     // XB-6: nothing until granted.
-    const QVector<LocationSpec> locations = m_server->consent() == Consent::Granted
-        ? m_server->visibleLocations() : QVector<LocationSpec>();
-    reply(message, [locations](WireWriter &w) {
+    const QVector<LocationSpec> locations = m_session.m_server->consent() == Consent::Granted
+        ? m_session.m_server->locations()->visible() : QVector<LocationSpec>();
+    m_session.reply(message, [locations](WireWriter &w) {
         w.openArray("(sssa{sv})");
         for (const LocationSpec &spec : locations) {
             w.openStruct().string(spec.id).string(spec.provider).string(spec.name).variantMap(spec.info()).close();
@@ -386,40 +408,33 @@ void Session::onListLocations(const Call &, const SharedMessage &message)
     });
 }
 
-void Session::onCapabilities(const Call &call, const SharedMessage &message)
+void Session::Admin::onCapabilities(const Call &call, const SharedMessage &message) const
 {
-    run(call, message, [](Backend *backend, Writer *out) {
+    m_session.run(call, message, [](const Backend *backend, Writer *out) {
         const Capabilities capabilities = backend->capabilities();
         *out = [capabilities](WireWriter &w) { Protocol::writeCapabilities(w, capabilities); };
         return Result::success();
     });
 }
 
-void Session::onDisconnect(const Call &call, const SharedMessage &message)
+void Session::Admin::onDisconnect(const Call &call, const SharedMessage &message) const
 {
-    Result error;
-    if (!m_server->pool(call.loc, &error)) {
-        replyError(message, error);
+    LocationBook *locations = m_session.m_server->locations();
+    if (Result error; !locations->pool(call.loc, &error)) {
+        m_session.replyError(message, error);
         return;
     }
-    m_server->disconnectLocation(call.loc);
-    reply(message);
+    locations->disconnect(call.loc);
+    m_session.reply(message);
 }
 
-void Session::onConnectAdHoc(Call &call, const SharedMessage &message)
+void Session::Admin::onConnectAdHoc(Call &call, const SharedMessage &message) const
 {
     ConnectionParams params;
     QString path;
-    Result r = Url::parse(call.text, &params, &path);   // XH-6: a password in the URL is refused
-    if (r.ok() && params.provider == QLatin1String("local"))
-        r = Result(Error::PermissionDenied, QStringLiteral("The bridge never accesses local files"));   // XB-11
-    if (r.ok() && !BackendLoader::isAvailable(params.provider))
-        r = Result(Error::Unsupported, QStringLiteral("No backend for %1 is installed").arg(params.provider));
-    if (r.ok() && !call.adHoc.securityProfile.isEmpty() && params.provider != QLatin1String("smb"))
-        r = Result(Error::ProtocolError, QStringLiteral("security_profile applies to SMB only"));
-    if (!r.ok()) {
+    if (const Result r = parseAdHoc(call, &params, &path); !r.ok()) {
         wipeSecrets(&call);
-        replyError(message, r, r.error() == Error::ProtocolError);
+        m_session.replyError(message, r, r.error() == Error::ProtocolError);
         return;
     }
     if (!call.adHoc.user.isEmpty())
@@ -445,35 +460,37 @@ void Session::onConnectAdHoc(Call &call, const SharedMessage &message)
     details.insert(QStringLiteral("url"), Url::format(params, path));
     details.insert(QStringLiteral("provider"), params.provider);
     details.insert(QStringLiteral("host"), params.host);
-    BridgeServer *server = m_server;
-    const quint64 sessionId = m_id;
-    m_server->questions()->ask(m_id, QLatin1String(QuestionKind::InsecureConsent), details,
-                               [server, sessionId, spec, message](bool answered, QuestionAnswer answer) {
+    const BridgeServer *server = m_session.m_server;
+    const quint64 sessionId = m_session.m_id;
+    m_session.m_server->questions()->ask(sessionId, QLatin1String(QuestionKind::InsecureConsent), details,
+                                         [server, sessionId, spec, message](bool answered, const QuestionAnswer &answer) {
         Session *s = server->session(sessionId);
         if (!s)
             return;
         if (!answered || !answer.accept) {
-            s->replyError(message, Result(Error::SecurityPolicy, QStringLiteral("The insecure connection was declined")));
+            s->replyError(message, Result(Error::SecurityPolicy,
+                                          QStringLiteral("The insecure connection was declined")));
             return;
         }
         LocationSpec accepted = spec;
         accepted.params.options.insert(QStringLiteral("allow_insecure"), QStringLiteral("true"));
-        s->connectAdHoc(accepted, message);
+        Admin(*s).connectAdHoc(accepted, message);
     });
 }
 
-void Session::connectAdHoc(const LocationSpec &specIn, const SharedMessage &message)
+void Session::Admin::connectAdHoc(const LocationSpec &specIn, const SharedMessage &message) const
 {
+    const BridgeServer *server = m_session.m_server;
+    LocationBook *locations = server->locations();
     LocationSpec spec = specIn;
-    spec.id = m_server->reserveAdHocId();
+    spec.id = locations->reserveAdHocId();
     auto pool = std::make_shared<std::unique_ptr<Pool>>(
-        std::make_unique<Pool>(spec, m_server->connector(), m_server->hosts()));
+        std::make_unique<Pool>(spec, locations->connector(), locations->hosts()));
     Pool *raw = pool->get();
-    BridgeServer *server = m_server;
-    const quint64 sessionId = m_id;
+    const quint64 sessionId = m_session.m_id;
     // Establishing is what the first item does (identity, then the secret).
-    runOnPool(raw, Lane::Interactive, message, [](Backend *, Writer *) { return Result::success(); },
-              [server, sessionId, spec, pool, message](const Result &result, const Writer &) {
+    m_session.runOnPool(raw, Lane::Interactive, message, [](Backend *, Writer *) { return Result::success(); },
+                        [server, sessionId, spec, pool, message](const Result &result, const auto &) {
         Session *s = server->session(sessionId);
         if (!result.ok()) {
             pool->reset();
@@ -481,79 +498,76 @@ void Session::connectAdHoc(const LocationSpec &specIn, const SharedMessage &mess
                 s->replyError(message, result);
             return;
         }
-        const QString id = server->addAdHoc(spec, std::move(*pool));
+        const QString id = server->locations()->addAdHoc(spec, std::move(*pool));
         if (s)
             s->reply(message, [id](WireWriter &w) { w.string(id); });
     });
 }
 
-void Session::onForgetAdHoc(const Call &call, const SharedMessage &message)
+void Session::Admin::onForgetAdHoc(const Call &call, const SharedMessage &message) const
 {
-    if (!m_server->forgetAdHoc(call.loc)) {
-        replyError(message, Result(Error::NotFound, QStringLiteral("No such ad-hoc location")));
+    if (!m_session.m_server->locations()->forgetAdHoc(call.loc)) {
+        m_session.replyError(message, Result(Error::NotFound, QStringLiteral("No such ad-hoc location")));
         return;
     }
-    reply(message);
+    m_session.reply(message);
 }
 
-void Session::onDiscover(const Call &call, const SharedMessage &message)
+void Session::Admin::onDiscover(const Call &call, const SharedMessage &message) const
 {
-    if (call.flag != m_discovering) {
-        m_discovering = call.flag;
-        m_server->setDiscovering(m_id, call.flag);
+    if (call.flag != m_session.m_discovering) {
+        m_session.m_discovering = call.flag;
+        m_session.m_server->nearby()->setDiscovering(m_session.m_id, call.flag);
     }
-    reply(message);
+    m_session.reply(message);
 }
 
-void Session::onCancel(const Call &call, const SharedMessage &message)
+void Session::Admin::onCancel(const Call &call, const SharedMessage &message) const
 {
-    const quint64 op = m_publicOps.value(call.number);
-    if (op != 0) {
-        const auto it = m_ops.constFind(op);
-        if (it != m_ops.constEnd())
+    if (const quint64 op = m_session.m_publicOps.value(call.number); op != 0) {
+        if (const auto it = m_session.m_ops.constFind(op); it != m_session.m_ops.constEnd())
             it->token->cancel();
-        m_server->kickAll();
-    } else if (call.number == 0 || call.number >= m_nextPublicId) {
-        replyError(message, Result(Error::NotFound, QStringLiteral("No such request or job")));
+        m_session.m_server->kickAll();
+    } else if (call.number == 0 || call.number >= m_session.m_nextPublicId) {
+        m_session.replyError(message, Result(Error::NotFound, QStringLiteral("No such request or job")));
         return;
     }
-    reply(message);   // an id that already finished: nothing to do
+    m_session.reply(message);   // an id that already finished: nothing to do
 }
 
-void Session::onAnswer(Call &call, const SharedMessage &message)
+void Session::Admin::onAnswer(Call &call, const SharedMessage &message) const
 {
     QuestionAnswer answer;
     answer.accept = call.answer.accept;
     answer.answers.swap(call.answer.answers);   // single owner (XSEC-6)
-    if (!m_server->questions()->answer(m_id, call.text, std::move(answer))) {
-        replyError(message, Result(Error::NotFound, QStringLiteral("No such question")));
+    if (!m_session.m_server->questions()->answer(m_session.m_id, call.text, std::move(answer))) {
+        m_session.replyError(message, Result(Error::NotFound, QStringLiteral("No such question")));
         return;
     }
-    reply(message);
+    m_session.reply(message);
 }
 
-void Session::onOpenAccountSettings(const Call &call, const SharedMessage &message)
+void Session::Admin::onOpenAccountSettings(const Call &call, const SharedMessage &message) const
 {
     LocationSpec spec;
-    if (!m_server->findLocation(call.loc, &spec) || spec.kind != LocationKind::Account) {
-        replyError(message, Result(Error::NotFound, QStringLiteral("No such account")));
+    if (!m_session.m_server->locations()->find(call.loc, &spec) || spec.kind != LocationKind::Account) {
+        m_session.replyError(message, Result(Error::NotFound, QStringLiteral("No such account")));
         return;
     }
-    const Result r = m_server->handoff().openAccountSettings(spec.accountId, spec.provider);
+    const Result r = m_session.m_server->handoff().openAccountSettings(spec.accountId, spec.provider);
     if (r.ok())
-        reply(message);
+        m_session.reply(message);
     else
-        replyError(message, r);
+        m_session.replyError(message, r);
 }
 
-void Session::onAddAccount(const Call &call, const SharedMessage &message)
+void Session::Admin::onAddAccount(const Call &call, const SharedMessage &message) const
 {
-    const Result r = m_server->handoff().addAccount(call.text);
+    const Result r = m_session.m_server->handoff().addAccount(call.text);
     if (r.ok())
-        reply(message);
+        m_session.reply(message);
     else
-        replyError(message, r);
+        m_session.replyError(message, r);
 }
 
-} // namespace Bridge
-} // namespace NetVfs
+} // namespace NetVfs::Bridge

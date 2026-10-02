@@ -7,17 +7,15 @@
 #include "location.h"
 #include "runtime.h"
 
-#include <QtCore/QHash>
-
 #include <condition_variable>
 #include <deque>
 #include <functional>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <thread>
 
-namespace NetVfs {
-namespace Bridge {
+namespace NetVfs::Bridge {
 
 // Who a piece of work is for: the session (for questions) and the request's
 // cancel token.
@@ -64,7 +62,7 @@ public:
     int openHandles() const { return m_handleCount.load(); }
 
     // Worker thread only (inside Work).
-    quint32 addHandle(ReadHandle *handle);     // takes ownership
+    quint32 addHandle(std::unique_ptr<ReadHandle> handle);
     ReadHandle *handle(quint32 id) const;
     void closeHandle(quint32 id);
 
@@ -88,17 +86,16 @@ private:
     bool m_stopping = false;
     bool m_running = false;
     CancelTokenPtr m_currentToken;
-    Backend *m_backend = nullptr;      // created and deleted on the worker thread
+    std::unique_ptr<Backend> m_backend;   // created and deleted on the worker thread
     qint64 m_lastActivityMs = 0;
 
-    QHash<quint32, ReadHandle *> m_handles;   // worker thread
+    std::map<quint32, std::unique_ptr<ReadHandle>> m_handles;   // worker thread
     quint32 m_nextHandle = 1;
     std::atomic<int> m_handleCount { 0 };
     std::atomic<bool> m_finished { false };
     std::thread m_thread;
 };
 
-} // namespace Bridge
-} // namespace NetVfs
+} // namespace NetVfs::Bridge
 
 #endif
