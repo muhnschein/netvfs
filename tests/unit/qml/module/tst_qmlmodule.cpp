@@ -119,7 +119,7 @@ private slots:
             "QtObject {\n"
             "    property NetVfsProbe probe: NetVfsProbe {}\n"
             "    property SshKeyTool keys: SshKeyTool {}\n"
-            "    property int port: NetVfsHelpers.defaultPort(\"smb\")\n"
+            "    property int port: NetVfsInput.defaultPort(\"smb\")\n"
             "    property bool idle: probe.state === NetVfsProbe.Idle && !probe.busy\n"
             "    property bool unchecked: probe.identityStatus === NetVfsProbe.IdentityNotChecked\n"
             "    property int authFailed: NetVfsProbe.AuthFailed\n"

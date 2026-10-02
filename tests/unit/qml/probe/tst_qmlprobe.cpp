@@ -150,14 +150,14 @@ private slots:
         QSignalSpy identified(&probe, &NetVfsProbe::identified);
         QSignalSpy failed(&probe, &NetVfsProbe::failed);
         probe.identify(params());
-        QCOMPARE(probe.state(), NetVfsProbe::Identifying);
+        QCOMPARE(probe.state(), NetVfsProbe::State::Identifying);
         QVERIFY(probe.busy());
         QTRY_COMPARE(identified.count(), 1);
         QCOMPARE(failed.count(), 0);
-        QCOMPARE(probe.state(), NetVfsProbe::Identified);
+        QCOMPARE(probe.state(), NetVfsProbe::State::Identified);
         QVERIFY(!probe.busy());
-        QCOMPARE(probe.identityStatus(), NetVfsProbe::IdentityUnknown);
-        QCOMPARE(probe.error(), NetVfsProbe::NoError);
+        QCOMPARE(probe.identityStatus(), NetVfsProbe::IdentityStatus::IdentityUnknown);
+        QCOMPARE(probe.error(), NetVfsProbe::ErrorCode::NoError);
         const QVariantMap identity = probe.serverIdentity();
         QCOMPARE(identity.value(QStringLiteral("algorithm")).toString(), QStringLiteral("ssh-ed25519"));
         QCOMPARE(identity.value(QStringLiteral("fingerprint")).toString(), NetVfsUi::sha256Fingerprint(KeyBlob));
@@ -170,10 +170,10 @@ private slots:
         QTest::addColumn<QByteArray>("serverKey");
         QTest::addColumn<QString>("pin");
         QTest::addColumn<int>("status");
-        QTest::newRow("matches") << KeyBlob << pinOf(KeyBlob) << int(NetVfsProbe::IdentityMatches);
-        QTest::newRow("changed") << OtherBlob << pinOf(KeyBlob) << int(NetVfsProbe::IdentityChanged);
-        QTest::newRow("no identity") << QByteArray() << QString() << int(NetVfsProbe::NoIdentity);
-        QTest::newRow("identity vanished") << QByteArray() << pinOf(KeyBlob) << int(NetVfsProbe::IdentityChanged);
+        QTest::newRow("matches") << KeyBlob << pinOf(KeyBlob) << int(NetVfsProbe::IdentityStatus::IdentityMatches);
+        QTest::newRow("changed") << OtherBlob << pinOf(KeyBlob) << int(NetVfsProbe::IdentityStatus::IdentityChanged);
+        QTest::newRow("no identity") << QByteArray() << QString() << int(NetVfsProbe::IdentityStatus::NoIdentity);
+        QTest::newRow("identity vanished") << QByteArray() << pinOf(KeyBlob) << int(NetVfsProbe::IdentityStatus::IdentityChanged);
     }
 
     void identifyComparesPin()
@@ -201,12 +201,12 @@ private slots:
         probe.identify(params());
         QTRY_COMPARE(failed.count(), 1);
         QCOMPARE(identified.count(), 0);
-        QCOMPARE(probe.state(), NetVfsProbe::Failed);
-        QCOMPARE(probe.error(), NetVfsProbe::NetworkUnreachable);
+        QCOMPARE(probe.state(), NetVfsProbe::State::Failed);
+        QCOMPARE(probe.error(), NetVfsProbe::ErrorCode::NetworkUnreachable);
         QCOMPARE(probe.errorText(),
                  QStringLiteral("Cannot reach the server. Check the server name, the port and the network connection."));
         QCOMPARE(probe.errorDetail(), QStringLiteral("no route to host"));
-        QCOMPARE(probe.identityStatus(), NetVfsProbe::IdentityNotChecked);
+        QCOMPARE(probe.identityStatus(), NetVfsProbe::IdentityStatus::IdentityNotChecked);
     }
 
     void missingBackend()
@@ -215,8 +215,8 @@ private slots:
         QSignalSpy failed(&probe, &NetVfsProbe::failed);
         probe.identify(params(QString(), QStringLiteral("nope")));
         QCOMPARE(failed.count(), 1);
-        QCOMPARE(probe.state(), NetVfsProbe::Failed);
-        QCOMPARE(probe.error(), NetVfsProbe::Unsupported);
+        QCOMPARE(probe.state(), NetVfsProbe::State::Failed);
+        QCOMPARE(probe.error(), NetVfsProbe::ErrorCode::Unsupported);
         QCOMPARE(probe.errorText(), QStringLiteral("Support for this kind of server is not installed on this device."));
         probe.verify(params(QString(), QStringLiteral("nope")), credentials(QStringLiteral("secret")), QString());
         QCOMPARE(failed.count(), 2);
@@ -231,11 +231,11 @@ private slots:
         NetVfsProbe probe;
         QSignalSpy verified(&probe, &NetVfsProbe::verified);
         probe.verify(params(pinOf(KeyBlob)), credentials(QStringLiteral("secret")), QStringLiteral("Sailfish OS/Backups"));
-        QCOMPARE(probe.state(), NetVfsProbe::Verifying);
+        QCOMPARE(probe.state(), NetVfsProbe::State::Verifying);
         QTRY_COMPARE(verified.count(), 1);
-        QCOMPARE(probe.state(), NetVfsProbe::Verified);
+        QCOMPARE(probe.state(), NetVfsProbe::State::Verified);
         QCOMPARE(probe.freeBytes(), Q_INT64_C(123456789));
-        QCOMPARE(probe.identityStatus(), NetVfsProbe::IdentityMatches);
+        QCOMPARE(probe.identityStatus(), NetVfsProbe::IdentityStatus::IdentityMatches);
         QVERIFY(server->exists(QStringLiteral("Sailfish OS/Backups")));
         const QStringList log = serverLog();
         QCOMPARE(log.value(0), QStringLiteral("connect"));
@@ -253,7 +253,7 @@ private slots:
         probe.verify(params(), credentials(QStringLiteral("secret")), QStringLiteral("b"));
         QTRY_COMPARE(verified.count(), 1);
         QCOMPARE(probe.freeBytes(), Q_INT64_C(-1));
-        QCOMPARE(probe.identityStatus(), NetVfsProbe::NoIdentity);
+        QCOMPARE(probe.identityStatus(), NetVfsProbe::IdentityStatus::NoIdentity);
     }
 
     void verifyChecksPinBeforeCredentials_data()
@@ -261,9 +261,9 @@ private slots:
         QTest::addColumn<QString>("pin");
         QTest::addColumn<int>("error");
         QTest::addColumn<int>("status");
-        QTest::newRow("no pin") << QString() << int(NetVfsProbe::ServerIdentityUnknown) << int(NetVfsProbe::IdentityUnknown);
-        QTest::newRow("other pin") << pinOf(OtherBlob) << int(NetVfsProbe::ServerIdentityChanged)
-                                   << int(NetVfsProbe::IdentityChanged);
+        QTest::newRow("no pin") << QString() << int(NetVfsProbe::ErrorCode::ServerIdentityUnknown) << int(NetVfsProbe::IdentityStatus::IdentityUnknown);
+        QTest::newRow("other pin") << pinOf(OtherBlob) << int(NetVfsProbe::ErrorCode::ServerIdentityChanged)
+                                   << int(NetVfsProbe::IdentityStatus::IdentityChanged);
     }
 
     void verifyChecksPinBeforeCredentials()
@@ -289,11 +289,11 @@ private slots:
         QTest::addColumn<QString>("failOp");
         QTest::addColumn<int>("error");
         QTest::addColumn<QString>("text");
-        QTest::newRow("wrong secret") << "wrong" << QString() << int(NetVfsProbe::AuthFailed)
+        QTest::newRow("wrong secret") << "wrong" << QString() << int(NetVfsProbe::ErrorCode::AuthFailed)
                                       << "The server refused the sign-in. Check the user name and the password or key.";
-        QTest::newRow("no permission") << "secret" << "makePath" << int(NetVfsProbe::PermissionDenied)
+        QTest::newRow("no permission") << "secret" << "makePath" << int(NetVfsProbe::ErrorCode::PermissionDenied)
                                        << "The server does not allow writing to the backups folder.";
-        QTest::newRow("upload fails") << "secret" << "upload" << int(NetVfsProbe::PermissionDenied)
+        QTest::newRow("upload fails") << "secret" << "upload" << int(NetVfsProbe::ErrorCode::PermissionDenied)
                                       << "The server does not allow writing to the backups folder.";
     }
 
@@ -322,7 +322,7 @@ private slots:
         QSignalSpy failed(&probe, &NetVfsProbe::failed);
         probe.verify(params(), creds, QStringLiteral("b"));
         QTRY_COMPARE(failed.count(), 1);
-        QCOMPARE(probe.error(), NetVfsProbe::AuthFailed);
+        QCOMPARE(probe.error(), NetVfsProbe::ErrorCode::AuthFailed);
     }
 
     void cancelReachesBackend()
@@ -336,12 +336,12 @@ private slots:
         probe.verify(params(), credentials(QStringLiteral("secret")), QStringLiteral("b"));
         QTRY_VERIFY(logHas(QStringLiteral("upload:")));
         probe.cancel();
-        QCOMPARE(probe.state(), NetVfsProbe::Idle);
+        QCOMPARE(probe.state(), NetVfsProbe::State::Idle);
         QVERIFY(!probe.busy());
         QTest::qWait(900);
         QCOMPARE(verified.count(), 0);
         QCOMPARE(failed.count(), 0);
-        QCOMPARE(probe.state(), NetVfsProbe::Idle);
+        QCOMPARE(probe.state(), NetVfsProbe::State::Idle);
         QVERIFY(!logHas(QStringLiteral("freeSpace:")));
 
         // The probe is usable again afterwards.
@@ -362,7 +362,7 @@ private slots:
         QTRY_COMPARE(identified.count(), 1);
         QTest::qWait(500);
         QCOMPARE(verified.count(), 0);
-        QCOMPARE(probe.state(), NetVfsProbe::Identified);
+        QCOMPARE(probe.state(), NetVfsProbe::State::Identified);
     }
 
     void destroyWhileRunning()
@@ -396,16 +396,16 @@ private slots:
         NetVfsProbe probe;
         QSignalSpy failed(&probe, &NetVfsProbe::failed);
         probe.identify(params(QString(), QStringLiteral("nope")));
-        QCOMPARE(probe.state(), NetVfsProbe::Failed);
+        QCOMPARE(probe.state(), NetVfsProbe::State::Failed);
         probe.reset();
-        QCOMPARE(probe.state(), NetVfsProbe::Idle);
-        QCOMPARE(probe.error(), NetVfsProbe::NoError);
+        QCOMPARE(probe.state(), NetVfsProbe::State::Idle);
+        QCOMPARE(probe.error(), NetVfsProbe::ErrorCode::NoError);
         QVERIFY(probe.errorText().isEmpty());
         QVERIFY(probe.errorDetail().isEmpty());
         QVERIFY(probe.serverIdentity().isEmpty());
         QCOMPARE(probe.freeBytes(), Q_INT64_C(-1));
         probe.cancel();   // nothing running: stays idle
-        QCOMPARE(probe.state(), NetVfsProbe::Idle);
+        QCOMPARE(probe.state(), NetVfsProbe::State::Idle);
     }
 
     void verifyAccountWithStoredSecret()
@@ -418,10 +418,10 @@ private slots:
         probe.setSessionFactory(sessionFactory(Result()));
         QSignalSpy verified(&probe, &NetVfsProbe::verified);
         probe.verifyAccount(accountId);
-        QCOMPARE(probe.state(), NetVfsProbe::Verifying);
+        QCOMPARE(probe.state(), NetVfsProbe::State::Verifying);
         QTRY_COMPARE(verified.count(), 1);
         QVERIFY(FakeServer::instance()->exists(QStringLiteral("Phone backups")));
-        QCOMPARE(probe.identityStatus(), NetVfsProbe::IdentityMatches);
+        QCOMPARE(probe.identityStatus(), NetVfsProbe::IdentityStatus::IdentityMatches);
     }
 
     void verifyAccountPinOverride()
@@ -435,7 +435,7 @@ private slots:
         QSignalSpy failed(&probe, &NetVfsProbe::failed);
         probe.verifyAccount(accountId);
         QTRY_COMPARE(failed.count(), 1);
-        QCOMPARE(probe.error(), NetVfsProbe::ServerIdentityChanged);
+        QCOMPARE(probe.error(), NetVfsProbe::ErrorCode::ServerIdentityChanged);
         QVERIFY(!logHas(QStringLiteral("authenticate")));
         probe.verifyAccount(accountId, pinOf(OtherBlob));
         QTRY_COMPARE(verified.count(), 1);
@@ -450,7 +450,7 @@ private slots:
         QSignalSpy failed(&probe, &NetVfsProbe::failed);
         probe.verifyAccount(accountId);
         QTRY_COMPARE(failed.count(), 1);
-        QCOMPARE(probe.error(), NetVfsProbe::AuthFailed);
+        QCOMPARE(probe.error(), NetVfsProbe::ErrorCode::AuthFailed);
         QCOMPARE(probe.errorText(),
                  QStringLiteral("The stored password or key for this account could not be read. Update the sign-in details."));
         QCOMPARE(probe.errorDetail(), QStringLiteral("no identity"));
@@ -467,7 +467,7 @@ private slots:
         probe.cancel();
         QTest::qWait(100);
         QCOMPARE(verified.count(), 0);
-        QCOMPARE(probe.state(), NetVfsProbe::Idle);
+        QCOMPARE(probe.state(), NetVfsProbe::State::Idle);
         QVERIFY(serverLog().isEmpty());
     }
 
@@ -479,7 +479,7 @@ private slots:
         QSignalSpy failed(&probe, &NetVfsProbe::failed);
         probe.verifyAccount(424242);
         QTRY_COMPARE(failed.count(), 1);
-        QCOMPARE(probe.error(), NetVfsProbe::NotFound);
+        QCOMPARE(probe.error(), NetVfsProbe::ErrorCode::NotFound);
     }
 };
 

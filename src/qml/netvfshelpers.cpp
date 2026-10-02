@@ -8,6 +8,8 @@
 #include <QtCore/QRegularExpression>
 #include <QtCore/QUrl>
 
+#include <algorithm>
+
 using namespace NetVfs;
 
 namespace NetVfsUi {
@@ -33,11 +35,8 @@ QString str(const char *latin1)
 
 bool hasControlCharacter(const QString &text)
 {
-    for (const QChar c : text) {
-        if (c.category() == QChar::Other_Control)
-            return true;
-    }
-    return false;
+    return std::any_of(text.cbegin(), text.cend(),
+                       [](const QChar c) { return c.category() == QChar::Other_Control; });
 }
 
 bool isIpv6Literal(const QString &host)
@@ -60,11 +59,8 @@ bool isHostName(const QString &host)
     const QString ace = QString::fromLatin1(QUrl::toAce(name));
     if (ace.isEmpty() || ace.size() > MaxHostLength)
         return false;
-    for (const QString &label : ace.split(QLatin1Char('.'))) {
-        if (!isDnsLabel(label))
-            return false;
-    }
-    return true;
+    const QStringList labels = ace.split(QLatin1Char('.'));
+    return std::all_of(labels.cbegin(), labels.cend(), isDnsLabel);
 }
 
 QString stripBrackets(const QString &host)
@@ -139,6 +135,11 @@ QVariantMap identityToVariant(const ServerIdentity &identity)
     return map;
 }
 
+InputRules::InputRules(QObject *parent)
+    : QObject(parent)
+{
+}
+
 Helpers::Helpers(QObject *parent)
     : QObject(parent)
 {
@@ -164,7 +165,7 @@ QString Helpers::backupsPathKey() const
     return QLatin1String(Keys::BackupsPath);
 }
 
-int Helpers::defaultPort(const QString &provider) const
+int InputRules::defaultPort(const QString &provider) const
 {
     if (provider == QLatin1String(ProviderSftp))
         return 22;
@@ -183,7 +184,7 @@ bool Helpers::isProviderInstalled(const QString &provider) const
     return BackendLoader::isAvailable(provider);
 }
 
-QString Helpers::hostProblem(const QString &host) const
+QString InputRules::hostProblem(const QString &host) const
 {
     const QString value = host.trimmed();
     if (value.isEmpty()) {
@@ -204,24 +205,29 @@ QString Helpers::hostProblem(const QString &host) const
     return qtTrId("settings-accounts-netvfs-la-host_invalid");
 }
 
-QString Helpers::portProblem(const QString &port) const
+QString InputRules::portProblem(const QString &port) const
 {
-    const QString value = port.trimmed();
-    if (value.isEmpty())
-        return QString();
-    static const QRegularExpression digits(QStringLiteral("^[0-9]{1,5}$"));
-    if (const int number = value.toInt(); digits.match(value).hasMatch() && number >= 1 && number <= 65535)
+    if (port.trimmed().isEmpty() || parsePort(port) > 0)
         return QString();
     //% "The port must be a number from 1 to 65535."
     return qtTrId("settings-accounts-netvfs-la-port_invalid");
 }
 
-int Helpers::portValue(const QString &port) const
+int parsePort(const QString &port)
 {
-    return portProblem(port).isEmpty() ? port.trimmed().toInt() : 0;
+    static const QRegularExpression digits(QStringLiteral("^[0-9]{1,5}$"));
+    const QString value = port.trimmed();
+    if (const int number = value.toInt(); digits.match(value).hasMatch() && number >= 1 && number <= 65535)
+        return number;
+    return 0;
 }
 
-QString Helpers::userNameProblem(const QString &userName) const
+int InputRules::portValue(const QString &port) const
+{
+    return parsePort(port);
+}
+
+QString InputRules::userNameProblem(const QString &userName) const
 {
     const QString value = userName.trimmed();
     if (value.isEmpty()) {
@@ -235,7 +241,7 @@ QString Helpers::userNameProblem(const QString &userName) const
     return QString();
 }
 
-QString Helpers::shareProblem(const QString &share) const
+QString InputRules::shareProblem(const QString &share) const
 {
     const QString value = share.trimmed();
     if (value.isEmpty()) {
@@ -253,7 +259,7 @@ QString Helpers::shareProblem(const QString &share) const
     return QString();
 }
 
-QString Helpers::backupsPathProblem(const QString &provider, const QString &path) const
+QString InputRules::backupsPathProblem(const QString &provider, const QString &path) const
 {
     QString normalized;
     if (path.trimmed().isEmpty()) {
@@ -276,7 +282,12 @@ QString Helpers::backupsPathProblem(const QString &provider, const QString &path
     return QString();
 }
 
-QString Helpers::cleanBackupsPath(const QString &provider, const QString &path) const
+QString InputRules::cleanBackupsPath(const QString &provider, const QString &path) const
+{
+    return cleanFolderPath(provider, path);
+}
+
+QString cleanFolderPath(const QString &provider, const QString &path)
 {
     QString normalized;
     if (!Paths::normalize(path.trimmed(), &normalized).ok())
@@ -299,7 +310,7 @@ QVariantMap Helpers::makeParams(const QString &provider, const QString &host, co
     ConnectionParams params;
     params.provider = provider;
     params.host = stripBrackets(host.trimmed());
-    params.port = portValue(port);
+    params.port = parsePort(port);
     params.username = userName.trimmed();
     params.options = options;
     return paramsToVariant(params);
@@ -342,7 +353,7 @@ QVariantMap Helpers::creationSettings(const QVariantMap &paramsMap, const QStrin
     insertOptions(&global, params);
 
     QVariantMap service;
-    service.insert(str(Keys::BackupsPath), cleanBackupsPath(params.provider, backupsPath));
+    service.insert(str(Keys::BackupsPath), cleanFolderPath(params.provider, backupsPath));
 
     QVariantMap result;
     result.insert(QStringLiteral("global"), global);

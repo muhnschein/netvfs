@@ -34,9 +34,9 @@ class SshKeyTool : public QObject
     Q_PROPERTY(QString installErrorDetail READ installErrorDetail NOTIFY installStateChanged)
 
 public:
-    enum State { Empty, Working, NeedsPassphrase, Ready, Failed };
+    enum class State { Empty, Working, NeedsPassphrase, Ready, Failed };
     Q_ENUM(State)
-    enum InstallState { InstallIdle, Installing, Installed, InstallFailed };
+    enum class InstallState { InstallIdle, Installing, Installed, InstallFailed };
     Q_ENUM(InstallState)
 
     // `tools` defaults to the SFTP backend plugin's implementation.
@@ -46,7 +46,7 @@ public:
 
     State state() const { return m_state; }
     bool available() const { return m_tools != nullptr; }
-    bool hasKey() const { return m_state == Ready; }
+    bool hasKey() const { return m_state == State::Ready; }
     QString algorithm() const { return m_key.algorithm; }
     QString publicKey() const { return m_key.publicLine; }
     QString fingerprint() const { return m_key.fingerprint; }
@@ -83,11 +83,11 @@ private:
     void setInstallState(InstallState state);
 
     NetVfs::SshKeyTools *m_tools;
-    State m_state = Empty;
+    State m_state = State::Empty;
     NetVfs::SshKeyMaterial m_key;
     QString m_errorText;
     QString m_errorDetail;
-    InstallState m_installState = InstallIdle;
+    InstallState m_installState = InstallState::InstallIdle;
     QString m_installErrorText;
     QString m_installErrorDetail;
     BackendJobs m_keyJobs;       // last members: destroyed (and joined) first

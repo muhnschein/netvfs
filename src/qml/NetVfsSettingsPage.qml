@@ -39,7 +39,7 @@ Page {
     readonly property bool _isSftp: provider === "sftp"
     readonly property bool _isSmb: provider === "smb"
     readonly property string _serviceName: NetVfsHelpers.backupServiceName(provider)
-    readonly property string _folderProblem: NetVfsHelpers.backupsPathProblem(provider, folderField.text)
+    readonly property string _folderProblem: NetVfsInput.backupsPathProblem(provider, folderField.text)
     readonly property var _identity: NetVfsHelpers.identityFromPin(_option("host_key"))
 
     function _option(key) {
@@ -84,7 +84,7 @@ Page {
             _storedName = name
             changed = true
         }
-        var path = NetVfsHelpers.cleanBackupsPath(provider, folderField.text)
+        var path = NetVfsInput.cleanBackupsPath(provider, folderField.text)
         if (_folderProblem === "" && path !== _storedBackupsPath) {
             account.setConfigurationValue(_serviceName, NetVfsHelpers.backupsPathKey, path)
             _storedBackupsPath = path
@@ -302,7 +302,7 @@ Page {
                 //% "Port"
                 label: qsTrId("settings-accounts-netvfs-la-port")
                 value: page._params["port"] > 0 ? String(page._params["port"])
-                                                : String(NetVfsHelpers.defaultPort(page.provider))
+                                                : String(NetVfsInput.defaultPort(page.provider))
             }
 
             DetailItem {

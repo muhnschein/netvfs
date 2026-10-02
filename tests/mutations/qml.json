@@ -16,15 +16,15 @@
   {
     "name": "unknown server key reported as matching (S-7)",
     "file": "src/qml/netvfsprobe.cpp",
-    "search": "        return NetVfsProbe::IdentityUnknown;",
-    "replace": "        return NetVfsProbe::IdentityMatches;",
+    "search": "        return Status::IdentityUnknown;",
+    "replace": "        return Status::IdentityMatches;",
     "test": "dbus-run-session -- build/tests/unit/qml/probe/tst_qmlprobe"
   },
   {
     "name": "protocol without identity reported as matching",
     "file": "src/qml/netvfsprobe.cpp",
-    "search": "outcome.identity.isEmpty() ? NetVfsProbe::NoIdentity : NetVfsProbe::IdentityMatches",
-    "replace": "NetVfsProbe::IdentityMatches",
+    "search": "outcome.identity.isEmpty() ? Status::NoIdentity : Status::IdentityMatches",
+    "replace": "Status::IdentityMatches",
     "test": "dbus-run-session -- build/tests/unit/qml/probe/tst_qmlprobe"
   },
   {
@@ -105,10 +105,10 @@
     "test": "build/tests/unit/qml/helpers/tst_qmlhelpers"
   },
   {
-    "name": "port 0 accepted",
+    "name": "port 65536 accepted",
     "file": "src/qml/netvfshelpers.cpp",
     "search": "number >= 1 && number <= 65535",
-    "replace": "number >= 0 && number <= 65535",
+    "replace": "number >= 1 && number <= 65536",
     "test": "build/tests/unit/qml/helpers/tst_qmlhelpers"
   },
   {
@@ -135,8 +135,8 @@
   {
     "name": "install attempted without a key",
     "file": "src/qml/sshkeytool.cpp",
-    "search": "    if (m_state != Ready) {\n        finishInstall",
-    "replace": "    if (m_state == Failed) {\n        finishInstall",
+    "search": "    if (m_state != State::Ready) {\n        finishInstall",
+    "replace": "    if (m_state == State::Failed) {\n        finishInstall",
     "test": "build/tests/unit/qml/keytool/tst_qmlkeytool"
   },
   {

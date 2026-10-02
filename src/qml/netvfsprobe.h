@@ -48,11 +48,11 @@ class NetVfsProbe : public QObject
     Q_PROPERTY(qint64 freeBytes READ freeBytes NOTIFY stateChanged)
 
 public:
-    enum State { Idle, Identifying, Identified, Verifying, Verified, Failed };
+    enum class State { Idle, Identifying, Identified, Verifying, Verified, Failed };
     Q_ENUM(State)
 
     // Mirrors NetVfs::Error (SPEC 5.4).
-    enum ErrorCode {
+    enum class ErrorCode {
         NoError, Canceled, NetworkUnreachable, Timeout, ServerIdentityUnknown, ServerIdentityChanged,
         AuthFailed, SecurityPolicy, PermissionDenied, NotFound, AlreadyExists, NoSpace, Unsupported,
         ProtocolError, Internal
@@ -60,7 +60,7 @@ public:
     Q_ENUM(ErrorCode)
 
     // Result of comparing the identity seen by identify() with params.options.host_key.
-    enum IdentityStatus { IdentityNotChecked, NoIdentity, IdentityUnknown, IdentityMatches, IdentityChanged };
+    enum class IdentityStatus { IdentityNotChecked, NoIdentity, IdentityUnknown, IdentityMatches, IdentityChanged };
     Q_ENUM(IdentityStatus)
 
     using SessionFactory = std::function<NetVfs::AccountSession *(int accountId, QObject *parent)>;
@@ -69,7 +69,7 @@ public:
     ~NetVfsProbe() override;
 
     State state() const { return m_state; }
-    bool busy() const { return m_state == Identifying || m_state == Verifying; }
+    bool busy() const { return m_state == State::Identifying || m_state == State::Verifying; }
     ErrorCode error() const { return static_cast<ErrorCode>(m_error); }
     QString errorText() const { return m_errorText; }
     QString errorDetail() const { return m_errorDetail; }
@@ -108,12 +108,12 @@ private:
     void setState(State state);
     void closeSession();
 
-    State m_state = Idle;
+    State m_state = State::Idle;
     NetVfs::Error m_error = NetVfs::Error::None;
     QString m_errorText;
     QString m_errorDetail;
     NetVfs::ServerIdentity m_identity;
-    IdentityStatus m_identityStatus = IdentityNotChecked;
+    IdentityStatus m_identityStatus = IdentityStatus::IdentityNotChecked;
     qint64 m_freeBytes = -1;
     SessionFactory m_sessionFactory;
     QPointer<NetVfs::AccountSession> m_session;

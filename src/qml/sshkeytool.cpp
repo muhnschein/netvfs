@@ -93,7 +93,7 @@ void SshKeyTool::runKeyJob(const std::function<Result(SshKeyMaterial *)> &operat
         setFailed(backendMissingText(), QString());
         return;
     }
-    m_state = Working;
+    m_state = State::Working;
     emit stateChanged();
     auto outcome = std::make_shared<KeyOutcome>();
     m_keyJobs.start([operation, outcome](CancelToken *) {
@@ -110,7 +110,7 @@ void SshKeyTool::finishKeyJob(const Result &result, const SshKeyMaterial &materi
     m_key = SshKeyMaterial();
     if (result.ok()) {
         m_key = material;
-        m_state = Ready;
+        m_state = State::Ready;
         m_errorText.clear();
         m_errorDetail.clear();
         emit stateChanged();
@@ -119,7 +119,7 @@ void SshKeyTool::finishKeyJob(const Result &result, const SshKeyMaterial &materi
     if (job != KeyJob::Generate && result.error() == Error::AuthFailed) {
         // An encrypted file: ask for the passphrase. The message is shown
         // only when a passphrase was given and was wrong.
-        m_state = NeedsPassphrase;
+        m_state = State::NeedsPassphrase;
         m_errorText = job == KeyJob::ImportWithPassphrase ? userErrorText(Error::AuthFailed, Activity::KeyFile)
                                                           : QString();
         m_errorDetail.clear();
@@ -132,7 +132,7 @@ void SshKeyTool::finishKeyJob(const Result &result, const SshKeyMaterial &materi
 
 void SshKeyTool::setFailed(const QString &text, const QString &detail)
 {
-    m_state = Failed;
+    m_state = State::Failed;
     m_errorText = text;
     m_errorDetail = detail;
     emit stateChanged();
@@ -140,7 +140,7 @@ void SshKeyTool::setFailed(const QString &text, const QString &detail)
 
 QString SshKeyTool::secret() const
 {
-    if (m_state != Ready || m_key.privateKey.isEmpty())
+    if (m_state != State::Ready || m_key.privateKey.isEmpty())
         return QString();
     QByteArray encoded = encodeKeySecret(m_key.privateKey);
     const QString value = QString::fromLatin1(encoded);
@@ -151,7 +151,7 @@ QString SshKeyTool::secret() const
 void SshKeyTool::installWithPassword(const QVariantMap &paramsMap, const QString &password)
 {
     m_installJobs.cancel();
-    if (m_state != Ready) {
+    if (m_state != State::Ready) {
         finishInstall(Result(Error::Internal, QStringLiteral("No key to install")));
         return;
     }
@@ -160,7 +160,7 @@ void SshKeyTool::installWithPassword(const QVariantMap &paramsMap, const QString
     Result result;
     Backend *backend = BackendLoader::create(params.provider, &result);
     if (!backend) {
-        m_installState = InstallFailed;
+        m_installState = InstallState::InstallFailed;
         m_installErrorText = backendMissingText();
         m_installErrorDetail = result.message();
         emit installStateChanged();
@@ -171,7 +171,7 @@ void SshKeyTool::installWithPassword(const QVariantMap &paramsMap, const QString
     secureWipe(bytes);
     const QString publicLine = m_key.publicLine;
     auto outcome = std::make_shared<Result>();
-    setInstallState(Installing);
+    setInstallState(InstallState::Installing);
     m_installJobs.start([backend, params, credentials, publicLine, outcome](CancelToken *token) {
         std::unique_ptr<Backend> owned(backend);
         token->attach(backend);
@@ -191,12 +191,12 @@ void SshKeyTool::finishInstall(const Result &result)
     if (result.ok()) {
         m_installErrorText.clear();
         m_installErrorDetail.clear();
-        setInstallState(Installed);
+        setInstallState(InstallState::Installed);
         return;
     }
     m_installErrorText = userErrorText(result.error(), Activity::InstallKey);
     m_installErrorDetail = result.message();
-    setInstallState(InstallFailed);
+    setInstallState(InstallState::InstallFailed);
 }
 
 void SshKeyTool::setInstallState(InstallState state)
@@ -209,12 +209,12 @@ void SshKeyTool::cancel()
 {
     if (m_keyJobs.isRunning()) {
         m_keyJobs.cancel();
-        m_state = m_key.privateKey.isEmpty() ? Empty : Ready;
+        m_state = m_key.privateKey.isEmpty() ? State::Empty : State::Ready;
         emit stateChanged();
     }
     if (m_installJobs.isRunning()) {
         m_installJobs.cancel();
-        setInstallState(InstallIdle);
+        setInstallState(InstallState::InstallIdle);
     }
 }
 
@@ -224,10 +224,10 @@ void SshKeyTool::clear()
     m_installJobs.cancel();
     m_key.wipe();
     m_key = SshKeyMaterial();
-    m_state = Empty;
+    m_state = State::Empty;
     m_errorText.clear();
     m_errorDetail.clear();
-    m_installState = InstallIdle;
+    m_installState = InstallState::InstallIdle;
     m_installErrorText.clear();
     m_installErrorDetail.clear();
     emit stateChanged();
