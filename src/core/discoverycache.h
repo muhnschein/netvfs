@@ -77,6 +77,19 @@ private:
     struct AddressEntry {
         QHostAddress address;
         Lifetime life;
+
+        AddressEntry() = default;
+        AddressEntry(const AddressEntry &other) = default;
+        AddressEntry &operator=(const AddressEntry &other) = default;
+        ~AddressEntry() = default;
+        // QHostAddress has no move constructor in Qt 5: swapping it cannot fail.
+        AddressEntry(AddressEntry &&other) noexcept : life(other.life) { address.swap(other.address); }
+        AddressEntry &operator=(AddressEntry &&other) noexcept
+        {
+            address.swap(other.address);
+            life = other.life;
+            return *this;
+        }
     };
 
     struct Instance {
@@ -122,10 +135,11 @@ private:
     void handleTxt(const Dns::Record &rec, Context *c);
     void handleAddress(const Dns::Record &rec, Context *c);
     void flushFamily(const QByteArray &host, quint16 type, Context *c);
-    void markHostDirty(const QByteArray &host, Context *c);
+    void markHostDirty(const QByteArray &host, Context *c) const;
     void removeInstance(const QByteArray &key, Context *c);
-    void evaluate(Instance *inst, Context *c);
+    void evaluate(Instance *inst, Context *c) const;
     void finishContext(Context *c);
+    void touchInstancesOf(const QByteArray &host, Context *c);
     void expireInstance(Instance *inst, Context *c);
     void expireAddresses(Context *c);
     void pruneHosts();
@@ -133,8 +147,8 @@ private:
     bool isComplete(const Instance &inst) const;
     bool hasAddresses(const QByteArray &host) const;
     DiscoveredService snapshot(const Instance &inst) const;
-    void collectResolve(Instance *inst, qint64 now, Collector *col);
-    void collectRefresh(Instance *inst, qint64 now, Collector *col);
+    void collectResolve(Instance *inst, qint64 now, Collector *col) const;
+    void collectRefresh(Instance *inst, qint64 now, Collector *col) const;
     void collectHostRefresh(qint64 now, Collector *col);
     qint64 instanceDeadline(const Instance &inst) const;
 

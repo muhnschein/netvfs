@@ -25,11 +25,14 @@ mkdir -p "$out/work" "$out/artifacts"
 
 # Value of a "// fuzz-<key>: ..." directive in a harness (empty if absent).
 directive() {
-    sed -n "s|^// fuzz-$1: *||p" "$2" | head -n 1
+    key=$1
+    harness=$2
+    sed -n "s|^// fuzz-$key: *||p" "$harness" | head -n 1
 }
 
 qt_modules() {
-    modules=$(directive qt "$1")
+    harness=$1
+    modules=$(directive qt "$harness")
     [ -n "$modules" ] || modules=Core
     for m in $modules; do printf 'Qt5%s ' "$m"; done
 }

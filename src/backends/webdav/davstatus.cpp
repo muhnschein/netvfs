@@ -3,6 +3,7 @@
 
 #include <QtCore/QStringList>
 
+#include <algorithm>
 #include <array>
 
 namespace NetVfs::WebDav {
@@ -49,11 +50,7 @@ bool isNumber(const QByteArray &token)
 {
     if (token.isEmpty())
         return false;
-    for (const char c : token) {
-        if (c < '0' || c > '9')
-            return false;
-    }
-    return true;
+    return std::all_of(token.begin(), token.end(), [](char c) { return c >= '0' && c <= '9'; });
 }
 
 struct DateParts {

@@ -72,8 +72,8 @@ Error classify550(const QByteArray &text, bool *ambiguous)
 
 Error classify421(const QByteArray &text)
 {
-    const QByteArray lower = text.toLower();
-    if (mentions(lower, { "too many", "connection limit", "maximum number", "max number", "limit reached",
+    if (const QByteArray lower = text.toLower();
+            mentions(lower, { "too many", "connection limit", "maximum number", "max number", "limit reached",
                           "try again later", "max clients", "users", "connections from your" }))
         return Error::TooManyConnections;
     return Error::ConnectionLost;
@@ -193,8 +193,8 @@ Result settingsFrom(const ConnectionParams &params, Settings *out)
     Settings settings;
     if (params.host.isEmpty() || params.host.contains(QLatin1Char('@')) || params.host.contains(QLatin1Char('/')))
         return Result(Error::Internal, QStringLiteral("Invalid server name"));
-    const QString mode = params.option(QLatin1String(TlsModeOption), QStringLiteral("explicit")).toLower();
-    if (mode == QLatin1String("explicit")) {
+    if (const QString mode = params.option(QLatin1String(TlsModeOption), QStringLiteral("explicit")).toLower();
+            mode == QLatin1String("explicit")) {
         settings.tlsMode = TlsMode::Explicit;
     } else if (mode == QLatin1String("implicit")) {
         settings.tlsMode = TlsMode::Implicit;
@@ -238,8 +238,7 @@ QByteArray urlPath(const QByteArray &remotePath)
         from = 1;
     }
     for (int i = from; i < remotePath.size(); ++i) {
-        const auto c = uchar(remotePath.at(i));
-        if (c == '/' || unreserved(c))
+        if (const auto c = uchar(remotePath.at(i)); c == '/' || unreserved(c))
             out += char(c);
         else
             out += '%' + QByteArray(1, char(c)).toHex().toUpper();
@@ -351,8 +350,7 @@ TlsGuard::Verdict TlsGuard::feed(const char *data, size_t size)
         m_line.clear();
         if (code < 0)
             continue;
-        const Verdict verdict = reply(code);
-        if (verdict != Verdict::Continue)
+        if (const Verdict verdict = reply(code); verdict != Verdict::Continue)
             return verdict;
     }
     return Verdict::Continue;

@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 #include "discoverytransport.h"
 
+#include "addressclass.h"
 #include "dnsmessage.h"
 #include "logging.h"
 
+#include <algorithm>
 #include <utility>
 
 namespace NetVfs {
@@ -11,7 +13,6 @@ namespace NetVfs {
 namespace {
 
 constexpr int MulticastTtl = 255;                // RFC 6762 section 11
-constexpr int Ipv6LinkLocalPrefix = 10;
 
 const QHostAddress &group4()
 {
@@ -28,11 +29,8 @@ const QHostAddress &group6()
 bool hasAddressOfFamily(const QNetworkInterface &iface, QAbstractSocket::NetworkLayerProtocol family)
 {
     const QList<QNetworkAddressEntry> entries = iface.addressEntries();
-    for (const QNetworkAddressEntry &e : entries) {
-        if (e.ip().protocol() == family)
-            return true;
-    }
-    return false;
+    return std::any_of(entries.begin(), entries.end(),
+                       [family](const QNetworkAddressEntry &e) { return e.ip().protocol() == family; });
 }
 
 } // namespace
@@ -64,7 +62,7 @@ quint16 MulticastTransport::localPort() const
     return m_v4Bound ? m_v4.localPort() : 0;
 }
 
-bool MulticastTransport::bindSocket(QUdpSocket *socket, const QHostAddress &any)
+bool MulticastTransport::bindSocket(QUdpSocket *socket, const QHostAddress &any) const
 {
     if (!socket->bind(any, m_options.port, QAbstractSocket::ShareAddress | QAbstractSocket::ReuseAddressHint)) {
         qCDebug(lcNetVfsCore) << "mDNS: bind failed:" << socket->errorString();
@@ -155,15 +153,12 @@ void MulticastTransport::send(const QByteArray &datagram)
 
 bool MulticastTransport::isOnLink(const QHostAddress &sender, const QList<QNetworkAddressEntry> &entries)
 {
-    if (sender.protocol() == QAbstractSocket::IPv6Protocol
-        && sender.isInSubnet(QHostAddress(QStringLiteral("fe80::")), Ipv6LinkLocalPrefix))
+    if (AddressClass::isIpv6LinkLocal(sender))
         return true;
-    for (const QNetworkAddressEntry &e : entries) {
-        if (e.ip().protocol() == sender.protocol() && e.prefixLength() >= 0
-            && sender.isInSubnet(e.ip(), e.prefixLength()))
-            return true;
-    }
-    return false;
+    return std::any_of(entries.begin(), entries.end(), [&sender](const QNetworkAddressEntry &e) {
+        return e.ip().protocol() == sender.protocol() && e.prefixLength() >= 0
+            && sender.isInSubnet(e.ip(), e.prefixLength());
+    });
 }
 
 bool MulticastTransport::onLink(const QHostAddress &sender) const

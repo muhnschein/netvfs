@@ -45,8 +45,8 @@ Result FtpReadHandle::read(qint64 offset, qint64 maxBytes, QByteArray *out)
     if (maxBytes == 0 || (m_size >= 0 && offset >= m_size))
         return Result::success();
     const qint64 end = m_bufferStart + m_buffer.size();
-    const bool continues = offset >= m_bufferStart && offset <= end && (m_streaming || m_eof || offset < end);
-    if (!continues) {
+    if (const bool continues = offset >= m_bufferStart && offset <= end && (m_streaming || m_eof || offset < end);
+            !continues) {
         endStream();
         m_buffer.clear();
         m_bufferStart = offset;
@@ -55,8 +55,7 @@ Result FtpReadHandle::read(qint64 offset, qint64 maxBytes, QByteArray *out)
         m_buffer.remove(0, int(offset - m_bufferStart));
         m_bufferStart = offset;
     }
-    const Result r = fill(maxBytes);
-    if (!r.ok())
+    if (const Result r = fill(maxBytes); !r.ok())
         return r;
     const int take = int(std::min<qint64>(maxBytes, m_buffer.size()));
     *out = m_buffer.left(take);
@@ -88,8 +87,7 @@ Result FtpReadHandle::fill(qint64 wanted)
 {
     while (m_buffer.size() < wanted && !m_eof) {
         if (!m_streaming) {
-            const Result r = startAt(m_bufferStart + m_buffer.size());
-            if (!r.ok())
+            if (const Result r = startAt(m_bufferStart + m_buffer.size()); !r.ok())
                 return r;
         }
         Result r = m_backend->claim(this);
@@ -104,7 +102,7 @@ Result FtpReadHandle::fill(qint64 wanted)
             m_backend->release(this);
             m_backend->requestDone();
             if (!r.ok())
-                return m_backend->explainRead(r, m_remote);
+                return FtpBackend::Lookup(*m_backend).readFailure(r, m_remote);
             m_eof = true;
         } else if (!r.ok()) {
             endStream();
@@ -211,7 +209,7 @@ Result FtpWriteHandle::drive(bool toEnd)
         m_backend->release(this);
         m_backend->requestDone();
         if (!r.ok())
-            return m_backend->explainUpload(r, m_remote);
+            return FtpBackend::Lookup(*m_backend).uploadFailure(r, m_remote);
         if (!toEnd)
             return Result(Error::ProtocolError, QStringLiteral("The server ended the upload early"));
         return r;

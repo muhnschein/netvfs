@@ -65,7 +65,9 @@ wait_http() {
 }
 
 port_of() {
-    docker port "$1" "$2/tcp" | head -n 1 | sed 's/.*://'
+    container=$1
+    port=$2
+    docker port "$container" "$port/tcp" | head -n 1 | sed 's/.*://'
 }
 
 log "building the Apache image"

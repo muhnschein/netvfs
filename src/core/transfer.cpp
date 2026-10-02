@@ -51,8 +51,7 @@ void removeQuietly(Backend *backend, const QString &path, const Result &cause)
 {
     if (cause.error() == Error::Canceled)
         backend->resetCancel();
-    const Result r = backend->removeFile(path);
-    if (!r.ok() && r.error() != Error::NotFound)
+    if (const Result r = backend->removeFile(path); !r.ok() && r.error() != Error::NotFound)
         logRemovalFailure("partial file", r);
 }
 
@@ -145,71 +144,49 @@ Result writeResumed(Backend *backend, CountingReader *reader, const QString &pat
     return handle->commit();
 }
 
-} // namespace
-
-Result upload(Backend *backend, QIODevice *source, qint64 size, const QString &finalPath,
-              Progress *progress, const TransferPolicy &policy)
+Result checkPolicy(const QString &target, const TransferPolicy &policy)
 {
-    QString target;
-    Result r = Paths::normalize(finalPath, &target);
-    if (!r.ok())
-        return r;
     if (Paths::fileName(target).isEmpty())
         return Result(Error::Internal, QStringLiteral("Upload target has no file name"));
     if (policy.resume && (!policy.useTempName || policy.resumeOffset < 0))
         return Result(Error::Internal, QStringLiteral("Resuming needs a temporary name and an offset"));
+    return Result::success();
+}
 
-    const qint64 base = policy.resume ? policy.resumeOffset : 0;
-    r = checkFreeSpace(backend, target, size < 0 ? -1 : size - base);
-    if (!r.ok())
+// Resuming needs a partial file of exactly `resumeOffset` bytes; the source
+// is positioned behind them.
+Result prepareResume(Backend *backend, QIODevice *source, const QString &part, const TransferPolicy &policy)
+{
+    Entry existing;
+    if (const Result r = backend->stat(part, &existing); !r.ok())
         return r;
-
-    const QString part = temporaryPath(target, policy);
-    // Keeps a resumable temporary file; removes anything else.
-    const auto cleanup = [&](const Result &cause) {
-        if (policy.useTempName && !policy.resume)
-            removeQuietly(backend, part, cause);
-    };
-
-    if (policy.resume) {
-        Entry existing;
-        r = backend->stat(part, &existing);
-        if (!r.ok())
-            return r;
-        if (existing.size != policy.resumeOffset) {
-            return Result(Error::ProtocolError,
-                          QStringLiteral("Cannot resume at %1: the partial file has %2 bytes")
-                              .arg(policy.resumeOffset).arg(existing.size));
-        }
-        if (!skipSource(source, policy.resumeOffset))
-            return Result(Error::Internal, QStringLiteral("Cannot position the local file for resuming"));
+    if (existing.size != policy.resumeOffset) {
+        return Result(Error::ProtocolError,
+                      QStringLiteral("Cannot resume at %1: the partial file has %2 bytes")
+                          .arg(policy.resumeOffset).arg(existing.size));
     }
+    if (!skipSource(source, policy.resumeOffset))
+        return Result(Error::Internal, QStringLiteral("Cannot position the local file for resuming"));
+    return Result::success();
+}
 
-    CountingReader reader(source);
-    reader.open(QIODevice::ReadOnly);
-    if (policy.resume) {
-        r = writeResumed(backend, &reader, part, size, policy, progress);
-    } else {
-        UploadOptions options;
-        options.write.disposition = !policy.useTempName && policy.commitMode == RenameMode::NoReplace
-            ? WriteOptions::CreateNew : WriteOptions::Truncate;
-        options.write.createMode = policy.createMode;
-        options.write.expectedSize = size;
-        options.write.modified = policy.modified;
-        r = backend->upload(&reader, part, options, progress);
-    }
-    if (!r.ok()) {
-        cleanup(r);
-        return r;
-    }
-    const qint64 sent = base + reader.count();
-    if (size >= 0 && sent != size) {
-        cleanup(r);
-        return Result(Error::Internal,
-                      QStringLiteral("Local file changed during upload (%1 of %2 bytes read)")
-                          .arg(sent).arg(size));
-    }
+Result writeFresh(Backend *backend, CountingReader *reader, const QString &path, qint64 size,
+                  const TransferPolicy &policy, Progress *progress)
+{
+    UploadOptions options;
+    options.write.disposition = !policy.useTempName && policy.commitMode == RenameMode::NoReplace
+        ? WriteOptions::CreateNew : WriteOptions::Truncate;
+    options.write.createMode = policy.createMode;
+    options.write.expectedSize = size;
+    options.write.modified = policy.modified;
+    return backend->upload(reader, path, options, progress);
+}
 
+// Size check and the rename to the final name.
+Result commitUpload(Backend *backend, const QString &part, const QString &target, qint64 sent,
+                    const TransferPolicy &policy)
+{
+    Result r = Result::success();
     if (policy.verifySize) {
         Entry entry;
         r = backend->stat(part, &entry);
@@ -221,8 +198,60 @@ Result upload(Backend *backend, QIODevice *source, qint64 size, const QString &f
     }
     if (r.ok() && part != target)
         r = backend->rename(part, target, policy.commitMode);
+    return r;
+}
+
+// Keeps a resumable temporary file; removes anything else.
+void cleanupPartial(Backend *backend, const QString &part, const TransferPolicy &policy, const Result &cause)
+{
+    if (policy.useTempName && !policy.resume)
+        removeQuietly(backend, part, cause);
+}
+
+} // namespace
+
+Result upload(Backend *backend, QIODevice *source, qint64 size, const QString &finalPath,
+              Progress *progress, const TransferPolicy &policy)
+{
+    QString target;
+    Result r = Paths::normalize(finalPath, &target);
     if (!r.ok())
-        cleanup(r);
+        return r;
+    r = checkPolicy(target, policy);
+    if (!r.ok())
+        return r;
+
+    const qint64 base = policy.resume ? policy.resumeOffset : 0;
+    r = checkFreeSpace(backend, target, size < 0 ? -1 : size - base);
+    if (!r.ok())
+        return r;
+
+    const QString part = temporaryPath(target, policy);
+    if (policy.resume) {
+        r = prepareResume(backend, source, part, policy);
+        if (!r.ok())
+            return r;
+    }
+
+    CountingReader reader(source);
+    reader.open(QIODevice::ReadOnly);
+    r = policy.resume ? writeResumed(backend, &reader, part, size, policy, progress)
+                      : writeFresh(backend, &reader, part, size, policy, progress);
+    if (!r.ok()) {
+        cleanupPartial(backend, part, policy, r);
+        return r;
+    }
+    const qint64 sent = base + reader.count();
+    if (size >= 0 && sent != size) {
+        cleanupPartial(backend, part, policy, r);
+        return Result(Error::Internal,
+                      QStringLiteral("Local file changed during upload (%1 of %2 bytes read)")
+                          .arg(sent).arg(size));
+    }
+
+    r = commitUpload(backend, part, target, sent, policy);
+    if (!r.ok())
+        cleanupPartial(backend, part, policy, r);
     return r;
 }
 

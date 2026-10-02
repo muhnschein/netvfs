@@ -103,8 +103,7 @@ EntryType unixType(const QByteArray &value, QByteArray *target)
     const QByteArray kind = value.mid(int(sizeof("os.unix=")) - 1);
     const QByteArray lower = kind.toLower();
     if (lower.startsWith("slink")) {
-        const int colon = kind.indexOf(':');
-        if (colon >= 0)
+        if (const int colon = kind.indexOf(':'); colon >= 0)
             *target = kind.mid(colon + 1);
         return EntryType::Symlink;
     }
@@ -382,8 +381,7 @@ bool applyUnixName(const QByteArray &line, int start, Entry *entry)
 {
     QByteArray name = line.mid(start);
     if (entry->type == EntryType::Symlink) {
-        const int arrow = name.indexOf(" -> ");
-        if (arrow >= 0) {
+        if (const int arrow = name.indexOf(" -> "); arrow >= 0) {
             entry->extra.insert(QStringLiteral("linkTarget"), Names::decode(name.mid(arrow + 4)));
             name = name.left(arrow);
         }
@@ -445,8 +443,7 @@ QDate parseDosDate(const QByteArray &token)
 bool parseDosTime(QByteArray token, const QByteArray &suffix, QTime *time, bool *usedSuffix)
 {
     QByteArray meridiem;
-    const QByteArray upper = token.toUpper();
-    if (upper.endsWith("AM") || upper.endsWith("PM")) {
+    if (const QByteArray upper = token.toUpper(); upper.endsWith("AM") || upper.endsWith("PM")) {
         meridiem = upper.right(2);
         token.chop(2);
     } else if (suffix.toUpper() == "AM" || suffix.toUpper() == "PM") {
@@ -480,8 +477,7 @@ LineResult parseDosLine(const QByteArray &line, Entry *entry)
     const int kind = usedSuffix ? 3 : 2;
     if (kind + 1 >= tokens.size())
         return LineResult::Invalid;
-    const QByteArray what = text(line, tokens.at(kind));
-    if (what.toUpper() == "<DIR>") {
+    if (const QByteArray what = text(line, tokens.at(kind)); what.toUpper() == "<DIR>") {
         entry->type = EntryType::Directory;
     } else if (allDigits(what)) {
         entry->type = EntryType::File;
@@ -525,8 +521,7 @@ void ReplyReader::feed(const char *data, size_t size)
     while (from < chunk.size()) {
         const int newline = chunk.indexOf('\n', from);
         const int end = newline < 0 ? chunk.size() : newline;
-        const int room = MaxLineBytes - m_partial.size();
-        if (room > 0)
+        if (const int room = MaxLineBytes - m_partial.size(); room > 0)
             m_partial += chunk.mid(from, qMin(room, end - from));
         if (newline < 0)
             break;
@@ -717,8 +712,7 @@ LineResult parseMlstReply(const Reply &reply, Entry *entry)
     if (reply.code != 250)
         return LineResult::Invalid;
     for (int i = 1; i < reply.lines.size(); ++i) {
-        const QByteArray &line = reply.lines.at(i);
-        if (line.startsWith(' '))
+        if (const QByteArray &line = reply.lines.at(i); line.startsWith(' '))
             return parseFacts(line.mid(1), false, entry);
     }
     return LineResult::Invalid;
@@ -739,8 +733,7 @@ QDate resolveYearlessDate(int month, int day, const QDate &today)
 {
     const QDate limit = today.addDays(1);
     for (int year = today.year(); year >= today.year() - 1; --year) {
-        const QDate date(year, month, day);
-        if (date.isValid() && date <= limit)
+        if (const QDate date(year, month, day); date.isValid() && date <= limit)
             return date;
     }
     return QDate();
@@ -796,8 +789,7 @@ void ListingParser::parse(const QByteArray &line, QVector<Entry> *out)
     if (m_mlsd) {
         result = parseMlsxLine(line, &entry);
         if (result == LineResult::Entry) {
-            const QByteArray name = Names::encode(entry.name);
-            if (name == "." || name == "..")
+            if (const QByteArray name = Names::encode(entry.name); name == "." || name == "..")
                 result = LineResult::Skip;
             else if (!validName(name))
                 result = LineResult::Invalid;

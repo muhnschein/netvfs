@@ -2,14 +2,29 @@
 #ifndef NETVFS_FTPCONNECTION_H
 #define NETVFS_FTPCONNECTION_H
 
+#include "curlhandles.h"
 #include "ftpparse.h"
 #include "ftpsupport.h"
 
 #include <curl/curl.h>
 
 #include <atomic>
-#include <functional>
 #include <memory>
+
+namespace NetVfs::Ftp {
+class Connection;
+}
+
+// The user data of libcurl's callbacks of a Connection (ftpcallbacks.h).
+struct NetVfsFtpHooks {
+    NetVfs::Ftp::Connection *connection;
+
+    size_t write(const char *data, size_t length) const;
+    size_t read(char *buffer, size_t capacity) const;
+    size_t header(const char *data, size_t length) const;
+    void debug(curl_infotype type, const char *data, size_t length) const;
+    bool progress(curl_off_t downloadTotal, curl_off_t downloaded, curl_off_t uploadTotal, curl_off_t uploaded) const;
+};
 
 namespace NetVfs::Ftp {
 
@@ -78,7 +93,19 @@ public:
     // true). stop() ends a started transfer early; libcurl then closes the
     // control connection.
     Result start(const Request &request, TransferSink *sink);
-    Result pump(const std::function<bool()> &enough, const QString &context);
+    template<typename Enough>
+    Result pump(Enough enough, const QString &context)
+    {
+        Result r;
+        if (!beginPump(&r))
+            return r;
+        while (!pumpRound(&r, context)) {
+            if (enough())
+                return Result::success();
+            waitForData();
+        }
+        return r;
+    }
     // Wakes a paused transfer (a pump() call does this as well).
     void resume();
     bool started() const { return m_started; }
@@ -105,23 +132,28 @@ public:
     void close();
 
 private:
+    friend struct ::NetVfsFtpHooks;
+
     struct SlistDeleter { void operator()(curl_slist *list) const { curl_slist_free_all(list); } };
 
-    static size_t onWrite(char *data, size_t size, size_t count, void *self);
-    static size_t onRead(char *buffer, size_t size, size_t count, void *self);
-    static size_t onHeader(char *data, size_t size, size_t count, void *self);
-    static int onDebug(CURL *easy, curl_infotype type, char *data, size_t size, void *self);
-    static int onProgress(void *self, curl_off_t dlTotal, curl_off_t dlNow, curl_off_t ulTotal, curl_off_t ulNow);
+    // The three steps of pump(): the checks before it starts; one round of
+    // work (true when pump() is over: *result is its outcome); the wait
+    // between two rounds.
+    bool beginPump(Result *result);
+    bool pumpRound(Result *result, const QString &context);
+    void waitForData();
 
     Result applyBase(const QByteArray &url);
     Result applyRequest(const Request &request);
     Result complete(CURLcode code, const QString &context);
     bool guard(const char *data, size_t size);
+    void recordSent(curl_infotype type, const char *data, size_t size);
     bool canceled() const { return m_canceled && m_canceled->load(); }
 
     const std::atomic<bool> *m_canceled;
-    CURL *m_easy = nullptr;
-    CURLM *m_multi = nullptr;
+    Curl::EasyHandle m_easy = Curl::noEasyHandle();
+    Curl::MultiHandle m_multi = Curl::noMultiHandle();
+    NetVfsFtpHooks m_hooks { this };
     Settings m_settings;
     ConnectionParams m_params;
     QByteArray m_userName;

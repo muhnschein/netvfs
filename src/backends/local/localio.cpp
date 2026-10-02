@@ -133,6 +133,141 @@ QByteArray temporaryName(const QByteArray &target, int attempt)
         + QByteArray::number(++counter) + '-' + QByteArray::number(attempt);
 }
 
+Result openForRead(const QByteArray &native, Fd *fd, NativeStat *st)
+{
+    // O_NONBLOCK: opening a FIFO without a writer must not block (C-9);
+    // reads wait in Waiter instead. No effect on regular files.
+    Fd file(::open(native.constData(), O_RDONLY | O_CLOEXEC | O_NOCTTY | O_NONBLOCK));
+    if (!file.valid())
+        return errnoResult(errno, display(native));
+    if (const int e = statFd(file.get(), st); e != 0)
+        return errnoResult(e, display(native));
+    if (st->isDir())
+        return Result(Error::IsADirectory, QStringLiteral("%1 is a folder").arg(display(native)));
+    *fd = std::move(file);
+    return Result::success();
+}
+
+Result openForWrite(const QByteArray &native, const WriteOptions &options, Fd *fd)
+{
+    if (options.createMode < -1 || options.createMode > 07777)
+        return Result(Error::Internal, QStringLiteral("Invalid mode %1").arg(options.createMode, 0, 8));
+    if (options.disposition == WriteOptions::Resume && options.resumeOffset < 0)
+        return Result(Error::Internal, QStringLiteral("Invalid resume offset"));
+    int flags = O_WRONLY | O_CLOEXEC | O_NOCTTY | O_NONBLOCK;
+    if (options.disposition == WriteOptions::CreateNew)
+        flags |= O_CREAT | O_EXCL;
+    else if (options.disposition == WriteOptions::Truncate)
+        flags |= O_CREAT | O_TRUNC;
+    // L-7: Resume opens without truncation.
+    const mode_t mode = options.createMode >= 0 ? static_cast<mode_t>(options.createMode) : DefaultFileMode;
+    Fd file(::open(native.constData(), flags, mode));
+    if (!file.valid())
+        return errnoResult(errno, display(native));
+    if (options.disposition == WriteOptions::Resume) {
+        NativeStat st;
+        if (const int e = statFd(file.get(), &st); e != 0)
+            return errnoResult(e, display(native));
+        if (st.size != options.resumeOffset) {
+            return Result(Error::ProtocolError, QStringLiteral("Cannot resume %1 at %2: the file has %3 bytes")
+                                                    .arg(display(native)).arg(options.resumeOffset).arg(st.size));
+        }
+        if (::lseek(file.get(), options.resumeOffset, SEEK_SET) < 0 && errno != ESPIPE)
+            return errnoResult(errno, display(native));
+    }
+    *fd = std::move(file);
+    return Result::success();
+}
+
+// Copies into `target` opened with `flags`; removes it again on failure.
+Result copyInto(int source, const QByteArray &target, const NativeStat &st, int flags,
+                const Waiter &waiter)
+{
+    Fd output(::open(target.constData(), O_WRONLY | O_CLOEXEC | O_NOCTTY | flags,
+                     static_cast<mode_t>(st.mode & 0777)));   // as cp(1): source mode, umask applies
+    if (!output.valid())
+        return errnoResult(errno, display(target));
+    Result r = copyData(source, output.get(), waiter);
+    if (r.ok()) {
+        // Server-side copies keep the modification time (as cp -p, XS-9).
+        const std::array<struct timespec, 2> times = { toTimespec(fromMsecs(st.accessedMs)),
+                                                       toTimespec(fromMsecs(st.modifiedMs)) };
+        if (::futimens(output.get(), times.data()) != 0)
+            qCDebug(lcNetVfsLocal) << "Cannot keep the modification time of a copy";
+        if (const int e = output.close(); e != 0)
+            r = errnoResult(e, display(target));
+    }
+    if (!r.ok()) {
+        output.reset();
+        ::unlink(target.constData());
+    }
+    return r;
+}
+
+// Replace: copies to a temporary name next to the target, then renames it
+// over the target, so a failed copy leaves the old file intact.
+Result copyReplacing(int source, const QByteArray &target, const NativeStat &st, const Waiter &waiter)
+{
+    for (int attempt = 0; attempt < MaxTemporaryAttempts; ++attempt) {
+        const QByteArray temporary = temporaryName(target, attempt);
+        const Result r = copyInto(source, temporary, st, O_CREAT | O_EXCL, waiter);
+        if (r.error() == Error::AlreadyExists)
+            continue;
+        if (!r.ok())
+            return r;
+        if (::rename(temporary.constData(), target.constData()) != 0) {
+            const int error = errno;
+            ::unlink(temporary.constData());
+            return errnoResult(error, display(target));
+        }
+        syncFolder(parentOf(target));
+        return Result::success();
+    }
+    return Result(Error::Internal, QStringLiteral("No free temporary name next to %1").arg(display(target)));
+}
+
+// Bytes a download will deliver: the range, bounded by what the file holds.
+qint64 downloadTotal(const DownloadOptions &options, const NativeStat &st)
+{
+    if (isStream(st))
+        return options.length;
+    const qint64 available = qMax<qint64>(0, st.size - options.offset);
+    return options.length < 0 ? available : qMin(options.length, available);
+}
+
+// Bytes an upload will take, -1 if unknown.
+qint64 uploadTotal(const WriteOptions &write, const QIODevice *source)
+{
+    if (write.expectedSize >= 0)
+        return write.expectedSize;
+    return source->isSequential() ? -1 : source->size();
+}
+
+// The chunk loop of download(): cancel is checked between chunks (L-6).
+Result pumpDownload(int fd, const DownloadOptions &options, bool stream, QIODevice *sink, qint64 total,
+                    Progress *progress, const Waiter &waiter)
+{
+    QByteArray buffer(static_cast<int>(ChunkSize), Qt::Uninitialized);
+    qint64 done = 0;
+    while (options.length < 0 || done < options.length) {
+        if (waiter.canceled() || (progress && progress->canceled()))
+            return canceled();
+        const qint64 want = options.length < 0 ? ChunkSize : qMin(ChunkSize, options.length - done);
+        qint64 n = 0;
+        if (const Result r = readOnce(fd, stream ? -1 : options.offset + done, buffer.data(), want, waiter, &n);
+                !r.ok())
+            return r;
+        if (n == 0)
+            break;
+        if (sink->write(buffer.constData(), n) != n)
+            return Result(Error::NoSpace, QStringLiteral("Cannot write the local file: %1").arg(sink->errorString()));
+        done += n;
+        if (progress)
+            progress->update(done, total);
+    }
+    return Result::success();
+}
+
 } // namespace
 
 // --- read handle ------------------------------------------------------------
@@ -257,16 +392,19 @@ Result LocalWriteHandle::commit()
         m_fd.reset();
         return r;
     }
+    const int fd = m_fd.get();
+    if (fd < 0)
+        return handleClosed();
     // L-7: data on stable storage before the caller renames it into place.
     // FIFOs and devices have nothing to flush (EINVAL).
-    if (::fsync(m_fd.get()) != 0 && errno != EINVAL && errno != EROFS) {
+    if (::fsync(fd) != 0 && errno != EINVAL && errno != EROFS) {
         const int error = errno;
         m_fd.reset();
         return errnoResult(error, QStringLiteral("Cannot flush"));
     }
     if (m_modified.isValid()) {   // SetModifiedOnUpload
-        const std::array<struct timespec, 2> times = { toTimespec(QDateTime()), toTimespec(m_modified) };
-        if (::futimens(m_fd.get(), times.data()) != 0) {
+        if (const std::array<struct timespec, 2> times = { toTimespec(QDateTime()), toTimespec(m_modified) };
+                ::futimens(m_fd.get(), times.data()) != 0) {
             const int error = errno;
             m_fd.reset();
             return errnoResult(error, QStringLiteral("Cannot set the modification time"));
@@ -283,52 +421,6 @@ void LocalWriteHandle::abort()
 }
 
 // --- opening ----------------------------------------------------------------
-
-Result LocalBackend::openForRead(const QByteArray &native, Fd *fd, NativeStat *st) const
-{
-    // O_NONBLOCK: opening a FIFO without a writer must not block (C-9);
-    // reads wait in Waiter instead. No effect on regular files.
-    Fd file(::open(native.constData(), O_RDONLY | O_CLOEXEC | O_NOCTTY | O_NONBLOCK));
-    if (!file.valid())
-        return errnoResult(errno, display(native));
-    if (const int e = statFd(file.get(), st); e != 0)
-        return errnoResult(e, display(native));
-    if (st->isDir())
-        return Result(Error::IsADirectory, QStringLiteral("%1 is a folder").arg(display(native)));
-    *fd = std::move(file);
-    return Result::success();
-}
-
-Result LocalBackend::openForWrite(const QByteArray &native, const WriteOptions &options, Fd *fd) const
-{
-    if (options.createMode < -1 || options.createMode > 07777)
-        return Result(Error::Internal, QStringLiteral("Invalid mode %1").arg(options.createMode, 0, 8));
-    if (options.disposition == WriteOptions::Resume && options.resumeOffset < 0)
-        return Result(Error::Internal, QStringLiteral("Invalid resume offset"));
-    int flags = O_WRONLY | O_CLOEXEC | O_NOCTTY | O_NONBLOCK;
-    if (options.disposition == WriteOptions::CreateNew)
-        flags |= O_CREAT | O_EXCL;
-    else if (options.disposition == WriteOptions::Truncate)
-        flags |= O_CREAT | O_TRUNC;
-    // L-7: Resume opens without truncation.
-    const mode_t mode = options.createMode >= 0 ? static_cast<mode_t>(options.createMode) : DefaultFileMode;
-    Fd file(::open(native.constData(), flags, mode));
-    if (!file.valid())
-        return errnoResult(errno, display(native));
-    if (options.disposition == WriteOptions::Resume) {
-        NativeStat st;
-        if (const int e = statFd(file.get(), &st); e != 0)
-            return errnoResult(e, display(native));
-        if (st.size != options.resumeOffset) {
-            return Result(Error::ProtocolError, QStringLiteral("Cannot resume %1 at %2: the file has %3 bytes")
-                                                    .arg(display(native)).arg(options.resumeOffset).arg(st.size));
-        }
-        if (::lseek(file.get(), options.resumeOffset, SEEK_SET) < 0 && errno != ESPIPE)
-            return errnoResult(errno, display(native));
-    }
-    *fd = std::move(file);
-    return Result::success();
-}
 
 Result LocalBackend::openRead(const QString &path, ReadHandle **out)
 {
@@ -378,7 +470,7 @@ Result LocalBackend::upload(QIODevice *source, const QString &path, const Upload
     const WriteOptions &write = options.write;
     LocalWriteHandle handle(m_context, std::move(fd),
                             write.disposition == WriteOptions::Resume ? write.resumeOffset : 0, write.modified);
-    const qint64 total = write.expectedSize >= 0 ? write.expectedSize : (source->isSequential() ? -1 : source->size());
+    const qint64 total = uploadTotal(write, source);
     QByteArray buffer(static_cast<int>(ChunkSize), Qt::Uninitialized);
     for (;;) {
         if (progress && progress->canceled()) {
@@ -419,31 +511,7 @@ Result LocalBackend::download(const QString &path, QIODevice *sink, const Downlo
     const bool stream = isStream(st);
     if (stream && options.offset > 0)
         return Result(Error::Unsupported, QStringLiteral("%1 can only be read sequentially").arg(display(native)));
-    qint64 total = options.length;
-    if (!stream) {
-        const qint64 available = qMax<qint64>(0, st.size - options.offset);
-        total = options.length < 0 ? available : qMin(options.length, available);
-    }
-    const Waiter waiter = m_context->waiter();
-    QByteArray buffer(static_cast<int>(ChunkSize), Qt::Uninitialized);
-    qint64 done = 0;
-    while (options.length < 0 || done < options.length) {
-        if (waiter.canceled() || (progress && progress->canceled()))   // L-6: between chunks
-            return canceled();
-        const qint64 want = options.length < 0 ? ChunkSize : qMin(ChunkSize, options.length - done);
-        qint64 n = 0;
-        if (const Result r = readOnce(fd.get(), stream ? -1 : options.offset + done, buffer.data(), want, waiter, &n);
-                !r.ok())
-            return r;
-        if (n == 0)
-            break;
-        if (sink->write(buffer.constData(), n) != n)
-            return Result(Error::NoSpace, QStringLiteral("Cannot write the local file: %1").arg(sink->errorString()));
-        done += n;
-        if (progress)
-            progress->update(done, total);
-    }
-    return Result::success();
+    return pumpDownload(fd.get(), options, stream, sink, downloadTotal(options, st), progress, m_context->waiter());
 }
 
 // --- server-side work (L-4, L-5) --------------------------------------------
@@ -467,57 +535,10 @@ Result LocalBackend::copy(const QString &from, const QString &to, const CopyOpti
     if (st.type != EntryType::File)
         return Result(Error::Unsupported, QStringLiteral("%1 is not a regular file").arg(display(source)));
     if (options.mode == RenameMode::NoReplace)
-        return copyInto(input.get(), target, st, O_CREAT | O_EXCL);
-    NativeStat existing;
-    if (statAt(AT_FDCWD, target, false, &existing) == 0 && existing.isDir())   // XC-10, XC-17
+        return copyInto(input.get(), target, st, O_CREAT | O_EXCL, m_context->waiter());
+    if (NativeStat existing; statAt(AT_FDCWD, target, false, &existing) == 0 && existing.isDir())   // XC-10, XC-17
         return Result(Error::AlreadyExists, QStringLiteral("%1 is a folder and is not replaced").arg(display(target)));
-    return copyReplacing(input.get(), target, st);
-}
-
-// Copies into `target` opened with `flags`; removes it again on failure.
-Result LocalBackend::copyInto(int source, const QByteArray &target, const NativeStat &st, int flags) const
-{
-    Fd output(::open(target.constData(), O_WRONLY | O_CLOEXEC | O_NOCTTY | flags,
-                     static_cast<mode_t>(st.mode & 0777)));   // as cp(1): source mode, umask applies
-    if (!output.valid())
-        return errnoResult(errno, display(target));
-    Result r = copyData(source, output.get(), m_context->waiter());
-    if (r.ok()) {
-        // Server-side copies keep the modification time (as cp -p, XS-9).
-        const std::array<struct timespec, 2> times = { toTimespec(fromMsecs(st.accessedMs)),
-                                                       toTimespec(fromMsecs(st.modifiedMs)) };
-        if (::futimens(output.get(), times.data()) != 0)
-            qCDebug(lcNetVfsLocal) << "Cannot keep the modification time of a copy";
-        if (const int e = output.close(); e != 0)
-            r = errnoResult(e, display(target));
-    }
-    if (!r.ok()) {
-        output.reset();
-        ::unlink(target.constData());
-    }
-    return r;
-}
-
-// Replace: copies to a temporary name next to the target, then renames it
-// over the target, so a failed copy leaves the old file intact.
-Result LocalBackend::copyReplacing(int source, const QByteArray &target, const NativeStat &st) const
-{
-    for (int attempt = 0; attempt < MaxTemporaryAttempts; ++attempt) {
-        const QByteArray temporary = temporaryName(target, attempt);
-        const Result r = copyInto(source, temporary, st, O_CREAT | O_EXCL);
-        if (r.error() == Error::AlreadyExists)
-            continue;
-        if (!r.ok())
-            return r;
-        if (::rename(temporary.constData(), target.constData()) != 0) {
-            const int error = errno;
-            ::unlink(temporary.constData());
-            return errnoResult(error, display(target));
-        }
-        syncFolder(parentOf(target));
-        return Result::success();
-    }
-    return Result(Error::Internal, QStringLiteral("No free temporary name next to %1").arg(display(target)));
+    return copyReplacing(input.get(), target, st, m_context->waiter());
 }
 
 Result LocalBackend::checksum(const QString &path, const QString &algorithm, QByteArray *digest)

@@ -932,7 +932,7 @@ private slots:
 
     void trustStore()
     {
-        CURL *easy = curl_easy_init();
+        const Curl::EasyHandle easy = Curl::newEasyHandle();
         QVERIFY(easy);
         CurlTls::TrustStore store = CurlTls::trustStore(easy, QByteArray("/tmp/test-ca.pem"));
         QCOMPARE(store.caFile, QByteArray("/tmp/test-ca.pem"));
@@ -944,13 +944,12 @@ private slots:
         QVERIFY(store.caFile != "/tmp/test-ca.pem");
         QCOMPARE(CurlTls::applyTestCaFile(easy, QByteArray()), CURLE_OK);
         QVERIFY(CurlTls::isOpenSsl());
-        curl_easy_cleanup(easy);
     }
 
     // W-4 decisions that do not need a server.
     void identityPolicy()
     {
-        CURL *easy = curl_easy_init();
+        const Curl::EasyHandle easy = Curl::newEasyHandle();
         QVERIFY(easy);
         const ServerIdentity seen = ServerIdentity::fromTlsSpki(QByteArray("spki"));
         ServerIdentity trusted = seen;
@@ -965,7 +964,6 @@ private slots:
         QCOMPARE(CurlTls::applyIdentityPolicy(easy, QStringLiteral("ssh-ed25519 AAAA"), false, seen).error(),
                  Error::ServerIdentityChanged);
         QCOMPARE(CurlTls::applyIdentityPolicy(easy, QString(), false, ServerIdentity()).error(), Error::Internal);
-        curl_easy_cleanup(easy);
     }
 };
 

@@ -9,6 +9,7 @@ INCLUDEPATH += $$PWD
 include(../curlcommon/curlcommon.pri)
 
 HEADERS += \
+    $$PWD/davcallbacks.h \
     $$PWD/davclient.h \
     $$PWD/davconfig.h \
     $$PWD/davhandles.h \
@@ -20,6 +21,7 @@ HEADERS += \
     $$PWD/webdavbackend.h
 
 SOURCES += \
+    $$PWD/davcallbacks.c \
     $$PWD/davclient.cpp \
     $$PWD/davconfig.cpp \
     $$PWD/davhandles.cpp \

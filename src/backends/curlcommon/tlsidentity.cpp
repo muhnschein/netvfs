@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 #include "tlsidentity.h"
+#include "tlscallbacks.h"
 
 #include <QtCore/QStringList>
 
@@ -10,7 +11,9 @@
 #include <openssl/x509_vfy.h>
 #include <openssl/x509v3.h>
 
+#include <algorithm>
 #include <array>
+#include <cstddef>
 #include <ctime>
 #include <memory>
 #include <vector>
@@ -21,6 +24,7 @@ namespace {
 
 constexpr int Ipv4Length = 4;
 constexpr int Ipv6Length = 16;
+constexpr int MaxChainErrors = 64;
 
 struct X509Free {
     void operator()(X509 *x) const { X509_free(x); }
@@ -50,15 +54,14 @@ X509Ptr parsePem(const QByteArray &pem)
     return X509Ptr(PEM_read_bio_X509(bio.get(), nullptr, nullptr, nullptr));
 }
 
-QByteArray spkiDer(X509 *cert)
+QByteArray spkiDer(const X509 *cert)
 {
-    X509_PUBKEY *key = X509_get_X509_PUBKEY(cert);
+    const X509_PUBKEY *key = X509_get_X509_PUBKEY(cert);
     const int length = key ? i2d_X509_PUBKEY(key, nullptr) : 0;
     if (length <= 0)
         return QByteArray();
     QByteArray der(length, Qt::Uninitialized);
-    auto *cursor = reinterpret_cast<unsigned char *>(der.data());
-    if (i2d_X509_PUBKEY(key, &cursor) != length)
+    if (auto *cursor = reinterpret_cast<unsigned char *>(der.data()); i2d_X509_PUBKEY(key, &cursor) != length)
         return QByteArray();
     return der;
 }
@@ -86,22 +89,24 @@ QDateTime asn1Time(const ASN1_TIME *time)
 QString ipString(const ASN1_OCTET_STRING *ip)
 {
     const int length = ASN1_STRING_length(ip);
-    const unsigned char *bytes = ASN1_STRING_get0_data(ip);
+    const auto *bytes = reinterpret_cast<const std::byte *>(ASN1_STRING_get0_data(ip));
     QStringList parts;
     if (length == Ipv4Length) {
         for (int i = 0; i < length; ++i)
-            parts << QString::number(bytes[i]);
+            parts << QString::number(std::to_integer<unsigned>(bytes[i]));
         return parts.join(QLatin1Char('.'));
     }
     if (length == Ipv6Length) {
-        for (int i = 0; i < length; i += 2)
-            parts << QString::number((bytes[i] << 8) | bytes[i + 1], 16);
+        for (int i = 0; i < length; i += 2) {
+            const unsigned group = (std::to_integer<unsigned>(bytes[i]) << 8) | std::to_integer<unsigned>(bytes[i + 1]);
+            parts << QString::number(group, 16);
+        }
         return parts.join(QLatin1Char(':'));
     }
     return QString();
 }
 
-QStringList subjectAltNames(X509 *cert)
+QStringList subjectAltNames(const X509 *cert)
 {
     QStringList result;
     std::unique_ptr<GENERAL_NAMES, NamesFree> names(
@@ -109,8 +114,7 @@ QStringList subjectAltNames(X509 *cert)
     if (!names)
         return result;
     for (int i = 0; i < sk_GENERAL_NAME_num(names.get()); ++i) {
-        const GENERAL_NAME *name = sk_GENERAL_NAME_value(names.get(), i);
-        if (name->type == GEN_DNS) {
+        if (const GENERAL_NAME *name = sk_GENERAL_NAME_value(names.get(), i); name->type == GEN_DNS) {
             const ASN1_STRING *dns = name->d.dNSName;
             result << QStringLiteral("DNS:") + QString::fromLatin1(
                           reinterpret_cast<const char *>(ASN1_STRING_get0_data(dns)), ASN1_STRING_length(dns));
@@ -121,7 +125,7 @@ QStringList subjectAltNames(X509 *cert)
     return result;
 }
 
-QString certificateSha256(X509 *cert)
+QString certificateSha256(const X509 *cert)
 {
     std::array<unsigned char, EVP_MAX_MD_SIZE> digest {};
     unsigned int length = 0;
@@ -142,17 +146,6 @@ int problemFor(int verifyError)
     default:
         return ServerIdentity::UntrustedRoot;
     }
-}
-
-// Records every verification error instead of stopping at the first.
-int collectProblems(int ok, X509_STORE_CTX *ctx)
-{
-    if (!ok) {
-        auto *problems = static_cast<int *>(X509_STORE_CTX_get_ex_data(ctx, 0));
-        if (problems)
-            *problems |= problemFor(X509_STORE_CTX_get_error(ctx));
-    }
-    return 1;
 }
 
 bool loadStore(X509_STORE *store, const TrustStore &trust)
@@ -179,11 +172,15 @@ int chainProblems(X509 *leaf, STACK_OF(X509) *presented, const TrustStore &trust
         return ServerIdentity::UntrustedRoot;
     if (X509_STORE_CTX_init(ctx.get(), store.get(), leaf, presented) != 1)
         return ServerIdentity::UntrustedRoot;
-    int problems = 0;
-    X509_STORE_CTX_set_ex_data(ctx.get(), 0, &problems);
-    X509_STORE_CTX_set_verify_cb(ctx.get(), collectProblems);
     X509_STORE_CTX_set_time(ctx.get(), 0, at);
-    if (X509_verify_cert(ctx.get()) != 1 && problems == 0)
+    // Every error of the chain counts, not only the first.
+    std::array<int, MaxChainErrors> codes {};
+    int verified = 0;
+    const int count = netvfs_tls_verify_collecting(ctx.get(), codes.data(), static_cast<int>(codes.size()), &verified);
+    int problems = 0;
+    for (int i = 0; i < count; ++i)
+        problems |= problemFor(codes[static_cast<size_t>(i)]);
+    if (!verified && problems == 0)
         problems = ServerIdentity::UntrustedRoot;
     return problems;
 }
@@ -192,11 +189,7 @@ bool isIpv4Literal(const QByteArray &host)
 {
     if (host.count('.') != 3)
         return false;
-    for (const char c : host) {
-        if (c != '.' && (c < '0' || c > '9'))
-            return false;
-    }
-    return true;
+    return std::all_of(host.begin(), host.end(), [](char c) { return c == '.' || (c >= '0' && c <= '9'); });
 }
 
 // Validity times are checked with the chain (X509_STORE_CTX_set_time).
@@ -252,7 +245,7 @@ ServerIdentity identityFromCertificates(X509 *leaf, STACK_OF(X509) *presented, c
         identity.systemTrusted = true;
         return identity;
     }
-    const time_t at = time_t(now.toMSecsSinceEpoch() / 1000);
+    const auto at = static_cast<time_t>(now.toMSecsSinceEpoch() / 1000);
     int problems = hostProblems(leaf, host) | chainProblems(leaf, presented, store, at);
     if (check == ChainCheck::Failed && problems == 0)
         problems = ServerIdentity::UntrustedRoot;   // libcurl's store disagrees with ours

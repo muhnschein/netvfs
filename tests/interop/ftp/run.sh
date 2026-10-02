@@ -77,7 +77,9 @@ wait_ready() {
 }
 
 host_port() {
-    docker port "$1" "$2/tcp" | head -n 1 | sed 's/.*://'
+    container=$1
+    port=$2
+    docker port "$container" "$port/tcp" | head -n 1 | sed 's/.*://'
 }
 
 make_certs

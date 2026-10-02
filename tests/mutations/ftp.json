@@ -1,15 +1,15 @@
 [
   {
     "name": "C-7 identity probe completes the handshake (USER would follow)",
-    "file": "src/backends/curlcommon/tlsprobe.cpp",
-    "search": "    return 0;   // never complete this handshake (C-7)",
+    "file": "src/backends/curlcommon/tlscallbacks.c",
+    "search": "    return 0;   /* never complete this handshake (C-7) */",
     "replace": "    return 1;",
     "test": "sh tests/interop/ftp/run.sh build identityBeforeUser"
   },
   {
     "name": "C-7 plain probe reads past the greeting",
     "file": "src/backends/ftp/ftpconnection.cpp",
-    "search": "    if (state->stopAfterGreeting && state->reader.last().isValid())",
+    "search": "    if (stopAfterGreeting && reader.last().isValid())",
     "replace": "    if (false)",
     "test": "sh tests/interop/ftp/run.sh build plainConnectSendsNothing"
   },
@@ -184,7 +184,7 @@
   {
     "name": "XSEC-2 guard never consulted by the header callback",
     "file": "src/backends/ftp/ftpconnection.cpp",
-    "search": "    if (connection->m_settings.tlsMode == TlsMode::Explicit && !connection->guard(data, length))",
+    "search": "    if (connection->m_settings.tlsMode == NetVfs::Ftp::TlsMode::Explicit && !connection->guard(data, length))",
     "replace": "    if (false && !connection->guard(data, length))",
     "test": "sh tests/interop/ftp/run.sh build signInTlsFailures reconnectKeepsTls"
   },

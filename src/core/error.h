@@ -26,7 +26,7 @@ enum class Error {
     Unsupported,
     ProtocolError,
     Internal,
-    // API v2 (XC-21)
+    // Added with API v2, see XC-21
     ConnectionLost,         // an established connection dropped
     NotADirectory,
     IsADirectory,

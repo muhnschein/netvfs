@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 #include "discoverycache.h"
+#include "addressclass.h"
 
 #include <algorithm>
 #include <utility>
@@ -19,10 +20,6 @@ constexpr int GoodbyeGraceMs = 1000;             // RFC 6762 section 10.1 (TXT o
 constexpr int ControlLimit = 0x20;
 constexpr int C1First = 0x7F;
 constexpr int C1Last = 0x9F;
-constexpr int Ipv6LinkLocalPrefix = 10;
-constexpr int Ipv4MulticastPrefix = 4;
-constexpr int Ipv4LoopbackPrefix = 8;
-constexpr int Ipv6MulticastPrefix = 8;
 
 const std::array<BrowseType, 6> Table = {{
     {"_sftp-ssh._tcp", "sftp", ""},
@@ -61,7 +58,7 @@ QString cleanPath(const QByteArray &bytes)
 
 bool hostByteAllowed(char c)
 {
-    const uchar u = static_cast<uchar>(c);
+    const auto u = static_cast<uchar>(c);
     return (u >= '0' && u <= '9') || (u >= 'a' && u <= 'z') || (u >= 'A' && u <= 'Z')
         || u == '-' || u == '_' || u >= 0x80;
 }
@@ -89,21 +86,15 @@ bool cleanHost(const QByteArray &target, QString *host)
     return true;
 }
 
-bool inSubnet(const QHostAddress &a, const char *net, int prefix)
-{
-    return a.isInSubnet(QHostAddress(QLatin1String(net)), prefix);
-}
-
 // An address worth connecting to. Link-local IPv6 needs an interface scope
 // that a multicast DNS answer does not carry, so it is unusable here.
 bool usableAddress(const QHostAddress &a)
 {
     if (a.isNull() || a == QHostAddress::AnyIPv4 || a == QHostAddress::AnyIPv6)
         return false;
-    if (a.protocol() == QAbstractSocket::IPv4Protocol)
-        return !inSubnet(a, "224.0.0.0", Ipv4MulticastPrefix) && !inSubnet(a, "127.0.0.0", Ipv4LoopbackPrefix);
-    return a != QHostAddress::LocalHostIPv6 && !inSubnet(a, "fe80::", Ipv6LinkLocalPrefix)
-        && !inSubnet(a, "ff00::", Ipv6MulticastPrefix);
+    if (a.isLoopback() || a.isMulticast())
+        return false;
+    return !AddressClass::isIpv6LinkLocal(a);
 }
 
 QByteArray typeSuffix(const BrowseType &t)
@@ -188,7 +179,7 @@ qint64 ServiceCache::Lifetime::refreshAt() const
 
 void ServiceCache::Collector::add(const QByteArray &name, quint16 type)
 {
-    const QPair<QByteArray, quint16> key(name, type);
+    const QPair key(name, type);
     if (seen.contains(key))
         return;
     seen.insert(key);
@@ -342,7 +333,7 @@ void ServiceCache::handleAddress(const Dns::Record &rec, Context *c)
 // part of the same answer).
 void ServiceCache::flushFamily(const QByteArray &host, quint16 type, Context *c)
 {
-    const QPair<QByteArray, quint16> key(host, type);
+    const QPair key(host, type);
     if (c->flushed.contains(key))
         return;
     c->flushed.insert(key);
@@ -357,7 +348,7 @@ void ServiceCache::flushFamily(const QByteArray &host, quint16 type, Context *c)
                   entries.end());
 }
 
-void ServiceCache::markHostDirty(const QByteArray &host, Context *c)
+void ServiceCache::markHostDirty(const QByteArray &host, Context *c) const
 {
     c->dirtyHosts.insert(host);
 }
@@ -417,7 +408,7 @@ DiscoveredService ServiceCache::snapshot(const Instance &inst) const
     return s;
 }
 
-void ServiceCache::evaluate(Instance *inst, Context *c)
+void ServiceCache::evaluate(Instance *inst, Context *c) const
 {
     const bool complete = isComplete(*inst);
     if (complete) {
@@ -448,20 +439,24 @@ void ServiceCache::evaluate(Instance *inst, Context *c)
     c->events->append(e);
 }
 
+// Instances whose SRV target is `host` are re-evaluated; their addresses changed.
+void ServiceCache::touchInstancesOf(const QByteArray &host, Context *c)
+{
+    for (auto it = m_instances.begin(); it != m_instances.end(); ++it) {
+        if (!it.value().hasSrv || it.value().target != host)
+            continue;
+        if (c->wall.isValid())          // expiry is not "seen"
+            it.value().lastSeen = c->wall;
+        c->dirty.insert(it.key());
+    }
+}
+
 void ServiceCache::finishContext(Context *c)
 {
-    for (const QByteArray &host : std::as_const(c->dirtyHosts)) {
-        for (auto it = m_instances.begin(); it != m_instances.end(); ++it) {
-            if (it.value().hasSrv && it.value().target == host) {
-                if (c->wall.isValid())          // expiry is not "seen"
-                    it.value().lastSeen = c->wall;
-                c->dirty.insert(it.key());
-            }
-        }
-    }
+    for (const QByteArray &host : std::as_const(c->dirtyHosts))
+        touchInstancesOf(host, c);
     for (const QByteArray &key : std::as_const(c->dirty)) {
-        const auto it = m_instances.find(key);
-        if (it != m_instances.end())
+        if (const auto it = m_instances.find(key); it != m_instances.end())
             evaluate(&it.value(), c);
     }
     pruneHosts();
@@ -533,8 +528,7 @@ void ServiceCache::expire(qint64 now, Events *events)
     c.events = events;
     const QList<QByteArray> keys = m_instances.keys();
     for (const QByteArray &key : keys) {
-        const auto it = m_instances.find(key);
-        if (it != m_instances.end())
+        if (const auto it = m_instances.find(key); it != m_instances.end())
             expireInstance(&it.value(), &c);
     }
     expireAddresses(&c);
@@ -543,7 +537,7 @@ void ServiceCache::expire(qint64 now, Events *events)
 
 // ------------------------------------------------------- questions, deadlines
 
-void ServiceCache::collectResolve(Instance *inst, qint64 now, Collector *col)
+void ServiceCache::collectResolve(Instance *inst, qint64 now, Collector *col) const
 {
     if (isComplete(*inst) || inst->nextResolve < 0 || now < inst->nextResolve
         || inst->attempts >= MaxResolveAttempts)
@@ -560,7 +554,7 @@ void ServiceCache::collectResolve(Instance *inst, qint64 now, Collector *col)
     inst->nextResolve = now + (static_cast<qint64>(FirstResolveDelayMs) << (inst->attempts - 1));
 }
 
-void ServiceCache::collectRefresh(Instance *inst, qint64 now, Collector *col)
+void ServiceCache::collectRefresh(Instance *inst, qint64 now, Collector *col) const
 {
     if (inst->hasSrv && inst->srv.refreshAt() >= 0 && now >= inst->srv.refreshAt()) {
         col->add(inst->key, Dns::TypeSrv);

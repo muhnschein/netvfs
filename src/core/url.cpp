@@ -5,6 +5,7 @@
 
 #include <QtCore/QUrl>
 
+#include <algorithm>
 #include <array>
 
 namespace NetVfs::Url {
@@ -54,11 +55,8 @@ Result invalid(const char *what)
 
 bool hasControlCharacter(const QString &text)
 {
-    for (const QChar c : text) {
-        if (c.unicode() < FirstPrintable || c.unicode() == Delete)
-            return true;
-    }
-    return false;
+    return std::any_of(text.begin(), text.end(),
+                       [](QChar c) { return c.unicode() < FirstPrintable || c.unicode() == Delete; });
 }
 
 int hexValue(char c)
@@ -79,9 +77,11 @@ bool percentDecode(const QString &text, QByteArray *bytes)
     const QByteArray raw = Names::encode(text);
     QByteArray out;
     out.reserve(raw.size());
-    for (int i = 0; i < raw.size(); ++i) {
+    int i = 0;
+    while (i < raw.size()) {
         if (raw.at(i) != '%') {
             out.append(raw.at(i));
+            ++i;
             continue;
         }
         const int high = i + 2 < raw.size() ? hexValue(raw.at(i + 1)) : -1;
@@ -89,7 +89,7 @@ bool percentDecode(const QString &text, QByteArray *bytes)
         if (high < 0 || low < 0)
             return false;
         out.append(char(high * 16 + low));
-        i += 2;
+        i += 3;
     }
     *bytes = out;
     return true;
@@ -112,8 +112,9 @@ QString percentEncode(const QString &text, bool keepSlash)
             out.append(QLatin1Char(c));
         } else {
             out.append(QLatin1Char('%'));
-            out.append(QLatin1Char(hex[(uchar(c) >> 4) & 0x0F]));
-            out.append(QLatin1Char(hex[uchar(c) & 0x0F]));
+            const auto value = static_cast<unsigned>(static_cast<uchar>(c));
+            out.append(QLatin1Char(hex[(value >> 4) & 0x0F]));
+            out.append(QLatin1Char(hex[value & 0x0F]));
         }
     }
     return out;
@@ -132,11 +133,7 @@ bool decodeText(const QString &text, QString *out)
 
 bool isAscii(const QString &text)
 {
-    for (const QChar c : text) {
-        if (c.unicode() > 0x7F)
-            return false;
-    }
-    return true;
+    return std::all_of(text.begin(), text.end(), [](QChar c) { return c.unicode() <= 0x7F; });
 }
 
 bool validHostCharacters(const QString &host)
@@ -153,14 +150,12 @@ bool validIpv6(const QString &host)
 {
     if (!host.contains(QLatin1Char(':')))
         return false;
-    for (const QChar c : host) {
+    return std::all_of(host.begin(), host.end(), [](QChar c) {
         const bool hex = (c >= QLatin1Char('0') && c <= QLatin1Char('9'))
             || (c >= QLatin1Char('a') && c <= QLatin1Char('f'))
             || (c >= QLatin1Char('A') && c <= QLatin1Char('F'));
-        if (!hex && c != QLatin1Char(':') && c != QLatin1Char('.'))
-            return false;
-    }
-    return true;
+        return hex || c == QLatin1Char(':') || c == QLatin1Char('.');
+    });
 }
 
 // Host name kept in Unicode: punycode labels are converted (QUrl::fromAce).
@@ -182,10 +177,9 @@ bool parsePort(const QString &text, int *port)
         return true;
     if (text.size() > MaxPortDigits)
         return false;
-    for (const QChar c : text) {
-        if (c < QLatin1Char('0') || c > QLatin1Char('9'))
-            return false;
-    }
+    const auto isDigit = [](QChar c) { return c >= QLatin1Char('0') && c <= QLatin1Char('9'); };
+    if (!std::all_of(text.begin(), text.end(), isDigit))
+        return false;
     *port = text.toInt();
     return *port >= 1 && *port <= MaxPort;
 }
@@ -237,22 +231,20 @@ Result parseAuthority(const QString &text, Authority *out)
     return parseHostPort(text.mid(at + 1), out);
 }
 
-Result parseScheme(const QString &url, const SchemeInfo **info, QString *rest)
+Result parseScheme(const QString &url, QString *scheme, QString *rest)
 {
     const int separator = url.indexOf(QLatin1String("://"));
     if (separator <= 0)
         return invalid("no scheme");
-    const QString scheme = url.left(separator).toLower();
-    for (const QChar c : scheme) {
+    *scheme = url.left(separator).toLower();
+    const auto validCharacter = [](QChar c) {
         const bool letter = c >= QLatin1Char('a') && c <= QLatin1Char('z');
         const bool other = (c >= QLatin1Char('0') && c <= QLatin1Char('9')) || c == QLatin1Char('+')
             || c == QLatin1Char('-') || c == QLatin1Char('.');
-        if (!letter && !other)
-            return invalid("bad scheme");
-    }
-    *info = findScheme(scheme);
-    if (!*info)
-        return Result(Error::Unsupported, QStringLiteral("Unsupported URL scheme \"%1\"").arg(scheme));
+        return letter || other;
+    };
+    if (!std::all_of(scheme->begin(), scheme->end(), validCharacter))
+        return invalid("bad scheme");
     *rest = url.mid(separator + 3);
     return Result::success();
 }
@@ -396,11 +388,14 @@ Result parse(const QString &url, ConnectionParams *params, QString *path)
 {
     if (hasControlCharacter(url))
         return invalid("control character");
-    const SchemeInfo *info = nullptr;
+    QString scheme;
     QString rest;
-    Result r = parseScheme(url, &info, &rest);
+    Result r = parseScheme(url, &scheme, &rest);
     if (!r.ok())
         return r;
+    const SchemeInfo *info = findScheme(scheme);
+    if (!info)
+        return Result(Error::Unsupported, QStringLiteral("Unsupported URL scheme \"%1\"").arg(scheme));
     if (rest.contains(QLatin1Char('?')) || rest.contains(QLatin1Char('#')))
         return invalid("queries and fragments are not supported");
 

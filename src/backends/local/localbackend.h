@@ -46,9 +46,7 @@ struct Context {
 class LocalBackend : public Backend
 {
 public:
-    LocalBackend();
-    LocalBackend(const LocalBackend &) = delete;
-    LocalBackend &operator=(const LocalBackend &) = delete;
+    LocalBackend() = default;
     ~LocalBackend() override;
 
     Result connect(const ConnectionParams &params, ServerIdentity *seen) override;
@@ -97,20 +95,8 @@ private:
     Result prepare(const QString &path, QByteArray *native) const;
     Result statEntry(const QString &path, bool follow, Entry *out);
     void fillEntry(const NativeStat &st, Entry *out);
-    void resolveTarget(int dirFd, const QByteArray &path, Entry *entry);
-    void probeCapabilities(const ConnectionParams &params);
 
-    Result renameSameFile(const QByteArray &from, const QByteArray &to, RenameMode mode) const;
-    Result renameNoReplace(const QByteArray &from, const QByteArray &to, bool isDir) const;
-    Result renameLinked(const QByteArray &from, const QByteArray &to) const;
-    Result renameChecked(const QByteArray &from, const QByteArray &to) const;
-
-    Result openForRead(const QByteArray &native, Fd *fd, NativeStat *st) const;
-    Result openForWrite(const QByteArray &native, const WriteOptions &options, Fd *fd) const;
-    Result copyInto(int source, const QByteArray &target, const NativeStat &st, int flags) const;
-    Result copyReplacing(int source, const QByteArray &target, const NativeStat &st) const;
-
-    std::shared_ptr<Context> m_context;
+    std::shared_ptr<Context> m_context = std::make_shared<Context>();
     State m_state = State::Idle;
     QByteArray m_root;
     Capabilities m_capabilities;

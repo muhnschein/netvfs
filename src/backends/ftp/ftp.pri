@@ -6,12 +6,14 @@ INCLUDEPATH += $$PWD
 include(../curlcommon/curlcommon.pri)
 HEADERS += \
     $$PWD/ftpbackend.h \
+    $$PWD/ftpcallbacks.h \
     $$PWD/ftpconnection.h \
     $$PWD/ftphandles.h \
     $$PWD/ftpparse.h \
     $$PWD/ftpsupport.h
 SOURCES += \
     $$PWD/ftpbackend.cpp \
+    $$PWD/ftpcallbacks.c \
     $$PWD/ftpconnection.cpp \
     $$PWD/ftphandles.cpp \
     $$PWD/ftpparse.cpp \

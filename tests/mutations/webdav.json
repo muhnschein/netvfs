@@ -16,7 +16,7 @@
   {
     "name": "W-4 tls_verify_peer ignored",
     "file": "src/backends/webdav/webdavbackend.cpp",
-    "search": "        tls.verifyPeer = m_config.pinVerifyPeer;",
+    "search": "        tls.verifyPeer = m_b.m_config.pinVerifyPeer;",
     "replace": "        tls.verifyPeer = false;",
     "test": "build/tests/unit/webdav/tst_webdav tlsPinnedVerifyPeer"
   },
@@ -121,14 +121,14 @@
   {
     "name": "XSEC-4 proxy from the environment",
     "file": "src/backends/webdav/davclient.cpp",
-    "search": "    curl_easy_setopt(easy, CURLOPT_NETRC, long(CURL_NETRC_IGNORED));\n    curl_easy_setopt(easy, CURLOPT_PROXY, \"\");",
-    "replace": "    curl_easy_setopt(easy, CURLOPT_NETRC, long(CURL_NETRC_IGNORED));",
+    "search": "    curl_easy_setopt(raw, CURLOPT_NETRC, long(CURL_NETRC_IGNORED));\n    curl_easy_setopt(raw, CURLOPT_PROXY, \"\");",
+    "replace": "    curl_easy_setopt(raw, CURLOPT_NETRC, long(CURL_NETRC_IGNORED));",
     "test": "build/tests/unit/webdav/tst_webdav ignoresProxyEnvironment"
   },
   {
     "name": "W-16 no cookie engine",
     "file": "src/backends/webdav/davclient.cpp",
-    "search": "    curl_easy_setopt(easy, CURLOPT_COOKIEFILE, \"\");",
+    "search": "    curl_easy_setopt(raw, CURLOPT_COOKIEFILE, \"\");",
     "replace": "",
     "test": "build/tests/unit/webdav/tst_webdav cookiesInMemory"
   },
@@ -261,8 +261,8 @@
   {
     "name": "C-9 cancel() does nothing",
     "file": "src/backends/webdav/davclient.cpp",
-    "search": "    m_cancel = true;\n    std::lock_guard<std::mutex> lock(m_wakeLock);",
-    "replace": "    std::lock_guard<std::mutex> lock(m_wakeLock);",
+    "search": "    m_cancel = true;\n    const std::scoped_lock lock(m_wakeLock);",
+    "replace": "    const std::scoped_lock lock(m_wakeLock);",
     "test": "build/tests/unit/webdav/tst_webdav cancelWithinTwoSeconds:stat cancelWithinTwoSeconds:upload"
   },
   {
@@ -278,5 +278,12 @@
     "search": "    if (selfIsFile)\n        return Result(Error::NotADirectory, QStringLiteral(\"Not a folder\"));\n    if (hasMember)",
     "replace": "    if (hasMember)",
     "test": "build/tests/unit/webdav/tst_webdav listNotAFolder removeCases"
+  },
+  {
+    "name": "W-3 identity probe completes the handshake (the unauthenticated chain reader would connect)",
+    "file": "src/backends/curlcommon/tlscallbacks.c",
+    "search": "    return 0;   /* never complete this handshake (C-7) */",
+    "replace": "    return 1;",
+    "test": "build/tests/unit/webdav/tst_webdav tlsUntrustedSendsNothing"
   }
 ]

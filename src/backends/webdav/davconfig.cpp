@@ -3,6 +3,8 @@
 
 #include <QtCore/QRegularExpression>
 
+#include <algorithm>
+
 namespace NetVfs::WebDav {
 
 namespace {
@@ -38,12 +40,10 @@ Result parseScheme(const ConnectionParams &params, QByteArray *scheme)
 
 bool hasNextcloudToken(const QStringList &classes)
 {
-    for (const QString &token : classes) {
-        if (token.startsWith(QLatin1String("nextcloud-")) || token.startsWith(QLatin1String("nc-"))
-            || token.startsWith(QLatin1String("oc-")))
-            return true;
-    }
-    return false;
+    return std::any_of(classes.begin(), classes.end(), [](const QString &token) {
+        return token.startsWith(QLatin1String("nextcloud-")) || token.startsWith(QLatin1String("nc-"))
+            || token.startsWith(QLatin1String("oc-"));
+    });
 }
 
 bool hasNextcloudCookie(const QByteArray &setCookie)
@@ -87,8 +87,7 @@ ServerFeatures detectFeatures(const QMap<QByteArray, QByteArray> &headers, const
 {
     ServerFeatures features;
     for (const QByteArray &token : headers.value("dav").split(',')) {
-        const QString item = QString::fromLatin1(token.trimmed()).toLower();
-        if (!item.isEmpty())
+        if (const QString item = QString::fromLatin1(token.trimmed()).toLower(); !item.isEmpty())
             features.davClasses << item;
     }
     features.partialUpdate = features.davClasses.contains(QStringLiteral("sabredav-partialupdate"));

@@ -226,8 +226,8 @@
   {
     "name": "transport: every sender counts as on-link",
     "file": "src/core/discoverytransport.cpp",
-    "search": "&& sender.isInSubnet(e.ip(), e.prefixLength()))",
-    "replace": "&& true)",
+    "search": "&& sender.isInSubnet(e.ip(), e.prefixLength());",
+    "replace": "&& true;",
     "test": "timeout 120 build/tests/unit/discovery/tst_discovery"
   }
 ]

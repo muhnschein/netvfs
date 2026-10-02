@@ -13,7 +13,14 @@ bool isEscape(char16_t u)
     return u >= EscapeBase + 0x80 && u <= EscapeBase + 0xFF;
 }
 
-bool isContinuation(uchar b)
+// True if a high surrogate followed by a low surrogate starts at `i`.
+bool pairAt(const QString &text, int i)
+{
+    return i + 1 < text.size() && QChar::isHighSurrogate(text.at(i).unicode())
+        && QChar::isLowSurrogate(text.at(i + 1).unicode());
+}
+
+bool isContinuation(uint b)
 {
     return (b & 0xC0) == 0x80;
 }
@@ -22,16 +29,16 @@ bool isContinuation(uchar b)
 // Unicode table 3-7), or 0 if ill-formed. Stores the code point.
 int sequenceLength(const QByteArray &bytes, int i, uint *codePoint)
 {
-    const auto at = [&](int k) { return uchar(bytes.at(k)); };
-    const uchar b0 = at(i);
+    const auto at = [&bytes](int k) { return static_cast<uint>(static_cast<uchar>(bytes.at(k))); };
+    const uint b0 = at(i);
     const int remaining = bytes.size() - i;
     if (b0 < 0x80) {
         *codePoint = b0;
         return 1;
     }
     int length = 0;
-    uchar lo = 0x80;
-    uchar hi = 0xBF;
+    uint lo = 0x80;
+    uint hi = 0xBF;
     uint cp = 0;
     if (b0 >= 0xC2 && b0 <= 0xDF) {
         length = 2;
@@ -55,12 +62,12 @@ int sequenceLength(const QByteArray &bytes, int i, uint *codePoint)
     }
     if (remaining < length)
         return 0;
-    const uchar b1 = at(i + 1);
+    const uint b1 = at(i + 1);
     if (b1 < lo || b1 > hi)
         return 0;
     cp = (cp << 6) | (b1 & 0x3F);
     for (int k = 2; k < length; ++k) {
-        const uchar b = at(i + k);
+        const uint b = at(i + k);
         if (!isContinuation(b))
             return 0;
         cp = (cp << 6) | (b & 0x3F);
@@ -119,11 +126,12 @@ QByteArray encode(const QString &name)
     QByteArray out;
     out.reserve(name.size());
     const int n = name.size();
-    for (int i = 0; i < n; ++i) {
+    int i = 0;
+    while (i < n) {
         const char16_t u = name.at(i).unicode();
-        if (QChar::isHighSurrogate(u) && i + 1 < n && QChar::isLowSurrogate(name.at(i + 1).unicode())) {
+        if (pairAt(name, i)) {
             appendUtf8(&out, QChar::surrogateToUcs4(u, name.at(i + 1).unicode()));
-            ++i;
+            ++i;   // the low surrogate
         } else if (isEscape(u)) {
             out.append(char(u - EscapeBase));
         } else if (QChar::isSurrogate(u)) {
@@ -131,6 +139,7 @@ QByteArray encode(const QString &name)
         } else {
             appendUtf8(&out, u);
         }
+        ++i;
     }
     return out;
 }
@@ -138,14 +147,16 @@ QByteArray encode(const QString &name)
 bool isEncodable(const QString &name)
 {
     const int n = name.size();
-    for (int i = 0; i < n; ++i) {
-        const char16_t u = name.at(i).unicode();
-        if (QChar::isHighSurrogate(u) && i + 1 < n && QChar::isLowSurrogate(name.at(i + 1).unicode())) {
-            ++i;
+    int i = 0;
+    while (i < n) {
+        if (pairAt(name, i)) {
+            i += 2;
             continue;
         }
+        const char16_t u = name.at(i).unicode();
         if (QChar::isSurrogate(u) && !isEscape(u))
             return false;
+        ++i;
     }
     return true;
 }
@@ -154,14 +165,15 @@ QString display(const QString &name)
 {
     QString result = name;
     const int n = result.size();
-    for (int i = 0; i < n; ++i) {
-        const char16_t u = result.at(i).unicode();
-        if (QChar::isHighSurrogate(u) && i + 1 < n && QChar::isLowSurrogate(result.at(i + 1).unicode())) {
-            ++i;
+    int i = 0;
+    while (i < n) {
+        if (pairAt(result, i)) {
+            i += 2;
             continue;
         }
-        if (QChar::isSurrogate(u))
+        if (QChar::isSurrogate(result.at(i).unicode()))
             result[i] = QChar(ushort(Replacement));
+        ++i;
     }
     return result;
 }
@@ -169,14 +181,15 @@ QString display(const QString &name)
 bool hasEscapes(const QString &name)
 {
     const int n = name.size();
-    for (int i = 0; i < n; ++i) {
-        const char16_t u = name.at(i).unicode();
-        if (QChar::isHighSurrogate(u) && i + 1 < n && QChar::isLowSurrogate(name.at(i + 1).unicode())) {
-            ++i;
+    int i = 0;
+    while (i < n) {
+        if (pairAt(name, i)) {
+            i += 2;
             continue;
         }
-        if (isEscape(u))
+        if (isEscape(name.at(i).unicode()))
             return true;
+        ++i;
     }
     return false;
 }

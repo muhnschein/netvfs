@@ -92,6 +92,10 @@ bool isDotOrDotDot(const char *name)
     return std::strcmp(name, ".") == 0 || std::strcmp(name, "..") == 0;
 }
 
+struct DirCloser {
+    void operator()(DIR *dir) const { ::closedir(dir); }
+};
+
 Result systemFailure(const QByteArray &native)
 {
     return errnoResult(errno, display(native));
@@ -107,6 +111,85 @@ Result plainRename(const QByteArray &from, const QByteArray &to)
 Result alreadyExists(const QByteArray &native)
 {
     return Result(Error::AlreadyExists, QStringLiteral("%1 already exists").arg(display(native)));
+}
+
+void resolveTarget(int dirFd, const QByteArray &path, Entry *entry)
+{
+    NativeStat target;
+    if (statAt(dirFd, path, true, &target) == 0)
+        entry->targetType = target.type;
+    else
+        entry->flags |= EntryFlag::TargetUnknown;   // dangling, a loop, or no access
+}
+
+Result renameChecked(const QByteArray &from, const QByteArray &to)
+{
+    // XC-10: the documented race between this check and rename().
+    if (NativeStat existing; statAt(AT_FDCWD, to, false, &existing) == 0)
+        return alreadyExists(to);
+    return plainRename(from, to);
+}
+
+Result renameLinked(const QByteArray &from, const QByteArray &to)
+{
+    // link() fails with EEXIST atomically; unlink() then drops the old name.
+    if (::link(from.constData(), to.constData()) != 0) {
+        const int error = errno;
+        if (error == EPERM || error == EOPNOTSUPP || error == EMLINK || error == ENOSYS)
+            return renameChecked(from, to);   // no hard links here
+        return errnoResult(error, display(to));
+    }
+    if (::unlink(from.constData()) != 0) {
+        const int error = errno;
+        ::unlink(to.constData());
+        return errnoResult(error, display(from));
+    }
+    return Result::success();
+}
+
+Result renameNoReplace(const QByteArray &from, const QByteArray &to, bool isDir, bool tryNative)
+{
+    if (tryNative) {
+        if (renameat2Call(from, to, RenameNoReplace) == 0)
+            return Result::success();
+        if (const int error = errno; error != EINVAL && error != ENOSYS)
+            return errnoResult(error, display(to));
+        // No RENAME_NOREPLACE on this kernel or file system (L-3).
+    }
+    return isDir ? renameChecked(from, to) : renameLinked(from, to);
+}
+
+Result renameSameFile(const QByteArray &from, const QByteArray &to, RenameMode mode)
+{
+    if (from == to)
+        return Result::success();
+    // A case-only rename on a case-insensitive file system: one entry.
+    if (Names::decode(from).compare(Names::decode(to), Qt::CaseInsensitive) == 0)
+        return plainRename(from, to);
+    // Two hard links of one file.
+    if (mode == RenameMode::NoReplace)
+        return alreadyExists(to);
+    // rename(2) leaves both names in place; Replace means `from` goes away.
+    if (::unlink(from.constData()) != 0)
+        return systemFailure(from);
+    return Result::success();
+}
+
+Capabilities probeCapabilities(const QByteArray &root, bool tryNativeNoReplace)
+{
+    Capabilities caps;
+    for (const Capability c : { Capability::Symlinks, Capability::Hardlinks, Capability::PosixModes,
+                                Capability::Ownership, Capability::SetModified, Capability::SetModifiedOnUpload,
+                                Capability::ReadHandles, Capability::EfficientRanges, Capability::WriteResume,
+                                Capability::AtomicReplace, Capability::ServerCopy, Capability::SpaceInfo,
+                                Capability::Checksums })
+        caps.flags.insert(c);
+    if (tryNativeNoReplace && kernelHasRenameat2() && fileSystemHasNoReplace(root))
+        caps.flags.insert(Capability::NativeNoReplace);
+    caps.checksumAlgorithms = QStringList { QStringLiteral("sha256"), QStringLiteral("sha1"), QStringLiteral("md5") };
+    if (struct statvfs vfs {}; ::statvfs(root.constData(), &vfs) == 0 && vfs.f_namemax > 0)
+        caps.maxNameBytes = static_cast<qint64>(vfs.f_namemax);
+    return caps;
 }
 
 } // namespace
@@ -167,7 +250,7 @@ private:
         if (st.type == EntryType::Symlink && m_resolve) {
             if (m_resolutions < MaxSymlinkResolutions) {
                 ++m_resolutions;
-                m_backend.resolveTarget(dirFd, name, &entry);
+                resolveTarget(dirFd, name, &entry);
             } else {
                 entry.flags |= EntryFlag::TargetUnknown;
             }
@@ -193,11 +276,6 @@ private:
 };
 
 // --- connection (L-1) -------------------------------------------------------
-
-LocalBackend::LocalBackend()
-    : m_context(std::make_shared<Context>())
-{
-}
 
 LocalBackend::~LocalBackend()
 {
@@ -229,29 +307,11 @@ Result LocalBackend::connect(const ConnectionParams &params, ServerIdentity *see
         return Result(Error::NotADirectory, QStringLiteral("%1 is not a folder").arg(display(m_root)));
 
     m_context->requestTimeoutMs = params.requestTimeoutMs > 0 ? params.requestTimeoutMs : DefaultRequestTimeoutMs;
-    probeCapabilities(params);
+    m_tryNativeNoReplace = params.flag(QLatin1String(NativeNoReplaceOption), true);
+    m_capabilities = probeCapabilities(m_root, m_tryNativeNoReplace);
     m_state = State::Connected;
     qCDebug(lcNetVfsLocal) << "Local root" << display(m_root);
     return Result::success();
-}
-
-void LocalBackend::probeCapabilities(const ConnectionParams &params)
-{
-    m_tryNativeNoReplace = params.flag(QLatin1String(NativeNoReplaceOption), true);
-    Capabilities caps;
-    for (const Capability c : { Capability::Symlinks, Capability::Hardlinks, Capability::PosixModes,
-                                Capability::Ownership, Capability::SetModified, Capability::SetModifiedOnUpload,
-                                Capability::ReadHandles, Capability::EfficientRanges, Capability::WriteResume,
-                                Capability::AtomicReplace, Capability::ServerCopy, Capability::SpaceInfo,
-                                Capability::Checksums })
-        caps.flags.insert(c);
-    if (m_tryNativeNoReplace && kernelHasRenameat2() && fileSystemHasNoReplace(m_root))
-        caps.flags.insert(Capability::NativeNoReplace);
-    caps.checksumAlgorithms = QStringList { QStringLiteral("sha256"), QStringLiteral("sha1"), QStringLiteral("md5") };
-    struct statvfs vfs {};
-    if (::statvfs(m_root.constData(), &vfs) == 0 && vfs.f_namemax > 0)
-        caps.maxNameBytes = static_cast<qint64>(vfs.f_namemax);
-    m_capabilities = caps;
 }
 
 Result LocalBackend::authenticate(const Credentials &credentials, AuthPrompter *prompter)
@@ -352,15 +412,6 @@ void LocalBackend::fillEntry(const NativeStat &st, Entry *out)
         out->flags |= EntryFlag::NameNotUtf8;
 }
 
-void LocalBackend::resolveTarget(int dirFd, const QByteArray &path, Entry *entry)
-{
-    NativeStat target;
-    if (statAt(dirFd, path, true, &target) == 0)
-        entry->targetType = target.type;
-    else
-        entry->flags |= EntryFlag::TargetUnknown;   // dangling, a loop, or no access
-}
-
 // --- metadata (XC-7) --------------------------------------------------------
 
 Result LocalBackend::statEntry(const QString &path, bool follow, Entry *out)
@@ -401,7 +452,7 @@ Result LocalBackend::list(const QString &dir, ListSink *sink, const ListOptions 
     Fd fd(::open(native.constData(), O_RDONLY | O_DIRECTORY | O_CLOEXEC));
     if (!fd.valid())
         return systemFailure(native);
-    const std::unique_ptr<DIR, int (*)(DIR *)> handle(::fdopendir(fd.get()), ::closedir);
+    const std::unique_ptr<DIR, DirCloser> handle(::fdopendir(fd.get()));
     if (!handle)
         return systemFailure(native);
     fd.release();   // owned by the DIR stream now
@@ -418,8 +469,7 @@ Result LocalBackend::makeDir(const QString &path, bool exclusive)
     if (::mkdir(native.constData(), FolderMode) == 0)
         return Result::success();
     const int error = errno;
-    NativeStat st;
-    if (error == EEXIST && !exclusive && statAt(AT_FDCWD, native, true, &st) == 0 && st.isDir())
+    if (NativeStat st; error == EEXIST && !exclusive && statAt(AT_FDCWD, native, true, &st) == 0 && st.isDir())
         return Result::success();   // XC-8: an existing folder is fine
     return errnoResult(error, display(native));
 }
@@ -463,12 +513,10 @@ Result LocalBackend::rename(const QString &from, const QString &to, RenameMode m
     if (const int e = statAt(AT_FDCWD, source, false, &src); e != 0)
         return errnoResult(e, display(source));
     NativeStat dst;
-    const bool targetExists = statAt(AT_FDCWD, target, false, &dst) == 0;
-
-    if (targetExists && dst.sameFile(src))
+    if (const bool targetExists = statAt(AT_FDCWD, target, false, &dst) == 0; targetExists && dst.sameFile(src))
         r = renameSameFile(source, target, mode);
     else if (mode == RenameMode::NoReplace)
-        r = renameNoReplace(source, target, src.isDir());
+        r = renameNoReplace(source, target, src.isDir(), m_tryNativeNoReplace);
     else if (targetExists && dst.isDir())   // XC-10: a folder is never replaced
         r = alreadyExists(target);
     else
@@ -480,61 +528,6 @@ Result LocalBackend::rename(const QString &from, const QString &to, RenameMode m
             syncFolder(parentOf(source));
     }
     return r;
-}
-
-Result LocalBackend::renameSameFile(const QByteArray &from, const QByteArray &to, RenameMode mode) const
-{
-    if (from == to)
-        return Result::success();
-    // A case-only rename on a case-insensitive file system: one entry.
-    if (Names::decode(from).compare(Names::decode(to), Qt::CaseInsensitive) == 0)
-        return plainRename(from, to);
-    // Two hard links of one file.
-    if (mode == RenameMode::NoReplace)
-        return alreadyExists(to);
-    // rename(2) leaves both names in place; Replace means `from` goes away.
-    if (::unlink(from.constData()) != 0)
-        return systemFailure(from);
-    return Result::success();
-}
-
-Result LocalBackend::renameNoReplace(const QByteArray &from, const QByteArray &to, bool isDir) const
-{
-    if (m_tryNativeNoReplace) {
-        if (renameat2Call(from, to, RenameNoReplace) == 0)
-            return Result::success();
-        const int error = errno;
-        if (error != EINVAL && error != ENOSYS)
-            return errnoResult(error, display(to));
-        // No RENAME_NOREPLACE on this kernel or file system (L-3).
-    }
-    return isDir ? renameChecked(from, to) : renameLinked(from, to);
-}
-
-Result LocalBackend::renameLinked(const QByteArray &from, const QByteArray &to) const
-{
-    // link() fails with EEXIST atomically; unlink() then drops the old name.
-    if (::link(from.constData(), to.constData()) != 0) {
-        const int error = errno;
-        if (error == EPERM || error == EOPNOTSUPP || error == EMLINK || error == ENOSYS)
-            return renameChecked(from, to);   // no hard links here
-        return errnoResult(error, display(to));
-    }
-    if (::unlink(from.constData()) != 0) {
-        const int error = errno;
-        ::unlink(to.constData());
-        return errnoResult(error, display(from));
-    }
-    return Result::success();
-}
-
-Result LocalBackend::renameChecked(const QByteArray &from, const QByteArray &to) const
-{
-    // XC-10: the documented race between this check and rename().
-    NativeStat existing;
-    if (statAt(AT_FDCWD, to, false, &existing) == 0)
-        return alreadyExists(to);
-    return plainRename(from, to);
 }
 
 Result LocalBackend::setAttributes(const QString &path, const AttributeChanges &changes)
@@ -551,8 +544,8 @@ Result LocalBackend::setAttributes(const QString &path, const AttributeChanges &
     if (changes.mode >= 0 && ::chmod(native.constData(), static_cast<mode_t>(changes.mode)) != 0)
         return systemFailure(native);
     if (changes.modified.isValid() || changes.accessed.isValid()) {
-        const std::array<struct timespec, 2> times = { toTimespec(changes.accessed), toTimespec(changes.modified) };
-        if (::utimensat(AT_FDCWD, native.constData(), times.data(), 0) != 0)
+        if (const std::array<struct timespec, 2> times = { toTimespec(changes.accessed), toTimespec(changes.modified) };
+                ::utimensat(AT_FDCWD, native.constData(), times.data(), 0) != 0)
             return systemFailure(native);
     }
     return Result::success();

@@ -78,6 +78,86 @@ QByteArray depthHeader(int depth)
     return "Depth: " + QByteArray::number(depth);
 }
 
+Result statusResult(const Response &response, Method method)
+{
+    const qint64 retryAfter = parseRetryAfter(response.header("retry-after"), QDateTime::currentDateTimeUtc());
+    return httpResult(response.status, method, response.reason, retryAfter);
+}
+
+// A 207 answer to DELETE/COPY/MOVE lists the members that failed.
+Result multistatusFailure(const Response &response, Method method)
+{
+    int failed = 0;
+    MultistatusParser parser([&failed](const DavResource &resource) {
+        if (resource.status != 0 && !is2xx(resource.status)) {
+            failed = resource.status;
+            return false;
+        }
+        return true;
+    });
+    parser.feed(response.body.constData(), response.body.size());
+    if (failed != 0)
+        return httpResult(failed, method);
+    if (!parser.stopped()) {
+        if (const Result r = parser.finish(); !r.ok())
+            return r;
+    }
+    return Result::success();
+}
+
+// Delivers the children of a PROPFIND Depth 1 answer to a ListSink in
+// batches while the answer is still streaming (XC-6).
+class ListCollector
+{
+public:
+    ListCollector(ListSink *sink, int batchSize, bool nextcloud)
+        : m_sink(sink), m_batchSize(batchSize), m_nextcloud(nextcloud) {}
+
+    // False stops the PROPFIND: the sink wants no more.
+    bool operator()(const DavResource &resource, const HrefResolver &resolver)
+    {
+        QByteArray name;
+        switch (resolver.classify(resource.href, &name)) {
+        case HrefResolver::Kind::Self:
+            m_selfIsFile = resource.typeKnown && !resource.collection;
+            return true;
+        case HrefResolver::Kind::Other:
+            qCDebug(lcNetVfsWebdav) << "Ignoring href" << resource.href;
+            return true;
+        case HrefResolver::Kind::Child:
+            break;
+        }
+        if (resource.status != 0 && !is2xx(resource.status))
+            return true;
+        m_batch << toEntry(resource, Names::decode(name), m_nextcloud);
+        return m_batch.size() < m_batchSize || flush();
+    }
+
+    // Delivers what is left.
+    void finish()
+    {
+        if (!m_stopped && !m_batch.isEmpty())
+            flush();
+    }
+    bool selfIsFile() const { return m_selfIsFile; }
+    bool stopped() const { return m_stopped; }
+
+private:
+    bool flush()
+    {
+        m_stopped = !m_sink->entries(m_batch);
+        m_batch.clear();
+        return !m_stopped;
+    }
+
+    ListSink *m_sink;
+    int m_batchSize;
+    bool m_nextcloud;
+    QVector<Entry> m_batch;
+    bool m_selfIsFile = false;
+    bool m_stopped = false;
+};
+
 } // namespace
 
 WebDavBackend::WebDavBackend() = default;
@@ -100,8 +180,7 @@ Result WebDavBackend::checkUsable() const
 Result WebDavBackend::urlFor(const QString &path, bool collection, QByteArray *url) const
 {
     QByteArray relative;
-    const Result r = encodeRelativePath(path, &relative);
-    if (!r.ok())
+    if (const Result r = encodeRelativePath(path, &relative); !r.ok())
         return r;
     *url = m_baseUrl + relative;
     if (collection && !relative.isEmpty())
@@ -118,11 +197,6 @@ Result WebDavBackend::send(Request &request, Response *response)
     return r;
 }
 
-Result WebDavBackend::statusResult(const Response &response, Method method) const
-{
-    const qint64 retryAfter = parseRetryAfter(response.header("retry-after"), QDateTime::currentDateTimeUtc());
-    return httpResult(response.status, method, response.reason, retryAfter);
-}
 
 bool WebDavBackend::nextcloud() const
 {
@@ -131,11 +205,11 @@ bool WebDavBackend::nextcloud() const
     return m_config.flavor == Flavor::Nextcloud;
 }
 
-Result WebDavBackend::propfind(const QByteArray &url, int depth, const ResourceCallback &callback,
-                               Response *response)
+template<typename Callback>
+Result WebDavBackend::propfind(const QByteArray &url, int depth, Callback &&callback, Response *response)
 {
     std::unique_ptr<HrefResolver> resolver;
-    MultistatusParser parser([&](const DavResource &resource) {
+    MultistatusParser parser([&resolver, &callback, response](const DavResource &resource) {
         if (!resolver)
             resolver = std::make_unique<HrefResolver>(response->url);
         return callback(resource, *resolver);
@@ -149,8 +223,7 @@ Result WebDavBackend::propfind(const QByteArray &url, int depth, const ResourceC
     request.headers << depthHeader(depth) << ContentTypeXml;
     request.body = &body;
     request.sink = &sink;
-    Result r = send(request, response);
-    if (!r.ok())
+    if (const Result r = send(request, response); !r.ok())
         return r;
     if (response->status != StatusMultiStatus) {
         if (is2xx(response->status))
@@ -160,91 +233,89 @@ Result WebDavBackend::propfind(const QByteArray &url, int depth, const ResourceC
     return parser.stopped() ? Result::success() : parser.finish();
 }
 
-Result WebDavBackend::statUrl(const QByteArray &url, const QString &name, Entry *out)
-{
-    bool found = false;
-    DavResource self;
-    Response response;
-    Result r = propfind(url, 0, [&](const DavResource &resource, const HrefResolver &) {
-        if (!found) {
-            self = resource;
-            found = true;
-        }
-        return true;
-    }, &response);
-    if (!r.ok())
-        return r;
-    if (!found)
-        return Result(Error::ProtocolError, QStringLiteral("The server described no resource"));
-    if (self.status != 0 && !is2xx(self.status))
-        return httpResult(self.status, Method::Propfind);
-    if (out)
-        *out = toEntry(self, name, nextcloud());
-    return Result::success();
-}
 
 // ------------------------------------------------------------- connection
 
-Result WebDavBackend::fetchOptions(Response *response)
+// The exchange at connect() (W-3, W-5): TLS identity, OPTIONS and the
+// features the server announces.
+class WebDavBackend::Handshake
+{
+public:
+    explicit Handshake(WebDavBackend &backend) : m_b(backend) {}
+
+    Result connectTls(ServerIdentity *identity, Response *options) const;
+    Result fetchOptions(Response *response) const;
+    void takeFeatures(const Response &options) const;
+
+private:
+    Result readUntrusted(bool verificationFailed, const QString &failureDetail, const ServerIdentity &pinned,
+                         ServerIdentity *identity) const;
+
+    WebDavBackend &m_b;
+};
+
+Result WebDavBackend::Handshake::fetchOptions(Response *response) const
 {
     Request request;
     request.method = Method::Options;
-    request.url = m_baseUrl;
-    return send(request, response);
+    request.url = m_b.m_baseUrl;
+    return m_b.send(request, response);
 }
 
-void WebDavBackend::takeFeatures(const Response &options)
+void WebDavBackend::Handshake::takeFeatures(const Response &options) const
 {
-    m_features = detectFeatures(options.headers, m_config.basePath);
-    m_featuresKnown = is2xx(options.status);
-    qCDebug(lcNetVfsWebdav) << "DAV classes" << m_features.davClasses << "nextcloud" << nextcloud();
+    m_b.m_features = detectFeatures(options.headers, m_b.m_config.basePath);
+    m_b.m_featuresKnown = is2xx(options.status);
+    qCDebug(lcNetVfsWebdav) << "DAV classes" << m_b.m_features.davClasses << "nextcloud" << m_b.nextcloud();
 }
 
-Result WebDavBackend::connectTls(ServerIdentity *identity, Response *options)
+Result WebDavBackend::Handshake::connectTls(ServerIdentity *identity, Response *options) const
 {
-    const ServerIdentity pinned = ServerIdentity::fromPin(m_config.pin);
+    const ServerIdentity pinned = ServerIdentity::fromPin(m_b.m_config.pin);
     TlsSettings tls;
     if (pinned.kind == ServerIdentity::Kind::TlsCertificate) {
         tls.pinnedKey = "sha256//" + pinned.fingerprint.toLatin1();
-        tls.verifyPeer = m_config.pinVerifyPeer;
+        tls.verifyPeer = m_b.m_config.pinVerifyPeer;
     }
-    tls.caFile = m_config.testCaFile;
-    m_client.setTls(tls);
+    tls.caFile = m_b.m_config.testCaFile;
+    m_b.m_client.setTls(tls);
 
     // W-3: handshake and an unauthenticated OPTIONS; the chain comes from
     // CURLOPT_CERTINFO.
     Request request;
     request.method = Method::Options;
-    request.url = m_baseUrl;
+    request.url = m_b.m_baseUrl;
     request.certificateInfo = true;
-    Result r = send(request, options);
-    const QByteArray host = m_config.origin.host;
+    const Result r = m_b.send(request, options);
     if (r.ok() && !options->certificates.isEmpty()) {
-        *identity = identityFromChain(options->certificates, host,
+        *identity = identityFromChain(options->certificates, m_b.m_config.origin.host,
                                       tls.verifyPeer ? ChainCheck::Verified : ChainCheck::NotChecked,
-                                      m_client.trustStore());
+                                      m_b.m_client.trustStore());
         return Result::success();
     }
     if (!r.ok() && r.error() != Error::ServerIdentityChanged)
         return r;
-    // Verification or the pin failed (or the chain is missing): a second
-    // handshake without verification collects the chain; no HTTP request
-    // is sent on it.
     const bool verificationFailed = !r.ok() && options->curlCode == CURLE_PEER_FAILED_VERIFICATION;
     *options = Response();
-    QVector<QByteArray> chain;
-    const Result probe = m_client.probeCertificates(&chain);
-    if (!probe.ok())
+    return readUntrusted(verificationFailed, r.detail(), pinned, identity);
+}
+
+// Verification or the pin failed (or the chain is missing): a second
+// handshake, which the client ends once it has the certificate, collects the
+// chain; no HTTP request is sent on it.
+Result WebDavBackend::Handshake::readUntrusted(bool verificationFailed, const QString &failureDetail,
+                                               const ServerIdentity &pinned, ServerIdentity *identity) const
+{
+    const ChainCheck check = verificationFailed ? ChainCheck::Failed : ChainCheck::NotChecked;
+    if (const Result probe = m_b.m_client.probeIdentity(check, identity); !probe.ok())
         return probe;
-    *identity = identityFromChain(chain, host, verificationFailed ? ChainCheck::Failed : ChainCheck::NotChecked,
-                                  m_client.trustStore());
     qCDebug(lcNetVfsWebdav) << "Certificate" << identity->details.value(QStringLiteral("subject")).toString()
                             << "issued by" << identity->details.value(QStringLiteral("issuer")).toString()
                             << "problems" << identity->problems;
     if (verificationFailed && !identity->isEmpty() && *identity == pinned) {
         return Result(Error::ServerIdentityChanged,
                       QStringLiteral("The pinned server certificate is no longer trusted by the system"),
-                      r.detail());
+                      failureDetail);
     }
     return Result::success();
 }
@@ -267,10 +338,10 @@ Result WebDavBackend::connect(const ConnectionParams &params, ServerIdentity *se
     ServerIdentity identity;
     Response options;
     if (m_config.origin.scheme == "https") {
-        r = connectTls(&identity, &options);
+        r = Handshake(*this).connectTls(&identity, &options);
     } else {
         m_client.setTls(TlsSettings());
-        r = fetchOptions(&options);
+        r = Handshake(*this).fetchOptions(&options);
     }
     if (seen)
         *seen = identity;
@@ -285,7 +356,7 @@ Result WebDavBackend::connect(const ConnectionParams &params, ServerIdentity *se
     m_link = std::make_shared<HandleLink>();
     m_link->backend = this;
     if (options.status > 0)
-        takeFeatures(options);
+        Handshake(*this).takeFeatures(options);
     return Result::success();
 }
 
@@ -308,7 +379,7 @@ Result WebDavBackend::authenticate(const Credentials &credentials, AuthPrompter 
     // W-5: PROPFIND Depth 0 on the base.
     DavResource base;
     Response response;
-    Result r = propfind(m_baseUrl, 0, [&](const DavResource &resource, const HrefResolver &) {
+    Result r = propfind(m_baseUrl, 0, [&base](const DavResource &resource, const HrefResolver &) {
         if (base.href.isEmpty())
             base = resource;
         return true;
@@ -324,10 +395,10 @@ Result WebDavBackend::authenticate(const Credentials &credentials, AuthPrompter 
     m_quotaSeen = base.quotaAvailable >= 0 || base.quotaUsed >= 0;
     if (!m_featuresKnown) {
         Response options;
-        r = fetchOptions(&options);
+        r = Handshake(*this).fetchOptions(&options);
         if (!r.ok())
             return r;
-        takeFeatures(options);
+        Handshake(*this).takeFeatures(options);
     }
     m_authenticated = true;
     return Result::success();
@@ -361,7 +432,7 @@ Result WebDavBackend::keepAlive()
     if (Result r = checkUsable(); !r.ok())
         return r;
     Response response;
-    const Result r = fetchOptions(&response);
+    const Result r = Handshake(*this).fetchOptions(&response);
     if (r.error() == Error::NetworkUnreachable)
         return Result(Error::ConnectionLost, r.message(), r.detail());
     return r;
@@ -404,7 +475,24 @@ Result WebDavBackend::stat(const QString &path, Entry *out)
     QByteArray url;
     if (Result r = urlFor(path, false, &url); !r.ok())
         return r;
-    return statUrl(url, nameOf(path), out);
+    bool found = false;
+    DavResource self;
+    Response response;
+    if (const Result r = propfind(url, 0, [&found, &self](const DavResource &resource, const HrefResolver &) {
+            if (!found) {
+                self = resource;
+                found = true;
+            }
+            return true;
+        }, &response); !r.ok())
+        return r;
+    if (!found)
+        return Result(Error::ProtocolError, QStringLiteral("The server described no resource"));
+    if (self.status != 0 && !is2xx(self.status))
+        return httpResult(self.status, Method::Propfind);
+    if (out)
+        *out = toEntry(self, nameOf(path), nextcloud());
+    return Result::success();
 }
 
 Result WebDavBackend::list(const QString &dir, ListSink *sink, const ListOptions &options)
@@ -415,42 +503,17 @@ Result WebDavBackend::list(const QString &dir, ListSink *sink, const ListOptions
     if (Result r = urlFor(dir, true, &url); !r.ok())
         return r;
     const int batchSize = options.batchSize > 0 ? options.batchSize : ListOptions().batchSize;
-    const bool flavorNextcloud = nextcloud();
-    QVector<Entry> batch;
-    bool sinkStopped = false;
-    bool selfIsFile = false;
+    ListCollector collector(sink, batchSize, nextcloud());
     Response response;
-    Result r = propfind(url, 1, [&](const DavResource &resource, const HrefResolver &resolver) {
-        QByteArray name;
-        switch (resolver.classify(resource.href, &name)) {
-        case HrefResolver::Kind::Self:
-            selfIsFile = resource.typeKnown && !resource.collection;
-            return true;
-        case HrefResolver::Kind::Other:
-            qCDebug(lcNetVfsWebdav) << "Ignoring href" << resource.href;
-            return true;
-        case HrefResolver::Kind::Child:
-            break;
-        }
-        if (resource.status != 0 && !is2xx(resource.status))
-            return true;
-        batch << toEntry(resource, Names::decode(name), flavorNextcloud);
-        if (batch.size() < batchSize)
-            return true;
-        // XC-6: delivered while the response is still streaming.
-        sinkStopped = !sink->entries(batch);
-        batch.clear();
-        return !sinkStopped;
-    }, &response);
-    if (r.ok() && response.status == StatusMultiStatus && selfIsFile)
+    const Result r = propfind(url, 1, collector, &response);
+    if (r.ok() && response.status == StatusMultiStatus && collector.selfIsFile())
         return Result(Error::NotADirectory, QStringLiteral("Not a folder"));
-    if (r.ok() && !sinkStopped && !batch.isEmpty())
-        sinkStopped = !sink->entries(batch);
-    if (sinkStopped)
+    if (r.ok())
+        collector.finish();
+    if (collector.stopped())
         return Result(Error::Canceled, QStringLiteral("Canceled"));
     if (!r.ok() && mayBeFile(response)) {
-        Entry entry;
-        if (stat(dir, &entry).ok() && !entry.isDir())
+        if (Entry entry; stat(dir, &entry).ok() && !entry.isDir())
             return Result(Error::NotADirectory, QStringLiteral("Not a folder"));
     }
     return r;
@@ -517,7 +580,7 @@ Result WebDavBackend::removeDir(const QString &path)
     bool hasMember = false;
     bool selfIsFile = false;
     Response response;
-    Result r = propfind(url, 1, [&](const DavResource &resource, const HrefResolver &resolver) {
+    Result r = propfind(url, 1, [&selfIsFile, &hasMember](const DavResource &resource, const HrefResolver &resolver) {
         switch (resolver.classify(resource.href, nullptr)) {
         case HrefResolver::Kind::Self:
             selfIsFile = resource.typeKnown && !resource.collection;
@@ -544,7 +607,8 @@ Result WebDavBackend::removeDir(const QString &path)
     Request request;
     request.method = Method::Delete;
     request.url = url;
-    if (r = send(request, &response); !r.ok())
+    r = send(request, &response);
+    if (!r.ok())
         return r;
     if (response.status == StatusMultiStatus)
         return multistatusFailure(response, Method::Delete);
@@ -568,34 +632,27 @@ Result WebDavBackend::removeTreeNative(const QString &path)
     return statusResult(response, Method::Delete);
 }
 
-// A 207 answer to DELETE/COPY/MOVE lists the members that failed.
-Result WebDavBackend::multistatusFailure(const Response &response, Method method) const
+// COPY and MOVE (W-8).
+class WebDavBackend::Transfers
 {
-    int failed = 0;
-    MultistatusParser parser([&](const DavResource &resource) {
-        if (resource.status != 0 && !is2xx(resource.status)) {
-            failed = resource.status;
-            return false;
-        }
-        return true;
-    });
-    parser.feed(response.body.constData(), response.body.size());
-    if (failed != 0)
-        return httpResult(failed, method);
-    if (!parser.stopped()) {
-        const Result r = parser.finish();
-        if (!r.ok())
-            return r;
-    }
-    return Result::success();
-}
+public:
+    explicit Transfers(WebDavBackend &backend) : m_b(backend) {}
 
-Result WebDavBackend::checkReplaceTarget(const QString &to)
+    Result run(Method method, const QString &from, const QString &to, RenameMode mode,
+               const QByteArray &depth) const;
+
+private:
+    Result checkReplaceTarget(const QString &to) const;
+
+    WebDavBackend &m_b;
+};
+
+Result WebDavBackend::Transfers::checkReplaceTarget(const QString &to) const
 {
     // XC-10: a folder is never replaced (with NoReplace the server refuses
     // any existing target itself).
     Entry target;
-    const Result r = stat(to, &target);
+    const Result r = m_b.stat(to, &target);
     if (r.ok() && target.isDir())
         return Result(Error::AlreadyExists, QStringLiteral("Cannot replace a folder"));
     if (!r.ok() && r.error() != Error::NotFound)
@@ -603,17 +660,17 @@ Result WebDavBackend::checkReplaceTarget(const QString &to)
     return Result::success();
 }
 
-Result WebDavBackend::transferTo(Method method, const QString &from, const QString &to, RenameMode mode,
-                                 const QByteArray &depth)
+Result WebDavBackend::Transfers::run(Method method, const QString &from, const QString &to, RenameMode mode,
+                                     const QByteArray &depth) const
 {
-    if (Result r = checkUsable(); !r.ok())
+    if (Result r = m_b.checkUsable(); !r.ok())
         return r;
     Request request;
     request.method = method;
     QByteArray destination;
-    if (Result r = urlFor(from, false, &request.url); !r.ok())
+    if (Result r = m_b.urlFor(from, false, &request.url); !r.ok())
         return r;
-    if (Result r = urlFor(to, false, &destination); !r.ok())
+    if (Result r = m_b.urlFor(to, false, &destination); !r.ok())
         return r;
     if (mode == RenameMode::Replace) {
         if (Result r = checkReplaceTarget(to); !r.ok())
@@ -625,15 +682,14 @@ Result WebDavBackend::transferTo(Method method, const QString &from, const QStri
     if (!depth.isEmpty())
         request.headers << "Depth: " + depth;
     Response response;
-    if (Result r = send(request, &response); !r.ok())
+    if (Result r = m_b.send(request, &response); !r.ok())
         return r;
     if (response.status == StatusMultiStatus)
         return multistatusFailure(response, method);
     const Result r = statusResult(response, method);
     if (r.error() == Error::PermissionDenied) {
         // A missing source is 403 on some servers (rclone).
-        Entry source;
-        if (stat(from, &source).error() == Error::NotFound)
+        if (Entry source; m_b.stat(from, &source).error() == Error::NotFound)
             return Result(Error::NotFound, QStringLiteral("No such file or folder"), r.detail());
     }
     return r;
@@ -641,7 +697,7 @@ Result WebDavBackend::transferTo(Method method, const QString &from, const QStri
 
 Result WebDavBackend::rename(const QString &from, const QString &to, RenameMode mode)
 {
-    return transferTo(Method::Move, from, to, mode, QByteArray());
+    return Transfers(*this).run(Method::Move, from, to, mode, QByteArray());
 }
 
 Result WebDavBackend::copy(const QString &from, const QString &to, const CopyOptions &options)
@@ -650,7 +706,7 @@ Result WebDavBackend::copy(const QString &from, const QString &to, const CopyOpt
     if (Result r = stat(from, &source); !r.ok())
         return r;
     const QByteArray depth = source.isDir() && options.recursive ? QByteArray("infinity") : QByteArray("0");
-    return transferTo(Method::Copy, from, to, options.mode, depth);
+    return Transfers(*this).run(Method::Copy, from, to, options.mode, depth);
 }
 
 Result WebDavBackend::setAttributes(const QString &path, const AttributeChanges &changes)
@@ -757,7 +813,23 @@ Result WebDavBackend::download(const QString &path, QIODevice *sink, const Downl
 
 // ------------------------------------------------------------- writing
 
-QList<QByteArray> WebDavBackend::uploadHeaders(const WriteOptions &options) const
+// What PUT/PATCH need before and after the request (W-10, W-11).
+class WebDavBackend::Writes
+{
+public:
+    explicit Writes(WebDavBackend &backend) : m_b(backend) {}
+
+    QList<QByteArray> headers(const WriteOptions &options) const;
+    Result prepare(const QString &path, const WriteOptions &options) const;
+    Result outcome(const Response &response, Method method, const QString &path) const;
+
+private:
+    Result prepareResume(const QString &path, const WriteOptions &options) const;
+
+    WebDavBackend &m_b;
+};
+
+QList<QByteArray> WebDavBackend::Writes::headers(const WriteOptions &options) const
 {
     QList<QByteArray> headers;
     if (options.disposition == WriteOptions::Resume) {
@@ -770,12 +842,12 @@ QList<QByteArray> WebDavBackend::uploadHeaders(const WriteOptions &options) cons
     if (options.disposition == WriteOptions::CreateNew)
         headers << "If-None-Match: *";
     // W-11
-    if (nextcloud() && options.modified.isValid())
+    if (m_b.nextcloud() && options.modified.isValid())
         headers << "X-OC-MTime: " + QByteArray::number(options.modified.toMSecsSinceEpoch() / MsPerSecond);
     return headers;
 }
 
-Result WebDavBackend::prepareWrite(const QString &path, const WriteOptions &options)
+Result WebDavBackend::Writes::prepare(const QString &path, const WriteOptions &options) const
 {
     if (options.disposition == WriteOptions::Resume)
         return prepareResume(path, options);
@@ -784,18 +856,18 @@ Result WebDavBackend::prepareWrite(const QString &path, const WriteOptions &opti
     // W-10: If-None-Match: * makes the server refuse to replace; some
     // servers (rclone) ignore it, so an existing file is caught here, too.
     Entry existing;
-    const Result r = stat(path, &existing);
+    const Result r = m_b.stat(path, &existing);
     if (r.ok())
         return Result(Error::AlreadyExists, QStringLiteral("The file already exists"));
     return r.error() == Error::NotFound ? Result::success() : r;
 }
 
-Result WebDavBackend::prepareResume(const QString &path, const WriteOptions &options)
+Result WebDavBackend::Writes::prepareResume(const QString &path, const WriteOptions &options) const
 {
-    if (!m_features.partialUpdate)
+    if (!m_b.m_features.partialUpdate)
         return Result(Error::Unsupported, QStringLiteral("The server cannot resume uploads"));
     Entry existing;
-    if (Result r = stat(path, &existing); !r.ok())
+    if (Result r = m_b.stat(path, &existing); !r.ok())
         return r;
     if (existing.size != options.resumeOffset) {
         return Result(Error::ProtocolError, QStringLiteral("Cannot resume at %1: the partial file has %2 bytes")
@@ -805,12 +877,11 @@ Result WebDavBackend::prepareResume(const QString &path, const WriteOptions &opt
     return Result::success();
 }
 
-Result WebDavBackend::writeTargetResult(const Response &response, Method method, const QString &path)
+Result WebDavBackend::Writes::outcome(const Response &response, Method method, const QString &path) const
 {
     const Result r = statusResult(response, method);
     if (response.status == StatusMethodNotAllowed || response.status == StatusConflict) {
-        Entry entry;
-        if (stat(path, &entry).ok() && entry.isDir())
+        if (Entry entry; m_b.stat(path, &entry).ok() && entry.isDir())
             return Result(Error::IsADirectory, QStringLiteral("Is a folder"));
     }
     return r;
@@ -823,7 +894,7 @@ Result WebDavBackend::upload(QIODevice *source, const QString &path, const Uploa
         return r;
     const WriteOptions &write = options.write;
     const bool resume = write.disposition == WriteOptions::Resume;
-    if (Result r = prepareWrite(path, write); !r.ok())
+    if (Result r = Writes(*this).prepare(path, write); !r.ok())
         return r;
     qint64 size = write.expectedSize;
     if (size >= 0 && resume)
@@ -832,7 +903,7 @@ Result WebDavBackend::upload(QIODevice *source, const QString &path, const Uploa
         size = source->size() - source->pos();
     Request request;
     request.method = resume ? Method::Patch : Method::Put;
-    request.headers = uploadHeaders(write);
+    request.headers = Writes(*this).headers(write);
     request.progress = progress;
     if (Result r = urlFor(path, false, &request.url); !r.ok())
         return r;
@@ -842,7 +913,7 @@ Result WebDavBackend::upload(QIODevice *source, const QString &path, const Uploa
     Response response;
     if (Result r = send(request, &response); !r.ok())
         return r;
-    return writeTargetResult(response, request.method, path);
+    return Writes(*this).outcome(response, request.method, path);
 }
 
 Result WebDavBackend::openWrite(const QString &path, const WriteOptions &options, WriteHandle **out)
@@ -853,14 +924,14 @@ Result WebDavBackend::openWrite(const QString &path, const WriteOptions &options
     if (m_openWrites >= MaxWriteHandles)
         return Result(Error::TooManyConnections, QStringLiteral("Too many files open for writing"));
     const bool resume = options.disposition == WriteOptions::Resume;
-    if (Result r = prepareWrite(path, options); !r.ok())
+    if (Result r = Writes(*this).prepare(path, options); !r.ok())
         return r;
     qint64 size = options.expectedSize;
     if (size >= 0 && resume)
         size -= options.resumeOffset;
     Request request;
     request.method = resume ? Method::Patch : Method::Put;
-    request.headers = uploadHeaders(options);
+    request.headers = Writes(*this).headers(options);
     if (Result r = urlFor(path, false, &request.url); !r.ok())
         return r;
     // Only the announced size matters here; the stream supplies the bytes.
@@ -871,8 +942,7 @@ Result WebDavBackend::openWrite(const QString &path, const WriteOptions &options
         return r;
     if (stream->answered()) {
         // Answered before any body byte: an error, or an empty file is done.
-        const Result r = finishWrite(stream.get(), path, options);
-        if (!r.ok())
+        if (const Result r = finishWrite(stream.get(), path, options); !r.ok())
             return r;
         stream.reset();
     }
@@ -887,7 +957,7 @@ Result WebDavBackend::finishWrite(Client::Stream *stream, const QString &path, c
     if (Result r = stream->finish(&response); !r.ok())
         return r;
     const Method method = options.disposition == WriteOptions::Resume ? Method::Patch : Method::Put;
-    return writeTargetResult(response, method, path);
+    return Writes(*this).outcome(response, method, path);
 }
 
 // ------------------------------------------------------------- server-side
@@ -903,7 +973,7 @@ Result WebDavBackend::checksum(const QString &path, const QString &algorithm, QB
         return r;
     QString checksums;
     Response response;
-    if (Result r = propfind(url, 0, [&](const DavResource &resource, const HrefResolver &) {
+    if (Result r = propfind(url, 0, [&checksums](const DavResource &resource, const HrefResolver &) {
             checksums = resource.checksums;
             return false;
         }, &response); !r.ok()) {
@@ -928,7 +998,7 @@ Result WebDavBackend::spaceInfo(const QString &dir, SpaceInfo *out)
     DavResource self;
     bool found = false;
     Response response;
-    if (Result r = propfind(url, 0, [&](const DavResource &resource, const HrefResolver &) {
+    if (Result r = propfind(url, 0, [&self, &found](const DavResource &resource, const HrefResolver &) {
             self = resource;
             found = true;
             return false;

@@ -18,7 +18,6 @@ struct BoundedPipe::State
 
     explicit State(qint64 size) : buffer(int(std::max<qint64>(size, 1)), Qt::Uninitialized) {}
 
-    mutable std::mutex mutex;
     std::condition_variable notEmpty;   // data arrived, writer closed or pipe failed
     std::condition_variable notFull;    // space freed, reader closed or pipe failed
     QByteArray buffer;                  // ring storage, fixed size
@@ -28,6 +27,9 @@ struct BoundedPipe::State
     bool writerClosed = false;
     bool readerClosed = false;
     Result failure;                     // first fail() wins
+
+    // The only way to the mutex: callers hold the returned lock while they use the state.
+    Lock lock() const { return Lock(m_mutex); }
 
     qint64 capacity() const { return buffer.size(); }
 
@@ -79,13 +81,16 @@ struct BoundedPipe::State
     {
         notFull.wait(*lock, [this] { return count < capacity() || failedLocked() || readerClosed; });
     }
+
+private:
+    mutable std::mutex m_mutex;
 };
 
 namespace {
 
 using State = BoundedPipe::State;
 
-class PipeWriter : public QIODevice
+class PipeWriter final : public QIODevice
 {
 public:
     explicit PipeWriter(std::shared_ptr<State> state) : m_state(std::move(state))
@@ -100,7 +105,7 @@ public:
     void close() override
     {
         if (isOpen()) {
-            State::Lock lock(m_state->mutex);
+            State::Lock lock = m_state->lock();
             m_state->writerClosed = true;
             m_state->notEmpty.notify_all();
         }
@@ -113,7 +118,7 @@ protected:
     // Blocks until all of `length` bytes are in the ring (bounded memory).
     qint64 writeData(const char *data, qint64 length) override
     {
-        State::Lock lock(m_state->mutex);
+        State::Lock lock = m_state->lock();
         qint64 done = 0;
         while (done < length) {
             m_state->waitForSpaceLocked(&lock);
@@ -132,7 +137,7 @@ private:
     std::shared_ptr<State> m_state;
 };
 
-class PipeReader : public QIODevice
+class PipeReader final : public QIODevice
 {
 public:
     explicit PipeReader(std::shared_ptr<State> state) : m_state(std::move(state))
@@ -147,7 +152,7 @@ public:
     void close() override
     {
         if (isOpen()) {
-            State::Lock lock(m_state->mutex);
+            State::Lock lock = m_state->lock();
             m_state->readerClosed = true;
             m_state->notFull.notify_all();
         }
@@ -156,7 +161,7 @@ public:
 
     qint64 bytesAvailable() const override
     {
-        State::Lock lock(m_state->mutex);
+        State::Lock lock = m_state->lock();
         return m_state->failedLocked() ? 0 : m_state->count + QIODevice::bytesAvailable();
     }
 
@@ -164,7 +169,7 @@ public:
     // deliver data, so that "while (!atEnd())" loops behave on a live pipe.
     bool atEnd() const override
     {
-        State::Lock lock(m_state->mutex);
+        State::Lock lock = m_state->lock();
         m_state->waitForDataLocked(&lock);
         return m_state->failedLocked() || m_state->count == 0;
     }
@@ -175,7 +180,7 @@ protected:
     {
         if (maxSize <= 0)
             return 0;
-        State::Lock lock(m_state->mutex);
+        State::Lock lock = m_state->lock();
         m_state->waitForDataLocked(&lock);
         if (m_state->failedLocked()) {
             setErrorString(m_state->failure.message());
@@ -195,8 +200,8 @@ private:
 
 BoundedPipe::BoundedPipe(qint64 capacity)
     : m_state(std::make_shared<State>(capacity))
-    , m_writer(new PipeWriter(m_state))
-    , m_reader(new PipeReader(m_state))
+    , m_writer(std::make_unique<PipeWriter>(m_state))
+    , m_reader(std::make_unique<PipeReader>(m_state))
 {
 }
 
@@ -216,20 +221,20 @@ QIODevice *BoundedPipe::reader()
     return m_reader.get();
 }
 
-void BoundedPipe::fail(const Result &result)
+void BoundedPipe::fail(const Result &result) const
 {
-    State::Lock lock(m_state->mutex);
+    State::Lock lock = m_state->lock();
     m_state->failLocked(result);
 }
 
-void BoundedPipe::cancel()
+void BoundedPipe::cancel() const
 {
     fail(Result(Error::Canceled));
 }
 
 Result BoundedPipe::result() const
 {
-    State::Lock lock(m_state->mutex);
+    State::Lock lock = m_state->lock();
     return m_state->failure;
 }
 
@@ -240,13 +245,13 @@ qint64 BoundedPipe::capacity() const
 
 qint64 BoundedPipe::buffered() const
 {
-    State::Lock lock(m_state->mutex);
+    State::Lock lock = m_state->lock();
     return m_state->count;
 }
 
 qint64 BoundedPipe::peakBuffered() const
 {
-    State::Lock lock(m_state->mutex);
+    State::Lock lock = m_state->lock();
     return m_state->peak;
 }
 

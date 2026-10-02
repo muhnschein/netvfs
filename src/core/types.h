@@ -100,7 +100,12 @@ struct NETVFS_EXPORT ServerIdentity {
     QByteArray publicKey;     // SSH: key blob; TLS: DER SubjectPublicKeyInfo
     QString fingerprint;      // SSH: "SHA256:..."; TLS: SHA-256 of SPKI, base64 (curl pin form)
     bool systemTrusted = false;          // TLS chain + hostname verified against system CAs
-    enum Problem { SelfSigned = 1, UntrustedRoot = 2, Expired = 4, NotYetValid = 8, HostnameMismatch = 16 };
+    // Bits of `problems`.
+    static constexpr int SelfSigned = 1;
+    static constexpr int UntrustedRoot = 2;
+    static constexpr int Expired = 4;
+    static constexpr int NotYetValid = 8;
+    static constexpr int HostnameMismatch = 16;
     int problems = 0;
     QVariantMap details;      // TLS: subject, issuer, notBefore, notAfter, sans, certSha256
 

@@ -142,8 +142,8 @@
   {
     "name": "XH-7 extension not kept when truncating",
     "file": "src/core/paths.cpp",
-    "search": "        if (extensionBytes < maxBytes) {",
-    "replace": "        if (false) {",
+    "search": "extensionBytes < maxBytes) {",
+    "replace": "false) {",
     "test": "build/tests/unit/url/tst_url"
   }
 ]

@@ -179,7 +179,7 @@ class NETVFS_EXPORT DiscoveryTransport : public QObject
     Q_OBJECT
 
 public:
-    explicit DiscoveryTransport(QObject *parent = nullptr) : QObject(parent) {}
+    using QObject::QObject;
     // Binds the sockets; true if at least one family is usable. Called again
     // after a failure. Idempotent while open.
     virtual bool open() = 0;

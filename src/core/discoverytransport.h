@@ -20,7 +20,7 @@ namespace NetVfs {
 //
 // Datagrams are accepted only from the mDNS source port and from on-link
 // senders (RFC 6762 section 11); anything else is dropped before parsing.
-class NETVFS_EXPORT MulticastTransport : public DiscoveryTransport
+class NETVFS_EXPORT MulticastTransport final : public DiscoveryTransport
 {
     Q_OBJECT
 
@@ -56,7 +56,7 @@ public:
 
 private:
     void readFrom(QUdpSocket *socket);
-    bool bindSocket(QUdpSocket *socket, const QHostAddress &any);
+    bool bindSocket(QUdpSocket *socket, const QHostAddress &any) const;
     void joinInterfaces();
     void joinInterface(const QNetworkInterface &iface);
     bool usableInterface(const QNetworkInterface &iface) const;

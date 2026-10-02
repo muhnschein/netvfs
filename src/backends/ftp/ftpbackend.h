@@ -54,10 +54,13 @@ public:
 class FtpBackend : public Backend
 {
 public:
+    class Lookup;   // stat and listing, and what a failure of a request means (below)
+
     FtpBackend();
-    FtpBackend(const FtpBackend &) = delete;
-    FtpBackend &operator=(const FtpBackend &) = delete;
     ~FtpBackend() override;
+
+    using Backend::authenticate;
+    using Backend::list;
 
     Result connect(const ConnectionParams &params, ServerIdentity *seen) override;
     Result authenticate(const Credentials &credentials, AuthPrompter *prompter) override;
@@ -97,25 +100,15 @@ public:
     void requestDone();
     bool canceled() const { return m_canceled.load(); }
     Result applyModified(const QByteArray &remote, const QDateTime &modified);
-    // Maps a failed upload of `remote` to the most precise error (missing
-    // parent, target is a folder).
-    Result explainUpload(const Result &failure, const QByteArray &remote) { return uploadFailure(failure, remote); }
-    Result explainRead(const Result &failure, const QByteArray &remote) { return readFailure(failure, remote); }
 
 private:
+    class Writes;   // preparation of a write, SITE CHMOD (ftpbackend.cpp)
+
     Result ready() const;
     Result signIn(QVector<Reply> *replies);
     Result resolve(const QString &path, QByteArray *remote) const;
     Result command(const QList<QByteArray> &commands, QVector<Reply> *replies, const QString &context);
     Result statRemote(const QByteArray &remote, Entry *out);
-    Result statMlst(const QByteArray &remote, Entry *out);
-    Result statBasic(const QByteArray &remote, Entry *out);
-    Result statViaParent(const QByteArray &remote, Entry *out);
-    Result listRemote(const QByteArray &remote, ListSink *sink, int batchSize);
-    Result uploadFailure(const Result &failure, const QByteArray &remote);
-    Result readFailure(const Result &failure, const QByteArray &remote);
-    Result prepareWrite(const QByteArray &remote, const WriteOptions &options);
-    Result chmod(const QByteArray &remote, qint32 mode);
 
     std::unique_ptr<Connection> m_connection;
     ConnectionParams m_params;
@@ -131,6 +124,25 @@ private:
     StreamOwner *m_owner = nullptr;
     QSet<StreamOwner *> m_handles;
     std::atomic<bool> m_canceled { false };
+};
+
+// Looking things up on the server (F-3, F-4), and explaining failed requests.
+class FtpBackend::Lookup
+{
+public:
+    explicit Lookup(FtpBackend &backend) : m_b(backend) {}
+
+    Result statMlst(const QByteArray &remote, Entry *out) const;
+    Result statBasic(const QByteArray &remote, Entry *out) const;
+    Result statViaParent(const QByteArray &remote, Entry *out) const;
+    Result listRemote(const QByteArray &remote, ListSink *sink, int batchSize) const;
+    // Map a failed upload / read of `remote` to the most precise error
+    // (missing parent, target is a folder).
+    Result uploadFailure(const Result &failure, const QByteArray &remote) const;
+    Result readFailure(const Result &failure, const QByteArray &remote) const;
+
+private:
+    FtpBackend &m_b;
 };
 
 Backend *createFtpBackend();

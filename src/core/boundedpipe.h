@@ -27,8 +27,8 @@ public:
     QIODevice *writer();   // write side; close() signals EOF
     QIODevice *reader();   // read side; returns 0 at EOF
 
-    void fail(const Result &result);
-    void cancel();
+    void fail(const Result &result) const;
+    void cancel() const;
     Result result() const;     // success until fail()/cancel()
     qint64 capacity() const;
     qint64 buffered() const;   // bytes currently held
