@@ -5,6 +5,6 @@
 include(../../test.pri)
 TARGET = tst_sftp
 INCLUDEPATH += $$NETVFS_ROOT/src/backends/sftp $$VENDOR_PREFIX/include
-HEADERS = $$NETVFS_ROOT/src/backends/sftp/sftpsupport.h
-SOURCES = tst_sftp.cpp $$NETVFS_ROOT/src/backends/sftp/sftpsupport.cpp
+HEADERS = $$NETVFS_ROOT/src/backends/sftp/sftpsupport.h $$NETVFS_ROOT/src/backends/sftp/sftpshell.h
+SOURCES = tst_sftp.cpp $$NETVFS_ROOT/src/backends/sftp/sftpsupport.cpp $$NETVFS_ROOT/src/backends/sftp/sftpshell.cpp
 QT += network
