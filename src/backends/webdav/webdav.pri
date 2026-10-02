@@ -6,16 +6,15 @@
 CONFIG += link_pkgconfig
 PKGCONFIG += libcurl openssl
 INCLUDEPATH += $$PWD
+include(../curlcommon/curlcommon.pri)
 
 HEADERS += \
     $$PWD/davclient.h \
     $$PWD/davconfig.h \
-    $$PWD/davglobal.h \
     $$PWD/davhandles.h \
     $$PWD/davio.h \
     $$PWD/davlog.h \
     $$PWD/davstatus.h \
-    $$PWD/davtls.h \
     $$PWD/davurl.h \
     $$PWD/davxml.h \
     $$PWD/webdavbackend.h
@@ -23,12 +22,10 @@ HEADERS += \
 SOURCES += \
     $$PWD/davclient.cpp \
     $$PWD/davconfig.cpp \
-    $$PWD/davglobal.c \
     $$PWD/davhandles.cpp \
     $$PWD/davio.cpp \
     $$PWD/davlog.cpp \
     $$PWD/davstatus.cpp \
-    $$PWD/davtls.cpp \
     $$PWD/davurl.cpp \
     $$PWD/davxml.cpp \
     $$PWD/webdavbackend.cpp

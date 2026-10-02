@@ -4,7 +4,7 @@
 // from a test CA with HTTP/2, Basic and Digest) and rclone "serve webdav".
 // Ports, the password and the CA file come from the JSON file named by
 // NETVFS_WEBDAV_INTEROP_CONFIG. The backend sources are compiled in with
-// NETVFS_WEBDAV_TEST_HOOKS so that the test CA can stand in for the system
+// NETVFS_TLS_TEST_HOOKS so that the test CA can stand in for the system
 // CAs; pluginLoads() checks the real plugin.
 #include "backendloader.h"
 #include "identity.h"

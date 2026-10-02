@@ -3,7 +3,7 @@
 #define NETVFS_DAVCLIENT_H
 
 #include "davstatus.h"
-#include "davtls.h"
+#include "tlsidentity.h"
 #include "davurl.h"
 
 #include <QtCore/QByteArray>
@@ -127,7 +127,7 @@ public:
     // W-3: a TLS handshake without verification and without any HTTP
     // request, only to collect the certificate chain.
     Result probeCertificates(QVector<QByteArray> *chain);
-    TrustStore trustStore() const;
+    CurlTls::TrustStore trustStore() const;
 
     // Streamed request body (openWrite) on a separate easy handle.
     class Stream;

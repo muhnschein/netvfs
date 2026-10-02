@@ -1,0 +1,156 @@
+[
+  {
+    "name": "C-7 identity probe completes the handshake (USER would follow)",
+    "file": "src/backends/curlcommon/tlsprobe.cpp",
+    "search": "    return 0;   // never complete this handshake (C-7)",
+    "replace": "    return 1;",
+    "test": "sh tests/interop/ftp/run.sh build identityBeforeUser"
+  },
+  {
+    "name": "C-7 plain probe reads past the greeting",
+    "file": "src/backends/ftp/ftpconnection.cpp",
+    "search": "    if (state->stopAfterGreeting && state->reader.last().isValid())",
+    "replace": "    if (false)",
+    "test": "sh tests/interop/ftp/run.sh build plainConnectSendsNothing"
+  },
+  {
+    "name": "XSEC-2 AUTH TLS refusal tolerated",
+    "file": "src/backends/ftp/ftpsupport.cpp",
+    "search": "        if (code != 234)\n            return Verdict::AuthRefused;",
+    "replace": "        if (false)\n            return Verdict::AuthRefused;",
+    "test": "build/tests/unit/ftp/tst_ftp tlsGuard"
+  },
+  {
+    "name": "XSEC-2 PROT P refusal tolerated",
+    "file": "src/backends/ftp/ftpsupport.cpp",
+    "search": "        if (code / 100 != 2)\n            return Verdict::ProtectionRefused;",
+    "replace": "        if (false)\n            return Verdict::ProtectionRefused;",
+    "test": "build/tests/unit/ftp/tst_ftp tlsGuard"
+  },
+  {
+    "name": "W-4 pinned chain no longer trusted accepted",
+    "file": "src/backends/curlcommon/tlsprobe.cpp",
+    "search": "        if (verifyPeer && !seen.systemTrusted) {",
+    "replace": "        if (false) {",
+    "test": "build/tests/unit/ftp/tst_ftp identityPolicy"
+  },
+  {
+    "name": "F-1 plain FTP without insecure consent",
+    "file": "src/backends/ftp/ftpsupport.cpp",
+    "search": "        if (!params.flag(QLatin1String(InsecureOption)))",
+    "replace": "        if (false)",
+    "test": "build/tests/unit/ftp/tst_ftp settings"
+  },
+  {
+    "name": "XC-10 NoReplace without the stat check",
+    "file": "src/backends/ftp/ftpbackend.cpp",
+    "search": "        if (mode == RenameMode::NoReplace)\n            return Result(Error::AlreadyExists, QStringLiteral(\"Renaming: the target exists\"));",
+    "replace": "        if (mode == RenameMode::NoReplace && false)\n            return Result(Error::AlreadyExists, QStringLiteral(\"Renaming: the target exists\"));",
+    "test": "sh tests/interop/ftp/run.sh build namespaceOps"
+  },
+  {
+    "name": "F-7 550 not-found heuristics lost",
+    "file": "src/backends/ftp/ftpsupport.cpp",
+    "search": "\"can not find\", \"no files found\" }))\n        return Error::NotFound;",
+    "replace": "\"can not find\", \"no files found\" }))\n        return Error::PermissionDenied;",
+    "test": "build/tests/unit/ftp/tst_ftp replyErrors"
+  },
+  {
+    "name": "F-7 550 fallback is not PermissionDenied",
+    "file": "src/backends/ftp/ftpsupport.cpp",
+    "search": "        *ambiguous = true;\n    return Error::PermissionDenied;",
+    "replace": "        *ambiguous = true;\n    return Error::NotFound;",
+    "test": "build/tests/unit/ftp/tst_ftp replyErrors"
+  },
+  {
+    "name": "F-7 421 too many connections not recognised",
+    "file": "src/backends/ftp/ftpsupport.cpp",
+    "search": "        return Error::TooManyConnections;\n    return Error::ConnectionLost;",
+    "replace": "        return Error::ConnectionLost;\n    return Error::ConnectionLost;",
+    "test": "build/tests/unit/ftp/tst_ftp replyErrors"
+  },
+  {
+    "name": "F-3 six-month rule: dates far in the future kept",
+    "file": "src/backends/ftp/ftpparse.cpp",
+    "search": "    const QDate limit = today.addDays(1);",
+    "replace": "    const QDate limit = today.addDays(200);",
+    "test": "build/tests/unit/ftp/tst_ftp yearlessDates"
+  },
+  {
+    "name": "F-3 six-month rule: previous year never tried",
+    "file": "src/backends/ftp/ftpparse.cpp",
+    "search": "year >= today.year() - 1; --year)",
+    "replace": "year >= today.year(); --year)",
+    "test": "build/tests/unit/ftp/tst_ftp yearlessDates"
+  },
+  {
+    "name": "F-3 MLSD unix.mode read as decimal",
+    "file": "src/backends/ftp/ftpparse.cpp",
+    "search": "    const int mode = value.toInt(&ok, 8);",
+    "replace": "    const int mode = value.toInt(&ok, 10);",
+    "test": "build/tests/unit/ftp/tst_ftp mlsxFacts"
+  },
+  {
+    "name": "F-3 MLSD size fact ignored",
+    "file": "src/backends/ftp/ftpparse.cpp",
+    "search": "    if (fact == \"size\")\n        return applySize(value, entry);",
+    "replace": "    if (fact == \"size\")\n        return applySize(QByteArray(\"0\"), entry);",
+    "test": "build/tests/unit/ftp/tst_ftp mlsxFacts"
+  },
+  {
+    "name": "F-3 MLSD cdir/pdir listed",
+    "file": "src/backends/ftp/ftpparse.cpp",
+    "search": "    if (self && listing)\n        return false;",
+    "replace": "    if (self && listing && false)\n        return false;",
+    "test": "build/tests/unit/ftp/tst_ftp mlsxFacts listingParser"
+  },
+  {
+    "name": "XC-4 line breaks in names reach the control connection",
+    "file": "src/backends/ftp/ftpsupport.cpp",
+    "search": "    if (bytes.contains('\\r') || bytes.contains('\\n') || bytes.contains('\\0'))",
+    "replace": "    if (bytes.contains('\\0'))",
+    "test": "build/tests/unit/ftp/tst_ftp remotePaths"
+  },
+  {
+    "name": "F-5 resume offset not checked",
+    "file": "src/backends/ftp/ftpbackend.cpp",
+    "search": "        if (!exists || existing.size != options.resumeOffset) {",
+    "replace": "        if (!exists) {",
+    "test": "sh tests/interop/ftp/run.sh build handles"
+  },
+  {
+    "name": "F-5 download offset not sent (REST)",
+    "file": "src/backends/ftp/ftpconnection.cpp",
+    "search": "            QByteArray range = QByteArray::number(request.offset) + '-';",
+    "replace": "            QByteArray range = QByteArray::number(0) + '-';",
+    "test": "sh tests/interop/ftp/run.sh build ranges"
+  },
+  {
+    "name": "F-5 read handle restarts at offset 0",
+    "file": "src/backends/ftp/ftphandles.cpp",
+    "search": "    request.offset = offset;",
+    "replace": "    request.offset = offset * 0;",
+    "test": "sh tests/interop/ftp/run.sh build handles"
+  },
+  {
+    "name": "XC-20 keepAlive misses a reopened connection",
+    "file": "src/backends/ftp/ftpbackend.cpp",
+    "search": "    if (m_connection->unexpectedReconnect())",
+    "replace": "    if (false)",
+    "test": "sh tests/interop/ftp/run.sh build keepAliveAfterDrop"
+  },
+  {
+    "name": "F-2 no new sign-in after a busy (421) greeting",
+    "file": "src/backends/ftp/ftpbackend.cpp",
+    "search": "        if (r.ok() || seen.size() != 1 || seen.first().code != 421)",
+    "replace": "        if (r.ok() || seen.size() != 1 || true)",
+    "test": "sh tests/interop/ftp/run.sh build busyGreeting"
+  },
+  {
+    "name": "F-7 421 reported as libcurl's Timeout",
+    "file": "src/backends/ftp/ftpsupport.cpp",
+    "search": "    if (reply.isValid() && reply.code == 421)",
+    "replace": "    if (false)",
+    "test": "build/tests/unit/ftp/tst_ftp curlErrors"
+  }
+]
