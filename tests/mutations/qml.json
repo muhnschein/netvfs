@@ -1,0 +1,170 @@
+[
+  {
+    "name": "identify sends credentials (C-7)",
+    "file": "src/qml/netvfsprobe.cpp",
+    "search": "    outcome.result = backend->connect(params, &outcome.identity);\n    if (outcome.result.ok()) {\n        outcome.identityCheck",
+    "replace": "    outcome.result = establish(backend, params, Credentials(params.username, \"secret\"), &outcome.identity);\n    if (outcome.result.ok()) {\n        outcome.identityCheck",
+    "test": "dbus-run-session -- build/tests/unit/qml/probe/tst_qmlprobe"
+  },
+  {
+    "name": "verify skips the folder and probe-file check (7.2)",
+    "file": "src/qml/netvfsprobe.cpp",
+    "search": "        outcome.result = verifyAccess(backend, backupsPath, &outcome.freeBytes);",
+    "replace": "        outcome.freeBytes = 0;",
+    "test": "dbus-run-session -- build/tests/unit/qml/probe/tst_qmlprobe"
+  },
+  {
+    "name": "unknown server key reported as matching (S-7)",
+    "file": "src/qml/netvfsprobe.cpp",
+    "search": "        return NetVfsProbe::IdentityUnknown;",
+    "replace": "        return NetVfsProbe::IdentityMatches;",
+    "test": "dbus-run-session -- build/tests/unit/qml/probe/tst_qmlprobe"
+  },
+  {
+    "name": "protocol without identity reported as matching",
+    "file": "src/qml/netvfsprobe.cpp",
+    "search": "outcome.identity.isEmpty() ? NetVfsProbe::NoIdentity : NetVfsProbe::IdentityMatches",
+    "replace": "NetVfsProbe::IdentityMatches",
+    "test": "dbus-run-session -- build/tests/unit/qml/probe/tst_qmlprobe"
+  },
+  {
+    "name": "accepted new pin ignored by verifyAccount (7.5)",
+    "file": "src/qml/netvfsprobe.cpp",
+    "search": "        if (!pin.isEmpty())\n            params.options.insert",
+    "replace": "        if (pin.isNull())\n            params.options.insert",
+    "test": "dbus-run-session -- build/tests/unit/qml/probe/tst_qmlprobe"
+  },
+  {
+    "name": "stored-secret failure gets the generic text (U-4)",
+    "file": "src/qml/netvfsprobe.cpp",
+    "search": "userErrorText(result.error(), Activity::StoredSecret)",
+    "replace": "userErrorText(result.error())",
+    "test": "dbus-run-session -- build/tests/unit/qml/probe/tst_qmlprobe"
+  },
+  {
+    "name": "cancel does not reach the backend (C-9)",
+    "file": "src/qml/backendjobs.cpp",
+    "search": "    m_canceled.store(true);\n    if (m_backend)\n        m_backend->cancel();",
+    "replace": "    m_canceled.store(true);",
+    "test": "dbus-run-session -- build/tests/unit/qml/probe/tst_qmlprobe"
+  },
+  {
+    "name": "stale job result delivered after cancel",
+    "file": "src/qml/backendjobs.cpp",
+    "search": "        if (generation != m_generation)\n            return;",
+    "replace": "        if (generation == 0)\n            return;",
+    "test": "dbus-run-session -- build/tests/unit/qml/probe/tst_qmlprobe"
+  },
+  {
+    "name": "SMB folder names not checked (M-9)",
+    "file": "src/qml/netvfshelpers.cpp",
+    "search": "    if (provider != QLatin1String(ProviderSmb))\n        return QString();\n    // SPEC-smb M-9",
+    "replace": "    if (!provider.isNull())\n        return QString();\n    // SPEC-smb M-9",
+    "test": "build/tests/unit/qml/helpers/tst_qmlhelpers"
+  },
+  {
+    "name": "SMB leading slash kept (M-8)",
+    "file": "src/qml/netvfshelpers.cpp",
+    "search": "        while (normalized.startsWith(QLatin1Char('/')))\n            normalized.remove(0, 1);",
+    "replace": "        normalized.squeeze();",
+    "test": "build/tests/unit/qml/helpers/tst_qmlhelpers"
+  },
+  {
+    "name": "host_key_seen written to the account",
+    "file": "src/qml/netvfshelpers.cpp",
+    "search": "    if (key == QLatin1String(Keys::HostKeySeen))\n        return false;",
+    "replace": "    if (key.isNull())\n        return false;",
+    "test": "build/tests/unit/qml/helpers/tst_qmlhelpers"
+  },
+  {
+    "name": "attention not cleared by the update flow (6.4)",
+    "file": "src/qml/netvfshelpers.cpp",
+    "search": "    remove << str(Keys::Attention) << str(Keys::CredentialsNeedUpdateFrom)",
+    "replace": "    remove << str(Keys::CredentialsNeedUpdateFrom)",
+    "test": "build/tests/unit/qml/helpers/tst_qmlhelpers"
+  },
+  {
+    "name": "Backup page label is the bare user name (A-2)",
+    "file": "src/qml/netvfshelpers.cpp",
+    "search": "    QVariantMap global;\n    global.insert(str(Keys::DefaultCredentialsUsername), accountLabel(params.username, params.host));\n    QVariantMap result;",
+    "replace": "    QVariantMap global;\n    global.insert(str(Keys::DefaultCredentialsUsername), params.username);\n    QVariantMap result;",
+    "test": "build/tests/unit/qml/helpers/tst_qmlhelpers"
+  },
+  {
+    "name": "missing require_encryption shown as unencrypted (M-3)",
+    "file": "src/qml/netvfshelpers.cpp",
+    "search": "params.options.value(str(OptRequireEncryption), true).toBool()",
+    "replace": "params.options.value(str(OptRequireEncryption), false).toBool()",
+    "test": "build/tests/unit/qml/helpers/tst_qmlhelpers"
+  },
+  {
+    "name": "IPv6 detection accepts host:port",
+    "file": "src/qml/netvfshelpers.cpp",
+    "search": "host.count(QLatin1Char(':')) >= 2",
+    "replace": "host.count(QLatin1Char(':')) >= 1",
+    "test": "build/tests/unit/qml/helpers/tst_qmlhelpers"
+  },
+  {
+    "name": "port 0 accepted",
+    "file": "src/qml/netvfshelpers.cpp",
+    "search": "number >= 1 && number <= 65535",
+    "replace": "number >= 0 && number <= 65535",
+    "test": "build/tests/unit/qml/helpers/tst_qmlhelpers"
+  },
+  {
+    "name": "encrypted key file not asking for a passphrase",
+    "file": "src/qml/sshkeytool.cpp",
+    "search": "    if (job != KeyJob::Generate && result.error() == Error::AuthFailed) {",
+    "replace": "    if (job == KeyJob::Generate && result.error() == Error::AuthFailed) {",
+    "test": "build/tests/unit/qml/keytool/tst_qmlkeytool"
+  },
+  {
+    "name": "secret without the netvfs-key-v1 prefix (SPEC-sftp 2)",
+    "file": "src/qml/sshkeytool.cpp",
+    "search": "    QByteArray encoded = encodeKeySecret(m_key.privateKey);",
+    "replace": "    QByteArray encoded = m_key.privateKey.toBase64();",
+    "test": "build/tests/unit/qml/keytool/tst_qmlkeytool"
+  },
+  {
+    "name": "key file size not limited",
+    "file": "src/qml/sshkeytool.cpp",
+    "search": "    if (file.size() > MaxKeyFileSize)",
+    "replace": "    if (file.size() < 0)",
+    "test": "build/tests/unit/qml/keytool/tst_qmlkeytool"
+  },
+  {
+    "name": "install attempted without a key",
+    "file": "src/qml/sshkeytool.cpp",
+    "search": "    if (m_state != Ready) {\n        finishInstall",
+    "replace": "    if (m_state == Failed) {\n        finishInstall",
+    "test": "build/tests/unit/qml/keytool/tst_qmlkeytool"
+  },
+  {
+    "name": "service type is not storage (3.2)",
+    "file": "accounts/templates/service.xml.in",
+    "search": "<type>storage</type>",
+    "replace": "<type>sync</type>",
+    "test": "build/tests/unit/qml/module/tst_qmlmodule"
+  },
+  {
+    "name": "QML module file not listed in qmldir",
+    "file": "src/qml/qmldir",
+    "search": "SshKeyPage 1.0 SshKeyPage.qml\n",
+    "replace": "",
+    "test": "build/tests/unit/qml/module/tst_qmlmodule"
+  },
+  {
+    "name": "ES6 syntax in a page (Qt 5.6 target)",
+    "file": "src/qml/ProbeBusyPage.qml",
+    "search": "    onInfoButtonClicked: editRequested()",
+    "replace": "    onInfoButtonClicked: { let back = editRequested; back() }",
+    "test": "build/tests/unit/qml/module/tst_qmlmodule"
+  },
+  {
+    "name": "OnlineSync helper used (U-1)",
+    "file": "accounts/ui/sftp.qml",
+    "search": "NetVfsCreationAgent {",
+    "replace": "OnlineSyncAccountCreationAgent {",
+    "test": "build/tests/unit/qml/module/tst_qmlmodule"
+  }
+]

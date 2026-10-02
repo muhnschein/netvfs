@@ -1,0 +1,7 @@
+module com.jolla.settings.accounts
+AccountCreationAgent 1.0 AccountCreationAgent.qml
+AccountSettingsAgent 1.0 AccountSettingsAgent.qml
+AccountCredentialsAgent 1.0 AccountCredentialsAgent.qml
+AccountBusyPage 1.0 AccountBusyPage.qml
+StandardAccountSettingsPullDownMenu 1.0 StandardAccountSettingsPullDownMenu.qml
+AccountCredentialsUpdater 1.0 AccountCredentialsUpdater.qml
