@@ -58,6 +58,25 @@ jobs:
       - name: Mutation check
         run: ./tools/mutation-check.py --build build
 
+  fuzz:
+    name: Fuzzing (fixed budget)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -q
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends \
+              clang libclang-rt-dev qtbase5-dev pkg-config
+      - name: Fuzz harnesses (60 s each, ASan + UBSan)
+        run: ./tests/fuzz/run.sh build-fuzz 60
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: failure()
+        with:
+          name: fuzz-reproducers
+          path: build-fuzz/fuzz/artifacts
+          if-no-files-found: ignore
+
   rpm:
     name: Sailfish OS 5.2 aarch64 RPMs
     runs-on: ubuntu-24.04

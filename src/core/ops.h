@@ -34,10 +34,17 @@ struct TreeCounts {
     qint64 failed = 0;
 };
 
-// XH-2: depth-first, lists then deletes, never follows symlinks, honours
-// cancel between entries, stops at the first error unless continueOnError
-// (then returns the first error after visiting everything). Removing a
-// non-directory removes just that entry.
+// XH-2: depth-first, lists then deletes, never follows symlinks (lstat
+// semantics: a link to a folder is removed with removeFile(), even if the
+// backend lists it as a folder), honours cancel between entries (a false
+// return from TreeProgress::removed, or Canceled from the backend), stops at
+// the first error unless continueOnError (then returns the first error after
+// visiting everything; a folder with a failed entry below it is not
+// attempted; Canceled and ConnectionLost always stop). Removing a
+// non-directory removes just that entry. An empty path or "/" is refused with
+// InvalidName. With options.useNative, a backend reporting RecursiveDelete
+// removes the tree with one removeTreeNative() call (counts then hold only the
+// root folder); Unsupported falls back to the portable algorithm.
 NETVFS_EXPORT Result removeTree(Backend *backend, const QString &path, TreeProgress *progress = nullptr,
                                 const RemoveTreeOptions &options = RemoveTreeOptions(),
                                 TreeCounts *counts = nullptr);
@@ -74,9 +81,18 @@ public:
     }
 };
 
-// XH-3: streaming recursive traversal. With SymlinkPolicy::Follow, symlinked
-// folders are descended into with loop detection by the set of resolved
-// folder paths on the current branch (a loop is skipped, not an error).
+// XH-3: streaming recursive traversal; one folder's listing is held in memory
+// at a time, never the whole tree. With preOrder == false, visit() is called
+// for a folder after its children (and `*descend` is ignored); with postOrder,
+// leave() follows. A folder whose visit() sets `*descend = false`, or that sits
+// at maxDepth, is not entered (leave() is then called only for the latter).
+// With SymlinkPolicy::Follow, symlinked folders are descended into with loop
+// detection by the set of resolved folder paths on the current branch: the
+// target of readLink() is resolved against the identity of the containing
+// folder, so a link back to an ancestor is reported once as a leaf and not
+// entered (a loop is skipped, not an error). A link whose target cannot be
+// stat'ed or read is a leaf. Trees deeper than 4096 levels fail with
+// ProtocolError.
 NETVFS_EXPORT Result walk(Backend *backend, const QString &root, WalkVisitor *visitor,
                           const WalkOptions &options = WalkOptions());
 
@@ -89,9 +105,19 @@ struct CopyAcrossOptions {
 
 // XH-5: reference copy between two backends (possibly two protocols) through
 // a BoundedPipe: the source download runs on a worker thread, the destination
-// upload on the calling thread, constant memory. Both backends must be idle
-// and owned by the calling thread; the source backend is used from the
-// worker thread for the duration of the call only (C-8 hand-over).
+// upload (Transfer::upload: temporary name unless AtomicPut, size check,
+// commit with `mode`) on the calling thread, constant memory. The two must be
+// different, idle backend instances owned by the calling thread; the source
+// backend is used from the worker thread for the duration of the call only
+// (C-8 hand-over). A failure on either side fails the pipe, so the other side
+// returns promptly; the first failure is the result. Cancel: Progress::update()
+// and canceled() are only called on the calling thread; canceled() is polled
+// once per destination chunk, so the copy ends with Canceled within one chunk
+// of the request (a backend stalled in the network is bounded by its own
+// timeouts, C-14). A source folder needs `recursive` (else IsADirectory):
+// folders are created with makeDir (the root exclusively under NoReplace),
+// links to files are copied as files, links to folders and dangling links are
+// skipped. Recursive progress reports total -1.
 NETVFS_EXPORT Result copyAcross(Backend *source, const QString &sourcePath,
                                 Backend *destination, const QString &destinationPath,
                                 const CopyAcrossOptions &options = CopyAcrossOptions(),

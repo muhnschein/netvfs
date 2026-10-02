@@ -1,0 +1,1 @@
+<d:multistatus xmlns:d="DAV:" xmlns:oc="http://owncloud.org/ns"><d:response><d:href><![CDATA[/dav/dir/c]]></d:href><d:propstat><d:prop><d:ishidden>1</d:ishidden><d:getetag><![CDATA["q"]]></d:getetag></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response></d:multistatus>

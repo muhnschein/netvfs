@@ -18,12 +18,15 @@ BuildRequires: openssl-devel
 BuildRequires: sailfish-svg2png
 BuildRequires: pkgconfig(Qt5Core)
 BuildRequires: pkgconfig(Qt5DBus)
+BuildRequires: pkgconfig(Qt5Network)
 BuildRequires: pkgconfig(Qt5Concurrent)
 BuildRequires: pkgconfig(Qt5Qml)
 BuildRequires: pkgconfig(Qt5Quick)
 BuildRequires: pkgconfig(accounts-qt5)
 BuildRequires: pkgconfig(libsignon-qt5)
 BuildRequires: pkgconfig(buteosyncfw5) >= 0.10.0
+# SPEC-v2 W-1: the WebDAV backend uses the system libcurl.
+BuildRequires: pkgconfig(libcurl)
 
 %description
 Adds "SFTP" and "SMB" account providers to Settings > Accounts that appear as
@@ -43,6 +46,14 @@ Requires:   %{name}-core = %{version}-%{release}
 
 %description core-devel
 Headers and pkg-config file for building applications on libnetvfs.
+
+%package backend-local
+Summary:    Local file system backend for libnetvfs
+Requires:   %{name}-core = %{version}-%{release}
+
+%description backend-local
+libnetvfs-local.so: the local file system as a netvfs location (SPEC-v2
+section 6.5), for the command line tool and in-process consumers.
 
 %package account-sftp
 Summary:    SFTP backup account
@@ -74,6 +85,13 @@ Requires:   systemd
 %description account-smb
 SMB 3 account provider, backend (statically linked libsmb2) and Buteo backup
 plugins.
+
+%package backend-webdav
+Summary:    WebDAV backend
+Requires:   %{name}-core = %{version}-%{release}
+
+%description backend-webdav
+WebDAV backend (SPEC-v2 6.3) over the system libcurl.
 
 %prep
 %setup -q -n %{name}-%{version}
@@ -111,10 +129,16 @@ systemctl-user try-restart msyncd.service || :
 %{_libdir}/qt5/qml/org/netvfs/accounts
 %{_datadir}/translations/netvfs*.qm
 
+%files backend-webdav
+%{_libdir}/netvfs/backends/libnetvfs-webdav.so
+
 %files core-devel
 %{_includedir}/netvfs
 %{_libdir}/libnetvfs.so
 %{_libdir}/pkgconfig/netvfs.pc
+
+%files backend-local
+%{_libdir}/netvfs/backends/libnetvfs-local.so
 
 %files account-sftp
 %{_libdir}/netvfs/backends/libnetvfs-sftp.so

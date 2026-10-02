@@ -6,7 +6,7 @@ TARGET = netvfs
 VERSION = 1.0.0
 DESTDIR = $$NETVFS_LIB_OUT
 
-QT = core dbus
+QT = core dbus network
 CONFIG += hide_symbols link_pkgconfig create_pc create_prl no_install_prl
 PKGCONFIG += accounts-qt5 libsignon-qt5
 
@@ -19,6 +19,9 @@ PUBLIC_HEADERS = \
     backend.h \
     backendloader.h \
     boundedpipe.h \
+    discovery.h \
+    discoverytransport.h \
+    dnsmessage.h \
     error.h \
     identity.h \
     logging.h \
@@ -34,24 +37,32 @@ PUBLIC_HEADERS = \
     types.h \
     url.h
 
-HEADERS = $$PUBLIC_HEADERS
+HEADERS = $$PUBLIC_HEADERS \
+    discoverycache.h
 
 SOURCES = \
     accountsession.cpp \
     accountstore.cpp \
     backend.cpp \
     backendloader.cpp \
+    boundedpipe.cpp \
+    discovery.cpp \
+    discoverycache.cpp \
+    discoverytransport.cpp \
+    dnsmessage.cpp \
     error.cpp \
     identity.cpp \
     logging.cpp \
     names.cpp \
+    ops.cpp \
     paths.cpp \
     probe.cpp \
     secretsource.cpp \
     secure.cpp \
     sshkeys.cpp \
     transfer.cpp \
-    types.cpp
+    types.cpp \
+    url.cpp
 
 target.path = $$[QT_INSTALL_LIBS]
 headers.files = $$PUBLIC_HEADERS
@@ -63,4 +74,4 @@ QMAKE_PKGCONFIG_DESCRIPTION = Remote file access over SFTP and SMB accounts
 QMAKE_PKGCONFIG_LIBDIR = $$target.path
 QMAKE_PKGCONFIG_INCDIR = $$headers.path
 QMAKE_PKGCONFIG_DESTDIR = pkgconfig
-QMAKE_PKGCONFIG_REQUIRES = Qt5Core Qt5DBus accounts-qt5 libsignon-qt5
+QMAKE_PKGCONFIG_REQUIRES = Qt5Core Qt5DBus Qt5Network accounts-qt5 libsignon-qt5

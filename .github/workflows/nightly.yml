@@ -1,0 +1,23 @@
+name: Nightly
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  nextcloud:
+    name: WebDAV against Nextcloud (SPEC-v2 XT-2)
+    runs-on: ubuntu-24.04
+    env:
+      QMAKE_ARGS: NETVFS_WERROR=1
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          submodules: recursive
+      - name: Install dependencies
+        run: ./tools/ci/install-host-deps.sh
+      - name: Build
+        run: make -j"$(nproc)"
+      - name: Nextcloud interop
+        run: QT_QPA_PLATFORM=offscreen ./tests/interop/webdav/nextcloud.sh build
