@@ -48,6 +48,7 @@ const char *const UserFileVariable = "NTLM_USER_FILE";
 // libsmb2 completion callbacks have the C signature smb2_command_cb.
 void ignoreCompletion(smb2_context *, int, void *, void *) // NOSONAR(cpp:S5008) C callback signature
 {
+    // Completion of a close sent for an abandoned open: nothing waits for it.
 }
 
 void storeResult(Call *call, int status, void *commandData) // NOSONAR(cpp:S5008) libsmb2 result pointer

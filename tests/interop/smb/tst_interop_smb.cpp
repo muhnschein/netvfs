@@ -825,6 +825,17 @@ private slots:
         QBuffer sinkBuffer(&sink);
         sinkBuffer.open(QIODevice::WriteOnly);
         QCOMPARE(backend->download(QStringLiteral("ops/none"), &sinkBuffer, nullptr).error(), Error::NotFound);
+        // Local I/O failures are not reported as server errors.
+        QBuffer closed;
+        QCOMPARE(backend->upload(&closed, QStringLiteral("ops/local"), nullptr).error(), Error::Internal);
+        QVERIFY(backend->remove(QStringLiteral("ops/local")).ok());
+        QByteArray small("0123456789");
+        QBuffer smallBuffer(&small);
+        smallBuffer.open(QIODevice::ReadOnly);
+        QVERIFY(backend->upload(&smallBuffer, QStringLiteral("ops/small"), nullptr).ok());
+        QBuffer readOnlySink(&small);
+        readOnlySink.open(QIODevice::ReadOnly);
+        QCOMPARE(backend->download(QStringLiteral("ops/small"), &readOnlySink, nullptr).error(), Error::Internal);
         // M-9 inside a session too: nothing is sent.
         QCOMPARE(backend->makePath(QStringLiteral("ops/bad|name")).error(), Error::Internal);
     }
@@ -848,19 +859,22 @@ private slots:
     // M-13: one context per thread; two connections in parallel.
     void parallelConnections()
     {
+        const QString file = m_tmp.filePath(QStringLiteral("parallel.bin"));
+        QVERIFY(writePattern(file, 8 * 1024 * 1024, 42));
+        const QByteArray sha = sha256Of(file);
         std::array<Result, 2> results;
         std::array<std::thread, 2> threads;
         for (int i = 0; i < 2; ++i) {
-            threads[i] = std::thread([this, i, &results]() {
+            threads[i] = std::thread([this, i, &results, &file, &sha]() {
                 const auto backend = newBackend();
                 Result r = signIn(backend.get(), params(QStringLiteral("strict")), credentials());
                 const QString name = QStringLiteral("parallel-%1.tar").arg(i);
                 if (r.ok())
-                    r = Transfer::uploadFile(backend.get(), m_big, name);
+                    r = Transfer::uploadFile(backend.get(), file, name);
                 const QString local = m_tmp.filePath(name);
                 if (r.ok())
                     r = Transfer::downloadFile(backend.get(), name, local);
-                if (r.ok() && sha256Of(local) != m_bigSha)
+                if (r.ok() && sha256Of(local) != sha)
                     r = Result(Error::ProtocolError, QStringLiteral("content differs"));
                 if (r.ok())
                     r = backend->remove(name);
