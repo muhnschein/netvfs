@@ -59,6 +59,9 @@ public:
     FtpBackend();
     ~FtpBackend() override;
 
+    using Backend::authenticate;
+    using Backend::list;
+
     Result connect(const ConnectionParams &params, ServerIdentity *seen) override;
     Result authenticate(const Credentials &credentials, AuthPrompter *prompter) override;
     Capabilities capabilities() const override;

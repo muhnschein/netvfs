@@ -154,7 +154,7 @@ public:
 
 Backend *createFtpBackend()
 {
-    return new FtpBackend();
+    return std::make_unique<FtpBackend>().release();   // the caller owns it
 }
 
 FtpBackend::FtpBackend() = default;
@@ -805,7 +805,7 @@ Result FtpBackend::openRead(const QString &path, ReadHandle **out)
     if (entry.type == EntryType::Directory)
         return Result(Error::IsADirectory, QStringLiteral("Reading: is a folder"));
     if (out)
-        *out = new FtpReadHandle(this, remote, entry.size);
+        *out = std::make_unique<FtpReadHandle>(this, remote, entry.size).release();   // the caller owns it
     return r;
 }
 
@@ -823,7 +823,7 @@ Result FtpBackend::openWrite(const QString &path, const WriteOptions &options, W
     if (!r.ok())
         return r;
     if (out)
-        *out = new FtpWriteHandle(this, remote, options);
+        *out = std::make_unique<FtpWriteHandle>(this, remote, options).release();   // the caller owns it
     return r;
 }
 
