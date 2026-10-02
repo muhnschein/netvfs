@@ -6,7 +6,7 @@
 class FakeBackendFactory : public QObject, public NetVfs::BackendFactory
 {
     Q_OBJECT
-    Q_PLUGIN_METADATA(IID "org.netvfs.BackendFactory/1.0")
+    Q_PLUGIN_METADATA(IID "org.netvfs.BackendFactory/2.0")
     Q_INTERFACES(NetVfs::BackendFactory)
 
 public:
