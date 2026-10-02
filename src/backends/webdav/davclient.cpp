@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 #include "davclient.h"
-#include "davglobal.h"
+#include "curlglobal.h"
 #include "davlog.h"
 #include "secure.h"
 #include "types.h"
@@ -228,7 +228,7 @@ int Transfer::onProgress(void *user, curl_off_t, curl_off_t, curl_off_t, curl_of
 
 Client::Client()
 {
-    std::call_once(curlInitOnce, [] { curlInitialized = netvfs_webdav_curl_init() != 0; });
+    std::call_once(curlInitOnce, [] { curlInitialized = netvfs_curl_global_init() != 0; });
 }
 
 Client::~Client()
@@ -601,9 +601,9 @@ Result Client::probeCertificates(QVector<QByteArray> *chain)
     return r;
 }
 
-TrustStore Client::trustStore() const
+CurlTls::TrustStore Client::trustStore() const
 {
-    TrustStore store;
+    CurlTls::TrustStore store;
     if (!m_tls.caFile.isEmpty()) {
         store.caFile = m_tls.caFile;
         return store;

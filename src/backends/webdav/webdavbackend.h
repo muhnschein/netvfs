@@ -31,7 +31,7 @@ struct HandleLink;
 //    on the pin alone. A pinned key that no longer verifies with
 //    tls_verify_peer=true is ServerIdentityChanged.
 //
-// Test hook: built with NETVFS_WEBDAV_TEST_HOOKS (interop driver only, never
+// Test hook: built with NETVFS_TLS_TEST_HOOKS (interop driver only, never
 // the plugin), the option "test_ca_file" replaces the system CA bundle.
 //
 // Handles: any number of read handles (each read() is one ranged GET on the

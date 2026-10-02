@@ -25,7 +25,7 @@ BuildRequires: pkgconfig(Qt5Quick)
 BuildRequires: pkgconfig(accounts-qt5)
 BuildRequires: pkgconfig(libsignon-qt5)
 BuildRequires: pkgconfig(buteosyncfw5) >= 0.10.0
-# SPEC-v2 W-1: the WebDAV backend uses the system libcurl.
+# SPEC-v2 W-1, F-1: the WebDAV and FTP backends use the system libcurl.
 BuildRequires: pkgconfig(libcurl)
 
 %description
@@ -93,6 +93,13 @@ Requires:   %{name}-core = %{version}-%{release}
 %description backend-webdav
 WebDAV backend (SPEC-v2 6.3) over the system libcurl.
 
+%package backend-ftp
+Summary:    FTP/FTPS backend
+Requires:   %{name}-core = %{version}-%{release}
+
+%description backend-ftp
+FTP and FTPS backend (SPEC-v2 6.4) over the system libcurl.
+
 %prep
 %setup -q -n %{name}-%{version}
 
@@ -131,6 +138,9 @@ systemctl-user try-restart msyncd.service || :
 
 %files backend-webdav
 %{_libdir}/netvfs/backends/libnetvfs-webdav.so
+
+%files backend-ftp
+%{_libdir}/netvfs/backends/libnetvfs-ftp.so
 
 %files core-devel
 %{_includedir}/netvfs

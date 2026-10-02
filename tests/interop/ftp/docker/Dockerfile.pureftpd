@@ -1,0 +1,11 @@
+# SPDX-License-Identifier: LGPL-2.1-or-later
+# pure-ftpd (ubuntu:24.04 ships 1.0.50) for the FTP interop suite: explicit
+# FTPS with MLSD/MLST, MFMT and UTF8 (SPEC-v2 F-3, XT-2). The distribution
+# build has no implicit TLS; vsftpd covers implicit FTPS.
+ARG BASE=mirror.gcr.io/library/ubuntu:24.04
+FROM ${BASE}
+RUN apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends pure-ftpd \
+    && rm -rf /var/lib/apt/lists/*
+COPY start-pureftpd.sh /setup/
+CMD ["/setup/start-pureftpd.sh"]

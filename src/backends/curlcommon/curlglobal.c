@@ -1,11 +1,12 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
-/* Process-wide libcurl initialisation for the WebDAV backend (SPEC-v2 W-1).
+/* Process-wide libcurl initialisation for the libcurl based backends
+ * (SPEC-v2 W-1, F-1).
  * libcurl keeps its own copies of user names, passwords, bearer tokens and
  * request headers and frees them without overwriting. Its memory callbacks
  * are therefore routed through allocators that wipe every block before it
  * is released (SEC-5, XSEC-6). curl_global_init_mem() only takes effect for
  * the first initialisation in the process. */
-#include "davglobal.h"
+#include "curlglobal.h"
 
 #include <curl/curl.h>
 #include <malloc.h>
@@ -49,7 +50,7 @@ static char *wipingStrdup(const char *text)
     return copy;
 }
 
-int netvfs_webdav_curl_init(void)
+int netvfs_curl_global_init(void)
 {
     return curl_global_init_mem(CURL_GLOBAL_DEFAULT, malloc, wipingFree, wipingRealloc, wipingStrdup, calloc)
         == CURLE_OK;
