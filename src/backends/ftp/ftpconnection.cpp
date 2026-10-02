@@ -25,6 +25,20 @@ constexpr long LowSpeedLimit = 1;            // bytes/s; below it for requestTim
 constexpr int MillisecondsPerSecond = 1000;
 constexpr long QuitTimeoutSeconds = 1;
 constexpr const char *Protocols = "ftp,ftps";
+constexpr int MaxSentCommands = 256;
+// The first libcurl release measured to reuse an explicit-TLS FTP control
+// connection in "TLS required" mode (8.20.0); builds before it may not (see
+// TlsGuard).
+constexpr unsigned int MinVersionForRequiredTls = 0x081400;
+
+// CURLOPT_USE_SSL for explicit FTPS (XSEC-2): libcurl's own "TLS required"
+// mode where the running libcurl can reuse the connection (the guard still
+// checks the replies), else "try" mode where the guard alone enforces TLS.
+long explicitUseSsl()
+{
+    const curl_version_info_data *info = curl_version_info(CURLVERSION_NOW);
+    return info && info->version_num >= MinVersionForRequiredTls ? long(CURLUSESSL_ALL) : long(CURLUSESSL_TRY);
+}
 
 long seconds(int milliseconds)
 {
@@ -219,9 +233,9 @@ Result Connection::configure(const Settings &settings, const ConnectionParams &p
 Result Connection::applyBase(const QByteArray &url)
 {
     curl_easy_reset(m_easy.get());
-    // Explicit TLS: libcurl's try mode plus TlsGuard (see there); implicit
-    // TLS cannot fall back.
-    const long useSsl = m_settings.tlsMode == TlsMode::Explicit ? long(CURLUSESSL_TRY) : long(CURLUSESSL_ALL);
+    // Explicit TLS: libcurl's required or try mode plus TlsGuard (see
+    // explicitUseSsl); implicit TLS cannot fall back.
+    const long useSsl = m_settings.tlsMode == TlsMode::Explicit ? explicitUseSsl() : long(CURLUSESSL_ALL);
     CURLcode code = applyCommon(m_easy, url, m_settings, m_params, useSsl);
     if (code == CURLE_OK) {
         code = Curl::OptionChain(m_easy)
@@ -236,6 +250,11 @@ Result Connection::applyBase(const QByteArray &url)
                    .set(CURLOPT_NOPROGRESS, 0L)
                    .set(CURLOPT_XFERINFOFUNCTION, netvfs_ftp_progress_callback)
                    .set(CURLOPT_XFERINFODATA, &m_hooks)
+                   // Only to see the commands libcurl sends (debug); with a
+                   // debug function set, verbose mode prints nothing.
+                   .set(CURLOPT_DEBUGFUNCTION, netvfs_ftp_debug_callback)
+                   .set(CURLOPT_DEBUGDATA, &m_hooks)
+                   .set(CURLOPT_VERBOSE, 1L)
                    .code();
     }
     if (code == CURLE_OK && m_settings.tlsMode != TlsMode::None)
@@ -314,6 +333,10 @@ Result Connection::start(const Request &request, TransferSink *sink)
     m_reader.reset();
     m_replies.clear();
     m_guardFailure = Result();
+    m_sent.clear();
+    m_quoted.clear();
+    for (const QByteArray &command : request.commands)
+        m_quoted.append(command.startsWith('*') ? command.mid(1) : command);
     // XSEC-2: every request starts in the guard's initial state, whatever
     // became of the previous one (a connection that died half way through a
     // sign-in must not colour the greeting of the next one).
@@ -395,6 +418,7 @@ Result Connection::complete(CURLcode code, const QString &context)
     curl_easy_getinfo(m_easy.get(), CURLINFO_NUM_CONNECTS, &connects);
     m_unexpectedReconnect = connects > 0 && !m_expectReconnect;
     m_replies = m_reader.replies();
+    m_replyBase = m_reader.count() - m_replies.size();
     // libcurl may have closed the connection after an error.
     m_expectReconnect = code != CURLE_OK || m_closesConnection;
     if (!m_guardFailure.ok())
@@ -420,9 +444,25 @@ void Connection::stop()
 QVector<Reply> Connection::lastReplies(int count) const
 {
     QVector<Reply> result(count);
-    const int available = m_replies.size();
-    for (int i = 0; i < count && i < available; ++i)
-        result[count - 1 - i] = m_replies.at(available - 1 - i);
+    const int quoted = m_quoted.size();
+    if (count > quoted)
+        return result;
+    // The quoted commands run back to back; find that run among the commands
+    // libcurl sent (its own sign-in commands come before, its own CWD or
+    // transfer commands after).
+    for (int start = 0; start + quoted <= m_sent.size(); ++start) {
+        int i = 0;
+        while (i < quoted && m_sent.at(start + i).line == m_quoted.at(i))
+            ++i;
+        if (i < quoted)
+            continue;
+        for (int j = 0; j < count; ++j) {
+            const int index = m_sent.at(start + quoted - count + j).replyIndex - m_replyBase;
+            if (index >= 0 && index < m_replies.size())
+                result[j] = m_replies.at(index);
+        }
+        break;
+    }
     return result;
 }
 
@@ -465,11 +505,30 @@ bool Connection::guard(const char *data, size_t size)
     return false;
 }
 
+// Remembers a command libcurl sent, to match it with its reply (the debug
+// function of libcurl, see NetVfsFtpHooks::debug).
+void Connection::recordSent(curl_infotype type, const char *data, size_t size)
+{
+    if (type != CURLINFO_HEADER_OUT || m_sent.size() >= MaxSentCommands)
+        return;
+    SentCommand sent;
+    sent.line = QByteArray(data, static_cast<int>(size)).trimmed();
+    if (sent.line.startsWith("PASS "))   // never keep the secret (SEC-5)
+        sent.line.clear();
+    sent.replyIndex = m_reader.count();
+    m_sent.append(sent);
+}
+
 } // namespace NetVfs::Ftp
 
 // ------------------------------------------------------------- callbacks
 
 // The callbacks of libcurl (ftpcallbacks.c) end up here with typed state.
+void NetVfsFtpHooks::debug(curl_infotype type, const char *data, size_t length) const
+{
+    connection->recordSent(type, data, length);
+}
+
 size_t NetVfsFtpHooks::write(const char *data, size_t length) const
 {
     if (!connection->m_sink)
@@ -543,6 +602,11 @@ size_t netvfs_ftp_on_read(NetVfsFtpHooks *hooks, char *buffer, size_t capacity)
 size_t netvfs_ftp_on_header(NetVfsFtpHooks *hooks, const char *data, size_t length)
 {
     return hooks->header(data, length);
+}
+
+void netvfs_ftp_on_debug(NetVfsFtpHooks *hooks, curl_infotype type, const char *data, size_t length)
+{
+    hooks->debug(type, data, length);
 }
 
 int netvfs_ftp_on_progress(NetVfsFtpHooks *hooks, curl_off_t downloadTotal, curl_off_t downloaded,

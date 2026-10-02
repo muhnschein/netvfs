@@ -22,6 +22,7 @@ struct NetVfsFtpHooks {
     size_t write(const char *data, size_t length) const;
     size_t read(char *buffer, size_t capacity) const;
     size_t header(const char *data, size_t length) const;
+    void debug(curl_infotype type, const char *data, size_t length) const;
     bool progress(curl_off_t downloadTotal, curl_off_t downloaded, curl_off_t uploadTotal, curl_off_t uploaded) const;
 };
 
@@ -114,7 +115,10 @@ public:
     // Replies of the last request, oldest first.
     const QVector<Reply> &replies() const { return m_replies; }
     // The replies to the last `count` quoted commands (all prefixed with
-    // '*', so each got exactly one reply); invalid entries if missing.
+    // '*', so each got exactly one reply); invalid entries if missing. Each
+    // reply is found through the command that libcurl sent (the debug
+    // callback), not by its place among the replies: libcurl adds commands of
+    // its own around the quoted ones (sign-in, a CWD after them in 8.20).
     QVector<Reply> lastReplies(int count) const;
     // The login folder libcurl found with PWD (raw bytes), empty if unknown.
     QByteArray entryPath() const;
@@ -143,6 +147,7 @@ private:
     Result applyRequest(const Request &request);
     Result complete(CURLcode code, const QString &context);
     bool guard(const char *data, size_t size);
+    void recordSent(curl_infotype type, const char *data, size_t size);
     bool canceled() const { return m_canceled && m_canceled->load(); }
 
     const std::atomic<bool> *m_canceled;
@@ -160,6 +165,15 @@ private:
     TlsGuard m_guard;
     Result m_guardFailure;
     QVector<Reply> m_replies;
+    // The commands libcurl sent during the request (never PASS), each with
+    // the number of replies received before it: its reply is the next one.
+    struct SentCommand {
+        QByteArray line;
+        int replyIndex = 0;
+    };
+    QVector<SentCommand> m_sent;
+    QList<QByteArray> m_quoted;         // the request's quoted commands, without '*'
+    int m_replyBase = 0;                // number of replies before m_replies.first()
     bool m_started = false;
     bool m_paused = false;
     bool m_expectReconnect = true;      // the first request connects

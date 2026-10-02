@@ -23,6 +23,13 @@ static int on_progress(void *user_data, curl_off_t download_total, curl_off_t do
                                   uploaded);
 }
 
+static int on_debug(CURL *curl, curl_infotype type, char *data, size_t size, void *user_data)
+{
+    (void)curl;
+    netvfs_ftp_on_debug((struct NetVfsFtpHooks *)user_data, type, data, size);
+    return 0;
+}
+
 static size_t on_probe_header(char *data, size_t size, size_t count, void *user_data)
 {
     return netvfs_ftp_probe_header((struct NetVfsFtpProbeState *)user_data, data, size * count);
@@ -42,5 +49,6 @@ const curl_write_callback netvfs_ftp_write_callback = on_write;
 const curl_read_callback netvfs_ftp_read_callback = on_read;
 const curl_write_callback netvfs_ftp_header_callback = on_header;
 const curl_xferinfo_callback netvfs_ftp_progress_callback = on_progress;
+const curl_debug_callback netvfs_ftp_debug_callback = on_debug;
 const curl_write_callback netvfs_ftp_probe_header_callback = on_probe_header;
 const curl_xferinfo_callback netvfs_ftp_probe_progress_callback = on_probe_progress;

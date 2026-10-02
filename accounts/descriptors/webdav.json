@@ -1,0 +1,44 @@
+{
+    "provider": "webdav",
+    "services": ["files"],
+    "defaultPort": 0,
+    "authModes": [
+        { "id": "password", "label": "settings-accounts-netvfs-me-password", "secret": "password" },
+        { "id": "token", "label": "settings-accounts-netvfs-me-token", "secret": "token" }
+    ],
+    "fields": [
+        { "key": "host", "type": "text", "label": "settings-accounts-netvfs-la-server",
+          "placeholder": "settings-accounts-netvfs-ph-server", "validation": "host", "input": "url" },
+        { "key": "tls", "type": "choice", "label": "settings-accounts-netvfs-la-tls", "default": "https",
+          "choices": [
+              { "value": "https", "label": "settings-accounts-netvfs-me-tls_https" },
+              { "value": "http", "label": "settings-accounts-netvfs-me-tls_http" }
+          ] },
+        { "key": "allow_insecure", "type": "switch", "label": "settings-accounts-netvfs-la-allow_insecure",
+          "description": "settings-accounts-netvfs-la-allow_insecure_http", "default": false, "validation": "consent",
+          "visibleWhen": { "tls": ["http"] } },
+        { "key": "port", "type": "text", "label": "settings-accounts-netvfs-la-port",
+          "placeholder": "settings-accounts-netvfs-ph-port_default", "validation": "port", "optional": true,
+          "input": "digits" },
+        { "key": "base_path", "type": "text", "label": "settings-accounts-netvfs-la-base_path",
+          "description": "settings-accounts-netvfs-la-base_path_description", "default": "/", "validation": "path",
+          "input": "url" },
+        { "key": "flavor", "type": "choice", "label": "settings-accounts-netvfs-la-flavor", "default": "auto",
+          "choices": [
+              { "value": "auto", "label": "settings-accounts-netvfs-me-flavor_auto" },
+              { "value": "nextcloud", "label": "settings-accounts-netvfs-me-flavor_nextcloud" },
+              { "value": "generic", "label": "settings-accounts-netvfs-me-flavor_generic" }
+          ] },
+        { "key": "username", "type": "text", "label": "settings-accounts-netvfs-la-user", "validation": "userName" },
+        { "key": "password_hint", "type": "note", "label": "settings-accounts-netvfs-la-webdav_password_hint",
+          "visibleWhen": { "auth_mode": ["password"] } },
+        { "key": "token_hint", "type": "note", "label": "settings-accounts-netvfs-la-token_hint",
+          "visibleWhen": { "auth_mode": ["token"] } },
+        { "key": "pin_trusted", "type": "switch", "label": "settings-accounts-netvfs-la-pin_trusted",
+          "description": "settings-accounts-netvfs-la-pin_trusted_description", "default": false,
+          "visibleWhen": { "tls": ["https"] } },
+        { "key": "files_root", "type": "text", "label": "settings-accounts-netvfs-la-files_root",
+          "description": "settings-accounts-netvfs-la-folder_in_base", "validation": "folder", "optional": true,
+          "service": "files" }
+    ]
+}
