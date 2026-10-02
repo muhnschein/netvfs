@@ -736,23 +736,106 @@ private slots:
         // A later login claim outside the sequence is refused.
         QCOMPARE(guard.reply(230), V::Unexpected);
         // AUTH TLS refused (also "530 please login with USER and PASS").
+        guard.reset();
         QCOMPARE(guard.reply(220), V::Continue);
         QCOMPARE(guard.reply(500), V::AuthRefused);
         guard.reset();
         QCOMPARE(guard.reply(220), V::Continue);
         QCOMPARE(guard.reply(530), V::AuthRefused);
+        // Whatever else is not 234, a 220 ("service ready", the greeting's
+        // code) and codes outside the RFC 959 range included: libcurl would
+        // go on with "AUTH SSL" and USER in clear text.
+        for (const int code : { 220, 200, 230, 334, 431, 502, 534, 600, 999, 0 }) {
+            guard.reset();
+            QCOMPARE(guard.reply(220), V::Continue);
+            QCOMPARE(guard.reply(code), V::AuthRefused);
+        }
         // PROT P refused.
+        guard.reset();
         for (const int code : { 220, 234, 331, 230, 200 })
             QCOMPARE(guard.reply(code), V::Continue);
         QCOMPARE(guard.reply(536), V::ProtectionRefused);
-        // A failed login leaves the guard waiting; a new greeting restarts it.
-        for (const int code : { 220, 234, 331, 530, 220, 234, 230, 500, 200 })
+        // A greeting in the middle of a sign-in is not one.
+        for (const QVector<int> &prefix : { QVector<int> { 220, 234 }, QVector<int> { 220, 234, 230 } }) {
+            guard.reset();
+            for (const int code : prefix)
+                QCOMPARE(guard.reply(code), V::Continue);
+            QCOMPARE(guard.reply(220), V::Unexpected);
+        }
+        // A failed login leaves the guard waiting; every request starts anew,
+        // so a greeting that claims a login after it is refused (230 is what
+        // libcurl takes for the greeting in "try" mode: no AUTH TLS, no USER).
+        guard.reset();
+        for (const int code : { 220, 234, 331, 530 })
+            QCOMPARE(guard.reply(code), V::Continue);
+        guard.reset();
+        QCOMPARE(guard.reply(230), V::Unexpected);
+        guard.reset();
+        for (const int code : { 220, 234, 230, 500, 200 })
             QCOMPARE(guard.reply(code), V::Continue);
         // A 230 straight after the greeting (no AUTH answer) is refused.
+        guard.reset();
         QCOMPARE(guard.reply(220), V::Continue);
         QCOMPARE(guard.reply(230), V::AuthRefused);
         guard.reset();
         QCOMPARE(guard.reply(331), V::Continue);
+    }
+
+    // XSEC-2: the guard splits the header callback's bytes into replies the
+    // way libcurl does (ftp_endofresp: the first line that is "ddd "), because
+    // that is what libcurl acts on.
+    void tlsGuardFollowsLibcurl()
+    {
+        using V = TlsGuard::Verdict;
+        const auto feed = [](TlsGuard *guard, const char *text) { return guard->feed(text, strlen(text)); };
+        TlsGuard guard;
+        QCOMPARE(feed(&guard, "220 netvfs\r\n234 go\r\n331 pass\r\n230 in\r\n200 pbsz\r\n200 prot\r\n"), V::Continue);
+        QCOMPARE(feed(&guard, "230 out of sequence\r\n"), V::Unexpected);
+
+        // Replies cut anywhere, byte by byte.
+        guard.reset();
+        const QByteArray stream("220-banner\r\n 220 indented\r\n220 end\r\n234 go\r\n");
+        for (const char c : stream)
+            QCOMPARE(guard.feed(&c, 1), V::Continue);
+        QCOMPARE(feed(&guard, "331 a\r\n"), V::Continue);
+
+        // A multi-line AUTH answer that starts like a success but ends with
+        // a refusal: libcurl sees the 500 (the closing line only has to be
+        // "ddd "), so must the guard.
+        guard.reset();
+        QCOMPARE(feed(&guard, "220 hi\r\n"), V::Continue);
+        QCOMPARE(feed(&guard, "234-fine\r\n500 not really\r\n"), V::AuthRefused);
+        QCOMPARE(QString::fromLatin1(guard.lastLine()), QStringLiteral("500 not really\r\n"));
+        // ... and the other way round: libcurl takes it as 234 and starts TLS.
+        guard.reset();
+        QCOMPARE(feed(&guard, "220 hi\r\n"), V::Continue);
+        QCOMPARE(feed(&guard, "500-no\r\n234 yes\r\n"), V::Continue);
+        // The greeting hidden behind a continuation line.
+        guard.reset();
+        QCOMPARE(feed(&guard, "220-hi\r\n230 logged in\r\n"), V::Unexpected);
+
+        // Codes outside 1xx..5xx still end a reply for libcurl.
+        for (const char *answer : { "600 x\r\n", "999 x\r\n", "000 x\r\n", "220 x\r\n", "230 x\r\n" }) {
+            guard.reset();
+            QCOMPARE(feed(&guard, "220 hi\r\n"), V::Continue);
+            QCOMPARE(feed(&guard, answer), V::AuthRefused);
+        }
+        // Lines that are not the end of a reply (libcurl waits for more).
+        guard.reset();
+        QCOMPARE(feed(&guard, "220 hi\r\n"), V::Continue);
+        for (const char *line : { "234\r\n", "23x ok\r\n", "2345 x\r\n", " 500 x\r\n", "500-x\r\n", "garbage\r\n", "\r\n" })
+            QCOMPARE(feed(&guard, line), V::Continue);
+        QCOMPARE(feed(&guard, "534 now\r\n"), V::AuthRefused);
+
+        // Very long lines are cut, the end of the reply is still found.
+        guard.reset();
+        QCOMPARE(feed(&guard, "220 hi\r\n"), V::Continue);
+        const QByteArray longLine = "234-" + QByteArray(100000, 'x') + "\r\n503 bye\r\n";
+        QCOMPARE(guard.feed(longLine.constData(), size_t(longLine.size())), V::AuthRefused);
+        QVERIFY(guard.lastLine().size() <= 512);
+        // A bare LF ends a line, too.
+        guard.reset();
+        QCOMPARE(feed(&guard, "220 hi\n500 no\n"), V::AuthRefused);
     }
 
     // ------------------------------------------------------- XC-16, W-3

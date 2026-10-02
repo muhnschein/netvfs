@@ -121,6 +121,21 @@ int probeProgress(void *self, curl_off_t, curl_off_t, curl_off_t, curl_off_t)
     return canceled && canceled->load() ? 1 : 0;
 }
 
+QString guardMessage(TlsGuard::Verdict verdict)
+{
+    switch (verdict) {
+    case TlsGuard::Verdict::AuthRefused:
+        return QStringLiteral("The server does not offer TLS");
+    case TlsGuard::Verdict::ProtectionRefused:
+        return QStringLiteral("The server refuses to encrypt data connections");
+    case TlsGuard::Verdict::Unexpected:
+        return QStringLiteral("The server skipped the TLS sign-in");
+    case TlsGuard::Verdict::Continue:
+        break;
+    }
+    return QString();
+}
+
 struct EasyDeleter { void operator()(CURL *easy) const { curl_easy_cleanup(easy); } };
 struct MultiDeleter { void operator()(CURLM *multi) const { curl_multi_cleanup(multi); } };
 
@@ -325,6 +340,10 @@ Result Connection::start(const Request &request, TransferSink *sink)
     m_reader.reset();
     m_replies.clear();
     m_guardFailure = Result();
+    // XSEC-2: every request starts in the guard's initial state, whatever
+    // became of the previous one (a connection that died half way through a
+    // sign-in must not colour the greeting of the next one).
+    m_guard.reset();
     for (const QByteArray &command : request.commands) {
         // XSEC-5: commands at debug level only (they carry paths, never PASS).
         qCDebug(lcNetVfsFtp) << "command:" << command;
@@ -389,10 +408,8 @@ Result Connection::complete(CURLcode code, const QString &context)
     m_replies = m_reader.replies();
     // libcurl may have closed the connection after an error.
     m_expectReconnect = code != CURLE_OK || m_closesConnection;
-    if (!m_guardFailure.ok()) {
-        m_guard.reset();
+    if (!m_guardFailure.ok())
         return m_guardFailure;
-    }
     if (code == CURLE_OK)
         return Result::success();
     return curlError(code, m_reader.last(), canceled(), context);
@@ -478,33 +495,28 @@ size_t Connection::onHeader(char *data, size_t size, size_t count, void *self)
 {
     auto *connection = static_cast<Connection *>(self);
     const size_t length = size * count;
+    // The guard judges the raw lines the way libcurl does (TlsGuard), before
+    // anything else is done with them.
+    if (connection->m_settings.tlsMode == TlsMode::Explicit && !connection->guard(data, length))
+        return 0;   // libcurl ends the request before it sends anything else
     const int before = connection->m_reader.count();
     connection->m_reader.feed(data, length);
-    if (connection->m_reader.count() == before)
-        return length;
-    const Reply &reply = connection->m_reader.last();
-    // XSEC-5: server replies at debug level only.
-    qCDebug(lcNetVfsFtp) << "reply:" << replyForLog(reply);
-    if (connection->m_settings.tlsMode != TlsMode::Explicit)
-        return length;
-    switch (connection->m_guard.reply(reply.code)) {
-    case TlsGuard::Verdict::Continue:
-        return length;
-    case TlsGuard::Verdict::AuthRefused:
-        connection->m_guardFailure = Result(Error::SecurityPolicy, QStringLiteral("The server does not offer TLS"),
-                                            replyForLog(reply));
-        break;
-    case TlsGuard::Verdict::ProtectionRefused:
-        connection->m_guardFailure = Result(Error::SecurityPolicy,
-                                            QStringLiteral("The server refuses to encrypt data connections"),
-                                            replyForLog(reply));
-        break;
-    case TlsGuard::Verdict::Unexpected:
-        connection->m_guardFailure = Result(Error::SecurityPolicy,
-                                            QStringLiteral("The server skipped the TLS sign-in"), replyForLog(reply));
-        break;
+    if (connection->m_reader.count() != before) {
+        // XSEC-5: server replies at debug level only.
+        qCDebug(lcNetVfsFtp) << "reply:" << replyForLog(connection->m_reader.last());
     }
-    return 0;   // libcurl ends the request before it sends anything else
+    return length;
+}
+
+// XSEC-2: false (with m_guardFailure set) when the replies in `data` show
+// that TLS would not protect what libcurl sends next.
+bool Connection::guard(const char *data, size_t size)
+{
+    const TlsGuard::Verdict verdict = m_guard.feed(data, size);
+    if (verdict == TlsGuard::Verdict::Continue)
+        return true;
+    m_guardFailure = Result(Error::SecurityPolicy, guardMessage(verdict), lineForLog(m_guard.lastLine()));
+    return false;
 }
 
 int Connection::onProgress(void *self, curl_off_t dlTotal, curl_off_t dlNow, curl_off_t ulTotal, curl_off_t ulNow)

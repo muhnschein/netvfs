@@ -112,6 +112,7 @@ private:
     Result applyBase(const QByteArray &url);
     Result applyRequest(const Request &request);
     Result complete(CURLcode code, const QString &context);
+    bool guard(const char *data, size_t size);
     bool canceled() const { return m_canceled && m_canceled->load(); }
 
     const std::atomic<bool> *m_canceled;

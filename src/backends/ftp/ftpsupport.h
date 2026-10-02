@@ -64,10 +64,13 @@ Result replyError(const Reply &reply, const QString &context, bool *ambiguous = 
 // was requested.
 Result curlError(CURLcode code, const Reply &reply, bool canceled, const QString &context);
 
-// XSEC-2 for explicit FTPS. Distribution builds of libcurl refuse to reuse
-// an explicit-TLS control connection when TLS is required (CURLUSESSL_ALL),
-// so every request would open a new connection and sign in again. The
-// control connection therefore runs in libcurl's "try" mode, and this guard
+// XSEC-2 for explicit FTPS. Some builds of libcurl (measured: Ubuntu 24.04's
+// 8.5.0-2ubuntu10.15, which carries a security backport on connection
+// reuse; vanilla 8.5.0 and 8.20.0 reuse the connection) refuse to reuse an
+// explicit-TLS control connection when TLS is required (CURLUSESSL_ALL), so
+// every request would open a new connection and sign in again. The control
+// connection therefore runs in libcurl's "try" mode, in which libcurl itself
+// carries on in clear text when AUTH TLS or PROT P is refused, and this guard
 // enforces "TLS or nothing" on the server replies, which libcurl hands to
 // the header callback before it acts on them: a greeting must be followed
 // by 234 to AUTH TLS (else USER would follow in clear text), and the reply
@@ -75,21 +78,42 @@ Result curlError(CURLcode code, const Reply &reply, bool canceled, const QString
 // greeting that claims a completed login (230) is refused as well. A
 // verdict other than Continue makes the header callback abort the request
 // before libcurl sends anything else.
+//
+// The guard must see the replies exactly as libcurl does, or a crafted
+// reply could hide a refusal from it: feed() therefore splits the bytes
+// into lines and ends a reply at the first line that is "ddd " (three
+// digits and a space), whatever the reply started with (libcurl's
+// ftp_endofresp), instead of using the stricter RFC 959 grammar of
+// ReplyReader. A new request starts with reset(); a 220 counts as a
+// greeting only then, never as the answer to AUTH TLS.
 class TlsGuard
 {
 public:
     enum class Verdict { Continue, AuthRefused, ProtectionRefused, Unexpected };
 
+    // The bytes of one header callback call. The first verdict other than
+    // Continue is returned at once.
+    Verdict feed(const char *data, size_t size);
+    // One complete reply with `code` (what feed() extracts).
     Verdict reply(int code);
-    void reset() { m_state = State::Idle; }
+    // A new request: the control connection is either the established one
+    // (nothing to wait for) or a new one that starts with a greeting.
+    void reset();
+    // The line that completed the reply of the last verdict, for the log.
+    const QByteArray &lastLine() const { return m_lastLine; }
 
 private:
     enum class State { Idle, AwaitAuth, AwaitLogin, AwaitPbsz, AwaitProt };
+    static constexpr int MaxLineBytes = 512;
     State m_state = State::Idle;
+    QByteArray m_line;       // the line being received (cut at MaxLineBytes)
+    QByteArray m_lastLine;
 };
 
 // Log helper (XSEC-5): the reply as text, for debug output only.
 QString replyForLog(const Reply &reply);
+// The same for one raw line of server text.
+QString lineForLog(const QByteArray &line);
 
 } // namespace NetVfs::Ftp
 

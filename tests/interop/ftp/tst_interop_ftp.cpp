@@ -263,9 +263,11 @@ private:
     }
 
     // ftpstall.py fake: a recording FTP server with `cert`.
-    std::unique_ptr<Helper> fakeServer(const QString &tls, const QString &cert, const QString &log) const
+    std::unique_ptr<Helper> fakeServer(const QString &tls, const QString &cert, const QString &log,
+                                       const QStringList &extra = QStringList()) const
     {
         QStringList arguments { QStringLiteral("fake"), QStringLiteral("--tls"), tls, QStringLiteral("--log"), log };
+        arguments << extra;
         if (!cert.isEmpty()) {
             arguments << QStringLiteral("--cert") << m_certs + QLatin1Char('/') + cert + QStringLiteral(".crt")
                       << QStringLiteral("--key") << m_certs + QLatin1Char('/') + cert + QStringLiteral(".key");
@@ -278,7 +280,8 @@ private:
         QFile file(log);
         if (!file.open(QIODevice::ReadOnly))
             return QStringList();
-        return QString::fromUtf8(file.readAll()).split(QLatin1Char('\n'), NETVFS_SKIP_EMPTY_PARTS);
+        const QByteArray bytes = file.readAll();   // may hold NUL: fromUtf8(QByteArray) would stop there
+        return QString::fromUtf8(bytes.constData(), bytes.size()).split(QLatin1Char('\n'), NETVFS_SKIP_EMPTY_PARTS);
     }
 
     static bool sentUser(const QStringList &lines)
@@ -303,6 +306,81 @@ private:
         p.connectTimeoutMs = 5000;
         p.requestTimeoutMs = 5000;
         return p;
+    }
+
+    // XSEC-1 / XSEC-2 tests: the fake server with misbehaviour (ftpstall.py
+    // --behavior) and a trace of the bytes it received without TLS. Connection
+    // 1 of such a test is the identity probe of connect(), connection 2 the
+    // one authenticate() opens, later ones are libcurl reconnects.
+    std::unique_ptr<Helper> tracedServer(const QStringList &behaviors, const QString &log,
+                                         const QString &tls = QStringLiteral("explicit")) const
+    {
+        QStringList extra { QStringLiteral("--trace"), QStringLiteral("--alt-cert"),
+                            m_certs + QStringLiteral("/trusted.crt"), QStringLiteral("--alt-key"),
+                            m_certs + QStringLiteral("/trusted.key") };
+        for (const QString &behavior : behaviors)
+            extra << QStringLiteral("--behavior") << behavior;
+        return fakeServer(tls, tls == QLatin1String("none") ? QString() : QStringLiteral("selfsigned"), log, extra);
+    }
+
+    // Waits until every connection the server accepted has ended.
+    static void settle(const QString &log)
+    {
+        QTest::qWait(300);
+        QTRY_VERIFY2_WITH_TIMEOUT(connectionsEnded(recorded(log)), qPrintable(recorded(log).join(QLatin1Char('|'))),
+                                  10000);
+    }
+
+    static bool connectionsEnded(const QStringList &lines)
+    {
+        return lines.filter(QRegularExpression(QStringLiteral("^CONN "))).size()
+            == lines.filter(QRegularExpression(QStringLiteral("^END "))).size();
+    }
+
+    // The log lines of one control connection (1-based).
+    static QStringList connectionLines(const QStringList &lines, int connection)
+    {
+        QStringList result;
+        bool inside = false;
+        for (const QString &line : lines) {
+            if (line.startsWith(QLatin1String("CONN ")))
+                inside = line.mid(5).toInt() == connection;
+            else if (inside)
+                result << line;
+        }
+        return result;
+    }
+
+    // Everything the server received on connection `connection` (0: all)
+    // while the socket was not wrapped in TLS (control and data).
+    static QByteArray clearBytes(const QStringList &lines, int connection = 0)
+    {
+        static const QRegularExpression pattern(QStringLiteral("^CLEAR [cd](\\d+) ([0-9a-f]+)$"));
+        QByteArray all;
+        for (const QString &line : lines) {
+            const QRegularExpressionMatch m = pattern.match(line);
+            if (m.hasMatch() && (connection == 0 || m.captured(1).toInt() == connection))
+                all += QByteArray::fromHex(m.captured(2).toLatin1());
+        }
+        return all;
+    }
+
+    // XSEC-1: no USER, PASS, user name, password or file data in clear text.
+    void verifyNoClearSecrets(const QStringList &lines, const QByteArray &payload = QByteArray()) const
+    {
+        const QByteArray clear = clearBytes(lines);
+        const QByteArray what = clear.left(300) + " | " + lines.join(QLatin1Char('|')).toLatin1();
+        QVERIFY2(!clear.contains("USER"), what.constData());
+        QVERIFY2(!clear.contains("PASS"), what.constData());
+        QVERIFY2(!clear.contains("alice"), what.constData());
+        QVERIFY2(!clear.contains(m_password), what.constData());
+        QVERIFY2(payload.isEmpty() || !clear.contains(payload), what.constData());
+    }
+
+    QByteArray secretPayload() const
+    {
+        QByteArray payload("SECRET-FILE-DATA-" + unique(QString()).toLatin1() + "-");
+        return payload + QByteArray(2000, 'x');
     }
 
 private slots:
@@ -400,6 +478,270 @@ private slots:
         b->disconnect();
         QTRY_VERIFY(recorded(log).contains(QStringLiteral("CLOSED")));
         QCOMPARE(recorded(log), QStringList { QStringLiteral("CLOSED") });
+    }
+
+    // ------------------------------------------------ XSEC-1, XSEC-2, F-1, F-2
+    //
+    // Explicit FTPS never falls back to clear text. The server below breaks
+    // AUTH TLS, PBSZ/PROT or the greeting in ways a man in the middle (or a
+    // misconfigured server) could, and the trace of what the server received
+    // without TLS proves that no USER, PASS or file data was sent.
+
+    // One row per misbehaviour. `probeError` is what connect() returns when
+    // the behaviour applies to its connection, `error` what authenticate()
+    // returns when it applies to the second connection only.
+    static void tlsRow(const char *name, const QStringList &behaviors, Error probeError, Error error, bool userOverTls)
+    {
+        QTest::newRow(name) << behaviors << int(probeError) << int(error) << userOverTls;
+    }
+
+    static void tlsFailureRows()
+    {
+        QTest::addColumn<QStringList>("behaviors");
+        QTest::addColumn<int>("probeError");
+        QTest::addColumn<int>("error");
+        QTest::addColumn<bool>("userOverTls");   // the sign-in reached USER, over TLS
+        const Error policy = Error::SecurityPolicy;
+        // One row per way AUTH TLS can be refused: 500 (unknown command), 502
+        // (not implemented), 534 (policy), 431 (service not available), a
+        // 220 ("service ready", the greeting code), codes outside 1xx-5xx
+        // that libcurl still takes as a complete reply, and a multi-line
+        // reply whose closing line carries another code than the first.
+        for (const char *code : { "500", "502", "534", "431", "220", "600", "999" })
+            tlsRow(code, { QStringLiteral("auth=") + QLatin1String(code) }, policy, policy, false);
+        // "000 " is no reply for libcurl: it waits (and nothing is sent), the
+        // guard calls it a refusal.
+        tlsRow("000", { QStringLiteral("auth=000") }, Error::Timeout, policy, false);
+        tlsRow("AUTH multi-line 234- then 500", { QStringLiteral("auth-raw=234-wait\\r\\n500 refused\\r\\n") }, policy,
+               policy, false);
+        tlsRow("234 then the socket closes", { QStringLiteral("auth-after=close") }, policy, policy, false);
+        tlsRow("234 then no TLS, garbage", { QStringLiteral("auth-after=garbage") }, policy, policy, false);
+        // libcurl in "required" mode (the probe) takes a 230 greeting for the
+        // greeting and goes on with AUTH TLS; in "try" mode it would skip the
+        // sign-in, which the guard refuses.
+        tlsRow("greeting 230 (logged in)", { QStringLiteral("greeting=230") }, Error::None, policy, false);
+        tlsRow("unsolicited 230 behind the greeting", { QStringLiteral("extra=230") }, policy, policy, false);
+        // After sign-in, over TLS: PBSZ/PROT refusals (the probe never gets there).
+        tlsRow("PROT P refused 500", { QStringLiteral("prot=500") }, Error::None, policy, true);
+        tlsRow("PROT P refused 534", { QStringLiteral("prot=534") }, Error::None, policy, true);
+        tlsRow("PROT P refused 536", { QStringLiteral("prot=536") }, Error::None, policy, true);
+        tlsRow("PBSZ and PROT refused", { QStringLiteral("pbsz=500"), QStringLiteral("prot=500") }, Error::None, policy,
+               true);
+        tlsRow("PBSZ refused, PROT P accepted", { QStringLiteral("pbsz=500") }, Error::None, Error::None, true);
+        tlsRow("well-behaved server", QStringList(), Error::None, Error::None, true);
+    }
+
+    // authenticate() on a connection the server breaks: the TlsGuard (TRY
+    // mode) has to stop libcurl before it sends USER.
+    void signInTlsFailures_data() { tlsFailureRows(); }
+    void signInTlsFailures()
+    {
+        QFETCH(QStringList, behaviors);
+        QFETCH(int, error);
+        QFETCH(bool, userOverTls);   // (the column probeError belongs to probeTlsFailures)
+        const QString log = m_tmp.filePath(unique(QStringLiteral("fake-")));
+        QStringList all { QStringLiteral("login=ok") };
+        for (const QString &behavior : behaviors)   // connection 2 only; 1 is the probe
+            all << QStringLiteral("2:") + behavior;
+        const auto fake = tracedServer(all, log);
+        QVERIFY(fake->port() > 0);
+        const ConnectionParams p = fakeParams(fake->port(), QStringLiteral("explicit"));
+        std::unique_ptr<Backend> b = create();
+        ServerIdentity seen;
+        Result r = b->connect(p, &seen);
+        QVERIFY2(r.ok(), qPrintable(r.toString() + QLatin1Char(' ') + r.detail()));
+        r = b->authenticate(Credentials(p.username, m_password));
+        QVERIFY2(r.error() == Error(error), qPrintable(r.toString() + QLatin1Char(' ') + r.detail()));
+        b->disconnect();
+        settle(log);
+        const QStringList lines = recorded(log);
+        verifyNoClearSecrets(lines);
+        const QStringList second = connectionLines(lines, 2);
+        QVERIFY2(sentUser(second) == userOverTls, qPrintable(lines.join(QLatin1Char('|'))));
+        if (userOverTls) {   // USER only ever after the handshake
+            QVERIFY(second.indexOf(QStringLiteral("TLS-OK")) >= 0);
+            QVERIFY(second.indexOf(QStringLiteral("TLS-OK")) < second.indexOf(QStringLiteral("C: USER alice")));
+        }
+        if (error == int(Error::None))
+            QCOMPARE(clearBytes(lines, 2), QByteArray("AUTH TLS\r\n"));
+    }
+
+    // connect(): the identity probe runs in libcurl's own "TLS required" mode.
+    void probeTlsFailures_data() { tlsFailureRows(); }
+    void probeTlsFailures()
+    {
+        QFETCH(QStringList, behaviors);
+        QFETCH(int, probeError);
+        const QString log = m_tmp.filePath(unique(QStringLiteral("fake-")));
+        const auto fake = tracedServer(behaviors, log);
+        QVERIFY(fake->port() > 0);
+        const ConnectionParams p = fakeParams(fake->port(), QStringLiteral("explicit"));
+        std::unique_ptr<Backend> b = create();
+        ServerIdentity seen;
+        const Result r = b->connect(p, &seen);
+        QVERIFY2(r.error() == Error(probeError), qPrintable(r.toString() + QLatin1Char(' ') + r.detail()));
+        QCOMPARE(seen.isEmpty(), probeError != int(Error::None));
+        b->disconnect();
+        settle(log);
+        const QStringList lines = recorded(log);
+        verifyNoClearSecrets(lines);
+        QVERIFY2(!sentUser(lines), qPrintable(lines.join(QLatin1Char('|'))));
+    }
+
+    void reconnectRows()
+    {
+        QTest::addColumn<QStringList>("behaviors");   // connection 3, the reconnect
+        QTest::addColumn<int>("error");
+        const int policy = int(Error::SecurityPolicy);
+        QTest::newRow("well-behaved: TLS again, then USER") << QStringList() << int(Error::None);
+        for (const char *code : { "500", "534", "220", "600" })
+            QTest::newRow(code) << QStringList { QStringLiteral("3:auth=") + QLatin1String(code) } << policy;
+        QTest::newRow("AUTH multi-line 234- then 500")
+            << QStringList { QStringLiteral("3:auth-raw=234-wait\\r\\n500 refused\\r\\n") } << policy;
+        QTest::newRow("234 then garbage")
+            << QStringList { QStringLiteral("3:auth-after=garbage") } << policy;
+        QTest::newRow("234 then the socket closes")
+            << QStringList { QStringLiteral("3:auth-after=close") } << policy;
+        QTest::newRow("greeting 230") << QStringList { QStringLiteral("3:greeting=230") } << policy;
+        QTest::newRow("unsolicited 230") << QStringList { QStringLiteral("3:extra=230") } << policy;
+        QTest::newRow("PROT P refused") << QStringList { QStringLiteral("3:prot=500") } << policy;
+        QTest::newRow("other certificate (the pin)")
+            << QStringList { QStringLiteral("3:cert=alt") } << int(Error::ServerIdentityChanged);
+    }
+
+    // F-1 / XSEC-1: the server drops the control connection after sign-in;
+    // libcurl reconnects on the next request, and the new connection must
+    // run AUTH TLS, the identity check and PROT P again before USER, PASS or
+    // the STOR data.
+    void reconnectKeepsTls_data() { reconnectRows(); }
+    void reconnectKeepsTls()
+    {
+        QFETCH(QStringList, behaviors);
+        QFETCH(int, error);
+        const QString log = m_tmp.filePath(unique(QStringLiteral("fake-")));
+        const auto fake = tracedServer(QStringList { QStringLiteral("login=ok"), QStringLiteral("2:drop-after=FEAT") }
+                                           + behaviors,
+                                       log);
+        QVERIFY(fake->port() > 0);
+        const ConnectionParams p = fakeParams(fake->port(), QStringLiteral("explicit"));
+        std::unique_ptr<Backend> b = create();
+        ServerIdentity seen;
+        QVERIFY(b->connect(p, &seen).ok());
+        Result r = b->authenticate(Credentials(p.username, m_password));
+        QVERIFY2(r.ok(), qPrintable(r.toString() + QLatin1Char(' ') + r.detail()));
+        QTRY_VERIFY(recorded(log).contains(QStringLiteral("DROPPED")));
+        const QByteArray payload = secretPayload();
+        r = put(b.get(), QStringLiteral("/upload.bin"), payload);
+        QVERIFY2(r.error() == Error(error), qPrintable(r.toString() + QLatin1Char(' ') + r.detail()));
+        b->disconnect();
+        settle(log);
+        const QStringList lines = recorded(log);
+        verifyNoClearSecrets(lines, payload);
+        const QStringList third = connectionLines(lines, 3);
+        QVERIFY2(!third.isEmpty(), qPrintable(lines.join(QLatin1Char('|'))));
+        const QString uploaded = QStringLiteral("UPLOAD %1 %2").arg(payload.size()).arg(QString::fromLatin1(sha256(payload)));
+        if (error == int(Error::None)) {
+            QVERIFY2(lines.contains(uploaded), qPrintable(lines.join(QLatin1Char('|'))));
+            QCOMPARE(clearBytes(lines, 3), QByteArray("AUTH TLS\r\n"));
+            QVERIFY(third.indexOf(QStringLiteral("TLS-OK")) < third.indexOf(QStringLiteral("C: USER alice")));
+        } else {
+            QVERIFY2(!lines.contains(uploaded), qPrintable(lines.join(QLatin1Char('|'))));
+        }
+        if (error == int(Error::ServerIdentityChanged))   // not even over TLS
+            QVERIFY2(!sentUser(third), qPrintable(lines.join(QLatin1Char('|'))));
+    }
+
+    // A connection that died in the middle of a sign-in must not leave the
+    // guard in a state in which the next connection's greeting is taken for
+    // the end of a login (connection 4 greets with 230: "already logged in").
+    void abortedSignInDoesNotWeakenNextConnection()
+    {
+        const QString log = m_tmp.filePath(unique(QStringLiteral("fake-")));
+        const auto fake = tracedServer({ QStringLiteral("login=ok"), QStringLiteral("2:drop-after=FEAT"),
+                                         QStringLiteral("3:drop-after=USER"), QStringLiteral("4:greeting=230") },
+                                       log);
+        QVERIFY(fake->port() > 0);
+        const ConnectionParams p = fakeParams(fake->port(), QStringLiteral("explicit"));
+        std::unique_ptr<Backend> b = create();
+        QVERIFY(b->connect(p, nullptr).ok());
+        Result r = b->authenticate(Credentials(p.username, m_password));
+        QVERIFY2(r.ok(), qPrintable(r.toString() + QLatin1Char(' ') + r.detail()));
+        QTRY_VERIFY(recorded(log).contains(QStringLiteral("DROPPED")));
+        QVERIFY(!b->keepAlive().ok());   // connection 3: dies after USER
+        QTRY_VERIFY(recorded(log).filter(QStringLiteral("DROPPED")).size() == 2);
+        const QByteArray payload = secretPayload();
+        r = put(b.get(), QStringLiteral("/upload.bin"), payload);
+        QVERIFY2(r.error() == Error::SecurityPolicy, qPrintable(r.toString() + QLatin1Char(' ') + r.detail()));
+        b->disconnect();
+        settle(log);
+        const QStringList lines = recorded(log);
+        verifyNoClearSecrets(lines, payload);
+        QCOMPARE(clearBytes(lines, 4), QByteArray());   // not even a command in clear text
+    }
+
+    // PROT P accepted, but the data connection is not TLS: the upload must
+    // fail without the data going out.
+    void dataConnectionWithoutTls()
+    {
+        const QString log = m_tmp.filePath(unique(QStringLiteral("fake-")));
+        const auto fake = tracedServer({ QStringLiteral("login=ok"), QStringLiteral("data=clear") }, log);
+        QVERIFY(fake->port() > 0);
+        const ConnectionParams p = fakeParams(fake->port(), QStringLiteral("explicit"));
+        std::unique_ptr<Backend> b = create();
+        QVERIFY(b->connect(p, nullptr).ok());
+        Result r = b->authenticate(Credentials(p.username, m_password));
+        QVERIFY2(r.ok(), qPrintable(r.toString() + QLatin1Char(' ') + r.detail()));
+        const QByteArray payload = secretPayload();
+        r = put(b.get(), QStringLiteral("/upload.bin"), payload);
+        // libcurl reports a failed TLS handshake on the data connection as
+        // "unknown PASV reply" (ProtocolError); SecurityPolicy would be as
+        // right. What counts is that the upload fails and sends nothing.
+        QVERIFY2(r.error() == Error::ProtocolError || r.error() == Error::SecurityPolicy,
+                 qPrintable(r.toString() + QLatin1Char(' ') + r.detail()));
+        b->disconnect();
+        settle(log);
+        verifyNoClearSecrets(recorded(log), payload);
+    }
+
+    // The detector itself: over TLS the file arrives protected (positive
+    // control), over plain FTP (allow_insecure) the same trace shows USER,
+    // PASS and the file in clear text.
+    void traceDetectsClearText_data()
+    {
+        QTest::addColumn<QString>("tls");
+        QTest::newRow("explicit") << QStringLiteral("explicit");
+        QTest::newRow("none") << QStringLiteral("none");
+    }
+    void traceDetectsClearText()
+    {
+        QFETCH(QString, tls);
+        const bool plain = tls == QLatin1String("none");
+        const QString log = m_tmp.filePath(unique(QStringLiteral("fake-")));
+        const auto fake = tracedServer({ QStringLiteral("login=ok") }, log, tls);
+        QVERIFY(fake->port() > 0);
+        const ConnectionParams p = fakeParams(fake->port(), tls);
+        std::unique_ptr<Backend> b = create();
+        QVERIFY(b->connect(p, nullptr).ok());
+        Result r = b->authenticate(Credentials(p.username, m_password));
+        QVERIFY2(r.ok(), qPrintable(r.toString() + QLatin1Char(' ') + r.detail()));
+        const QByteArray payload = secretPayload();
+        r = put(b.get(), QStringLiteral("/upload.bin"), payload);
+        QVERIFY2(r.ok(), qPrintable(r.toString() + QLatin1Char(' ') + r.detail()));
+        Result download;
+        QCOMPARE(get(b.get(), QStringLiteral("/hello.txt"), &download), QByteArray("hello from the fake FTP server\n"));
+        QVERIFY(download.ok());
+        b->disconnect();
+        settle(log);
+        const QStringList lines = recorded(log);
+        // The identity probe and one control connection for sign-in, stats,
+        // the upload and the download (libcurl reuses the TLS connection).
+        QCOMPARE(lines.filter(QRegularExpression(QStringLiteral("^CONN "))).size(), 2);
+        const QByteArray clear = clearBytes(lines);
+        QCOMPARE(clear.contains("USER alice"), plain);
+        QCOMPARE(clear.contains(m_password), plain);
+        QCOMPARE(clear.contains(payload), plain);
+        if (!plain)
+            QVERIFY(lines.contains(QStringLiteral("UPLOAD %1 %2").arg(payload.size()).arg(QString::fromLatin1(sha256(payload)))));
     }
 
     // XC-16: a chain to a trusted anchor needs no pin and no prompt.

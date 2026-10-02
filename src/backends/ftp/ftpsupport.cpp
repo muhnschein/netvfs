@@ -300,24 +300,88 @@ Result curlError(CURLcode code, const Reply &reply, bool canceled, const QString
     return Result(error, QStringLiteral("%1: %2").arg(context, describe(error)), detail);
 }
 
+namespace {
+
+constexpr int CodeDigits = 3;
+constexpr int ReplyCodeRadix = 10;
+
+bool isAsciiDigit(char c)
+{
+    return c >= '0' && c <= '9';
+}
+
+// libcurl's ftp_endofresp(): a line of more than three bytes that starts with
+// three digits and a space ends a reply; its digits are the reply code.
+// -1 for any other line.
+int endOfReplyCode(const QByteArray &line)
+{
+    if (line.size() <= CodeDigits || line.at(CodeDigits) != ' ')
+        return -1;
+    int code = 0;
+    for (int i = 0; i < CodeDigits; ++i) {
+        if (!isAsciiDigit(line.at(i)))
+            return -1;
+        code = code * ReplyCodeRadix + (line.at(i) - '0');
+    }
+    return code;
+}
+
+} // namespace
+
+void TlsGuard::reset()
+{
+    m_state = State::Idle;
+    m_line.clear();
+}
+
+TlsGuard::Verdict TlsGuard::feed(const char *data, size_t size)
+{
+    for (size_t i = 0; i < size; ++i) {
+        if (m_line.size() < MaxLineBytes)
+            m_line.append(data[i]);
+        if (data[i] != '\n')
+            continue;
+        const int code = endOfReplyCode(m_line);
+        if (code >= 0)
+            m_lastLine = m_line;
+        m_line.clear();
+        if (code < 0)
+            continue;
+        const Verdict verdict = reply(code);
+        if (verdict != Verdict::Continue)
+            return verdict;
+    }
+    return Verdict::Continue;
+}
+
 TlsGuard::Verdict TlsGuard::reply(int code)
 {
-    // 220 only ever greets a new connection (we never send REIN).
-    if (code == 220) {
-        m_state = State::AwaitAuth;
-        return Verdict::Continue;
-    }
     switch (m_state) {
+    case State::Idle:
+        // The greeting of a new connection (we never send REIN); 230 is a
+        // server that claims we are logged in already, which libcurl takes
+        // for the greeting in "try" mode and then skips AUTH TLS and USER.
+        if (code == 220) {
+            m_state = State::AwaitAuth;
+            return Verdict::Continue;
+        }
+        return code == 230 ? Verdict::Unexpected : Verdict::Continue;
     case State::AwaitAuth:
+        // Anything but 234 (also 220, 334 and 5xx) is an AUTH TLS refusal,
+        // after which libcurl would try "AUTH SSL" and then USER.
         if (code != 234)
             return Verdict::AuthRefused;
         m_state = State::AwaitLogin;
         return Verdict::Continue;
     case State::AwaitLogin:
+        if (code == 220)   // a greeting in the middle of a sign-in
+            return Verdict::Unexpected;
         if (code / 100 == 2)
             m_state = State::AwaitPbsz;
         return Verdict::Continue;
     case State::AwaitPbsz:
+        if (code == 220)
+            return Verdict::Unexpected;
         m_state = State::AwaitProt;
         return Verdict::Continue;
     case State::AwaitProt:
@@ -325,11 +389,13 @@ TlsGuard::Verdict TlsGuard::reply(int code)
             return Verdict::ProtectionRefused;
         m_state = State::Idle;
         return Verdict::Continue;
-    case State::Idle:
-        break;
     }
-    // A login outside the sequence above (a server greeting with 230).
-    return code == 230 ? Verdict::Unexpected : Verdict::Continue;
+    return Verdict::Continue;
+}
+
+QString lineForLog(const QByteArray &line)
+{
+    return Names::display(Names::decode(line.trimmed()));
 }
 
 QString replyForLog(const Reply &reply)

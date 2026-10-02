@@ -138,5 +138,54 @@
     "search": "    if (m_connection->unexpectedReconnect())",
     "replace": "    if (false)",
     "test": "sh tests/interop/ftp/run.sh build keepAliveAfterDrop"
+  },
+  {
+    "name": "XSEC-2 AUTH TLS answered 220 taken for a greeting (libcurl then sends USER)",
+    "file": "src/backends/ftp/ftpsupport.cpp",
+    "search": "        if (code != 234)\n            return Verdict::AuthRefused;",
+    "replace": "        if (code != 234 && code != 220)\n            return Verdict::AuthRefused;",
+    "test": "build/tests/unit/ftp/tst_ftp tlsGuard"
+  },
+  {
+    "name": "XSEC-2 greeting that claims a login accepted",
+    "file": "src/backends/ftp/ftpsupport.cpp",
+    "search": "        return code == 230 ? Verdict::Unexpected : Verdict::Continue;",
+    "replace": "        return Verdict::Continue;",
+    "test": "build/tests/unit/ftp/tst_ftp tlsGuard"
+  },
+  {
+    "name": "XSEC-2 greeting in the middle of a sign-in tolerated",
+    "file": "src/backends/ftp/ftpsupport.cpp",
+    "search": "        if (code == 220)   // a greeting in the middle of a sign-in\n            return Verdict::Unexpected;",
+    "replace": "        if (false)\n            return Verdict::Unexpected;",
+    "test": "build/tests/unit/ftp/tst_ftp tlsGuard"
+  },
+  {
+    "name": "XSEC-2 guard reads reply codes by the RFC 959 range, not like libcurl",
+    "file": "src/backends/ftp/ftpsupport.cpp",
+    "search": "        if (!isAsciiDigit(line.at(i)))\n            return -1;",
+    "replace": "        if (!isAsciiDigit(line.at(i)) || line.at(0) > '5')\n            return -1;",
+    "test": "build/tests/unit/ftp/tst_ftp tlsGuardFollowsLibcurl"
+  },
+  {
+    "name": "XSEC-2 guard ends a reply at the first line of a multi-line reply",
+    "file": "src/backends/ftp/ftpsupport.cpp",
+    "search": "    if (line.size() <= CodeDigits || line.at(CodeDigits) != ' ')\n        return -1;",
+    "replace": "    if (line.size() <= CodeDigits || (line.at(CodeDigits) != ' ' && line.at(CodeDigits) != '-'))\n        return -1;",
+    "test": "build/tests/unit/ftp/tst_ftp tlsGuardFollowsLibcurl"
+  },
+  {
+    "name": "XSEC-2 guard state survives into the next request",
+    "file": "src/backends/ftp/ftpconnection.cpp",
+    "search": "    m_guard.reset();\n    for (const QByteArray &command : request.commands) {",
+    "replace": "    for (const QByteArray &command : request.commands) {",
+    "test": "sh tests/interop/ftp/run.sh build abortedSignInDoesNotWeakenNextConnection"
+  },
+  {
+    "name": "XSEC-2 guard never consulted by the header callback",
+    "file": "src/backends/ftp/ftpconnection.cpp",
+    "search": "    if (connection->m_settings.tlsMode == TlsMode::Explicit && !connection->guard(data, length))",
+    "replace": "    if (false && !connection->guard(data, length))",
+    "test": "sh tests/interop/ftp/run.sh build signInTlsFailures reconnectKeepsTls"
   }
 ]
