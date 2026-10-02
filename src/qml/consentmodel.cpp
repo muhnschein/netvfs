@@ -1,0 +1,99 @@
+// SPDX-License-Identifier: LGPL-2.1-or-later
+#include "consentmodel.h"
+
+using namespace NetVfs;
+
+namespace NetVfsUi {
+
+ConsentModel::ConsentModel(QObject *parent)
+    : QAbstractListModel(parent)
+{
+    reload();
+}
+
+void ConsentModel::setStorePath(const QString &path)
+{
+    if (path == m_storePath)
+        return;
+    m_storePath = path;
+    emit storePathChanged();
+    reload();
+}
+
+int ConsentModel::rowCount(const QModelIndex &parent) const
+{
+    return parent.isValid() ? 0 : count();
+}
+
+QVariant ConsentModel::data(const QModelIndex &index, int role) const
+{
+    if (!index.isValid() || index.row() < 0 || index.row() >= count())
+        return QVariant();
+    const ConsumerInfo &consumer = m_consumers.at(index.row());
+    switch (role) {
+    case ConsumerIdRole:
+        return consumer.id;
+    case DisplayNameRole:
+    case Qt::DisplayRole:
+        return consumer.displayName;
+    case ConsentRole:
+        return ConsentStore::consentToString(m_consents.at(index.row()));
+    default:
+        return QVariant();
+    }
+}
+
+QHash<int, QByteArray> ConsentModel::roleNames() const
+{
+    QHash<int, QByteArray> names;
+    names.insert(ConsumerIdRole, "consumerId");
+    names.insert(DisplayNameRole, "displayName");
+    names.insert(ConsentRole, "consent");
+    return names;
+}
+
+void ConsentModel::reload()
+{
+    const int before = count();
+    beginResetModel();
+    m_consumers = ConsentStore::consumers();
+    const ConsentStore consents(m_storePath);
+    m_consents.clear();
+    for (const ConsumerInfo &consumer : m_consumers)
+        m_consents << consents.consent(consumer.id);
+    endResetModel();
+    if (count() != before)
+        emit countChanged();
+}
+
+bool ConsentModel::grant(const QString &consumerId)
+{
+    return store(consumerId, Consent::Granted);
+}
+
+bool ConsentModel::revoke(const QString &consumerId)
+{
+    return store(consumerId, Consent::Denied);
+}
+
+QString ConsentModel::consent(const QString &consumerId) const
+{
+    return ConsentStore::consentToString(ConsentStore(m_storePath).consent(consumerId));
+}
+
+bool ConsentModel::store(const QString &consumerId, Consent consent)
+{
+    for (int row = 0; row < count(); ++row) {
+        if (m_consumers.at(row).id != consumerId)
+            continue;
+        if (!ConsentStore(m_storePath).setConsent(consumerId, consent))
+            return false;
+        m_consents[row] = consent;
+        const QModelIndex changed = index(row);
+        emit dataChanged(changed, changed, { ConsentRole });
+        return true;
+    }
+    return false;   // only registered consumers
+}
+
+} // namespace NetVfsUi

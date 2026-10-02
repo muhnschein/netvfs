@@ -9,16 +9,21 @@ PKGCONFIG *= accounts-qt5
 
 HEADERS += \
     $$PWD/backendjobs.h \
+    $$PWD/consentmodel.h \
     $$PWD/errortexts.h \
     $$PWD/netvfshelpers.h \
     $$PWD/netvfsprobe.h \
+    $$PWD/providerdescriptors.h \
     $$PWD/sshkeytool.h
 
 SOURCES += \
     $$PWD/backendjobs.cpp \
+    $$PWD/consentmodel.cpp \
     $$PWD/errortexts.cpp \
     $$PWD/netvfshelpers.cpp \
     $$PWD/netvfsprobe.cpp \
+    $$PWD/providerdescriptors.cpp \
+    $$PWD/descriptortexts.cpp \
     $$PWD/sshkeytool.cpp
 
 # Module files installed next to the plugin (relative to this directory).
@@ -29,6 +34,7 @@ NETVFS_QML_MODULE_FILES = \
     NetVfsSettingsAgent.qml \
     NetVfsUpdateAgent.qml \
     NetVfsSettingsPage.qml \
+    NetVfsConsentPage.qml \
     ConnectionDialog.qml \
     ProbeBusyPage.qml \
     ServerIdentityDialog.qml \
