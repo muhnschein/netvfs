@@ -11,7 +11,7 @@
 namespace NetVfs {
 
 namespace {
-const char PasswordMethod[] = "password";
+const char AuthMethod[] = "password";   // signond method and mechanism name
 }
 
 SecretSource::SecretSource(QObject *parent)
@@ -46,7 +46,7 @@ void SignonSecretSource::fetch(quint32 credentialsId)
         emit failed(Result(Error::AuthFailed, QStringLiteral("The stored credentials are missing")));
         return;
     }
-    m_session = m_identity->createSession(QLatin1String(PasswordMethod));
+    m_session = m_identity->createSession(QLatin1String(AuthMethod));
     if (!m_session) {
         finish();
         emit failed(Result(Error::Internal, QStringLiteral("Cannot open a credentials session")));
@@ -57,7 +57,7 @@ void SignonSecretSource::fetch(quint32 credentialsId)
 
     SignOn::SessionData data;
     data.setUiPolicy(SignOn::NoUserInteractionPolicy);
-    m_session->process(data, QLatin1String(PasswordMethod));
+    m_session->process(data, QLatin1String(AuthMethod));
 }
 
 void SignonSecretSource::onResponse(const SignOn::SessionData &data)
