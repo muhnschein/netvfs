@@ -9,6 +9,6 @@ DEBIAN_FRONTEND=noninteractive $sudo apt-get install -y -q --no-install-recommen
     qtbase5-dev qtbase5-dev-tools qtdeclarative5-dev qttools5-dev-tools \
     libqt5sql5-sqlite libqt5xmlpatterns5-dev \
     libaccounts-qt5-dev libsignon-qt5-dev signond signon-plugin-password \
-    libssl-dev zlib1g-dev \
+    libssl-dev zlib1g-dev libcurl4-openssl-dev \
     dbus dbus-x11 openssh-client smbclient \
     bear gcovr

@@ -24,6 +24,8 @@ BuildRequires: pkgconfig(Qt5Quick)
 BuildRequires: pkgconfig(accounts-qt5)
 BuildRequires: pkgconfig(libsignon-qt5)
 BuildRequires: pkgconfig(buteosyncfw5) >= 0.10.0
+# SPEC-v2 W-1: the WebDAV backend uses the system libcurl.
+BuildRequires: pkgconfig(libcurl)
 
 %description
 Adds "SFTP" and "SMB" account providers to Settings > Accounts that appear as
@@ -75,6 +77,13 @@ Requires:   systemd
 SMB 3 account provider, backend (statically linked libsmb2) and Buteo backup
 plugins.
 
+%package backend-webdav
+Summary:    WebDAV backend
+Requires:   %{name}-core = %{version}-%{release}
+
+%description backend-webdav
+WebDAV backend (SPEC-v2 6.3) over the system libcurl.
+
 %prep
 %setup -q -n %{name}-%{version}
 
@@ -110,6 +119,9 @@ systemctl-user try-restart msyncd.service || :
 %dir %{_libdir}/netvfs/backends
 %{_libdir}/qt5/qml/org/netvfs/accounts
 %{_datadir}/translations/netvfs*.qm
+
+%files backend-webdav
+%{_libdir}/netvfs/backends/libnetvfs-webdav.so
 
 %files core-devel
 %{_includedir}/netvfs
