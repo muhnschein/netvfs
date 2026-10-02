@@ -37,8 +37,8 @@
   {
     "name": "dropped session not SecurityPolicy",
     "file": "src/backends/smb/smbutil.cpp",
-    "search": "            return Result(Error::SecurityPolicy, withContext(context, QLatin1String(ServerClosedMessage)));",
-    "replace": "            return Result(Error::ProtocolError, withContext(context, QLatin1String(ServerClosedMessage)));",
+    "search": "        return Result(Error::SecurityPolicy, withContext(context, QLatin1String(ServerClosedMessage)));",
+    "replace": "        return Result(Error::ProtocolError, withContext(context, QLatin1String(ServerClosedMessage)));",
     "test": "build/tests/unit/smb/tst_smb withoutStatus serverClosesDuringSetup"
   },
   {
@@ -109,7 +109,7 @@
     "file": "src/backends/smb/smbbackend.cpp",
     "search": "    smb2_set_security_mode(m_ctx, SMB2_NEGOTIATE_SIGNING_ENABLED | SMB2_NEGOTIATE_SIGNING_REQUIRED); // M-2\n    smb2_set_sign(m_ctx, 1);",
     "replace": "    smb2_set_security_mode(m_ctx, SMB2_NEGOTIATE_SIGNING_ENABLED); // M-2\n    smb2_set_sign(m_ctx, 0);",
-    "test": "sh tests/interop/smb/run.sh build encryptionOffSigned"
+    "test": "sh tests/interop/smb/run.sh build encryptionOffSigned tamperedResponse"
   },
   {
     "name": "M-1 any SMB version offered",

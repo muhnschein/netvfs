@@ -374,6 +374,9 @@ private slots:
         qInfo("smbstatus: %s", row.constData());
         QVERIFY2(row.contains("SMB3_11"), row.constData());
         QVERIFY2(row.contains("AES-128-CMAC"), row.constData());
+        // M-2: every message is signed because the client requires it; the
+        // server alone (signing not mandatory) would sign only the tree connect.
+        QVERIFY2(!row.contains("partial"), row.constData());
         QVERIFY2(!row.contains("AES-128-CCM"), row.constData());
     }
 

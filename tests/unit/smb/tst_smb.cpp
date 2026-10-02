@@ -13,7 +13,9 @@
 #include <QtConcurrent/QtConcurrentRun>
 #include <QtTest/QtTest>
 
-#include <smb2/smb2-errors.h>
+#include "smb2api.h"
+
+#include <smb2/libsmb2-share-enum.h>
 
 #include <atomic>
 #include <chrono>
@@ -464,6 +466,17 @@ private slots:
                      symbol.constData());
         }
         QVERIFY(libsmb2Symbols > 50);   // libsmb2 is linked statically (SEC-7)
+    }
+
+    // The plugin's definition, linked here the same way: share enumeration is
+    // not available and does not reach the network.
+    void shareEnumerationStub()
+    {
+        smb2_context *ctx = smb2_init_context();
+        QVERIFY(ctx);
+        QCOMPARE(smb2_share_enum_async(ctx, SHARE_INFO_1, nullptr, nullptr), -ENOTSUP);
+        QCOMPARE(QByteArray(smb2_get_error(ctx)), QByteArray("Share enumeration is not available"));
+        smb2_destroy_context(ctx);
     }
 
     void callsBeforeSignIn()
