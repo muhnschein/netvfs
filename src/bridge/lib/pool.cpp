@@ -124,6 +124,7 @@ Worker *Pool::pick(Lane lane)
 
 void Pool::submit(Lane lane, const TaskContext &context, Worker::Work work)
 {
+    reapFinished();   // connections closed by Disconnect free their host slots
     Worker *worker = pick(lane);
     if (!worker) {
         m_pending.push_back(Pending { lane, context, std::move(work) });

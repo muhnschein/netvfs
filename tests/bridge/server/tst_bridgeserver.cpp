@@ -98,6 +98,7 @@ private Q_SLOTS:
     void disconnectCancelsJobs();
     void cancelJob();
     void walkRemoveTreeCopyAcross();
+    void walkBatchLimit();
     void accountIdentityChangedSetsAttention();
     void adHocIdentityQuestion();
     void keyboardInteractive();
@@ -573,6 +574,26 @@ void tst_BridgeServer::walkRemoveTreeCopyAcross()
     QVERIFY(done.args.value(1).toString().isEmpty());
     QCOMPARE(done.args.value(3).toMap().value("files").toLongLong(), 3);
     QVERIFY(!fake()->exists(QStringLiteral("t")));
+}
+
+void tst_BridgeServer::walkBatchLimit()
+{
+    Fixture f;
+    for (int i = 0; i < 700; ++i)
+        fake()->addFile(QStringLiteral("w/f%1").arg(i), "x");
+    auto c = f.helloClient();
+    QVERIFY(!c->call("Walk", [](WireWriter &w) { w.string(Loc).bytes("w").variantMap(QVariantMap()); }).isError);
+    QVERIFY(c->waitSignal(QStringLiteral("JobFinished")).args.value(1).toString().isEmpty());
+    int total = 0;
+    for (;;) {
+        const TestClient::Message b = c->waitSignal(QStringLiteral("WalkBatch"), nullptr, 100);
+        if (!b.valid)
+            break;
+        const int n = b.args.value(1).toList().size();
+        QVERIFY2(n <= Bridge::Limits::MaxListBatch, qPrintable(QString::number(n)));   // XB-17
+        total += n;
+    }
+    QCOMPARE(total, 700);
 }
 
 void tst_BridgeServer::accountIdentityChangedSetsAttention()
