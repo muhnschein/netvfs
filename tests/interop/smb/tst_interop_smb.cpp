@@ -968,8 +968,10 @@ private slots:
         QCOMPARE(contentOf(backend.get(), QStringLiteral("v2/a.txt")), QByteArray("aaa"));
         QCOMPARE(backend->rename(QStringLiteral("v2/b.txt"), QStringLiteral("v2/sub"), RenameMode::NoReplace).error(),
                  Error::AlreadyExists);
-        QCOMPARE(backend->rename(QStringLiteral("v2/b.txt"), QStringLiteral("v2/sub"), RenameMode::Replace).error(),
-                 Error::AlreadyExists);
+        // XC-10: refused before the request (servers differ in what they answer).
+        const Result ontoFolder = backend->rename(QStringLiteral("v2/b.txt"), QStringLiteral("v2/sub"), RenameMode::Replace);
+        QCOMPARE(ontoFolder.error(), Error::AlreadyExists);
+        QVERIFY2(ontoFolder.message().contains(QLatin1String("the target is a folder")), qPrintable(ontoFolder.message()));
         QVERIFY(backend->rename(QStringLiteral("v2/b.txt"), QStringLiteral("v2/c.txt"), RenameMode::NoReplace).ok());
         QCOMPARE(backend->rename(QStringLiteral("v2/nope"), QStringLiteral("v2/x"), RenameMode::NoReplace).error(),
                  Error::NotFound);
@@ -1105,6 +1107,16 @@ private slots:
         QVERIFY(handle->read(content.size() + 100, 100, &part).ok());
         QVERIFY(part.isEmpty());
         QCOMPARE(handle->read(-1, 1, &part).error(), Error::Internal);
+        // XM-6: read-ahead, then reads elsewhere: the queued chunks are not
+        // mistaken for the new position.
+        handle->readAhead(0, 3 * 1024 * 1024);
+        QVERIFY(handle->read(2 * 1024 * 1024 + 7, 10, &part).ok());
+        QCOMPARE(part, content.mid(2 * 1024 * 1024 + 7, 10));
+        QVERIFY(handle->read(100, 10, &part).ok());
+        QCOMPARE(part, content.mid(100, 10));
+        handle->readAhead(1000, 2 * 1024 * 1024);
+        QVERIFY(handle->read(1000, 1024 * 1024 + 1, &part).ok());
+        QCOMPARE(part, content.mid(1000, 1024 * 1024 + 1));
         QVERIFY(handle->close().ok());
         QCOMPARE(handle->read(0, 1, &part).error(), Error::Internal);
         ReadHandle *missing = nullptr;
@@ -1309,7 +1321,11 @@ private slots:
         QCOMPARE(backend->makeDir(QStringLiteral("/newshare"), false).error(), Error::PermissionDenied);
         QCOMPARE(backend->removeDir(QStringLiteral("/")).error(), Error::PermissionDenied);
         QCOMPARE(backend->removeFile(QStringLiteral("/")).error(), Error::PermissionDenied);
-        QCOMPARE(backend->removeDir(QStringLiteral("/backup")).error(), Error::PermissionDenied);
+        // Refused by the backend itself, not left to the server.
+        const Result shareRemoval = backend->removeDir(QStringLiteral("/backup"));
+        QCOMPARE(shareRemoval.error(), Error::PermissionDenied);
+        QVERIFY2(shareRemoval.message().contains(QLatin1String("a share cannot be removed")),
+                 qPrintable(shareRemoval.message()));
         QCOMPARE(backend->rename(QStringLiteral("/backup"), QStringLiteral("/b2"), RenameMode::NoReplace).error(),
                  Error::PermissionDenied);
         QVERIFY(put(backend.get(), QStringLiteral("/backup/server-mode.txt"), "server mode"));
@@ -1359,7 +1375,13 @@ private slots:
         const QStringList shares { QStringLiteral("backup"), QStringLiteral("small"), QStringLiteral("media"),
                                    QStringLiteral("hidden$"), QStringLiteral("readonly") };
         Entry entry;
-        for (const QString &share : shares.mid(0, 4))
+        QVERIFY(put(backend.get(), QStringLiteral("/backup/lru.txt"), "backup"));
+        QTRY_COMPARE(connections(server), 2);        // IPC$ and backup
+        // Share names are case-insensitive: no second context for BACKUP.
+        QVERIFY(backend->stat(QStringLiteral("/BACKUP/lru.txt"), &entry).ok());
+        QTest::qWait(500);
+        QCOMPARE(connections(server), 2);
+        for (const QString &share : shares.mid(1, 3))
             QVERIFY(put(backend.get(), QStringLiteral("/%1/lru.txt").arg(share), share.toUtf8()));
         QTRY_COMPARE(connections(server), 5);        // IPC$ and four shares
         // Share names are case-insensitive: the same context, and a use.
