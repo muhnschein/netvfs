@@ -41,6 +41,7 @@ SOURCES = \
     accountstore.cpp \
     backend.cpp \
     backendloader.cpp \
+    boundedpipe.cpp \
     error.cpp \
     identity.cpp \
     logging.cpp \

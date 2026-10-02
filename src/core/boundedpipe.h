@@ -32,6 +32,7 @@ public:
     Result result() const;     // success until fail()/cancel()
     qint64 capacity() const;
     qint64 buffered() const;   // bytes currently held
+    qint64 peakBuffered() const;   // high-water mark of buffered(); never above capacity()
 
     struct State;
 
