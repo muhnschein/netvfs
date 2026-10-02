@@ -866,6 +866,20 @@ private slots:
         QCOMPARE(r.message(), QStringLiteral("SFTP is not enabled for this user"));
     }
 
+    // S-2: libssh defaults are not widened; no common algorithm is SecurityPolicy.
+    void noCommonAlgorithm()
+    {
+        auto b = std::unique_ptr<Backend>(BackendLoader::create(QStringLiteral("sftp")));
+        for (int attempt = 0; attempt < 5; ++attempt) {
+            ServerIdentity seen;
+            const Result r = b->connect(params(QStringLiteral("o96"), QStringLiteral("legacy"), QStringLiteral("alice")),
+                                        &seen);
+            QVERIFY2(r.error() == Error::SecurityPolicy, qPrintable(r.toString()));
+            QVERIFY(r.message().contains(QLatin1String("diffie-hellman-group14-sha1")));
+            QVERIFY(seen.isEmpty());
+        }
+    }
+
     // S-13, S-14 with a server that wants a key and then a password.
     void secondFactor()
     {

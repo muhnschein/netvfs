@@ -1,12 +1,9 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-#include "sftpbackend.h"
-#include "sshkeytools.h"
+#include "sftpentry.h"
 
 #include <QtCore/QObject>
 
-#include <memory>
-
-namespace NetVfs::Sftp {
+namespace NetVfs {
 
 // Root object of libnetvfs-sftp.so: the backend factory and, so that libssh
 // code lives only in the SFTP package, the SSH key tools (SPEC-sftp 5.1).
@@ -18,20 +15,20 @@ class SftpPlugin : public QObject, public BackendFactory, public SshKeyTools
 
 public:
     QString provider() const override { return QStringLiteral("sftp"); }
-    Backend *create() override { return std::make_unique<SftpBackend>().release(); }
+    Backend *create() override { return createSftpBackend(); }
 
-    Result generate(SshKeyMaterial *out) override { return generateKey(out); }
+    Result generate(SshKeyMaterial *out) override { return generateSshKey(out); }
     Result importKey(const QByteArray &fileContents, const QByteArray &passphrase,
                      SshKeyMaterial *out) override
     {
-        return Sftp::importKey(fileContents, passphrase, out);
+        return importSshKey(fileContents, passphrase, out);
     }
     Result describe(const QByteArray &privateKey, SshKeyMaterial *out) override
     {
-        return describeKey(privateKey, out);
+        return describeSshKey(privateKey, out);
     }
 };
 
-} // namespace NetVfs::Sftp
+} // namespace NetVfs
 
 #include "sftpplugin.moc"

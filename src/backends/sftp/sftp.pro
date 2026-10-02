@@ -5,7 +5,8 @@ NETVFS_PROVIDER = sftp
 include(../backend.pri)
 
 include(sftp.pri)
-SOURCES += sftpplugin.cpp
+HEADERS += sftpentry.h
+SOURCES += sftpentry.cpp sftpplugin.cpp
 
 LIBS += $$VENDOR_PREFIX/lib/libssh.a -lcrypto -lpthread
 PRE_TARGETDEPS += $$VENDOR_PREFIX/lib/libssh.a

@@ -103,7 +103,7 @@ private:
 
 SftpBackend::~SftpBackend()
 {
-    disconnect();
+    closeSession();
 }
 
 void SftpBackend::configureSession(ssh_session session)
@@ -115,7 +115,7 @@ void SftpBackend::configureSession(ssh_session session)
 
 Result SftpBackend::connect(const ConnectionParams &params, ServerIdentity *seen)
 {
-    disconnect();
+    closeSession();
     if (m_canceled)
         return Result(Error::Canceled);
     if (params.host.isEmpty() || params.host.contains(QLatin1Char('@')))
@@ -130,17 +130,17 @@ Result SftpBackend::connect(const ConnectionParams &params, ServerIdentity *seen
 
     const bool pinned = !params.option(QLatin1String(HostKeyOption)).isEmpty();
     Result r = openTransport(pinned, seen);
-    if (!r.ok() && pinned && m_session && isHostKeyMismatch(text(ssh_get_error(m_session)))) {
+    if (!r.ok() && pinned && isHostKeyMismatch(r.message())) {
         // The server no longer offers the pinned key type (S-5). Connect once
         // more without the restriction, so that the caller sees the key the
         // server presents now and reports ServerIdentityChanged (S-7).
-        disconnect();
+        closeSession();
         r = openTransport(false, seen);
     }
     if (r.ok() && m_canceled)
         r = Result(Error::Canceled);
     if (!r.ok())
-        disconnect();
+        closeSession();
     return r;
 }
 
@@ -155,8 +155,8 @@ Result SftpBackend::openTransport(bool restrictHostKey, ServerIdentity *seen)
 
     qCDebug(lcNetVfsSftp) << "Connecting to" << m_params.host << "port" << m_params.port;
     // S-3: no ssh_session_is_known_server(); the caller compares the pin.
-    if (ssh_connect(m_session) != SSH_OK)
-        return sessionFailure();
+    if (ErrorTrail trail; ssh_connect(m_session) != SSH_OK)
+        return connectFailure(trail.explain(text(ssh_get_error(m_session))));
 
     ssh_key key = nullptr;
     if (ssh_get_server_publickey(m_session, &key) != SSH_OK)
@@ -217,7 +217,7 @@ Result SftpBackend::sessionFailure() const
     return connectFailure(text(ssh_get_error(m_session)));
 }
 
-void SftpBackend::disconnect()
+void SftpBackend::closeSession()
 {
     if (m_sftp) {
         sftp_free(m_sftp);
@@ -234,6 +234,11 @@ void SftpBackend::disconnect()
     m_hasFsync = false;
     m_hasStatvfs = false;
     m_hasPosixRename = false;
+}
+
+void SftpBackend::disconnect()
+{
+    closeSession();
 }
 
 void SftpBackend::cancel()

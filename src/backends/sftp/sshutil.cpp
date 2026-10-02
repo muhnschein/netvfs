@@ -7,6 +7,43 @@
 
 namespace NetVfs::Sftp {
 
+namespace {
+thread_local ErrorTrail *activeTrail = nullptr;
+} // namespace
+
+ErrorTrail::ErrorTrail()
+    : m_previousLevel(ssh_get_log_level())
+{
+    activeTrail = this;
+    // A generic lambda converts to ssh_logging_callback.
+    ssh_set_log_callback([](int priority, const char *, const char *message, auto) {
+        if (activeTrail && priority == SSH_LOG_TRACE)
+            activeTrail->record(message);
+    });
+    ssh_set_log_level(SSH_LOG_TRACE);
+}
+
+ErrorTrail::~ErrorTrail()
+{
+    ssh_set_log_level(m_previousLevel);
+    activeTrail = nullptr;
+}
+
+void ErrorTrail::record(const char *message)
+{
+    if (const QString line = QString::fromUtf8(message); line.contains(QLatin1String("kex error")))
+        m_messages << line;
+}
+
+QString ErrorTrail::explain(const QString &last) const
+{
+    if (m_messages.isEmpty() || last.contains(QLatin1String("kex error")))
+        return last;
+    // "function: message" as libssh formats it for callbacks.
+    const QString first = m_messages.constFirst();
+    return first.mid(first.indexOf(QLatin1String("kex error")));
+}
+
 void ensureLibraryInitialized()
 {
     static std::once_flag once;

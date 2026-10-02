@@ -5,7 +5,10 @@
 #include "error.h"
 #include "types.h"
 
+#include <libssh/callbacks.h>
 #include <libssh/libssh.h>
+
+#include <QtCore/QStringList>
 
 #include <memory>
 
@@ -40,6 +43,28 @@ QString keyTypeName(ssh_key key);
 QByteArray publicKeyBlob(ssh_key key);         // raw wire blob of the public part
 QString sha256Fingerprint(ssh_key key);         // "SHA256:..." (S-6)
 ServerIdentity identityOf(ssh_key key);
+
+// libssh keeps only its last error message, and a socket error in the same
+// poll round can replace "kex error ..." after a failed key exchange (S-2).
+// While an ErrorTrail exists, the messages libssh records on this thread are
+// collected as well; libssh reports them to its thread-local log callback at
+// SSH_LOG_TRACE. Afterwards the callback stays installed but idle.
+class ErrorTrail
+{
+public:
+    ErrorTrail();
+    ErrorTrail(const ErrorTrail &) = delete;
+    ErrorTrail &operator=(const ErrorTrail &) = delete;
+    ~ErrorTrail();
+
+    void record(const char *message);
+    // The key exchange failure, if one was recorded; otherwise `last`.
+    QString explain(const QString &last) const;
+
+private:
+    QStringList m_messages;
+    int m_previousLevel = 0;
+};
 
 // S-12: ssh_pki_import_privkey_base64() on the whole key file text. Never
 // prompts: without a passphrase an encrypted key simply fails. The copies

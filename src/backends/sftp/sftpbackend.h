@@ -54,6 +54,7 @@ private:
     };
     class PendingQueue;
 
+    void closeSession();
     Result openTransport(bool restrictHostKey, ServerIdentity *seen);
     Result applyOptions(bool restrictHostKey) const;
     bool setTimeout(int milliseconds) const;

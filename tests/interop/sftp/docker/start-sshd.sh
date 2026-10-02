@@ -8,13 +8,13 @@
 #   kbdint   2203  keyboard-interactive only, via PAM (distribution sshd)
 #   nosftp   2204  no sftp subsystem
 #   noext    2205  sftp-server behind noext.py, which hides all extensions
+#   legacy   2206  only a key exchange that libssh does not offer (SHA-1)
 # The password of every password user is $TEST_PASSWORD. /run/netvfs-ready
 # appears when all instances accept connections.
 set -eu
 
 : "${TEST_PASSWORD:?}"
 : "${INSTANCES:=default nosftp noext}"
-keyscan=$(dirname "$SSH_KEYGEN")/ssh-keyscan
 
 for user in alice carol twofactor; do
     id "$user" >/dev/null 2>&1 || useradd -m -s /bin/sh "$user"
@@ -127,6 +127,11 @@ EOF
         echo "PasswordAuthentication yes"
         echo "Subsystem sftp /usr/bin/python3 /setup/noext.py $SFTP_SERVER"
         ;;
+    legacy)
+        common 2206 legacy
+        echo "KexAlgorithms diffie-hellman-group14-sha1"
+        echo "Subsystem sftp internal-sftp"
+        ;;
     *)
         echo "unknown instance $1" >&2
         exit 1
@@ -145,7 +150,7 @@ done
 for name in $INSTANCES; do
     port=$(sed -n 's/^Port //p' "/etc/ssh/sshd-$name.conf")
     tries=0
-    until "$keyscan" -T 1 -p "$port" 127.0.0.1 >/dev/null 2>&1; do
+    until grep -q "Server listening on 0.0.0.0 port $port" "/var/log/sshd-$name.log"; do
         tries=$((tries + 1))
         if [ "$tries" -gt 100 ]; then
             echo "sshd instance $name did not start" >&2

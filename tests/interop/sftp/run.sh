@@ -36,7 +36,7 @@ build_images() {
     if [ ! -d "$openssh_src" ]; then
         log "fetching OpenSSH $openssh_tag"
         rm -rf "$openssh_src.tmp"
-        git clone -q --depth 1 --branch "$openssh_tag" https://github.com/openssh/openssh-portable "$openssh_src.tmp"
+        git -c advice.detachedHead=false clone -q --depth 1 --branch "$openssh_tag" https://github.com/openssh/openssh-portable "$openssh_src.tmp"
         mv "$openssh_src.tmp" "$openssh_src"
     fi
     context="$work/context-source"
@@ -59,6 +59,7 @@ instance_port() {
     kbdint) echo 2203 ;;
     nosftp) echo 2204 ;;
     noext) echo 2205 ;;
+    legacy) echo 2206 ;;
     esac
 }
 
@@ -163,7 +164,7 @@ build_images
 
 password=$(od -An -N12 -tx1 /dev/urandom | tr -d ' \n')
 o103="default hardened nosftp noext"
-o96="default kbdint noext"
+o96="default kbdint noext legacy"
 o89="default"
 start o103 netvfs-sftp-openssh103:test "$o103" --tmpfs /srv/small:size=8m
 start o96 netvfs-sftp-openssh96:test "$o96"

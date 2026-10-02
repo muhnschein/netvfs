@@ -700,7 +700,7 @@ private slots:
         const ScriptedPeer peer(unsupportedKexGreeting());
         auto b = backend();
         const Result r = b->connect(localParams(peer.port()), nullptr);
-        QCOMPARE(r.error(), Error::SecurityPolicy);
+        QVERIFY2(r.error() == Error::SecurityPolicy, qPrintable(r.toString()));
         QVERIFY(r.message().contains(QLatin1String("frobnicate-kex@example.org")));
     }
 
