@@ -96,13 +96,8 @@ Result Session::signIn(const QByteArray &server, Profile profile, const QString 
     // SEC-5: drop libsmb2's copy of the password as soon as it is not needed.
     smb2_set_password(m_ctx, nullptr);
 
-    // XM-1: a guest mapping is named as such, also when it made the
-    // sign-in fail (a guest session cannot sign its replies); M-1 defence
-    // in depth for the dialect.
-    if (const Result guest = checkSessionFlags(profile, smb2_get_session_flags(m_ctx)); !guest.ok())
-        r = guest;
-    else if (r.ok())
-        r = checkSession(m_ctx, profile);
+    // XM-1 guest mapping, M-1 defence in depth for the dialect.
+    r = checkSession(m_ctx, profile, r);
     if (!r.ok()) {
         destroy();
         return r;

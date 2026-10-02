@@ -20,6 +20,11 @@
 
 extern char **environ;
 
+// smb.pro passes the install path (smbhelper.pri); this is the same default.
+#ifndef NETVFS_SMB_SHARES_HELPER
+#define NETVFS_SMB_SHARES_HELPER "/usr/libexec/netvfs/netvfs-smb-shares"
+#endif
+
 namespace NetVfs::Smb {
 
 namespace {

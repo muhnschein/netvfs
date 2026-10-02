@@ -94,12 +94,11 @@ Result signIn(const Context &context, const ShareRequest &request, Profile profi
                  request.requestTimeoutMs);
     const int rc = smb2_connect_share(ctx, request.server.constData(), "IPC$", nullptr);
     smb2_set_password(ctx, nullptr);       // SEC-5
-    if (Result guest = checkSessionFlags(profile, smb2_get_session_flags(ctx)); !guest.ok())
-        return guest;
-    if (rc < 0)
-        return errorForStatus(static_cast<quint32>(smb2_get_nterror(ctx)), -rc, Stage::SessionSetup,
-                              QStringLiteral("Sign-in failed"));
-    return checkSession(ctx, profile);
+    const Result r = rc < 0 ? errorForStatus(static_cast<quint32>(smb2_get_nterror(ctx)), -rc, Stage::SessionSetup,
+                                             QStringLiteral("Sign-in failed"))
+                            : Result::success();
+    // The backend's own checks: guest mapping (XM-1), dialect (M-1).
+    return checkSession(ctx, profile, r);
 }
 
 Result listShares(const Context &context, int *count)

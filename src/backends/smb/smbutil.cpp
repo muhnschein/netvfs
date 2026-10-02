@@ -460,12 +460,15 @@ void applyProfile(smb2_context *ctx, Profile profile, const QString &user, const
     smb2_set_password(ctx, s.guest ? nullptr : secret.constData());
 }
 
-Result checkSession(smb2_context *ctx, Profile profile)
+Result checkSession(smb2_context *ctx, Profile profile, const Result &signIn)
 {
     // XM-1: a session the server mapped to guest is never accepted in place
-    // of the account's own.
+    // of the account's own, and is named as such also when it made the
+    // sign-in fail (a guest session cannot sign its replies).
     if (Result r = checkSessionFlags(profile, smb2_get_session_flags(ctx)); !r.ok())
         return r;
+    if (!signIn.ok())
+        return signIn;
     const quint16 dialect = smb2_get_dialect(ctx);
     if (!dialectAllowed(profile, dialect)) {
         // M-1, defence in depth: never accept a dialect that was not offered.

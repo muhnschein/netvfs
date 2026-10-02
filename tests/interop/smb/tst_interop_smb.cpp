@@ -7,6 +7,7 @@
 #include "ops.h"
 #include "paths.h"
 #include "smb2api.h"
+#include "smbshares.h"
 #include "transfer.h"
 
 #include <QtCore/QBuffer>
@@ -28,6 +29,10 @@
 #include <thread>
 
 using namespace NetVfs;
+using NetVfs::Smb::ShareInfo;
+using NetVfs::Smb::ShareRequest;
+using NetVfs::Smb::parseShareOutput;
+using NetVfs::Smb::encodeShareRequest;
 
 namespace QTest {
 template<>
@@ -1355,9 +1360,12 @@ private slots:
         for (const QString &share : shares.mid(0, 4))
             QVERIFY(put(backend.get(), QStringLiteral("/%1/lru.txt").arg(share), share.toUtf8()));
         QTRY_COMPARE(connections(server), 5);        // IPC$ and four shares
+        // Share names are case-insensitive: the same context, and a use.
+        QVERIFY(backend->stat(QStringLiteral("/BACKUP/lru.txt"), &entry).ok());
         QVERIFY(backend->stat(QStringLiteral("/readonly/existing.txt"), &entry).ok());
         QTRY_COMPARE(connections(server), 5);        // one closed for the fifth
-        QTRY_COMPARE(treeConnects(server, "backup"), 0);   // the least recently used
+        QTRY_COMPARE(treeConnects(server, "small"), 0);    // the least recently used
+        QCOMPARE(treeConnects(server, "backup"), 1);
 
         // Handles keep their context: four open files, a fifth share waits.
         std::vector<std::unique_ptr<ReadHandle>> handles;
@@ -1411,6 +1419,73 @@ private slots:
         QVERIFY(backend->list(QStringLiteral("/"), &entries).ok());
         QVERIFY(entries.isEmpty());          // nothing saved, nothing enumerated
         qputenv("NETVFS_SMB_SHARES_HELPER", original);
+    }
+
+    // XM-7: the helper itself, as the backend runs it: the same profile
+    // checks (a guest mapping is refused), shares as JSON lines.
+    void shareHelperDirect()
+    {
+        const auto run = [](const ShareRequest &request, QByteArray *out) {
+            QProcess helper;
+            helper.start(QString::fromLocal8Bit(qgetenv("NETVFS_SMB_SHARES_HELPER")), QStringList());
+            if (!helper.waitForStarted(10000))
+                return -1;
+            helper.write(encodeShareRequest(request));
+            helper.closeWriteChannel();
+            helper.waitForFinished(60000);
+            *out = helper.readAllStandardOutput();
+            return helper.exitStatus() == QProcess::NormalExit ? helper.exitCode() : -1;
+        };
+        ShareRequest request;
+        request.server = address(QStringLiteral("strict")).toUtf8();
+        request.user = "backup";
+        request.profile = "strict";
+        request.requestTimeoutMs = 30000;
+        request.secret = m_password;
+        QByteArray out;
+        QCOMPARE(run(request, &out), 0);
+        QVector<ShareInfo> shares;
+        QVERIFY2(parseShareOutput(out, &shares).ok(), out.constData());
+        QStringList names;
+        for (const ShareInfo &share : shares)
+            names << share.name;
+        QVERIFY2(names.contains(QStringLiteral("hidden$")) && names.contains(QStringLiteral("IPC$")),
+                 qPrintable(names.join(QLatin1Char(','))));   // the filter is the backend's
+
+        request.server = address(QStringLiteral("guest")).toUtf8();
+        request.user = "nosuchuser";
+        request.secret = "whatever";
+        QCOMPARE(run(request, &out), 1);
+        const Result mapped = parseShareOutput(out, &shares);
+        QCOMPARE(mapped.error(), Error::SecurityPolicy);
+        QVERIFY2(mapped.message().contains(QLatin1String("guest")), qPrintable(mapped.message()));
+        request.secret = "wrong";
+        request.user = "backup";
+        QCOMPARE(run(request, &out), 1);
+        QCOMPARE(parseShareOutput(out, &shares).error(), Error::AuthFailed);
+    }
+
+    // C-9: a cancel() from within the transfer ends it, even when the
+    // rest of the file has already arrived (read-ahead).
+    void downloadCancelFromProgress()
+    {
+        const auto backend = newBackend();
+        QVERIFY(signIn(backend.get(), params(QStringLiteral("strict")), credentials()).ok());
+        const QByteArray data(3 * 1024 * 1024, 'd');
+        QVERIFY(put(backend.get(), QStringLiteral("cancel-me.bin"), data));
+        struct CancelOnFirst : Progress {
+            Backend *backend = nullptr;
+            void update(qint64, qint64) override { backend->cancel(); }
+        } progress;
+        progress.backend = backend.get();
+        QByteArray received;
+        QBuffer sink(&received);
+        QVERIFY(sink.open(QIODevice::WriteOnly));
+        QCOMPARE(backend->download(QStringLiteral("cancel-me.bin"), &sink, DownloadOptions(), &progress).error(),
+                 Error::Canceled);
+        QVERIFY(received.size() < data.size());
+        backend->resetCancel();
+        QVERIFY(backend->removeFile(QStringLiteral("cancel-me.bin")).ok());
     }
 
     // XM-9: a DFS link is Unsupported with the detail "DFS referral".

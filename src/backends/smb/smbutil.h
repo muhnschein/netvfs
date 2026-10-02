@@ -80,9 +80,10 @@ Result checkSessionFlags(Profile profile, quint16 sessionFlags);
 // password is set last, after neutraliseUserFile().
 void applyProfile(smb2_context *ctx, Profile profile, const QString &user, const QString &domain,
                   const QByteArray &secret, int requestTimeoutMs);
-// After smb2_connect_share() on a context set up by applyProfile(): the
-// negotiated dialect (M-1) and the session flags (guest mapping).
-Result checkSession(smb2_context *ctx, Profile profile);
+// After smb2_connect_share() on a context set up by applyProfile(), with
+// its outcome `signIn`: the session flags (guest mapping, also after a
+// failed sign-in), then the outcome, then the negotiated dialect (M-1).
+Result checkSession(smb2_context *ctx, Profile profile, const Result &signIn);
 
 // M-1: SMB 3.0, 3.0.2 and 3.1.1.
 bool isSmb3Dialect(quint16 dialect);
