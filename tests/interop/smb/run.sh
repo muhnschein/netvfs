@@ -74,7 +74,7 @@ samba smb2only "$image" smb2only
 samba aes256 "$image" aes256
 samba gmac "$image" gmac
 samba guest "$image" guest
-samba conf "$image" strict -v "$work/conf-data:/srv/smb/backup"
+samba conf "$image" strict -e HOST_WRITABLE=1 -v "$work/conf-data:/srv/smb/backup"
 samba current "$current_image" strict
 for s in strict default encoff smb2only aes256 gmac guest conf current; do
     ready "$s"

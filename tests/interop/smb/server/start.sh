@@ -35,6 +35,12 @@ else
     cp "/opt/netvfs/conf/$variant.conf" /etc/samba/smb.conf
 fi
 cat /opt/netvfs/conf/shares.conf >> /etc/samba/smb.conf
+# HOST_WRITABLE=1: the backup share is a host folder that the conformance
+# suite also writes to directly (as an unprivileged CI user), so everything
+# smbd creates there must stay writable for that user.
+if [ "${HOST_WRITABLE:-0}" = 1 ]; then
+    sed -i '/^\[backup\]/a\  force create mode = 0666\n  force directory mode = 0777' /etc/samba/smb.conf
+fi
 testparm -s >/dev/null 2>&1 || { testparm -s; exit 1; }
 
 exec smbd --foreground --no-process-group --debug-stdout
