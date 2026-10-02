@@ -18,6 +18,38 @@ constexpr const char *OpenSshBegin = "-----BEGIN OPENSSH PRIVATE KEY-----";
 constexpr const char *OpenSshEnd = "-----END OPENSSH PRIVATE KEY-----";
 constexpr const char *CertificateSuffix = "-cert-v01@openssh.com";
 constexpr const char *DsaType = "ssh-dss";
+// Channel open failure reasons (RFC 4254 5.1) as libssh words them.
+constexpr const char *ProhibitedReason = "error (1)";
+constexpr const char *ConnectFailedReason = "error (2)";
+constexpr const char *ShortageReason = "error (4)";
+constexpr const char *OpenFailed = " open failed";
+constexpr const char *ProFtpdBanner = "SSH-2.0-mod_sftp";
+// SFTP v3 times are unsigned 32-bit seconds.
+constexpr qint64 MaxSftpSeconds = 0xffffffffLL;
+constexpr qint32 ModeBits = 07777;
+
+// XS-4: server families whose SSH_FXP_SYMLINK argument order the interop
+// suite verified (tests/interop/sftp), by the start of the server's banner.
+struct SymlinkFamily {
+    const char *bannerPrefix;
+    SymlinkOrder order;
+};
+const std::array<SymlinkFamily, 1> &verifiedSymlinkFamilies()
+{
+    static const std::array<SymlinkFamily, 1> families = { {
+        // ProFTPD mod_sftp takes OpenSSH's order from every client.
+        { ProFtpdBanner, SymlinkOrder::Swapped },
+    } };
+    return families;
+}
+
+bool validTime(const QDateTime &time)
+{
+    if (!time.isValid())
+        return true;
+    const qint64 seconds = time.toMSecsSinceEpoch() / 1000;
+    return seconds >= 0 && seconds <= MaxSftpSeconds;
+}
 
 // Reads the big-endian SSH wire encoding (RFC 4251 section 5).
 class WireReader
@@ -235,6 +267,24 @@ Result sftpStatusFailure(int sftpStatus, const QString &sshMessage, const QStrin
     default:
         break;
     }
+    if (sftpStatus == SSH_FX_FAILURE) {
+        // SFTP v3 has no codes for these; servers such as ProFTPD send the
+        // strerror() text with SSH_FX_FAILURE (XC-21).
+        struct Text {
+            const char *text;
+            Error error;
+        };
+        static const std::array<Text, 3> texts = { {
+            { "Not a directory", Error::NotADirectory },
+            { "Is a directory", Error::IsADirectory },
+            { "Directory not empty", Error::DirectoryNotEmpty },
+        } };
+        const auto found = std::find_if(texts.cbegin(), texts.cend(), [&sshMessage](const Text &entry) {
+            return sshMessage.endsWith(QLatin1String(entry.text));
+        });
+        if (found != texts.cend())
+            return Result(found->error, QStringLiteral("%1: %2").arg(context, QLatin1String(found->text)));
+    }
     const Error error = sshMessage.contains(QLatin1String("Timeout"), Qt::CaseInsensitive) ? Error::Timeout
                                                                                           : Error::ProtocolError;
     return Result(error, QStringLiteral("%1: %2").arg(context, sshMessage));
@@ -296,6 +346,94 @@ Result interactiveNotSupported()
                   QStringLiteral("The server needs interactive sign-in, which is not supported"));
 }
 
+Result interactiveDeclined()
+{
+    return Result(Error::AuthFailed, QStringLiteral("Interactive sign-in was not completed"));
+}
+
+RoundAction keyboardInteractiveAction(int prompts, bool firstEchoes, bool passwordPrompt, bool secretUsable,
+                                      bool hasPrompter)
+{
+    if (prompts <= 0)
+        return RoundAction::Acknowledge;
+    if (secretUsable && prompts == 1 && !firstEchoes && (passwordPrompt || !hasPrompter))
+        return RoundAction::AnswerWithSecret;
+    return hasPrompter ? RoundAction::AskPrompter : RoundAction::Refuse;
+}
+
+bool isPasswordPrompt(const QString &text)
+{
+    return text.contains(QLatin1String("password"), Qt::CaseInsensitive);
+}
+
+PromptOutcome promptRound(AuthPrompter *prompter, const QString &name, const QString &instruction,
+                          const QVector<AuthPrompt> &prompts, QVector<QByteArray> *answers,
+                          const std::function<bool(int, const QByteArray &)> &setAnswer)
+{
+    answers->clear();
+    PromptOutcome outcome = PromptOutcome::Answered;
+    if (!prompter->answer(name, instruction, prompts, answers))
+        outcome = PromptOutcome::Declined;
+    else if (answers->size() != prompts.size())
+        outcome = PromptOutcome::BadAnswers;
+    for (int i = 0; outcome == PromptOutcome::Answered && i < answers->size(); ++i) {
+        if (!setAnswer(i, answers->at(i)))
+            outcome = PromptOutcome::Rejected;
+    }
+    // Overwritten in place: the bytes live on in the caller's vector until it
+    // goes, so the stores cannot be dropped as dead.
+    for (QByteArray &answer : *answers)
+        answer.fill('\0');
+    return outcome;
+}
+
+Result channelOpenFailure(const QString &sshMessage)
+{
+    // OpenSSH: "open failed" with reason 2 (connect failed) when
+    // MaxSessions is reached; other servers say "administratively
+    // prohibited" (1) or "resource shortage" (4).
+    const bool refused = sshMessage.contains(QLatin1String(ProhibitedReason))
+        || sshMessage.contains(QLatin1String(ShortageReason))
+        || (sshMessage.contains(QLatin1String(ConnectFailedReason)) && sshMessage.endsWith(QLatin1String(OpenFailed)));
+    if (sshMessage.contains(QLatin1String("Channel opening failure")) && refused)
+        return Result(Error::TooManyConnections,
+                      QStringLiteral("The server allows no further session on this connection"), sshMessage);
+    return Result(Error::ProtocolError, QStringLiteral("The server refused a session: %1").arg(sshMessage));
+}
+
+SymlinkOrder symlinkOrderFor(const QString &serverBanner, bool openSshBanner)
+{
+    if (openSshBanner)
+        return SymlinkOrder::AsLibssh;
+    const auto &families = verifiedSymlinkFamilies();
+    const auto found = std::find_if(families.cbegin(), families.cend(), [&serverBanner](const SymlinkFamily &family) {
+        return serverBanner.startsWith(QLatin1String(family.bannerPrefix));
+    });
+    return found == families.cend() ? SymlinkOrder::Unverified : found->order;
+}
+
+bool lstatFollowsLinks(const QString &serverBanner)
+{
+    return serverBanner.startsWith(QLatin1String(ProFtpdBanner));
+}
+
+Result checkResumeOffset(qint64 remoteSize, qint64 resumeOffset)
+{
+    if (remoteSize == resumeOffset)
+        return Result::success();
+    return Result(Error::ProtocolError,
+                  QStringLiteral("Cannot resume at %1: the file has %2 bytes").arg(resumeOffset).arg(remoteSize));
+}
+
+Result checkAttributeChanges(const AttributeChanges &changes)
+{
+    if (changes.mode < -1 || (changes.mode >= 0 && (changes.mode & ~ModeBits) != 0))
+        return Result(Error::Internal, QStringLiteral("Invalid mode %1").arg(changes.mode, 0, 8));
+    if (!validTime(changes.modified) || !validTime(changes.accessed))
+        return Result(Error::Internal, QStringLiteral("SFTP cannot store times before 1970 or after 2106"));
+    return Result::success();
+}
+
 Result checkSecretForMode(const QString &authMode, const QByteArray &secret)
 {
     if (authMode == QLatin1String(AuthModePassword)) {
@@ -308,6 +446,13 @@ Result checkSecretForMode(const QString &authMode, const QByteArray &secret)
         if (!decodeKeySecret(secret, nullptr))
             return Result(Error::AuthFailed,
                           QStringLiteral("The account uses an SSH key, but no valid key is stored"));
+        return Result::success();
+    }
+    if (authMode == QLatin1String(AuthModeInteractive)) {
+        // XS-11: the stored secret is optional and, if present, a password.
+        if (isKeySecret(secret))
+            return Result(Error::AuthFailed,
+                          QStringLiteral("The account signs in interactively, but the stored credential is a key"));
         return Result::success();
     }
     return Result(Error::Internal, QStringLiteral("Unknown sign-in method \"%1\"").arg(authMode));

@@ -6,7 +6,9 @@
 #include "names.h"
 #include "paths.h"
 #include "probe.h"
+#include "prompter.h"
 #include "secure.h"
+#include "shellexec.h"
 #include "sshkeys.h"
 #include "types.h"
 
@@ -14,7 +16,9 @@
 #include <QtCore/QScopedPointer>
 #include <QtTest/QtTest>
 
+#include <chrono>
 #include <memory>
+#include <thread>
 
 using namespace NetVfs;
 using NetVfs::Test::FakeBackend;
@@ -104,6 +108,22 @@ public:
     void cancel() override {}
     void resetCancel() override {}
     void disconnect() override {}
+};
+
+// MinimalBackend with the ShellExec interface (XS-9).
+class ShellBackend : public MinimalBackend, public ShellExec
+{
+public:
+    bool reported = false;
+    Capabilities capabilities() const override
+    {
+        Capabilities caps;
+        if (reported)
+            caps.flags << Capability::ShellExec;
+        return caps;
+    }
+    Result exec(const QStringList &, const ExecOptions &, ExecResult *) override { return Result(); }
+    Result find(const QString &, const QString &, int, QStringList *) override { return Result(); }
 };
 
 } // namespace
@@ -884,6 +904,91 @@ private slots:
         QCOMPARE(Names::display(pair), pair);
         QVERIFY(!Names::hasEscapes(pair + QStringLiteral("x")));
         QVERIFY(Names::hasEscapes(pair + Names::decode(QByteArray("\xfe"))));
+    }
+    // XC-15, XC-22: BlockingPrompter waits for another thread.
+    void blockingPrompterAnswers()
+    {
+        QVector<BlockingPrompter::Question> asked;
+        BlockingPrompter *self = nullptr;
+        BlockingPrompter prompter([&asked, &self](const BlockingPrompter::Question &question) {
+            asked.append(question);
+            QVERIFY(self->waiting());
+            // The answering thread (here: a timer on this one would deadlock,
+            // so answer from a helper thread).
+            std::thread([self]() { self->respond({ QByteArray("123456") }); }).detach();
+        });
+        self = &prompter;
+        AuthPrompt prompt;
+        prompt.text = QStringLiteral("Verification code: ");
+        QVector<QByteArray> answers;
+        QVERIFY(prompter.answer(QStringLiteral("n"), QStringLiteral("i"), { prompt }, &answers));
+        QCOMPARE(answers, QVector<QByteArray>({ QByteArray("123456") }));
+        QCOMPARE(asked.size(), 1);
+        QCOMPARE(asked.first().name, QStringLiteral("n"));
+        QCOMPARE(asked.first().instruction, QStringLiteral("i"));
+        QCOMPARE(asked.first().prompts.first().text, prompt.text);
+        QVERIFY(!prompter.waiting());
+        prompter.respond({ QByteArray("late") });   // nobody waits: ignored
+        prompter.decline();
+    }
+
+    void blockingPrompterDeclines()
+    {
+        BlockingPrompter *self = nullptr;
+        BlockingPrompter prompter([&self](const BlockingPrompter::Question &) {
+            std::thread([self]() { self->decline(); }).detach();
+        });
+        self = &prompter;
+        QVector<QByteArray> answers { QByteArray("stale") };
+        QVERIFY(!prompter.answer(QString(), QString(), { AuthPrompt() }, &answers));
+        QCOMPARE(answers, QVector<QByteArray>({ QByteArray("stale") }));   // untouched
+    }
+
+    void blockingPrompterCancel()
+    {
+        // XC-22: cancel() from another thread ends a wait nobody answers,
+        // and stays in effect until reset().
+        BlockingPrompter prompter([](const BlockingPrompter::Question &) { /* nobody answers */ });
+        QElapsedTimer timer;
+        timer.start();
+        std::thread canceler([&prompter]() {
+            std::this_thread::sleep_for(std::chrono::milliseconds(200));
+            prompter.cancel();
+        });
+        QVector<QByteArray> answers;
+        QVERIFY(!prompter.answer(QString(), QString(), { AuthPrompt() }, &answers));
+        canceler.join();
+        QVERIFY(timer.elapsed() < 2000);
+        QVERIFY(answers.isEmpty());
+        QVERIFY(!prompter.answer(QString(), QString(), { AuthPrompt() }, &answers));   // still canceled
+        prompter.reset();
+        BlockingPrompter *self = &prompter;
+        std::thread answerer([self]() {
+            while (!self->waiting())
+                std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            self->respond({ QByteArray("ok") });
+        });
+        QVERIFY(prompter.answer(QString(), QString(), { AuthPrompt() }, &answers));
+        answerer.join();
+        QCOMPARE(answers, QVector<QByteArray>({ QByteArray("ok") }));
+    }
+
+    void shellExecOf()
+    {
+        // XS-9: the interface only when the capability is reported.
+        MinimalBackend plain;
+        QVERIFY(!ShellExec::of(&plain));
+        QVERIFY(!ShellExec::of(nullptr));
+        ShellBackend shell;
+        QVERIFY(!ShellExec::of(&shell));
+        shell.reported = true;
+        QCOMPARE(ShellExec::of(&shell), static_cast<ShellExec *>(&shell));
+        ExecOptions options;
+        QCOMPARE(options.maxOutput, qint64(1) << 20);
+        QCOMPARE(options.timeoutMs, -1);
+        const ExecResult result;
+        QCOMPARE(result.exitStatus, -1);
+        QVERIFY(!result.truncated);
     }
 };
 
