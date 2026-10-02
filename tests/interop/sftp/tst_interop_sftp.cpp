@@ -340,6 +340,14 @@ private:
     qint64 interrupt(GateProgress *gate, const std::function<Result()> &work,
                      const std::function<void()> &atGate, Result *result) const
     {
+        return interrupt(gate, work, atGate, std::function<void()>(), result);
+    }
+
+    // As above; `afterRelease` runs once the worker goes on, and the time is
+    // measured from its end.
+    qint64 interrupt(GateProgress *gate, const std::function<Result()> &work, const std::function<void()> &atGate,
+                     const std::function<void()> &afterRelease, Result *result) const
+    {
         QFuture<Result> future = QtConcurrent::run(work);
         if (!gate->waitReached(120000)) {
             gate->proceed();
@@ -350,6 +358,10 @@ private:
         timer.start();
         atGate();
         gate->proceed();
+        if (afterRelease) {
+            afterRelease();
+            timer.restart();
+        }
         *result = future.result();
         return timer.elapsed();
     }
@@ -396,8 +408,10 @@ private slots:
     {
         if (logCapture().previous)
             qInstallMessageHandler(logCapture().previous);
-        if (!m_servers.isEmpty())
+        if (!m_servers.isEmpty()) {
             docker({ QStringLiteral("unpause"), container(QStringLiteral("o89")) });
+            exec(QStringLiteral("o89"), QStringLiteral("rm -f /tmp/hold"));
+        }
     }
 
     // S-T1, S-6, S-7
@@ -804,13 +818,12 @@ private slots:
     // C-9 and C-14 while the server does not answer at all.
     void stalledServer()
     {
-        ConnectionParams p = params(QStringLiteral("o89"), QStringLiteral("default"), QStringLiteral("alice"));
-        p.requestTimeoutMs = 3000;
+        // C-9: the server holds its replies back (whole packets only); the
+        // worker drains what arrived and then waits; cancel() ends the wait.
+        ConnectionParams p = params(QStringLiteral("o89"), QStringLiteral("hold"), QStringLiteral("alice"));
         auto b = signedIn(p, m_password);
         QVERIFY(b);
         QVERIFY(Transfer::uploadFile(b.get(), m_bigFile, QStringLiteral("stall.bin")).ok());
-        const QString paused = container(QStringLiteral("o89"));
-
         QBuffer sink;
         QVERIFY(sink.open(QIODevice::WriteOnly));
         GateProgress cancelGate(1024 * 1024);
@@ -818,20 +831,26 @@ private slots:
         Backend *raw = b.get();
         qint64 ms = interrupt(
             &cancelGate, [&]() { return raw->download(QStringLiteral("stall.bin"), &sink, &cancelGate); },
+            [&]() { exec(QStringLiteral("o89"), QStringLiteral("touch /tmp/hold")); },
             [&]() {
-                docker({ QStringLiteral("pause"), paused });
+                QThread::msleep(1000);
                 raw->cancel();
             },
             &r);
-        docker({ QStringLiteral("unpause"), paused });
+        exec(QStringLiteral("o89"), QStringLiteral("rm -f /tmp/hold"));
         QCOMPARE(r.error(), Error::Canceled);
-        QVERIFY2(ms >= 0 && ms <= CancelBoundMs + 1000, qPrintable(QString::number(ms)));   // + docker pause itself
+        QVERIFY2(ms >= 0 && ms <= CancelBoundMs, qPrintable(QString::number(ms)));
+        QVERIFY(sink.size() < BigFileSize);
 
+        // C-14: the whole container stops, also in the middle of a packet.
+        p = params(QStringLiteral("o89"), QStringLiteral("default"), QStringLiteral("alice"));
+        p.requestTimeoutMs = 3000;
         b = signedIn(p, m_password);
         QVERIFY(b);
         raw = b.get();
         sink.close();
         QVERIFY(sink.open(QIODevice::WriteOnly | QIODevice::Truncate));
+        const QString paused = container(QStringLiteral("o89"));
         GateProgress timeoutGate(1024 * 1024);
         ms = interrupt(
             &timeoutGate, [&]() { return raw->download(QStringLiteral("stall.bin"), &sink, &timeoutGate); },

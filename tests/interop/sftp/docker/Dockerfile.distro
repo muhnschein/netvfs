@@ -11,5 +11,5 @@ RUN apt-get update \
     && ssh-keygen -A
 ENV SSHD=/usr/sbin/sshd SSH_KEYGEN=/usr/bin/ssh-keygen SFTP=/usr/bin/sftp \
     SFTP_SERVER=/usr/lib/openssh/sftp-server USE_PAM=1
-COPY start-sshd.sh noext.py /setup/
+COPY start-sshd.sh sftpproxy.py /setup/
 CMD ["/setup/start-sshd.sh"]

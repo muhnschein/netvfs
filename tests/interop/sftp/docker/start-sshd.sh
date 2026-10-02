@@ -7,7 +7,9 @@
 #   hardened 2202  SPEC-sftp section 9 (OpenSSH 10.x only)
 #   kbdint   2203  keyboard-interactive only, via PAM (distribution sshd)
 #   nosftp   2204  no sftp subsystem
-#   noext    2205  sftp-server behind noext.py, which hides all extensions
+#   noext    2205  sftp-server behind sftpproxy.py, which hides all extensions
+#   hold     2207  sftp-server behind sftpproxy.py, which holds replies back
+#                  while /tmp/hold exists
 #   legacy   2206  only a key exchange that libssh does not offer (SHA-1)
 # The password of every password user is $TEST_PASSWORD. /run/netvfs-ready
 # appears when all instances accept connections.
@@ -125,7 +127,12 @@ EOF
     noext)
         common 2205 noext
         echo "PasswordAuthentication yes"
-        echo "Subsystem sftp /usr/bin/python3 /setup/noext.py $SFTP_SERVER"
+        echo "Subsystem sftp /usr/bin/python3 /setup/sftpproxy.py --no-extensions $SFTP_SERVER"
+        ;;
+    hold)
+        common 2207 hold
+        echo "PasswordAuthentication yes"
+        echo "Subsystem sftp /usr/bin/python3 /setup/sftpproxy.py --hold-file /tmp/hold $SFTP_SERVER"
         ;;
     legacy)
         common 2206 legacy

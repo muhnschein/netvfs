@@ -771,41 +771,51 @@ Result SftpBackend::drain(PendingQueue *queue, char *buffer) const
     return r;
 }
 
-Result SftpBackend::readChunks(sftp_file file, QIODevice *sink, qint64 total, Progress *progress) const
+Result SftpBackend::readStep(sftp_file file, PendingQueue *queue, QByteArray *buffer, Sink *sink,
+                             quint64 *offset, bool *finished) const
+{
+    Pending pending = queue->take();
+    qint64 n = 0;
+    if (const Result r = waitRead(&pending, buffer->data(), &n); !r.ok())
+        return r;
+    if (n == 0) {
+        *finished = true;
+        return drain(queue, buffer->data());   // end of file
+    }
+    if (sink->device->write(buffer->constData(), n) != n) {
+        return Result(Error::NoSpace,
+                      QStringLiteral("Cannot write the local file: %1").arg(sink->device->errorString()));
+    }
+    sink->done += n;
+    if (sink->progress)
+        sink->progress->update(sink->done, sink->total);
+    if (static_cast<size_t>(n) == pending.length)
+        return Result::success();
+    // A short read: the requests already sent ask for the wrong offsets.
+    // Drop their answers and continue after the data.
+    *offset = pending.offset + static_cast<quint64>(n);
+    Result r = drain(queue, buffer->data());
+    if (r.ok() && sftp_seek64(file, *offset) < 0)
+        r = sftpFailure(QStringLiteral("seek"));
+    return r;
+}
+
+Result SftpBackend::readChunks(sftp_file file, Sink *sink) const
 {
     PendingQueue queue;
     QByteArray buffer(static_cast<int>(m_readChunk), Qt::Uninitialized);
     quint64 offset = 0;
-    qint64 done = 0;
-    for (;;) {
+    bool finished = false;
+    while (!finished) {
         if (m_canceled)
-            return Result(Error::Canceled);
+            return Result(Error::Canceled);   // C-9, between requests
         Result r = refillReadWindow(file, &queue, &offset);
+        if (r.ok())
+            r = readStep(file, &queue, &buffer, sink, &offset, &finished);
         if (!r.ok())
             return r;
-        Pending pending = queue.take();
-        qint64 n = 0;
-        r = waitRead(&pending, buffer.data(), &n);
-        if (!r.ok())
-            return r;
-        if (n == 0)
-            return drain(&queue, buffer.data());   // end of file
-        if (sink->write(buffer.constData(), n) != n)
-            return Result(Error::NoSpace, QStringLiteral("Cannot write the local file: %1").arg(sink->errorString()));
-        done += n;
-        if (progress)
-            progress->update(done, total);
-        if (static_cast<size_t>(n) < pending.length) {
-            // A short read: the requests already sent ask for the wrong
-            // offsets. Drop their answers and continue after the data.
-            offset = pending.offset + static_cast<quint64>(n);
-            r = drain(&queue, buffer.data());
-            if (r.ok() && sftp_seek64(file, offset) < 0)
-                r = sftpFailure(QStringLiteral("seek"));
-            if (!r.ok())
-                return r;
-        }
     }
+    return Result::success();
 }
 
 Result SftpBackend::download(const QString &path, QIODevice *sink, Progress *progress)
@@ -819,15 +829,30 @@ Result SftpBackend::download(const QString &path, QIODevice *sink, Progress *pro
     sftp_file file = sftp_open(m_sftp, remote.constData(), O_RDONLY, 0);
     if (!file)
         return sftpFailure(display(remote));
-    qint64 total = -1;
+    Sink target { sink, progress, -1, 0 };
     if (sftp_attributes attributes = sftp_fstat(file)) {
-        total = static_cast<qint64>(attributes->size);
+        target.total = static_cast<qint64>(attributes->size);
         sftp_attributes_free(attributes);
     }
     sftp_file_set_nonblocking(file);
-    r = readChunks(file, sink, total, progress);
+    r = readChunks(file, &target);
     closeFile(file, r.ok());
     return r;
+}
+
+Result SftpBackend::readRange(sftp_file file, const QByteArray &remote, qint64 length, QByteArray *out) const
+{
+    QByteArray buffer(static_cast<int>(m_readChunk), Qt::Uninitialized);
+    while (out->size() < length) {
+        const auto wanted = static_cast<size_t>(qMin<qint64>(buffer.size(), length - out->size()));
+        const ssize_t n = sftp_read(file, buffer.data(), wanted);
+        if (n < 0)
+            return sftpFailure(display(remote));
+        if (n == 0)
+            break;
+        out->append(buffer.constData(), static_cast<int>(n));
+    }
+    return Result::success();
 }
 
 Result SftpBackend::read(const QString &path, qint64 offset, qint64 length, QByteArray *out)
@@ -844,19 +869,10 @@ Result SftpBackend::read(const QString &path, qint64 offset, qint64 length, QByt
     if (!file)
         return sftpFailure(display(remote));
     out->clear();
-    QByteArray buffer(static_cast<int>(m_readChunk), Qt::Uninitialized);
     if (sftp_seek64(file, static_cast<quint64>(offset)) < 0)
         r = sftpFailure(display(remote));
-    while (r.ok() && out->size() < length) {
-        const auto wanted = static_cast<size_t>(qMin<qint64>(buffer.size(), length - out->size()));
-        const ssize_t n = sftp_read(file, buffer.data(), wanted);
-        if (n < 0)
-            r = sftpFailure(display(remote));
-        else if (n == 0)
-            break;
-        else
-            out->append(buffer.constData(), static_cast<int>(n));
-    }
+    else
+        r = readRange(file, remote, length, out);
     closeFile(file, r.ok());
     return r;
 }

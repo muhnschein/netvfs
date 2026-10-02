@@ -53,6 +53,12 @@ private:
         quint64 offset = 0;
     };
     class PendingQueue;
+    struct Sink {
+        QIODevice *device = nullptr;
+        Progress *progress = nullptr;
+        qint64 total = -1;
+        qint64 done = 0;
+    };
 
     void closeSession();
     Result openTransport(bool restrictHostKey, ServerIdentity *seen);
@@ -81,7 +87,10 @@ private:
     Result writeChunks(sftp_file file, QIODevice *source, const QByteArray &remote, Progress *progress) const;
     Result refillReadWindow(sftp_file file, PendingQueue *queue, quint64 *offset) const;
     Result drain(PendingQueue *queue, char *buffer) const;
-    Result readChunks(sftp_file file, QIODevice *sink, qint64 total, Progress *progress) const;
+    Result readStep(sftp_file file, PendingQueue *queue, QByteArray *buffer, Sink *sink, quint64 *offset,
+                    bool *finished) const;
+    Result readChunks(sftp_file file, Sink *sink) const;
+    Result readRange(sftp_file file, const QByteArray &remote, qint64 length, QByteArray *out) const;
     Result waitWrite(Pending *pending, const QByteArray &remote) const;
     Result waitRead(Pending *pending, char *buffer, qint64 *received) const;
     Result waitForData(const QElapsedTimer &started) const;

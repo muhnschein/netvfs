@@ -60,6 +60,7 @@ instance_port() {
     nosftp) echo 2204 ;;
     noext) echo 2205 ;;
     legacy) echo 2206 ;;
+    hold) echo 2207 ;;
     esac
 }
 
@@ -165,7 +166,7 @@ build_images
 password=$(od -An -N12 -tx1 /dev/urandom | tr -d ' \n')
 o103="default hardened nosftp noext"
 o96="default kbdint noext legacy"
-o89="default"
+o89="default hold"
 start o103 netvfs-sftp-openssh103:test "$o103" --tmpfs /srv/small:size=8m
 start o96 netvfs-sftp-openssh96:test "$o96"
 start o89 netvfs-sftp-openssh89:test "$o89"
