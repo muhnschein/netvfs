@@ -1,0 +1,6 @@
+total 12
+drwxr-xr-x    2 1001     1001         4096 Oct 02 15:23 .
+-rw-r--r--    1 1001     1001       100000 Oct 02 15:23 up load.bin
+lrwxrwxrwx    1 0        0               9 Mar 31  2024 link -> plain.txt
+crw-rw-rw-    1 root     root       1,   3 Feb 29 12:00 null
+-rwsr-sr-t+ 1 owner 1 Jan  1  2020  leadé

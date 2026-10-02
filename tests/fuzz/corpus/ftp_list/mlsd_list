@@ -1,0 +1,4 @@
+!type=cdir;sizd=4096;modify=20261002152306;UNIX.mode=0755; .
+type=file;size=1234;modify=20210304050607.25;perm=adfrw;UNIX.mode=0640;UNIX.uid=1001;UNIX.gid=100;unique=801g1; name with ; and spaces
+type=OS.unix=slink:/etc/x;unix.owner=alice; link
+type=dir;create=20190101000000; café
