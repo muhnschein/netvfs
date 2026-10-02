@@ -18,6 +18,7 @@ budget)".
 | --- | --- |
 | `fuzz_names.cpp` | `Names::encode(Names::decode(x)) == x` for every byte string; UTF-16 input never crashes |
 | `fuzz_url.cpp` | `Url::parse` never crashes; what it accepts survives parse, format, parse unchanged |
+| `fuzz_smb_shares.cpp` | the SMB share helper's output parser (XM-7) never crashes; what it accepts obeys the limits, holds only valid unique share names and survives the helper's writers; the request codec is canonical |
 
 ## Adding a harness: one file
 

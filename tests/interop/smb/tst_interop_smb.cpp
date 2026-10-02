@@ -4,6 +4,7 @@
 // see run.sh for the servers and server/conf/ for their configurations.
 #include "backendloader.h"
 #include "identity.h"
+#include "ops.h"
 #include "paths.h"
 #include "smb2api.h"
 #include "transfer.h"
@@ -927,11 +928,18 @@ private slots:
         QVERIFY(signIn(backend.get(), params(QStringLiteral("strict")), credentials()).ok());
         const Capabilities caps = backend->capabilities();
         QVERIFY(caps.has(Capability::NativeNoReplace));
-        QVERIFY(!caps.has(Capability::AtomicReplace));
+        QVERIFY(caps.has(Capability::AtomicReplace));       // vendor/patches/libsmb2/0005
         QVERIFY(caps.has(Capability::ReadHandles));
+        QVERIFY(caps.has(Capability::EfficientRanges));
+        QVERIFY(caps.has(Capability::WriteResume));
+        QVERIFY(caps.has(Capability::SetModified));
         QVERIFY(caps.has(Capability::SpaceInfo));
         QVERIFY(caps.has(Capability::WindowsNames));
+        QVERIFY(caps.has(Capability::CaseInsensitive));
         QVERIFY(!caps.has(Capability::PosixModes));
+        QVERIFY(!caps.has(Capability::Symlinks));
+        QVERIFY(!caps.has(Capability::ShareEnumeration));   // share mode
+        QCOMPARE(caps.maxNameBytes, qint64(255));
         QVERIFY(caps.maxReadChunk > 0 && caps.maxWriteChunk > 0);
 
         // XC-8
@@ -1113,6 +1121,451 @@ private slots:
         QVERIFY(signIn(backend.get(), viaProxy(4455, true), credentials()).ok());
         QCOMPARE(backend->keepAlive().error(), Error::ConnectionLost);
         QCOMPARE(backend->keepAlive().error(), Error::ConnectionLost);
+    }
+
+    // ---- SPEC-v2 §6.2: profiles, server mode, share enumeration ---------
+
+private:
+    ConnectionParams profiled(const QString &server, const QString &profile, const QString &share = QStringLiteral("backup"))
+    {
+        ConnectionParams p = params(server, true, share);
+        p.options.insert(QStringLiteral("security_profile"), profile);
+        if (share.isEmpty())
+            p.options.remove(QStringLiteral("share"));
+        return p;
+    }
+
+    // Processes (one per TCP connection) of `user` on `server`.
+    int connections(const QString &server, const QByteArray &user = QByteArray("backup")) const
+    {
+        const QList<QByteArray> lines = exec(server, { QStringLiteral("smbstatus"), QStringLiteral("-p") }).split('\n');
+        return static_cast<int>(std::count_if(lines.begin(), lines.end(), [&user](const QByteArray &line) {
+            return line.simplified().split(' ').value(1) == user;
+        }));
+    }
+
+    // Tree connects to `share` on `server`.
+    int treeConnects(const QString &server, const QByteArray &share) const
+    {
+        const QList<QByteArray> lines = exec(server, { QStringLiteral("smbstatus"), QStringLiteral("-S") }).split('\n');
+        return static_cast<int>(std::count_if(lines.begin(), lines.end(), [&share](const QByteArray &line) {
+            return line.simplified().split(' ').value(0) == share;
+        }));
+    }
+
+    static QStringList namesOf(const QVector<Entry> &entries)
+    {
+        QStringList names;
+        for (const Entry &e : entries)
+            names << e.name;
+        return names;
+    }
+
+private slots:
+    // XM-1, M-T9: SMB 2.1 only. strict and signed refuse it, legacy accepts it.
+    void profilesOnSmb2Only_data()
+    {
+        QTest::addColumn<QString>("profile");
+        QTest::addColumn<bool>("accepted");
+        QTest::newRow("strict") << "strict" << false;
+        QTest::newRow("signed") << "signed" << false;
+        QTest::newRow("legacy") << "legacy" << true;
+    }
+
+    void profilesOnSmb2Only()
+    {
+        QFETCH(QString, profile);
+        QFETCH(bool, accepted);
+        const auto backend = newBackend();
+        const Result r = signIn(backend.get(), profiled(QStringLiteral("smb2only"), profile), credentials());
+        if (!accepted) {
+            QCOMPARE(r.error(), Error::SecurityPolicy);
+            return;
+        }
+        QVERIFY2(r.ok(), qPrintable(r.toString()));
+        QVERIFY(put(backend.get(), QStringLiteral("legacy.txt"), "smb 2.1"));
+        QCOMPARE(contentOf(backend.get(), QStringLiteral("legacy.txt")), QByteArray("smb 2.1"));
+        const QByteArray row = sessionRow(QStringLiteral("smb2only"));
+        QVERIFY2(row.contains("SMB2_10"), row.constData());
+        QVERIFY(backend->removeFile(QStringLiteral("legacy.txt")).ok());
+    }
+
+    // XM-1: legacy and signed against the strict server still get SMB 3.1.1
+    // with the encryption the server requires.
+    void weakerProfilesOnStrictServer()
+    {
+        for (const QString &profile : { QStringLiteral("signed"), QStringLiteral("legacy") }) {
+            const auto backend = newBackend();
+            const Result r = signIn(backend.get(), profiled(QStringLiteral("strict"), profile), credentials());
+            QVERIFY2(r.ok(), qPrintable(profile + QLatin1String(": ") + r.toString()));
+            QVERIFY(backend->keepAlive().ok());
+            const QByteArray row = sessionRow(QStringLiteral("strict"));
+            QVERIFY2(row.contains("SMB3_11") && row.contains("AES-128-CCM"), row.constData());
+        }
+    }
+
+    // XM-1: the guest profile: no user, no password, signing off.
+    void guestProfile()
+    {
+        const auto backend = newBackend();
+        const Result r = signIn(backend.get(), profiled(QStringLiteral("guest"), QStringLiteral("guest"),
+                                                        QStringLiteral("public")),
+                                Credentials());
+        QVERIFY2(r.ok(), qPrintable(r.toString()));
+        QVERIFY(backend->makeDir(QStringLiteral("guestdir"), false).ok());
+        QVERIFY(put(backend.get(), QStringLiteral("guestdir/g.txt"), "guest"));
+        QCOMPARE(contentOf(backend.get(), QStringLiteral("guestdir/g.txt")), QByteArray("guest"));
+        QVERIFY(backend->removeFile(QStringLiteral("guestdir/g.txt")).ok());
+        QVERIFY(backend->removeDir(QStringLiteral("guestdir")).ok());
+        // Guest against a server that does not map guests.
+        const auto refused = newBackend();
+        QVERIFY(!signIn(refused.get(), profiled(QStringLiteral("strict"), QStringLiteral("guest")), Credentials()).ok());
+    }
+
+    // XM-1: "map to guest = Bad User" turns an unknown user into a guest;
+    // every profile but guest refuses that session (no silent downgrade).
+    void guestMappingRefused_data()
+    {
+        QTest::addColumn<QString>("profile");
+        QTest::newRow("strict") << "strict";
+        QTest::newRow("signed") << "signed";
+        QTest::newRow("legacy") << "legacy";
+    }
+
+    void guestMappingRefused()
+    {
+        QFETCH(QString, profile);
+        const auto backend = newBackend();
+        ConnectionParams p = profiled(QStringLiteral("guest"), profile, QStringLiteral("public"));
+        p.username = QStringLiteral("nosuchuser");
+        const Result r = signIn(backend.get(), p, Credentials(QStringLiteral("nosuchuser"), "whatever"));
+        QCOMPARE(r.error(), Error::SecurityPolicy);
+        QVERIFY2(r.message().contains(QLatin1String("guest")), qPrintable(r.message()));
+        // The real account is not affected.
+        const auto account = newBackend();
+        QVERIFY(signIn(account.get(), profiled(QStringLiteral("guest"), profile), credentials()).ok());
+    }
+
+    // XM-2, XM-3, XM-7: the root of server mode lists shares.
+    void serverModeRoot()
+    {
+        const auto backend = newBackend();
+        ConnectionParams p = profiled(QStringLiteral("strict"), QStringLiteral("strict"), QString());
+        p.options.insert(QStringLiteral("shares"), QStringLiteral("backup, Saved"));
+        QVERIFY(signIn(backend.get(), p, credentials()).ok());
+        const Capabilities caps = backend->capabilities();
+        QVERIFY(caps.has(Capability::ShareEnumeration));
+        QVERIFY(caps.has(Capability::ReadHandles));
+
+        QVector<Entry> entries;
+        QVERIFY(backend->list(QStringLiteral("/"), &entries).ok());
+        const QStringList names = namesOf(entries);
+        // Saved names first, then what the server lists (disk shares, no '$').
+        QCOMPARE(names, QStringList({ QStringLiteral("backup"), QStringLiteral("Saved"), QStringLiteral("readonly"),
+                                      QStringLiteral("small"), QStringLiteral("media"), QStringLiteral("dfs") }));
+        for (const Entry &e : entries) {
+            QCOMPARE(e.type, EntryType::Directory);
+            QVERIFY(!e.flags.testFlag(EntryFlag::ReadOnly));
+        }
+        QCOMPARE(entries.at(4).extra.value(QStringLiteral("remark")).toString(), QStringLiteral("Films and music"));
+
+        Entry entry;
+        QVERIFY(backend->stat(QStringLiteral("/"), &entry).ok());
+        QCOMPARE(entry.type, EntryType::Directory);
+        QVERIFY(backend->stat(QStringLiteral("/media"), &entry).ok());
+        QCOMPARE(entry.name, QStringLiteral("media"));
+        QCOMPARE(entry.type, EntryType::Directory);
+        QCOMPARE(backend->stat(QStringLiteral("/Saved"), &entry).error(), Error::NotFound);   // no such share
+
+        p.options.insert(QStringLiteral("show_admin_shares"), true);
+        const auto admin = newBackend();
+        QVERIFY(signIn(admin.get(), p, credentials()).ok());
+        QVERIFY(admin->list(QStringLiteral("/"), &entries).ok());
+        QVERIFY(namesOf(entries).contains(QStringLiteral("hidden$")));
+        QVERIFY(!namesOf(entries).contains(QStringLiteral("IPC$")));     // not a disk share
+
+        p.options.insert(QStringLiteral("share_enumeration"), false);
+        const auto saved = newBackend();
+        QVERIFY(signIn(saved.get(), p, credentials()).ok());
+        QVERIFY(!saved->capabilities().has(Capability::ShareEnumeration));
+        QVERIFY(saved->list(QStringLiteral("/"), &entries).ok());
+        QCOMPARE(namesOf(entries), QStringList({ QStringLiteral("backup"), QStringLiteral("Saved") }));
+    }
+
+    // XM-2: what the root and the shares themselves allow.
+    void serverModeOperations()
+    {
+        const auto backend = newBackend();
+        QVERIFY(signIn(backend.get(), profiled(QStringLiteral("strict"), QStringLiteral("strict"), QString()),
+                       credentials()).ok());
+        QCOMPARE(backend->makeDir(QStringLiteral("/"), false).error(), Error::PermissionDenied);
+        QCOMPARE(backend->makeDir(QStringLiteral("/newshare"), false).error(), Error::PermissionDenied);
+        QCOMPARE(backend->removeDir(QStringLiteral("/")).error(), Error::PermissionDenied);
+        QCOMPARE(backend->removeFile(QStringLiteral("/")).error(), Error::PermissionDenied);
+        QCOMPARE(backend->removeDir(QStringLiteral("/backup")).error(), Error::PermissionDenied);
+        QCOMPARE(backend->rename(QStringLiteral("/backup"), QStringLiteral("/b2"), RenameMode::NoReplace).error(),
+                 Error::PermissionDenied);
+        QVERIFY(put(backend.get(), QStringLiteral("/backup/server-mode.txt"), "server mode"));
+        QCOMPARE(backend->rename(QStringLiteral("/backup/server-mode.txt"), QStringLiteral("/"), RenameMode::Replace).error(),
+                 Error::PermissionDenied);
+        QCOMPARE(backend->rename(QStringLiteral("/backup/server-mode.txt"), QStringLiteral("/media/x.txt"),
+                                 RenameMode::NoReplace).error(),
+                 Error::Unsupported);
+        QByteArray data("x");
+        QBuffer source(&data);
+        QVERIFY(source.open(QIODevice::ReadOnly));
+        QCOMPARE(backend->upload(&source, QStringLiteral("/file.txt"), UploadOptions(), nullptr).error(),
+                 Error::PermissionDenied);
+        WriteHandle *writer = nullptr;
+        QCOMPARE(backend->openWrite(QStringLiteral("/"), WriteOptions(), &writer).error(), Error::PermissionDenied);
+        ReadHandle *reader = nullptr;
+        QCOMPARE(backend->openRead(QStringLiteral("/"), &reader).error(), Error::PermissionDenied);
+        SpaceInfo space;
+        QCOMPARE(backend->spaceInfo(QStringLiteral("/"), &space).error(), Error::PermissionDenied);
+        AttributeChanges times;
+        times.modified = QDateTime::currentDateTimeUtc();
+        QCOMPARE(backend->setAttributes(QStringLiteral("/"), times).error(), Error::PermissionDenied);
+
+        // Inside a share everything works as in share mode.
+        QVERIFY(backend->makePath(QStringLiteral("/backup/server/a")).ok());
+        QVERIFY(backend->makeDir(QStringLiteral("/backup"), false).ok());
+        QCOMPARE(backend->makeDir(QStringLiteral("/backup"), true).error(), Error::AlreadyExists);
+        QCOMPARE(contentOf(backend.get(), QStringLiteral("/backup/server-mode.txt")), QByteArray("server mode"));
+        QVERIFY(backend->rename(QStringLiteral("/backup/server-mode.txt"), QStringLiteral("/backup/server/a/m.txt"),
+                                RenameMode::NoReplace).ok());
+        QVERIFY(backend->spaceInfo(QStringLiteral("/backup"), &space).ok());
+        QVERIFY(space.total > 0);
+        QVERIFY(backend->keepAlive().ok());
+        QVERIFY(backend->removeFile(QStringLiteral("/backup/server/a/m.txt")).ok());
+        QVERIFY(backend->removeDir(QStringLiteral("/backup/server/a")).ok());
+        QVERIFY(backend->removeDir(QStringLiteral("/backup/server")).ok());
+    }
+
+    // XM-2: at most four share contexts; the least recently used goes,
+    // never one with open handles.
+    void serverModeContextLimit()
+    {
+        const QString server = QStringLiteral("strict");
+        QTRY_COMPARE_WITH_TIMEOUT(connections(server), 0, 15000);
+        const auto backend = newBackend();
+        QVERIFY(signIn(backend.get(), profiled(server, QStringLiteral("strict"), QString()), credentials()).ok());
+        const QStringList shares { QStringLiteral("backup"), QStringLiteral("small"), QStringLiteral("media"),
+                                   QStringLiteral("hidden$"), QStringLiteral("readonly") };
+        Entry entry;
+        for (const QString &share : shares.mid(0, 4))
+            QVERIFY(put(backend.get(), QStringLiteral("/%1/lru.txt").arg(share), share.toUtf8()));
+        QTRY_COMPARE(connections(server), 5);        // IPC$ and four shares
+        QVERIFY(backend->stat(QStringLiteral("/readonly/existing.txt"), &entry).ok());
+        QTRY_COMPARE(connections(server), 5);        // one closed for the fifth
+        QTRY_COMPARE(treeConnects(server, "backup"), 0);   // the least recently used
+
+        // Handles keep their context: four open files, a fifth share waits.
+        std::vector<std::unique_ptr<ReadHandle>> handles;
+        for (const QString &share : shares.mid(0, 4)) {
+            ReadHandle *raw = nullptr;
+            QVERIFY(backend->openRead(QStringLiteral("/%1/lru.txt").arg(share), &raw).ok());
+            handles.emplace_back(raw);
+        }
+        QCOMPARE(backend->stat(QStringLiteral("/readonly/existing.txt"), &entry).error(), Error::TooManyConnections);
+        QVERIFY(handles.at(1)->close().ok());
+        QVERIFY(backend->stat(QStringLiteral("/readonly/existing.txt"), &entry).ok());
+        QByteArray data;
+        for (const int i : { 0, 2, 3 }) {
+            QVERIFY(handles.at(static_cast<size_t>(i))->read(0, 100, &data).ok());
+            QCOMPARE(data, shares.at(i).toUtf8());
+        }
+        QCOMPARE(handles.at(1)->read(0, 1, &data).error(), Error::Internal);   // closed
+        handles.clear();
+        for (const QString &share : shares.mid(0, 4))
+            QVERIFY(backend->removeFile(QStringLiteral("/%1/lru.txt").arg(share)).ok());
+        // C-9, disconnect covers every context.
+        backend->disconnect();
+        QTRY_COMPARE_WITH_TIMEOUT(connections(server), 0, 15000);
+    }
+
+    // XM-7: a broken helper is ProtocolError and the backend stays usable;
+    // without the helper there is no ShareEnumeration.
+    void shareHelperFailures()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString crash = dir.filePath(QStringLiteral("crash.sh"));
+        QFile script(crash);
+        QVERIFY(script.open(QIODevice::WriteOnly));
+        script.write("#!/bin/sh\ncat >/dev/null\nprintf '{\"name\":\"evil/../x\",\"type\":0,\"remark\":\"\"}\\n'\nkill -SEGV $$\n");
+        script.close();
+        script.setPermissions(QFileDevice::ReadOwner | QFileDevice::ExeOwner);
+        const QByteArray original = qgetenv("NETVFS_SMB_SHARES_HELPER");
+        qputenv("NETVFS_SMB_SHARES_HELPER", QFile::encodeName(crash));
+        const auto backend = newBackend();
+        QVERIFY(signIn(backend.get(), profiled(QStringLiteral("strict"), QStringLiteral("strict"), QString()),
+                       credentials()).ok());
+        QVector<Entry> entries;
+        QCOMPARE(backend->list(QStringLiteral("/"), &entries).error(), Error::ProtocolError);
+        Entry entry;
+        QVERIFY(backend->stat(QStringLiteral("/backup"), &entry).ok());
+        QVERIFY(backend->keepAlive().ok());
+
+        qputenv("NETVFS_SMB_SHARES_HELPER", QFile::encodeName(dir.filePath(QStringLiteral("missing"))));
+        QVERIFY(!backend->capabilities().has(Capability::ShareEnumeration));
+        QVERIFY(backend->list(QStringLiteral("/"), &entries).ok());
+        QVERIFY(entries.isEmpty());          // nothing saved, nothing enumerated
+        qputenv("NETVFS_SMB_SHARES_HELPER", original);
+    }
+
+    // XM-9: a DFS link is Unsupported with the detail "DFS referral".
+    void dfsReferral()
+    {
+        const auto backend = newBackend();
+        QVERIFY(signIn(backend.get(), params(QStringLiteral("strict"), true, QStringLiteral("dfs")), credentials()).ok());
+        Entry entry;
+        const Result r = backend->stat(QStringLiteral("away"), &entry);
+        QCOMPARE(r.error(), Error::Unsupported);
+        QCOMPARE(r.detail(), QStringLiteral("DFS referral"));
+        QVector<Entry> entries;
+        QCOMPARE(backend->list(QStringLiteral("away"), &entries).error(), Error::Unsupported);
+    }
+
+    // XC-11, XM-6: times through SET_INFO; modes are not SMB's.
+    void attributes()
+    {
+        const auto backend = newBackend();
+        QVERIFY(signIn(backend.get(), params(QStringLiteral("strict")), credentials()).ok());
+        QVERIFY(put(backend.get(), QStringLiteral("attr.txt"), "attributes"));
+        const QDateTime when(QDate(2021, 3, 4), QTime(5, 6, 7), Qt::UTC);
+        AttributeChanges changes;
+        changes.modified = when;
+        QVERIFY(backend->setAttributes(QStringLiteral("attr.txt"), changes).ok());
+        Entry entry;
+        QVERIFY(backend->stat(QStringLiteral("attr.txt"), &entry).ok());
+        QCOMPARE(entry.modified, when);
+        QCOMPARE(exec(QStringLiteral("strict"), { QStringLiteral("stat"), QStringLiteral("-c"), QStringLiteral("%Y"),
+                                                  QStringLiteral("/srv/smb/backup/attr.txt") })
+                     .trimmed(),
+                 QByteArray::number(when.toMSecsSinceEpoch() / 1000));
+        changes.mode = 0644;
+        QCOMPARE(backend->setAttributes(QStringLiteral("attr.txt"), changes).error(), Error::Unsupported);
+        changes = AttributeChanges();
+        changes.accessed = when.addDays(1);
+        QVERIFY(backend->setAttributes(QStringLiteral("attr.txt"), changes).ok());
+        QVERIFY(backend->stat(QStringLiteral("attr.txt"), &entry).ok());
+        QCOMPARE(entry.modified, when);                  // left alone
+        QCOMPARE(entry.accessed, when.addDays(1));
+        QCOMPARE(backend->setAttributes(QStringLiteral("nope.txt"), changes).error(), Error::NotFound);
+        // A folder, too.
+        QVERIFY(backend->makeDir(QStringLiteral("attrdir"), false).ok());
+        changes = AttributeChanges();
+        changes.modified = when;
+        QVERIFY(backend->setAttributes(QStringLiteral("attrdir"), changes).ok());
+        QVERIFY(backend->stat(QStringLiteral("attrdir"), &entry).ok());
+        QCOMPARE(entry.modified, when);
+        // XC-14: WriteOptions::modified on commit.
+        UploadOptions upload;
+        upload.write.disposition = WriteOptions::Truncate;
+        upload.write.modified = when.addYears(1);
+        QVERIFY(put(backend.get(), QStringLiteral("attr.txt"), "again", upload));
+        QVERIFY(backend->stat(QStringLiteral("attr.txt"), &entry).ok());
+        QCOMPARE(entry.modified, when.addYears(1));
+        QVERIFY(entry.created.isValid());               // XM-4: birth time
+        QVERIFY(backend->removeFile(QStringLiteral("attr.txt")).ok());
+        QVERIFY(backend->removeDir(QStringLiteral("attrdir")).ok());
+    }
+
+    // XM-4: DOS attributes as entry flags.
+    void entryFlags()
+    {
+        const auto backend = newBackend();
+        QVERIFY(signIn(backend.get(), params(QStringLiteral("strict")), credentials()).ok());
+        QVERIFY(put(backend.get(), QStringLiteral("flags.txt"), "flags"));
+        int code = -1;
+        exec(QStringLiteral("strict"), { QStringLiteral("smbclient"), QStringLiteral("//localhost/backup"),
+                                         QStringLiteral("-A"), QStringLiteral("/etc/netvfs-auth"), QStringLiteral("-c"),
+                                         QStringLiteral("setmode flags.txt +hrs") },
+             &code);
+        QCOMPARE(code, 0);
+        Entry entry;
+        QVERIFY(backend->stat(QStringLiteral("flags.txt"), &entry).ok());
+        QVERIFY(entry.flags.testFlag(EntryFlag::Hidden));
+        QVERIFY(entry.flags.testFlag(EntryFlag::ReadOnly));
+        QVERIFY(entry.flags.testFlag(EntryFlag::System));
+        exec(QStringLiteral("strict"), { QStringLiteral("smbclient"), QStringLiteral("//localhost/backup"),
+                                         QStringLiteral("-A"), QStringLiteral("/etc/netvfs-auth"), QStringLiteral("-c"),
+                                         QStringLiteral("setmode flags.txt -hrs") });
+        QVERIFY(backend->stat(QStringLiteral("flags.txt"), &entry).ok());
+        QVERIFY(!entry.flags.testFlag(EntryFlag::Hidden));
+        QVERIFY(backend->removeFile(QStringLiteral("flags.txt")).ok());
+    }
+
+    // M-13 (C-8 hand-over), XH-5: Ops::copyAcross runs the source's download
+    // on a worker thread; SMB to local and SMB to SMB (server mode).
+    void copyAcrossThreads()
+    {
+        const auto source = newBackend();
+        QVERIFY(signIn(source.get(), params(QStringLiteral("strict")), credentials()).ok());
+        QByteArray content(5 * 1024 * 1024 + 3, Qt::Uninitialized);
+        for (int i = 0; i < content.size(); ++i)
+            content[i] = static_cast<char>(i * 7 + (i >> 11));
+        QVERIFY(put(source.get(), QStringLiteral("across.bin"), content));
+
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const std::unique_ptr<Backend> local(BackendLoader::create(QStringLiteral("local")));
+        QVERIFY(local);
+        ConnectionParams localParams;
+        localParams.provider = QStringLiteral("local");
+        localParams.options.insert(QStringLiteral("root"), dir.path());
+        QVERIFY(establish(local.get(), localParams, Credentials()).ok());
+        Result r = Ops::copyAcross(source.get(), QStringLiteral("across.bin"), local.get(), QStringLiteral("copy.bin"));
+        QVERIFY2(r.ok(), qPrintable(r.toString()));
+        QFile copy(dir.filePath(QStringLiteral("copy.bin")));
+        QVERIFY(copy.open(QIODevice::ReadOnly));
+        QCOMPARE(copy.readAll(), content);
+
+        const auto destination = newBackend();
+        QVERIFY(signIn(destination.get(), profiled(QStringLiteral("strict"), QStringLiteral("strict"), QString()),
+                       credentials()).ok());
+        r = Ops::copyAcross(source.get(), QStringLiteral("across.bin"), destination.get(), QStringLiteral("/media/across.bin"));
+        QVERIFY2(r.ok(), qPrintable(r.toString()));
+        QCOMPARE(contentOf(destination.get(), QStringLiteral("/media/across.bin")), content);
+        // And back, with the server-mode backend as the source.
+        r = Ops::copyAcross(destination.get(), QStringLiteral("/media/across.bin"), source.get(), QStringLiteral("back.bin"));
+        QVERIFY2(r.ok(), qPrintable(r.toString()));
+        QCOMPARE(contentOf(source.get(), QStringLiteral("back.bin")), content);
+        // The source is usable on this thread again.
+        QVERIFY(source->keepAlive().ok());
+        QVERIFY(source->removeFile(QStringLiteral("across.bin")).ok());
+        QVERIFY(source->removeFile(QStringLiteral("back.bin")).ok());
+        QVERIFY(destination->removeFile(QStringLiteral("/media/across.bin")).ok());
+    }
+
+    // XM-6: resume continues at the remote size, and only there.
+    void writeResume()
+    {
+        const auto backend = newBackend();
+        QVERIFY(signIn(backend.get(), params(QStringLiteral("strict")), credentials()).ok());
+        QVERIFY(put(backend.get(), QStringLiteral("resume.bin"), "0123456789"));
+        WriteOptions options;
+        options.disposition = WriteOptions::Resume;
+        options.resumeOffset = 9;
+        WriteHandle *raw = nullptr;
+        const Result wrong = backend->openWrite(QStringLiteral("resume.bin"), options, &raw);
+        QVERIFY2(wrong.error() == Error::ProtocolError, qPrintable(wrong.toString()));
+        QVERIFY(!raw);
+        options.resumeOffset = 11;
+        QCOMPARE(backend->openWrite(QStringLiteral("resume.bin"), options, &raw).error(), Error::ProtocolError);
+        options.resumeOffset = 10;
+        QVERIFY(backend->openWrite(QStringLiteral("resume.bin"), options, &raw).ok());
+        std::unique_ptr<WriteHandle> writer(raw);
+        QCOMPARE(writer->position(), qint64(10));
+        QByteArray tail(3 * 1024 * 1024 + 5, 'z');
+        QVERIFY(writer->write(tail.constData(), tail.size()).ok());
+        QCOMPARE(writer->position(), qint64(10) + tail.size());
+        QVERIFY(writer->commit().ok());
+        QCOMPARE(contentOf(backend.get(), QStringLiteral("resume.bin")), QByteArray("0123456789") + tail);
+        QCOMPARE(writer->write("x", 1).error(), Error::Internal);    // committed: closed
+        options.resumeOffset = 0;
+        QCOMPARE(backend->openWrite(QStringLiteral("missing.bin"), options, &raw).error(), Error::NotFound);
+        QVERIFY(backend->removeFile(QStringLiteral("resume.bin")).ok());
     }
 };
 
