@@ -122,7 +122,7 @@ public:
         , m_batchSize(options.batchSize > 0 ? options.batchSize : DefaultBatchSize)
         , m_resolve(options.resolveSymlinkTypes)
     {
-        m_batch.reserve(m_batchSize);
+        m_batch.reserve(qMin(m_batchSize, DefaultBatchSize));
     }
 
     Result run(DIR *dir)

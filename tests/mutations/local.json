@@ -1,0 +1,163 @@
+[
+  {
+    "name": "local: rename(NoReplace) without RENAME_NOREPLACE",
+    "file": "src/backends/local/localbackend.cpp",
+    "search": "if (renameat2Call(from, to, RenameNoReplace) == 0)",
+    "replace": "if (renameat2Call(from, to, 0U) == 0)",
+    "test": "timeout 300 build/tests/conformance/tst_conformance"
+  },
+  {
+    "name": "local: rename(NoReplace) fallback skips the stat check for folders",
+    "file": "src/backends/local/localbackend.cpp",
+    "search": "    if (statAt(AT_FDCWD, to, false, &existing) == 0)\n        return alreadyExists(to);",
+    "replace": "    if (statAt(AT_FDCWD, to, false, &existing) == 0 && false)\n        return alreadyExists(to);",
+    "test": "timeout 300 build/tests/conformance/tst_conformance"
+  },
+  {
+    "name": "local: rename(NoReplace) fallback renames instead of linking",
+    "file": "src/backends/local/localbackend.cpp",
+    "search": "if (::link(from.constData(), to.constData()) != 0) {",
+    "replace": "if (::rename(from.constData(), to.constData()) != 0) {",
+    "test": "timeout 300 build/tests/conformance/tst_conformance"
+  },
+  {
+    "name": "local: rename(Replace) replaces a folder",
+    "file": "src/backends/local/localbackend.cpp",
+    "search": "else if (targetExists && dst.isDir())   // XC-10",
+    "replace": "else if (targetExists && false)   // XC-10",
+    "test": "timeout 300 build/tests/conformance/tst_conformance"
+  },
+  {
+    "name": "local: rename(NoReplace) onto a hard link of the source",
+    "file": "src/backends/local/localbackend.cpp",
+    "search": "    if (mode == RenameMode::NoReplace)\n        return alreadyExists(to);\n    // rename(2)",
+    "replace": "    if (mode == RenameMode::NoReplace && false)\n        return alreadyExists(to);\n    // rename(2)",
+    "test": "timeout 300 build/tests/conformance/tst_conformance"
+  },
+  {
+    "name": "local: resume offset not checked",
+    "file": "src/backends/local/localio.cpp",
+    "search": "if (st.size != options.resumeOffset) {",
+    "replace": "if (false) {",
+    "test": "timeout 300 build/tests/conformance/tst_conformance"
+  },
+  {
+    "name": "local: resume writes at the start",
+    "file": "src/backends/local/localio.cpp",
+    "search": "if (::lseek(file.get(), options.resumeOffset, SEEK_SET) < 0 && errno != ESPIPE)",
+    "replace": "if (false)",
+    "test": "timeout 300 build/tests/conformance/tst_conformance"
+  },
+  {
+    "name": "local: CreateNew truncates an existing file",
+    "file": "src/backends/local/localio.cpp",
+    "search": "flags |= O_CREAT | O_EXCL;",
+    "replace": "flags |= O_CREAT | O_TRUNC;",
+    "test": "timeout 300 build/tests/conformance/tst_conformance"
+  },
+  {
+    "name": "local: copy(NoReplace) overwrites",
+    "file": "src/backends/local/localio.cpp",
+    "search": "return copyInto(input.get(), target, st, O_CREAT | O_EXCL);",
+    "replace": "return copyInto(input.get(), target, st, O_CREAT | O_TRUNC);",
+    "test": "timeout 300 build/tests/conformance/tst_conformance"
+  },
+  {
+    "name": "local: copy(Replace) onto a folder",
+    "file": "src/backends/local/localio.cpp",
+    "search": "if (statAt(AT_FDCWD, target, false, &existing) == 0 && existing.isDir())",
+    "replace": "if (statAt(AT_FDCWD, target, false, &existing) == 0 && false)",
+    "test": "timeout 300 build/tests/conformance/tst_conformance"
+  },
+  {
+    "name": "local: copy of a folder is not Unsupported",
+    "file": "src/backends/local/localio.cpp",
+    "search": "if (r.error() == Error::IsADirectory)   // no ServerCopyRecursive",
+    "replace": "if (false)   // no ServerCopyRecursive",
+    "test": "timeout 300 build/tests/conformance/tst_conformance"
+  },
+  {
+    "name": "local: setAttributes changes times before checking the mode",
+    "file": "src/backends/local/localbackend.cpp",
+    "search": "if (changes.mode >= 0 && (changes.mode & ~07777) != 0)",
+    "replace": "if (false)",
+    "test": "timeout 300 build/tests/conformance/tst_conformance"
+  },
+  {
+    "name": "local: makeDir ignores exclusive",
+    "file": "src/backends/local/localbackend.cpp",
+    "search": "if (error == EEXIST && !exclusive && ",
+    "replace": "if (error == EEXIST && (!exclusive || true) && ",
+    "test": "timeout 300 build/tests/conformance/tst_conformance"
+  },
+  {
+    "name": "local: list ignores cancel between entries",
+    "file": "src/backends/local/localbackend.cpp",
+    "search": "if (m_backend.m_context->canceled)   // L-6: between entries",
+    "replace": "if (false)   // L-6: between entries",
+    "test": "timeout 300 build/tests/conformance/tst_conformance"
+  },
+  {
+    "name": "local: download ignores cancel between chunks",
+    "file": "src/backends/local/localio.cpp",
+    "search": "if (waiter.canceled() || (progress && progress->canceled()))   // L-6: between chunks",
+    "replace": "if (progress && progress->canceled())   // L-6: between chunks",
+    "test": "timeout 300 build/tests/conformance/tst_conformance"
+  },
+  {
+    "name": "local: upload ignores Progress::canceled",
+    "file": "src/backends/local/localio.cpp",
+    "search": "if (progress && progress->canceled()) {\n            handle.abort();",
+    "replace": "if (false) {\n            handle.abort();",
+    "test": "timeout 300 build/tests/conformance/tst_conformance"
+  },
+  {
+    "name": "local: waiting on a stalled FIFO ignores cancel",
+    "file": "src/backends/local/localutil.cpp",
+    "search": "        if (canceled())\n            return Result(Error::Canceled);\n        if (m_timeoutMs",
+    "replace": "        if (m_timeoutMs",
+    "test": "timeout 300 build/tests/conformance/tst_conformance"
+  },
+  {
+    "name": "local: waiting on a stalled FIFO ignores the request timeout",
+    "file": "src/backends/local/localutil.cpp",
+    "search": "if (m_timeoutMs > 0 && timer.elapsed() >= m_timeoutMs)",
+    "replace": "if (false)",
+    "test": "NETVFS_CONFORMANCE_TARGETS=local timeout 60 build/tests/conformance/tst_conformance stallTimeoutFifo"
+  },
+  {
+    "name": "local: handles survive disconnect",
+    "file": "src/backends/local/localbackend.cpp",
+    "search": "++m_context->generation;   // XC-13",
+    "replace": ";   // XC-13",
+    "test": "timeout 300 build/tests/conformance/tst_conformance"
+  },
+  {
+    "name": "local: listing never resolves link targets",
+    "file": "src/backends/local/localbackend.cpp",
+    "search": "if (st.type == EntryType::Symlink && m_resolve) {",
+    "replace": "if (false) {",
+    "test": "timeout 300 build/tests/conformance/tst_conformance"
+  },
+  {
+    "name": "local: listing follows symlinks",
+    "file": "src/backends/local/localbackend.cpp",
+    "search": "const int rc = statAt(dirFd, name, false, &st);   // lstat semantics",
+    "replace": "const int rc = statAt(dirFd, name, true, &st);   // lstat semantics",
+    "test": "timeout 300 build/tests/conformance/tst_conformance"
+  },
+  {
+    "name": "local: removeFile follows a symlink to a folder",
+    "file": "src/backends/local/localbackend.cpp",
+    "search": "    if (const int e = statAt(AT_FDCWD, native, false, &st); e != 0)\n        return errnoResult(e, display(native));\n    if (st.isDir())   // XC-9",
+    "replace": "    if (const int e = statAt(AT_FDCWD, native, true, &st); e != 0)\n        return errnoResult(e, display(native));\n    if (st.isDir())   // XC-9",
+    "test": "timeout 300 build/tests/conformance/tst_conformance"
+  },
+  {
+    "name": "local: unlisted checksum algorithm accepted",
+    "file": "src/backends/local/localio.cpp",
+    "search": "    else\n        return false;\n    return true;",
+    "replace": "    else\n        *out = QCryptographicHash::Sha256;\n    return true;",
+    "test": "timeout 300 build/tests/conformance/tst_conformance"
+  }
+]
