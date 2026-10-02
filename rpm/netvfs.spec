@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: LGPL-2.1-or-later
 
 Name:       netvfs
-Version:    0.1.0
+Version:    0.2.0
 Release:    1
 Summary:    SFTP and SMB backup accounts for Sailfish OS
 License:    LGPL-2.1-or-later
