@@ -24,6 +24,9 @@ stdout) and serves one of three modes:
       control connection; see class Behavior) and --trace adds the clear text
       bytes it received, so that the XSEC-1/XSEC-2 tests can prove that no USER,
       PASS or file data ever arrived unprotected (see class Session).
+      With --busy N the 2nd to (N+1)th connection is greeted with "421 Too
+      many connections" and closed (logged as BUSY), like a server with a
+      connection limit that still counts the client's previous connection.
 """
 import argparse
 import codecs
@@ -495,8 +498,15 @@ class FakeServer:
 
     def run(self):
         server = listen()
+        accepted = 0
         while True:
             client, _ = server.accept()
+            accepted += 1
+            if 1 < accepted <= 1 + self.args.busy:
+                self.recorder.write("BUSY")
+                client.sendall(b"421 Too many connections from your IP\r\n")
+                client.close()
+                continue
             track(client)
             self.count += 1
             session = Session(client, self.count, self)
@@ -523,6 +533,7 @@ def main():
     p.add_argument("--behavior", action="append", metavar="[N:]KEY[=VALUE]")
     p.add_argument("--trace", action="store_true")
     p.add_argument("--log", required=True)
+    p.add_argument("--busy", type=int, default=0)
     args = parser.parse_args()
     {"forward": forward, "silent": silent, "fake": fake}[args.mode](args)
 
