@@ -22,9 +22,37 @@ QVariantMap identityToVariant(const NetVfs::ServerIdentity &identity);
 // "SHA256:<unpadded base64>" of a raw key blob, as printed by ssh-keygen -lf.
 QString sha256Fingerprint(const QByteArray &publicKeyBlob);
 
-// Validation and account data for the settings UI. Every *Problem() method
-// returns an empty string when the input is acceptable, or a translated,
-// specific message. Logic lives here (not in QML) so it is unit tested.
+// 0 (protocol default) for an empty or invalid port field.
+int parsePort(const QString &port);
+// Normalized backups folder ("" if invalid); SMB paths lose a leading '/'
+// (SPEC-smb M-8).
+QString cleanFolderPath(const QString &provider, const QString &path);
+
+// Input validation for the account dialogs (QML singleton NetVfsInput),
+// applied before any connection is made (SPEC-smb M-9). Every *Problem()
+// method returns an empty string when the input is acceptable, or a
+// translated, specific message. Logic lives here (not in QML) so it is
+// unit tested.
+class InputRules : public QObject
+{
+    Q_OBJECT
+    Q_DISABLE_COPY(InputRules)
+
+public:
+    explicit InputRules(QObject *parent = nullptr);
+
+    Q_INVOKABLE int defaultPort(const QString &provider) const;
+    Q_INVOKABLE QString hostProblem(const QString &host) const;
+    Q_INVOKABLE QString portProblem(const QString &port) const;
+    Q_INVOKABLE int portValue(const QString &port) const;
+    Q_INVOKABLE QString userNameProblem(const QString &userName) const;
+    Q_INVOKABLE QString shareProblem(const QString &share) const;
+    Q_INVOKABLE QString backupsPathProblem(const QString &provider, const QString &path) const;
+    Q_INVOKABLE QString cleanBackupsPath(const QString &provider, const QString &path) const;
+};
+
+// Account data, labels and texts for the settings UI (QML singleton
+// NetVfsHelpers).
 class Helpers : public QObject
 {
     Q_OBJECT
@@ -42,19 +70,8 @@ public:
     QString credentialsName() const;
     QString backupsPathKey() const;
 
-    Q_INVOKABLE int defaultPort(const QString &provider) const;
     Q_INVOKABLE QString backupServiceName(const QString &provider) const;
     Q_INVOKABLE bool isProviderInstalled(const QString &provider) const;
-
-    Q_INVOKABLE QString hostProblem(const QString &host) const;
-    Q_INVOKABLE QString portProblem(const QString &port) const;
-    // 0 (protocol default) for an empty field.
-    Q_INVOKABLE int portValue(const QString &port) const;
-    Q_INVOKABLE QString userNameProblem(const QString &userName) const;
-    Q_INVOKABLE QString shareProblem(const QString &share) const;
-    Q_INVOKABLE QString backupsPathProblem(const QString &provider, const QString &path) const;
-    // Normalized folder; SMB paths lose a leading '/' (SPEC-smb M-8).
-    Q_INVOKABLE QString cleanBackupsPath(const QString &provider, const QString &path) const;
 
     // SPEC A-1, A-2: "user@host".
     Q_INVOKABLE QString accountLabel(const QString &userName, const QString &host) const;

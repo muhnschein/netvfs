@@ -45,7 +45,8 @@ int ownWarnings(const QList<QQmlError> &warnings)
     for (const QQmlError &warning : warnings) {
         const QString text = warning.toString();
         const bool ours = text.contains(QLatin1String("/src/qml/")) || text.contains(QLatin1String("/accounts/ui/"))
-                || text.contains(QLatin1String("/org/netvfs/accounts/"));
+                || text.contains(QLatin1String("/org/netvfs/accounts/"))
+                || text.contains(QLatin1String("/tests/qmltarget/selftest/"));
         std::printf("%s %s\n", ours ? "WARNING" : "note   ", qPrintable(text));
         if (ours)
             ++count;

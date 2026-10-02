@@ -15,9 +15,9 @@ using namespace NetVfs;
 
 namespace NetVfsUi {
 
-static_assert(static_cast<int>(Error::Internal) == static_cast<int>(NetVfsProbe::Internal),
+static_assert(static_cast<int>(Error::Internal) == static_cast<int>(NetVfsProbe::ErrorCode::Internal),
               "NetVfsProbe::ErrorCode must mirror NetVfs::Error");
-static_assert(static_cast<int>(Error::AuthFailed) == static_cast<int>(NetVfsProbe::AuthFailed),
+static_assert(static_cast<int>(Error::AuthFailed) == static_cast<int>(NetVfsProbe::ErrorCode::AuthFailed),
               "NetVfsProbe::ErrorCode must mirror NetVfs::Error");
 
 namespace {
@@ -25,13 +25,14 @@ constexpr const char *HostKeyOption = "host_key";
 
 NetVfsProbe::IdentityStatus identityStatusFor(const ProbeOutcome &outcome)
 {
+    using Status = NetVfsProbe::IdentityStatus;
     switch (outcome.identityCheck.error()) {
     case Error::None:
-        return outcome.identity.isEmpty() ? NetVfsProbe::NoIdentity : NetVfsProbe::IdentityMatches;
+        return outcome.identity.isEmpty() ? Status::NoIdentity : Status::IdentityMatches;
     case Error::ServerIdentityUnknown:
-        return NetVfsProbe::IdentityUnknown;
+        return Status::IdentityUnknown;
     default:
-        return NetVfsProbe::IdentityChanged;
+        return Status::IdentityChanged;
     }
 }
 
@@ -102,7 +103,7 @@ void NetVfsProbe::identify(const QVariantMap &paramsMap)
     if (!backend)
         return;
     qCDebug(lcNetVfsUi) << "Identifying" << params.host;
-    setState(Identifying);
+    setState(State::Identifying);
     auto outcome = std::make_shared<ProbeOutcome>();
     m_jobs.start([backend, params, outcome](CancelToken *token) {
         std::unique_ptr<Backend> owned(backend);
@@ -124,7 +125,7 @@ void NetVfsProbe::verify(const QVariantMap &paramsMap, const QVariantMap &creden
 void NetVfsProbe::verifyAccount(int accountId, const QString &pin)
 {
     reset();
-    setState(Verifying);
+    setState(State::Verifying);
     AccountSession *session = m_sessionFactory(accountId, this);
     m_session = session;
     connect(session, &AccountSession::ready, this, [this, session, pin]() {
@@ -147,7 +148,7 @@ void NetVfsProbe::cancel()
     m_jobs.cancel();
     closeSession();
     if (busy())
-        setState(Idle);
+        setState(State::Idle);
 }
 
 void NetVfsProbe::reset()
@@ -158,9 +159,9 @@ void NetVfsProbe::reset()
     m_errorText.clear();
     m_errorDetail.clear();
     m_identity = ServerIdentity();
-    m_identityStatus = IdentityNotChecked;
+    m_identityStatus = IdentityStatus::IdentityNotChecked;
     m_freeBytes = -1;
-    setState(Idle);
+    setState(State::Idle);
 }
 
 Backend *NetVfsProbe::createBackend(const QString &provider)
@@ -179,7 +180,7 @@ void NetVfsProbe::startVerify(const ConnectionParams &params, const Credentials 
     if (!backend)
         return;
     qCDebug(lcNetVfsUi) << "Verifying" << params.host << backupsPath;
-    setState(Verifying);
+    setState(State::Verifying);
     auto outcome = std::make_shared<ProbeOutcome>();
     m_jobs.start([backend, params, credentials, backupsPath, outcome](CancelToken *token) {
         // The captured credentials wipe themselves when the job is released (SEC-5).
@@ -198,15 +199,15 @@ void NetVfsProbe::finishIdentify(const ProbeOutcome &outcome)
         return;
     }
     m_identityStatus = identityStatusFor(outcome);
-    setState(Identified);
+    setState(State::Identified);
     emit identified();
 }
 
 void NetVfsProbe::finishVerify(const ProbeOutcome &outcome)
 {
     // The identity was checked unless the connection itself failed.
-    const Error error = outcome.result.error();
-    if (outcome.result.ok() || !outcome.identity.isEmpty() || error == Error::ServerIdentityChanged) {
+    if (const Error error = outcome.result.error();
+            outcome.result.ok() || !outcome.identity.isEmpty() || error == Error::ServerIdentityChanged) {
         m_identity = outcome.identity;
         m_identityStatus = identityStatusFor(outcome);
     }
@@ -215,7 +216,7 @@ void NetVfsProbe::finishVerify(const ProbeOutcome &outcome)
         return;
     }
     m_freeBytes = outcome.freeBytes;
-    setState(Verified);
+    setState(State::Verified);
     emit verified();
 }
 
@@ -225,7 +226,7 @@ void NetVfsProbe::fail(Error error, const QString &text, const QString &detail)
     m_error = error;
     m_errorText = text;
     m_errorDetail = detail;
-    setState(Failed);
+    setState(State::Failed);
     emit failed();
 }
 

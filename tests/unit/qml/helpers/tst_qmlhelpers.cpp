@@ -47,6 +47,7 @@ class TestQmlHelpers : public QObject
 
 private:
     Helpers helpers;
+    NetVfsUi::InputRules input;
 
 private slots:
     void initTestCase()
@@ -60,9 +61,9 @@ private slots:
         QCOMPARE(helpers.credentialsApplication(), QStringLiteral("netvfs"));
         QCOMPARE(helpers.credentialsName(), QStringLiteral("default"));
         QCOMPARE(helpers.backupsPathKey(), QStringLiteral("backups_path"));
-        QCOMPARE(helpers.defaultPort(QStringLiteral("sftp")), 22);
-        QCOMPARE(helpers.defaultPort(QStringLiteral("smb")), 445);
-        QCOMPARE(helpers.defaultPort(QStringLiteral("fake")), 0);
+        QCOMPARE(input.defaultPort(QStringLiteral("sftp")), 22);
+        QCOMPARE(input.defaultPort(QStringLiteral("smb")), 445);
+        QCOMPARE(input.defaultPort(QStringLiteral("fake")), 0);
         QCOMPARE(helpers.backupServiceName(QStringLiteral("smb")), QStringLiteral("smb-backup"));
     }
 
@@ -106,7 +107,7 @@ private slots:
     {
         QFETCH(QString, host);
         QFETCH(QString, problem);
-        QCOMPARE(helpers.hostProblem(host), problem);
+        QCOMPARE(input.hostProblem(host), problem);
     }
 
     void port_data()
@@ -131,18 +132,18 @@ private slots:
         QFETCH(QString, port);
         QFETCH(bool, ok);
         QFETCH(int, value);
-        QCOMPARE(helpers.portProblem(port).isEmpty(), ok);
+        QCOMPARE(input.portProblem(port).isEmpty(), ok);
         if (!ok)
-            QCOMPARE(helpers.portProblem(port), QStringLiteral("The port must be a number from 1 to 65535."));
-        QCOMPARE(helpers.portValue(port), value);
+            QCOMPARE(input.portProblem(port), QStringLiteral("The port must be a number from 1 to 65535."));
+        QCOMPARE(input.portValue(port), value);
     }
 
     void userName()
     {
-        QCOMPARE(helpers.userNameProblem(QStringLiteral(" ")), QStringLiteral("Enter the user name."));
-        QCOMPARE(helpers.userNameProblem(QStringLiteral("alice")), QString());
-        QCOMPARE(helpers.userNameProblem(QStringLiteral("WORKGROUP\\alice")), QString());
-        QCOMPARE(helpers.userNameProblem(QStringLiteral("ali\tce")),
+        QCOMPARE(input.userNameProblem(QStringLiteral(" ")), QStringLiteral("Enter the user name."));
+        QCOMPARE(input.userNameProblem(QStringLiteral("alice")), QString());
+        QCOMPARE(input.userNameProblem(QStringLiteral("WORKGROUP\\alice")), QString());
+        QCOMPARE(input.userNameProblem(QStringLiteral("ali\tce")),
                  QStringLiteral("The user name contains characters that are not allowed."));
     }
 
@@ -167,7 +168,7 @@ private slots:
     {
         QFETCH(QString, share);
         QFETCH(QString, problem);
-        QCOMPARE(helpers.shareProblem(share), problem);
+        QCOMPARE(input.shareProblem(share), problem);
     }
 
     void backupsPath_data()
@@ -206,8 +207,8 @@ private slots:
         QFETCH(QString, path);
         QFETCH(QString, problem);
         QFETCH(QString, clean);
-        QCOMPARE(helpers.backupsPathProblem(provider, path), problem);
-        QCOMPARE(helpers.cleanBackupsPath(provider, path), clean);
+        QCOMPARE(input.backupsPathProblem(provider, path), problem);
+        QCOMPARE(input.cleanBackupsPath(provider, path), clean);
     }
 
     void accountLabel()

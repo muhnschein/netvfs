@@ -46,7 +46,7 @@ void BackendJobs::start(const Work &work, const Done &done)
 {
     cancel();
     const quint64 generation = ++m_generation;
-    const std::shared_ptr<CancelToken> token = std::make_shared<CancelToken>();
+    const auto token = std::make_shared<CancelToken>();
     m_token = token;
     m_running = true;
 

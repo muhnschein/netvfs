@@ -3,7 +3,8 @@
 # Builds the org.netvfs.accounts plugin against the Sailfish OS target (Qt 5.6,
 # warnings are errors) and compiles every account UI QML file with the
 # target's QML engine against the real Silica/Accounts/Pickers modules and the
-# SPEC 7.1 stubs of the closed agent types (stubs/).
+# SPEC 7.1 stubs of the closed agent types (stubs/); selftest/ checks the
+# plugin types, enums and singletons from QML on the same engine.
 #
 # Env: SDK_IMAGE (default sfos:5.2), TARGET (default SailfishOS-5.2.0.15-aarch64).
 set -eu
@@ -29,5 +30,6 @@ docker run --rm -v "$work:/home/mersdk/src" "$SDK_IMAGE" bash -euc "
     sb2 make -j\$(nproc)
     cd ~/src
     QT_QPA_PLATFORM=minimal sb2 build/tests/qmltarget/qmlcheck/qmlcheck --create \
-        -I ~/src/tests/qmltarget/stubs -I ~/src/build/qml src/qml/*.qml accounts/ui/*.qml
+        -I ~/src/tests/qmltarget/stubs -I ~/src/build/qml src/qml/*.qml accounts/ui/*.qml \
+        tests/qmltarget/selftest/*.qml
 "

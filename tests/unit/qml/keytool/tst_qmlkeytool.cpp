@@ -115,7 +115,7 @@ private:
     {
         QSignalSpy changed(tool, &SshKeyTool::stateChanged);
         tool->generate();
-        QTRY_COMPARE(tool->state(), SshKeyTool::Ready);
+        QTRY_COMPARE(tool->state(), SshKeyTool::State::Ready);
     }
 
 private slots:
@@ -136,11 +136,11 @@ private slots:
     {
         SshKeyTool tool(&tools, nullptr);
         QVERIFY(tool.available());
-        QCOMPARE(tool.state(), SshKeyTool::Empty);
+        QCOMPARE(tool.state(), SshKeyTool::State::Empty);
         QVERIFY(tool.secret().isEmpty());
         tool.generate();
-        QCOMPARE(tool.state(), SshKeyTool::Working);
-        QTRY_COMPARE(tool.state(), SshKeyTool::Ready);
+        QCOMPARE(tool.state(), SshKeyTool::State::Working);
+        QTRY_COMPARE(tool.state(), SshKeyTool::State::Ready);
         QVERIFY(tool.hasKey());
         QCOMPARE(tool.algorithm(), QStringLiteral("ssh-ed25519"));
         QCOMPARE(tool.publicKey(), PublicLine);
@@ -155,7 +155,7 @@ private slots:
         QCOMPARE(decoded, PrivateKey);
 
         tool.clear();
-        QCOMPARE(tool.state(), SshKeyTool::Empty);
+        QCOMPARE(tool.state(), SshKeyTool::State::Empty);
         QVERIFY(!tool.hasKey());
         QVERIFY(tool.secret().isEmpty());
         QVERIFY(tool.publicKey().isEmpty());
@@ -165,7 +165,7 @@ private slots:
     {
         SshKeyTool tool(&tools, nullptr);
         tool.importFile(writeFile(QStringLiteral("id_ecdsa"), PrivateKey));
-        QTRY_COMPARE(tool.state(), SshKeyTool::Ready);
+        QTRY_COMPARE(tool.state(), SshKeyTool::State::Ready);
         QCOMPARE(tool.algorithm(), QStringLiteral("ecdsa-sha2-nistp256"));
         QVERIFY(!tool.secret().isEmpty());
     }
@@ -175,7 +175,7 @@ private slots:
         SshKeyTool tool(&tools, nullptr);
         const QString path = writeFile(QStringLiteral("id url"), PrivateKey);
         tool.importFile(QUrl::fromLocalFile(path).toString());
-        QTRY_COMPARE(tool.state(), SshKeyTool::Ready);
+        QTRY_COMPARE(tool.state(), SshKeyTool::State::Ready);
     }
 
     void importEncrypted()
@@ -184,15 +184,15 @@ private slots:
         const QString path = writeFile(QStringLiteral("id_encrypted"), "ENCRYPTED " + PrivateKey);
         SshKeyTool tool(&tools, nullptr);
         tool.importFile(path);
-        QTRY_COMPARE(tool.state(), SshKeyTool::NeedsPassphrase);
+        QTRY_COMPARE(tool.state(), SshKeyTool::State::NeedsPassphrase);
         QVERIFY(tool.errorText().isEmpty());
         QVERIFY(!tool.hasKey());
         tool.importFile(path, QStringLiteral("wrong"));
-        QTRY_VERIFY(tool.state() != SshKeyTool::Working);
-        QCOMPARE(tool.state(), SshKeyTool::NeedsPassphrase);
+        QTRY_VERIFY(tool.state() != SshKeyTool::State::Working);
+        QCOMPARE(tool.state(), SshKeyTool::State::NeedsPassphrase);
         QCOMPARE(tool.errorText(), QStringLiteral("The passphrase is not correct."));
         tool.importFile(path, QStringLiteral("open sesame"));
-        QTRY_COMPARE(tool.state(), SshKeyTool::Ready);
+        QTRY_COMPARE(tool.state(), SshKeyTool::State::Ready);
         QVERIFY(tool.errorText().isEmpty());
     }
 
@@ -221,7 +221,7 @@ private slots:
         QFETCH(QString, detail);
         SshKeyTool tool(&tools, nullptr);
         tool.importFile(writeFile(name, contents));
-        QTRY_COMPARE(tool.state(), SshKeyTool::Failed);
+        QTRY_COMPARE(tool.state(), SshKeyTool::State::Failed);
         QCOMPARE(tool.errorText(), text);
         QCOMPARE(tool.errorDetail(), detail);
         QVERIFY(tool.secret().isEmpty());
@@ -231,7 +231,7 @@ private slots:
     {
         SshKeyTool tool(&tools, nullptr);
         tool.importFile(dir.filePath(QStringLiteral("does-not-exist")));
-        QTRY_COMPARE(tool.state(), SshKeyTool::Failed);
+        QTRY_COMPARE(tool.state(), SshKeyTool::State::Failed);
         QCOMPARE(tool.errorText(), QStringLiteral("The file could not be read as a private key."));
     }
 
@@ -240,7 +240,7 @@ private slots:
         SshKeyTool tool(&tools, nullptr);
         makeReady(&tool);
         tool.importFile(writeFile(QStringLiteral("bad"), "hello"));
-        QTRY_COMPARE(tool.state(), SshKeyTool::Failed);
+        QTRY_COMPARE(tool.state(), SshKeyTool::State::Failed);
         QVERIFY(tool.secret().isEmpty());
         QVERIFY(tool.publicKey().isEmpty());
     }
@@ -250,10 +250,10 @@ private slots:
         SshKeyTool tool(nullptr, nullptr);
         QVERIFY(!tool.available());
         tool.generate();
-        QCOMPARE(tool.state(), SshKeyTool::Failed);
+        QCOMPARE(tool.state(), SshKeyTool::State::Failed);
         QCOMPARE(tool.errorText(), QStringLiteral("Support for this kind of server is not installed on this device."));
         tool.importFile(writeFile(QStringLiteral("k"), PrivateKey));
-        QCOMPARE(tool.state(), SshKeyTool::Failed);
+        QCOMPARE(tool.state(), SshKeyTool::State::Failed);
     }
 
     void defaultToolsWithoutPlugin()
@@ -266,7 +266,7 @@ private slots:
         if (tool.available())
             QSKIP("An SFTP backend is installed on this host");
         tool.generate();
-        QCOMPARE(tool.state(), SshKeyTool::Failed);
+        QCOMPARE(tool.state(), SshKeyTool::State::Failed);
     }
 
     void realSftpPlugin()
@@ -280,7 +280,7 @@ private slots:
         qputenv("NETVFS_BACKEND_PATH", saved);
         QVERIFY(tool.available());
         tool.generate();
-        QTRY_COMPARE(tool.state(), SshKeyTool::Ready);
+        QTRY_COMPARE(tool.state(), SshKeyTool::State::Ready);
         QVERIFY(tool.publicKey().startsWith(QStringLiteral("ssh-ed25519 ")));
         QVERIFY(tool.fingerprint().startsWith(QStringLiteral("SHA256:")));
         QVERIFY(tool.secret().startsWith(QStringLiteral("netvfs-key-v1:")));
@@ -292,15 +292,15 @@ private slots:
         tools.gate = &gate;
         SshKeyTool tool(&tools, nullptr);
         tool.generate();
-        QCOMPARE(tool.state(), SshKeyTool::Working);
+        QCOMPARE(tool.state(), SshKeyTool::State::Working);
         tool.cancel();
-        QCOMPARE(tool.state(), SshKeyTool::Empty);
+        QCOMPARE(tool.state(), SshKeyTool::State::Empty);
         gate.release();
         QTest::qWait(100);
-        QCOMPARE(tool.state(), SshKeyTool::Empty);
+        QCOMPARE(tool.state(), SshKeyTool::State::Empty);
         QVERIFY(tool.secret().isEmpty());
         tool.cancel();   // nothing running
-        QCOMPARE(tool.state(), SshKeyTool::Empty);
+        QCOMPARE(tool.state(), SshKeyTool::State::Empty);
     }
 
     void installWithPassword()
@@ -312,13 +312,13 @@ private slots:
         makeReady(&tool);
         QSignalSpy changed(&tool, &SshKeyTool::installStateChanged);
         tool.installWithPassword(sftpParams(serverIdentity().toPin()), QStringLiteral("secret"));
-        QCOMPARE(tool.installState(), SshKeyTool::Installing);
-        QTRY_COMPARE(tool.installState(), SshKeyTool::Installed);
+        QCOMPARE(tool.installState(), SshKeyTool::InstallState::Installing);
+        QTRY_COMPARE(tool.installState(), SshKeyTool::InstallState::Installed);
         QVERIFY(tool.installErrorText().isEmpty());
         QCOMPARE(server->fileData(QStringLiteral(".ssh/authorized_keys")), PublicLine.toUtf8() + '\n');
         QVERIFY(logHas(QStringLiteral("authenticate")));
         QVERIFY(changed.count() >= 2);
-        QCOMPARE(tool.state(), SshKeyTool::Ready);   // the key itself is unchanged
+        QCOMPARE(tool.state(), SshKeyTool::State::Ready);   // the key itself is unchanged
     }
 
     void installWrongPassword()
@@ -326,7 +326,7 @@ private slots:
         SshKeyTool tool(&tools, nullptr);
         makeReady(&tool);
         tool.installWithPassword(sftpParams(QString()), QStringLiteral("wrong"));
-        QTRY_COMPARE(tool.installState(), SshKeyTool::InstallFailed);
+        QTRY_COMPARE(tool.installState(), SshKeyTool::InstallState::InstallFailed);
         QCOMPARE(tool.installErrorText(),
                  QStringLiteral("The server did not accept the password, so the key could not be installed."));
         QVERIFY(!tool.installErrorDetail().isEmpty());
@@ -340,7 +340,7 @@ private slots:
         SshKeyTool tool(&tools, nullptr);
         makeReady(&tool);
         tool.installWithPassword(sftpParams(QStringLiteral("ssh-ed25519 AAAAother")), QStringLiteral("secret"));
-        QTRY_COMPARE(tool.installState(), SshKeyTool::InstallFailed);
+        QTRY_COMPARE(tool.installState(), SshKeyTool::InstallState::InstallFailed);
         QVERIFY(!logHas(QStringLiteral("authenticate")));
     }
 
@@ -348,12 +348,12 @@ private slots:
     {
         SshKeyTool tool(&tools, nullptr);
         tool.installWithPassword(sftpParams(QString()), QStringLiteral("secret"));
-        QCOMPARE(tool.installState(), SshKeyTool::InstallFailed);
+        QCOMPARE(tool.installState(), SshKeyTool::InstallState::InstallFailed);
         QCOMPARE(tool.installErrorText(), QStringLiteral("Something went wrong on this device."));
 
         makeReady(&tool);
         tool.installWithPassword(sftpParams(QString(), QStringLiteral("nope")), QStringLiteral("secret"));
-        QCOMPARE(tool.installState(), SshKeyTool::InstallFailed);
+        QCOMPARE(tool.installState(), SshKeyTool::InstallState::InstallFailed);
         QCOMPARE(tool.installErrorText(), QStringLiteral("Support for this kind of server is not installed on this device."));
     }
 
@@ -365,11 +365,11 @@ private slots:
         tool.installWithPassword(sftpParams(QString()), QStringLiteral("secret"));
         QTRY_VERIFY(logHas(QStringLiteral("authenticate")));
         tool.cancel();
-        QCOMPARE(tool.installState(), SshKeyTool::InstallIdle);
+        QCOMPARE(tool.installState(), SshKeyTool::InstallState::InstallIdle);
         QTest::qWait(600);
-        QCOMPARE(tool.installState(), SshKeyTool::InstallIdle);
+        QCOMPARE(tool.installState(), SshKeyTool::InstallState::InstallIdle);
         tool.clear();
-        QCOMPARE(tool.installState(), SshKeyTool::InstallIdle);
+        QCOMPARE(tool.installState(), SshKeyTool::InstallState::InstallIdle);
     }
 };
 

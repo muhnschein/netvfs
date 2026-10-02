@@ -22,13 +22,13 @@ Dialog {
     // "generate" or "import" (key mode only)
     readonly property string keySource: methodBox.currentIndex === 2 ? "import" : "generate"
     readonly property string password: passwordField.text
-    readonly property string backupsPath: NetVfsHelpers.cleanBackupsPath(provider, backupsField.text)
+    readonly property string backupsPath: NetVfsInput.cleanBackupsPath(provider, backupsField.text)
 
-    readonly property string hostProblem: NetVfsHelpers.hostProblem(hostField.text)
-    readonly property string portProblem: NetVfsHelpers.portProblem(portField.text)
-    readonly property string userProblem: NetVfsHelpers.userNameProblem(userField.text)
-    readonly property string shareProblem: isSmb ? NetVfsHelpers.shareProblem(shareField.text) : ""
-    readonly property string folderProblem: NetVfsHelpers.backupsPathProblem(provider, backupsField.text)
+    readonly property string hostProblem: NetVfsInput.hostProblem(hostField.text)
+    readonly property string portProblem: NetVfsInput.portProblem(portField.text)
+    readonly property string userProblem: NetVfsInput.userNameProblem(userField.text)
+    readonly property string shareProblem: isSmb ? NetVfsInput.shareProblem(shareField.text) : ""
+    readonly property string folderProblem: NetVfsInput.backupsPathProblem(provider, backupsField.text)
     readonly property bool passwordMissing: authMode === "password" && passwordField.text.length === 0
     readonly property bool connectionValid: hostProblem === "" && portProblem === "" && userProblem === ""
                                             && shareProblem === "" && folderProblem === ""
@@ -97,8 +97,8 @@ Dialog {
                 width: parent.width
                 //% "Port"
                 label: qsTrId("settings-accounts-netvfs-la-port")
-                text: NetVfsHelpers.defaultPort(dialog.provider) > 0
-                      ? String(NetVfsHelpers.defaultPort(dialog.provider)) : ""
+                text: NetVfsInput.defaultPort(dialog.provider) > 0
+                      ? String(NetVfsInput.defaultPort(dialog.provider)) : ""
                 inputMethodHints: Qt.ImhDigitsOnly
                 errorHighlight: dialog.portProblem !== ""
                 description: dialog.portProblem

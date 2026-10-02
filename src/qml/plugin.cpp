@@ -51,12 +51,6 @@ private:
     bool m_installed = false;
 };
 
-QObject *createHelpers(QQmlEngine *engine, QJSEngine *scriptEngine)
-{
-    Q_UNUSED(engine)
-    Q_UNUSED(scriptEngine)
-    return std::make_unique<NetVfsUi::Helpers>().release();   // owned by the engine
-}
 
 } // namespace
 
@@ -83,7 +77,13 @@ public:
         Q_ASSERT(QLatin1String(uri) == QLatin1String("org.netvfs.accounts"));
         qmlRegisterType<NetVfsUi::NetVfsProbe>(uri, 1, 0, "NetVfsProbe");
         qmlRegisterType<NetVfsUi::SshKeyTool>(uri, 1, 0, "SshKeyTool");
-        qmlRegisterSingletonType<NetVfsUi::Helpers>(uri, 1, 0, "NetVfsHelpers", createHelpers);
+        // Singletons are owned by the engine.
+        qmlRegisterSingletonType<NetVfsUi::Helpers>(uri, 1, 0, "NetVfsHelpers", [](QQmlEngine *, QJSEngine *) -> QObject * {
+            return std::make_unique<NetVfsUi::Helpers>().release();
+        });
+        qmlRegisterSingletonType<NetVfsUi::InputRules>(uri, 1, 0, "NetVfsInput", [](QQmlEngine *, QJSEngine *) -> QObject * {
+            return std::make_unique<NetVfsUi::InputRules>().release();
+        });
     }
 };
 
