@@ -106,34 +106,113 @@ export NETVFS_BACKEND_PATH="$build/lib/netvfs/backends"
 export NETVFS_SMB_SHARES_HELPER="$build/libexec/netvfs/netvfs-smb-shares"
 export NETVFS_SMB_PREFIX="$prefix"
 export NETVFS_SMB_PASSWORD="$password"
-# SPEC 12.2: the command-line tool end to end.
+# SPEC 12.2, SPEC-v2 XC-CLI: the command-line tool end to end.
 cli() {
     NETVFS_SECRET="$password" "$build/bin/netvfs-cli" --provider smb --host "$strict" --user backup \
         --option share=backup "$@"
 }
 
-cli_round_trip() {
-    head -c 3000000 /dev/urandom > "$work/cli.bin"
-    if cli verify "CLI run" >/dev/null \
-        && cli put "$work/cli.bin" "CLI run/cli.bin" \
-        && cli ls "CLI run" | grep -q " 3000000 cli.bin$" \
-        && cli get "CLI run/cli.bin" "$work/cli.out" \
-        && cmp -s "$work/cli.bin" "$work/cli.out" \
-        && [ "$(docker exec "$prefix-strict" sha256sum "/srv/smb/backup/CLI run/cli.bin" | cut -d' ' -f1)" \
-             = "$(sha256sum "$work/cli.bin" | cut -d' ' -f1)" ] \
-        && cli rm "CLI run/cli.bin"; then
-        echo "PASS   : netvfs-cli round trip"
-    else
-        echo "FAIL!  : netvfs-cli round trip"
+# cli_expect <exit code> <cli arguments>: the CLI must fail with exactly that code.
+cli_expect() {
+    want=$1
+    shift
+    expect_code "$want" env NETVFS_SECRET="$password" "$build/bin/netvfs-cli" --provider smb --host "$strict" \
+        --user backup --option share=backup "$@"
+}
+
+# expect_code <exit code> <command...>: the command must fail with exactly that code.
+expect_code() {
+    want=$1
+    shift
+    set +e
+    "$@" >/dev/null 2>&1
+    got=$?
+    set -e
+    if [ "$got" -ne "$want" ]; then
+        echo "expected exit code $want, got $got: $*" >&2
         return 1
     fi
+}
+
+cli_round_trip() {
+    cli verify "CLI run" >/dev/null
+    cli put "$work/cli.bin" "CLI run/cli.bin"
+    cli ls "CLI run" | grep -q " 3000000 cli.bin$"
+    cli ls -l "CLI run" | grep -Eq "^-[-rwx?]+ [^ ]+ [^ ]+ 3000000 [0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z [-A-Z]+ cli.bin$"
+    cli stat --json "CLI run/cli.bin" | grep -q '"size": 3000000'
+    cli get "CLI run/cli.bin" "$work/cli.out"
+    cmp -s "$work/cli.bin" "$work/cli.out"
+    [ "$(docker exec "$prefix-strict" sha256sum "/srv/smb/backup/CLI run/cli.bin" | cut -d' ' -f1)" \
+      = "$(sha256sum "$work/cli.bin" | cut -d' ' -f1)" ]
+    # cat with a range
+    cli cat --offset 1000 --length 500 "CLI run/cli.bin" > "$work/cli.range"
+    tail -c +1001 "$work/cli.bin" | head -c 500 | cmp - "$work/cli.range"
+    # capabilities, free space
+    caps=$(cli caps | sed -n 's/^capabilities: //p')
+    case " $caps " in *" WindowsNames "*) ;; *) echo "SMB does not report WindowsNames" >&2; return 1 ;; esac
+    cli caps --json | grep -q '"capabilities"'
+    cli df "CLI run" | grep -q '^[0-9][0-9]*$'
+    # mkdir -p, --exclusive, touch creating an empty file
+    cli mkdir -p "CLI run/tree/inner"
+    cli mkdir "CLI run/tree"
+    cli_expect 20 mkdir --exclusive "CLI run/tree"
+    cli touch "CLI run/empty"
+    cli stat "CLI run/empty" | grep -Eq "^-[-rwx?]+ .* 0 "
+    # mv does not replace unless asked
+    cli put "$work/cli.bin" "CLI run/other.bin"
+    cli_expect 20 mv "CLI run/other.bin" "CLI run/cli.bin"
+    cli mv --replace "CLI run/other.bin" "CLI run/cli.bin"
+    cli put "$work/cli.bin" "CLI run/tree/inner/f"
+    # cp across two locations (--to-url): a local tree into the share, NoReplace by default.
+    mkdir -p "$work/cpsrc/sub"
+    cp "$work/cli.bin" "$work/cpsrc/sub/f"
+    NETVFS_SECRET="$password" "$build/bin/netvfs-cli" --url "file://$work/cpsrc" cp -r \
+        --to-url "smb://backup@$strict/backup/CLI%20run" sub tree2
+    cli ls "CLI run/tree2" | grep -q " f$"
+    cli get "CLI run/tree2/f" "$work/cli.out"
+    cmp -s "$work/cli.bin" "$work/cli.out"
+    expect_code 20 env NETVFS_SECRET="$password" "$build/bin/netvfs-cli" --url "file://$work/cpsrc" cp -r \
+        --to-url "smb://backup@$strict/backup/CLI%20run" sub tree2
+    # and back: the share as the source, read on copyAcross's worker thread (M-13 hand-over)
+    mkdir -p "$work/cpdst"
+    NETVFS_SECRET="$password" "$build/bin/netvfs-cli" --url "smb://backup@$strict/backup/CLI%20run" cp -r \
+        --to-url "file://$work/cpdst" tree2 back
+    cmp -s "$work/cli.bin" "$work/cpdst/back/f"
+    # rm refuses folders, rmdir only empty ones, rm -r removes the tree
+    cli_expect 27 rm "CLI run/tree"
+    cli_expect 28 rmdir "CLI run/tree/inner"
+    cli rm -r "CLI run/tree"
+    cli rm -r "CLI run/tree2"
+    cli rm "CLI run/empty"
+    # --url and --profile; a password in the URL is refused (exit 17)
+    NETVFS_SECRET="$password" "$build/bin/netvfs-cli" --url "smb://backup@$strict/backup/CLI%20run" ls "" | grep -q "cli.bin$"
+    cli --profile signed ls "CLI run" | grep -q "cli.bin$"
+    expect_code 17 "$build/bin/netvfs-cli" --url "smb://backup:pw@$strict/backup" ls ""
+    cli rm "CLI run/cli.bin"
+    # shares: the server's shares (server mode, XM-2/XM-7)
+    NETVFS_SECRET="$password" "$build/bin/netvfs-cli" --provider smb --host "$strict" --user backup shares \
+        > "$work/cli.shares"
+    grep -qx backup "$work/cli.shares"
+    grep -qx media "$work/cli.shares"
+    if grep -qx 'hidden\$' "$work/cli.shares"; then echo "admin share listed" >&2; return 1; fi
 }
 
 status=0
 if [ "${NETVFS_SMB_CONFORMANCE_ONLY:-0}" != 1 ]; then
     "$build/tests/interop/smb/tst_interop_smb" "$@" || status=1
     [ $# -eq 0 ] || exit $status
-    cli_round_trip || status=1
+    head -c 3000000 /dev/urandom > "$work/cli.bin"
+    # A subshell of its own: "set -e" is ignored inside a function that is called as a condition.
+    set +e
+    (set -e; cli_round_trip)
+    cli_status=$?
+    set -e
+    if [ $cli_status -eq 0 ]; then
+        echo "PASS   : netvfs-cli round trip"
+    else
+        echo "FAIL!  : netvfs-cli round trip"
+        status=1
+    fi
 fi
 
 # SPEC-v2 XT-1: the conformance suite, strict profile, against a share and

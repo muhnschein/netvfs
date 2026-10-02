@@ -1,0 +1,247 @@
+[
+  {
+    "name": "XC-10 mv replaces by default",
+    "file": "src/cli/clicommands.cpp",
+    "search": "return cmd.has(QStringLiteral(\"replace\")) ? RenameMode::Replace : RenameMode::NoReplace;",
+    "replace": "Q_UNUSED(cmd) return RenameMode::Replace;",
+    "test": "build/tests/unit/cli/tst_cli"
+  },
+  {
+    "name": "XC-10 --replace is ignored",
+    "file": "src/cli/clicommands.cpp",
+    "search": "return cmd.has(QStringLiteral(\"replace\")) ? RenameMode::Replace : RenameMode::NoReplace;",
+    "replace": "Q_UNUSED(cmd) return RenameMode::NoReplace;",
+    "test": "build/tests/unit/cli/tst_cli"
+  },
+  {
+    "name": "XH-6 a password in --url is accepted",
+    "file": "src/cli/cli.cpp",
+    "search": "if (!parsed.ok())",
+    "replace": "if (parsed.ok() && !parsed.ok())",
+    "test": "build/tests/unit/cli/tst_cli"
+  },
+  {
+    "name": "XC-14 cat --offset is not passed on",
+    "file": "src/cli/clicommands.cpp",
+    "search": "        options.offset = value;",
+    "replace": "        options.offset = 0;",
+    "test": "build/tests/unit/cli/tst_cli"
+  },
+  {
+    "name": "XC-14 cat --length is not passed on",
+    "file": "src/cli/clicommands.cpp",
+    "search": "        options.length = value;",
+    "replace": "        options.length = -1;",
+    "test": "build/tests/unit/cli/tst_cli"
+  },
+  {
+    "name": "XH-2 rm -r does not use removeTree",
+    "file": "src/cli/clicommands.cpp",
+    "search": "return Ops::removeTree(c.backend, path);",
+    "replace": "return c.backend->remove(path);",
+    "test": "build/tests/unit/cli/tst_cli"
+  },
+  {
+    "name": "rm without -r removes folders",
+    "file": "src/cli/clicommands.cpp",
+    "search": "    return c.backend->removeFile(path);",
+    "replace": "    return c.backend->remove(path);",
+    "test": "build/tests/unit/cli/tst_cli"
+  },
+  {
+    "name": "SEC secret taken from the command line",
+    "file": "src/cli/cli.cpp",
+    "search": "QByteArray secret = qgetenv(location.secretEnv.toLocal8Bit().constData());",
+    "replace": "QByteArray secret = location.secretEnv.toLocal8Bit();",
+    "test": "build/tests/unit/cli/tst_cli"
+  },
+  {
+    "name": "mkdir -p creates one folder only",
+    "file": "src/cli/clicommands.cpp",
+    "search": "        return c.backend->makePath(path);",
+    "replace": "        return c.backend->makeDir(path, false);",
+    "test": "build/tests/unit/cli/tst_cli"
+  },
+  {
+    "name": "mkdir --exclusive is ignored",
+    "file": "src/cli/clicommands.cpp",
+    "search": "return c.backend->makeDir(path, c.cmd.has(QStringLiteral(\"exclusive\")));",
+    "replace": "return c.backend->makeDir(path, false);",
+    "test": "build/tests/unit/cli/tst_cli"
+  },
+  {
+    "name": "cp uses server copy for -r without ServerCopyRecursive",
+    "file": "src/cli/clicommands.cpp",
+    "search": "(!recursive || caps.has(Capability::ServerCopyRecursive))",
+    "replace": "true",
+    "test": "build/tests/unit/cli/tst_cli"
+  },
+  {
+    "name": "cp never uses server copy",
+    "file": "src/cli/clicommands.cpp",
+    "search": "if (caps.has(Capability::ServerCopy) &&",
+    "replace": "if (false && caps.has(Capability::ServerCopy) &&",
+    "test": "build/tests/unit/cli/tst_cli"
+  },
+  {
+    "name": "cp ignores --to-url",
+    "file": "src/cli/clicommands.cpp",
+    "search": "const bool crossLocation = c.cmd.values.contains(QStringLiteral(\"to-url\"));",
+    "replace": "const bool crossLocation = false;",
+    "test": "build/tests/unit/cli/tst_cli"
+  },
+  {
+    "name": "touch does not create missing files",
+    "file": "src/cli/clicommands.cpp",
+    "search": "if (found.error() == Error::NotFound)",
+    "replace": "if (false)",
+    "test": "build/tests/unit/cli/tst_cli"
+  },
+  {
+    "name": "chmod reads the mode as decimal",
+    "file": "src/cli/clicommands.cpp",
+    "search": "const int OctalBase = 8;",
+    "replace": "const int OctalBase = 10;",
+    "test": "build/tests/unit/cli/tst_cli"
+  },
+  {
+    "name": "a time without zone is local time",
+    "file": "src/cli/clicommands.cpp",
+    "search": "if (time.timeSpec() == Qt::LocalTime)",
+    "replace": "if (false)",
+    "test": "build/tests/unit/cli/tst_cli"
+  },
+  {
+    "name": "sum default algorithm changed",
+    "file": "src/cli/clicommands.cpp",
+    "search": "const char DefaultChecksum[] = \"sha256\";",
+    "replace": "const char DefaultChecksum[] = \"md5\";",
+    "test": "build/tests/unit/cli/tst_cli"
+  },
+  {
+    "name": "df --all ignored",
+    "file": "src/cli/clicommands.cpp",
+    "search": "if (c.cmd.has(QStringLiteral(\"all\"))) {",
+    "replace": "if (false) {",
+    "test": "build/tests/unit/cli/tst_cli"
+  },
+  {
+    "name": "ls -l ignored",
+    "file": "src/cli/clicommands.cpp",
+    "search": "printEntries(c, collector.sorted(), c.cmd.has(QStringLiteral(\"long\")));",
+    "replace": "printEntries(c, collector.sorted(), false);",
+    "test": "build/tests/unit/cli/tst_cli"
+  },
+  {
+    "name": "ls not sorted by name",
+    "file": "src/cli/clicommands.cpp",
+    "search": "return a.name < b.name;",
+    "replace": "return a.name > b.name;",
+    "test": "build/tests/unit/cli/tst_cli"
+  },
+  {
+    "name": "ln -s makes hard links",
+    "file": "src/cli/clicommands.cpp",
+    "search": "    if (c.cmd.has(QStringLiteral(\"symbolic\")))",
+    "replace": "    if (false)",
+    "test": "build/tests/unit/cli/tst_cli"
+  },
+  {
+    "name": "relative paths are not resolved against the URL path",
+    "file": "src/cli/clicommands.cpp",
+    "search": "if (!basePath.isEmpty() && !argument.startsWith(QLatin1Char('/')))",
+    "replace": "if (false)",
+    "test": "build/tests/unit/cli/tst_cli"
+  },
+  {
+    "name": "exit code base changed",
+    "file": "src/cli/cli.cpp",
+    "search": "const int ExitErrorBase = 10;",
+    "replace": "const int ExitErrorBase = 20;",
+    "test": "build/tests/unit/cli/tst_cli"
+  },
+  {
+    "name": "--url combined with --host accepted",
+    "file": "src/cli/cli.cpp",
+    "search": "if (!options->url.isEmpty() && options->explicitLocation) {",
+    "replace": "if (false) {",
+    "test": "build/tests/unit/cli/tst_cli"
+  },
+  {
+    "name": "--host-key pin not validated",
+    "file": "src/cli/cli.cpp",
+    "search": "if (ServerIdentity::fromPin(value).isEmpty()) {",
+    "replace": "if (false) {",
+    "test": "build/tests/unit/cli/tst_cli"
+  },
+  {
+    "name": "--profile value not validated",
+    "file": "src/cli/cli.cpp",
+    "search": "if (!validProfile(value)) {",
+    "replace": "if (!validProfile(value) && false) {",
+    "test": "build/tests/unit/cli/tst_cli"
+  },
+  {
+    "name": "--prompt answers are echoed",
+    "file": "src/cli/cliprompt.cpp",
+    "search": "const bool hide = !prompt.echo && m_echo;",
+    "replace": "const bool hide = false;",
+    "test": "build/tests/unit/cli/tst_cli"
+  },
+  {
+    "name": "--prompt reads a secret even if the echo stays on",
+    "file": "src/cli/cliprompt.cpp",
+    "search": "    if (hide && !m_echo->setEcho(false))",
+    "replace": "    if (false)",
+    "test": "build/tests/unit/cli/tst_cli"
+  },
+  {
+    "name": "--prompt end of input accepted as an answer",
+    "file": "src/cli/cliprompt.cpp",
+    "search": "const bool complete = !line.isEmpty();",
+    "replace": "const bool complete = true;",
+    "test": "build/tests/unit/cli/tst_cli"
+  },
+  {
+    "name": "terminal escape sequences pass through",
+    "file": "src/cli/cliformat.cpp",
+    "search": "if (c.unicode() < FirstPrintable || c.unicode() == Delete ||",
+    "replace": "if (c.unicode() == Delete ||",
+    "test": "build/tests/unit/cli/tst_cli"
+  },
+  {
+    "name": "XC-4 JSON without nameBytes",
+    "file": "src/cli/cliformat.cpp",
+    "search": "if (entry.flags.testFlag(EntryFlag::NameNotUtf8) || Names::hasEscapes(shown))",
+    "replace": "if (false)",
+    "test": "build/tests/unit/cli/tst_cli"
+  },
+  {
+    "name": "JSON prints unknown numbers as -1",
+    "file": "src/cli/cliformat.cpp",
+    "search": "return value < 0 ? QJsonValue(QJsonValue::Null) : QJsonValue(static_cast<double>(value));",
+    "replace": "return QJsonValue(static_cast<double>(value));",
+    "test": "build/tests/unit/cli/tst_cli"
+  },
+  {
+    "name": "discover does not merge _ssh and _sftp-ssh",
+    "file": "src/cli/cliformat.cpp",
+    "search": "const QString key = service.endpointKey();",
+    "replace": "const QString key = service.key();",
+    "test": "build/tests/unit/cli/tst_cli"
+  },
+  {
+    "name": "tls_verify_peer advice wrong",
+    "file": "src/cli/cliformat.cpp",
+    "search": "add --option tls_verify_peer=true to keep",
+    "replace": "add --option tls_verify_peer=false to keep",
+    "test": "build/tests/unit/cli/tst_cli"
+  },
+  {
+    "name": "setuid bit not shown",
+    "file": "src/cli/cliformat.cpp",
+    "search": "triplet(mode, 6, (mode & ModeSetUid) != 0, QLatin1Char('s'))",
+    "replace": "triplet(mode, 6, false, QLatin1Char('s'))",
+    "test": "build/tests/unit/cli/tst_cli"
+  }
+]

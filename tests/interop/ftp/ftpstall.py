@@ -17,7 +17,10 @@ stdout) and serves one of three modes:
       clear text before TLS and the decrypted text after it, one line per
       command, plus TLS-START / TLS-OK / TLS-FAIL markers. USER gets 331,
       PASS 530. The identity tests (XT-5) read the log to prove that no USER
-      command was sent before the identity was accepted.
+      command was sent before the identity was accepted. With --busy N the
+      2nd to (N+1)th connection is greeted with "421 Too many connections"
+      and closed (logged as BUSY), like a server with a connection limit
+      that still counts the client's previous connection.
 """
 import argparse
 import re
@@ -184,8 +187,15 @@ def fake(args):
         context.load_cert_chain(args.cert, args.key)
     recorder = Recorder(args.log)
     server = listen()
+    accepted = 0
     while True:
         client, _ = server.accept()
+        accepted += 1
+        if 1 < accepted <= 1 + args.busy:
+            recorder.write("BUSY")
+            client.sendall(b"421 Too many connections from your IP\r\n")
+            client.close()
+            continue
         track(client)
         threading.Thread(target=serve_fake, args=(client, args, context, recorder), daemon=True).start()
 
@@ -202,6 +212,7 @@ def main():
     p.add_argument("--cert")
     p.add_argument("--key")
     p.add_argument("--log", required=True)
+    p.add_argument("--busy", type=int, default=0)
     args = parser.parse_args()
     {"forward": forward, "silent": silent, "fake": fake}[args.mode](args)
 

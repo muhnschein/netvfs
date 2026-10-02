@@ -1,0 +1,16 @@
+{
+    "description": "Without consent nothing is listed and location calls fail with PermissionDenied (XB-6)",
+    "consent": "denied",
+    "steps": [
+        { "call": "ListLocations", "sig": "", "args": [], "error": "org.netvfs.Error.ProtocolError" },
+        { "call": "Hello", "sig": "us", "args": [1, "contract"], "reply": [1, "*", "*"] },
+        { "call": "GetConsent", "sig": "", "args": [], "reply": ["denied"] },
+        { "call": "ListLocations", "sig": "", "args": [], "reply": [[]] },
+        { "call": "Stat", "sig": "saybs", "args": ["account:1", { "bytes": "" }, true, ""],
+          "error": "org.netvfs.Error.PermissionDenied" },
+        { "call": "List", "sig": "saysu", "args": ["account:1", { "bytes": "" }, "", 0],
+          "error": "org.netvfs.Error.PermissionDenied" },
+        { "call": "Discover", "sig": "b", "args": [true], "error": "org.netvfs.Error.PermissionDenied" },
+        { "call": "Cancel", "sig": "u", "args": [7], "error": "org.netvfs.Error.NotFound" }
+    ]
+}
