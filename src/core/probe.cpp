@@ -8,6 +8,15 @@
 namespace NetVfs {
 
 const char ProbeFilePrefix[] = ".netvfs-probe-";
+const char DirModeOption[] = "dir_mode";
+const char BackupDirMode[] = "0700";
+
+ConnectionParams withBackupDirMode(const ConnectionParams &params)
+{
+    ConnectionParams result = params;
+    result.options.insert(QLatin1String(DirModeOption), QLatin1String(BackupDirMode));
+    return result;
+}
 
 Result verifyAccess(Backend *backend, const QString &dir, qint64 *freeBytes)
 {

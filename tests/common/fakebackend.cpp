@@ -81,11 +81,13 @@ void FakeServer::reset()
     reportSizeMismatch = false;
     nodes.clear();
     log.clear();
+    lastParams = ConnectionParams();
     m_nextLinkGroup = 1;
 }
 
 void FakeServer::addFile(const QString &path, const QByteArray &data, const QDateTime &modified, qint32 mode)
 {
+    addDir(Paths::parent(path));
     Node node;
     node.data = data;
     node.modified = modified;
@@ -94,7 +96,7 @@ void FakeServer::addFile(const QString &path, const QByteArray &data, const QDat
     nodes.insert(path, node);
 }
 
-void FakeServer::addDir(const QString &path)
+void FakeServer::addDir(const QString &path, qint32 mode)
 {
     QString current;
     for (const QString &part : path.split(QLatin1Char('/'), NETVFS_SKIP_EMPTY_PARTS)) {
@@ -103,7 +105,7 @@ void FakeServer::addDir(const QString &path)
             continue;
         Node node;
         node.type = EntryType::Directory;
-        node.mode = DefaultDirMode;
+        node.mode = mode;
         node.modified = QDateTime::currentDateTimeUtc();
         nodes.insert(current, node);
     }
@@ -111,6 +113,7 @@ void FakeServer::addDir(const QString &path)
 
 void FakeServer::addSymlink(const QString &path, const QString &target)
 {
+    addDir(Paths::parent(path));
     Node node;
     node.type = EntryType::Symlink;
     node.target = target;
@@ -121,6 +124,7 @@ void FakeServer::addSymlink(const QString &path, const QString &target)
 
 void FakeServer::addSpecial(const QString &path)
 {
+    addDir(Paths::parent(path));
     Node node;
     node.type = EntryType::Special;
     node.modified = QDateTime::currentDateTimeUtc();
@@ -420,9 +424,11 @@ Entry FakeBackend::entryFor(const QString &key, const FakeServer::Node &node, bo
     return e;
 }
 
-Result FakeBackend::connect(const ConnectionParams &, ServerIdentity *seen)
+Result FakeBackend::connect(const ConnectionParams &params, ServerIdentity *seen)
 {
     QMutexLocker lock(&m_server->mutex);
+    m_server->lastParams = params;
+    m_params = params;
     Result r = begin(QStringLiteral("connect"), false);
     if (r.ok())
         r = m_server->connectResult;
@@ -577,7 +583,10 @@ Result FakeBackend::makeDir(const QString &path, bool exclusive)
         return notFound(parent);
     if (!parent.isEmpty() && !m_server->nodes.value(parent).isDir())
         return Result(Error::NotADirectory, QStringLiteral("%1 is not a folder").arg(parent));
-    m_server->addDir(resolved);
+    // Like SFTP: the "dir_mode" option (octal), else the server default.
+    bool octal = false;
+    const int mode = m_params.option(QStringLiteral("dir_mode")).toInt(&octal, 8);
+    m_server->addDir(resolved, octal ? (mode & 07777) : FakeServer::DefaultDirMode);
     return r;
 }
 

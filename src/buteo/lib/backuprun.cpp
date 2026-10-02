@@ -10,6 +10,7 @@
 #include "backupservice.h"
 #include "backupsteps.h"
 #include "logging.h"
+#include "probe.h"
 
 #include <Accounts/Manager>
 
@@ -124,7 +125,7 @@ void BackupRun::startOperation()
 void BackupRun::startJob(const NetworkJob::Body &body, const std::function<void()> &next)
 {
     m_next = next;
-    m_job = std::make_unique<NetworkJob>(m_session->config().provider, m_session->params(),
+    m_job = std::make_unique<NetworkJob>(m_session->config().provider, withBackupDirMode(m_session->params()),
                                          m_session->credentials(), body);
     connect(m_job.get(), &QThread::finished, this, &BackupRun::onJobFinished);
     m_job->start();

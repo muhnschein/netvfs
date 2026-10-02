@@ -91,7 +91,7 @@ private slots:
         QCOMPARE(run({ QStringLiteral("mkdir"), QStringLiteral("a/b") }), 0);
         QCOMPARE(run({ QStringLiteral("put"), local, QStringLiteral("a/b/f") }), 0);
         QCOMPARE(run({ QStringLiteral("ls"), QStringLiteral("a") }), 0);
-        QCOMPARE(out, QStringLiteral("d 0 b\n"));
+        QCOMPARE(out, QStringLiteral("d -1 b\n"));   // XC-2: unknown size
         QCOMPARE(run({ QStringLiteral("stat"), QStringLiteral("a/b/f") }), 0);
         QVERIFY(out.startsWith(QStringLiteral("- 7 ")));
         QCOMPARE(run({ QStringLiteral("mv"), QStringLiteral("a/b/f"), QStringLiteral("a/b/g") }), 0);

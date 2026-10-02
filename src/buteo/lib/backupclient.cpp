@@ -146,6 +146,9 @@ Buteo::SyncResults::MinorCode BackupClient::minorCodeFor(Error error)
     case Error::Canceled:
         return Buteo::SyncResults::ABORTED;
     case Error::NetworkUnreachable:
+    case Error::ConnectionLost:         // XC-21: retryable like an unreachable server
+    case Error::TooManyConnections:
+    case Error::RateLimited:
     case Error::Timeout:
         return Buteo::SyncResults::CONNECTION_ERROR;
     case Error::AuthFailed:

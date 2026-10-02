@@ -65,10 +65,12 @@ public:
     QHash<QString, Node> nodes;
     QStringList log;                    // "connect", "authenticate", "upload:<path>", ...
     int liveBackends = 0;
+    ConnectionParams lastParams;        // given to the last connect()
 
+    // add*() create missing parent folders.
     void addFile(const QString &path, const QByteArray &data, const QDateTime &modified = QDateTime::currentDateTimeUtc(),
                  qint32 mode = DefaultFileMode);
-    void addDir(const QString &path);   // with missing parents
+    void addDir(const QString &path, qint32 mode = DefaultDirMode);   // with missing parents
     void addSymlink(const QString &path, const QString &target);
     void addSpecial(const QString &path);
     bool exists(const QString &path) const;
@@ -148,6 +150,7 @@ private:
     static Result key(const QString &path, QString *out);
 
     FakeServer *m_server;
+    ConnectionParams m_params;
     bool m_connected = false;
     bool m_authenticated = false;
     quint64 m_generation = 0;           // bumped by disconnect(): handles become stale

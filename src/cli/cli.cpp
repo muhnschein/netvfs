@@ -143,14 +143,14 @@ Result runCommand(Backend *backend, const Options &options, QTextStream &out)
         QVector<Entry> entries;
         const Result r = backend->list(a.at(0), &entries);
         for (const Entry &e : entries)
-            out << (e.isDir ? 'd' : '-') << ' ' << e.size << ' ' << e.name << '\n';
+            out << (e.isDir() ? 'd' : '-') << ' ' << e.size << ' ' << e.name << '\n';
         return r;
     }
     if (command == QLatin1String("stat")) {
         Entry e;
         const Result r = backend->stat(a.at(0), &e);
         if (r.ok())
-            out << (e.isDir ? 'd' : '-') << ' ' << e.size << ' ' << e.modified.toUTC().toString(Qt::ISODate) << '\n';
+            out << (e.isDir() ? 'd' : '-') << ' ' << e.size << ' ' << e.modified.toUTC().toString(Qt::ISODate) << '\n';
         return r;
     }
     if (command == QLatin1String("put"))
@@ -162,7 +162,7 @@ Result runCommand(Backend *backend, const Options &options, QTextStream &out)
     if (command == QLatin1String("rm"))
         return backend->remove(a.at(0));
     if (command == QLatin1String("mv"))
-        return backend->rename(a.at(0), a.at(1));
+        return backend->rename(a.at(0), a.at(1), RenameMode::Replace);
     // df
     qint64 bytes = -1;
     const Result r = backend->freeSpace(a.at(0), &bytes);
