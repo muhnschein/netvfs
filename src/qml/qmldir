@@ -1,0 +1,11 @@
+module org.netvfs.accounts
+plugin netvfsaccountsplugin
+NetVfsAccountSetup 1.0 NetVfsAccountSetup.qml
+NetVfsCreationAgent 1.0 NetVfsCreationAgent.qml
+NetVfsSettingsAgent 1.0 NetVfsSettingsAgent.qml
+NetVfsUpdateAgent 1.0 NetVfsUpdateAgent.qml
+NetVfsSettingsPage 1.0 NetVfsSettingsPage.qml
+ConnectionDialog 1.0 ConnectionDialog.qml
+ProbeBusyPage 1.0 ProbeBusyPage.qml
+ServerIdentityDialog 1.0 ServerIdentityDialog.qml
+SshKeyPage 1.0 SshKeyPage.qml
