@@ -16,6 +16,9 @@ docker run --rm -v "$root:/home/mersdk/src" -w /home/mersdk/src "$SDK_IMAGE" bas
         if sb2 -t '$TARGET' ldd \"\$so\" | grep 'not found'; then
             echo \"unresolved libraries in \$so\"; status=1
         fi
+        if readelf -d \"/srv/mer/targets/$TARGET\$so\" | grep -E 'RPATH|RUNPATH'; then
+            echo \"\$so carries a library search path from the build\"; status=1
+        fi
     done
     exit \$status
 "

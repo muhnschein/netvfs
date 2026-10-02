@@ -190,8 +190,12 @@ Result errorForStatus(quint32 ntStatus, int errnoValue, Stage stage, const QStri
         // INVALID_PARAMETER and required encryption without a common cipher
         // with ACCESS_DENIED at tree connect (M-T14).
         if (stage == Stage::SessionSetup && !keepsMeaningInSetup(r.error())) {
+            // Samba gives the same ACCESS_DENIED for an account that may not
+            // use the share and for a missing common cipher, so name both.
+            const char *reason = ntStatus == SMB2_STATUS_ACCESS_DENIED ? ShareRefusedMessage
+                                                                       : SessionRefusedMessage;
             r = Result(Error::SecurityPolicy, withContext(context, QStringLiteral("%1 (NT status %2)")
-                                                                       .arg(QLatin1String(SessionRefusedMessage),
+                                                                       .arg(QLatin1String(reason),
                                                                             hexStatus(ntStatus))));
         }
         return r;

@@ -13,6 +13,9 @@ AccountBusyPage {
     // transition, so the owner may replace the page when work completes).
     signal pageActivated()
     signal editRequested()
+    // Emitted when the page stops being the current one while work still
+    // runs (the user went back): the owner cancels that work (U-3, U-4).
+    signal left()
 
     property bool _wasActivated
 
@@ -36,6 +39,8 @@ AccountBusyPage {
         if (status === PageStatus.Active && !_wasActivated) {
             _wasActivated = true
             pageActivated()
+        } else if (status === PageStatus.Inactive && _wasActivated && state === "busy") {
+            left()
         }
     }
 }

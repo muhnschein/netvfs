@@ -69,6 +69,12 @@ QtObject {
             return
         }
         _creating = true
+        // A previous attempt's account (removed, Invalid) must not be touched again.
+        _accountId = 0
+        if (_account !== null) {
+            _account.destroy()
+            _account = null
+        }
         _provider = params.provider
         _params = params
         _secret = secret
@@ -237,7 +243,7 @@ QtObject {
 
     function _fail(text) {
         _secret = ""
-        if (_creating && _account !== null && _accountId > 0) {
+        if (_creating && _stage !== "account" && _account !== null && _accountId > 0) {
             // U-3: no half-created account; remove() also deletes the identity
             // referenced by the segregated_credentials key (SPEC 3.5). The
             // object stays busy (delayDeletion) until the removal is synced.

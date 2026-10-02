@@ -84,7 +84,15 @@ AccountCredentialsAgent {
         _probe.identify(_storedParams)
     }
 
+    // A result is only acted on while its busy page is still shown.
+    function _onBusyPage() {
+        return _busyPage !== null && pageStack.currentPage === _busyPage
+    }
+
     function _identified() {
+        if (!_onBusyPage()) {
+            return
+        }
         var status = _probe.identityStatus
         if (status === NetVfsProbe.IdentityChanged || status === NetVfsProbe.IdentityUnknown) {
             pageStack.replace(identityComponent, {
@@ -143,6 +151,9 @@ AccountCredentialsAgent {
     }
 
     function _verified() {
+        if (!_onBusyPage()) {
+            return
+        }
         //% "Saving the sign-in details"
         _busyPage.showBusy(qsTrId("settings-accounts-netvfs-la-saving_credentials"))
         _setup.update(root.accountId, _params, _usingStoredSecret ? "" : _secret())
@@ -162,6 +173,9 @@ AccountCredentialsAgent {
     }
 
     function _probeFailed() {
+        if (!_onBusyPage()) {
+            return
+        }
         if (_usingStoredSecret && _probe.error === NetVfsProbe.AuthFailed) {
             _askCredentials()
             return
@@ -199,6 +213,7 @@ AccountCredentialsAgent {
             root._tryStart()
         }
         onEditRequested: root._goBack()
+        onLeft: root._probe.cancel()
     }
 
     Component {
@@ -220,6 +235,7 @@ AccountCredentialsAgent {
             busyDescription: root._verifyText()
             onPageActivated: root._afterIdentity(root._pin, checkPage)
             onEditRequested: root._goBack()
+            onLeft: root._probe.cancel()
         }
     }
 
@@ -271,6 +287,7 @@ AccountCredentialsAgent {
             busyDescription: root._verifyText()
             onPageActivated: root._startVerify(verifyPage)
             onEditRequested: root._goBack()
+            onLeft: root._probe.cancel()
         }
     }
 }

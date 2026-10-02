@@ -27,7 +27,9 @@ HEADERS = $$PWD/loader/loader.h
 SOURCES = $$PWD/loader/loader.cpp
 LIBS += $$netvfsButeoLibs()
 PRE_TARGETDEPS += $$NETVFS_BUTEO_LIB
-QMAKE_RPATHDIR += $$NETVFS_LIB_OUT
+# Tests load the plugin from the build tree; installed plugins find
+# libnetvfs through the system library path (no RUNPATH in packages).
+!equals(NETVFS_BUILD_TESTS, 0): QMAKE_RPATHDIR += $$NETVFS_LIB_OUT
 QMAKE_LFLAGS += -Wl,--no-undefined
 
 # Profiles generated from one template per kind; only the names and the

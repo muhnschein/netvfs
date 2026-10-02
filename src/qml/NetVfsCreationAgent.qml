@@ -57,7 +57,15 @@ AccountCreationAgent {
         _probe.identify(_params)
     }
 
+    // A result is only acted on while its busy page is still shown.
+    function _onBusyPage() {
+        return _busyPage !== null && pageStack.currentPage === _busyPage
+    }
+
     function _identified() {
+        if (!_onBusyPage()) {
+            return
+        }
         if (_probe.identityStatus === NetVfsProbe.IdentityUnknown) {
             pageStack.replace(identityComponent, { "identity": _probe.serverIdentity })
         } else if (_probe.identityStatus === NetVfsProbe.NoIdentity) {
@@ -86,6 +94,9 @@ AccountCreationAgent {
     }
 
     function _verified() {
+        if (!_onBusyPage()) {
+            return
+        }
         //% "Adding the account"
         _busyPage.showBusy(qsTrId("settings-accounts-netvfs-la-creating_account"))
         var secret = _authMode === "publickey" ? _keyTool.secret() : _password
@@ -107,6 +118,9 @@ AccountCreationAgent {
     }
 
     function _probeFailed() {
+        if (!_onBusyPage()) {
+            return
+        }
         _busyPage.showError(_errorHeading(), _probe.errorText, _probe.errorDetail)
     }
 
@@ -152,6 +166,7 @@ AccountCreationAgent {
             busyDescription: qsTrId("settings-accounts-netvfs-la-identifying")
             onPageActivated: root._startIdentify(identifyPage)
             onEditRequested: root._goBack()
+            onLeft: root._probe.cancel()
         }
     }
 
@@ -193,6 +208,7 @@ AccountCreationAgent {
             busyDescription: root._verifyText()
             onPageActivated: root._startVerify(verifyPage)
             onEditRequested: root._goBack()
+            onLeft: root._probe.cancel()
         }
     }
 

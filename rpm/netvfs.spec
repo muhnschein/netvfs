@@ -18,6 +18,7 @@ BuildRequires: openssl-devel
 BuildRequires: sailfish-svg2png
 BuildRequires: pkgconfig(Qt5Core)
 BuildRequires: pkgconfig(Qt5DBus)
+BuildRequires: pkgconfig(Qt5Concurrent)
 BuildRequires: pkgconfig(Qt5Qml)
 BuildRequires: pkgconfig(Qt5Quick)
 BuildRequires: pkgconfig(accounts-qt5)
@@ -52,6 +53,9 @@ Requires:   jolla-vault
 Requires:   buteo-syncfw-qt5-msyncd
 Requires:   sailfish-components-accounts-qt5
 Requires:   systemd
+
+# The SSH key import page uses the system file picker.
+Requires:   sailfish-components-pickers-qt5
 
 %description account-sftp
 SFTP account provider, backend (statically linked libssh) and Buteo backup

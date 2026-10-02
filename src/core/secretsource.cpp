@@ -74,11 +74,30 @@ void SignonSecretSource::onResponse(const SignOn::SessionData &data)
         emit fetched(credentials);
 }
 
+Result secretErrorFromSignon(int signonErrorType)
+{
+    // A-6: only an identity or secret that cannot be used is AuthFailed (and
+    // thus flags the account, SPEC 6.4); a signond outage is not.
+    switch (signonErrorType) {
+    case SignOn::Error::PermissionDenied:          // signond's answer for an unknown identity
+    case SignOn::Error::IdentityNotFound:
+    case SignOn::Error::CredentialsNotAvailable:
+    case SignOn::Error::MissingData:
+    case SignOn::Error::InvalidCredentials:
+    case SignOn::Error::NotAuthorized:
+    case SignOn::Error::UserInteraction:           // the password plugin wants input: no usable secret
+        return Result(Error::AuthFailed, QStringLiteral("The stored credentials cannot be used"));
+    default:
+        return Result(Error::Internal, QStringLiteral("The credentials service is not available"));
+    }
+}
+
 void SignonSecretSource::onError(const SignOn::Error &error)
 {
-    qCWarning(lcNetVfsCore) << "Credentials lookup failed:" << error.type() << error.message();
+    qCWarning(lcNetVfsCore) << "Credentials lookup failed with signond error" << error.type();
+    qCDebug(lcNetVfsCore) << "signond:" << error.message();
     finish();
-    emit failed(Result(Error::AuthFailed, QStringLiteral("The stored credentials cannot be read")));
+    emit failed(secretErrorFromSignon(error.type()));
 }
 
 void SignonSecretSource::finish()

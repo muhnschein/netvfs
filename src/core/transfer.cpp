@@ -37,13 +37,20 @@ private:
     qint64 m_count = 0;
 };
 
+// C-17: the message may name a remote path, so it is logged at debug level only.
+void logRemovalFailure(const char *what, const Result &r)
+{
+    qCWarning(lcNetVfsCore) << "Could not remove" << what << errorName(r.error());
+    qCDebug(lcNetVfsCore) << r.message();
+}
+
 void removeQuietly(Backend *backend, const QString &path, const Result &cause)
 {
     if (cause.error() == Error::Canceled)
         backend->resetCancel();
     const Result r = backend->remove(path);
     if (!r.ok() && r.error() != Error::NotFound)
-        qCWarning(lcNetVfsCore) << "Could not remove partial file:" << r.toString();
+        logRemovalFailure("partial file", r);
 }
 
 } // namespace
@@ -172,7 +179,7 @@ Result removeStaleParts(Backend *backend, const QString &dir, const QDateTime &n
         if (r.error() == Error::Canceled)
             return r;
         if (!r.ok())
-            qCWarning(lcNetVfsCore) << "Could not remove stale partial file:" << r.toString();
+            logRemovalFailure("stale partial file", r);
     }
     return Result::success();
 }

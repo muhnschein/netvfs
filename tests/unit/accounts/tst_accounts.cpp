@@ -6,6 +6,7 @@
 #include "secretsource.h"
 
 #include <Accounts/Manager>
+#include <SignOn/Error>
 #include <SignOn/Identity>
 #include <SignOn/IdentityInfo>
 
@@ -157,6 +158,36 @@ private slots:
 
         QCOMPARE(store.setAttention(99999, Attention::AuthFailed).error(), Error::NotFound);
         QCOMPARE(store.clearAttention(99999).error(), Error::NotFound);
+    }
+
+    // A-6 / 6.4: only an unusable identity or secret flags the account.
+    void signonErrorMapping_data()
+    {
+        QTest::addColumn<int>("type");
+        QTest::addColumn<int>("expected");
+        const int auth = int(Error::AuthFailed);
+        const int internal = int(Error::Internal);
+        QTest::newRow("permission denied") << int(SignOn::Error::PermissionDenied) << auth;
+        QTest::newRow("identity not found") << int(SignOn::Error::IdentityNotFound) << auth;
+        QTest::newRow("credentials not available") << int(SignOn::Error::CredentialsNotAvailable) << auth;
+        QTest::newRow("missing data") << int(SignOn::Error::MissingData) << auth;
+        QTest::newRow("invalid credentials") << int(SignOn::Error::InvalidCredentials) << auth;
+        QTest::newRow("not authorized") << int(SignOn::Error::NotAuthorized) << auth;
+        QTest::newRow("user interaction") << int(SignOn::Error::UserInteraction) << auth;
+        QTest::newRow("internal server") << int(SignOn::Error::InternalServer) << internal;
+        QTest::newRow("communication") << int(SignOn::Error::InternalCommunication) << internal;
+        QTest::newRow("service not available") << int(SignOn::Error::ServiceNotAvailable) << internal;
+        QTest::newRow("timed out") << int(SignOn::Error::TimedOut) << internal;
+        QTest::newRow("unknown") << int(SignOn::Error::Unknown) << internal;
+    }
+
+    void signonErrorMapping()
+    {
+        QFETCH(int, type);
+        QFETCH(int, expected);
+        const Result r = secretErrorFromSignon(type);
+        QCOMPARE(int(r.error()), expected);
+        QCOMPARE(attentionForError(r.error()) == Attention::AuthFailed, expected == int(Error::AuthFailed));
     }
 
     void sessionReady()

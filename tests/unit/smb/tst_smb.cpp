@@ -298,6 +298,9 @@ private slots:
         QCOMPARE(connectionLost(Stage::Established).error(), Error::NetworkUnreachable);
         QVERIFY(errorForStatus(SMB2_STATUS_NOT_SUPPORTED, 0, Stage::SessionSetup, QString())
                     .message().startsWith(QLatin1String(SessionRefusedMessage)));
+        // ACCESS_DENIED at tree connect: no share access or no common cipher (M-T14).
+        QVERIFY(errorForStatus(SMB2_STATUS_ACCESS_DENIED, 0, Stage::SessionSetup, QString())
+                    .message().startsWith(QLatin1String(ShareRefusedMessage)));
     }
 
     // No NT status: TCP failures, the server dropping the session, and the

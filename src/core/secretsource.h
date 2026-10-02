@@ -53,6 +53,9 @@ private:
     QPointer<SignOn::AuthSession> m_session;
 };
 
+// Maps a SignOn::Error type to the result of a secret lookup (A-6).
+NETVFS_EXPORT Result secretErrorFromSignon(int signonErrorType);
+
 } // namespace NetVfs
 
 Q_DECLARE_METATYPE(NetVfs::Credentials)

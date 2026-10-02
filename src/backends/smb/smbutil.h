@@ -23,6 +23,9 @@ inline constexpr const char *ServerClosedMessage =
 inline constexpr const char *SessionRefusedMessage =
     "the server refused the session; it may require a protocol version, cipher or signing algorithm "
     "this device does not offer (SMB 3 with AES-128-CCM and AES-128-CMAC), or deny this account the share";
+inline constexpr const char *ShareRefusedMessage =
+    "the server refused the share: this account may not use it, or the server and this device have no "
+    "encryption cipher in common";
 inline constexpr const char *ConnectionLostMessage = "the connection to the server was lost";
 
 inline constexpr quint32 MaxChunkSize = 1024 * 1024;        // M-11

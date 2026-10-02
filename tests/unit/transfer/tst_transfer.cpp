@@ -172,11 +172,12 @@ private slots:
     void cleanupFailureIsTolerated()
     {
         server->failOps.insert(QStringLiteral("rename"), Result(Error::PermissionDenied));
-        server->failOps.insert(QStringLiteral("remove"), Result(Error::PermissionDenied));
+        server->failOps.insert(QStringLiteral("remove"), Result(Error::PermissionDenied, QStringLiteral("dir/b.part")));
         QByteArray data = pattern(100);
         QBuffer buffer(&data);
         buffer.open(QIODevice::ReadOnly);
-        QTest::ignoreMessage(QtWarningMsg, QRegularExpression(QStringLiteral("Could not remove partial file")));
+        // C-17: no remote path in a warning.
+        QTest::ignoreMessage(QtWarningMsg, QRegularExpression(QStringLiteral("^Could not remove partial file \"PermissionDenied\"$")));
         QCOMPARE(Transfer::upload(backend.data(), &buffer, data.size(), QStringLiteral("dir/b")).error(),
                  Error::PermissionDenied);
     }
@@ -283,8 +284,9 @@ private slots:
         QCOMPARE(Transfer::removeStaleParts(backend.data(), QStringLiteral("dir"), now).error(), Error::PermissionDenied);
 
         server->addFile(QStringLiteral("dir/a.part"), "x", now.addSecs(-30 * 3600));
-        server->failOps.insert(QStringLiteral("remove"), Result(Error::PermissionDenied));
-        QTest::ignoreMessage(QtWarningMsg, QRegularExpression(QStringLiteral("stale partial file")));
+        server->failOps.insert(QStringLiteral("remove"), Result(Error::PermissionDenied, QStringLiteral("dir/a.part")));
+        QTest::ignoreMessage(QtWarningMsg,
+                             QRegularExpression(QStringLiteral("^Could not remove stale partial file \"PermissionDenied\"$")));
         QVERIFY(Transfer::removeStaleParts(backend.data(), QStringLiteral("dir"), now).ok());
         server->failOps.insert(QStringLiteral("remove"), Result(Error::Canceled));
         QCOMPARE(Transfer::removeStaleParts(backend.data(), QStringLiteral("dir"), now).error(), Error::Canceled);
