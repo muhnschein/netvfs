@@ -6,6 +6,8 @@
 #include <Accounts/Manager>
 #include <Accounts/Service>
 
+#include <algorithm>
+
 namespace NetVfs {
 
 namespace Keys {
@@ -14,6 +16,7 @@ const char Port[] = "netvfs/port";
 const char Username[] = "netvfs/username";
 const char Attention[] = "netvfs/attention";
 const char BackupsPath[] = "backups_path";
+const char FilesRoot[] = "files_root";
 const char DefaultCredentialsUsername[] = "default_credentials_username";
 const char CredentialsNeedUpdate[] = "CredentialsNeedUpdate";
 const char CredentialsNeedUpdateFrom[] = "CredentialsNeedUpdateFrom";
@@ -28,6 +31,7 @@ QString providerKey(const QString &provider, const QString &key)
 const char DefaultBackupsPath[] = "Sailfish OS/Backups";
 const char CredentialsApplication[] = "netvfs";
 const char CredentialsName[] = "default";
+const char FilesServiceType[] = "netvfs-files";
 
 namespace {
 const char AttentionAuthFailed[] = "auth-failed";
@@ -36,6 +40,22 @@ const char AttentionIdentityChanged[] = "server-identity-changed";
 Result notFound(int accountId)
 {
     return Result(Error::NotFound, QStringLiteral("Account %1 does not exist").arg(accountId));
+}
+
+// The value of `key` in the provider's `service`; empty when the service is
+// not installed. Leaves the global service selected.
+QString serviceValue(Accounts::Manager *manager, Accounts::Account *account, Service service, const char *key,
+                     bool *enabled)
+{
+    QString value;
+    *enabled = false;
+    if (const Accounts::Service s = manager->service(serviceName(account->providerName(), service)); s.isValid()) {
+        account->selectService(s);
+        value = account->value(QLatin1String(key)).toString();
+        *enabled = account->isEnabled();
+        account->selectService(Accounts::Service());
+    }
+    return value;
 }
 
 Result sync(Accounts::Account *account)
@@ -83,7 +103,12 @@ Attention attentionForError(Error error)
 
 QString backupServiceName(const QString &provider)
 {
-    return provider + QStringLiteral("-backup");
+    return serviceName(provider, Service::Backup);
+}
+
+QString filesServiceName(const QString &provider)
+{
+    return serviceName(provider, Service::Files);
 }
 
 AccountStore::AccountStore(Accounts::Manager *manager)
@@ -91,7 +116,7 @@ AccountStore::AccountStore(Accounts::Manager *manager)
 {
 }
 
-Result AccountStore::load(int accountId, AccountConfig *out) const
+Result AccountStore::load(int accountId, Service service, AccountConfig *out) const
 {
     Accounts::Account *account = m_manager->account(accountId);  // owned by the manager
     if (!account)
@@ -101,6 +126,7 @@ Result AccountStore::load(int accountId, AccountConfig *out) const
     config.accountId = accountId;
     config.provider = account->providerName();
     config.displayName = account->displayName();
+    config.service = service;
 
     account->selectService(Accounts::Service());
     config.enabled = account->isEnabled();
@@ -118,15 +144,16 @@ Result AccountStore::load(int accountId, AccountConfig *out) const
         if (key.startsWith(prefix))
             params.options.insert(key.mid(prefix.size()), account->value(key));
     }
+    config.securityProfile = securityProfile(params);
+    config.insecureAllowed = params.flag(QLatin1String(OptionKeys::AllowInsecure));
 
-    if (const Accounts::Service service = m_manager->service(backupServiceName(config.provider));
-            service.isValid()) {
-        account->selectService(service);
-        config.backupsPath = account->value(QLatin1String(Keys::BackupsPath)).toString();
-        account->selectService(Accounts::Service());
-    }
+    bool backupEnabled = false;
+    bool filesEnabled = false;
+    config.backupsPath = serviceValue(m_manager, account, Service::Backup, Keys::BackupsPath, &backupEnabled);
     if (config.backupsPath.trimmed().isEmpty())
         config.backupsPath = QLatin1String(DefaultBackupsPath);
+    config.filesRoot = serviceValue(m_manager, account, Service::Files, Keys::FilesRoot, &filesEnabled).trimmed();
+    config.serviceEnabled = config.enabled && (service == Service::Backup ? backupEnabled : filesEnabled);
 
     if (params.host.isEmpty())
         return Result(Error::Internal, QStringLiteral("Account %1 has no server").arg(accountId));
@@ -136,7 +163,27 @@ Result AccountStore::load(int accountId, AccountConfig *out) const
     return Result::success();
 }
 
-Result AccountStore::setAttention(int accountId, Attention attention, const QString &seenIdentityPin) const
+QList<int> AccountStore::filesAccounts() const
+{
+    QList<int> ids;
+    for (const Accounts::AccountId id : m_manager->accountList(QLatin1String(FilesServiceType))) {
+        Accounts::Account *account = m_manager->account(id);   // owned by the manager
+        if (!account)
+            continue;
+        account->selectService(Accounts::Service());
+        if (!account->isEnabled())
+            continue;
+        bool filesEnabled = false;
+        serviceValue(m_manager, account, Service::Files, Keys::FilesRoot, &filesEnabled);
+        if (filesEnabled)
+            ids << static_cast<int>(id);
+    }
+    std::sort(ids.begin(), ids.end());
+    return ids;
+}
+
+Result AccountStore::setAttention(int accountId, Service service, Attention attention,
+                                  const QString &seenIdentityPin) const
 {
     if (attention == Attention::None)
         return clearAttention(accountId);
@@ -149,7 +196,7 @@ Result AccountStore::setAttention(int accountId, Attention attention, const QStr
     account->selectService(Accounts::Service());
     account->setValue(QLatin1String(Keys::Attention), attentionToString(attention));
     account->setValue(QLatin1String(Keys::CredentialsNeedUpdate), true);
-    account->setValue(QLatin1String(Keys::CredentialsNeedUpdateFrom), backupServiceName(provider));
+    account->setValue(QLatin1String(Keys::CredentialsNeedUpdateFrom), serviceName(provider, service));
     if (!seenIdentityPin.isEmpty())
         account->setValue(Keys::providerKey(provider, QLatin1String(Keys::HostKeySeen)), seenIdentityPin);
     qCDebug(lcNetVfsCore) << "Account" << accountId << "needs attention:" << attentionToString(attention);

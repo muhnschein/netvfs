@@ -1,0 +1,18 @@
+{
+    "description": "Read handles and a job with JobFinished (XB-10)",
+    "consent": "granted",
+    "files": { "v.bin": "0123456789", "tree/a": "a", "tree/sub/b": "b" },
+    "steps": [
+        { "call": "Hello", "sig": "us", "args": [1, "contract"], "reply": [1, "*", "*"] },
+        { "call": "OpenRead", "sig": "says", "args": ["account:1", { "bytes": "v.bin" }, "stream"], "reply": ["$h", 10] },
+        { "call": "Read", "sig": "uxu", "args": ["$h", 3, 4], "reply": [{ "bytes": "3456" }] },
+        { "call": "ReadAhead", "sig": "uxx", "args": ["$h", 4, 1024], "reply": [] },
+        { "call": "Read", "sig": "uxu", "args": ["$h", 8, 100], "reply": [{ "bytes": "89" }] },
+        { "call": "Close", "sig": "u", "args": ["$h"], "reply": [] },
+        { "call": "Read", "sig": "uxu", "args": ["$h", 0, 1], "error": "org.netvfs.Error.NotFound" },
+        { "call": "RemoveTree", "sig": "say", "args": ["account:1", { "bytes": "tree" }], "reply": ["$job"] },
+        { "signal": "JobFinished", "args": ["$job", "", "", { "files": 2, "dirs": 2 }] },
+        { "call": "Stat", "sig": "saybs", "args": ["account:1", { "bytes": "tree" }, true, ""],
+          "error": "org.netvfs.Error.NotFound" }
+    ]
+}

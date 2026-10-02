@@ -5,6 +5,7 @@ NetVfsCreationAgent 1.0 NetVfsCreationAgent.qml
 NetVfsSettingsAgent 1.0 NetVfsSettingsAgent.qml
 NetVfsUpdateAgent 1.0 NetVfsUpdateAgent.qml
 NetVfsSettingsPage 1.0 NetVfsSettingsPage.qml
+NetVfsConsentPage 1.0 NetVfsConsentPage.qml
 ConnectionDialog 1.0 ConnectionDialog.qml
 ProbeBusyPage 1.0 ProbeBusyPage.qml
 ServerIdentityDialog 1.0 ServerIdentityDialog.qml

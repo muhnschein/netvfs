@@ -1,0 +1,83 @@
+From: muhnschein <tan_anemone.0l@icloud.com>
+Subject: [PATCH] session setup: record the session flags
+
+The SessionFlags of the SESSION_SETUP reply were only used to decide on
+encryption and then dropped. A client that must not accept a session the
+server silently mapped to guest (SMB2_SESSION_FLAG_IS_GUEST) or to an
+anonymous session (SMB2_SESSION_FLAG_IS_NULL) cannot tell.
+
+Record the flags in the context before the signing checks run and add
+smb2_get_session_flags(). Recording them before the checks matters: a
+guest session cannot be signed, so with signing required the connect
+fails, and the caller can still name the reason.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+diff -ruN a/include/libsmb2-private.h b/include/libsmb2-private.h
+--- a/include/libsmb2-private.h
++++ b/include/libsmb2-private.h
+@@ -299,6 +299,8 @@
+         uint32_t max_read_size;
+         uint32_t max_write_size;
+         uint16_t dialect;
++        /* SessionFlags of the last successful SESSION_SETUP reply */
++        uint16_t session_flags;
+ 
+         char error_string[MAX_ERROR_SIZE];
+         int nterror;
+diff -ruN a/include/smb2/libsmb2.h b/include/smb2/libsmb2.h
+--- a/include/smb2/libsmb2.h
++++ b/include/smb2/libsmb2.h
+@@ -375,6 +375,14 @@
+ uint16_t smb2_get_dialect(struct smb2_context *smb2);
+ 
+ /*
++ * gets the SessionFlags (SMB2_SESSION_FLAG_IS_GUEST, _IS_NULL,
++ * _IS_ENCRYPT_DATA) of the final SESSION_SETUP reply. They are recorded
++ * before signing is checked, so a caller can tell after a failed connect
++ * whether the server mapped the session to guest. 0 before session setup.
++ */
++uint16_t smb2_get_session_flags(struct smb2_context *smb2);
++
++/*
+  * Set the security mode for the connection.
+  * This is a combination of the flags SMB2_NEGOTIATE_SIGNING_ENABLED
+  * and  SMB2_NEGOTIATE_SIGNING_REQUIRED
+diff -ruN a/lib/init.c b/lib/init.c
+--- a/lib/init.c
++++ b/lib/init.c
+@@ -660,6 +660,11 @@
+         return smb2->dialect;
+ }
+ 
++uint16_t smb2_get_session_flags(struct smb2_context *smb2)
++{
++        return smb2->session_flags;
++}
++
+ void smb2_set_security_mode(struct smb2_context *smb2, uint16_t security_mode)
+ {
+         smb2->security_mode = security_mode;
+diff -ruN a/lib/libsmb2.c b/lib/libsmb2.c
+--- a/lib/libsmb2.c
++++ b/lib/libsmb2.c
+@@ -795,6 +795,8 @@
+                 return;
+         }
+ 
++        smb2->session_flags = rep->session_flags;
++
+         if (smb2->seal_requested != SMB2_SEAL_NONE &&
+             (rep->session_flags & SMB2_SESSION_FLAG_IS_ENCRYPT_DATA)) {
+                 smb2->seal = 1;
+diff -ruN a/lib/libsmb2.syms b/lib/libsmb2.syms
+--- a/lib/libsmb2.syms
++++ b/lib/libsmb2.syms
+@@ -84,6 +84,7 @@
+ smb2_get_client_guid
+ smb2_get_compound_pdu
+ smb2_get_dialect
++smb2_get_session_flags
+ smb2_get_domain
+ smb2_get_error
+ smb2_get_fd

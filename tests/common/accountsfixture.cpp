@@ -53,6 +53,10 @@ void AccountsFixture::installProvider(const QString &provider)
               "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<service id=\"" + p + "-backup\">\n"
               "  <type>storage</type>\n  <name>Backups</name>\n  <provider>" + p + "</provider>\n"
               "</service>\n");
+    writeFile(m_dir.path() + QStringLiteral("/services/") + provider + QStringLiteral("-files.service"),
+              "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<service id=\"" + p + "-files\">\n"
+              "  <type>netvfs-files</type>\n  <name>Files</name>\n  <provider>" + p + "</provider>\n"
+              "</service>\n");
 }
 
 int AccountsFixture::createAccount(const QString &provider, const QVariantMap &globals,
@@ -80,6 +84,22 @@ int AccountsFixture::createAccount(const QString &provider, const QVariantMap &g
     if (!account->syncAndBlock())
         return 0;
     return static_cast<int>(account->id());
+}
+
+bool AccountsFixture::setService(int accountId, const QString &service, bool enabled, const QVariantMap &values)
+{
+    Accounts::Account *account = manager()->account(static_cast<Accounts::AccountId>(accountId));
+    if (!account)
+        return false;
+    const Accounts::Service s = service.isEmpty() ? Accounts::Service() : manager()->service(service);
+    if (!service.isEmpty() && !s.isValid())
+        return false;
+    account->selectService(s);
+    account->setEnabled(enabled);
+    for (auto it = values.constBegin(); it != values.constEnd(); ++it)
+        account->setValue(it.key(), it.value());
+    account->selectService(Accounts::Service());
+    return account->syncAndBlock();
 }
 
 QVariant AccountsFixture::value(int accountId, const QString &key, const QString &service)

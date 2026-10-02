@@ -1,0 +1,31 @@
+{
+    "provider": "ftp",
+    "services": ["files"],
+    "defaultPort": 0,
+    "authModes": [
+        { "id": "password", "label": "settings-accounts-netvfs-me-password", "secret": "password" }
+    ],
+    "fields": [
+        { "key": "host", "type": "text", "label": "settings-accounts-netvfs-la-server",
+          "placeholder": "settings-accounts-netvfs-ph-server", "validation": "host", "input": "url" },
+        { "key": "tls_mode", "type": "choice", "label": "settings-accounts-netvfs-la-tls_mode", "default": "explicit",
+          "choices": [
+              { "value": "explicit", "label": "settings-accounts-netvfs-me-tls_explicit" },
+              { "value": "implicit", "label": "settings-accounts-netvfs-me-tls_implicit" },
+              { "value": "none", "label": "settings-accounts-netvfs-me-tls_none" }
+          ] },
+        { "key": "allow_insecure", "type": "switch", "label": "settings-accounts-netvfs-la-allow_insecure",
+          "description": "settings-accounts-netvfs-la-allow_insecure_ftp", "default": false, "validation": "consent",
+          "visibleWhen": { "tls_mode": ["none"] } },
+        { "key": "port", "type": "text", "label": "settings-accounts-netvfs-la-port",
+          "placeholder": "settings-accounts-netvfs-ph-port_default", "validation": "port", "optional": true,
+          "input": "digits" },
+        { "key": "username", "type": "text", "label": "settings-accounts-netvfs-la-user", "validation": "userName" },
+        { "key": "pin_trusted", "type": "switch", "label": "settings-accounts-netvfs-la-pin_trusted",
+          "description": "settings-accounts-netvfs-la-pin_trusted_description", "default": false,
+          "visibleWhen": { "tls_mode": ["explicit", "implicit"] } },
+        { "key": "files_root", "type": "text", "label": "settings-accounts-netvfs-la-files_root",
+          "description": "settings-accounts-netvfs-la-files_root_home", "validation": "folder", "optional": true,
+          "service": "files" }
+    ]
+}

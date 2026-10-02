@@ -7,13 +7,6 @@
     "test": "build/tests/unit/smb/tst_smb chunkSizes"
   },
   {
-    "name": "M-8 leading slash kept",
-    "file": "src/backends/smb/smbutil.cpp",
-    "search": "        normalized.remove(0, 1);",
-    "replace": "        normalized.append(QString());",
-    "test": "build/tests/unit/smb/tst_smb paths"
-  },
-  {
     "name": "M-9 Windows-invalid names accepted",
     "file": "src/backends/smb/smbutil.cpp",
     "search": "if (Result r = Paths::checkWindowsPath(normalized); !r.ok())",
@@ -40,13 +33,6 @@
     "search": "        return Result(Error::SecurityPolicy, withContext(context, QLatin1String(ServerClosedMessage)));",
     "replace": "        return Result(Error::ProtocolError, withContext(context, QLatin1String(ServerClosedMessage)));",
     "test": "build/tests/unit/smb/tst_smb withoutStatus serverClosesDuringSetup"
-  },
-  {
-    "name": "sign-in refusals keep their file-operation meaning",
-    "file": "src/backends/smb/smbutil.cpp",
-    "search": "    return error == Error::AuthFailed || error == Error::NotFound || error == Error::Timeout;",
-    "replace": "    return true;",
-    "test": "build/tests/unit/smb/tst_smb ntStatus"
   },
   {
     "name": "compound-request errno ignored",
@@ -77,118 +63,6 @@
     "test": "build/tests/unit/smb/tst_smb probeHanging"
   },
   {
-    "name": "M-12 cancel does not abandon the request",
-    "file": "src/backends/smb/smbbackend.cpp",
-    "search": "        if (wait == Wait::Cancellable && m_cancel) {\n            abandon(call);",
-    "replace": "        if (false) {\n            abandon(call);",
-    "test": "build/tests/unit/smb/tst_smb cancelStalledSignIn"
-  },
-  {
-    "name": "M-5 NTLM_USER_FILE left in place",
-    "file": "src/backends/smb/smbbackend.cpp",
-    "search": "    qunsetenv(UserFileVariable);",
-    "replace": "    qCDebug(lcNetVfsSmb) << UserFileVariable;",
-    "test": "sh tests/interop/smb/run.sh build userFileIgnored"
-  },
-  {
-    "name": "M-3 seal not requested",
-    "file": "src/backends/smb/smbbackend.cpp",
-    "search": "        smb2_set_seal(ctx, 1);",
-    "replace": "        smb2_set_sign(ctx, 1);",
-    "test": "sh tests/interop/smb/run.sh build encryptionRequiredServerOff"
-  },
-  {
-    "name": "M-3 seal turned off instead of left alone",
-    "file": "src/backends/smb/smbbackend.cpp",
-    "search": "    if (requireEncryption(params.options))                                    // M-3; off: not called\n        smb2_set_seal(ctx, 1);",
-    "replace": "    smb2_set_seal(ctx, requireEncryption(params.options) ? 1 : 0);",
-    "test": "sh tests/interop/smb/run.sh build encryptionOffServerRequires"
-  },
-  {
-    "name": "M-2 signing not required",
-    "file": "src/backends/smb/smbbackend.cpp",
-    "search": "    smb2_set_security_mode(ctx, SMB2_NEGOTIATE_SIGNING_ENABLED | SMB2_NEGOTIATE_SIGNING_REQUIRED); // M-2\n    smb2_set_sign(ctx, 1);",
-    "replace": "    smb2_set_security_mode(ctx, SMB2_NEGOTIATE_SIGNING_ENABLED); // M-2\n    smb2_set_sign(ctx, 0);",
-    "test": "sh tests/interop/smb/run.sh build encryptionOffSigned tamperedResponse"
-  },
-  {
-    "name": "M-1 any SMB version offered",
-    "file": "src/backends/smb/smbbackend.cpp",
-    "search": "    smb2_set_version(ctx, SMB2_VERSION_ANY3);",
-    "replace": "    smb2_set_version(ctx, SMB2_VERSION_ANY);",
-    "test": "sh tests/interop/smb/run.sh build smb2OnlyServer"
-  },
-  {
-    "name": "rename does not replace the target",
-    "file": "src/backends/smb/smbbackend.cpp",
-    "search": "    if (r.ok())\n        r = unlinkPath(to, QStringLiteral(\"replace\"));",
-    "replace": "    if (false)\n        r = unlinkPath(to, QStringLiteral(\"replace\"));",
-    "test": "sh tests/interop/smb/run.sh build operations"
-  },
-  {
-    "name": "stage stays at session setup after sign-in",
-    "file": "src/backends/smb/smbbackend.cpp",
-    "search": "    m_stage = Stage::Established;\n    qCDebug",
-    "replace": "    qCDebug",
-    "test": "sh tests/interop/smb/run.sh build operations"
-  },
-  {
-    "name": "upload offset not advanced",
-    "file": "src/backends/smb/smbbackend.cpp",
-    "search": "        offset += quint64(n);",
-    "replace": "        offset += 0;",
-    "test": "sh tests/interop/smb/run.sh build strictServer"
-  },
-  {
-    "name": "lost connection not remembered",
-    "file": "src/backends/smb/smbbackend.cpp",
-    "search": "            continue;\n        m_broken = true;",
-    "replace": "            continue;",
-    "test": "sh tests/interop/smb/run.sh build connectionDropped"
-  },
-  {
-    "name": "free space in allocation units",
-    "file": "src/backends/smb/smbbackend.cpp",
-    "search": "        out->free = scaled(call->vfs.f_bavail, unit);",
-    "replace": "        out->free = scaled(call->vfs.f_bavail, 1);",
-    "test": "sh tests/interop/smb/run.sh build fullShare"
-  },
-  {
-    "name": "directory entries . and .. listed",
-    "file": "src/backends/smb/smbbackend.cpp",
-    "search": "        if (const QByteArray name(ent->name); name != \".\" && name != \"..\")",
-    "replace": "        if (const QByteArray name(ent->name); !name.isNull())",
-    "test": "sh tests/interop/smb/run.sh build cancelUpload"
-  },
-  {
-    "name": "XC-9 removeFile deletes folders",
-    "file": "src/backends/smb/smbbackend.cpp",
-    "search": "    if (r.ok() && (p.isEmpty() || entry.isDir()))\n        return Result(Error::IsADirectory, QStringLiteral(\"remove: a folder\"));",
-    "replace": "",
-    "test": "sh tests/interop/smb/run.sh build v2Namespace"
-  },
-  {
-    "name": "XC-9 removeDir trusts the close",
-    "file": "src/backends/smb/smbbackend.cpp",
-    "search": "    if (r.ok())\n        return Result(Error::DirectoryNotEmpty, QStringLiteral(\"remove folder: the folder is not empty\"));",
-    "replace": "",
-    "test": "sh tests/interop/smb/run.sh build v2Namespace"
-  },
-  {
-    "name": "XC-9 removeDir deletes files",
-    "file": "src/backends/smb/smbbackend.cpp",
-    "search": "    if (r.ok() && !entry.isDir())\n        return Result(Error::NotADirectory, QStringLiteral(\"remove folder: not a folder\"));",
-    "replace": "",
-    "test": "sh tests/interop/smb/run.sh build v2Namespace"
-  },
-  {
-    "name": "XM-5 NoReplace replaces",
-    "file": "src/backends/smb/smbbackend.cpp",
-    "search": "    if (mode == RenameMode::Replace)\n        return renameReplacing(f, t);",
-    "replace": "    if (true)\n        return renameReplacing(f, t);",
-    "test": "sh tests/interop/smb/run.sh build v2Namespace"
-  },
-  {
     "name": "XC-21 dropped session not ConnectionLost",
     "file": "src/backends/smb/smbutil.cpp",
     "search": "    return Result(Error::ConnectionLost, QLatin1String(ConnectionLostMessage));   // XC-21",
@@ -196,17 +70,528 @@
     "test": "build/tests/unit/smb/tst_smb"
   },
   {
-    "name": "XC-6 batches ignore batchSize",
+    "name": "M-8 leading slash kept",
+    "file": "src/backends/smb/smbutil.cpp",
+    "search": "    return normalized.startsWith(QLatin1Char('/')) ? normalized.mid(1) : normalized;",
+    "replace": "    return normalized;",
+    "test": "build/tests/unit/smb/tst_smb paths serverPaths"
+  },
+  {
+    "name": "sign-in refusals keep their file-operation meaning",
+    "file": "src/backends/smb/smbutil.cpp",
+    "search": "    return error == Error::AuthFailed || error == Error::NotFound || error == Error::Timeout\n        || error == Error::Unsupported;",
+    "replace": "    return true;",
+    "test": "build/tests/unit/smb/tst_smb ntStatus"
+  },
+  {
+    "name": "M-12 cancel does not abandon the request",
+    "file": "src/backends/smb/smbsession.cpp",
+    "search": "        if (wait == Wait::Cancellable && m_cancel) {\n            abandon(call);",
+    "replace": "        if (false) {\n            abandon(call);",
+    "test": "build/tests/unit/smb/tst_smb cancelStalledSignIn"
+  },
+  {
+    "name": "M-13 a second thread is let in",
+    "file": "src/backends/smb/smbsession.cpp",
+    "search": "    if (idle != self)\n        return false;           // M-13: another thread is inside",
+    "replace": "    if (false)\n        return false;",
+    "test": "build/tests/unit/smb/tst_smb concurrentThreads"
+  },
+  {
+    "name": "M-13 hand-over refused (connecting thread only)",
+    "file": "src/backends/smb/smbsession.cpp",
+    "search": "    if (m_owner.compare_exchange_strong(idle, self)) {",
+    "replace": "    if (std::this_thread::get_id() == std::thread::id() && m_owner.compare_exchange_strong(idle, self)) {",
+    "test": "build/tests/unit/smb/tst_smb otherThread"
+  },
+  {
+    "name": "M-5 NTLM_USER_FILE left in place",
+    "file": "src/backends/smb/smbutil.cpp",
+    "search": "    qunsetenv(UserFileVariable);",
+    "replace": "    qCDebug(lcNetVfsSmb) << UserFileVariable;",
+    "test": "build/tests/unit/smb/tst_smb serverClosesDuringSetup helperEnvironment"
+  },
+  {
+    "name": "XM-1 unknown profile falls back to strict",
+    "file": "src/backends/smb/smbutil.cpp",
+    "search": "    return Result(Error::SecurityPolicy, QStringLiteral(\"unknown SMB security profile \\\"%1\\\"\").arg(name));",
+    "replace": "    *out = Profile::Strict;\n    return Result::success();",
+    "test": "build/tests/unit/smb/tst_smb profiles authenticateChecksInput"
+  },
+  {
+    "name": "XM-1 signed requires encryption",
+    "file": "src/backends/smb/smbutil.cpp",
+    "search": "    case Profile::Signed:\n        s.encryption = Encryption::IfServerAsks;",
+    "replace": "    case Profile::Signed:",
+    "test": "build/tests/unit/smb/tst_smb profileSettings"
+  },
+  {
+    "name": "XM-1 legacy offers SMB 3 only",
+    "file": "src/backends/smb/smbutil.cpp",
+    "search": "    case Profile::Legacy:\n        s.version = SMB2_VERSION_ANY;",
+    "replace": "    case Profile::Legacy:",
+    "test": "build/tests/unit/smb/tst_smb profileSettings"
+  },
+  {
+    "name": "XM-1 strict offers SMB 2",
+    "file": "src/backends/smb/smbutil.cpp",
+    "search": "    ProfileSettings s;\n    s.version = SMB2_VERSION_ANY3;",
+    "replace": "    ProfileSettings s;\n    s.version = SMB2_VERSION_ANY;",
+    "test": "build/tests/unit/smb/tst_smb profileSettings"
+  },
+  {
+    "name": "XM-1 guest signs",
+    "file": "src/backends/smb/smbutil.cpp",
+    "search": "        s.signing = false;\n        s.encryption = Encryption::Off;",
+    "replace": "        s.encryption = Encryption::Off;",
+    "test": "build/tests/unit/smb/tst_smb profileSettings"
+  },
+  {
+    "name": "XM-1 guest sends the user name",
+    "file": "src/backends/smb/smbutil.cpp",
+    "search": "    smb2_set_user(ctx, s.guest ? \"\" : user.toUtf8().constData());",
+    "replace": "    smb2_set_user(ctx, user.toUtf8().constData());",
+    "test": "build/tests/unit/smb/tst_smb appliedProfile"
+  },
+  {
+    "name": "M-3 seal not requested (strict)",
+    "file": "src/backends/smb/smbutil.cpp",
+    "search": "    if (s.encryption == Encryption::Required)                                         // M-3\n        smb2_set_seal(ctx, 1);",
+    "replace": "    if (false)\n        smb2_set_seal(ctx, 1);",
+    "test": "sh tests/interop/smb/run.sh build encryptionRequiredServerOff"
+  },
+  {
+    "name": "M-3 seal turned off instead of left alone (signed)",
+    "file": "src/backends/smb/smbutil.cpp",
+    "search": "    else if (s.encryption == Encryption::Off)\n        smb2_set_seal(ctx, 0);",
+    "replace": "    else\n        smb2_set_seal(ctx, 0);",
+    "test": "sh tests/interop/smb/run.sh build encryptionOffServerRequires"
+  },
+  {
+    "name": "M-2 signing not required",
+    "file": "src/backends/smb/smbutil.cpp",
+    "search": "        smb2_set_security_mode(ctx, SMB2_NEGOTIATE_SIGNING_ENABLED | SMB2_NEGOTIATE_SIGNING_REQUIRED);\n        smb2_set_sign(ctx, 1);",
+    "replace": "        smb2_set_security_mode(ctx, SMB2_NEGOTIATE_SIGNING_ENABLED);\n        smb2_set_sign(ctx, 0);",
+    "test": "sh tests/interop/smb/run.sh build encryptionOffSigned tamperedResponse"
+  },
+  {
+    "name": "XM-1 dialect not offered accepted (legacy check for every profile)",
+    "file": "src/backends/smb/smbutil.cpp",
+    "search": "    return settingsFor(profile).version == SMB2_VERSION_ANY\n        && (dialect == SMB2_VERSION_0202 || dialect == SMB2_VERSION_0210);",
+    "replace": "    return dialect == SMB2_VERSION_0202 || dialect == SMB2_VERSION_0210;",
+    "test": "build/tests/unit/smb/tst_smb dialects"
+  },
+  {
+    "name": "XM-1 guest mapping accepted",
+    "file": "src/backends/smb/smbutil.cpp",
+    "search": "    if (sessionFlags & (SMB2_SESSION_FLAG_IS_GUEST | SMB2_SESSION_FLAG_IS_NULL))",
+    "replace": "    if (sessionFlags & 0)",
+    "test": "build/tests/unit/smb/tst_smb sessionFlags"
+  },
+  {
+    "name": "XM-1 guest profile asks for credentials",
     "file": "src/backends/smb/smbbackend.cpp",
-    "search": "        if (batch.size() < batchSize)\n            continue;",
-    "replace": "        if (true)\n            continue;",
+    "search": "    if (!guest && (m_user.isEmpty() || credentials.secret.isEmpty()))",
+    "replace": "    if (m_user.isEmpty() || credentials.secret.isEmpty())",
+    "test": "build/tests/unit/smb/tst_smb authenticateChecksInput"
+  },
+  {
+    "name": "XM-2 root operations reach a share",
+    "file": "src/backends/smb/smbbackend.cpp",
+    "search": "    out->root = out->share.isEmpty();",
+    "replace": "    out->root = false;",
+    "test": "sh tests/interop/smb/run.sh build serverModeOperations"
+  },
+  {
+    "name": "XM-2 share root removable",
+    "file": "src/backends/smb/smbbackend.cpp",
+    "search": "    if (at.path.isEmpty())\n        return shareRootDenied(QStringLiteral(\"remove folder\"));",
+    "replace": "",
+    "test": "sh tests/interop/smb/run.sh build serverModeOperations"
+  },
+  {
+    "name": "XM-2 shares renamable",
+    "file": "src/backends/smb/smbbackend.cpp",
+    "search": "    if (shareLevel(from) || shareLevel(to))",
+    "replace": "    if (false)",
+    "test": "sh tests/interop/smb/run.sh build serverModeOperations"
+  },
+  {
+    "name": "XM-2 missing share created",
+    "file": "src/backends/smb/smbbackend.cpp",
+    "search": "    if (r.error() == Error::NotFound && m_serverMode && at.path.isEmpty())\n        return rootDenied(QStringLiteral(\"create folder\"));",
+    "replace": "",
+    "test": "sh tests/interop/smb/run.sh build serverModeOperations"
+  },
+  {
+    "name": "XM-2 no context limit",
+    "file": "src/backends/smb/smbbackend.cpp",
+    "search": "    if (static_cast<int>(m_shares.size()) >= MaxShareSessions) {",
+    "replace": "    if (false) {",
+    "test": "sh tests/interop/smb/run.sh build serverModeContextLimit"
+  },
+  {
+    "name": "XM-2 LRU evicts contexts with open handles",
+    "file": "src/backends/smb/smbbackend.cpp",
+    "search": "        if (!session->hasFiles() && (!oldest || session->lastUse < oldest->lastUse))",
+    "replace": "        if (!oldest || session->lastUse < oldest->lastUse)",
+    "test": "sh tests/interop/smb/run.sh build serverModeContextLimit"
+  },
+  {
+    "name": "XM-2 most recently used evicted",
+    "file": "src/backends/smb/smbbackend.cpp",
+    "search": "        if (!session->hasFiles() && (!oldest || session->lastUse < oldest->lastUse))",
+    "replace": "        if (!session->hasFiles() && (!oldest || session->lastUse > oldest->lastUse))",
+    "test": "sh tests/interop/smb/run.sh build serverModeContextLimit"
+  },
+  {
+    "name": "XM-2 use not recorded",
+    "file": "src/backends/smb/smbbackend.cpp",
+    "search": "        (*it)->lastUse = ++m_useClock;",
+    "replace": "        ++m_useClock;",
+    "test": "sh tests/interop/smb/run.sh build serverModeContextLimit"
+  },
+  {
+    "name": "XM-2 share names case-sensitive",
+    "file": "src/backends/smb/smbbackend.cpp",
+    "search": "        if ((*it)->share().compare(share, Qt::CaseInsensitive) != 0)",
+    "replace": "        if ((*it)->share().compare(share, Qt::CaseSensitive) != 0)",
+    "test": "sh tests/interop/smb/run.sh build serverModeContextLimit"
+  },
+  {
+    "name": "XM-3 saved shares ignored",
+    "file": "src/backends/smb/smbbackend.cpp",
+    "search": "    QStringList names = configuredShares(m_params.options);",
+    "replace": "    QStringList names;",
+    "test": "sh tests/interop/smb/run.sh build serverModeRoot"
+  },
+  {
+    "name": "XM-3 duplicates kept",
+    "file": "src/backends/smb/smbutil.cpp",
+    "search": "        if (!list->contains(name, Qt::CaseInsensitive))",
+    "replace": "        if (true)",
+    "test": "build/tests/unit/smb/tst_smb configuredShareList"
+  },
+  {
+    "name": "XM-7 admin shares shown",
+    "file": "src/backends/smb/smbshares.cpp",
+    "search": "    return showAdminShares || !share.name.endsWith(QLatin1Char('$'));",
+    "replace": "    return true;",
+    "test": "build/tests/unit/smb/tst_smb shareFilter"
+  },
+  {
+    "name": "XM-7 show_admin_shares ignored",
+    "file": "src/backends/smb/smbbackend.cpp",
+    "search": "    const bool showAdmin = m_params.flag(QStringLiteral(\"show_admin_shares\"), false);",
+    "replace": "    const bool showAdmin = false;",
+    "test": "sh tests/interop/smb/run.sh build serverModeRoot"
+  },
+  {
+    "name": "XM-7 every share type listed",
+    "file": "src/backends/smb/smbshares.cpp",
+    "search": "    if ((share.type & ShareTypeMask) != ShareTypeDiskTree)\n        return false;",
+    "replace": "",
+    "test": "build/tests/unit/smb/tst_smb shareFilter"
+  },
+  {
+    "name": "XM-7 share type flags not masked",
+    "file": "src/backends/smb/smbshares.cpp",
+    "search": "    if ((share.type & ShareTypeMask) != ShareTypeDiskTree)",
+    "replace": "    if (share.type != ShareTypeDiskTree)",
+    "test": "build/tests/unit/smb/tst_smb shareFilter"
+  },
+  {
+    "name": "XM-7 enumeration without the helper",
+    "file": "src/backends/smb/smbbackend.cpp",
+    "search": "    return m_serverMode && m_params.flag(QStringLiteral(\"share_enumeration\"), true) && shareHelperInstalled();",
+    "replace": "    return m_serverMode && m_params.flag(QStringLiteral(\"share_enumeration\"), true);",
+    "test": "sh tests/interop/smb/run.sh build shareHelperFailures"
+  },
+  {
+    "name": "XM-7 share names not validated",
+    "file": "src/backends/smb/smbshares.cpp",
+    "search": "    if (!validShareName(name.toString()))\n        return malformed(QStringLiteral(\"a share name is not valid\"));",
+    "replace": "",
+    "test": "build/tests/unit/smb/tst_smb shareOutput"
+  },
+  {
+    "name": "XM-7 truncated output accepted",
+    "file": "src/backends/smb/smbshares.cpp",
+    "search": "    return malformed(QStringLiteral(\"the output is truncated\"));\n}\n\n} // namespace",
+    "replace": "    return Result::success();\n}\n\n} // namespace",
+    "test": "build/tests/unit/smb/tst_smb shareOutput"
+  },
+  {
+    "name": "XM-7 end count not checked",
+    "file": "src/backends/smb/smbshares.cpp",
+    "search": "    if (object.size() != 1 || !end.isDouble() || end.toDouble() != count)",
+    "replace": "    if (object.size() != 1 || !end.isDouble())",
+    "test": "build/tests/unit/smb/tst_smb shareOutput"
+  },
+  {
+    "name": "XM-7 extra fields accepted",
+    "file": "src/backends/smb/smbshares.cpp",
+    "search": "    return std::all_of(present.begin(), present.end(), [&keys](const QString &key) { return keys.contains(key); });",
+    "replace": "    return !present.isEmpty();",
+    "test": "build/tests/unit/smb/tst_smb shareOutput"
+  },
+  {
+    "name": "XM-7 output size not capped",
+    "file": "src/backends/smb/smbshares.cpp",
+    "search": "    if (output.size() > MaxShareOutputBytes)\n        return malformed(QStringLiteral(\"too much output\"));",
+    "replace": "",
+    "test": "build/tests/unit/smb/tst_smb shareOutput"
+  },
+  {
+    "name": "XM-7 helper errors pass through unchecked",
+    "file": "src/backends/smb/smbshares.cpp",
+    "search": "    if (error == Error::None || !passesThrough(error))",
+    "replace": "    if (error == Error::None)",
+    "test": "build/tests/unit/smb/tst_smb shareOutput"
+  },
+  {
+    "name": "XM-7 partial list kept on failure",
+    "file": "src/backends/smb/smbshares.cpp",
+    "search": "    if (r.ok())\n        *shares = parsed;",
+    "replace": "    *shares = parsed;",
+    "test": "build/tests/unit/smb/tst_smb shareOutput"
+  },
+  {
+    "name": "XM-7 crash not detected",
+    "file": "src/backends/smb/smbhelper.cpp",
+    "search": "    if (WIFSIGNALED(status))\n        return helperFailed(",
+    "replace": "    if (false)\n        return helperFailed(",
+    "test": "build/tests/unit/smb/tst_smb helperProcess"
+  },
+  {
+    "name": "XM-7 exit status ignored",
+    "file": "src/backends/smb/smbhelper.cpp",
+    "search": "    if (code != 0 && r.ok()) {",
+    "replace": "    if (false) {",
+    "test": "build/tests/unit/smb/tst_smb helperProcess"
+  },
+  {
+    "name": "XM-7 helper not killed on cancel",
+    "file": "src/backends/smb/smbhelper.cpp",
+    "search": "        if (cancel)\n            return Result(Error::Canceled);\n        if (clock.elapsed() > timeoutMs)\n            return Result(Error::Timeout, QStringLiteral(\"the share list did not arrive in time\"));\n        pollfd",
+    "replace": "        if (clock.elapsed() > timeoutMs)\n            return Result(Error::Timeout, QStringLiteral(\"the share list did not arrive in time\"));\n        pollfd",
+    "test": "build/tests/unit/smb/tst_smb helperStalls"
+  },
+  {
+    "name": "XM-7 request not wiped",
+    "file": "src/backends/smb/smbhelper.cpp",
+    "search": "    secureWipe(*request);           // XSEC-6",
+    "replace": "",
+    "test": "build/tests/unit/smb/tst_smb helperProcess"
+  },
+  {
+    "name": "XM-7 output not capped while reading",
+    "file": "src/backends/smb/smbhelper.cpp",
+    "search": "        if (output->size() > MaxShareOutputBytes)\n            return helperFailed(QStringLiteral(\"too much output\"));",
+    "replace": "",
+    "test": "build/tests/unit/smb/tst_smb helperProcess"
+  },
+  {
+    "name": "XM-7 helper keeps NTLM_USER_FILE",
+    "file": "src/backends/smb/smbhelper.cpp",
+    "search": "    // M-5: the helper inherits the environment.\n    neutraliseUserFile();",
+    "replace": "",
+    "test": "build/tests/unit/smb/tst_smb helperEnvironment"
+  },
+  {
+    "name": "XSEC-6 request codec accepts trailing bytes",
+    "file": "src/backends/smb/smbshares.cpp",
+    "search": "    if (at != data.size() || fields[0]",
+    "replace": "    if (fields[0]",
+    "test": "build/tests/unit/smb/tst_smb shareRequests"
+  },
+  {
+    "name": "XC-4 lone surrogates not kept",
+    "file": "src/backends/smb/smbutil.cpp",
+    "search": "            appendUtf8(&out, c.unicode());   // a lone surrogate included (WTF-8)",
+    "replace": "            appendUtf8(&out, c.isSurrogate() ? 0xfffdu : c.unicode());",
+    "test": "build/tests/unit/smb/tst_smb names"
+  },
+  {
+    "name": "XM-4 hidden attribute ignored",
+    "file": "src/backends/smb/smbfiles.cpp",
+    "search": "    if (st.smb2_attributes & SMB2_FILE_ATTRIBUTE_HIDDEN)\n        entry.flags |= EntryFlag::Hidden;",
+    "replace": "",
+    "test": "sh tests/interop/smb/run.sh build entryFlags"
+  },
+  {
+    "name": "XM-4 birth time ignored",
+    "file": "src/backends/smb/smbfiles.cpp",
+    "search": "    entry.created = timeOf(st.smb2_btime, st.smb2_btime_nsec);",
+    "replace": "",
+    "test": "sh tests/interop/smb/run.sh build attributes"
+  },
+  {
+    "name": "XM-9 DFS not recognised",
+    "file": "src/backends/smb/smbutil.cpp",
+    "search": "    if (ntStatus == SMB2_STATUS_PATH_NOT_COVERED || ntStatus == StatusDfsUnavailable)\n        return dfsReferral(context);",
+    "replace": "",
+    "test": "build/tests/unit/smb/tst_smb dfsReferrals"
+  },
+  {
+    "name": "XM-9 DFS errno not recognised",
+    "file": "src/backends/smb/smbutil.cpp",
+    "search": "    if (errnoValue == ENOEXEC)\n        return dfsReferral(context);",
+    "replace": "",
+    "test": "sh tests/interop/smb/run.sh build dfsReferral"
+  },
+  {
+    "name": "rename does not replace the target",
+    "file": "src/backends/smb/smbops.cpp",
+    "search": "        return smb2_rename_replace_async(ctx, from.constData(), to.constData(), netvfs_smb_complete_plain,",
+    "replace": "        return smb2_rename_async(ctx, from.constData(), to.constData(), netvfs_smb_complete_plain,",
+    "test": "sh tests/interop/smb/run.sh build v2Namespace"
+  },
+  {
+    "name": "XC-10 a folder target is replaced",
+    "file": "src/backends/smb/smbops.cpp",
+    "search": "    if (r.ok() && target.isDir())\n        return Result(Error::AlreadyExists, QStringLiteral(\"rename: the target is a folder\"));",
+    "replace": "",
+    "test": "sh tests/interop/smb/run.sh build v2Namespace"
+  },
+  {
+    "name": "XM-5 NoReplace replaces",
+    "file": "src/backends/smb/smbbackend.cpp",
+    "search": "    if (mode == RenameMode::Replace)\n        return Ops::renameReplacing(",
+    "replace": "    if (true)\n        return Ops::renameReplacing(",
+    "test": "sh tests/interop/smb/run.sh build v2Namespace"
+  },
+  {
+    "name": "stage stays at session setup after sign-in",
+    "file": "src/backends/smb/smbsession.cpp",
+    "search": "    m_stage = Stage::Established;\n    qCDebug",
+    "replace": "    qCDebug",
+    "test": "sh tests/interop/smb/run.sh build operations"
+  },
+  {
+    "name": "lost connection not remembered",
+    "file": "src/backends/smb/smbsession.cpp",
+    "search": "            continue;\n        m_broken = true;",
+    "replace": "            continue;",
+    "test": "sh tests/interop/smb/run.sh build connectionDropped"
+  },
+  {
+    "name": "free space in allocation units",
+    "file": "src/backends/smb/smbops.cpp",
+    "search": "        out->free = scaled(call->vfs.f_bavail, unit);",
+    "replace": "        out->free = scaled(call->vfs.f_bavail, 1);",
+    "test": "sh tests/interop/smb/run.sh build fullShare"
+  },
+  {
+    "name": "directory entries . and .. listed",
+    "file": "src/backends/smb/smbops.cpp",
+    "search": "        if (name != \".\" && name != \"..\")",
+    "replace": "        if (!name.isNull())",
+    "test": "sh tests/interop/smb/run.sh build cancelUpload"
+  },
+  {
+    "name": "XC-9 removeFile deletes folders",
+    "file": "src/backends/smb/smbops.cpp",
+    "search": "    if (r.ok() && (path.isEmpty() || entry.isDir()))\n        return Result(Error::IsADirectory, QStringLiteral(\"remove: a folder\"));",
+    "replace": "",
+    "test": "sh tests/interop/smb/run.sh build v2Namespace"
+  },
+  {
+    "name": "XC-9 removeDir trusts the close",
+    "file": "src/backends/smb/smbops.cpp",
+    "search": "    if (r.ok())\n        return Result(Error::DirectoryNotEmpty, QStringLiteral(\"remove folder: the folder is not empty\"));",
+    "replace": "",
+    "test": "sh tests/interop/smb/run.sh build v2Namespace"
+  },
+  {
+    "name": "XC-9 removeDir deletes files",
+    "file": "src/backends/smb/smbops.cpp",
+    "search": "    if (r.ok() && !entry.isDir())\n        return Result(Error::NotADirectory, QStringLiteral(\"remove folder: not a folder\"));",
+    "replace": "",
+    "test": "sh tests/interop/smb/run.sh build v2Namespace"
+  },
+  {
+    "name": "XC-6 batches ignore batchSize",
+    "file": "src/backends/smb/smbops.cpp",
+    "search": "    if (batch->isEmpty() || (!last && batch->size() < batchSize))",
+    "replace": "    if (batch->isEmpty() || !last)",
     "test": "sh tests/interop/smb/run.sh build v2Listing"
   },
   {
     "name": "XC-14 download ignores the offset",
     "file": "src/backends/smb/smbbackend.cpp",
-    "search": "        r = copyToSink(fh, options.offset, end, sink, progress);",
-    "replace": "        r = copyToSink(fh, 0, end, sink, progress);",
+    "search": "    const Result r = Ops::copyToSink(*at.session, &reader, options.offset, end, sink, progress);",
+    "replace": "    const Result r = Ops::copyToSink(*at.session, &reader, 0, end, sink, progress);",
     "test": "sh tests/interop/smb/run.sh build v2Transfers"
+  },
+  {
+    "name": "XM-6 resume offset not checked",
+    "file": "src/backends/smb/smbops.cpp",
+    "search": "    if (r.ok() && entry.size != options.resumeOffset) {",
+    "replace": "    if (false) {",
+    "test": "sh tests/interop/smb/run.sh build writeResume"
+  },
+  {
+    "name": "XM-6 resume truncates",
+    "file": "src/backends/smb/smbops.cpp",
+    "search": "        flags = O_RDWR;     // Resume: the size check needs FILE_READ_ATTRIBUTES",
+    "replace": "        flags = O_RDWR | O_TRUNC;",
+    "test": "sh tests/interop/smb/run.sh build writeResume"
+  },
+  {
+    "name": "XM-6 writes not in order",
+    "file": "src/backends/smb/smbfiles.cpp",
+    "search": "    m_sent += count;\n    m_inFlightBytes += count;",
+    "replace": "    m_inFlightBytes += count;",
+    "test": "sh tests/interop/smb/run.sh build writeResume strictServer"
+  },
+  {
+    "name": "XM-6 queue not discarded on a jump",
+    "file": "src/backends/smb/smbfiles.cpp",
+    "search": "    if (!m_queue.empty() && m_queue.front().offset + m_queue.front().used != position)\n        discard();      // not where the queue continues: a new position",
+    "replace": "",
+    "test": "sh tests/interop/smb/run.sh build v2Transfers"
+  },
+  {
+    "name": "C-9 cached reads ignore cancel",
+    "file": "src/backends/smb/smbfiles.cpp",
+    "search": "    if (m_session->canceled())\n        return Result(Error::Canceled);",
+    "replace": "",
+    "test": "sh tests/interop/smb/run.sh build downloadCancelFromProgress"
+  },
+  {
+    "name": "XC-11 mode changes accepted",
+    "file": "src/backends/smb/smbbackend.cpp",
+    "search": "    if (changes.mode >= 0)\n        return Result(Error::Unsupported, QStringLiteral(\"SMB has no permission bits\"));",
+    "replace": "",
+    "test": "sh tests/interop/smb/run.sh build attributes"
+  },
+  {
+    "name": "XC-11 modified not sent",
+    "file": "src/backends/smb/smbfiles.cpp",
+    "search": "    info.last_write_time = timevalOf(modified);     // zero: left alone",
+    "replace": "",
+    "test": "sh tests/interop/smb/run.sh build attributes"
+  },
+  {
+    "name": "XC-14 WriteOptions::modified ignored",
+    "file": "src/backends/smb/smbfiles.cpp",
+    "search": "    if (r.ok() && m_modified.isValid())\n        r = setTimes(*m_session, m_path, m_modified, QDateTime());",
+    "replace": "",
+    "test": "sh tests/interop/smb/run.sh build attributes"
+  },
+  {
+    "name": "XM-1 guest mapping only checked on success",
+    "file": "src/backends/smb/smbutil.cpp",
+    "search": "    if (Result r = checkSessionFlags(profile, smb2_get_session_flags(ctx)); !r.ok())\n        return r;\n    if (!signIn.ok())\n        return signIn;",
+    "replace": "    if (!signIn.ok())\n        return signIn;\n    if (Result r = checkSessionFlags(profile, smb2_get_session_flags(ctx)); !r.ok())\n        return r;",
+    "test": "sh tests/interop/smb/run.sh build guestMappingRefused"
+  },
+  {
+    "name": "XM-1 session flags not checked",
+    "file": "src/backends/smb/smbutil.cpp",
+    "search": "    if (Result r = checkSessionFlags(profile, smb2_get_session_flags(ctx)); !r.ok())\n        return r;\n    if (!signIn.ok())",
+    "replace": "    if (!signIn.ok())",
+    "test": "sh tests/interop/smb/run.sh build guestMappingRefused shareHelperDirect"
   }
 ]

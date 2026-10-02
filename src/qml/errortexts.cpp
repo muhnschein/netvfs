@@ -6,9 +6,34 @@ using namespace NetVfs;
 namespace NetVfsUi {
 
 namespace {
+// Files verify (SPEC-v2-review 2.19): nothing is written, so the backup
+// wording does not apply.
+QString browseText(Error error)
+{
+    switch (error) {
+    case Error::PermissionDenied:
+        //% "The server does not allow reading the start folder."
+        return qtTrId("settings-accounts-netvfs-la-error_browse_permission");
+    case Error::NotFound:
+        //% "The start folder was not found on the server."
+        return qtTrId("settings-accounts-netvfs-la-error_browse_not_found");
+    case Error::NotADirectory:
+        //% "The start folder on the server is not a folder."
+        return qtTrId("settings-accounts-netvfs-la-error_browse_not_a_folder");
+    default:
+        return QString();
+    }
+}
+
 // Errors whose meaning depends on the activity; empty when the generic text applies.
 QString activityText(Error error, Activity activity)
 {
+    if (activity == Activity::Browse)
+        return browseText(error);
+    if (activity == Activity::ServicePolicy && error == Error::SecurityPolicy) {
+        //% "These settings cannot be used for backups. Backups need an encrypted and signed connection, a share and a sign-in that works without you."
+        return qtTrId("settings-accounts-netvfs-la-error_service_policy_backup");
+    }
     if (activity == Activity::StoredSecret && error == Error::AuthFailed) {
         //% "The stored password or key for this account could not be read. Update the sign-in details."
         return qtTrId("settings-accounts-netvfs-la-error_stored_secret");

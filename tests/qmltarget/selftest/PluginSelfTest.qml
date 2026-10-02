@@ -15,6 +15,10 @@ Item {
         id: keys
     }
 
+    NetVfsConsentModel {
+        id: consents
+    }
+
     function check(ok, what) {
         if (!ok) {
             throw new Error("plugin self-test failed: " + what)
@@ -35,5 +39,16 @@ Item {
         check(NetVfsInput.defaultPort("sftp") === 22 && NetVfsInput.portValue("2222") === 2222, "NetVfsInput")
         check(NetVfsInput.backupsPathProblem("smb", "a:b") !== "", "NetVfsInput M-9")
         check(NetVfsHelpers.credentialsApplication === "netvfs", "NetVfsHelpers")
+        check(NetVfsProbe.IdentityTrusted === 5, "IdentityStatus.IdentityTrusted")
+        // SPEC-v2 XA-5: run-in-sdk.sh points NETVFS_PROVIDERS_DIR at accounts/descriptors.
+        check(NetVfsProviders.providers().length === 4, "NetVfsProviders.providers")
+        check(NetVfsProviders.descriptor("smb").fields.length > 5, "NetVfsProviders.descriptor")
+        check(NetVfsProviders.offersService("webdav", "files") && !NetVfsProviders.offersService("webdav", "backup"),
+              "NetVfsProviders.offersService")
+        check(NetVfsProviders.secretKind("smb", { "security_profile": "guest" }) === "none", "secretKind")
+        check(!NetVfsHelpers.serviceAllowed(NetVfsHelpers.makeParams("smb", "nas", "", "",
+                                                                     { "security_profile": "guest", "share": "s" }),
+                                            "backup"), "serviceAllowed")
+        check(consents.count >= 0 && consents.consent("lautta") !== "", "NetVfsConsentModel")
     }
 }

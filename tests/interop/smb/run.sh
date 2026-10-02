@@ -1,12 +1,16 @@
 #!/bin/sh
 # SPDX-License-Identifier: LGPL-2.1-or-later
-# SMB interop suite (SPEC-smb section 7, SPEC 12.2): containerised Samba
-# servers, the QtTest driver tst_interop_smb and one netvfs-cli round trip.
-# Usage: run.sh <build dir> [test functions...]   (the latter are passed to the driver)
+# SMB interop suite (SPEC-smb section 7, SPEC 12.2, SPEC-v2 XT-1/XT-2):
+# containerised Samba servers, the QtTest driver tst_interop_smb, one
+# netvfs-cli round trip and the backend conformance suite (two targets: a
+# share, and server mode).
+# Usage: run.sh <build dir> [test functions...]   (the latter are passed to the
+# driver; the CLI round trip and the conformance suite then do not run)
 #
 # Environment:
 #   NETVFS_SMB_CURRENT_BASE  base image for the "current Samba" server (M-T10),
 #                            default mirror.gcr.io/library/ubuntu:26.04
+#   NETVFS_SMB_CONFORMANCE_ONLY  1: run only the conformance suite
 set -eu
 
 here=$(cd "$(dirname "$0")" && pwd)
@@ -59,30 +63,38 @@ ready() {
 }
 
 # M-T16: "small" is a 16 MiB tmpfs on the strict server.
+# XT-1: "conf" is a strict server of its own for the conformance suite, which
+# ends its connections; its backup share is a folder of this host (hostPath).
+mkdir -p "$work/conf-data"
+chmod 777 "$work/conf-data"
 samba strict "$image" strict --tmpfs /srv/smb/small:size=16m
 samba default "$image" default
 samba encoff "$image" encoff
 samba smb2only "$image" smb2only
 samba aes256 "$image" aes256
 samba gmac "$image" gmac
+samba guest "$image" guest
+samba conf "$image" strict -v "$work/conf-data:/srv/smb/backup"
 samba current "$current_image" strict
-for s in strict default encoff smb2only aes256 gmac current; do
+for s in strict default encoff smb2only aes256 gmac guest conf current; do
     ready "$s"
 done
 
 # M-T12 and the stall tests: proxies on 4450.. in front of the servers.
 encoff=$(address encoff)
 strict=$(address strict)
+conf=$(address conf)
 docker run -d --name "$prefix-proxy" "$image" proxy \
     "4450:pass:0:$encoff" "4451:flip:5:$encoff" "4452:flip:5:$strict" \
     "4453:stall:5:$strict" "4454:stall:2:$strict" "4455:drop:5:$strict" "4456:drop:2:$strict" \
-    "4457:dialect:1:$strict" >/dev/null
+    "4457:dialect:1:$strict" "4458:stall:5:$conf" >/dev/null
 i=0
 until docker logs "$prefix-proxy" 2>&1 | grep -q "proxies ready"; do
     i=$((i + 1))
     [ $i -lt 40 ] || { docker logs "$prefix-proxy" >&2; exit 1; }
     sleep 0.25
 done
+proxy=$(address proxy)
 
 echo "Samba: $(docker exec "$prefix-strict" smbd --version), current: $(docker exec "$prefix-current" smbd --version)"
 
@@ -90,11 +102,10 @@ echo "Samba: $(docker exec "$prefix-strict" smbd --version), current: $(docker e
 # including in the vendored libsmb2. No effect on other builds.
 export UBSAN_OPTIONS="${UBSAN_OPTIONS:+$UBSAN_OPTIONS:}print_stacktrace=1:halt_on_error=1"
 export NETVFS_BACKEND_PATH="$build/lib/netvfs/backends"
+# XM-7: the build tree's share enumeration helper.
+export NETVFS_SMB_SHARES_HELPER="$build/libexec/netvfs/netvfs-smb-shares"
 export NETVFS_SMB_PREFIX="$prefix"
 export NETVFS_SMB_PASSWORD="$password"
-status=0
-"$build/tests/interop/smb/tst_interop_smb" "$@" || status=1
-
 # SPEC 12.2, SPEC-v2 XC-CLI: the command-line tool end to end.
 cli() {
     NETVFS_SECRET="$password" "$build/bin/netvfs-cli" --provider smb --host "$strict" --user backup \
@@ -152,8 +163,7 @@ cli_round_trip() {
     cli_expect 20 mv "CLI run/other.bin" "CLI run/cli.bin"
     cli mv --replace "CLI run/other.bin" "CLI run/cli.bin"
     cli put "$work/cli.bin" "CLI run/tree/inner/f"
-    # cp across two locations (--to-url): a local tree into the share, NoReplace by default. An SMB
-    # connection is thread-confined (M-13), so the share is always the destination here.
+    # cp across two locations (--to-url): a local tree into the share, NoReplace by default.
     mkdir -p "$work/cpsrc/sub"
     cp "$work/cli.bin" "$work/cpsrc/sub/f"
     NETVFS_SECRET="$password" "$build/bin/netvfs-cli" --url "file://$work/cpsrc" cp -r \
@@ -163,6 +173,11 @@ cli_round_trip() {
     cmp -s "$work/cli.bin" "$work/cli.out"
     expect_code 20 env NETVFS_SECRET="$password" "$build/bin/netvfs-cli" --url "file://$work/cpsrc" cp -r \
         --to-url "smb://backup@$strict/backup/CLI%20run" sub tree2
+    # and back: the share as the source, read on copyAcross's worker thread (M-13 hand-over)
+    mkdir -p "$work/cpdst"
+    NETVFS_SECRET="$password" "$build/bin/netvfs-cli" --url "smb://backup@$strict/backup/CLI%20run" cp -r \
+        --to-url "file://$work/cpdst" tree2 back
+    cmp -s "$work/cli.bin" "$work/cpdst/back/f"
     # rm refuses folders, rmdir only empty ones, rm -r removes the tree
     cli_expect 27 rm "CLI run/tree"
     cli_expect 28 rmdir "CLI run/tree/inner"
@@ -174,25 +189,57 @@ cli_round_trip() {
     cli --profile signed ls "CLI run" | grep -q "cli.bin$"
     expect_code 17 "$build/bin/netvfs-cli" --url "smb://backup:pw@$strict/backup" ls ""
     cli rm "CLI run/cli.bin"
-    # shares: the server's shares (server mode), where the backend has it
-    if NETVFS_SECRET="$password" "$build/bin/netvfs-cli" --provider smb --host "$strict" --user backup shares \
-            > "$work/cli.shares" 2>/dev/null; then
-        grep -qx backup "$work/cli.shares"
-    else
-        echo "note: shares is not available in this build (SMB server mode)"
-    fi
+    # shares: the server's shares (server mode, XM-2/XM-7)
+    NETVFS_SECRET="$password" "$build/bin/netvfs-cli" --provider smb --host "$strict" --user backup shares \
+        > "$work/cli.shares"
+    grep -qx backup "$work/cli.shares"
+    grep -qx media "$work/cli.shares"
+    if grep -qx 'hidden\$' "$work/cli.shares"; then echo "admin share listed" >&2; return 1; fi
 }
 
-head -c 3000000 /dev/urandom > "$work/cli.bin"
-# A subshell of its own: "set -e" is ignored inside a function that is called as a condition.
-set +e
-(set -e; cli_round_trip)
-cli_status=$?
-set -e
-if [ $cli_status -eq 0 ]; then
-    echo "PASS   : netvfs-cli round trip"
-else
-    echo "FAIL!  : netvfs-cli round trip"
-    status=1
+status=0
+if [ "${NETVFS_SMB_CONFORMANCE_ONLY:-0}" != 1 ]; then
+    "$build/tests/interop/smb/tst_interop_smb" "$@" || status=1
+    [ $# -eq 0 ] || exit $status
+    head -c 3000000 /dev/urandom > "$work/cli.bin"
+    # A subshell of its own: "set -e" is ignored inside a function that is called as a condition.
+    set +e
+    (set -e; cli_round_trip)
+    cli_status=$?
+    set -e
+    if [ $cli_status -eq 0 ]; then
+        echo "PASS   : netvfs-cli round trip"
+    else
+        echo "FAIL!  : netvfs-cli round trip"
+        status=1
+    fi
 fi
+
+# SPEC-v2 XT-1: the conformance suite, strict profile, against a share and
+# in server mode. The proxy on 4458 stalls every connection after sign-in.
+# "restart" ends every client connection of "conf" the way a restarting smbd
+# does (keepAlive -> ConnectionLost); a real container restart would change
+# the server's address under the following tests.
+mkdir -p "$work/conf-data/conformance" "$work/conf-data/conformance-server"
+chmod 777 "$work/conf-data/conformance" "$work/conf-data/conformance-server"
+cat > "$work/conformance.json" <<JSON
+{ "targets": [
+  { "name": "smb-share", "provider": "smb", "host": "$conf", "user": "backup",
+    "options": { "share": "backup", "security_profile": "strict" },
+    "secretEnv": "NETVFS_CONFORMANCE_SECRET",
+    "baseDir": "conformance", "hostPath": "$work/conf-data/conformance",
+    "stallProxy": { "host": "$proxy", "port": 4458 },
+    "restart": "docker exec $prefix-conf pkill -f 'smbd: client'" },
+  { "name": "smb-server", "provider": "smb", "host": "$conf", "user": "backup",
+    "options": { "shares": "backup", "security_profile": "strict" },
+    "secretEnv": "NETVFS_CONFORMANCE_SECRET",
+    "baseDir": "/backup/conformance-server", "hostPath": "$work/conf-data/conformance-server",
+    "stallProxy": { "host": "$proxy", "port": 4458 },
+    "restart": "docker exec $prefix-conf pkill -f 'smbd: client'" }
+] }
+JSON
+# Files the suite creates under hostPath (as root) must be writable by the
+# share's user inside the container (resume of the > 4 GiB file).
+(umask 000 && NETVFS_CONFORMANCE_SECRET="$password" NETVFS_CONFORMANCE_CONFIG="$work/conformance.json" \
+    "$build/tests/conformance/tst_conformance") || status=1
 exit $status

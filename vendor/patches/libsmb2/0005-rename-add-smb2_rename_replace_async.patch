@@ -1,0 +1,102 @@
+From: muhnschein <tan_anemone.0l@icloud.com>
+Subject: [PATCH] rename: add smb2_rename_replace_async()
+
+smb2_rename_async() always sends FileRenameInformation with
+ReplaceIfExists = 0, so the server refuses an existing target. A client
+that wants rename-over (for example to commit a temporary upload) has to
+delete the target first, which is not atomic: another client can see
+the name missing, and a failure between the two steps loses the old file.
+
+Add smb2_rename_replace_async(), the same compound with ReplaceIfExists
+set. smb2_rename_async() is unchanged.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+diff -ruN a/include/smb2/libsmb2.h b/include/smb2/libsmb2.h
+--- a/include/smb2/libsmb2.h
++++ b/include/smb2/libsmb2.h
+@@ -1234,6 +1234,16 @@
+                       const char *newpath, smb2_command_cb cb, void *cb_data);
+ 
+ /*
++ * Async rename() that replaces an existing newpath in the same request
++ * (FileRenameInformation with ReplaceIfExists set), atomically on the
++ * server. smb2_rename_async() fails on an existing newpath instead.
++ * Return values and callback status as for smb2_rename_async().
++ */
++int smb2_rename_replace_async(struct smb2_context *smb2, const char *oldpath,
++                              const char *newpath, smb2_command_cb cb,
++                              void *cb_data);
++
++/*
+  * Sync rename()
+  */
+ int smb2_rename(struct smb2_context *smb2, const char *oldpath,
+diff -ruN a/lib/libsmb2.c b/lib/libsmb2.c
+--- a/lib/libsmb2.c
++++ b/lib/libsmb2.c
+@@ -2772,7 +2772,7 @@
+ static int
+ smb2_new_name_async(struct smb2_context *smb2, const char *oldpath,
+                     const char *newpath, uint8_t file_info_class,
+-                    uint32_t desired_access,
++                    uint32_t desired_access, uint8_t replace_if_exist,
+                     smb2_command_cb cb, void *cb_data)
+ {
+         struct new_name_cb_data *new_name_data;
+@@ -2833,11 +2833,11 @@
+         si_req.additional_information = 0;
+         memcpy(si_req.file_id, compound_file_id, SMB2_FD_SIZE);
+         if (file_info_class == SMB2_FILE_LINK_INFORMATION) {
+-                ln_info.replace_if_exist = 0;
++                ln_info.replace_if_exist = replace_if_exist;
+                 ln_info.file_name = new_name_data->newpath;
+                 si_req.input_data = &ln_info;
+         } else {
+-                rn_info.replace_if_exist = 0;
++                rn_info.replace_if_exist = replace_if_exist;
+                 rn_info.file_name = new_name_data->newpath;
+                 si_req.input_data = &rn_info;
+         }
+@@ -2880,7 +2880,20 @@
+                                    SMB2_FILE_RENAME_INFORMATION,
+                                    SMB2_GENERIC_READ |
+                                    SMB2_FILE_READ_ATTRIBUTES |
+-                                   SMB2_DELETE,
++                                   SMB2_DELETE, 0,
++                                   cb, cb_data);
++}
++
++int
++smb2_rename_replace_async(struct smb2_context *smb2, const char *oldpath,
++                          const char *newpath, smb2_command_cb cb,
++                          void *cb_data)
++{
++        return smb2_new_name_async(smb2, oldpath, newpath,
++                                   SMB2_FILE_RENAME_INFORMATION,
++                                   SMB2_GENERIC_READ |
++                                   SMB2_FILE_READ_ATTRIBUTES |
++                                   SMB2_DELETE, 1,
+                                    cb, cb_data);
+ }
+ 
+@@ -2892,7 +2905,7 @@
+          * access to the source file. */
+         return smb2_new_name_async(smb2, oldpath, newpath,
+                                    SMB2_FILE_LINK_INFORMATION,
+-                                   SMB2_FILE_READ_ATTRIBUTES,
++                                   SMB2_FILE_READ_ATTRIBUTES, 0,
+                                    cb, cb_data);
+ }
+ 
+diff -ruN a/lib/libsmb2.syms b/lib/libsmb2.syms
+--- a/lib/libsmb2.syms
++++ b/lib/libsmb2.syms
+@@ -135,6 +135,7 @@
+ smb2_register_error_callback
+ smb2_rename
+ smb2_rename_async
++smb2_rename_replace_async
+ smb2_request_resume_key
+ smb2_request_resume_key_async
+ smb2_rewinddir
