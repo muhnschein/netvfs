@@ -138,11 +138,12 @@ bool applyValueOption(const QString &arg, const QString &value, Options *options
 
 bool parse(const QStringList &arguments, Options *options, QString *error)
 {
-    for (int i = 0; i < arguments.size(); ++i) {
-        const QString arg = arguments.at(i);
+    int next = 0;
+    while (next < arguments.size()) {
+        const QString arg = arguments.at(next++);
         if (!arg.startsWith(QLatin1Char('-'))) {
             options->command = arg;
-            options->args = arguments.mid(i + 1);
+            options->args = arguments.mid(next);
             break;
         }
         if (takesNoValue(arg)) {
@@ -150,11 +151,11 @@ bool parse(const QStringList &arguments, Options *options, QString *error)
             options->help = options->help || arg != QLatin1String("--prompt");
             continue;
         }
-        if (i + 1 >= arguments.size()) {
+        if (next >= arguments.size()) {
             *error = arg + QStringLiteral(" needs a value");
             return false;
         }
-        if (!applyValueOption(arg, arguments.at(++i), options, error))
+        if (!applyValueOption(arg, arguments.at(next++), options, error))
             return false;
     }
     if (options->help)
@@ -207,8 +208,9 @@ Result resolveRemotePaths(const Options &options, Prepared *prepared)
         if (kinds.at(i) != 'r')
             continue;
         QString path;
-        if (const Result r = resolvePath(options.main.basePath, prepared->cmd.positional.at(i), &path); !r.ok())
-            return r;
+        const Result resolved = resolvePath(options.main.basePath, prepared->cmd.positional.at(i), &path);
+        if (!resolved.ok())
+            return resolved;
         prepared->cmd.positional[i] = path;
     }
     return Result::success();
@@ -284,8 +286,9 @@ Result resolveLocation(Location *location, const QString &url, const QVariantMap
     if (!url.isEmpty()) {
         // XH-6: a password in the URL is rejected and never stored.
         QString path;
-        if (const Result r = Url::parse(url, &location->params, &path); !r.ok())
-            return r;
+        const Result parsed = Url::parse(url, &location->params, &path);
+        if (!parsed.ok())
+            return parsed;
         location->basePath = path;
     }
     for (auto it = overrides.constBegin(); it != overrides.constEnd(); ++it)
@@ -327,12 +330,14 @@ int run(const QStringList &arguments, QTextStream &out, QTextStream &err, QIODev
         return r.ok() ? 0 : fail(err, r);
     }
 
-    if (const Result r = resolveLocation(&options.main, options.url, options.overrides); !r.ok())
-        return fail(err, r);
+    const Result located = resolveLocation(&options.main, options.url, options.overrides);
+    if (!located.ok())
+        return fail(err, located);
     if (!locationGiven(options.main.params))
         return usageError(err, QStringLiteral("--url, or --provider and --host, is required"));
-    if (const Result r = resolveRemotePaths(options, &prepared); !r.ok())
-        return fail(err, r);
+    const Result resolved = resolveRemotePaths(options, &prepared);
+    if (!resolved.ok())
+        return fail(err, resolved);
     return runWithBackend(prepared, &options, connector, out, err);
 }
 

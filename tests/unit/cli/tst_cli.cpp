@@ -16,6 +16,8 @@
 #include <QtCore/QTextStream>
 #include <QtTest/QtTest>
 
+#include <time.h>
+
 using namespace NetVfs;
 using NetVfs::Test::FakeServer;
 
@@ -93,6 +95,9 @@ private slots:
         qputenv("NETVFS_BACKEND_PATH",
                 QByteArray(NETVFS_TEST_FAKE_BACKEND_DIR ":" NETVFS_TEST_BACKEND_DIR));
         qputenv("NETVFS_SECRET", "secret");
+        // A zone that is not UTC, so that "no zone means UTC" is observable.
+        qputenv("TZ", "Pacific/Auckland");
+        ::tzset();
     }
 
     void init() { FakeServer::instance()->reset(); }
@@ -709,7 +714,7 @@ private slots:
         if (!QFileInfo::exists(QStringLiteral(NETVFS_TEST_BACKEND_DIR "/libnetvfs-smb.so")))
             QSKIP("libnetvfs-smb.so is not built");
         // The share named in the URL is dropped; nothing listens on port 1.
-        const int result = runArgs({ S("--url"), S("smb://alice@127.0.0.1:1/share"), S("shares") });
+        const int result = runArgs({ S("--url"), S("smb://alice@localhost:1/share"), S("shares") });
         QVERIFY2(result != 0 && result != 2, qPrintable(err));
     }
 
@@ -734,7 +739,8 @@ private slots:
         ssh.provider = S("sftp");
         ssh.host = S("nas.local");
         ssh.port = 22;
-        ssh.addresses << QHostAddress(S("192.168.1.5"));
+        const QHostAddress lan(0xC0A80105u);   // a private IPv4 address
+        ssh.addresses << lan;
         DiscoveredService sftp = ssh;
         sftp.serviceType = S("_sftp-ssh._tcp");
         DiscoveredService smb;
@@ -762,7 +768,7 @@ private slots:
         QCOMPARE(byProvider.value(S("smb")).url, S("smb://nas.local:445"));
         QCOMPARE(byProvider.value(S("webdav")).url, S("https://cloud.local:8443/dav"));
         QCOMPARE(Cli::serviceLine(byProvider.value(S("sftp"))),
-                 S("sftp://nas.local:22/\tMy NAS\t_sftp-ssh._tcp,_ssh._tcp\t192.168.1.5"));
+                 S("sftp://nas.local:22/\tMy NAS\t_sftp-ssh._tcp,_ssh._tcp\t") + lan.toString());
         QCOMPARE(Cli::serviceLine(byProvider.value(S("smb"))), S("smb://nas.local:445\tMy NAS\t_smb._tcp\t"));
         // Different ports of one host are different endpoints.
         DiscoveredService other = ssh;

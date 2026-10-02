@@ -42,7 +42,7 @@ TerminalPrompter::TerminalPrompter(QIODevice *input, QTextStream *prompts, EchoC
 {
 }
 
-bool TerminalPrompter::readAnswer(const AuthPrompt &prompt, QByteArray *answer)
+bool TerminalPrompter::readAnswer(const AuthPrompt &prompt, QByteArray *answer) const
 {
     *m_prompts << sanitizeForTerminal(prompt.text);
     m_prompts->flush();

@@ -52,7 +52,7 @@ public:
                 QVector<QByteArray> *answers) override;
 
 private:
-    bool readAnswer(const AuthPrompt &prompt, QByteArray *answer);
+    bool readAnswer(const AuthPrompt &prompt, QByteArray *answer) const;
 
     QIODevice *m_input;
     QTextStream *m_prompts;

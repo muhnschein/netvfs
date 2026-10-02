@@ -267,12 +267,14 @@ Result cmdCp(const Context &c)
     Location target = c.options.main;
     if (crossLocation) {
         target = Location();
-        if (const Result r = targetLocation(c, &target); !r.ok())
-            return r;
+        const Result located = targetLocation(c, &target);
+        if (!located.ok())
+            return located;
     }
     QString destination;
-    if (const Result r = resolvePath(target.basePath, c.cmd.positional.at(1), &destination); !r.ok())
-        return r;
+    const Result resolved = resolvePath(target.basePath, c.cmd.positional.at(1), &destination);
+    if (!resolved.ok())
+        return resolved;
     const QString &source = c.cmd.positional.at(0);
 
     if (!crossLocation) {
@@ -288,8 +290,9 @@ Result cmdCp(const Context &c)
     // XH-5: across two connections, a second one to the same location unless
     // --to-url names another.
     QScopedPointer<Backend> second;
-    if (const Result r = c.connector.open(target, &second); !r.ok())
-        return r;
+    const Result opened = c.connector.open(target, &second);
+    if (!opened.ok())
+        return opened;
     Ops::CopyAcrossOptions options;
     options.recursive = recursive;
     options.mode = modeOf(c.cmd);
@@ -582,7 +585,8 @@ QVector<FlagSpec> flagsOf(const CommandSpec &spec)
             flag.takesValue = true;
             token.chop(1);
         }
-        if (const int bar = token.indexOf(QLatin1Char('|')); bar > 0) {
+        const int bar = token.indexOf(QLatin1Char('|'));
+        if (bar > 0) {
             flag.shortName = token.at(0);
             token = token.mid(bar + 1);
         }
@@ -610,10 +614,12 @@ const FlagSpec *findShort(const QVector<FlagSpec> &flags, QChar name)
     return nullptr;
 }
 
-// Takes the flag at args[*i]; `*i` moves over its value.
-bool takeFlag(const QVector<FlagSpec> &flags, const QStringList &args, int *i, CommandLine *out, QString *error)
+// Takes the flag at args[index]; `*consumed` is the number of arguments it used
+// (the flag, and its value when it has one).
+bool takeFlag(const QVector<FlagSpec> &flags, const QStringList &args, int index, int *consumed, CommandLine *out,
+              QString *error)
 {
-    const QString arg = args.at(*i);
+    const QString arg = args.at(index);
     QVector<const FlagSpec *> found;
     if (arg.startsWith(QLatin1String("--"))) {
         found.append(findLong(flags, arg.mid(2)));
@@ -621,6 +627,7 @@ bool takeFlag(const QVector<FlagSpec> &flags, const QStringList &args, int *i, C
         for (int k = 1; k < arg.size(); ++k)
             found.append(findShort(flags, arg.at(k)));
     }
+    *consumed = 1;
     for (const FlagSpec *flag : found) {
         if (!flag) {
             *error = QStringLiteral("unknown option ") + arg;
@@ -630,11 +637,12 @@ bool takeFlag(const QVector<FlagSpec> &flags, const QStringList &args, int *i, C
             out->flags.insert(flag->longName);
             continue;
         }
-        if (*i + 1 >= args.size()) {
+        if (index + *consumed >= args.size()) {
             *error = arg + QStringLiteral(" needs a value");
             return false;
         }
-        out->values[flag->longName].append(args.at(++*i));
+        out->values[flag->longName].append(args.at(index + *consumed));
+        ++*consumed;
     }
     return true;
 }
@@ -667,16 +675,19 @@ bool parseCommandLine(const CommandSpec &spec, const QStringList &args, CommandL
 {
     const QVector<FlagSpec> flags = flagsOf(spec);
     bool flagsEnded = false;
-    for (int i = 0; i < args.size(); ++i) {
-        const QString &arg = args.at(i);
+    int next = 0;
+    while (next < args.size()) {
+        const QString &arg = args.at(next);
+        int consumed = 1;
         if (!flagsEnded && arg == QLatin1String("--")) {
             flagsEnded = true;
         } else if (!flagsEnded && isFlag(arg)) {
-            if (!takeFlag(flags, args, &i, out, error))
+            if (!takeFlag(flags, args, next, &consumed, out, error))
                 return false;
         } else {
             out->positional.append(arg);
         }
+        next += consumed;
     }
     if (out->positional.size() != static_cast<int>(qstrlen(spec.kinds))) {
         *error = QStringLiteral("%1: wrong number of arguments").arg(QLatin1String(spec.name));
