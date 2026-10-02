@@ -103,7 +103,7 @@ bool isUnreserved(char c)
 
 QString percentEncode(const QString &text, bool keepSlash)
 {
-    static const QLatin1String hex("0123456789ABCDEF");
+    static const char hex[] = "0123456789ABCDEF";
     const QByteArray bytes = Names::encode(text);
     QString out;
     out.reserve(bytes.size());
@@ -112,8 +112,8 @@ QString percentEncode(const QString &text, bool keepSlash)
             out.append(QLatin1Char(c));
         } else {
             out.append(QLatin1Char('%'));
-            out.append(hex.at((uchar(c) >> 4) & 0x0F));
-            out.append(hex.at(uchar(c) & 0x0F));
+            out.append(QLatin1Char(hex[(uchar(c) >> 4) & 0x0F]));
+            out.append(QLatin1Char(hex[uchar(c) & 0x0F]));
         }
     }
     return out;
