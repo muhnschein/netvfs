@@ -12,7 +12,7 @@
 
 namespace NetVfs {
 
-AccountSession *AccountSession::open(int accountId, QObject *parent)
+AccountSession *AccountSession::open(int accountId, Service service, QObject *parent)
 {
     auto manager = std::make_unique<Accounts::Manager>();
     auto session = std::make_unique<AccountSession>(manager.get(), std::make_unique<SignonSecretSource>().release(),
@@ -20,7 +20,7 @@ AccountSession *AccountSession::open(int accountId, QObject *parent)
     manager.release()->setParent(session.get());
     // Deferred so callers can connect to ready()/failed() first.
     AccountSession *raw = session.release();   // owned by `parent` (Qt ownership)
-    QTimer::singleShot(0, raw, [raw, accountId]() { raw->start(accountId); });
+    QTimer::singleShot(0, raw, [raw, accountId, service]() { raw->start(accountId, service); });
     return raw;
 }
 
@@ -39,12 +39,20 @@ AccountSession::~AccountSession()
     releaseCredentials();
 }
 
-void AccountSession::start(int accountId)
+void AccountSession::start(int accountId, Service service)
 {
-    if (const Result r = AccountStore(m_manager).load(accountId, &m_config); !r.ok()) {
+    if (const Result r = AccountStore(m_manager).load(accountId, service, &m_config); !r.ok()) {
         emit failed(r);
         return;
     }
+    // XA-4: refused before the secret is read.
+    if (const Result r = checkServicePolicy(m_config.params, service); !r.ok()) {
+        qCDebug(lcNetVfsCore) << "Account" << accountId << "refused for" << serviceId(service) << r.toString();
+        emit failed(r);
+        return;
+    }
+    m_config.params = paramsForService(m_config.params, service);
+    m_secrets->setSecretOptional(secretOptional(m_config.params));   // XA-7
     m_secrets->fetch(m_config.credentialsId);
 }
 

@@ -12,7 +12,9 @@ enum class Activity {
     Connect,          // identify / verify / test connection
     StoredSecret,     // reading the stored secret from signond
     InstallKey,       // installing the public key with a password
-    KeyFile           // importing or generating a key
+    KeyFile,          // importing or generating a key
+    Browse,           // verifying an account for the Files service (SPEC-v2 XA-1)
+    ServicePolicy     // checking a configuration against a service (SPEC-v2 XA-4)
 };
 
 // Translated, user-facing sentence for an error.

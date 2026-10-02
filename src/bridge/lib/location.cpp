@@ -7,9 +7,7 @@
 #include "paths.h"
 #include "url.h"
 
-#include <Accounts/Account>
 #include <Accounts/Manager>
-#include <Accounts/Service>
 
 #include <QtCore/QPointer>
 
@@ -49,35 +47,6 @@ AccountDirectory::~AccountDirectory() = default;
 
 const char LibAccountsDirectory::FilesServiceType[] = "netvfs-files";
 
-namespace {
-
-QString filesServiceName(const QString &provider)
-{
-    return provider + QStringLiteral("-files");
-}
-
-// The account's Files service, if it has one and it is enabled.
-bool filesServiceEnabled(Accounts::Manager *manager, Accounts::Account *account, QString *filesRoot)
-{
-    const Accounts::Service service = manager->service(filesServiceName(account->providerName()));
-    if (!service.isValid())
-        return false;
-    account->selectService(service);
-    const bool enabled = account->isEnabled();
-    *filesRoot = account->value(QStringLiteral("files_root")).toString();
-    account->selectService(Accounts::Service());
-    return enabled && account->isEnabled();
-}
-
-// XA-4 adapter: the accounts work changes this call to
-// AccountSession::open(accountId, Service::Files, parent).
-AccountSession *openFilesSession(int accountId, QObject *parent)
-{
-    return AccountSession::open(accountId, parent);
-}
-
-} // namespace
-
 class LibAccountsDirectory::Private
 {
 public:
@@ -99,24 +68,21 @@ LibAccountsDirectory::~LibAccountsDirectory() = default;
 
 QVector<AccountLocation> LibAccountsDirectory::filesAccounts()
 {
+    // XA-1: enabled accounts whose Files service is enabled.
     QVector<AccountLocation> result;
-    const Accounts::AccountIdList ids = d->manager.accountList();
-    for (const Accounts::AccountId id : ids) {
-        Accounts::Account *account = d->manager.account(id);   // owned by the manager
-        QString filesRoot;
-        if (!account || !filesServiceEnabled(&d->manager, account, &filesRoot))
-            continue;
+    const AccountStore store(&d->manager);
+    for (const int id : store.filesAccounts()) {
         AccountConfig config;
-        if (!AccountStore(&d->manager).load(static_cast<int>(id), &config).ok())
+        if (!store.load(id, Service::Files, &config).ok())
             continue;
         AccountLocation location;
-        location.accountId = static_cast<int>(id);
+        location.accountId = id;
         location.provider = config.provider;
         location.displayName = config.displayName;
         location.params = config.params;
         location.attention = config.attention;
         QString normalized;
-        if (Paths::normalize(filesRoot, &normalized).ok())
+        if (Paths::normalize(config.filesRoot, &normalized).ok())
             location.filesRoot = normalized;
         result.append(location);
     }
@@ -125,7 +91,8 @@ QVector<AccountLocation> LibAccountsDirectory::filesAccounts()
 
 void LibAccountsDirectory::fetch(int accountId, const Fetched &done)
 {
-    AccountSession *session = openFilesSession(accountId, this);
+    // XA-4: refuses (SecurityPolicy) a configuration the Files service may not use.
+    AccountSession *session = AccountSession::open(accountId, Service::Files, this);
     auto finished = std::make_shared<bool>(false);
     QPointer<AccountSession> guard(session);
     connect(session, &AccountSession::ready, this, [guard, done, finished]() {
@@ -147,7 +114,7 @@ void LibAccountsDirectory::fetch(int accountId, const Fetched &done)
 
 void LibAccountsDirectory::setAttention(int accountId, Attention attention, const QString &seenPin)
 {
-    if (const Result r = AccountStore(&d->manager).setAttention(accountId, attention, seenPin); !r.ok())
+    if (const Result r = AccountStore(&d->manager).setAttention(accountId, Service::Files, attention, seenPin); !r.ok())
         qCWarning(lcNetVfsBridge) << "Cannot record the attention state:" << r.toString();
 }
 

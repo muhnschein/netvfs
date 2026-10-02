@@ -625,7 +625,11 @@ public:
 ### 6.4 FTP / FTPS (new plugin `libnetvfs-ftp.so`)
 
 - F-1: Transport: system libcurl, one easy handle (one control connection) per backend.
-  Option `tls_mode`: `explicit` (default; `AUTH TLS`, `CURLUSESSL_ALL`), `implicit`
+  Option `tls_mode`: `explicit` (default; `AUTH TLS`; libcurl runs in `CURLUSESSL_ALL` from
+  8.20.0 on and in `CURLUSESSL_TRY` before, because distribution libcurls such as Ubuntu
+  24.04's 8.5.0 do not reuse a `CURLUSESSL_ALL` FTP connection; in both a reply guard
+  aborts the request unless AUTH TLS was answered 234 and PROT P accepted, see `TlsGuard`
+  and XSEC-1/XSEC-2), `implicit`
   (port 990), `none` (plain FTP, requires `allow_insecure=true`). Passive mode only (EPSV,
   then PASV); active mode not supported. TLS identity exactly as W-3/W-4; TLS session
   reuse on data connections (servers with `require_ssl_reuse`).

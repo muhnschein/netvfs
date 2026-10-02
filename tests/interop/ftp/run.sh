@@ -8,8 +8,8 @@
 #
 # FTP data connections go to the port the server announces (EPSV, or PASV
 # with 127.0.0.1): the passive port ranges are published 1:1 on the host's
-# loopback, at a base derived from the process id so that parallel runs do
-# not collide.
+# loopback, in a free range below the ephemeral ports (chosen at start, see
+# below) so that parallel runs and outgoing connections do not collide.
 #
 # The driver compiles the backend in with NETVFS_TLS_TEST_HOOKS and passes
 # the test CA as the option test_ca_file, so the vsftpd explicit instance,
@@ -84,7 +84,32 @@ make_certs
 build_images
 
 password=$(od -An -N12 -tx1 /dev/urandom | tr -d ' \n')
-base=$((20000 + ($$ % 800) * 50))
+# 50 consecutive free loopback ports below the kernel's ephemeral range, so
+# that neither parallel runs nor outgoing connections can take them first.
+base=$(python3 - "$$" <<'PY'
+import socket, sys
+lo = int(open("/proc/sys/net/ipv4/ip_local_port_range").read().split()[0])
+start = 10000
+slots = max(1, (lo - start - 50) // 50)
+for i in range(slots):
+    base = start + ((int(sys.argv[1]) + i) % slots) * 50
+    socks = []
+    try:
+        for port in range(base, base + 50):
+            s = socket.socket()
+            s.bind(("127.0.0.1", port))
+            socks.append(s)
+    except OSError:
+        continue
+    finally:
+        for s in socks:
+            s.close()
+    print(base)
+    break
+else:
+    sys.exit("no free passive port range")
+PY
+)
 vsftpd="$prefix-vsftpd"
 pureftpd="$prefix-pureftpd"
 docker run -d --name "$vsftpd" -e TEST_PASSWORD="$password" -e PASV_BASE="$base" \

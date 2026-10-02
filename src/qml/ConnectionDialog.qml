@@ -3,57 +3,149 @@ import QtQuick 2.0
 import Sailfish.Silica 1.0
 import org.netvfs.accounts 1.0
 
-// Input dialog of the creation flow (SPEC 7.3 step 1) with the fields of
-// SPEC-sftp 1 and SPEC-smb 1. With credentialsOnly set it asks only for the
-// secret, for the credentials update flow (SPEC 7.5; for SFTP the three
-// choices of S-18: password, new key, imported key).
-// Input is validated by NetVfsHelpers before any connection is made (M-9).
+// Input dialog of the creation flow (SPEC 7.3 step 1), rendered from the
+// provider descriptor (SPEC-v2 XA-5, NetVfsProviders): connection fields,
+// the services to set up (backup only where the provider offers it and the
+// settings allow it, XA-4), the sign-in method and the secret. With
+// credentialsOnly set it asks only for the sign-in method and the secret,
+// for the credentials update flow (SPEC 7.5; for SFTP the choices of S-18).
+// Input is validated before any connection is made (M-9).
 Dialog {
     id: dialog
 
     property string provider
     property bool credentialsOnly
-    // "password" or "publickey"; preselects the sign-in method
+    // Preselects the sign-in method ("password", "publickey", "interactive", "token")
     property string initialAuthMode: "password"
 
-    readonly property bool isSftp: provider === "sftp"
-    readonly property bool isSmb: provider === "smb"
-    readonly property string authMode: isSftp && methodBox.currentIndex > 0 ? "publickey" : "password"
-    // "generate" or "import" (key mode only)
-    readonly property string keySource: methodBox.currentIndex === 2 ? "import" : "generate"
-    readonly property string password: passwordField.text
-    readonly property string backupsPath: NetVfsInput.cleanBackupsPath(provider, backupsField.text)
+    // { <field key>: value, auth_mode, key_source } (NetVfsProviders.initialValues)
+    property var values: ({})
 
-    readonly property string hostProblem: NetVfsInput.hostProblem(hostField.text)
-    readonly property string portProblem: NetVfsInput.portProblem(portField.text)
-    readonly property string userProblem: NetVfsInput.userNameProblem(userField.text)
-    readonly property string shareProblem: isSmb ? NetVfsInput.shareProblem(shareField.text) : ""
-    readonly property string folderProblem: NetVfsInput.backupsPathProblem(provider, backupsField.text)
-    readonly property bool passwordMissing: authMode === "password" && passwordField.text.length === 0
-    readonly property bool connectionValid: hostProblem === "" && portProblem === "" && userProblem === ""
-                                            && shareProblem === "" && folderProblem === ""
+    readonly property var descriptor: NetVfsProviders.descriptor(provider)
+    readonly property var fields: descriptor["fields"] || []
+    readonly property var authModes: descriptor["authModes"] || []
+    readonly property bool offersBackup: NetVfsProviders.offersService(provider, "backup")
+    readonly property bool offersFiles: NetVfsProviders.offersService(provider, "files")
+    readonly property bool filesInstalled: NetVfsHelpers.isServiceInstalled(NetVfsHelpers.filesServiceName(provider))
+
+    readonly property var draftParams: NetVfsProviders.makeParams(provider, values, {})
+    readonly property bool backupAllowed: NetVfsHelpers.serviceAllowed(draftParams, "backup")
+    readonly property bool backupSelected: offersBackup && backupSwitch.checked && backupAllowed
+    readonly property bool filesSelected: offersFiles && filesInstalled && (filesSwitch.checked || !offersBackup)
+    readonly property var services: _services(backupSelected, filesSelected)
+
+    readonly property var authModeEntry: NetVfsProviders.authMode(provider, values)
+    readonly property string authMode: authModeEntry["id"] || "password"
+    // "generate" or "import" (key mode only)
+    readonly property string keySource: authModeEntry["source"] === "import" ? "import" : "generate"
+    // "password", "token", "key" or "none" (XA-7)
+    readonly property string secretKind: NetVfsProviders.secretKind(provider, values)
+    readonly property string password: passwordField.text
+    readonly property string backupsPath: NetVfsProviders.serviceValue(provider, values, "backups_path")
+    readonly property string filesRoot: NetVfsProviders.serviceValue(provider, values, "files_root")
+
+    readonly property bool passwordMissing: (secretKind === "password" || secretKind === "token")
+                                            && passwordField.text.length === 0
+    readonly property bool connectionValid: services.length > 0
+                                            && NetVfsProviders.isValid(provider, values, services)
 
     // Connection parameters for NetVfsProbe and NetVfsAccountSetup;
-    // `hostKey` is the accepted pin (SFTP), or "".
-    function connectionParams(hostKey) {
-        var options = {}
-        if (isSftp) {
-            options["auth_mode"] = authMode
-            if (hostKey.length > 0) {
-                options["host_key"] = hostKey
-            }
-        }
-        if (isSmb) {
-            options["share"] = shareField.text.trim()
-            options["domain"] = domainField.text.trim()
-            options["require_encryption"] = encryptionSwitch.checked
-        }
-        return NetVfsHelpers.makeParams(provider, hostField.text, portField.text, userField.text, options)
+    // `pinOptions` are the accepted identity's (serverIdentity.pinOptions), or {}.
+    function connectionParams(pinOptions) {
+        return NetVfsProviders.makeParams(provider, values, pinOptions)
     }
 
     function clearPassword() {
         passwordField.text = ""
     }
+
+    function setValue(key, value) {
+        if (values[key] === value) {
+            return
+        }
+        var copy = {}
+        for (var k in values) {
+            copy[k] = values[k]
+        }
+        copy[key] = value
+        values = copy
+    }
+
+    function _services(backup, files) {
+        var list = []
+        if (backup) {
+            list.push("backup")
+        }
+        if (files) {
+            list.push("files")
+        }
+        return list
+    }
+
+    function _init() {
+        var initial = NetVfsProviders.initialValues(provider)
+        for (var i = 0; i < authModes.length; ++i) {
+            if (authModes[i]["id"] === initialAuthMode) {
+                initial["auth_mode"] = initialAuthMode
+                initial["key_source"] = authModes[i]["source"] || ""
+                break
+            }
+        }
+        values = initial
+    }
+
+    function _authIndex() {
+        for (var i = 0; i < authModes.length; ++i) {
+            if (authModes[i]["id"] === values["auth_mode"]
+                    && (authModes[i]["source"] || "") === (values["key_source"] || "")) {
+                return i
+            }
+        }
+        return 0
+    }
+
+    function _selectAuthMode(index) {
+        var mode = authModes[index]
+        if (mode === undefined || (mode["id"] === values["auth_mode"]
+                                   && (mode["source"] || "") === (values["key_source"] || ""))) {
+            return
+        }
+        var copy = {}
+        for (var k in values) {
+            copy[k] = values[k]
+        }
+        copy["auth_mode"] = mode["id"]
+        copy["key_source"] = mode["source"] || ""
+        values = copy
+    }
+
+    function _choiceIndex(field) {
+        var choices = field["choices"] || []
+        for (var i = 0; i < choices.length; ++i) {
+            if (choices[i]["value"] === values[field["key"]]) {
+                return i
+            }
+        }
+        return 0
+    }
+
+    function _text(field) {
+        var value = values[field["key"]]
+        return value !== undefined && value !== null ? String(value) : ""
+    }
+
+    function _inputHints(field) {
+        if (field["input"] === "digits") {
+            return Qt.ImhDigitsOnly
+        }
+        if (field["input"] === "url") {
+            return Qt.ImhNoAutoUppercase | Qt.ImhNoPredictiveText | Qt.ImhUrlCharactersOnly
+        }
+        return Qt.ImhNoAutoUppercase | Qt.ImhNoPredictiveText
+    }
+
+    onProviderChanged: _init()
+    Component.onCompleted: _init()
 
     canAccept: !passwordMissing && (credentialsOnly || connectionValid)
 
@@ -74,109 +166,118 @@ Dialog {
                               qsTrId("settings-accounts-netvfs-bt-connect")
             }
 
-            TextField {
-                id: hostField
+            Repeater {
+                model: dialog.fields
 
-                visible: !dialog.credentialsOnly
-                width: parent.width
-                //% "Server"
-                label: qsTrId("settings-accounts-netvfs-la-server")
-                //% "Server name or IP address"
-                placeholderText: qsTrId("settings-accounts-netvfs-ph-server")
-                inputMethodHints: Qt.ImhNoAutoUppercase | Qt.ImhNoPredictiveText | Qt.ImhUrlCharactersOnly
-                errorHighlight: text.length > 0 && dialog.hostProblem !== ""
-                description: errorHighlight ? dialog.hostProblem : ""
-                EnterKey.iconSource: "image://theme/icon-m-enter-next"
-                EnterKey.onClicked: portField.focus = true
-            }
+                Column {
+                    id: fieldItem
 
-            TextField {
-                id: portField
+                    readonly property var field: modelData
+                    readonly property string type: field["type"]
+                    readonly property string key: field["key"]
+                    // Service settings follow the service switches (second Repeater).
+                    readonly property bool shown: field["service"] === undefined
+                                                  && NetVfsProviders.isVisible(field, dialog.values, dialog.services)
+                                                  && (!dialog.credentialsOnly || type === "note")
+                    readonly property string problem: NetVfsProviders.problem(dialog.provider, field, dialog.values,
+                                                                              dialog.services)
+                    readonly property string description: NetVfsProviders.text(field["description"] || "")
 
-                visible: !dialog.credentialsOnly
-                width: parent.width
-                //% "Port"
-                label: qsTrId("settings-accounts-netvfs-la-port")
-                text: NetVfsInput.defaultPort(dialog.provider) > 0
-                      ? String(NetVfsInput.defaultPort(dialog.provider)) : ""
-                inputMethodHints: Qt.ImhDigitsOnly
-                errorHighlight: dialog.portProblem !== ""
-                description: dialog.portProblem
-                EnterKey.iconSource: "image://theme/icon-m-enter-next"
-                EnterKey.onClicked: (dialog.isSmb ? shareField : userField).focus = true
-            }
+                    visible: shown
+                    width: column.width
 
-            TextField {
-                id: shareField
+                    TextField {
+                        visible: fieldItem.type === "text"
+                        width: parent.width
+                        label: NetVfsProviders.text(fieldItem.field["label"])
+                        placeholderText: NetVfsProviders.text(fieldItem.field["placeholder"] || fieldItem.field["label"])
+                        text: dialog._text(fieldItem.field)
+                        inputMethodHints: dialog._inputHints(fieldItem.field)
+                        errorHighlight: text.length > 0 && fieldItem.problem !== ""
+                        description: errorHighlight ? fieldItem.problem : fieldItem.description
+                        onTextChanged: {
+                            if (fieldItem.type === "text" && fieldItem.field["service"] === undefined) {
+                                dialog.setValue(fieldItem.key, text)
+                            }
+                        }
+                        EnterKey.iconSource: "image://theme/icon-m-enter-close"
+                        EnterKey.onClicked: focus = false
+                    }
 
-                visible: dialog.isSmb && !dialog.credentialsOnly
-                width: parent.width
-                //% "Share"
-                label: qsTrId("settings-accounts-netvfs-la-share")
-                //% "Name of the shared folder on the server"
-                placeholderText: qsTrId("settings-accounts-netvfs-ph-share")
-                inputMethodHints: Qt.ImhNoAutoUppercase | Qt.ImhNoPredictiveText
-                errorHighlight: text.length > 0 && dialog.shareProblem !== ""
-                description: errorHighlight ? dialog.shareProblem : ""
-                EnterKey.iconSource: "image://theme/icon-m-enter-next"
-                EnterKey.onClicked: userField.focus = true
-            }
+                    TextSwitch {
+                        visible: fieldItem.type === "switch"
+                        automaticCheck: false
+                        checked: dialog.values[fieldItem.key] === true
+                        text: NetVfsProviders.text(fieldItem.field["label"])
+                        description: fieldItem.description
+                        onClicked: dialog.setValue(fieldItem.key, !checked)
+                    }
 
-            TextField {
-                id: userField
+                    ComboBox {
+                        visible: fieldItem.type === "choice"
+                        width: parent.width
+                        label: NetVfsProviders.text(fieldItem.field["label"])
+                        description: fieldItem.description
+                        currentIndex: dialog._choiceIndex(fieldItem.field)
+                        menu: ContextMenu {
+                            Repeater {
+                                model: fieldItem.field["choices"] || []
 
-                visible: !dialog.credentialsOnly
-                width: parent.width
-                //% "User name"
-                label: qsTrId("settings-accounts-netvfs-la-user")
-                inputMethodHints: Qt.ImhNoAutoUppercase | Qt.ImhNoPredictiveText
-                errorHighlight: text.length > 0 && dialog.userProblem !== ""
-                description: errorHighlight ? dialog.userProblem : ""
-                EnterKey.iconSource: "image://theme/icon-m-enter-next"
-                EnterKey.onClicked: (dialog.isSmb ? domainField : passwordField).focus = true
-            }
+                                MenuItem {
+                                    text: NetVfsProviders.text(modelData["label"])
+                                }
+                            }
+                        }
+                        onCurrentIndexChanged: {
+                            var choices = fieldItem.field["choices"] || []
+                            if (fieldItem.type === "choice" && currentIndex >= 0 && currentIndex < choices.length) {
+                                dialog.setValue(fieldItem.key, choices[currentIndex]["value"])
+                            }
+                        }
+                    }
 
-            TextField {
-                id: domainField
-
-                visible: dialog.isSmb && !dialog.credentialsOnly
-                width: parent.width
-                //% "Domain or workgroup (optional)"
-                label: qsTrId("settings-accounts-netvfs-la-domain")
-                inputMethodHints: Qt.ImhNoAutoUppercase | Qt.ImhNoPredictiveText
-                EnterKey.iconSource: "image://theme/icon-m-enter-next"
-                EnterKey.onClicked: passwordField.focus = true
+                    Label {
+                        visible: fieldItem.type === "note"
+                        x: Theme.horizontalPageMargin
+                        width: parent.width - 2 * x
+                        wrapMode: Text.Wrap
+                        font.pixelSize: Theme.fontSizeExtraSmall
+                        color: Theme.secondaryHighlightColor
+                        text: NetVfsProviders.text(fieldItem.field["label"])
+                    }
+                }
             }
 
             ComboBox {
                 id: methodBox
 
-                visible: dialog.isSftp
+                visible: dialog.authModes.length > 1
                 width: parent.width
                 //% "Sign-in method"
                 label: qsTrId("settings-accounts-netvfs-la-sign_in_method")
-                currentIndex: dialog.initialAuthMode === "publickey" ? 1 : 0
+                currentIndex: dialog._authIndex()
                 menu: ContextMenu {
-                    MenuItem {
-                        //% "Password"
-                        text: qsTrId("settings-accounts-netvfs-me-password")
-                    }
-                    MenuItem {
-                        //% "SSH key: generate a new key"
-                        text: qsTrId("settings-accounts-netvfs-me-key_generate")
-                    }
-                    MenuItem {
-                        //% "SSH key: import a key file"
-                        text: qsTrId("settings-accounts-netvfs-me-key_import")
+                    Repeater {
+                        model: dialog.authModes
+
+                        MenuItem {
+                            text: NetVfsProviders.text(modelData["label"])
+                        }
                     }
                 }
+                onCurrentIndexChanged: dialog._selectAuthMode(currentIndex)
             }
 
             PasswordField {
                 id: passwordField
 
-                visible: dialog.authMode === "password"
+                visible: dialog.secretKind === "password" || dialog.secretKind === "token"
                 width: parent.width
+                label: dialog.secretKind === "token"
+                       ? //% "Access token"
+                         qsTrId("settings-accounts-netvfs-la-token")
+                       : //% "Password"
+                         qsTrId("settings-accounts-netvfs-la-password")
                 EnterKey.iconSource: "image://theme/icon-m-enter-accept"
                 EnterKey.onClicked: {
                     if (dialog.canAccept) {
@@ -185,63 +286,76 @@ Dialog {
                 }
             }
 
-            Label {
-                // SPEC-smb 3: the one-line warning about NTLM challenge responses.
-                visible: dialog.isSmb
-                x: Theme.horizontalPageMargin
-                width: parent.width - 2 * x
-                wrapMode: Text.Wrap
-                font.pixelSize: Theme.fontSizeExtraSmall
-                color: Theme.secondaryHighlightColor
-                //% "Use a strong password that you use nowhere else: any server this account connects to can try to guess it."
-                text: qsTrId("settings-accounts-netvfs-la-smb_password_warning")
-            }
-
-            Label {
-                visible: dialog.authMode === "publickey"
-                x: Theme.horizontalPageMargin
-                width: parent.width - 2 * x
-                wrapMode: Text.Wrap
-                font.pixelSize: Theme.fontSizeExtraSmall
-                color: Theme.secondaryHighlightColor
-                //% "After checking the server's identity you can copy the public key, or install it on the server with your password."
-                text: qsTrId("settings-accounts-netvfs-la-key_mode_hint")
+            SectionHeader {
+                visible: !dialog.credentialsOnly && dialog.offersBackup && dialog.offersFiles
+                //% "Use this account for"
+                text: qsTrId("settings-accounts-netvfs-he-services")
             }
 
             TextSwitch {
-                id: encryptionSwitch
+                id: backupSwitch
 
-                // SPEC-smb M-3
-                visible: dialog.isSmb && !dialog.credentialsOnly
+                visible: !dialog.credentialsOnly && dialog.offersBackup
                 checked: true
-                //% "Require encryption"
-                text: qsTrId("settings-accounts-netvfs-la-require_encryption")
-                description: checked
-                             ? //% "Connect only if the server encrypts the connection (SMB 3)."
-                               qsTrId("settings-accounts-netvfs-la-require_encryption_on")
-                             : //% "Servers without SMB 3 encryption are accepted. Backups are then signed, not encrypted, on the network."
-                               qsTrId("settings-accounts-netvfs-la-require_encryption_off")
+                enabled: dialog.backupAllowed
+                //% "Backups"
+                text: qsTrId("settings-accounts-netvfs-la-service_backup")
+                description: dialog.backupAllowed
+                             ? //% "The account appears as a backup target in Settings > Backup."
+                               qsTrId("settings-accounts-netvfs-la-enable_backups_description")
+                             : NetVfsHelpers.serviceRefusalText(dialog.draftParams, "backup")
             }
 
-            TextField {
-                id: backupsField
+            TextSwitch {
+                id: filesSwitch
 
-                visible: !dialog.credentialsOnly
-                width: parent.width
-                //% "Backups folder"
-                label: qsTrId("settings-accounts-netvfs-la-backups_folder")
-                text: NetVfsHelpers.defaultBackupsPath
-                inputMethodHints: Qt.ImhNoPredictiveText
-                errorHighlight: dialog.folderProblem !== ""
-                description: errorHighlight
-                             ? dialog.folderProblem
-                             : (dialog.isSmb
-                                ? //% "Inside the share."
-                                  qsTrId("settings-accounts-netvfs-la-folder_in_share")
-                                : //% "Relative to the home folder, or starting with / for an absolute path."
-                                  qsTrId("settings-accounts-netvfs-la-folder_in_home"))
-                EnterKey.iconSource: "image://theme/icon-m-enter-close"
-                EnterKey.onClicked: focus = false
+                visible: !dialog.credentialsOnly && dialog.offersFiles && dialog.offersBackup && dialog.filesInstalled
+                checked: true
+                //% "Browsing files"
+                text: qsTrId("settings-accounts-netvfs-la-service_files")
+                //% "Apps that you allow can browse, open and save files on this server."
+                description: qsTrId("settings-accounts-netvfs-la-service_files_description")
+            }
+
+            Label {
+                visible: !dialog.credentialsOnly && dialog.provider !== "" && dialog.services.length === 0
+                x: Theme.horizontalPageMargin
+                width: parent.width - 2 * x
+                wrapMode: Text.Wrap
+                font.pixelSize: Theme.fontSizeExtraSmall
+                color: Theme.errorColor
+                //% "Choose at least one use for this account."
+                text: qsTrId("settings-accounts-netvfs-la-no_service")
+            }
+
+            // Service settings (backups folder, start folder) follow their switches.
+            Repeater {
+                model: dialog.credentialsOnly ? [] : dialog.fields
+
+                TextField {
+                    id: serviceField
+
+                    readonly property var field: modelData
+                    readonly property string problem: NetVfsProviders.problem(dialog.provider, field, dialog.values,
+                                                                              dialog.services)
+
+                    visible: field["service"] !== undefined
+                             && NetVfsProviders.isVisible(field, dialog.values, dialog.services)
+                    width: column.width
+                    label: NetVfsProviders.text(field["label"])
+                    placeholderText: label
+                    text: dialog._text(field)
+                    inputMethodHints: Qt.ImhNoPredictiveText
+                    errorHighlight: problem !== ""
+                    description: errorHighlight ? problem : NetVfsProviders.text(field["description"] || "")
+                    onTextChanged: {
+                        if (field["service"] !== undefined) {
+                            dialog.setValue(field["key"], text)
+                        }
+                    }
+                    EnterKey.iconSource: "image://theme/icon-m-enter-close"
+                    EnterKey.onClicked: focus = false
+                }
             }
         }
 

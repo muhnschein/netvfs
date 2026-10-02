@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: LGPL-2.1-or-later -->
+<!-- SPEC-v2 XA-1: a "netvfs-files" service named <provider>-files. Shares
+     the account's connection settings and identity with <provider>-backup;
+     only files_root is stored in this service. -->
+<service id="@PROVIDER@-files">
+    <type>netvfs-files</type>
+    <name>Files</name>
+    <icon>image://theme/icon-m-folder</icon>
+    <provider>@PROVIDER@</provider>
+    <template>
+        <group name="auth">
+            <setting name="method">password</setting>
+            <setting name="mechanism">password</setting>
+        </group>
+    </template>
+</service>
