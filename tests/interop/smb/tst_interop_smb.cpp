@@ -28,6 +28,14 @@
 
 using namespace NetVfs;
 
+namespace QTest {
+template<>
+char *toString(const NetVfs::Error &error)
+{
+    return qstrdup(qPrintable(NetVfs::errorName(error)));
+}
+} // namespace QTest
+
 namespace {
 
 const qint64 BigSize = 64 * 1024 * 1024;        // SPEC-smb 7: 64 MiB per positive case
@@ -185,7 +193,7 @@ private:
             if (e.name == QLatin1String(BigName)) {
                 found = true;
                 QCOMPARE(e.size, BigSize);
-                QVERIFY(!e.isDir);
+                QCOMPARE(e.type, EntryType::File);   // XC-2
                 QVERIFY(e.modified.isValid());
             }
         }
@@ -507,9 +515,9 @@ private slots:
         QVERIFY2(r.ok(), qPrintable(r.toString()));
         const Result first = backend->stat(QString(), &entry);
         QVERIFY2(!first.ok(), "a tampered reply was accepted");
-        QCOMPARE(first.error(), Error::NetworkUnreachable);
+        QCOMPARE(first.error(), Error::ConnectionLost);   // XC-21: after sign-in
         // The connection is aborted, not resynchronised.
-        QCOMPARE(backend->stat(QString(), &entry).error(), Error::NetworkUnreachable);
+        QCOMPARE(backend->stat(QString(), &entry).error(), Error::ConnectionLost);
     }
 
     // M-T13: with encryption required nothing readable crosses the wire; the
@@ -708,8 +716,8 @@ private slots:
         const auto backend = newBackend();
         QVERIFY(signIn(backend.get(), viaProxy(4455, true), credentials()).ok());
         Entry entry;
-        QCOMPARE(backend->stat(QString(), &entry).error(), Error::NetworkUnreachable);
-        QCOMPARE(backend->makePath(QStringLiteral("x")).error(), Error::NetworkUnreachable);
+        QCOMPARE(backend->stat(QString(), &entry).error(), Error::ConnectionLost);   // XC-21
+        QCOMPARE(backend->makePath(QStringLiteral("x")).error(), Error::ConnectionLost);
         backend->disconnect();
 
         const Result r = signIn(backend.get(), viaProxy(4456, true), credentials());
@@ -790,7 +798,7 @@ private slots:
         QVERIFY(signIn(backend.get(), params(QStringLiteral("strict")), credentials()).ok());
         Entry entry;
         QVERIFY(backend->stat(QString(), &entry).ok());
-        QVERIFY(entry.isDir);
+        QVERIFY(entry.isDir());
         QVERIFY(backend->makePath(QStringLiteral("ops/sub")).ok());
         QVERIFY(backend->makePath(QStringLiteral("ops/sub")).ok());     // idempotent
 
@@ -800,16 +808,16 @@ private slots:
         QBuffer bufB(&b);
         bufA.open(QIODevice::ReadOnly);
         bufB.open(QIODevice::ReadOnly);
-        QVERIFY(backend->upload(&bufA, QStringLiteral("ops/a"), nullptr).ok());
-        QVERIFY(backend->upload(&bufB, QStringLiteral("ops/b"), nullptr).ok());
+        QVERIFY(backend->upload(&bufA, QStringLiteral("ops/a"), UploadOptions(), nullptr).ok());
+        QVERIFY(backend->upload(&bufB, QStringLiteral("ops/b"), UploadOptions(), nullptr).ok());
 
-        // rename replaces the target.
-        QVERIFY(backend->rename(QStringLiteral("ops/a"), QStringLiteral("ops/b")).ok());
+        // rename(Replace) replaces the target.
+        QVERIFY(backend->rename(QStringLiteral("ops/a"), QStringLiteral("ops/b"), RenameMode::Replace).ok());
         QVERIFY(backend->stat(QStringLiteral("ops/b"), &entry).ok());
         QCOMPARE(entry.size, qint64(10));
         QCOMPARE(backend->stat(QStringLiteral("ops/a"), &entry).error(), Error::NotFound);
-        QCOMPARE(backend->rename(QStringLiteral("ops/a"), QStringLiteral("ops/c")).error(), Error::NotFound);
-        QCOMPARE(backend->rename(QStringLiteral("ops/b"), QStringLiteral("ops/sub")).error(), Error::AlreadyExists);
+        QCOMPARE(backend->rename(QStringLiteral("ops/a"), QStringLiteral("ops/c"), RenameMode::Replace).error(), Error::NotFound);
+        QCOMPARE(backend->rename(QStringLiteral("ops/b"), QStringLiteral("ops/sub"), RenameMode::Replace).error(), Error::AlreadyExists);
         QCOMPARE(backend->makePath(QStringLiteral("ops/b/deeper")).error(), Error::AlreadyExists);
 
         QByteArray part;
@@ -827,18 +835,18 @@ private slots:
         QByteArray sink;
         QBuffer sinkBuffer(&sink);
         sinkBuffer.open(QIODevice::WriteOnly);
-        QCOMPARE(backend->download(QStringLiteral("ops/none"), &sinkBuffer, nullptr).error(), Error::NotFound);
+        QCOMPARE(backend->download(QStringLiteral("ops/none"), &sinkBuffer, DownloadOptions(), nullptr).error(), Error::NotFound);
         // Local I/O failures are not reported as server errors.
         QBuffer closed;
-        QCOMPARE(backend->upload(&closed, QStringLiteral("ops/local"), nullptr).error(), Error::Internal);
+        QCOMPARE(backend->upload(&closed, QStringLiteral("ops/local"), UploadOptions(), nullptr).error(), Error::Internal);
         QVERIFY(backend->remove(QStringLiteral("ops/local")).ok());
         QByteArray small("0123456789");
         QBuffer smallBuffer(&small);
         smallBuffer.open(QIODevice::ReadOnly);
-        QVERIFY(backend->upload(&smallBuffer, QStringLiteral("ops/small"), nullptr).ok());
+        QVERIFY(backend->upload(&smallBuffer, QStringLiteral("ops/small"), UploadOptions(), nullptr).ok());
         QBuffer readOnlySink(&small);
         readOnlySink.open(QIODevice::ReadOnly);
-        QCOMPARE(backend->download(QStringLiteral("ops/small"), &readOnlySink, nullptr).error(), Error::Internal);
+        QCOMPARE(backend->download(QStringLiteral("ops/small"), &readOnlySink, DownloadOptions(), nullptr).error(), Error::Internal);
         // M-9 inside a session too: nothing is sent.
         QCOMPARE(backend->makePath(QStringLiteral("ops/bad|name")).error(), Error::Internal);
     }
@@ -852,7 +860,7 @@ private slots:
         QByteArray data("x");
         QBuffer buffer(&data);
         buffer.open(QIODevice::ReadOnly);
-        QCOMPARE(backend->upload(&buffer, QStringLiteral("new.txt"), nullptr).error(), Error::PermissionDenied);
+        QCOMPARE(backend->upload(&buffer, QStringLiteral("new.txt"), UploadOptions(), nullptr).error(), Error::PermissionDenied);
         QCOMPARE(backend->makePath(QStringLiteral("newdir")).error(), Error::PermissionDenied);
         QByteArray part;
         QVERIFY(backend->read(QStringLiteral("existing.txt"), 5, 4, &part).ok());
@@ -888,6 +896,223 @@ private slots:
             t.join();
         for (const Result &r : results)
             QVERIFY2(r.ok(), qPrintable(r.toString()));
+    }
+
+    // ---- API v2 (SPEC-v2 §4, §6.2) ---------------------------------------
+
+private:
+    static bool put(Backend *backend, const QString &path, const QByteArray &data,
+                    const UploadOptions &options = UploadOptions())
+    {
+        QByteArray copy = data;
+        QBuffer buffer(&copy);
+        buffer.open(QIODevice::ReadOnly);
+        const Result r = backend->upload(&buffer, path, options, nullptr);
+        if (!r.ok())
+            qWarning() << "upload failed:" << r.toString();
+        return r.ok();
+    }
+
+    static QByteArray contentOf(Backend *backend, const QString &path)
+    {
+        QByteArray data;
+        return backend->read(path, 0, -1, &data).ok() ? data : QByteArray("<unreadable>");
+    }
+
+private slots:
+    // XC-5, XC-8, XC-9, XC-10, XM-5
+    void v2Namespace()
+    {
+        const auto backend = newBackend();
+        QVERIFY(signIn(backend.get(), params(QStringLiteral("strict")), credentials()).ok());
+        const Capabilities caps = backend->capabilities();
+        QVERIFY(caps.has(Capability::NativeNoReplace));
+        QVERIFY(!caps.has(Capability::AtomicReplace));
+        QVERIFY(caps.has(Capability::ReadHandles));
+        QVERIFY(caps.has(Capability::SpaceInfo));
+        QVERIFY(caps.has(Capability::WindowsNames));
+        QVERIFY(!caps.has(Capability::PosixModes));
+        QVERIFY(caps.maxReadChunk > 0 && caps.maxWriteChunk > 0);
+
+        // XC-8
+        QVERIFY(backend->makeDir(QStringLiteral("v2"), true).ok());
+        QCOMPARE(backend->makeDir(QStringLiteral("v2"), true).error(), Error::AlreadyExists);
+        QVERIFY(backend->makeDir(QStringLiteral("v2"), false).ok());
+        QVERIFY(backend->makeDir(QString(), false).ok());
+        QCOMPARE(backend->makeDir(QString(), true).error(), Error::AlreadyExists);
+        QCOMPARE(backend->makeDir(QStringLiteral("v2/missing/deeper"), false).error(), Error::NotFound);
+        QVERIFY(put(backend.get(), QStringLiteral("v2/a.txt"), "aaa"));
+        QVERIFY(put(backend.get(), QStringLiteral("v2/b.txt"), "bbbb"));
+        QCOMPARE(backend->makeDir(QStringLiteral("v2/a.txt"), false).error(), Error::AlreadyExists);
+        QCOMPARE(backend->makeDir(QStringLiteral("v2/a.txt"), true).error(), Error::AlreadyExists);
+        QVERIFY(backend->makeDir(QStringLiteral("v2/sub"), true).ok());
+
+        // XC-10, XM-5: NoReplace is the server's; the target is untouched.
+        QCOMPARE(backend->rename(QStringLiteral("v2/b.txt"), QStringLiteral("v2/a.txt"), RenameMode::NoReplace).error(),
+                 Error::AlreadyExists);
+        QCOMPARE(contentOf(backend.get(), QStringLiteral("v2/a.txt")), QByteArray("aaa"));
+        QCOMPARE(backend->rename(QStringLiteral("v2/b.txt"), QStringLiteral("v2/sub"), RenameMode::NoReplace).error(),
+                 Error::AlreadyExists);
+        QCOMPARE(backend->rename(QStringLiteral("v2/b.txt"), QStringLiteral("v2/sub"), RenameMode::Replace).error(),
+                 Error::AlreadyExists);
+        QVERIFY(backend->rename(QStringLiteral("v2/b.txt"), QStringLiteral("v2/c.txt"), RenameMode::NoReplace).ok());
+        QCOMPARE(backend->rename(QStringLiteral("v2/nope"), QStringLiteral("v2/x"), RenameMode::NoReplace).error(),
+                 Error::NotFound);
+        QVERIFY(backend->rename(QStringLiteral("v2/c.txt"), QStringLiteral("v2/a.txt"), RenameMode::Replace).ok());
+        QCOMPARE(contentOf(backend.get(), QStringLiteral("v2/a.txt")), QByteArray("bbbb"));
+        QCOMPARE(backend->rename(QString(), QStringLiteral("v2/root"), RenameMode::NoReplace).error(),
+                 Error::PermissionDenied);
+
+        // XC-9
+        QVERIFY(put(backend.get(), QStringLiteral("v2/sub/inner.txt"), "x"));
+        QCOMPARE(backend->removeFile(QStringLiteral("v2/sub")).error(), Error::IsADirectory);
+        QCOMPARE(backend->removeDir(QStringLiteral("v2/sub")).error(), Error::DirectoryNotEmpty);
+        QCOMPARE(backend->removeDir(QStringLiteral("v2/a.txt")).error(), Error::NotADirectory);
+        QCOMPARE(backend->removeDir(QStringLiteral("v2/nope")).error(), Error::NotFound);
+        QCOMPARE(backend->removeFile(QStringLiteral("v2/nope")).error(), Error::NotFound);
+        QCOMPARE(backend->removeDir(QString()).error(), Error::PermissionDenied);
+        QVERIFY(backend->removeFile(QStringLiteral("v2/sub/inner.txt")).ok());
+        QVERIFY(backend->removeDir(QStringLiteral("v2/sub")).ok());
+        QVERIFY(backend->remove(QStringLiteral("v2/a.txt")).ok());
+
+        QVERIFY(backend->keepAlive().ok());   // XM-8
+        SpaceInfo space;
+        QVERIFY(backend->spaceInfo(QStringLiteral("v2"), &space).ok());
+        QVERIFY(space.total > 0 && space.free > 0 && space.free <= space.total && space.used >= 0);
+        QVERIFY(backend->removeDir(QStringLiteral("v2")).ok());
+    }
+
+    // XC-6, XM-4
+    void v2Listing()
+    {
+        const auto backend = newBackend();
+        QVERIFY(signIn(backend.get(), params(QStringLiteral("strict")), credentials()).ok());
+        QVERIFY(backend->makePath(QStringLiteral("v2list/sub")).ok());
+        for (int i = 0; i < 25; ++i)
+            QVERIFY(put(backend.get(), QStringLiteral("v2list/f%1").arg(i), QByteArray(i, 'x')));
+
+        struct Batches : ListSink {
+            QVector<int> sizes;
+            QVector<Entry> all;
+            bool entries(const QVector<Entry> &batch) override
+            {
+                sizes << batch.size();
+                all += batch;
+                return true;
+            }
+        } sink;
+        ListOptions options;
+        options.batchSize = 4;
+        QVERIFY(backend->list(QStringLiteral("v2list"), &sink, options).ok());
+        QCOMPARE(sink.all.size(), 26);
+        QCOMPARE(sink.sizes.size(), 7);
+        for (const int size : sink.sizes)
+            QVERIFY(size >= 1 && size <= 4);
+        for (const Entry &e : sink.all) {
+            QVERIFY(e.name != QLatin1String(".") && e.name != QLatin1String(".."));
+            if (e.name == QLatin1String("sub")) {
+                QCOMPARE(e.type, EntryType::Directory);
+                QCOMPARE(e.size, qint64(-1));
+            } else {
+                QCOMPARE(e.type, EntryType::File);
+                QCOMPARE(e.size, qint64(e.name.mid(1).toInt()));
+                QVERIFY(e.modified.isValid());
+                QCOMPARE(e.mode, -1);   // SMB has no POSIX modes
+            }
+        }
+
+        struct StopAtFirst : ListSink {
+            int calls = 0;
+            bool entries(const QVector<Entry> &) override { return ++calls < 1; }
+        } stop;
+        QCOMPARE(backend->list(QStringLiteral("v2list"), &stop, options).error(), Error::Canceled);
+        QCOMPARE(stop.calls, 1);
+        QVector<Entry> plain;
+        QCOMPARE(backend->list(QStringLiteral("v2list/f3"), &plain).error(), Error::NotADirectory);
+    }
+
+    // XC-13, XC-14
+    void v2Transfers()
+    {
+        const auto backend = newBackend();
+        QVERIFY(signIn(backend.get(), params(QStringLiteral("strict")), credentials()).ok());
+        QVERIFY(backend->makePath(QStringLiteral("v2io")).ok());
+        QByteArray content(3 * 1024 * 1024 + 17, Qt::Uninitialized);
+        for (int i = 0; i < content.size(); ++i)
+            content[i] = static_cast<char>((i * 131) >> 3);
+        QVERIFY(put(backend.get(), QStringLiteral("v2io/big.bin"), content));
+
+        // Dispositions.
+        QByteArray small("small");
+        QBuffer source(&small);
+        QVERIFY(source.open(QIODevice::ReadOnly));
+        UploadOptions options;
+        QCOMPARE(backend->upload(&source, QStringLiteral("v2io/big.bin"), options, nullptr).error(), Error::AlreadyExists);
+        QCOMPARE(backend->upload(&source, QStringLiteral("v2io"), options, nullptr).error(), Error::IsADirectory);
+        QVERIFY(put(backend.get(), QStringLiteral("v2io/small.bin"), "0123456789"));
+        options.write.disposition = WriteOptions::Truncate;
+        QVERIFY(backend->upload(&source, QStringLiteral("v2io/small.bin"), options, nullptr).ok());
+        QCOMPARE(contentOf(backend.get(), QStringLiteral("v2io/small.bin")), small);
+
+        // Ranged downloads.
+        QByteArray received;
+        QBuffer sink(&received);
+        QVERIFY(sink.open(QIODevice::WriteOnly));
+        DownloadOptions range;
+        range.offset = 1000;
+        range.length = 1024 * 1024 + 5;
+        QVERIFY(backend->download(QStringLiteral("v2io/big.bin"), &sink, range, nullptr).ok());
+        QCOMPARE(received, content.mid(1000, 1024 * 1024 + 5));
+        sink.close();
+        received.clear();
+        QVERIFY(sink.open(QIODevice::WriteOnly));
+        range.offset = content.size() - 10;
+        range.length = -1;
+        QVERIFY(backend->download(QStringLiteral("v2io/big.bin"), &sink, range, nullptr).ok());
+        QCOMPARE(received, content.right(10));
+        QCOMPARE(backend->download(QStringLiteral("v2io"), &sink, DownloadOptions(), nullptr).error(),
+                 Error::IsADirectory);
+
+        // A handle reads ranges on one open file, also at EOF.
+        ReadHandle *raw = nullptr;
+        QVERIFY(backend->openRead(QStringLiteral("v2io/big.bin"), &raw).ok());
+        std::unique_ptr<ReadHandle> handle(raw);
+        QCOMPARE(handle->size(), qint64(content.size()));
+        QByteArray part;
+        QVERIFY(handle->read(5, 100, &part).ok());
+        QCOMPARE(part, content.mid(5, 100));
+        QVERIFY(handle->read(1024 * 1024 - 3, 2 * 1024 * 1024, &part).ok());
+        QCOMPARE(part, content.mid(1024 * 1024 - 3, 2 * 1024 * 1024));
+        QVERIFY(handle->read(content.size() - 4, 100, &part).ok());
+        QCOMPARE(part, content.right(4));
+        QVERIFY(handle->read(content.size(), 100, &part).ok());
+        QVERIFY(part.isEmpty());
+        QVERIFY(handle->read(content.size() + 100, 100, &part).ok());
+        QVERIFY(part.isEmpty());
+        QCOMPARE(handle->read(-1, 1, &part).error(), Error::Internal);
+        QVERIFY(handle->close().ok());
+        QCOMPARE(handle->read(0, 1, &part).error(), Error::Internal);
+        ReadHandle *missing = nullptr;
+        QCOMPARE(backend->openRead(QStringLiteral("v2io/nope"), &missing).error(), Error::NotFound);
+        QVERIFY(!missing);
+        QCOMPARE(backend->openRead(QStringLiteral("v2io"), &missing).error(), Error::IsADirectory);
+        QVERIFY(!missing);
+
+        // Handles end with the connection.
+        QVERIFY(backend->openRead(QStringLiteral("v2io/big.bin"), &raw).ok());
+        handle.reset(raw);
+        backend->disconnect();
+        QCOMPARE(handle->read(0, 1, &part).error(), Error::ConnectionLost);
+        handle.reset();
+    }
+
+    // XC-20, XC-21: the proxy drops the connection after sign-in.
+    void v2KeepAliveAfterDrop()
+    {
+        const auto backend = newBackend();
+        QVERIFY(signIn(backend.get(), viaProxy(4455, true), credentials()).ok());
+        QCOMPARE(backend->keepAlive().error(), Error::ConnectionLost);
+        QCOMPARE(backend->keepAlive().error(), Error::ConnectionLost);
     }
 };
 

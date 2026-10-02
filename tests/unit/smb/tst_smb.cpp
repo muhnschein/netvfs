@@ -267,7 +267,11 @@ private slots:
         row("quota", SMB2_STATUS_QUOTA_EXCEEDED, Error::NoSpace, policy);
         row("not supported", SMB2_STATUS_NOT_SUPPORTED, Error::ProtocolError, policy);
         row("invalid parameter", SMB2_STATUS_INVALID_PARAMETER, Error::ProtocolError, policy);
-        row("sharing violation", SMB2_STATUS_SHARING_VIOLATION, Error::ProtocolError, policy);
+        // SPEC-v2 XC-9, XC-21
+        row("sharing violation", SMB2_STATUS_SHARING_VIOLATION, Error::Locked, policy);
+        row("file is a directory", SMB2_STATUS_FILE_IS_A_DIRECTORY, Error::IsADirectory, policy);
+        row("not a directory", SMB2_STATUS_NOT_A_DIRECTORY, Error::NotADirectory, policy);
+        row("directory not empty", SMB2_STATUS_DIRECTORY_NOT_EMPTY, Error::DirectoryNotEmpty, policy);
     }
     void ntStatus()
     {
@@ -295,7 +299,7 @@ private slots:
         QCOMPARE(closed.message(), QStringLiteral("the server closed the connection; it may not support SMB 3, "
                                                   "signing or encryption"));
         QCOMPARE(connectionLost(Stage::SessionSetup).toString(), closed.toString());
-        QCOMPARE(connectionLost(Stage::Established).error(), Error::NetworkUnreachable);
+        QCOMPARE(connectionLost(Stage::Established).error(), Error::ConnectionLost);   // XC-21
         QVERIFY(errorForStatus(SMB2_STATUS_NOT_SUPPORTED, 0, Stage::SessionSetup, QString())
                     .message().startsWith(QLatin1String(SessionRefusedMessage)));
         // ACCESS_DENIED at tree connect: no share access or no common cipher (M-T14).
@@ -325,7 +329,10 @@ private slots:
         row("session: eperm", EPERM, false, Error::PermissionDenied);
         row("session: eexist", EEXIST, false, Error::AlreadyExists);
         row("session: enospc", ENOSPC, false, Error::NoSpace);
-        row("session: enetreset", ENETRESET, false, Error::NetworkUnreachable);
+        row("session: enetreset", ENETRESET, false, Error::ConnectionLost);
+        row("session: enotdir", ENOTDIR, false, Error::NotADirectory);
+        row("session: enotempty", ENOTEMPTY, false, Error::DirectoryNotEmpty);
+        row("session: etxtbsy", ETXTBSY, false, Error::Locked);
         row("session: other", EIO, false, Error::ProtocolError);
     }
     void withoutStatus()
@@ -494,13 +501,18 @@ private slots:
         QCOMPARE(backend->stat(QString(), &entry).error(), Error::Internal);
         QCOMPARE(backend->list(QString(), &entries).error(), Error::Internal);
         QCOMPARE(backend->makePath(QStringLiteral("a/b")).error(), Error::Internal);
+        QCOMPARE(backend->makeDir(QStringLiteral("a"), true).error(), Error::Internal);
         QCOMPARE(backend->remove(QStringLiteral("a")).error(), Error::Internal);
-        QCOMPARE(backend->rename(QStringLiteral("a"), QStringLiteral("b")).error(), Error::Internal);
+        QCOMPARE(backend->removeDir(QStringLiteral("a")).error(), Error::Internal);
+        QCOMPARE(backend->rename(QStringLiteral("a"), QStringLiteral("b"), RenameMode::Replace).error(), Error::Internal);
+        QCOMPARE(backend->rename(QStringLiteral("a"), QStringLiteral("b"), RenameMode::NoReplace).error(), Error::Internal);
         QCOMPARE(backend->freeSpace(QString(), &bytes).error(), Error::Internal);
-        QCOMPARE(backend->upload(&buffer, QStringLiteral("a"), nullptr).error(), Error::Internal);
-        QCOMPARE(backend->download(QStringLiteral("a"), &buffer, nullptr).error(), Error::Internal);
+        QCOMPARE(backend->upload(&buffer, QStringLiteral("a"), UploadOptions(), nullptr).error(), Error::Internal);
+        QCOMPARE(backend->download(QStringLiteral("a"), &buffer, DownloadOptions(), nullptr).error(), Error::Internal);
         QCOMPARE(backend->read(QStringLiteral("a"), 0, 1, &data).error(), Error::Internal);
         QCOMPARE(backend->read(QStringLiteral("a"), -1, 1, &data).error(), Error::Internal);
+        QCOMPARE(backend->keepAlive().error(), Error::Internal);
+        QVERIFY(backend->capabilities().flags.isEmpty());   // XC-5: valid after authenticate()
         // M-9: rejected before anything is sent.
         QCOMPARE(backend->stat(QStringLiteral("bad:name"), &entry).error(), Error::Internal);
         QVERIFY(backend->stat(QStringLiteral("bad:name"), &entry).message().contains(QLatin1Char(':')));

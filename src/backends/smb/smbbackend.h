@@ -5,6 +5,8 @@
 #include "backend.h"
 #include "smbutil.h"
 
+#include <QtCore/QSet>
+
 #include <atomic>
 #include <memory>
 #include <thread>
@@ -17,10 +19,10 @@ namespace NetVfs::Smb {
 
 struct Call;
 
-// SPEC-smb. One instance owns one smb2_context, used only from the thread
-// that called connect() (M-13). Requests go through libsmb2's asynchronous
-// API and a poll loop so that cancel() and timeouts can abandon a request
-// that is stalled on the network (M-12, C-9).
+// SPEC-smb, SPEC-v2 §6.2. One instance owns one smb2_context, used only from
+// the thread that called connect() (M-13). Requests go through libsmb2's
+// asynchronous API and a poll loop so that cancel() and timeouts can abandon
+// a request that is stalled on the network (M-12, C-9).
 class SmbBackend final : public Backend
 {
 public:
@@ -29,18 +31,27 @@ public:
     SmbBackend(const SmbBackend &) = delete;
     SmbBackend &operator=(const SmbBackend &) = delete;
 
+    using Backend::authenticate;
+    using Backend::list;
+
     Result connect(const ConnectionParams &params, ServerIdentity *seen) override;
-    Result authenticate(const Credentials &credentials) override;
+    Result authenticate(const Credentials &credentials, AuthPrompter *prompter) override;
+    Capabilities capabilities() const override;
 
     Result stat(const QString &path, Entry *out) override;
-    Result list(const QString &dir, QVector<Entry> *out) override;
-    Result makePath(const QString &dir) override;
-    Result remove(const QString &path) override;
-    Result rename(const QString &from, const QString &to) override;
-    Result freeSpace(const QString &dir, qint64 *bytes) override;
-    Result upload(QIODevice *source, const QString &path, Progress *progress) override;
-    Result download(const QString &path, QIODevice *sink, Progress *progress) override;
-    Result read(const QString &path, qint64 offset, qint64 length, QByteArray *out) override;
+    Result list(const QString &dir, ListSink *sink, const ListOptions &options) override;
+
+    Result makeDir(const QString &path, bool exclusive) override;
+    Result removeFile(const QString &path) override;
+    Result removeDir(const QString &path) override;
+    Result rename(const QString &from, const QString &to, RenameMode mode) override;
+
+    Result openRead(const QString &path, ReadHandle **out) override;
+    Result upload(QIODevice *source, const QString &path, const UploadOptions &options, Progress *progress) override;
+    Result download(const QString &path, QIODevice *sink, const DownloadOptions &options, Progress *progress) override;
+
+    Result spaceInfo(const QString &dir, SpaceInfo *out) override;
+    Result keepAlive() override;
 
     void cancel() override;
     void resetCancel() override;
@@ -54,6 +65,7 @@ public:
     static constexpr int BackstopMs = 5000;
 
 private:
+    class Reader;   // ReadHandle (smbbackend.cpp)
     enum class Wait { Cancellable, Drain };
     Result checkUsable() const;
     // `start` issues the libsmb2 request: int (smb2_context *, Call *).
@@ -68,14 +80,17 @@ private:
 
     Result statPath(const QByteArray &path, Entry *out);
     Result unlinkPath(const QByteArray &path, const QString &context);
-    Result makeDir(const QByteArray &path);
+    Result makeDirectory(const QByteArray &path, bool exclusive);
+    Result renameReplacing(const QByteArray &from, const QByteArray &to);
+    Result renamePath(const QByteArray &from, const QByteArray &to);
     Result openFile(const QByteArray &path, int flags, smb2fh **fh);
+    Result openForUpload(const QByteArray &path, const WriteOptions &options, smb2fh **fh);
     Result closeFile(smb2fh *fh, const Result &outcome);
-    Result writeAll(smb2fh *fh, QIODevice *source, Progress *progress);
+    Result writeAll(smb2fh *fh, QIODevice *source, Progress *progress, quint64 offset);
     Result writeChunk(smb2fh *fh, const QByteArray &buffer, qint64 length, quint64 offset);
     Result readChunk(smb2fh *fh, quint64 offset, quint32 count, QByteArray *buffer, quint32 *got);
-    Result fileSize(smb2fh *fh, qint64 *size);
-    Result copyToSink(smb2fh *fh, qint64 size, QIODevice *sink, Progress *progress);
+    Result fileStat(smb2fh *fh, Entry *out);
+    Result copyToSink(smb2fh *fh, qint64 offset, qint64 end, QIODevice *sink, Progress *progress);
     Result readRange(smb2fh *fh, qint64 offset, qint64 length, QByteArray *out);
 
     smb2_context *m_ctx = nullptr;
@@ -87,6 +102,7 @@ private:
     std::thread::id m_owner;
     std::atomic<bool> m_cancel { false };
     std::vector<std::unique_ptr<Call>> m_orphans;
+    QSet<Reader *> m_readers;       // open handles, invalidated by destroyContext()
 };
 
 // M-5: libsmb2 lets a file named by NTLM_USER_FILE replace the password set
