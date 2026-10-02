@@ -1,0 +1,14 @@
+/build/
+/build-*/
+*.o
+*.so
+*.so.*
+*.a
+moc_*
+qrc_*
+.qmake.stash
+Makefile.qmake
+*.pro.user
+/RPMS/
+compile_commands.json
+coverage*.xml
