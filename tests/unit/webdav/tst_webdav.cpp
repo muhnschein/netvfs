@@ -5,7 +5,7 @@
 #include "davclient.h"
 #include "davconfig.h"
 #include "davstatus.h"
-#include "davtls.h"
+#include "tlsidentity.h"
 #include "davurl.h"
 #include "davxml.h"
 #include "fakedav.h"
@@ -31,6 +31,7 @@
 
 using namespace NetVfs;
 using namespace NetVfs::WebDav;
+using namespace NetVfs::CurlTls;
 
 Q_DECLARE_METATYPE(NetVfs::Error)
 

@@ -976,7 +976,7 @@ private slots:
         QBuffer sink;
         QVERIFY(sink.open(QIODevice::WriteOnly));
         QCOMPARE(b->download(dir + QStringLiteral("/nope"), &sink, DownloadOptions(), nullptr).error(), Error::NotFound);
-        QCOMPARE(b->stat(dir + QStringLiteral("/../x"), &entry).error(), Error::Internal);   // C-15
+        QCOMPARE(b->stat(dir + QStringLiteral("/../x"), &entry).error(), Error::InvalidName);   // C-15, XC-4
         QCOMPARE(b->makePath(QStringLiteral("/root/netvfs")).error(), Error::PermissionDenied);
         QByteArray content("0123456789abcdefghij");
         QBuffer source(&content);

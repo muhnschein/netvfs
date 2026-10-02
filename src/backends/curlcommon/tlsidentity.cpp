@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-#include "davtls.h"
+#include "tlsidentity.h"
 
 #include <QtCore/QStringList>
 
@@ -15,7 +15,7 @@
 #include <memory>
 #include <vector>
 
-namespace NetVfs::WebDav {
+namespace NetVfs::CurlTls {
 
 namespace {
 
@@ -171,16 +171,13 @@ bool loadStore(X509_STORE *store, const TrustStore &trust)
     return loaded;
 }
 
-int chainProblems(const std::vector<X509Ptr> &chain, const TrustStore &trust, time_t at)
+int chainProblems(X509 *leaf, STACK_OF(X509) *presented, const TrustStore &trust, time_t at)
 {
     std::unique_ptr<X509_STORE, StoreFree> store(X509_STORE_new());
     std::unique_ptr<X509_STORE_CTX, StoreCtxFree> ctx(X509_STORE_CTX_new());
-    std::unique_ptr<STACK_OF(X509), StackFree> untrusted(sk_X509_new_null());
-    if (!store || !ctx || !untrusted || !loadStore(store.get(), trust))
+    if (!store || !ctx || !loadStore(store.get(), trust))
         return ServerIdentity::UntrustedRoot;
-    for (size_t i = 1; i < chain.size(); ++i)
-        sk_X509_push(untrusted.get(), chain[i].get());
-    if (X509_STORE_CTX_init(ctx.get(), store.get(), chain.front().get(), untrusted.get()) != 1)
+    if (X509_STORE_CTX_init(ctx.get(), store.get(), leaf, presented) != 1)
         return ServerIdentity::UntrustedRoot;
     int problems = 0;
     X509_STORE_CTX_set_ex_data(ctx.get(), 0, &problems);
@@ -228,7 +225,19 @@ ServerIdentity identityFromChain(const QVector<QByteArray> &pemChain, const QByt
     }
     if (chain.empty())
         return ServerIdentity();
-    X509 *leaf = chain.front().get();
+    std::unique_ptr<STACK_OF(X509), StackFree> untrusted(sk_X509_new_null());
+    if (!untrusted)
+        return ServerIdentity();
+    for (size_t i = 1; i < chain.size(); ++i)
+        sk_X509_push(untrusted.get(), chain[i].get());
+    return identityFromCertificates(chain.front().get(), untrusted.get(), host, check, store, now);
+}
+
+ServerIdentity identityFromCertificates(X509 *leaf, STACK_OF(X509) *presented, const QByteArray &host,
+                                        ChainCheck check, const TrustStore &store, const QDateTime &now)
+{
+    if (!leaf)
+        return ServerIdentity();
     ServerIdentity identity = ServerIdentity::fromTlsSpki(spkiDer(leaf));
     if (identity.isEmpty())
         return identity;
@@ -244,7 +253,7 @@ ServerIdentity identityFromChain(const QVector<QByteArray> &pemChain, const QByt
         return identity;
     }
     const time_t at = time_t(now.toMSecsSinceEpoch() / 1000);
-    int problems = hostProblems(leaf, host) | chainProblems(chain, store, at);
+    int problems = hostProblems(leaf, host) | chainProblems(leaf, presented, store, at);
     if (check == ChainCheck::Failed && problems == 0)
         problems = ServerIdentity::UntrustedRoot;   // libcurl's store disagrees with ours
     identity.problems = problems;
@@ -252,4 +261,4 @@ ServerIdentity identityFromChain(const QVector<QByteArray> &pemChain, const QByt
     return identity;
 }
 
-} // namespace NetVfs::WebDav
+} // namespace NetVfs::CurlTls
