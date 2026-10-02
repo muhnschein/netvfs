@@ -19,6 +19,7 @@ PUBLIC_HEADERS = \
     backend.h \
     backendloader.h \
     boundedpipe.h \
+    consentstore.h \
     discovery.h \
     discoverytransport.h \
     dnsmessage.h \
@@ -46,6 +47,7 @@ SOURCES = \
     backend.cpp \
     backendloader.cpp \
     boundedpipe.cpp \
+    consentstore.cpp \
     discovery.cpp \
     discoverycache.cpp \
     discoverytransport.cpp \
