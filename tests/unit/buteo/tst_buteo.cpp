@@ -71,7 +71,7 @@ struct SessionSource
         auto session = std::make_unique<AccountSession>(manager.get(), secrets.release(), parent);
         manager.release()->setParent(session.get());
         AccountSession *raw = session.release();   // owned by `parent`
-        QTimer::singleShot(0, raw, [raw, accountId]() { raw->start(accountId); });
+        QTimer::singleShot(0, raw, [raw, accountId]() { raw->start(accountId, Service::Backup); });
         last = raw;
         return raw;
     }

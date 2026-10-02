@@ -30,6 +30,15 @@ extern const smb2_command_cb netvfs_smb_complete_open;
 /* For smb2_opendir_async(): stores the directory handle. */
 extern const smb2_command_cb netvfs_smb_complete_opendir;
 
+/*
+ * SPEC-v2 XC-11: sets FileBasicInformation (times; zero fields are left
+ * alone) on `path`, a file or a folder, in one compound request. Returns 0
+ * or -errno; on 0 `completion` is finished like any other request.
+ */
+int netvfs_smb_set_basic_info_async(struct smb2_context *smb2, const char *path,
+                                    const struct smb2_file_basic_info *info,
+                                    struct NetVfsSmbCompletion *completion);
+
 #ifdef __cplusplus
 }
 #endif

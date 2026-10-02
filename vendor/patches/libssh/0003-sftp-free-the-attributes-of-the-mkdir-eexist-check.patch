@@ -1,0 +1,24 @@
+From: muhnschein <tan_anemone.0l@icloud.com>
+Date: Fri, 2 Oct 2026 21:00:00 +0000
+Subject: [PATCH] sftp: free the attributes of the EEXIST check in sftp_mkdir()
+
+sftp_mkdir() maps a failed SSH_FXP_MKDIR on an existing path to
+SSH_FX_FILE_ALREADY_EXISTS with an sftp_lstat(), and releases the result
+with SAFE_FREE(). The strings the attributes own (extended pairs, which
+ProFTPD's mod_sftp sends, and owner/group) leak; LeakSanitizer reports
+them in the SFTP interop suite. Use sftp_attributes_free().
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+diff -ru c/src/sftp.c d/src/sftp.c
+--- c/src/sftp.c	2026-10-02 16:53:00.843374992 +0000
++++ d/src/sftp.c	2026-10-02 23:05:38.768872145 +0000
+@@ -1827,7 +1827,7 @@
+                  */
+                 errno_attr = sftp_lstat(sftp, directory);
+                 if (errno_attr != NULL) {
+-                    SAFE_FREE(errno_attr);
++                    sftp_attributes_free(errno_attr);
+                     sftp_set_error(sftp, SSH_FX_FILE_ALREADY_EXISTS);
+                 }
+                 break;

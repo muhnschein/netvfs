@@ -236,6 +236,7 @@ private slots:
         const QSet<QString> openTypes {
             // QtQuick, Silica, Sailfish.Pickers, Sailfish.Accounts
             QStringLiteral("Item"), QStringLiteral("Column"), QStringLiteral("Row"), QStringLiteral("Component"),
+            QStringLiteral("Repeater"), QStringLiteral("SilicaListView"), QStringLiteral("ViewPlaceholder"),
             QStringLiteral("QtObject"), QStringLiteral("Dialog"), QStringLiteral("Page"),
             QStringLiteral("SilicaFlickable"), QStringLiteral("DialogHeader"), QStringLiteral("PageHeader"),
             QStringLiteral("Label"), QStringLiteral("TextField"), QStringLiteral("PasswordField"),
@@ -248,7 +249,8 @@ private slots:
             QStringLiteral("NetVfsCreationAgent"), QStringLiteral("NetVfsSettingsAgent"),
             QStringLiteral("NetVfsUpdateAgent"), QStringLiteral("NetVfsSettingsPage"),
             QStringLiteral("ConnectionDialog"), QStringLiteral("ProbeBusyPage"),
-            QStringLiteral("ServerIdentityDialog"), QStringLiteral("SshKeyPage")
+            QStringLiteral("ServerIdentityDialog"), QStringLiteral("SshKeyPage"),
+            QStringLiteral("NetVfsConsentPage"), QStringLiteral("NetVfsConsentModel")
         };
         const QSet<QString> agentMembers {
             QStringLiteral("initialPage"), QStringLiteral("delayDeletion"), QStringLiteral("accountManager"),
@@ -286,7 +288,8 @@ private slots:
         QTest::addColumn<QString>("file");
         QTest::addColumn<QString>("type");
         QTest::addColumn<QString>("provider");
-        for (const QString &p : { QStringLiteral("sftp"), QStringLiteral("smb") }) {
+        for (const QString &p : { QStringLiteral("sftp"), QStringLiteral("smb"), QStringLiteral("webdav"),
+                                  QStringLiteral("ftp") }) {
             QTest::newRow(qPrintable(p)) << p + QStringLiteral(".qml") << "NetVfsCreationAgent" << p;
             QTest::newRow(qPrintable(p + QStringLiteral("-settings"))) << p + QStringLiteral("-settings.qml")
                                                                        << "NetVfsSettingsAgent" << p;
@@ -305,16 +308,20 @@ private slots:
         QVERIFY(code.contains(QStringLiteral("import org.netvfs.accounts 1.0")));
         QVERIFY(code.contains(type + QStringLiteral(" {")));
         QVERIFY(code.contains(QStringLiteral("provider: \"") + provider + QLatin1Char('"')));
-        const QString pro = readFile(SourceDir + QStringLiteral("/accounts/files.pro"));
-        QVERIFY(pro.contains(QStringLiteral("NETVFS_PROVIDERS = sftp smb")));
+        const QString pri = readFile(SourceDir + QStringLiteral("/accounts/providers.pri"));
+        QVERIFY(pri.contains(QStringLiteral("NETVFS_PROVIDERS = sftp smb webdav ftp\n")));
+        QVERIFY(pri.contains(QStringLiteral("NETVFS_BACKUP_PROVIDERS = sftp smb\n")));
     }
 
     void providerFiles_data()
     {
         QTest::addColumn<QString>("provider");
         QTest::addColumn<QString>("name");
-        QTest::newRow("sftp") << "sftp" << "SFTP";
-        QTest::newRow("smb") << "smb" << "SMB";
+        QTest::addColumn<bool>("backup");
+        QTest::newRow("sftp") << "sftp" << "SFTP" << true;
+        QTest::newRow("smb") << "smb" << "SMB" << true;
+        QTest::newRow("webdav") << "webdav" << "WebDAV" << false;
+        QTest::newRow("ftp") << "ftp" << "FTP" << false;
     }
 
     void providerFiles()
@@ -322,6 +329,7 @@ private slots:
         // SPEC 6.1 and 3.2/3.3: discovery by the Backup page depends on these values.
         QFETCH(QString, provider);
         QFETCH(QString, name);
+        QFETCH(bool, backup);
         const QString providerPath = BuildDir + QStringLiteral("/accounts/providers/") + provider + QStringLiteral(".provider");
         const QMap<QString, QString> p = readXml(providerPath);
         QVERIFY2(!p.isEmpty() && !p.contains(QStringLiteral("error")), qPrintable(providerPath));
@@ -332,7 +340,23 @@ private slots:
         QCOMPARE(p.value(QStringLiteral("provider/icon")), QStringLiteral("image://theme/graphic-service-") + provider);
         QVERIFY2(!readFile(providerPath).contains(QStringLiteral("<tag")), "no user-group tag (SPEC 6.1, V2)");
 
+        // SPEC-v2 XA-1: "<p>-files" of type netvfs-files for every provider.
+        const QString filesPath = BuildDir + QStringLiteral("/accounts/files-services/services/") + provider
+                + QStringLiteral("-files.service");
+        const QMap<QString, QString> f = readXml(filesPath);
+        QVERIFY2(!f.isEmpty() && !f.contains(QStringLiteral("error")), qPrintable(filesPath));
+        QCOMPARE(f.value(QStringLiteral("service@id")), provider + QStringLiteral("-files"));
+        QCOMPARE(f.value(QStringLiteral("service/type")), QStringLiteral("netvfs-files"));
+        QCOMPARE(f.value(QStringLiteral("service/name")), QStringLiteral("Files"));
+        QCOMPARE(f.value(QStringLiteral("service/provider")), provider);
+        QCOMPARE(f.value(QStringLiteral("setting:method")), QStringLiteral("password"));
+        QVERIFY(!f.contains(QStringLiteral("setting:sync_profile_templates")));
+
         const QString servicePath = BuildDir + QStringLiteral("/accounts/services/") + provider + QStringLiteral("-backup.service");
+        // XA-2: no backup service (and no Buteo profile) for webdav and ftp yet.
+        QCOMPARE(QFile::exists(servicePath), backup);
+        if (!backup)
+            return;
         const QMap<QString, QString> s = readXml(servicePath);
         QVERIFY2(!s.isEmpty() && !s.contains(QStringLiteral("error")), qPrintable(servicePath));
         QCOMPARE(s.value(QStringLiteral("service@id")), provider + QStringLiteral("-backup"));
@@ -348,11 +372,22 @@ private slots:
         QCOMPARE(s.value(QStringLiteral("service/template/group@name")), QStringLiteral("auth"));
     }
 
+    void serviceType()
+    {
+        const QString path = SourceDir + QStringLiteral("/accounts/files-services/netvfs-files.service-type");
+        const QMap<QString, QString> t = readXml(path);
+        QVERIFY2(!t.isEmpty() && !t.contains(QStringLiteral("error")), qPrintable(path));
+        QCOMPARE(t.value(QStringLiteral("service-type@id")), QStringLiteral("netvfs-files"));
+        QCOMPARE(t.value(QStringLiteral("service-type/name")), QStringLiteral("Files"));
+    }
+
     void icons_data()
     {
         QTest::addColumn<QString>("provider");
         QTest::newRow("sftp") << "sftp";
         QTest::newRow("smb") << "smb";
+        QTest::newRow("webdav") << "webdav";
+        QTest::newRow("ftp") << "ftp";
     }
 
     void icons()
@@ -384,6 +419,16 @@ private slots:
             }
         }
         QVERIFY(ids > 50);
+
+        // Descriptor labels (SPEC-v2 XA-5) are looked up at run time.
+        QStringList descriptorIds;
+        for (const QString &file : filesIn(QStringLiteral("accounts/descriptors"), { QStringLiteral("*.json") }))
+            descriptorIds += matches(readFile(file), QRegularExpression(QStringLiteral("\"(settings-accounts-netvfs-[^\"]+)\""))).values();
+        QVERIFY(descriptorIds.size() > 20);
+        for (const QString &id : descriptorIds) {
+            const QString text = translator.translate(nullptr, id.toUtf8().constData());
+            QVERIFY2(!text.isEmpty() && text != id, qPrintable(id));
+        }
     }
 };
 

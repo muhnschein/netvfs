@@ -201,5 +201,12 @@
     "search": "    if (reply.isValid() && reply.code == 421)",
     "replace": "    if (false)",
     "test": "build/tests/unit/ftp/tst_ftp curlErrors"
+  },
+  {
+    "name": "F-4 quoted-command replies shifted by one",
+    "file": "src/backends/ftp/ftpconnection.cpp",
+    "search": "            const int index = m_sent.at(start + quoted - count + j).replyIndex - m_replyBase;",
+    "replace": "            const int index = m_sent.at(start + quoted - count + j).replyIndex - m_replyBase + 1;",
+    "test": "sh tests/interop/ftp/run.sh build namespaceOps"
   }
 ]

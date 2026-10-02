@@ -1,0 +1,13 @@
+# SPDX-License-Identifier: LGPL-2.1-or-later
+# A server that is not OpenSSH (SPEC-v2 XT-2, XS-4, XS-6): ProFTPD's
+# mod_sftp from the distribution, password sign-in only.
+FROM mirror.gcr.io/library/ubuntu:24.04
+RUN apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+       proftpd-core proftpd-mod-crypto openssh-client python3 \
+    && rm -rf /var/lib/apt/lists/* \
+    && mkdir -p /etc/proftpd/hostkeys /var/log/proftpd \
+    && ssh-keygen -q -t rsa -b 3072 -m PEM -N '' -f /etc/proftpd/hostkeys/rsa \
+    && ssh-keygen -q -t ecdsa -b 256 -m PEM -N '' -f /etc/proftpd/hostkeys/ecdsa
+COPY start-proftpd.sh sftpproxy.py restart-instance.sh /setup/
+CMD ["/setup/start-proftpd.sh"]

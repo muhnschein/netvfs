@@ -14,7 +14,8 @@ namespace Test {
 
 // A private accounts database (ACCOUNTS, AG_PROVIDERS, AG_SERVICES point into a
 // temporary directory). Create it before the first Accounts::Manager in the
-// process. Providers get a "<provider>-backup" storage service.
+// process. Providers get a "<provider>-backup" storage service and a
+// "<provider>-files" netvfs-files service (SPEC-v2 XA-1).
 class Q_DECL_EXPORT AccountsFixture
 {
 public:
@@ -34,6 +35,10 @@ public:
                       const QString &backupsPath = QString(), quint32 credentialsId = 0);
 
     QVariant value(int accountId, const QString &key, const QString &service = QString());
+
+    // Enables or disables `service` ("" for the account itself) and writes
+    // `values` to it. Returns false on failure.
+    bool setService(int accountId, const QString &service, bool enabled, const QVariantMap &values = QVariantMap());
 
 private:
     QTemporaryDir m_dir;

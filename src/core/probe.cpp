@@ -56,4 +56,26 @@ Result verifyAccess(Backend *backend, const QString &dir, qint64 *freeBytes)
     return r;
 }
 
+Result verifyBrowseAccess(Backend *backend, const QString &root, qint64 *freeBytes)
+{
+    if (freeBytes)
+        *freeBytes = -1;
+
+    QString target;
+    Result r = Paths::normalize(root, &target);
+    if (!r.ok())
+        return r;
+    Entry entry;
+    r = backend->stat(target, &entry);
+    if (!r.ok())
+        return r;
+    if (!entry.isDir())
+        return Result(Error::NotADirectory, QStringLiteral("The start folder is not a folder"));
+
+    qint64 available = -1;
+    if (backend->freeSpace(target, &available).ok() && freeBytes)
+        *freeBytes = available;
+    return Result::success();
+}
+
 } // namespace NetVfs

@@ -181,6 +181,12 @@ public:
     // The backend wipes `answers` after use (SEC-5).
     virtual bool answer(const QString &name, const QString &instruction,
                         const QVector<AuthPrompt> &prompts, QVector<QByteArray> *answers) = 0;
+    // XC-22: Backend::cancel() calls this, from any thread, while answer()
+    // runs. An implementation whose answer() waits for a person must make
+    // that wait end soon and answer() return false; BlockingPrompter
+    // (prompter.h) does. The default does nothing, which is right only for
+    // prompters that never block.
+    virtual void cancel() {}
 };
 
 // ---------------------------------------------------------------- progress

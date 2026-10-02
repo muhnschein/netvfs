@@ -4,9 +4,13 @@ import Sailfish.Silica 1.0
 import com.jolla.settings.accounts 1.0
 import org.netvfs.accounts 1.0
 
-// Creation flow (SPEC 7.3) shared by sftp.qml and smb.qml:
-// input -> identify (no credentials, C-7) -> confirm server identity (SFTP,
-// S-7/S-8) -> [SSH key page, S-16] -> verify -> create (U-3) -> final dialog.
+// Creation flow (SPEC 7.3) shared by the providers' <p>.qml files:
+// input (from the provider descriptor, SPEC-v2 XA-5) -> identify (no
+// credentials, C-7) -> confirm server identity (SSH key, or a TLS
+// certificate the system does not trust or the user wants pinned; XC-16,
+// SPEC-v2-review 2.20) -> [SSH key page, S-16] -> verify (for backup when
+// chosen, else for files: nothing is written, 2.19) -> create (U-3) with the
+// chosen services (XA-1) -> final dialog.
 // Uses only the AccountCreationAgent members listed in SPEC 7.1 (R1) and no
 // OnlineSync* component or AccountFactory (U-1).
 AccountCreationAgent {
@@ -18,7 +22,11 @@ AccountCreationAgent {
     property string _authMode: "password"
     property string _keySource: "generate"
     property string _password
+    property string _secretKind: "password"
     property string _backupsPath
+    property string _filesRoot
+    property bool _backup
+    property bool _files
     property Item _busyPage
     property Item _keyPage
     property bool _verifying
@@ -46,9 +54,20 @@ AccountCreationAgent {
         }
         _authMode = connectionDialog.authMode
         _keySource = connectionDialog.keySource
+        _secretKind = connectionDialog.secretKind
         _password = connectionDialog.password
         _backupsPath = connectionDialog.backupsPath
-        _params = connectionDialog.connectionParams("")
+        _filesRoot = connectionDialog.filesRoot
+        _backup = connectionDialog.backupSelected
+        _files = connectionDialog.filesSelected
+        _params = connectionDialog.connectionParams({})
+    }
+
+    function _secret() {
+        if (_secretKind === "key") {
+            return _keyTool.secret()
+        }
+        return _secretKind === "none" ? "" : _password
     }
 
     function _startIdentify(page) {
@@ -68,8 +87,10 @@ AccountCreationAgent {
         }
         if (_probe.identityStatus === NetVfsProbe.IdentityUnknown) {
             pageStack.replace(identityComponent, { "identity": _probe.serverIdentity })
-        } else if (_probe.identityStatus === NetVfsProbe.NoIdentity) {
-            // SMB has no server identity to confirm (SPEC-smb 3).
+        } else if (_probe.identityStatus === NetVfsProbe.NoIdentity
+                   || _probe.identityStatus === NetVfsProbe.IdentityTrusted) {
+            // SMB has no server identity to confirm (SPEC-smb 3); a TLS
+            // certificate the system trusts needs no pin (XC-16).
             _busyPage.showBusy(_verifyText())
             _startVerify(_busyPage)
         } else {
@@ -78,8 +99,9 @@ AccountCreationAgent {
         }
     }
 
-    function _identityAccepted(pin) {
-        _params = connectionDialog.connectionParams(pin)
+    // XC-16, W-4: host_key and, for TLS, tls_verify_peer.
+    function _identityAccepted(pinOptions) {
+        _params = connectionDialog.connectionParams(pinOptions)
     }
 
     function _startVerify(page) {
@@ -89,8 +111,11 @@ AccountCreationAgent {
             // Stored with the account for display (SPEC-sftp 2).
             _params = NetVfsHelpers.withOptions(_params, { "public_key": _keyTool.publicKey })
         }
-        var secret = _authMode === "publickey" ? _keyTool.secret() : _password
-        _probe.verify(_params, { "username": _params.username, "secret": secret }, _backupsPath)
+        if (_backup) {
+            _probe.verify(_params, { "username": _params.username, "secret": _secret() }, _backupsPath, "backup")
+        } else {
+            _probe.verify(_params, { "username": _params.username, "secret": _secret() }, _filesRoot, "files")
+        }
     }
 
     function _verified() {
@@ -99,8 +124,12 @@ AccountCreationAgent {
         }
         //% "Adding the account"
         _busyPage.showBusy(qsTrId("settings-accounts-netvfs-la-creating_account"))
-        var secret = _authMode === "publickey" ? _keyTool.secret() : _password
-        _setup.create(_params, secret, _backupsPath, "")
+        _setup.create(_params, _secret(), {
+                          "backup": _backup,
+                          "files": _files,
+                          "backupsPath": _backupsPath,
+                          "filesRoot": _filesRoot
+                      }, "")
     }
 
     function _created(accountId) {
@@ -108,7 +137,7 @@ AccountCreationAgent {
         connectionDialog.clearPassword()
         _keyTool.clear()
         root.accountCreated(accountId)
-        pageStack.replace(finishComponent, { "freeBytes": _probe.freeBytes })
+        pageStack.replace(finishComponent, { "freeBytes": _probe.freeBytes, "backup": _backup })
     }
 
     function _setupFailed(text) {
@@ -133,8 +162,12 @@ AccountCreationAgent {
     }
 
     function _verifyText() {
-        //% "Signing in and checking the backups folder"
-        return qsTrId("settings-accounts-netvfs-la-verifying")
+        if (_backup) {
+            //% "Signing in and checking the backups folder"
+            return qsTrId("settings-accounts-netvfs-la-verifying")
+        }
+        //% "Signing in and checking the start folder"
+        return qsTrId("settings-accounts-netvfs-la-verifying_files")
     }
 
     // U-4: back to the input, or to the key page when the key was refused.
@@ -176,7 +209,7 @@ AccountCreationAgent {
         ServerIdentityDialog {
             acceptDestination: root._authMode === "publickey" ? keyComponent : verifyComponent
             acceptDestinationAction: PageStackAction.Push
-            onAccepted: root._identityAccepted(identity.pin)
+            onAccepted: root._identityAccepted(identity.pinOptions)
         }
     }
 
@@ -220,6 +253,7 @@ AccountCreationAgent {
             id: finishDialog
 
             property real freeBytes: -1
+            property bool backup
 
             backNavigation: false
             acceptDestination: root.endDestination
@@ -245,8 +279,11 @@ AccountCreationAgent {
                         width: parent.width - 2 * x
                         wrapMode: Text.Wrap
                         color: Theme.highlightColor
-                        //% "The account was added. Backups to this server can now be made in Settings > Backup."
-                        text: qsTrId("settings-accounts-netvfs-la-account_added")
+                        text: finishDialog.backup
+                              ? //% "The account was added. Backups to this server can now be made in Settings > Backup."
+                                qsTrId("settings-accounts-netvfs-la-account_added")
+                              : //% "The account was added. Apps that you allow can now use files on this server."
+                                qsTrId("settings-accounts-netvfs-la-account_added_files")
                     }
 
                     Label {

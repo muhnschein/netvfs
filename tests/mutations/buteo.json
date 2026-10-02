@@ -170,7 +170,7 @@
   {
     "name": "8.7 attention not recorded",
     "file": "src/buteo/lib/backuprun.cpp",
-    "search": "if (const Result stored = AccountStore(m_manager.get()).setAttention(m_spec.accountId, attention, pin); !stored.ok())",
+    "search": "if (const Result stored = AccountStore(m_manager.get()).setAttention(m_spec.accountId, Service::Backup, attention, pin); !stored.ok())",
     "replace": "if (const Result stored = Result(); !stored.ok())",
     "test": "dbus-run-session -- build/tests/unit/buteo/tst_buteo"
   },

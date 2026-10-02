@@ -171,3 +171,35 @@ Strict server used for M-T1:
   valid users = backup
   read only = no
 ```
+
+---
+
+## 8. API v2 implementation notes (SPEC-v2 §6.2)
+
+How the backend implements XM-1..XM-9, where the v2 text leaves a choice.
+
+| Item | Decision |
+|---|---|
+| XM-1 profiles | Option `security_profile` = `strict` (default) / `signed` / `legacy` / `guest`; without it `require_encryption=false` means `signed`. Any other value is `SecurityPolicy` (nothing weaker is guessed, XSEC-2). Dialects: `strict`/`signed` `SMB2_VERSION_ANY3`, `legacy`/`guest` `SMB2_VERSION_ANY`; the negotiated dialect is checked again against the profile (M-1 defence in depth). Signing required except for `guest` (`SIGNING_ENABLED` only). Encryption: `strict` `smb2_set_seal(1)`; `signed`/`legacy` leave seal unset, so libsmb2 encrypts exactly when the server or the share requires it (libsmb2 has no opportunistic encryption); `guest` `smb2_set_seal(0)`. `guest` sends an empty user name and no password (NTLMSSP anonymous) and ignores the account's credentials. The "allowed for service" column is enforced by `AccountSession` (XA-4), not here. |
+| XM-1 guest mapping | `smb2_get_session_flags()` (vendor patch 0004): `IS_GUEST` or `IS_NULL` on a session of any other profile is `SecurityPolicy`, also when the sign-in failed because the guest session could not sign. Verified against Samba with `map to guest = Bad User` for `strict`, `signed` and `legacy`. |
+| XM-2 server mode | Empty `share`. `authenticate()` signs in to `IPC$`: that proves credentials and profile before anything else and serves `keepAlive()` (ECHO) and the chunk sizes; it is not counted among the four share contexts. Share contexts open on first use of `/<share>/…`; the fifth closes the least recently used one without open handles, or fails with `TooManyConnections` when every context holds handles. Only in server mode is the password kept in memory after sign-in (wiped on `disconnect()`). `/`: `list`, `stat` only, everything else `PermissionDenied`; `/<share>`: `removeDir`, `rename`, `openWrite`/`upload` `PermissionDenied`, `makeDir` succeeds for an existing share (needed by `makePath`) and is `PermissionDenied` for a missing one. Moving between shares is `Unsupported`. |
+| XM-3 share list | `shares` (QStringList, list or comma separated string), trimmed, invalid names dropped, de-duplicated without regard to case; then the enumerated shares not yet listed. Entries are `Directory`; an enumerated remark is `Entry::extra["remark"]`. |
+| XM-4 entries | `created` from the birth time; `Hidden`/`ReadOnly`/`System` from the DOS attributes; reparse points libsmb2 reports as links are `Symlink` (no `Symlinks` capability, `readLink` is `Unsupported`), WSL FIFOs/devices/sockets `Special`. `CaseInsensitive` is reported unconditionally: Windows and Samba's default `case sensitive = auto` behave case-insensitively for SMB clients without POSIX extensions, and FILE_CASE_SENSITIVE_SEARCH cannot tell (Samba sets it either way); a consumer that avoids names differing only in case is right on a case-sensitive share too. `maxNameBytes` 255. |
+| XC-4 names | libsmb2 replaced unpaired UTF-16 surrogates with U+FFFD; vendor patch 0006 makes them WTF-8 in both directions, so they are passed through as lone `QChar`s and such files remain usable. |
+| XM-5 replace | Vendor patch 0005: `rename(Replace)` is one FileRenameInformation request with `ReplaceIfExists` (`AtomicReplace`); a folder target is still refused first (XC-10). |
+| XM-6 handles | `ReadHandle`/`WriteHandle` keep one `smb2fh`; reads and writes are pipelined in chunks of `chunkSize()` (M-11) with at most 4 MiB requested and not yet consumed per handle; `readAhead()` starts requests up to that bound. `Resume` opens read-write without truncate (the size check needs FILE_READ_ATTRIBUTES) and requires size == `resumeOffset`, else `ProtocolError`. `setAttributes` sets `modified`/`accessed` with one CREATE + SET_INFO (FileBasicInformation) + CLOSE compound on files and folders; `mode` is `Unsupported` before anything is sent; times before 1970 are `Unsupported`. `WriteOptions::modified` is applied after the close (`SetModifiedOnUpload`). |
+| XM-7 enumeration | Option `share_enumeration` (default true, server mode only). Helper `/usr/libexec/netvfs/netvfs-smb-shares`; the environment variable `NETVFS_SMB_SHARES_HELPER` names another binary when it is set (tests; whoever controls a process's environment controls the process anyway). `ShareEnumeration` is reported only when the helper is executable. Request on stdin as length-prefixed fields (see `smbshares.h`), never argv or the environment; `NTLM_USER_FILE` is removed before the spawn and again in the helper (M-5); the request buffers are wiped (XSEC-6). The helper signs in to `IPC$` with the same profile and the same checks, runs NetrShareEnum level 1 and writes JSON lines ending in `{"end":N}` or an error line. The backend kills it on cancel and after connect + request timeout, caps the output at 1 MiB, and treats a crash, a non-zero exit without an error line or any malformed output as `ProtocolError`; it keeps disk shares only (`type & 0xff == STYPE_DISKTREE`) and hides names ending in `$` unless `show_admin_shares=true`. The helper links the second libsmb2 build with DCE/RPC; the plugin keeps `noshareenum.c` (G-SMB item 4). |
+| XM-9 DFS | `STATUS_PATH_NOT_COVERED` (also as libsmb2's `ENOEXEC` from compound requests) and `STATUS_DFS_UNAVAILABLE` are `Unsupported` with detail "DFS referral". Verified with a Samba `msdfs root` share. |
+| XT-5 | SMB has no server identity (section 3): `connect()` sends nothing, `authenticate()` must send the NTLMSSP exchange. What the identity check does elsewhere is done here by the profile failing closed: required signing (keys from the password) and required encryption end the session when the server cannot provide them, and a guest mapping is refused. |
+
+Interop matrix additions (run with the profile named; M-T3/M-T7/M-T9 stay `strict`):
+
+| # | Case | Expected |
+|---|---|---|
+| M-T20 | SMB 2.1-only server, `strict` and `signed` | `SecurityPolicy` |
+| M-T21 | same server, `legacy` | pass, dialect 2.1 |
+| M-T22 | `map to guest = Bad User`, unknown user, `strict`/`signed`/`legacy` | `SecurityPolicy` (guest mapping) |
+| M-T23 | guest share, `guest` profile | pass |
+| M-T24 | server mode: share list (saved + enumerated, disk shares, `$` hidden), root and share-level refusals, four-context limit with handles | pass |
+| M-T25 | share helper crashes or writes garbage | `ProtocolError`, backend usable |
+| M-T26 | DFS link | `Unsupported`, detail "DFS referral" |

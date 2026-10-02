@@ -1,7 +1,15 @@
 # SPDX-License-Identifier: LGPL-2.1-or-later
 # The OpenSSH server of a distribution release (ubuntu:24.04 → 9.6p1,
-# ubuntu:22.04 → 8.9p1), with PAM.
+# ubuntu:22.04 → 8.9p1), with PAM and the one-time password stub module
+# (pam_netvfs_otp.c) for the keyboard-interactive cases (SPEC-v2 XT-2).
 ARG BASE=mirror.gcr.io/library/ubuntu:24.04
+FROM ${BASE} AS pam
+RUN apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends gcc libc6-dev libpam0g-dev \
+    && rm -rf /var/lib/apt/lists/*
+COPY pam_netvfs_otp.c /src/
+RUN gcc -O2 -Wall -Wextra -Werror -fPIC -shared -o /src/pam_netvfs_otp.so /src/pam_netvfs_otp.c
+
 FROM ${BASE}
 RUN apt-get update \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
@@ -9,7 +17,9 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/* \
     && mkdir -p /run/sshd \
     && ssh-keygen -A
+COPY --from=pam /src/pam_netvfs_otp.so /setup/
+RUN cp /setup/pam_netvfs_otp.so "$(dirname "$(find /usr/lib /lib -name pam_unix.so | head -n 1)")/"
 ENV SSHD=/usr/sbin/sshd SSH_KEYGEN=/usr/bin/ssh-keygen SFTP=/usr/bin/sftp \
     SFTP_SERVER=/usr/lib/openssh/sftp-server USE_PAM=1
-COPY start-sshd.sh sftpproxy.py /setup/
+COPY start-sshd.sh sftpproxy.py restart-instance.sh /setup/
 CMD ["/setup/start-sshd.sh"]

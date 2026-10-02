@@ -22,13 +22,25 @@ static_assert(static_cast<int>(Error::AuthFailed) == static_cast<int>(NetVfsProb
 
 namespace {
 constexpr const char *HostKeyOption = "host_key";
+constexpr const char *AuthInteractive = "interactive";
+
+NetVfsProbe::IdentityStatus matchedStatus(const ProbeOutcome &outcome)
+{
+    using Status = NetVfsProbe::IdentityStatus;
+    if (outcome.identity.isEmpty())
+        return Status::NoIdentity;
+    // XC-16: accepted without a pin because the system trusts the certificate.
+    if (!outcome.pinned && outcome.identity.kind == ServerIdentity::Kind::TlsCertificate)
+        return Status::IdentityTrusted;
+    return Status::IdentityMatches;
+}
 
 NetVfsProbe::IdentityStatus identityStatusFor(const ProbeOutcome &outcome)
 {
     using Status = NetVfsProbe::IdentityStatus;
     switch (outcome.identityCheck.error()) {
     case Error::None:
-        return outcome.identity.isEmpty() ? Status::NoIdentity : Status::IdentityMatches;
+        return matchedStatus(outcome);
     case Error::ServerIdentityUnknown:
         return Status::IdentityUnknown;
     default:
@@ -49,31 +61,72 @@ Credentials credentialsFromVariant(const QVariantMap &map, const QString &fallba
     return credentials;
 }
 
-AccountSession *openSession(int accountId, QObject *parent)
+AccountSession *openSession(int accountId, Service service, QObject *parent)
 {
-    return AccountSession::open(accountId, parent);
+    return AccountSession::open(accountId, service, parent);
+}
+
+// Interactive sign-in cannot be answered here: connect and check the identity only.
+void verifyIdentityOnly(Backend *backend, const ConnectionParams &params, ProbeOutcome *outcome)
+{
+    outcome->result = backend->connect(params, &outcome->identity);
+    if (!outcome->result.ok())
+        return;
+    outcome->identityCheck = identityCheckFor(outcome->identity, params);
+    outcome->result = outcome->identityCheck;
+    backend->disconnect();
+}
+
+Activity verifyActivity(const ProbeOutcome &outcome, Service service)
+{
+    if (service == Service::Files)
+        return Activity::Browse;
+    return outcome.refusedByPolicy ? Activity::ServicePolicy : Activity::Connect;
 }
 } // namespace
+
+Result identityCheckFor(const ServerIdentity &seen, const ConnectionParams &params)
+{
+    const QString pin = params.option(QLatin1String(HostKeyOption));
+    const Result r = checkServerIdentity(seen, pin);
+    if (r.ok() && pin.isEmpty() && seen.kind == ServerIdentity::Kind::TlsCertificate
+            && params.flag(QLatin1String(OptionKeys::PinTrusted)))
+        return Result(Error::ServerIdentityUnknown, QStringLiteral("The certificate is to be pinned (pin_trusted)"));
+    return r;
+}
 
 ProbeOutcome runIdentify(Backend *backend, const ConnectionParams &params)
 {
     ProbeOutcome outcome;
+    outcome.pinned = !params.option(QLatin1String(HostKeyOption)).isEmpty();
     outcome.result = backend->connect(params, &outcome.identity);
     if (outcome.result.ok()) {
-        outcome.identityCheck = checkServerIdentity(outcome.identity, params.option(QLatin1String(HostKeyOption)));
+        outcome.identityCheck = identityCheckFor(outcome.identity, params);
         backend->disconnect();
     }
     return outcome;
 }
 
 ProbeOutcome runVerify(Backend *backend, const ConnectionParams &params, const Credentials &credentials,
-                       const QString &backupsPath)
+                       const QString &folder, Service service)
 {
     ProbeOutcome outcome;
+    outcome.pinned = !params.option(QLatin1String(HostKeyOption)).isEmpty();
+    outcome.result = checkServicePolicy(params, service);   // XA-4, before anything is sent
+    if (!outcome.result.ok()) {
+        outcome.refusedByPolicy = true;
+        return outcome;
+    }
+    if (params.option(QLatin1String(OptionKeys::AuthMode)) == QLatin1String(AuthInteractive)) {
+        verifyIdentityOnly(backend, params, &outcome);
+        return outcome;
+    }
     outcome.result = establish(backend, params, credentials, &outcome.identity);
-    outcome.identityCheck = checkServerIdentity(outcome.identity, params.option(QLatin1String(HostKeyOption)));
+    outcome.identityCheck = identityCheckFor(outcome.identity, params);
     if (outcome.result.ok()) {
-        outcome.result = verifyAccess(backend, backupsPath, &outcome.freeBytes);
+        // SPEC-v2-review 2.19: Files never writes (read-only shares, guests).
+        outcome.result = service == Service::Backup ? verifyAccess(backend, folder, &outcome.freeBytes)
+                                                    : verifyBrowseAccess(backend, folder, &outcome.freeBytes);
         backend->disconnect();
     }
     return outcome;
@@ -114,32 +167,46 @@ void NetVfsProbe::identify(const QVariantMap &paramsMap)
 }
 
 void NetVfsProbe::verify(const QVariantMap &paramsMap, const QVariantMap &credentialsMap,
-                         const QString &backupsPath)
+                         const QString &folder, const QString &serviceId)
 {
     reset();
+    Service service = Service::Backup;
+    if (!serviceFromId(serviceId, &service)) {
+        fail(Error::Internal, userErrorText(Error::Internal), QStringLiteral("Unknown service ") + serviceId);
+        return;
+    }
     const ConnectionParams params = paramsFromVariant(paramsMap);
     const Credentials credentials = credentialsFromVariant(credentialsMap, params.username);
-    startVerify(params, credentials, backupsPath);
+    startVerify(params, credentials, folder, service);
 }
 
-void NetVfsProbe::verifyAccount(int accountId, const QString &pin)
+void NetVfsProbe::verifyAccount(int accountId, const QVariantMap &pinOptions, const QString &serviceId)
 {
     reset();
+    Service service = Service::Backup;
+    if (!serviceFromId(serviceId, &service)) {
+        fail(Error::Internal, userErrorText(Error::Internal), QStringLiteral("Unknown service ") + serviceId);
+        return;
+    }
     setState(State::Verifying);
-    AccountSession *session = m_sessionFactory(accountId, this);
+    AccountSession *session = m_sessionFactory(accountId, service, this);
     m_session = session;
-    connect(session, &AccountSession::ready, this, [this, session, pin]() {
+    connect(session, &AccountSession::ready, this, [this, session, pinOptions, service]() {
         ConnectionParams params = session->params();
-        if (!pin.isEmpty())
-            params.options.insert(QLatin1String(HostKeyOption), pin);
+        for (auto it = pinOptions.constBegin(); it != pinOptions.constEnd(); ++it)
+            params.options.insert(it.key(), it.value());
         const Credentials credentials = session->credentials();
-        const QString backupsPath = session->backupsPath();
+        const QString folder = service == Service::Backup ? session->backupsPath() : session->filesRoot();
         closeSession();
-        startVerify(params, credentials, backupsPath);
+        startVerify(params, credentials, folder, service);
     });
-    connect(session, &AccountSession::failed, this, [this](const NetVfs::Result &result) {
+    connect(session, &AccountSession::failed, this, [this, service](const NetVfs::Result &result) {
         closeSession();
-        fail(result.error(), userErrorText(result.error(), Activity::StoredSecret), result.message());
+        // XA-4: the session refuses a configuration before reading the secret.
+        Activity activity = Activity::StoredSecret;
+        if (result.error() == Error::SecurityPolicy)
+            activity = service == Service::Backup ? Activity::ServicePolicy : Activity::Connect;
+        fail(result.error(), userErrorText(result.error(), activity), result.message());
     });
 }
 
@@ -174,23 +241,23 @@ Backend *NetVfsProbe::createBackend(const QString &provider)
 }
 
 void NetVfsProbe::startVerify(const ConnectionParams &params, const Credentials &credentials,
-                              const QString &backupsPath)
+                              const QString &folder, Service service)
 {
     Backend *backend = createBackend(params.provider);
     if (!backend)
         return;
-    qCDebug(lcNetVfsUi) << "Verifying" << params.host << backupsPath;
+    qCDebug(lcNetVfsUi) << "Verifying" << params.host << serviceId(service) << folder;
     setState(State::Verifying);
     auto outcome = std::make_shared<ProbeOutcome>();
-    // The verify creates the backups folder the way backups do (S-20).
-    const ConnectionParams backupParams = withBackupDirMode(params);
-    m_jobs.start([backend, backupParams, credentials, backupsPath, outcome](CancelToken *token) {
+    // A backup verify creates the backups folder the way backups do (S-20).
+    const ConnectionParams serviceParams = service == Service::Backup ? withBackupDirMode(params) : params;
+    m_jobs.start([backend, serviceParams, credentials, folder, service, outcome](CancelToken *token) {
         // The captured credentials wipe themselves when the job is released (SEC-5).
         std::unique_ptr<Backend> owned(backend);
         token->attach(backend);
-        *outcome = runVerify(backend, backupParams, credentials, backupsPath);
+        *outcome = runVerify(backend, serviceParams, credentials, folder, service);
         token->detach();
-    }, [this, outcome]() { finishVerify(*outcome); });
+    }, [this, outcome, service]() { finishVerify(*outcome, service); });
 }
 
 void NetVfsProbe::finishIdentify(const ProbeOutcome &outcome)
@@ -205,7 +272,7 @@ void NetVfsProbe::finishIdentify(const ProbeOutcome &outcome)
     emit identified();
 }
 
-void NetVfsProbe::finishVerify(const ProbeOutcome &outcome)
+void NetVfsProbe::finishVerify(const ProbeOutcome &outcome, Service service)
 {
     // The identity was checked unless the connection itself failed.
     if (const Error error = outcome.result.error();
@@ -214,7 +281,8 @@ void NetVfsProbe::finishVerify(const ProbeOutcome &outcome)
         m_identityStatus = identityStatusFor(outcome);
     }
     if (!outcome.result.ok()) {
-        fail(outcome.result.error(), userErrorText(outcome.result.error()), outcome.result.message());
+        fail(outcome.result.error(), userErrorText(outcome.result.error(), verifyActivity(outcome, service)),
+             outcome.result.message());
         return;
     }
     m_freeBytes = outcome.freeBytes;
