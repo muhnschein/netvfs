@@ -279,10 +279,11 @@ Result sftpStatusFailure(int sftpStatus, const QString &sshMessage, const QStrin
             { "Is a directory", Error::IsADirectory },
             { "Directory not empty", Error::DirectoryNotEmpty },
         } };
-        for (const Text &entry : texts) {
-            if (sshMessage.endsWith(QLatin1String(entry.text)))
-                return Result(entry.error, QStringLiteral("%1: %2").arg(context, QLatin1String(entry.text)));
-        }
+        const auto found = std::find_if(texts.cbegin(), texts.cend(), [&sshMessage](const Text &entry) {
+            return sshMessage.endsWith(QLatin1String(entry.text));
+        });
+        if (found != texts.cend())
+            return Result(found->error, QStringLiteral("%1: %2").arg(context, QLatin1String(found->text)));
     }
     const Error error = sshMessage.contains(QLatin1String("Timeout"), Qt::CaseInsensitive) ? Error::Timeout
                                                                                           : Error::ProtocolError;
@@ -404,11 +405,11 @@ SymlinkOrder symlinkOrderFor(const QString &serverBanner, bool openSshBanner)
 {
     if (openSshBanner)
         return SymlinkOrder::AsLibssh;
-    for (const SymlinkFamily &family : verifiedSymlinkFamilies()) {
-        if (serverBanner.startsWith(QLatin1String(family.bannerPrefix)))
-            return family.order;
-    }
-    return SymlinkOrder::Unverified;
+    const auto &families = verifiedSymlinkFamilies();
+    const auto found = std::find_if(families.cbegin(), families.cend(), [&serverBanner](const SymlinkFamily &family) {
+        return serverBanner.startsWith(QLatin1String(family.bannerPrefix));
+    });
+    return found == families.cend() ? SymlinkOrder::Unverified : found->order;
 }
 
 bool lstatFollowsLinks(const QString &serverBanner)

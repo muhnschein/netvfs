@@ -414,11 +414,11 @@ Result SftpBackend::copy(const QString &from, const QString &to, const CopyOptio
         r = tools.checkCopyTarget(source, target, options);
     if (!r.ok())
         return r;
-    ExecOptions exec;
-    exec.maxOutput = HelperOutputLimit;
-    exec.timeoutMs = 0;   // proportional to the data; cancel() ends it
+    ExecOptions limits;
+    limits.maxOutput = HelperOutputLimit;
+    limits.timeoutMs = 0;   // proportional to the data; cancel() ends it
     ExecResult result;
-    r = tools.run(copyCommand(source, target, options.recursive), exec, &result);
+    r = tools.run(copyCommand(source, target, options.recursive), limits, &result);
     if (r.ok() && result.exitStatus != 0)
         r = commandFailed("cp", result);
     return r;

@@ -57,7 +57,7 @@ void SftpBackend::cancel()
 {
     m_canceled = true;
     // XC-22: a prompter waiting for a person returns now.
-    const std::lock_guard<std::mutex> lock(m_prompterMutex);
+    const std::scoped_lock lock(m_prompterMutex);
     if (m_prompter)
         m_prompter->cancel();
 }

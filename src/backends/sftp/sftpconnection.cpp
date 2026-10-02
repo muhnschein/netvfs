@@ -158,7 +158,7 @@ void SftpBackend::Connection::close()
 
 void SftpBackend::Connection::setPrompter(AuthPrompter *prompter)
 {
-    const std::lock_guard<std::mutex> lock(m_b.m_prompterMutex);
+    const std::scoped_lock lock(m_b.m_prompterMutex);
     m_b.m_prompter = prompter;
 }
 

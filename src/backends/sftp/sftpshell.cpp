@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 #include "sftpshell.h"
 
+#include <algorithm>
+
 namespace NetVfs::Sftp {
 
 namespace {
@@ -98,10 +100,8 @@ bool parseSha256Output(const QByteArray &out, QByteArray *digest)
     if (out.size() < start + Sha256HexLength + 1 || out.at(start + Sha256HexLength) != ' ')
         return false;
     const QByteArray hex = out.mid(start, Sha256HexLength);
-    for (const char c : hex) {
-        if (!isHex(c))
-            return false;
-    }
+    if (!std::all_of(hex.cbegin(), hex.cend(), isHex))
+        return false;
     *digest = QByteArray::fromHex(hex);
     return true;
 }

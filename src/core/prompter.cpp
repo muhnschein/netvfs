@@ -41,7 +41,7 @@ bool BlockingPrompter::answer(const QString &name, const QString &instruction, c
                               QVector<QByteArray> *answers)
 {
     {
-        const std::lock_guard<std::mutex> lock(m_state->mutex);
+        const std::scoped_lock lock(m_state->mutex);
         if (m_state->canceled)
             return false;
         m_state->wipeAnswers();
@@ -50,7 +50,7 @@ bool BlockingPrompter::answer(const QString &name, const QString &instruction, c
     if (m_state->ask)
         m_state->ask(Question { name, instruction, prompts });
 
-    std::unique_lock<std::mutex> lock(m_state->mutex);
+    std::unique_lock lock(m_state->mutex);
     m_state->changed.wait(lock, [this]() { return m_state->canceled || m_state->phase != State::Phase::Waiting; });
     const bool answered = !m_state->canceled && m_state->phase == State::Phase::Answered;
     if (answered && answers) {
@@ -67,7 +67,7 @@ bool BlockingPrompter::answer(const QString &name, const QString &instruction, c
 
 void BlockingPrompter::respond(const QVector<QByteArray> &answers)
 {
-    const std::lock_guard<std::mutex> lock(m_state->mutex);
+    const std::scoped_lock lock(m_state->mutex);
     if (m_state->phase != State::Phase::Waiting)
         return;
     m_state->answers = answers;
@@ -79,7 +79,7 @@ void BlockingPrompter::respond(const QVector<QByteArray> &answers)
 
 void BlockingPrompter::decline()
 {
-    const std::lock_guard<std::mutex> lock(m_state->mutex);
+    const std::scoped_lock lock(m_state->mutex);
     if (m_state->phase != State::Phase::Waiting)
         return;
     m_state->phase = State::Phase::Declined;
@@ -88,20 +88,20 @@ void BlockingPrompter::decline()
 
 void BlockingPrompter::cancel()
 {
-    const std::lock_guard<std::mutex> lock(m_state->mutex);
+    const std::scoped_lock lock(m_state->mutex);
     m_state->canceled = true;
     m_state->changed.notify_all();
 }
 
 void BlockingPrompter::reset()
 {
-    const std::lock_guard<std::mutex> lock(m_state->mutex);
+    const std::scoped_lock lock(m_state->mutex);
     m_state->canceled = false;
 }
 
 bool BlockingPrompter::waiting() const
 {
-    const std::lock_guard<std::mutex> lock(m_state->mutex);
+    const std::scoped_lock lock(m_state->mutex);
     return m_state->phase == State::Phase::Waiting;
 }
 
