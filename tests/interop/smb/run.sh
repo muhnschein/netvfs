@@ -86,9 +86,9 @@ done
 
 echo "Samba: $(docker exec "$prefix-strict" smbd --version), current: $(docker exec "$prefix-current" smbd --version)"
 
-# Sanitizer builds (M-T19): every UBSan report is fatal except the reviewed
-# ones in libsmb2 listed in ubsan-libsmb2.supp. No effect on other builds.
-export UBSAN_OPTIONS="${UBSAN_OPTIONS:+$UBSAN_OPTIONS:}print_stacktrace=1:halt_on_error=1:suppressions=$here/ubsan-libsmb2.supp"
+# Sanitizer builds (M-T19, gate G-SMB item 3): every UBSan report is fatal,
+# including in the vendored libsmb2. No effect on other builds.
+export UBSAN_OPTIONS="${UBSAN_OPTIONS:+$UBSAN_OPTIONS:}print_stacktrace=1:halt_on_error=1"
 export NETVFS_BACKEND_PATH="$build/lib/netvfs/backends"
 export NETVFS_SMB_PREFIX="$prefix"
 export NETVFS_SMB_PASSWORD="$password"

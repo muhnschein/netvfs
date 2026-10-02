@@ -1,0 +1,37 @@
+From 55c47d18609b136e60cfe788fe45872f86c2cba7 Mon Sep 17 00:00:00 2001
+From: muhnschein <tan_anemone.0l@icloud.com>
+Date: Fri, 2 Oct 2026 13:18:38 +0000
+Subject: [PATCH 2/3] smb3-seal: store the session id with memcpy
+
+The session id lives at offset 44 of the transform header, which is
+not 8-byte aligned. Storing it through a uint64_t pointer is undefined
+behaviour (UBSan: alignment) and can fault on strict-alignment CPUs.
+Use memcpy like the other header fields.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ lib/smb3-seal.c | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/lib/smb3-seal.c b/lib/smb3-seal.c
+index d082239..01233b2 100644
+--- a/lib/smb3-seal.c
++++ b/lib/smb3-seal.c
+@@ -75,6 +75,7 @@ smb3_encrypt_pdu(struct smb2_context *smb2,
+         uint32_t spl, u32;
+         int i;
+         uint16_t u16;
++        uint64_t u64;
+ 
+         if (!smb2->seal) {
+                 return 0;
+@@ -106,7 +107,8 @@ smb3_encrypt_pdu(struct smb2_context *smb2,
+         memcpy(&pdu->crypt[36], &u32, 4);
+         u16 = htole16(SMB_ENCRYPTION_AES128_CCM);
+         memcpy(&pdu->crypt[42], &u16, 2);
+-        *(uint64_t *)(void *)&pdu->crypt[44] = htole64(smb2->session_id);
++        u64 = htole64(smb2->session_id);
++        memcpy(&pdu->crypt[44], &u64, 8);
+ 
+         spl = 52;  /* transform header */
+         for (tmp_pdu = pdu; tmp_pdu; tmp_pdu = tmp_pdu->next_compound) {

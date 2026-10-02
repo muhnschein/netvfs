@@ -16,12 +16,25 @@ build() {
     shift
     stamp="$prefix/.$name.stamp"
     rev=$(git -C "$here/$name" rev-parse HEAD 2>/dev/null || echo unknown)
-    want="$rev ${CFLAGS:-} $*"
+    patches=$(cat "$here/patches/$name"/*.patch 2>/dev/null | cksum)
+    want="$rev $patches ${CFLAGS:-} $*"
     if [ -f "$stamp" ] && [ "$(cat "$stamp")" = "$want" ]; then
         return 0
     fi
+    # Local fixes on top of the pin (vendor/patches/<name>/*.patch) are
+    # applied to a copy, so the submodule checkout stays pristine.
+    src="$here/$name"
+    if ls "$here/patches/$name"/*.patch >/dev/null 2>&1; then
+        src="$work/$name-src"
+        rm -rf "$src"
+        mkdir -p "$src"
+        (cd "$here/$name" && tar --exclude=.git -cf - .) | (cd "$src" && tar -xf -)
+        for patch in "$here/patches/$name"/*.patch; do
+            patch -d "$src" -p1 --batch --forward --quiet < "$patch"
+        done
+    fi
     rm -rf "$work/$name"
-    cmake -S "$here/$name" -B "$work/$name" \
+    cmake -S "$src" -B "$work/$name" \
         -DCMAKE_BUILD_TYPE=RelWithDebInfo \
         -DCMAKE_INSTALL_PREFIX="$prefix" \
         -DCMAKE_INSTALL_LIBDIR=lib \
