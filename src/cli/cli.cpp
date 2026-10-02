@@ -208,8 +208,8 @@ Result resolveRemotePaths(const Options &options, Prepared *prepared)
         if (kinds.at(i) != 'r')
             continue;
         QString path;
-        const Result resolved = resolvePath(options.main.basePath, prepared->cmd.positional.at(i), &path);
-        if (!resolved.ok())
+        if (const Result resolved = resolvePath(options.main.basePath, prepared->cmd.positional.at(i), &path);
+            !resolved.ok())
             return resolved;
         prepared->cmd.positional[i] = path;
     }
@@ -241,7 +241,7 @@ private:
     bool m_failed = false;
 };
 
-int runWithBackend(const Prepared &prepared, Options *options, const Connector &connector, QTextStream &out,
+int runWithBackend(const Prepared &prepared, const Options *options, const Connector &connector, QTextStream &out,
                    QTextStream &err)
 {
     Result r;
@@ -286,8 +286,7 @@ Result resolveLocation(Location *location, const QString &url, const QVariantMap
     if (!url.isEmpty()) {
         // XH-6: a password in the URL is rejected and never stored.
         QString path;
-        const Result parsed = Url::parse(url, &location->params, &path);
-        if (!parsed.ok())
+        if (const Result parsed = Url::parse(url, &location->params, &path); !parsed.ok())
             return parsed;
         location->basePath = path;
     }
@@ -314,10 +313,12 @@ int run(const QStringList &arguments, QTextStream &out, QTextStream &err, QIODev
     if (!parseCommandLine(*prepared.spec, options.args, &prepared.cmd, &error))
         return usageError(err, error);
     if (prepared.spec->check) {
-        error = prepared.spec->check(prepared.cmd, &options);
+        error = prepared.spec->check(prepared.cmd, options);
         if (!error.isEmpty())
             return usageError(err, error);
     }
+    if (prepared.spec->adjust)
+        prepared.spec->adjust(&options);
 
     PromptSetup prompt(options.prompt, promptInput, &err);
     if (prompt.failed())
@@ -330,13 +331,11 @@ int run(const QStringList &arguments, QTextStream &out, QTextStream &err, QIODev
         return r.ok() ? 0 : fail(err, r);
     }
 
-    const Result located = resolveLocation(&options.main, options.url, options.overrides);
-    if (!located.ok())
+    if (const Result located = resolveLocation(&options.main, options.url, options.overrides); !located.ok())
         return fail(err, located);
     if (!locationGiven(options.main.params))
         return usageError(err, QStringLiteral("--url, or --provider and --host, is required"));
-    const Result resolved = resolveRemotePaths(options, &prepared);
-    if (!resolved.ok())
+    if (const Result resolved = resolveRemotePaths(options, &prepared); !resolved.ok())
         return fail(err, resolved);
     return runWithBackend(prepared, &options, connector, out, err);
 }

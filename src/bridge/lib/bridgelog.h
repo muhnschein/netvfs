@@ -10,13 +10,11 @@
 // << consumerTag(id) << ...
 Q_DECLARE_LOGGING_CATEGORY(lcNetVfsBridge)
 
-namespace NetVfs {
-namespace Bridge {
+namespace NetVfs::Bridge {
 inline QString consumerTag(const QString &id)
 {
     return QLatin1Char('[') + id + QLatin1Char(']');
 }
-} // namespace Bridge
-} // namespace NetVfs
+} // namespace NetVfs::Bridge
 
 #endif

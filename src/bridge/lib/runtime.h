@@ -14,8 +14,7 @@
 // Threading helpers of the bridge. The main thread owns every D-Bus
 // connection and all bookkeeping; backends run on worker threads (C-8) and
 // report back by posting functors to the MainQueue.
-namespace NetVfs {
-namespace Bridge {
+namespace NetVfs::Bridge {
 
 // Lives for the whole process on the main thread; functors posted from any
 // thread run there in order. Functors must not capture pointers to objects
@@ -47,7 +46,7 @@ class Rendezvous
 public:
     void set(T value)
     {
-        std::lock_guard<std::mutex> lock(m_mutex);
+        std::scoped_lock lock(m_mutex);
         if (m_done)
             return;
         m_value = std::move(value);
@@ -59,7 +58,7 @@ public:
     {
         using Clock = std::chrono::steady_clock;
         const auto deadline = Clock::now() + std::chrono::milliseconds(timeoutMs);
-        std::unique_lock<std::mutex> lock(m_mutex);
+        std::unique_lock lock(m_mutex);
         while (!m_done) {
             if ((token && token->isCanceled()) || Clock::now() >= deadline)
                 return false;
@@ -77,7 +76,6 @@ private:
     bool m_done = false;
 };
 
-} // namespace Bridge
-} // namespace NetVfs
+} // namespace NetVfs::Bridge
 
 #endif

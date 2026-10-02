@@ -6,8 +6,7 @@
 
 #include <chrono>
 
-namespace NetVfs {
-namespace Bridge {
+namespace NetVfs::Bridge {
 
 namespace {
 
@@ -53,21 +52,21 @@ Worker::~Worker()
 void Worker::post(const TaskContext &context, Work work)
 {
     // Also queued while stopping: run() hands it Canceled, so it is never lost.
-    std::lock_guard<std::mutex> lock(m_mutex);
+    std::scoped_lock lock(m_mutex);
     m_queue.push_back(Item { context, std::move(work) });
     m_cond.notify_all();
 }
 
 void Worker::kick()
 {
-    std::lock_guard<std::mutex> lock(m_mutex);
+    std::scoped_lock lock(m_mutex);
     if (m_currentToken && m_currentToken->isCanceled() && m_backend)
         m_backend->cancel();
 }
 
 void Worker::stop()
 {
-    std::lock_guard<std::mutex> lock(m_mutex);
+    std::scoped_lock lock(m_mutex);
     m_stopping = true;
     if (m_currentToken)
         m_currentToken->cancel();
@@ -78,55 +77,56 @@ void Worker::stop()
 
 int Worker::load() const
 {
-    std::lock_guard<std::mutex> lock(m_mutex);
+    std::scoped_lock lock(m_mutex);
     return static_cast<int>(m_queue.size()) + (m_running ? 1 : 0);
 }
 
 qint64 Worker::idleSinceMs() const
 {
-    std::lock_guard<std::mutex> lock(m_mutex);
+    std::scoped_lock lock(m_mutex);
     if (m_running || !m_queue.empty())
         return -1;
     return m_lastActivityMs;
 }
 
-quint32 Worker::addHandle(ReadHandle *handle)
+quint32 Worker::addHandle(std::unique_ptr<ReadHandle> handle)
 {
     const quint32 id = m_nextHandle++;
-    m_handles.insert(id, handle);
-    m_handleCount.store(m_handles.size());
+    m_handles.emplace(id, std::move(handle));
+    m_handleCount.store(static_cast<int>(m_handles.size()));
     return id;
 }
 
 ReadHandle *Worker::handle(quint32 id) const
 {
-    return m_handles.value(id, nullptr);
+    const auto it = m_handles.find(id);
+    return it == m_handles.end() ? nullptr : it->second.get();
 }
 
 void Worker::closeHandle(quint32 id)
 {
-    ReadHandle *handle = m_handles.take(id);
-    if (handle) {
-        handle->close();
-        delete handle;
+    if (const auto it = m_handles.find(id); it != m_handles.end()) {
+        it->second->close();
+        m_handles.erase(it);
     }
-    m_handleCount.store(m_handles.size());
+    m_handleCount.store(static_cast<int>(m_handles.size()));
 }
 
 Result Worker::ensureBackend(const TaskContext &context)
 {
     {
-        std::lock_guard<std::mutex> lock(m_mutex);
+        std::scoped_lock lock(m_mutex);
         if (m_backend)
             return Result::success();
     }
     Result created;
-    Backend *backend = BackendLoader::create(m_spec.provider, &created);
-    if (!backend)
+    std::unique_ptr<Backend> owned(BackendLoader::create(m_spec.provider, &created));
+    if (!owned)
         return created.ok() ? Result(Error::Unsupported, QStringLiteral("No backend for this location")) : created;
+    Backend *backend = owned.get();
     {
-        std::lock_guard<std::mutex> lock(m_mutex);
-        m_backend = backend;
+        std::scoped_lock lock(m_mutex);
+        m_backend = std::move(owned);
         if (m_stopping || context.canceled())
             backend->cancel();
     }
@@ -139,20 +139,15 @@ Result Worker::ensureBackend(const TaskContext &context)
 void Worker::resetBackend()
 {
     // Handles must go before their backend (backend.h).
-    for (auto it = m_handles.begin(); it != m_handles.end(); ++it)
-        delete it.value();
     m_handles.clear();
     m_handleCount.store(0);
-    Backend *backend = nullptr;
+    std::unique_ptr<Backend> backend;
     {
-        std::lock_guard<std::mutex> lock(m_mutex);
-        backend = m_backend;
-        m_backend = nullptr;
+        std::scoped_lock lock(m_mutex);
+        backend = std::move(m_backend);
     }
-    if (backend) {
+    if (backend)
         backend->disconnect();
-        delete backend;
-    }
 }
 
 void Worker::run()
@@ -161,7 +156,7 @@ void Worker::run()
         Item item;
         bool stopping = false;
         {
-            std::unique_lock<std::mutex> lock(m_mutex);
+            std::unique_lock lock(m_mutex);
             m_cond.wait(lock, [this]() { return m_stopping || !m_queue.empty(); });
             stopping = m_stopping;
             if (m_queue.empty())
@@ -178,15 +173,15 @@ void Worker::run()
             ready = ensureBackend(item.context);
         Backend *backend = nullptr;
         if (ready.ok()) {
-            std::lock_guard<std::mutex> lock(m_mutex);
-            backend = m_backend;
+            std::scoped_lock lock(m_mutex);
+            backend = m_backend.get();
         }
-        const Result result = item.work(ready.ok() ? backend : nullptr, ready, this);
-        if (ready.ok() && (dropsConnection(result) || item.context.canceled()))
+        if (const Result result = item.work(ready.ok() ? backend : nullptr, ready, this);
+            ready.ok() && (dropsConnection(result) || item.context.canceled()))
             resetBackend();
         else if (backend)
             backend->resetCancel();
-        std::lock_guard<std::mutex> lock(m_mutex);
+        std::scoped_lock lock(m_mutex);
         m_running = false;
         m_currentToken.reset();
         m_lastActivityMs = monotonicMs();
@@ -195,5 +190,4 @@ void Worker::run()
     m_finished.store(true);
 }
 
-} // namespace Bridge
-} // namespace NetVfs
+} // namespace NetVfs::Bridge

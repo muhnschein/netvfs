@@ -4,8 +4,7 @@
 #include <chrono>
 #include <thread>
 
-namespace NetVfs {
-namespace Bridge {
+namespace NetVfs::Bridge {
 
 namespace {
 constexpr int FlowPollMs = 20;
@@ -44,5 +43,4 @@ bool EntryBatcher::entries(const QVector<Entry> &batch)
     return m_batcher.flush();
 }
 
-} // namespace Bridge
-} // namespace NetVfs
+} // namespace NetVfs::Bridge

@@ -72,9 +72,11 @@ struct Context {
 };
 
 using Handler = Result (*)(const Context &);
-// Validates argument values before anything is connected; may adjust the
-// options. Returns a usage message, empty if fine.
-using Checker = QString (*)(const CommandLine &, Options *);
+// Validates argument values before anything is connected. Returns a usage
+// message, empty if fine.
+using Checker = QString (*)(const CommandLine &, const Options &);
+// Adjusts the options of a command that passed its check.
+using Adjuster = void (*)(Options *);
 
 enum class Needs { Nothing, Backend, Session };
 
@@ -89,6 +91,7 @@ struct CommandSpec {
     Needs needs;
     Handler handler;
     Checker check;
+    Adjuster adjust;
 };
 
 const CommandSpec *findCommand(const QString &name);

@@ -82,6 +82,8 @@ class tst_Generator : public QObject
 private Q_SLOTS:
     void goldenUnits();
     void skipsInvalidConsumers();
+    void messagesHideControlCharacters();
+    void ignoresUnsafeFolderOverrides();
     void sameRulesAsLibrary_data();
     void sameRulesAsLibrary();
     void usageAndMissingFolder();
@@ -113,6 +115,11 @@ void tst_Generator::goldenUnits()
         expected.replace("@CONSUMERS@", Inputs.toUtf8());
         QCOMPARE(QString::fromUtf8(readFile(actual.filePath())), QString::fromUtf8(expected));
     }
+    // The folders of the links are for the user manager only.
+    const QFileInfo wants(out.path() + QStringLiteral("/sockets.target.wants"));
+    QVERIFY(wants.isDir());
+    QVERIFY(!(wants.permissions() & (QFileDevice::ReadGroup | QFileDevice::WriteGroup | QFileDevice::ExeGroup
+                                     | QFileDevice::ReadOther | QFileDevice::WriteOther | QFileDevice::ExeOther)));
     // XB-4 essentials, spelled out.
     const QByteArray socket = readFile(out.path() + QStringLiteral("/netvfs-bridge@lautta.socket"));
     QVERIFY(socket.contains("ListenStream=%h/.local/share/org.netvfs/lautta/netvfs/bridge.sock\n"));
@@ -136,6 +143,34 @@ void tst_Generator::skipsInvalidConsumers()
     for (const QString &entry : tree(out.path()))
         QVERIFY2(entry.contains(QLatin1String("lautta")) || entry.contains(QLatin1String("photos"))
                      || entry.endsWith(QLatin1String(".wants")), qPrintable(entry));
+}
+
+// A file name cannot forge a line of the log.
+void tst_Generator::messagesHideControlCharacters()
+{
+    QTemporaryDir dir;
+    QTemporaryDir out;
+    QVERIFY(QFile(dir.path() + QStringLiteral("/a\nb.conf")).open(QIODevice::WriteOnly));
+    const Run run = generate(dir.path(), { out.path() });
+    QCOMPARE(run.exitCode, 0);
+    QVERIFY(run.stderrText.contains(QLatin1String("a?b.conf")));
+    QVERIFY(!run.stderrText.contains(QLatin1String("a\nb.conf")));
+}
+
+// NETVFS_CONSUMERS_DIR is for tests: only a plain absolute folder is used.
+void tst_Generator::ignoresUnsafeFolderOverrides()
+{
+    QTemporaryDir dir;
+    const QString folder = writeConsumer(dir, QStringLiteral("probe"), QStringLiteral("x"));
+    for (const QString &value : { folder + QStringLiteral("/../in-probe"), folder + QLatin1Char('\n'),
+                                     QStringLiteral("in-probe") }) {
+        QTemporaryDir out;
+        QCOMPARE(generate(value, { out.path() }).exitCode, 0);
+        QVERIFY2(!QFile::exists(out.path() + QStringLiteral("/netvfs-bridge@probe.socket")), qPrintable(value));
+    }
+    QTemporaryDir out;
+    QCOMPARE(generate(folder, { out.path() }).exitCode, 0);
+    QVERIFY(QFile::exists(out.path() + QStringLiteral("/netvfs-bridge@probe.socket")));
 }
 
 void tst_Generator::sameRulesAsLibrary_data()

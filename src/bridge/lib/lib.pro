@@ -20,6 +20,7 @@ HEADERS = \
     bridgeserver.h \
     connector.h \
     consentprompt.h \
+    dbusloop.h \
     fdcheck.h \
     handoff.h \
     knownhosts.h \
@@ -29,6 +30,7 @@ HEADERS = \
     protocol.h \
     questions.h \
     runtime.h \
+    serverparts.h \
     session.h \
     streaming.h \
     unixfd.h \
@@ -40,16 +42,19 @@ SOURCES = \
     args.cpp \
     bridgeserver.cpp \
     connector.cpp \
+    dbusloop.c \
     consentprompt.cpp \
     fdcheck.cpp \
     handoff.cpp \
     knownhosts.cpp \
     location.cpp \
+    locationbook.cpp \
     peercheck.cpp \
     pool.cpp \
     protocol.cpp \
     questions.cpp \
     runtime.cpp \
+    serverparts.cpp \
     session.cpp \
     sessionfiles.cpp \
     sessionjobs.cpp \

@@ -47,8 +47,7 @@ int main(int argc, char **argv)
 
     // Tests shorten the 30 s idle exit (XB-2).
     bool ok = false;
-    const int idleMs = qEnvironmentVariableIntValue("NETVFS_BRIDGE_IDLE_EXIT_MS", &ok);
-    if (ok && idleMs > 0)
+    if (const int idleMs = qEnvironmentVariableIntValue("NETVFS_BRIDGE_IDLE_EXIT_MS", &ok); ok && idleMs > 0)
         config.idleExitMs = idleMs;
 
     NetVfs::Bridge::BridgeServer server(config);
@@ -57,5 +56,5 @@ int main(int argc, char **argv)
         return 1;
     }
     QObject::connect(&server, &NetVfs::Bridge::BridgeServer::idleTimeout, &app, &QCoreApplication::quit);
-    return app.exec();
+    return QCoreApplication::exec();
 }

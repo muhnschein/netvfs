@@ -17,8 +17,7 @@
 //   insecure-consent      ad-hoc only (W-2, XM-1);     answer {"accept": b}
 // A question ends unanswered when its session goes away or its request is
 // canceled. Main thread only.
-namespace NetVfs {
-namespace Bridge {
+namespace NetVfs::Bridge {
 
 namespace QuestionKind {
 constexpr const char *IdentityUnknown = "identity-unknown";
@@ -57,7 +56,6 @@ private:
     quint64 m_next = 1;
 };
 
-} // namespace Bridge
-} // namespace NetVfs
+} // namespace NetVfs::Bridge
 
 #endif

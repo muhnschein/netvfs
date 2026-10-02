@@ -9,8 +9,7 @@
 
 #include <algorithm>
 
-namespace NetVfs {
-namespace Bridge {
+namespace NetVfs::Bridge {
 
 namespace {
 constexpr qint64 MaxFileBytes = 1 << 20;
@@ -32,12 +31,13 @@ QString KnownHosts::defaultFilePath(const QString &consumerId)
         + QStringLiteral("/netvfs/bridge/") + consumerId + QStringLiteral("/known_hosts");
 }
 
-void KnownHosts::loadLocked() const
+// Called with the mutex held (the state is only reachable through it).
+void KnownHosts::load(const QString &path, State *state)
 {
-    if (m_loaded)
+    if (state->loaded)
         return;
-    m_loaded = true;
-    QFile file(m_path);
+    state->loaded = true;
+    QFile file(path);
     if (!file.open(QIODevice::ReadOnly))
         return;
     const QList<QByteArray> lines = file.read(MaxFileBytes).split('\n');
@@ -45,49 +45,48 @@ void KnownHosts::loadLocked() const
         const int space = line.indexOf(' ');
         if (space <= 0)
             continue;
-        m_pins.insert(QString::fromUtf8(line.left(space)), QString::fromUtf8(line.mid(space + 1)).trimmed());
+        state->pins.insert(QString::fromUtf8(line.left(space)), QString::fromUtf8(line.mid(space + 1)).trimmed());
     }
 }
 
-bool KnownHosts::saveLocked() const
+bool KnownHosts::save(const QString &path, const State &state)
 {
-    QDir().mkpath(QFileInfo(m_path).absolutePath());
-    QSaveFile file(m_path);
+    QDir().mkpath(QFileInfo(path).absolutePath());
+    QSaveFile file(path);
     if (!file.open(QIODevice::WriteOnly))
         return false;
     file.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner);
-    QStringList keys = m_pins.keys();
+    QStringList keys = state.pins.keys();
     std::sort(keys.begin(), keys.end());
     for (const QString &key : keys)
-        file.write(key.toUtf8() + ' ' + m_pins.value(key).toUtf8() + '\n');
+        file.write(key.toUtf8() + ' ' + state.pins.value(key).toUtf8() + '\n');
     return file.commit();
 }
 
 QString KnownHosts::pin(const QString &key) const
 {
-    std::lock_guard<std::mutex> lock(m_mutex);
-    loadLocked();
-    return m_pins.value(key);
+    std::scoped_lock lock(m_mutex);
+    load(m_path, &m_state);
+    return m_state.pins.value(key);
 }
 
 bool KnownHosts::setPin(const QString &key, const QString &pin)
 {
     if (!isValidKey(key) || pin.isEmpty() || pin.contains(QLatin1Char('\n')))
         return false;
-    std::lock_guard<std::mutex> lock(m_mutex);
-    loadLocked();
-    m_pins.insert(key, pin);
-    return saveLocked();
+    std::scoped_lock lock(m_mutex);
+    load(m_path, &m_state);
+    m_state.pins.insert(key, pin);
+    return save(m_path, m_state);
 }
 
 bool KnownHosts::remove(const QString &key)
 {
-    std::lock_guard<std::mutex> lock(m_mutex);
-    loadLocked();
-    if (m_pins.remove(key) == 0)
+    std::scoped_lock lock(m_mutex);
+    load(m_path, &m_state);
+    if (m_state.pins.remove(key) == 0)
         return true;
-    return saveLocked();
+    return save(m_path, m_state);
 }
 
-} // namespace Bridge
-} // namespace NetVfs
+} // namespace NetVfs::Bridge

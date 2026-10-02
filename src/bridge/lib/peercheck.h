@@ -29,8 +29,7 @@
 //    accepted, so a process started after the connection cannot pass for it.
 //
 // /proc, the credentials and the clock are injectable for tests.
-namespace NetVfs {
-namespace Bridge {
+namespace NetVfs::Bridge {
 
 struct PeerCredentials {
     pid_t pid = 0;
@@ -77,7 +76,6 @@ private:
     Environment m_env;
 };
 
-} // namespace Bridge
-} // namespace NetVfs
+} // namespace NetVfs::Bridge
 
 #endif

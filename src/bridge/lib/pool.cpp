@@ -3,8 +3,7 @@
 
 #include <algorithm>
 
-namespace NetVfs {
-namespace Bridge {
+namespace NetVfs::Bridge {
 
 int PoolLimits::forLane(Lane lane)
 {
@@ -40,7 +39,7 @@ void HostRegistry::release(const QString &host, int count)
         m_used.erase(it);
 }
 
-bool HostRegistry::evictIdle(const QString &host, const Pool *except)
+bool HostRegistry::evictIdle(const QString &host, const Pool *except) const
 {
     for (Pool *pool : m_pools) {
         if (pool != except && pool->spec().hostKey() == host && pool->closeOneIdle())
@@ -49,9 +48,9 @@ bool HostRegistry::evictIdle(const QString &host, const Pool *except)
     return false;
 }
 
-void HostRegistry::notifyReleased(const QString &host)
+void HostRegistry::notifyReleased(const QString &host) const
 {
-    const QList<Pool *> pools = m_pools;
+    const std::vector<Pool *> pools = m_pools;
     for (Pool *pool : pools) {
         if (pool->spec().hostKey() == host)
             pool->retryPending();
@@ -71,12 +70,13 @@ Pool::Pool(const LocationSpec &spec, Connector *connector, HostRegistry *hosts)
 Pool::~Pool()
 {
     m_hosts->removePool(this);
-    stopAll();
-    for (auto &worker : m_retired)
-        worker.reset();   // joins
-    m_hosts->release(m_spec.hostKey(), static_cast<int>(m_retired.size()));
-    m_retired.clear();
-    for (Pending &pending : m_pending)
+    const auto connections = static_cast<int>(m_workers.size() + m_retired.size());
+    for (const auto &worker : m_workers)
+        worker->stop();
+    m_workers.clear();   // joins
+    m_retired.clear();   // joins
+    m_hosts->release(m_spec.hostKey(), connections);
+    for (const Pending &pending : m_pending)
         pending.work(nullptr, Result(Error::Canceled), nullptr);
     m_pending.clear();
 }
@@ -110,8 +110,7 @@ Worker *Pool::pick(Lane lane)
         return existing;
     const auto inLane = std::count_if(m_workers.cbegin(), m_workers.cend(),
                                       [lane](const std::unique_ptr<Worker> &w) { return w->lane() == lane; });
-    const QString host = m_spec.hostKey();
-    if (inLane < PoolLimits::forLane(lane)
+    if (const QString host = m_spec.hostKey(); inLane < PoolLimits::forLane(lane)
             && (m_hosts->tryAcquire(host) || (m_hosts->evictIdle(host, this) && m_hosts->tryAcquire(host)))) {
         m_workers.push_back(std::make_unique<Worker>(m_spec, lane, m_connector));
         return m_workers.back().get();
@@ -238,5 +237,4 @@ bool Pool::isIdle() const
     });
 }
 
-} // namespace Bridge
-} // namespace NetVfs
+} // namespace NetVfs::Bridge

@@ -10,8 +10,7 @@
 
 // SPEC-v2 XB-8, XB-9: names, types and message construction of
 // org.netvfs.Bridge1.
-namespace NetVfs {
-namespace Bridge {
+namespace NetVfs::Bridge {
 namespace Protocol {
 
 constexpr quint32 Version = 1;
@@ -49,7 +48,6 @@ MessagePtr errorReply(DBusMessage *call, const QString &name, const Result &resu
 MessagePtr signal(const char *member);
 
 } // namespace Protocol
-} // namespace Bridge
-} // namespace NetVfs
+} // namespace NetVfs::Bridge
 
 #endif

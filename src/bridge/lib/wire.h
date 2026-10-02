@@ -28,8 +28,7 @@ struct DBusMessageIter;
 // This file holds the message codec: arguments are decoded into plain Qt
 // values (the input of the validation layer, args.h) and replies and signals
 // are written with WireWriter.
-namespace NetVfs {
-namespace Bridge {
+namespace NetVfs::Bridge {
 
 // Owning pointer to a libdbus message.
 struct MessageUnref {
@@ -91,7 +90,8 @@ public:
 private:
     DBusMessageIter *top();
     void open(int type, const char *signature);
-    void appendBasic(int type, const void *value);
+    template <typename T>
+    void appendBasic(int type, const T *value);   // the basic value libdbus copies
     bool appendVariantValue(const QVariant &v);
 
     std::vector<std::unique_ptr<DBusMessageIter>> m_stack;
@@ -101,7 +101,6 @@ private:
 // D-Bus signature of a value accepted by WireWriter::variant(); empty if none.
 QByteArray variantSignature(const QVariant &v);
 
-} // namespace Bridge
-} // namespace NetVfs
+} // namespace NetVfs::Bridge
 
 #endif

@@ -14,8 +14,7 @@
 // pread/pwrite at explicit offsets (the consumer's file offset is irrelevant),
 // treats FIFOs as sequential streams, and never fsyncs, renames, truncates or
 // deletes anything locally.
-namespace NetVfs {
-namespace Bridge {
+namespace NetVfs::Bridge {
 
 enum class FdAccess { Read, Write };
 
@@ -40,7 +39,7 @@ Result checkUploadLength(const FdInfo &info, qint64 size, const QString &provide
 // mapped to device positions [0, length). FIFOs: sequential; reads stop after
 // `length` bytes when length >= 0. Every blocking wait polls at most 200 ms
 // at a time and gives up when `canceled` is set, so C-9 holds for local I/O.
-class FdDevice : public QIODevice
+class FdDevice final : public QIODevice
 {
 public:
     FdDevice(int fd, const FdInfo &info, qint64 offset, qint64 length, const std::atomic<bool> *canceled);
@@ -58,7 +57,7 @@ protected:
     qint64 writeData(const char *data, qint64 maxSize) override;
 
 private:
-    bool waitFor(short events);
+    bool waitFor(short events) const;
     bool canceled() const { return m_canceled && m_canceled->load(); }
 
     int m_fd;
@@ -70,7 +69,6 @@ private:
     const std::atomic<bool> *m_canceled;
 };
 
-} // namespace Bridge
-} // namespace NetVfs
+} // namespace NetVfs::Bridge
 
 #endif

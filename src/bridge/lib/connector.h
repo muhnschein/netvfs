@@ -6,8 +6,7 @@
 #include "questions.h"
 #include "worker.h"
 
-namespace NetVfs {
-namespace Bridge {
+namespace NetVfs::Bridge {
 
 class BridgeServer;
 
@@ -60,7 +59,6 @@ private:
     TaskContext m_context;
 };
 
-} // namespace Bridge
-} // namespace NetVfs
+} // namespace NetVfs::Bridge
 
 #endif

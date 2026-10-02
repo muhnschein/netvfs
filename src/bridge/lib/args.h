@@ -18,8 +18,7 @@
 // every string is length- and charset-checked, unknown option keys are
 // refused. File descriptors are checked separately (fdcheck.h) because that
 // needs the descriptor itself.
-namespace NetVfs {
-namespace Bridge {
+namespace NetVfs::Bridge {
 
 enum class Lane { Interactive, Bulk, Stream };
 QString laneName(Lane lane);
@@ -139,7 +138,6 @@ Result validateLane(const QVariant &value, Lane fallback, Lane *out);
 bool isValidLocationId(const QString &id);
 bool isValidToken(const QString &value, int maxLength);   // [a-z0-9-]{1,max}
 
-} // namespace Bridge
-} // namespace NetVfs
+} // namespace NetVfs::Bridge
 
 #endif

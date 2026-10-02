@@ -11,8 +11,7 @@
 // consumer, in ~/.local/share/netvfs/bridge/<id>/known_hosts. One line per
 // endpoint: "<provider>://<host>:<port> <pin>" (pin as ServerIdentity::toPin).
 // Thread-safe: workers read pins during establish.
-namespace NetVfs {
-namespace Bridge {
+namespace NetVfs::Bridge {
 
 class KnownHosts
 {
@@ -26,16 +25,18 @@ public:
     bool remove(const QString &key);
 
 private:
-    void loadLocked() const;
-    bool saveLocked() const;
+    struct State {
+        QHash<QString, QString> pins;
+        bool loaded = false;
+    };
+    static void load(const QString &path, State *state);
+    static bool save(const QString &path, const State &state);
 
     QString m_path;
     mutable std::mutex m_mutex;
-    mutable QHash<QString, QString> m_pins;
-    mutable bool m_loaded = false;
+    mutable State m_state;      // guarded by m_mutex, loaded on first use
 };
 
-} // namespace Bridge
-} // namespace NetVfs
+} // namespace NetVfs::Bridge
 
 #endif

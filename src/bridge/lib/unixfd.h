@@ -6,8 +6,7 @@
 
 #include <memory>
 
-namespace NetVfs {
-namespace Bridge {
+namespace NetVfs::Bridge {
 
 // A file descriptor received in a message (D-Bus "h"). The descriptor is
 // owned and closed when the last copy goes away, unless take() moved it out.
@@ -26,8 +25,7 @@ private:
     std::shared_ptr<Owner> m_owner;
 };
 
-} // namespace Bridge
-} // namespace NetVfs
+} // namespace NetVfs::Bridge
 
 Q_DECLARE_METATYPE(NetVfs::Bridge::UnixFd)
 

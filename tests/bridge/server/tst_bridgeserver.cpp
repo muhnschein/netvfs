@@ -9,6 +9,7 @@
 #include "fakebackend.h"
 #include "names.h"
 #include "protocol.h"
+#include "serverparts.h"
 #include "session.h"
 
 #include <QtCore/QElapsedTimer>
@@ -198,13 +199,13 @@ void tst_BridgeServer::revocationMidJob()
     });
     ::close(pipeFds[1]);
     QVERIFY2(!job.isError, qPrintable(job.name));
-    QVERIFY(waitFor([&f]() { return f.server->runningJobs() == 1; }));
+    QVERIFY(waitFor([&f]() { return f.server->quota()->runningJobs() == 1; }));
     // netvfs-ui revokes: bridge.conf changes on disk.
     QElapsedTimer timer;
     timer.start();
     f.setConsent(Consent::Denied);
     QVERIFY(c->waitDisconnected(3000));
-    QVERIFY(waitFor([&f]() { return f.server->runningJobs() == 0; }, 3000));
+    QVERIFY(waitFor([&f]() { return f.server->quota()->runningJobs() == 0; }, 3000));
     QVERIFY2(timer.elapsed() < 3000, qPrintable(QString::number(timer.elapsed())));
     ::close(pipeFds[0]);
     // A new client is still refused location calls.
@@ -315,7 +316,7 @@ void tst_BridgeServer::handles()
     QVERIFY2(!m.isError, qPrintable(m.name));
     const quint32 h = m.args.value(0).toUInt();
     QCOMPARE(m.args.value(1).toLongLong(), 10);
-    QCOMPARE(f.server->openHandles(), 1);
+    QCOMPARE(f.server->quota()->openHandles(), 1);
     m = c->call("Read", [h](WireWriter &w) { w.uint32(h).int64(3).uint32(4); });
     QCOMPARE(m.args.value(0).toByteArray(), QByteArray("3456"));
     QVERIFY(!c->call("ReadAhead", [h](WireWriter &w) { w.uint32(h).int64(0).int64(100); }).isError);
@@ -324,7 +325,7 @@ void tst_BridgeServer::handles()
     QCOMPARE(c->call("Read", [h](WireWriter &w) { w.uint32(h).int64(0).uint32((1 << 20) + 1); }).name,
              QLatin1String(InvalidArgs));
     QVERIFY(!c->call("Close", [h](WireWriter &w) { w.uint32(h); }).isError);
-    QCOMPARE(f.server->openHandles(), 0);
+    QCOMPARE(f.server->quota()->openHandles(), 0);
     QCOMPARE(c->call("Read", [h](WireWriter &w) { w.uint32(h).int64(0).uint32(1); }).name, QLatin1String(NotFound));
     // Disconnect drops the location's connections: the handle is gone.
     m = c->call("OpenRead", [](WireWriter &w) { w.string(Loc).bytes("v.bin").string(QString()); });
@@ -347,7 +348,7 @@ void tst_BridgeServer::handleLimit()
     QCOMPARE(over.name, QLatin1String(TooMany));
     QVERIFY(over.args.value(1).toMap().value("retryAfterMs").toLongLong() > 0);
     c->close();
-    QVERIFY(waitFor([&f]() { return f.server->openHandles() == 0; }));
+    QVERIFY(waitFor([&f]() { return f.server->quota()->openHandles() == 0; }));
 }
 
 void tst_BridgeServer::requestLimit()
@@ -363,7 +364,7 @@ void tst_BridgeServer::requestLimit()
     QList<quint32> serials;
     for (int i = 0; i < Bridge::ConsumerLimits::Requests; ++i)
         serials << c->send("Stat", [](WireWriter &w) { w.string(Loc).bytes("x").boolean(true).string(QString()); });
-    QVERIFY(waitFor([&f]() { return f.server->activeRequests() == Bridge::ConsumerLimits::Requests; }));
+    QVERIFY(waitFor([&f]() { return f.server->quota()->activeRequests() == Bridge::ConsumerLimits::Requests; }));
     const TestClient::Message over = c->call("Stat", [](WireWriter &w) { w.string(Loc).bytes("x").boolean(true).string(QString()); });
     QCOMPARE(over.name, QLatin1String(TooMany));
     QCOMPARE(over.args.value(1).toMap().value("retryAfterMs").toLongLong(), Bridge::ConsumerLimits::RetryAfterMs);
@@ -371,7 +372,7 @@ void tst_BridgeServer::requestLimit()
     QVERIFY(!c->call("GetConsent").isError);
     // Disconnecting cancels the waits (XB-13).
     c->close();
-    QVERIFY(waitFor([&f]() { return f.server->activeRequests() == 0; }, 3000));
+    QVERIFY(waitFor([&f]() { return f.server->quota()->activeRequests() == 0; }, 3000));
 }
 
 void tst_BridgeServer::jobLimit()
@@ -388,10 +389,10 @@ void tst_BridgeServer::jobLimit()
         const TestClient::Message m = c->call("RemoveTree", locPath(Loc, "x"));
         QVERIFY2(!m.isError, qPrintable(m.name));
     }
-    QCOMPARE(f.server->runningJobs(), Bridge::ConsumerLimits::Jobs);
+    QCOMPARE(f.server->quota()->runningJobs(), Bridge::ConsumerLimits::Jobs);
     QCOMPARE(c->call("RemoveTree", locPath(Loc, "x")).name, QLatin1String(TooMany));
     c->close();
-    QVERIFY(waitFor([&f]() { return f.server->runningJobs() == 0; }, 3000));
+    QVERIFY(waitFor([&f]() { return f.server->quota()->runningJobs() == 0; }, 3000));
 }
 
 void tst_BridgeServer::uploadAndDownloadRegular()
@@ -489,7 +490,7 @@ void tst_BridgeServer::fdValidation()
     QCOMPARE(c->call("Upload", [writeOnly](WireWriter &w) { w.string(Loc).bytes("x").unixFd(writeOnly).variantMap(QVariantMap()); }).name,
              QLatin1String(PermissionDenied));
     ::close(writeOnly);
-    QCOMPARE(f.server->runningJobs(), 0);
+    QCOMPARE(f.server->quota()->runningJobs(), 0);
     QVERIFY(fake()->log.filter(QStringLiteral("connect")).isEmpty());   // refused before any network work
     QVERIFY(!fake()->exists(QStringLiteral("x")));
 }
@@ -510,7 +511,7 @@ void tst_BridgeServer::disconnectCancelsJobs()
     QElapsedTimer timer;
     timer.start();
     c->close();
-    QVERIFY(waitFor([&f]() { return f.server->runningJobs() == 0; }, 2500));
+    QVERIFY(waitFor([&f]() { return f.server->quota()->runningJobs() == 0; }, 2500));
     QVERIFY2(timer.elapsed() < 2000, qPrintable(QString::number(timer.elapsed())));   // C-9 / XB-13
     QVERIFY(QFileInfo(QString::fromLocal8Bit(target)).size() < (8 << 20));
 }
@@ -619,7 +620,7 @@ namespace {
 Bridge::LocationSpec fakeAdHoc(Bridge::BridgeServer *server)
 {
     Bridge::LocationSpec spec;
-    spec.id = server->reserveAdHocId();
+    spec.id = server->locations()->reserveAdHocId();
     spec.kind = Bridge::LocationKind::AdHoc;
     spec.provider = QStringLiteral("fake");
     spec.name = QStringLiteral("adhoc");
@@ -635,7 +636,7 @@ void tst_BridgeServer::adHocIdentityQuestion()
     Fixture f;
     fake()->identity = ServerIdentity::fromPin(QStringLiteral("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIA=="));
     const Bridge::LocationSpec spec = fakeAdHoc(f.server.get());
-    f.server->addAdHoc(spec, std::make_unique<Bridge::Pool>(spec, f.server->connector(), f.server->hosts()));
+    f.server->locations()->addAdHoc(spec, std::make_unique<Bridge::Pool>(spec, f.server->locations()->connector(), f.server->locations()->hosts()));
     auto c = f.helloClient();
     QCOMPARE(c->call("ListLocations").args.value(0).toList().size(), 2);
 
@@ -699,7 +700,7 @@ void tst_BridgeServer::keyboardInteractive()
     q = c->waitSignal(QStringLiteral("Question"));
     QVERIFY(q.valid);
     c->close();
-    QVERIFY(waitFor([&f]() { return f.server->activeRequests() == 0; }, 3000));
+    QVERIFY(waitFor([&f]() { return f.server->quota()->activeRequests() == 0; }, 3000));
     QCOMPARE(f.server->questions()->pending(), 0);
 }
 

@@ -223,7 +223,7 @@ static int link_unit(const char *dir, const char *target, const char *unit)
             || snprintf(link, sizeof(link), "%s/%s", wants, unit) >= (int)sizeof(link)
             || snprintf(destination, sizeof(destination), "../%s", unit) >= (int)sizeof(destination))
         return -1;
-    if (mkdir(wants, 0755) != 0 && errno != EEXIST)
+    if (mkdir(wants, 0700) != 0 && errno != EEXIST)
         return -1;
     (void)unlink(link);
     return symlink(destination, link);
@@ -233,10 +233,11 @@ static int link_unit(const char *dir, const char *target, const char *unit)
 static void escape_specifiers(const char *in, char *out, size_t size)
 {
     size_t n = 0;
-    for (const char *p = in; *p && n + 2 < size; ++p) {
+    const char *p = in;
+    while (*p && n + 2 < size) {
         if (*p == '%')
             out[n++] = '%';
-        out[n++] = *p;
+        out[n++] = *p++;
     }
     out[n] = '\0';
 }
@@ -329,6 +330,41 @@ static int compare_names(const void *a, const void *b)
     return strcmp(*(const char *const *)a, *(const char *const *)b);
 }
 
+/* No control characters, no ".." component. */
+static int clean_folder(const char *path)
+{
+    for (const unsigned char *p = (const unsigned char *)path; *p; ++p) {
+        if (*p < 0x20 || *p == 0x7f)
+            return 0;
+    }
+    for (const char *p = strstr(path, ".."); p; p = strstr(p + 1, "..")) {
+        const int starts = p == path || p[-1] == '/';
+        const int ends = p[2] == '\0' || p[2] == '/';
+        if (starts && ends)
+            return 0;
+    }
+    return 1;
+}
+
+/* The folder with the consumer files: NETVFS_CONSUMERS_DIR (for tests) when it is an absolute path of
+ * a plausible length without control characters or ".." components. */
+static const char *consumers_dir(void)
+{
+    const char *overridden = getenv("NETVFS_CONSUMERS_DIR");
+    if (overridden && overridden[0] == '/' && strlen(overridden) <= MAX_PATH_LENGTH / 2 && clean_folder(overridden))
+        return overridden;
+    return CONSUMERS_DIR;
+}
+
+/* A file name for a message: control characters cannot forge log lines. */
+static void printable(const char *in, char *out, size_t size)
+{
+    size_t n = 0;
+    for (const unsigned char *p = (const unsigned char *)in; *p && n + 1 < size; ++p)
+        out[n++] = (*p < 0x20 || *p == 0x7f) ? '?' : (char)*p;
+    out[n] = '\0';
+}
+
 int main(int argc, char **argv)
 {
     if (argc < 2 || argv[1][0] == '\0') {
@@ -336,16 +372,14 @@ int main(int argc, char **argv)
         return 1;
     }
     const char *out = argv[1];
-    const char *dir_name = getenv("NETVFS_CONSUMERS_DIR");
-    if (!dir_name || dir_name[0] == '\0')
-        dir_name = CONSUMERS_DIR;
+    const char *dir_name = consumers_dir();
     DIR *dir = opendir(dir_name);
     if (!dir)
         return 0; /* nothing registered */
 
     char *names[256];
     size_t count = 0;
-    struct dirent *entry;
+    const struct dirent *entry;
     while ((entry = readdir(dir)) != NULL && count < sizeof(names) / sizeof(names[0])) {
         char stem[MAX_ID + 2];
         if (entry->d_name[0] != '.' && has_conf_suffix(entry->d_name, stem, sizeof(stem)))
@@ -369,9 +403,11 @@ int main(int argc, char **argv)
         const char *problem = parse_consumer(path, &c);
         if (!problem)
             problem = validate(&c, stem);
-        if (problem)
-            fprintf(stderr, "netvfs-bridge-generator: skipping %s: %s\n", path, problem);
-        else if (emit(out, &c, path) != 0)
+        if (problem) {
+            char shown[MAX_PATH_LENGTH];
+            printable(path, shown, sizeof(shown));
+            fprintf(stderr, "netvfs-bridge-generator: skipping %s: %s\n", shown, problem);
+        } else if (emit(out, &c, path) != 0)
             status = 1;
         free(names[i]);
     }

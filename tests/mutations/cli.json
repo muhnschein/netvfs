@@ -16,8 +16,8 @@
   {
     "name": "XH-6 a password in --url is accepted",
     "file": "src/cli/cli.cpp",
-    "search": "if (!parsed.ok())",
-    "replace": "if (parsed.ok() && !parsed.ok())",
+    "search": "; !parsed.ok())",
+    "replace": "; parsed.ok() && !parsed.ok())",
     "test": "build/tests/unit/cli/tst_cli"
   },
   {

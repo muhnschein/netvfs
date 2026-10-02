@@ -16,8 +16,7 @@ static void initBridgeResources()
     Q_INIT_RESOURCE(bridge);
 }
 
-namespace NetVfs {
-namespace Bridge {
+namespace NetVfs::Bridge {
 namespace Protocol {
 
 QString bridgeVersion()
@@ -120,5 +119,4 @@ MessagePtr signal(const char *member)
 }
 
 } // namespace Protocol
-} // namespace Bridge
-} // namespace NetVfs
+} // namespace NetVfs::Bridge
