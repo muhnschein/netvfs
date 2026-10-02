@@ -20,6 +20,9 @@ enum class Stage {
 
 inline constexpr const char *ServerClosedMessage =
     "the server closed the connection; it may not support SMB 3, signing or encryption";
+inline constexpr const char *SessionRefusedMessage =
+    "the server refused the session; it may require a protocol version, cipher or signing algorithm "
+    "this device does not offer (SMB 3 with AES-128-CCM and AES-128-CMAC), or deny this account the share";
 inline constexpr const char *ConnectionLostMessage = "the connection to the server was lost";
 
 inline constexpr quint32 MaxChunkSize = 1024 * 1024;        // M-11

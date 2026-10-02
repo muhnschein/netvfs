@@ -91,6 +91,11 @@ Result errorForNtStatus(quint32 ntStatus, const QString &context)
                                            .arg(hexStatus(ntStatus), QLatin1String(nterror_to_str(ntStatus)))));
 }
 
+bool keepsMeaningInSetup(Error error)
+{
+    return error == Error::AuthFailed || error == Error::NotFound || error == Error::Timeout;
+}
+
 bool isTransportErrno(int errnoValue)
 {
     return errnoValue == ECONNREFUSED || errnoValue == ENETUNREACH || errnoValue == EHOSTUNREACH;
@@ -177,8 +182,21 @@ Result translatePath(const QString &path, QByteArray *out)
 
 Result errorForStatus(quint32 ntStatus, int errnoValue, Stage stage, const QString &context)
 {
-    if (ntStatus != 0)
-        return errorForNtStatus(ntStatus, context);
+    if (ntStatus != 0) {
+        Result r = errorForNtStatus(ntStatus, context);
+        // During negotiate, session setup and tree connect, a refusal that is
+        // about neither the credentials nor the share name means the server
+        // wants something this client does not offer: Samba answers SMB 2-only
+        // with NOT_SUPPORTED (M-T9), signing algorithms it lacks with
+        // INVALID_PARAMETER and required encryption without a common cipher
+        // with ACCESS_DENIED at tree connect (M-T14).
+        if (stage == Stage::SessionSetup && !keepsMeaningInSetup(r.error())) {
+            r = Result(Error::SecurityPolicy, withContext(context, QStringLiteral("%1 (NT status %2)")
+                                                                       .arg(QLatin1String(SessionRefusedMessage),
+                                                                            hexStatus(ntStatus))));
+        }
+        return r;
+    }
     if (errnoValue == ETIMEDOUT)
         return Result(Error::Timeout, withContext(context, QStringLiteral("the server did not answer in time")));
     if (stage == Stage::SessionSetup) {

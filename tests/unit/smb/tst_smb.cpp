@@ -186,47 +186,54 @@ private slots:
         QCOMPARE(out, ok ? expected : QByteArray("unchanged"));
     }
 
-    // SPEC-smb 5, error mapping table.
+    // SPEC-smb 5, error mapping table. `setup` is the result during sign-in,
+    // where any refusal that is not about the credentials or the share name
+    // means the server wants something this client does not offer.
     void ntStatus_data()
     {
         QTest::addColumn<quint32>("status");
         QTest::addColumn<int>("error");
-        const auto row = [](const char *name, quint32 status, Error error) {
-            QTest::newRow(name) << status << static_cast<int>(error);
+        QTest::addColumn<int>("setup");
+        const auto row = [](const char *name, quint32 status, Error error, Error setup) {
+            QTest::newRow(name) << status << static_cast<int>(error) << static_cast<int>(setup);
         };
-        row("logon failure", SMB2_STATUS_LOGON_FAILURE, Error::AuthFailed);
-        row("wrong password", SMB2_STATUS_WRONG_PASSWORD, Error::AuthFailed);
-        row("no such user", SMB2_STATUS_NO_SUCH_USER, Error::AuthFailed);
-        row("account disabled", SMB2_STATUS_ACCOUNT_DISABLED, Error::AuthFailed);
-        row("account locked", SMB2_STATUS_ACCOUNT_LOCKED_OUT, Error::AuthFailed);
-        row("account expired", SMB2_STATUS_ACCOUNT_EXPIRED, Error::AuthFailed);
-        row("account restriction", SMB2_STATUS_ACCOUNT_RESTRICTION, Error::AuthFailed);
-        row("logon hours", SMB2_STATUS_INVALID_LOGON_HOURS, Error::AuthFailed);
-        row("password expired", SMB2_STATUS_PASSWORD_EXPIRED, Error::AuthFailed);
-        row("password must change", SMB2_STATUS_PASSWORD_MUST_CHANGE, Error::AuthFailed);
-        row("bad network name", SMB2_STATUS_BAD_NETWORK_NAME, Error::NotFound);
-        row("access denied", SMB2_STATUS_ACCESS_DENIED, Error::PermissionDenied);
-        row("name not found", SMB2_STATUS_OBJECT_NAME_NOT_FOUND, Error::NotFound);
-        row("path not found", SMB2_STATUS_OBJECT_PATH_NOT_FOUND, Error::NotFound);
-        row("collision", SMB2_STATUS_OBJECT_NAME_COLLISION, Error::AlreadyExists);
-        row("disk full", SMB2_STATUS_DISK_FULL, Error::NoSpace);
-        row("quota", SMB2_STATUS_QUOTA_EXCEEDED, Error::NoSpace);
-        row("io timeout", SMB2_STATUS_IO_TIMEOUT, Error::Timeout);
-        row("anything else", SMB2_STATUS_NOT_SUPPORTED, Error::ProtocolError);
-        row("sharing violation", SMB2_STATUS_SHARING_VIOLATION, Error::ProtocolError);
+        const Error policy = Error::SecurityPolicy;
+        row("logon failure", SMB2_STATUS_LOGON_FAILURE, Error::AuthFailed, Error::AuthFailed);
+        row("wrong password", SMB2_STATUS_WRONG_PASSWORD, Error::AuthFailed, Error::AuthFailed);
+        row("no such user", SMB2_STATUS_NO_SUCH_USER, Error::AuthFailed, Error::AuthFailed);
+        row("account disabled", SMB2_STATUS_ACCOUNT_DISABLED, Error::AuthFailed, Error::AuthFailed);
+        row("account locked", SMB2_STATUS_ACCOUNT_LOCKED_OUT, Error::AuthFailed, Error::AuthFailed);
+        row("account expired", SMB2_STATUS_ACCOUNT_EXPIRED, Error::AuthFailed, Error::AuthFailed);
+        row("account restriction", SMB2_STATUS_ACCOUNT_RESTRICTION, Error::AuthFailed, Error::AuthFailed);
+        row("logon hours", SMB2_STATUS_INVALID_LOGON_HOURS, Error::AuthFailed, Error::AuthFailed);
+        row("password expired", SMB2_STATUS_PASSWORD_EXPIRED, Error::AuthFailed, Error::AuthFailed);
+        row("password must change", SMB2_STATUS_PASSWORD_MUST_CHANGE, Error::AuthFailed, Error::AuthFailed);
+        row("bad network name", SMB2_STATUS_BAD_NETWORK_NAME, Error::NotFound, Error::NotFound);
+        row("io timeout", SMB2_STATUS_IO_TIMEOUT, Error::Timeout, Error::Timeout);
+        row("access denied", SMB2_STATUS_ACCESS_DENIED, Error::PermissionDenied, policy);
+        row("name not found", SMB2_STATUS_OBJECT_NAME_NOT_FOUND, Error::NotFound, Error::NotFound);
+        row("path not found", SMB2_STATUS_OBJECT_PATH_NOT_FOUND, Error::NotFound, Error::NotFound);
+        row("collision", SMB2_STATUS_OBJECT_NAME_COLLISION, Error::AlreadyExists, policy);
+        row("disk full", SMB2_STATUS_DISK_FULL, Error::NoSpace, policy);
+        row("quota", SMB2_STATUS_QUOTA_EXCEEDED, Error::NoSpace, policy);
+        row("not supported", SMB2_STATUS_NOT_SUPPORTED, Error::ProtocolError, policy);
+        row("invalid parameter", SMB2_STATUS_INVALID_PARAMETER, Error::ProtocolError, policy);
+        row("sharing violation", SMB2_STATUS_SHARING_VIOLATION, Error::ProtocolError, policy);
     }
     void ntStatus()
     {
         QFETCH(quint32, status);
         QFETCH(int, error);
-        // The NT status wins over the errno and the stage.
-        for (const Stage stage : { Stage::SessionSetup, Stage::Established }) {
-            const Result r = errorForStatus(status, ECONNRESET, stage, QStringLiteral("ctx"));
-            QCOMPARE(static_cast<int>(r.error()), error);
-            QVERIFY2(r.message().startsWith(QLatin1String("ctx: ")), qPrintable(r.message()));
-            QVERIFY2(r.message().contains(QStringLiteral("0x%1").arg(status, 8, 16, QLatin1Char('0'))),
-                     qPrintable(r.message()));
-        }
+        QFETCH(int, setup);
+        const QString hex = QStringLiteral("0x%1").arg(status, 8, 16, QLatin1Char('0'));
+        // The NT status wins over the errno.
+        const Result established = errorForStatus(status, ECONNRESET, Stage::Established, QStringLiteral("ctx"));
+        QCOMPARE(static_cast<int>(established.error()), error);
+        QVERIFY2(established.message().startsWith(QLatin1String("ctx: ")), qPrintable(established.message()));
+        QVERIFY2(established.message().contains(hex), qPrintable(established.message()));
+        const Result signIn = errorForStatus(status, ECONNRESET, Stage::SessionSetup, QStringLiteral("ctx"));
+        QCOMPARE(static_cast<int>(signIn.error()), setup);
+        QVERIFY2(signIn.message().contains(hex), qPrintable(signIn.message()));
     }
 
     void specMessages()
@@ -240,6 +247,8 @@ private slots:
                                                   "signing or encryption"));
         QCOMPARE(connectionLost(Stage::SessionSetup).toString(), closed.toString());
         QCOMPARE(connectionLost(Stage::Established).error(), Error::NetworkUnreachable);
+        QVERIFY(errorForStatus(SMB2_STATUS_NOT_SUPPORTED, 0, Stage::SessionSetup, QString())
+                    .message().startsWith(QLatin1String(SessionRefusedMessage)));
     }
 
     // No NT status: TCP failures, the server dropping the session, and the
