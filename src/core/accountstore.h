@@ -62,9 +62,9 @@ public:
     Result load(int accountId, AccountConfig *out) const;
 
     // SPEC 6.4. `seenIdentityPin` is recorded as host_key_seen when given.
-    Result setAttention(int accountId, Attention attention, const QString &seenIdentityPin = QString());
+    Result setAttention(int accountId, Attention attention, const QString &seenIdentityPin = QString()) const;
     // Clears netvfs/attention, CredentialsNeedUpdate(From) and host_key_seen.
-    Result clearAttention(int accountId);
+    Result clearAttention(int accountId) const;
 
 private:
     Accounts::Manager *m_manager;

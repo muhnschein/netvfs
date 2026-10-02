@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 #include "paths.h"
 
-namespace NetVfs {
-namespace Paths {
+namespace NetVfs::Paths {
 
 Result normalize(const QString &path, QString *normalized)
 {
@@ -83,5 +82,4 @@ Result checkWindowsPath(const QString &normalizedPath)
     return Result::success();
 }
 
-} // namespace Paths
-} // namespace NetVfs
+} // namespace NetVfs::Paths

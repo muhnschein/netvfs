@@ -6,8 +6,7 @@
 
 #include <QtCore/QDateTime>
 
-namespace NetVfs {
-namespace Transfer {
+namespace NetVfs::Transfer {
 
 NETVFS_EXPORT QString partName(const QString &path);   // "<path>.part"
 
@@ -31,7 +30,6 @@ NETVFS_EXPORT Result removeStaleParts(Backend *backend, const QString &dir,
                                       const QDateTime &now = QDateTime::currentDateTimeUtc(),
                                       qint64 maxAgeSecs = 24 * 60 * 60);
 
-} // namespace Transfer
-} // namespace NetVfs
+} // namespace NetVfs::Transfer
 
 #endif

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 #include "error.h"
 
+#include <array>
+
 namespace NetVfs {
 
 namespace {
@@ -9,7 +11,7 @@ struct ErrorNameEntry {
     const char *name;
 };
 
-const ErrorNameEntry errorNames[] = {
+const std::array<ErrorNameEntry, 15> errorNames = { {
     { Error::None, "None" },
     { Error::Canceled, "Canceled" },
     { Error::NetworkUnreachable, "NetworkUnreachable" },
@@ -25,7 +27,7 @@ const ErrorNameEntry errorNames[] = {
     { Error::Unsupported, "Unsupported" },
     { Error::ProtocolError, "ProtocolError" },
     { Error::Internal, "Internal" },
-};
+} };
 } // namespace
 
 QString errorName(Error error)

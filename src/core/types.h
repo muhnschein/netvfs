@@ -30,11 +30,11 @@ struct NETVFS_EXPORT ServerIdentity {
     QString toPin() const;
     static ServerIdentity fromPin(const QString &pin);
 
-    bool operator==(const ServerIdentity &other) const
+    friend bool operator==(const ServerIdentity &a, const ServerIdentity &b)
     {
-        return algorithm == other.algorithm && publicKey == other.publicKey;
+        return a.algorithm == b.algorithm && a.publicKey == b.publicKey;
     }
-    bool operator!=(const ServerIdentity &other) const { return !(*this == other); }
+    friend bool operator!=(const ServerIdentity &a, const ServerIdentity &b) { return !(a == b); }
 };
 
 // Connection parameters. Provider-specific values live in `options`, keyed

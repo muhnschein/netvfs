@@ -33,7 +33,7 @@ QObject *pluginFor(const QString &provider)
         // shared per process and plugins stay mapped until exit.
         QPluginLoader loader(path);
         QObject *root = loader.instance();
-        BackendFactory *factory = qobject_cast<BackendFactory *>(root);
+        const BackendFactory *factory = qobject_cast<BackendFactory *>(root);
         if (!factory) {
             qCWarning(lcNetVfsCore) << "Not a netvfs backend:" << path << loader.errorString();
             continue;
@@ -56,8 +56,7 @@ BackendFactory *factoryFor(const QString &provider)
 QStringList BackendLoader::searchPaths()
 {
     QStringList paths;
-    const QByteArray env = qgetenv("NETVFS_BACKEND_PATH");
-    if (!env.isEmpty())
+    if (const QByteArray env = qgetenv("NETVFS_BACKEND_PATH"); !env.isEmpty())
         paths += QString::fromLocal8Bit(env).split(QLatin1Char(':'), NETVFS_SKIP_EMPTY_PARTS);
     paths << QStringLiteral(NETVFS_BACKEND_DIR);
     return paths;

@@ -49,7 +49,8 @@ public:
     virtual void disconnect() = 0;
 };
 
-// Interface implemented by each backend plugin (libnetvfs-<provider>.so).
+// Interface implemented by each backend plugin (libnetvfs-<provider>.so),
+// IID "org.netvfs.BackendFactory/1.0".
 class NETVFS_EXPORT BackendFactory
 {
 public:
@@ -60,7 +61,7 @@ public:
 
 } // namespace NetVfs
 
-#define NetVfsBackendFactory_iid "org.netvfs.BackendFactory/1.0"
-Q_DECLARE_INTERFACE(NetVfs::BackendFactory, NetVfsBackendFactory_iid)
+// Plugins use the same IID string in Q_PLUGIN_METADATA (moc needs a literal).
+Q_DECLARE_INTERFACE(NetVfs::BackendFactory, "org.netvfs.BackendFactory/1.0")
 
 #endif

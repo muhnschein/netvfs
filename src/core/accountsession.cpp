@@ -8,16 +8,20 @@
 
 #include <QtCore/QTimer>
 
+#include <memory>
+
 namespace NetVfs {
 
 AccountSession *AccountSession::open(int accountId, QObject *parent)
 {
-    Accounts::Manager *manager = new Accounts::Manager;
-    AccountSession *session = new AccountSession(manager, new SignonSecretSource, parent);
-    manager->setParent(session);
+    auto manager = std::make_unique<Accounts::Manager>();
+    auto session = std::make_unique<AccountSession>(manager.get(), std::make_unique<SignonSecretSource>().release(),
+                                                    parent);
+    manager.release()->setParent(session.get());
     // Deferred so callers can connect to ready()/failed() first.
-    QTimer::singleShot(0, session, [session, accountId]() { session->start(accountId); });
-    return session;
+    AccountSession *raw = session.release();   // owned by `parent` (Qt ownership)
+    QTimer::singleShot(0, raw, [raw, accountId]() { raw->start(accountId); });
+    return raw;
 }
 
 AccountSession::AccountSession(Accounts::Manager *manager, SecretSource *secrets, QObject *parent)
@@ -37,8 +41,7 @@ AccountSession::~AccountSession()
 
 void AccountSession::start(int accountId)
 {
-    const Result r = AccountStore(m_manager).load(accountId, &m_config);
-    if (!r.ok()) {
+    if (const Result r = AccountStore(m_manager).load(accountId, &m_config); !r.ok()) {
         emit failed(r);
         return;
     }

@@ -11,5 +11,5 @@ int main(int argc, char *argv[])
     QCoreApplication app(argc, argv);
     QTextStream out(stdout);
     QTextStream err(stderr);
-    return NetVfs::Cli::run(app.arguments().mid(1), out, err);
+    return NetVfs::Cli::run(QCoreApplication::arguments().mid(1), out, err);
 }

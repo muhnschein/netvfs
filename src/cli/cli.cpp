@@ -12,8 +12,9 @@
 #include <QtCore/QScopedPointer>
 #include <QtCore/QTextStream>
 
-namespace NetVfs {
-namespace Cli {
+#include <array>
+
+namespace NetVfs::Cli {
 
 namespace {
 
@@ -105,10 +106,14 @@ bool parse(const QStringList &arguments, Options *options, QString *error)
 
 int expectedArgs(const QString &command)
 {
-    static const struct { const char *name; int args; } table[] = {
+    struct Command {
+        const char *name;
+        int args;
+    };
+    static const std::array<Command, 10> table = { {
         { "identify", 0 }, { "verify", 1 }, { "ls", 1 }, { "stat", 1 }, { "put", 2 },
         { "get", 2 }, { "mkdir", 1 }, { "rm", 1 }, { "mv", 2 }, { "df", 1 },
-    };
+    } };
     for (const auto &entry : table) {
         if (command == QLatin1String(entry.name))
             return entry.args;
@@ -171,8 +176,7 @@ Result runCommand(Backend *backend, const Options &options, QTextStream &out)
 int run(const QStringList &arguments, QTextStream &out, QTextStream &err)
 {
     Options options;
-    QString error;
-    if (!parse(arguments, &options, &error) || expectedArgs(options.command) != options.args.size()) {
+    if (QString error; !parse(arguments, &options, &error) || expectedArgs(options.command) != options.args.size()) {
         if (error.isEmpty())
             error = QStringLiteral("unknown command or wrong number of arguments");
         err << "netvfs-cli: " << error << "\n\n" << Usage;
@@ -211,5 +215,4 @@ int run(const QStringList &arguments, QTextStream &out, QTextStream &err)
     return r.ok() ? 0 : fail(err, r);
 }
 
-} // namespace Cli
-} // namespace NetVfs
+} // namespace NetVfs::Cli

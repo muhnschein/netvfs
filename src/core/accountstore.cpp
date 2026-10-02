@@ -119,8 +119,8 @@ Result AccountStore::load(int accountId, AccountConfig *out) const
             params.options.insert(key.mid(prefix.size()), account->value(key));
     }
 
-    const Accounts::Service service = m_manager->service(backupServiceName(config.provider));
-    if (service.isValid()) {
+    if (const Accounts::Service service = m_manager->service(backupServiceName(config.provider));
+            service.isValid()) {
         account->selectService(service);
         config.backupsPath = account->value(QLatin1String(Keys::BackupsPath)).toString();
         account->selectService(Accounts::Service());
@@ -136,7 +136,7 @@ Result AccountStore::load(int accountId, AccountConfig *out) const
     return Result::success();
 }
 
-Result AccountStore::setAttention(int accountId, Attention attention, const QString &seenIdentityPin)
+Result AccountStore::setAttention(int accountId, Attention attention, const QString &seenIdentityPin) const
 {
     if (attention == Attention::None)
         return clearAttention(accountId);
@@ -156,7 +156,7 @@ Result AccountStore::setAttention(int accountId, Attention attention, const QStr
     return sync(account);
 }
 
-Result AccountStore::clearAttention(int accountId)
+Result AccountStore::clearAttention(int accountId) const
 {
     Accounts::Account *account = m_manager->account(accountId);  // owned by the manager
     if (!account)

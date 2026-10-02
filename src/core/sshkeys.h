@@ -11,8 +11,9 @@ namespace NetVfs {
 // A key pair; the private part is wiped on destruction (SEC-5).
 struct NETVFS_EXPORT SshKeyMaterial {
     SshKeyMaterial() = default;
-    SshKeyMaterial(const SshKeyMaterial &other) = default;
-    SshKeyMaterial &operator=(const SshKeyMaterial &other) = default;
+    // Copies are deep so that wiping one copy never affects another.
+    SshKeyMaterial(const SshKeyMaterial &other);
+    SshKeyMaterial &operator=(const SshKeyMaterial &other);
     ~SshKeyMaterial();
 
     QByteArray privateKey;   // unencrypted, OpenSSH format ("-----BEGIN OPENSSH PRIVATE KEY-----")
@@ -56,7 +57,6 @@ NETVFS_EXPORT Result installAuthorizedKey(Backend *backend, const QString &publi
 
 } // namespace NetVfs
 
-#define NetVfsSshKeyTools_iid "org.netvfs.SshKeyTools/1.0"
-Q_DECLARE_INTERFACE(NetVfs::SshKeyTools, NetVfsSshKeyTools_iid)
+Q_DECLARE_INTERFACE(NetVfs::SshKeyTools, "org.netvfs.SshKeyTools/1.0")
 
 #endif

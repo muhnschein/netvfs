@@ -34,7 +34,7 @@ class NETVFS_EXPORT Result
 {
 public:
     Result() = default;
-    Result(Error error, const QString &message = QString())
+    explicit Result(Error error, const QString &message = QString())
         : m_error(error), m_message(message) {}
 
     static Result success() { return Result(); }

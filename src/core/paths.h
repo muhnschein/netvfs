@@ -6,8 +6,7 @@
 
 #include <QtCore/QStringList>
 
-namespace NetVfs {
-namespace Paths {
+namespace NetVfs::Paths {
 
 // SPEC C-15. '/' separated; repeated separators collapse; a trailing separator
 // is dropped; a leading separator is kept (absolute path, backend-defined
@@ -26,7 +25,6 @@ NETVFS_EXPORT QString fileName(const QString &normalizedPath);
 NETVFS_EXPORT QString windowsComponentProblem(const QString &component);
 NETVFS_EXPORT Result checkWindowsPath(const QString &normalizedPath);
 
-} // namespace Paths
-} // namespace NetVfs
+} // namespace NetVfs::Paths
 
 #endif

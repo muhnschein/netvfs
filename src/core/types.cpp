@@ -25,11 +25,11 @@ ServerIdentity ServerIdentity::fromPin(const QString &pin)
     return identity;
 }
 
+// Deep copies, so wiping ours never touches the caller's buffer.
 Credentials::Credentials(const QString &user, const QByteArray &secretData)
     : userName(user)
+    , secret(secretData.constData(), secretData.size())
 {
-    // Deep copy so wiping ours never races with the caller's buffer.
-    secret = QByteArray(secretData.constData(), secretData.size());
 }
 
 Credentials::Credentials(const Credentials &other)

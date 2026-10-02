@@ -8,8 +8,7 @@
 
 #include <unistd.h>
 
-namespace NetVfs {
-namespace Transfer {
+namespace NetVfs::Transfer {
 
 namespace {
 
@@ -178,5 +177,4 @@ Result removeStaleParts(Backend *backend, const QString &dir, const QDateTime &n
     return Result::success();
 }
 
-} // namespace Transfer
-} // namespace NetVfs
+} // namespace NetVfs::Transfer

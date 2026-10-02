@@ -26,6 +26,26 @@ QByteArray keyPart(const QByteArray &line)
 }
 } // namespace
 
+SshKeyMaterial::SshKeyMaterial(const SshKeyMaterial &other)
+    : privateKey(other.privateKey.constData(), other.privateKey.size())
+    , algorithm(other.algorithm)
+    , publicLine(other.publicLine)
+    , fingerprint(other.fingerprint)
+{
+}
+
+SshKeyMaterial &SshKeyMaterial::operator=(const SshKeyMaterial &other)
+{
+    if (this != &other) {
+        wipe();
+        privateKey = QByteArray(other.privateKey.constData(), other.privateKey.size());
+        algorithm = other.algorithm;
+        publicLine = other.publicLine;
+        fingerprint = other.fingerprint;
+    }
+    return *this;
+}
+
 SshKeyMaterial::~SshKeyMaterial()
 {
     wipe();

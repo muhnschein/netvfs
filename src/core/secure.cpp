@@ -6,11 +6,11 @@
 namespace NetVfs {
 
 namespace {
-void wipeBytes(void *data, size_t size)
+void wipeBytes(char *data, size_t count)
 {
-    // volatile pointer keeps the compiler from eliding the stores.
-    volatile unsigned char *p = static_cast<volatile unsigned char *>(data);
-    while (size--)
+    // Stores through a volatile pointer cannot be elided by the compiler.
+    volatile char *p = data;
+    while (count--)
         *p++ = 0;
 }
 } // namespace
@@ -22,10 +22,11 @@ void secureWipe(QByteArray &data)
     data.clear();
 }
 
+// QString::fill() lives in QtCore, so the stores cannot be elided here.
 void secureWipe(QString &data)
 {
     if (!data.isEmpty())
-        wipeBytes(data.data(), static_cast<size_t>(data.size()) * sizeof(QChar));
+        data.fill(QChar());
     data.clear();
 }
 
