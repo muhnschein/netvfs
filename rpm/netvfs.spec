@@ -44,6 +44,14 @@ Requires:   %{name}-core = %{version}-%{release}
 %description core-devel
 Headers and pkg-config file for building applications on libnetvfs.
 
+%package backend-local
+Summary:    Local file system backend for libnetvfs
+Requires:   %{name}-core = %{version}-%{release}
+
+%description backend-local
+libnetvfs-local.so: the local file system as a netvfs location (SPEC-v2
+section 6.5), for the command line tool and in-process consumers.
+
 %package account-sftp
 Summary:    SFTP backup account
 Requires:   %{name}-core = %{version}-%{release}
@@ -115,6 +123,9 @@ systemctl-user try-restart msyncd.service || :
 %{_includedir}/netvfs
 %{_libdir}/libnetvfs.so
 %{_libdir}/pkgconfig/netvfs.pc
+
+%files backend-local
+%{_libdir}/netvfs/backends/libnetvfs-local.so
 
 %files account-sftp
 %{_libdir}/netvfs/backends/libnetvfs-sftp.so
