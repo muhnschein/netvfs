@@ -103,8 +103,15 @@ is non-zero if any target failed. Every run works in
   a fresh backend connects through the proxy, `engage` runs, the call starts,
   `cancel()` follows after 300 ms and must end the call with `Canceled` within
   2 s; then `release` runs. Proxies: `tests/interop/sftp/docker/sftpproxy.py`
-  (`--hold-file`), `tests/interop/smb/server/flipproxy.py` (`stall` mode), and
-  the planned `httpstall.py` / `ftpstall.py`.
+  (`--hold-file` for SFTP replies; `--relay` holds a whole SSH connection,
+  keep-alive replies included), `tests/interop/smb/server/flipproxy.py`
+  (`stall` mode), and the planned `httpstall.py` / `ftpstall.py`.
+
+`tests/interop/sftp/run.sh` runs the suite against OpenSSH 10.3p1 (with
+`allow_shell=true`, so copy and checksum go through the exec channel) and
+ProFTPD mod_sftp (no exec channel, no native NoReplace), each with a
+`--relay` stall proxy, a restart command (`restart-instance.sh`) and a
+bind-mounted `hostPath`.
 
 ## Hooking a container target in (interop `run.sh`)
 
