@@ -7,15 +7,14 @@
 #include <QtCore/QObject>
 #include <QtCore/QStringList>
 #include <QtDBus/QDBusConnection>
+#include <QtDBus/QDBusPendingCallWatcher>
 
 #include <functional>
 
-#include <memory>
-#include <vector>
+#include <list>
 
 QT_BEGIN_NAMESPACE
 class QDBusMessage;
-class QDBusPendingCallWatcher;
 QT_END_NAMESPACE
 
 namespace NetVfs {
@@ -56,11 +55,16 @@ private:
     void subscribe(const char *name, const char *slot);
     void call(const QString &method, const QVariantList &arguments,
               const std::function<void(const QDBusMessage &)> &done);
-    void retire(const QDBusPendingCallWatcher *watcher);
 
     QDBusConnection m_connection;
-    std::vector<std::unique_ptr<QDBusPendingCallWatcher>> m_pending;
-    std::vector<std::unique_ptr<QDBusPendingCallWatcher>> m_finished;   // delivered, deleted on the next call
+    // Watchers are held by value; a delivered one is only dropped on the next
+    // call or at destruction, never while its own finished() is being emitted.
+    struct PendingCall {
+        explicit PendingCall(const QDBusPendingCall &call) : watcher(call) {}
+        QDBusPendingCallWatcher watcher;
+        bool delivered = false;
+    };
+    std::list<PendingCall> m_calls;
 };
 
 } // namespace NetVfs
