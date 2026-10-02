@@ -6,6 +6,8 @@
 #   make check-interop interop suite against containerised servers
 #   make coverage      unit + interop tests instrumented, writes build-coverage/coverage.xml
 #   make SANITIZE=1 check   the same under ASan + UBSan (vendored libraries included)
+#   make HOST_BUTEO=0  use the system buteosyncfw5 (pkg-config) instead of
+#                      building the pinned vendor/host/buteo-syncfw
 
 QMAKE ?= $(shell command -v qmake-qt5 || command -v qmake)
 JOBS ?= $(shell getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)
@@ -26,9 +28,13 @@ VENDOR_CFLAGS =
 endif
 
 BUILD_DIR := $(abspath $(BUILD))
+HOST_BUTEO ?= 1
+ifeq ($(HOST_BUTEO),1)
+QMAKE_ARGS += NETVFS_HOST_BUTEO=$(BUILD_DIR)/host-buteo
+endif
 TEST_ENV = QT_QPA_PLATFORM=offscreen
 
-.PHONY: all vendor configure check check-unit check-interop coverage clean distclean
+.PHONY: all vendor host-buteo configure check check-unit check-interop coverage clean distclean
 
 all: configure
 	$(MAKE) -C $(BUILD_DIR) $(if $(findstring -j,$(MAKEFLAGS)),,-j$(JOBS))
@@ -36,7 +42,13 @@ all: configure
 vendor:
 	CFLAGS="$(VENDOR_CFLAGS)" LDFLAGS="$(VENDOR_CFLAGS)" ./vendor/build-vendor.sh $(BUILD_DIR)/vendor
 
-configure: vendor
+# The host has no buteo packages; the Sailfish SDK build never runs this.
+host-buteo:
+ifeq ($(HOST_BUTEO),1)
+	./vendor/host/build-host-buteo.sh $(BUILD_DIR)/host-buteo
+endif
+
+configure: vendor host-buteo
 	mkdir -p $(BUILD_DIR)
 	cd $(BUILD_DIR) && $(QMAKE) -r $(CURDIR)/netvfs.pro VENDOR_PREFIX=$(BUILD_DIR)/vendor $(QMAKE_ARGS)
 

@@ -4,3 +4,6 @@
 [submodule "vendor/libsmb2"]
 	path = vendor/libsmb2
 	url = https://github.com/sahlberg/libsmb2.git
+[submodule "vendor/host/buteo-syncfw"]
+	path = vendor/host/buteo-syncfw
+	url = https://github.com/sailfishos/buteo-syncfw.git
