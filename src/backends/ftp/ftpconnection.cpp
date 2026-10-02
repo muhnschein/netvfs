@@ -103,6 +103,21 @@ bool drive(const Curl::MultiHandle &multi, const Curl::EasyHandle &easy, const s
     return true;
 }
 
+QString guardMessage(TlsGuard::Verdict verdict)
+{
+    switch (verdict) {
+    case TlsGuard::Verdict::AuthRefused:
+        return QStringLiteral("The server does not offer TLS");
+    case TlsGuard::Verdict::ProtectionRefused:
+        return QStringLiteral("The server refuses to encrypt data connections");
+    case TlsGuard::Verdict::Unexpected:
+        return QStringLiteral("The server skipped the TLS sign-in");
+    case TlsGuard::Verdict::Continue:
+        break;
+    }
+    return QString();
+}
+
 } // namespace
 
 size_t TransferSink::received(const char *, size_t)
@@ -299,6 +314,10 @@ Result Connection::start(const Request &request, TransferSink *sink)
     m_reader.reset();
     m_replies.clear();
     m_guardFailure = Result();
+    // XSEC-2: every request starts in the guard's initial state, whatever
+    // became of the previous one (a connection that died half way through a
+    // sign-in must not colour the greeting of the next one).
+    m_guard.reset();
     for (const QByteArray &command : request.commands) {
         // XSEC-5: commands at debug level only (they carry paths, never PASS).
         qCDebug(lcNetVfsFtp) << "command:" << command;
@@ -378,10 +397,8 @@ Result Connection::complete(CURLcode code, const QString &context)
     m_replies = m_reader.replies();
     // libcurl may have closed the connection after an error.
     m_expectReconnect = code != CURLE_OK || m_closesConnection;
-    if (!m_guardFailure.ok()) {
-        m_guard.reset();
+    if (!m_guardFailure.ok())
         return m_guardFailure;
-    }
     if (code == CURLE_OK)
         return Result::success();
     return curlError(code, m_reader.last(), canceled(), context);
@@ -437,12 +454,20 @@ void Connection::close()
     m_reader.reset();
 }
 
+// XSEC-2: false (with m_guardFailure set) when the replies in `data` show
+// that TLS would not protect what libcurl sends next.
+bool Connection::guard(const char *data, size_t size)
+{
+    const TlsGuard::Verdict verdict = m_guard.feed(data, size);
+    if (verdict == TlsGuard::Verdict::Continue)
+        return true;
+    m_guardFailure = Result(Error::SecurityPolicy, guardMessage(verdict), lineForLog(m_guard.lastLine()));
+    return false;
+}
+
 } // namespace NetVfs::Ftp
 
 // ------------------------------------------------------------- callbacks
-
-using NetVfs::Ftp::Connection;
-using NetVfs::Ftp::TlsGuard;
 
 // The callbacks of libcurl (ftpcallbacks.c) end up here with typed state.
 size_t NetVfsFtpHooks::write(const char *data, size_t length) const
@@ -467,35 +492,17 @@ size_t NetVfsFtpHooks::read(char *buffer, size_t capacity) const
 
 size_t NetVfsFtpHooks::header(const char *data, size_t length) const
 {
+    // The guard judges the raw lines the way libcurl does (TlsGuard), before
+    // anything else is done with them.
+    if (connection->m_settings.tlsMode == NetVfs::Ftp::TlsMode::Explicit && !connection->guard(data, length))
+        return 0;   // libcurl ends the request before it sends anything else
     const int before = connection->m_reader.count();
     connection->m_reader.feed(data, length);
-    if (connection->m_reader.count() == before)
-        return length;
-    const NetVfs::Ftp::Reply &reply = connection->m_reader.last();
-    // XSEC-5: server replies at debug level only.
-    qCDebug(lcNetVfsFtp) << "reply:" << NetVfs::Ftp::replyForLog(reply);
-    if (connection->m_settings.tlsMode != NetVfs::Ftp::TlsMode::Explicit)
-        return length;
-    switch (connection->m_guard.reply(reply.code)) {
-    case TlsGuard::Verdict::Continue:
-        return length;
-    case TlsGuard::Verdict::AuthRefused:
-        connection->m_guardFailure = NetVfs::Result(NetVfs::Error::SecurityPolicy,
-                                                    QStringLiteral("The server does not offer TLS"),
-                                                    NetVfs::Ftp::replyForLog(reply));
-        break;
-    case TlsGuard::Verdict::ProtectionRefused:
-        connection->m_guardFailure = NetVfs::Result(NetVfs::Error::SecurityPolicy,
-                                                    QStringLiteral("The server refuses to encrypt data connections"),
-                                                    NetVfs::Ftp::replyForLog(reply));
-        break;
-    case TlsGuard::Verdict::Unexpected:
-        connection->m_guardFailure = NetVfs::Result(NetVfs::Error::SecurityPolicy,
-                                                    QStringLiteral("The server skipped the TLS sign-in"),
-                                                    NetVfs::Ftp::replyForLog(reply));
-        break;
+    if (connection->m_reader.count() != before) {
+        // XSEC-5: server replies at debug level only.
+        qCDebug(lcNetVfsFtp) << "reply:" << NetVfs::Ftp::replyForLog(connection->m_reader.last());
     }
-    return 0;   // libcurl ends the request before it sends anything else
+    return length;
 }
 
 // True ends the transfer (Canceled).

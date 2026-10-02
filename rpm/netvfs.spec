@@ -27,6 +27,7 @@ BuildRequires: pkgconfig(libsignon-qt5)
 BuildRequires: pkgconfig(buteosyncfw5) >= 0.10.0
 # SPEC-v2 W-1, F-1: the WebDAV and FTP backends use the system libcurl.
 BuildRequires: pkgconfig(libcurl)
+BuildRequires: pkgconfig(dbus-1)
 
 %description
 Adds "SFTP" and "SMB" account providers to Settings > Accounts that appear as
@@ -100,6 +101,15 @@ Requires:   %{name}-core = %{version}-%{release}
 %description backend-ftp
 FTP and FTPS backend (SPEC-v2 6.4) over the system libcurl.
 
+%package bridge
+Summary:    Network locations for sandboxed apps
+Requires:   %{name}-core = %{version}-%{release}
+Requires:   systemd
+
+%description bridge
+netvfs-bridge (SPEC-v2 8a): serves netvfs locations to registered sandboxed
+consumers over a socket in their data folder, without handing out secrets.
+
 %prep
 %setup -q -n %{name}-%{version}
 
@@ -135,6 +145,15 @@ systemctl-user try-restart msyncd.service || :
 %dir %{_libdir}/netvfs/backends
 %{_libdir}/qt5/qml/org/netvfs/accounts
 %{_datadir}/translations/netvfs*.qm
+
+%files bridge
+/usr/libexec/netvfs/netvfs-bridge
+%{_prefix}/lib/systemd/user-generators/netvfs-bridge-generator
+%dir %{_datadir}/netvfs
+%dir %{_datadir}/netvfs/consumers
+%{_datadir}/netvfs/consumers/lautta.conf
+%dir %{_datadir}/netvfs/bridge
+%config %{_datadir}/netvfs/bridge/handoff.conf
 
 %files backend-webdav
 %{_libdir}/netvfs/backends/libnetvfs-webdav.so
