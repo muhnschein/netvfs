@@ -1,0 +1,2 @@
+<?xml version="1.0" encoding="utf-8"?>
+<d:multistatus xmlns:d="DAV:" xmlns:oc="http://owncloud.org/ns"><d:response><d:href>/remote.php/dav/files/alice/x</d:href><d:propstat><d:prop><d:resourcetype/><oc:permissions>RGDNVW</oc:permissions><oc:fileid>42</oc:fileid><oc:checksums><oc:checksum>SHA1:00ff MD5:abcd ADLER32:0102</oc:checksum></oc:checksums></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response></d:multistatus>
