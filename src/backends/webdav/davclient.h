@@ -23,6 +23,9 @@ class Progress;
 
 namespace NetVfs::WebDav {
 
+// W-13: a libcurl CURLcode as a Result. `message` is curl's error buffer.
+Result curlResult(int code, const QString &message = QString());
+
 // Request body. read() returns the number of bytes, 0 at the end, Failed
 // (see error()) or Pause when no data is available yet (streamed writes).
 class BodySource

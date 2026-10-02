@@ -108,6 +108,7 @@ private:
     Result transferTo(Method method, const QString &from, const QString &to, RenameMode mode, const QByteArray &depth);
     Result multistatusFailure(const Response &response, Method method) const;
     QList<QByteArray> uploadHeaders(const WriteOptions &options) const;
+    Result prepareWrite(const QString &path, const WriteOptions &options);
     Result prepareResume(const QString &path, const WriteOptions &options);
     Result writeTargetResult(const Response &response, Method method, const QString &path);
 

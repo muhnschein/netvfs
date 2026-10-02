@@ -19,9 +19,6 @@ QByteArray methodName(Method method);
 Result httpResult(int status, Method method, const QByteArray &reason = QByteArray(),
                   qint64 retryAfterMs = -1);
 
-// A libcurl CURLcode as a Result. `message` is curl's error buffer.
-Result curlResult(int code, const QString &message = QString());
-
 // RFC 9110 HTTP-date (IMF-fixdate, RFC 850, asctime); invalid on failure.
 QDateTime parseHttpDate(const QByteArray &value);
 

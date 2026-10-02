@@ -3,8 +3,6 @@
 
 #include <QtCore/QStringList>
 
-#include <curl/curl.h>
-
 #include <array>
 
 namespace NetVfs::WebDav {
@@ -38,38 +36,6 @@ const std::array<StatusRule, 10> statusRules = { {
     { 415, Error::Unsupported, "The server does not support this request" },
     { 423, Error::Locked, "The file is locked" },
     { 507, Error::NoSpace, "Not enough space on the server" },
-} };
-
-struct CurlRule {
-    CURLcode code;
-    Error error;
-    const char *message;
-};
-
-const std::array<CurlRule, 22> curlRules = { {
-    { CURLE_ABORTED_BY_CALLBACK, Error::Canceled, "Canceled" },
-    { CURLE_OPERATION_TIMEDOUT, Error::Timeout, "The server did not answer in time" },
-    { CURLE_COULDNT_RESOLVE_HOST, Error::NetworkUnreachable, "The server name could not be resolved" },
-    { CURLE_COULDNT_RESOLVE_PROXY, Error::NetworkUnreachable, "The proxy name could not be resolved" },
-    { CURLE_COULDNT_CONNECT, Error::NetworkUnreachable, "Could not connect to the server" },
-    { CURLE_SEND_ERROR, Error::ConnectionLost, "The connection to the server was lost" },
-    { CURLE_RECV_ERROR, Error::ConnectionLost, "The connection to the server was lost" },
-    { CURLE_PARTIAL_FILE, Error::ConnectionLost, "The connection to the server was lost during a transfer" },
-    { CURLE_GOT_NOTHING, Error::ConnectionLost, "The server closed the connection without an answer" },
-    { CURLE_HTTP2, Error::ConnectionLost, "The HTTP/2 connection failed" },
-    { CURLE_HTTP2_STREAM, Error::ConnectionLost, "The HTTP/2 stream failed" },
-    { CURLE_SSL_PINNEDPUBKEYNOTMATCH, Error::ServerIdentityChanged, "The server certificate key changed" },
-    { CURLE_PEER_FAILED_VERIFICATION, Error::ServerIdentityChanged,
-      "The server certificate is no longer trusted" },
-    { CURLE_SSL_CONNECT_ERROR, Error::ProtocolError, "The TLS handshake failed" },
-    { CURLE_UNSUPPORTED_PROTOCOL, Error::SecurityPolicy, "The protocol is not allowed" },
-    { CURLE_LOGIN_DENIED, Error::AuthFailed, "The server did not accept the credentials" },
-    { CURLE_TOO_MANY_REDIRECTS, Error::ProtocolError, "Too many redirects" },
-    { CURLE_OUT_OF_MEMORY, Error::Internal, "Out of memory" },
-    { CURLE_URL_MALFORMAT, Error::Internal, "Malformed URL" },
-    { CURLE_SEND_FAIL_REWIND, Error::ProtocolError, "The request could not be repeated" },
-    { CURLE_WEIRD_SERVER_REPLY, Error::ProtocolError, "The server sent an invalid answer" },
-    { CURLE_FAILED_INIT, Error::Internal, "libcurl could not be initialised" },
 } };
 
 int monthFromName(const QByteArray &token)
@@ -160,19 +126,6 @@ Result httpResult(int status, Method method, const QByteArray &reason, qint64 re
     if (status >= 300 && status < 400)
         return Result(Error::ProtocolError, QStringLiteral("Unexpected redirect"), detail);
     return Result(Error::ProtocolError, QStringLiteral("The server answered with status %1").arg(status), detail);
-}
-
-Result curlResult(int code, const QString &message)
-{
-    if (code == CURLE_OK)
-        return Result::success();
-    const QString detail = message.isEmpty() ? QString::fromLatin1(curl_easy_strerror(static_cast<CURLcode>(code)))
-                                             : message;
-    for (const CurlRule &rule : curlRules) {
-        if (rule.code == code)
-            return Result(rule.error, QLatin1String(rule.message), detail);
-    }
-    return Result(Error::ProtocolError, QStringLiteral("Transfer failed"), detail);
 }
 
 QDateTime parseHttpDate(const QByteArray &value)

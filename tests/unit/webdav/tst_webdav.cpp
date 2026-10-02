@@ -2,6 +2,7 @@
 // WebDAV backend (SPEC-v2 6.3): the pure parts (URLs, status mapping,
 // multistatus parsing, options, certificates) and the backend's behaviour
 // against an in-process HTTP(S) server.
+#include "davclient.h"
 #include "davconfig.h"
 #include "davstatus.h"
 #include "davtls.h"
@@ -233,6 +234,7 @@ private slots:
     void copyDepth();
     void makeDirCases();
     void removeCases();
+    void serverQuirks();
     void uploadHeaders();
     void uploadChunked();
     void uploadCreateNewConflictBeforeBody();
@@ -1396,6 +1398,45 @@ void TestWebDav::removeCases()
         return f.dav.handle(r);
     });
     QCOMPARE(f.backend.removeTreeNative(QStringLiteral("locked")).error(), Error::Locked);
+}
+
+void TestWebDav::serverQuirks()
+{
+    // rclone: MKCOL on an existing folder is 201, If-None-Match is ignored,
+    // MOVE of a missing source is 403.
+    Fixture f;
+    f.dav.addFolder("/dir");
+    f.dav.addFile("/file", "keep");
+    QVERIFY(f.signIn().ok());
+    f.server.setHandler([&f](const HttpRequestRecord &r) {
+        if (r.method == "MKCOL")
+            return HttpReply::make(201);
+        if (r.method == "MOVE" && !f.dav.exists("/missing") && r.target.endsWith("/missing"))
+            return HttpReply::make(403);
+        HttpRequestRecord plain = r;
+        plain.headers.remove("if-none-match");
+        return f.dav.handle(plain);
+    });
+    f.server.setExpectHandler(HttpTestServer::Handler());
+    QCOMPARE(f.backend.makeDir(QStringLiteral("dir"), true).error(), Error::AlreadyExists);
+    QVERIFY(f.backend.makeDir(QStringLiteral("dir"), false).ok());
+    QByteArray data("new");
+    QBuffer source(&data);
+    source.open(QIODevice::ReadOnly);
+    QCOMPARE(f.backend.upload(&source, QStringLiteral("file"), UploadOptions(), nullptr).error(), Error::AlreadyExists);
+    WriteHandle *raw = nullptr;
+    QCOMPARE(f.backend.openWrite(QStringLiteral("file"), WriteOptions(), &raw).error(), Error::AlreadyExists);
+    QCOMPARE(f.dav.node("/file").data, QByteArray("keep"));
+    QCOMPARE(f.backend.rename(QStringLiteral("missing"), QStringLiteral("x"), RenameMode::NoReplace).error(),
+             Error::NotFound);
+    // A real 403 stays PermissionDenied.
+    f.server.setHandler([](const HttpRequestRecord &r) {
+        if (r.method == "PROPFIND")
+            return HttpReply::make(207, multistatus(fileResponse("/dav/file", 4)));
+        return HttpReply::make(403);
+    });
+    QCOMPARE(f.backend.rename(QStringLiteral("file"), QStringLiteral("x"), RenameMode::NoReplace).error(),
+             Error::PermissionDenied);
 }
 
 void TestWebDav::uploadHeaders()

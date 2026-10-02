@@ -17,6 +17,7 @@ namespace NetVfs::WebDav {
 namespace {
 
 constexpr int StatusMultiStatus = 207;
+constexpr int StatusBadRequest = 400;
 constexpr int StatusRangeNotSatisfiable = 416;
 constexpr int StatusUnauthorized = 401;
 constexpr int StatusForbidden = 403;
@@ -60,6 +61,13 @@ bool isRoot(const QString &path)
 {
     QString normalized;
     return Paths::normalize(path, &normalized).ok() && Paths::components(normalized).isEmpty();
+}
+
+// "<file>/" is 404 on most servers, 400 on Apache, 405 or 409 on others.
+bool mayBeFile(const Response &response)
+{
+    return response.status == StatusBadRequest || response.status == StatusNotFound || response.status == StatusMethodNotAllowed
+        || response.status == StatusConflict;
 }
 
 QByteArray depthHeader(int depth)
@@ -437,8 +445,7 @@ Result WebDavBackend::list(const QString &dir, ListSink *sink, const ListOptions
         sinkStopped = !sink->entries(batch);
     if (sinkStopped)
         return Result(Error::Canceled, QStringLiteral("Canceled"));
-    if (r.error() == Error::NotFound || r.error() == Error::Unsupported) {
-        // "/file/" is not found on most servers: say why.
+    if (!r.ok() && mayBeFile(response)) {
         Entry entry;
         if (stat(dir, &entry).ok() && !entry.isDir())
             return Result(Error::NotADirectory, QStringLiteral("Not a folder"));
@@ -454,6 +461,13 @@ Result WebDavBackend::makeDir(const QString &path, bool exclusive)
         return r;
     if (isRoot(path))
         return exclusive ? Result(Error::AlreadyExists, QStringLiteral("The folder already exists")) : Result::success();
+    if (exclusive) {
+        // MKCOL on an existing collection is 405 (RFC 4918 9.3.1), but some
+        // servers (rclone) answer 201.
+        Entry existing;
+        if (stat(path, &existing).ok())
+            return Result(Error::AlreadyExists, QStringLiteral("The folder already exists"));
+    }
     Request request;
     request.method = Method::Mkcol;
     if (Result r = urlFor(path, true, &request.url); !r.ok())
@@ -513,7 +527,7 @@ Result WebDavBackend::removeDir(const QString &path)
         }
         return true;
     }, &response);
-    if (r.error() == Error::NotFound) {
+    if (!r.ok() && mayBeFile(response)) {
         Entry entry;
         if (stat(path, &entry).ok() && !entry.isDir())
             return Result(Error::NotADirectory, QStringLiteral("Not a folder"));
@@ -575,7 +589,8 @@ Result WebDavBackend::multistatusFailure(const Response &response, Method method
 
 Result WebDavBackend::checkReplaceTarget(const QString &to)
 {
-    // XC-10: replacing a folder is AlreadyExists in both modes.
+    // XC-10: a folder is never replaced (with NoReplace the server refuses
+    // any existing target itself).
     Entry target;
     const Result r = stat(to, &target);
     if (r.ok() && target.isDir())
@@ -597,8 +612,10 @@ Result WebDavBackend::transferTo(Method method, const QString &from, const QStri
         return r;
     if (Result r = urlFor(to, false, &destination); !r.ok())
         return r;
-    if (Result r = checkReplaceTarget(to); !r.ok())
-        return r;
+    if (mode == RenameMode::Replace) {
+        if (Result r = checkReplaceTarget(to); !r.ok())
+            return r;
+    }
     // W-8: the server enforces NoReplace (412) and replaces atomically.
     request.headers << "Destination: " + destination
                     << QByteArray(mode == RenameMode::Replace ? "Overwrite: T" : "Overwrite: F");
@@ -609,7 +626,14 @@ Result WebDavBackend::transferTo(Method method, const QString &from, const QStri
         return r;
     if (response.status == StatusMultiStatus)
         return multistatusFailure(response, method);
-    return statusResult(response, method);
+    const Result r = statusResult(response, method);
+    if (r.error() == Error::PermissionDenied) {
+        // A missing source is 403 on some servers (rclone).
+        Entry source;
+        if (stat(from, &source).error() == Error::NotFound)
+            return Result(Error::NotFound, QStringLiteral("No such file or folder"), r.detail());
+    }
+    return r;
 }
 
 Result WebDavBackend::rename(const QString &from, const QString &to, RenameMode mode)
@@ -748,6 +772,21 @@ QList<QByteArray> WebDavBackend::uploadHeaders(const WriteOptions &options) cons
     return headers;
 }
 
+Result WebDavBackend::prepareWrite(const QString &path, const WriteOptions &options)
+{
+    if (options.disposition == WriteOptions::Resume)
+        return prepareResume(path, options);
+    if (options.disposition != WriteOptions::CreateNew)
+        return Result::success();
+    // W-10: If-None-Match: * makes the server refuse to replace; some
+    // servers (rclone) ignore it, so an existing file is caught here, too.
+    Entry existing;
+    const Result r = stat(path, &existing);
+    if (r.ok())
+        return Result(Error::AlreadyExists, QStringLiteral("The file already exists"));
+    return r.error() == Error::NotFound ? Result::success() : r;
+}
+
 Result WebDavBackend::prepareResume(const QString &path, const WriteOptions &options)
 {
     if (!m_features.partialUpdate)
@@ -781,10 +820,8 @@ Result WebDavBackend::upload(QIODevice *source, const QString &path, const Uploa
         return r;
     const WriteOptions &write = options.write;
     const bool resume = write.disposition == WriteOptions::Resume;
-    if (resume) {
-        if (Result r = prepareResume(path, write); !r.ok())
-            return r;
-    }
+    if (Result r = prepareWrite(path, write); !r.ok())
+        return r;
     qint64 size = write.expectedSize;
     if (size >= 0 && resume)
         size -= write.resumeOffset;
@@ -813,10 +850,8 @@ Result WebDavBackend::openWrite(const QString &path, const WriteOptions &options
     if (m_openWrites >= MaxWriteHandles)
         return Result(Error::TooManyConnections, QStringLiteral("Too many files open for writing"));
     const bool resume = options.disposition == WriteOptions::Resume;
-    if (resume) {
-        if (Result r = prepareResume(path, options); !r.ok())
-            return r;
-    }
+    if (Result r = prepareWrite(path, options); !r.ok())
+        return r;
     qint64 size = options.expectedSize;
     if (size >= 0 && resume)
         size -= options.resumeOffset;
