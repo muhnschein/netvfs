@@ -1,17 +1,26 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 #include "sftpbackend.h"
 #include "logging.h"
+#include "names.h"
 #include "paths.h"
 #include "secure.h"
 #include "sftpsupport.h"
 #include "sshkeys.h"
 #include "sshutil.h"
 
+#include <QtCore/QBuffer>
 #include <QtCore/QIODevice>
 
+#include <algorithm>
 #include <deque>
 #include <fcntl.h>
 #include <limits>
+
+// libssh's global request (channels.c). It is not in the installed headers,
+// but it is the one way to send keepalive@openssh.com with want-reply and
+// see the answer (SPEC-v2 XS-12); ssh_send_keepalive() discards it. Linked
+// statically from the pinned libssh.
+extern "C" int ssh_global_request(ssh_session session, const char *request, ssh_buffer buffer, int reply);
 
 namespace NetVfs::Sftp {
 
@@ -19,6 +28,8 @@ namespace {
 
 constexpr const char *HostKeyOption = "host_key";
 constexpr const char *AuthModeOption = "auth_mode";
+constexpr const char *DirModeOption = "dir_mode";
+constexpr const char *KeepAliveRequest = "keepalive@openssh.com";
 constexpr const char *NullDevice = "/dev/null";
 constexpr int DefaultPort = 22;
 constexpr int DefaultConnectTimeoutMs = 15000;   // C-14
@@ -27,27 +38,85 @@ constexpr int PollIntervalMs = 100;
 // Closing a handle after a cancel or timeout must not undo C-9's 2 s bound.
 constexpr int CleanupTimeoutMs = 1000;
 constexpr int MaxKeyboardInteractiveRounds = 8;
-constexpr mode_t DirectoryMode = 0700;   // S-20
-constexpr mode_t FileMode = 0600;        // S-20
+// XC-23: without a requested mode the server's umask decides. libssh always
+// sends a mode; these are what OpenSSH's sftp-server and mkdir(1) use when
+// none is given.
+constexpr mode_t DefaultDirectoryMode = 0777;
+constexpr mode_t DefaultFileMode = 0666;
+constexpr mode_t PermissionBits = 07777;
+constexpr int MaxSymlinkResolutions = 512;       // XS-3, per listing
+constexpr qint64 MaxHandleRead = std::numeric_limits<int>::max();
 
 QString text(const char *value)
 {
     return value ? QString::fromUtf8(value) : QString();
 }
 
+// Remote names in messages: lossless decode, escapes shown as U+FFFD (XS-1).
 QString display(const QByteArray &remote)
 {
-    return QString::fromUtf8(remote);
+    return Names::display(Names::decode(remote));
 }
 
+QByteArray lastComponent(const QByteArray &remote)
+{
+    const int slash = remote.lastIndexOf('/');
+    return slash < 0 ? remote : remote.mid(slash + 1);
+}
+
+QByteArray joinRemote(const QByteArray &dir, const QByteArray &name)
+{
+    if (dir.isEmpty())
+        return name;
+    return dir.endsWith('/') ? dir + name : dir + '/' + name;
+}
+
+EntryType typeOf(const sftp_attributes_struct &attributes)
+{
+    // libssh derives the type from the permission bits for SFTP v3 servers.
+    switch (attributes.type) {
+    case SSH_FILEXFER_TYPE_REGULAR:
+        return EntryType::File;
+    case SSH_FILEXFER_TYPE_DIRECTORY:
+        return EntryType::Directory;
+    case SSH_FILEXFER_TYPE_SYMLINK:
+        return EntryType::Symlink;
+    case SSH_FILEXFER_TYPE_SPECIAL:
+        return EntryType::Special;
+    default:
+        return EntryType::Unknown;
+    }
+}
+
+QDateTime timeOf(uint32_t seconds)
+{
+    return QDateTime::fromMSecsSinceEpoch(static_cast<qint64>(seconds) * 1000, Qt::UTC);
+}
+
+// XS-2 (the part that needs no extension).
 Entry entryFrom(const sftp_attributes_struct &attributes, const QString &name)
 {
     Entry entry;
     entry.name = name;
-    entry.size = static_cast<qint64>(attributes.size);
-    entry.isDir = attributes.type == SSH_FILEXFER_TYPE_DIRECTORY;
-    if (attributes.flags & SSH_FILEXFER_ATTR_ACMODTIME)
-        entry.modified = QDateTime::fromMSecsSinceEpoch(static_cast<qint64>(attributes.mtime) * 1000, Qt::UTC);
+    entry.type = typeOf(attributes);
+    if (attributes.flags & SSH_FILEXFER_ATTR_SIZE)
+        entry.size = static_cast<qint64>(std::min<uint64_t>(attributes.size, std::numeric_limits<qint64>::max()));
+    if (attributes.flags & SSH_FILEXFER_ATTR_ACMODTIME) {
+        entry.modified = timeOf(attributes.mtime);
+        entry.accessed = timeOf(attributes.atime);
+    }
+    if (attributes.flags & SSH_FILEXFER_ATTR_PERMISSIONS)
+        entry.mode = static_cast<qint32>(attributes.permissions & PermissionBits);
+    if (attributes.flags & SSH_FILEXFER_ATTR_UIDGID) {
+        entry.uid = attributes.uid;
+        entry.gid = attributes.gid;
+    }
+    if (attributes.owner)
+        entry.owner = Names::decode(QByteArray(attributes.owner));
+    if (attributes.group)
+        entry.group = Names::decode(QByteArray(attributes.group));
+    if (Names::hasEscapes(name))
+        entry.flags |= EntryFlag::NameNotUtf8;
     return entry;
 }
 
@@ -69,6 +138,22 @@ qint64 readFully(QIODevice *source, char *data, qint64 size)
 bool supported(sftp_session sftp, const char *extension, const char *version)
 {
     return sftp_extension_supported(sftp, extension, version) != 0;
+}
+
+bool stopped(const std::atomic<bool> &canceled, const Progress *progress)
+{
+    return canceled || (progress && progress->canceled());
+}
+
+qint64 scaled(uint64_t blocks, uint64_t unit)
+{
+    const auto limit = static_cast<uint64_t>(std::numeric_limits<qint64>::max());
+    return static_cast<qint64>((unit && blocks > limit / unit) ? limit : blocks * unit);
+}
+
+Result invalidRange()
+{
+    return Result(Error::Internal, QStringLiteral("Invalid range"));
 }
 
 } // namespace
@@ -113,12 +198,11 @@ public:
     Result waitWrite(Pending *pending, const QByteArray &remote) const;
     Result waitRead(Pending *pending, char *buffer, qint64 *received) const;
     Result fillWriteWindow(sftp_file file, QIODevice *source, QByteArray *buffer, PendingQueue *queue, bool *eof, const QByteArray &remote) const;
-    Result writeChunks(sftp_file file, QIODevice *source, const QByteArray &remote, Progress *progress) const;
-    Result refillReadWindow(sftp_file file, PendingQueue *queue, quint64 *offset) const;
+    Result writeChunks(sftp_file file, QIODevice *source, const QByteArray &remote, Progress *progress, qint64 base) const;
+    Result refillReadWindow(sftp_file file, PendingQueue *queue, quint64 *offset, quint64 end) const;
     Result drain(PendingQueue *queue, char *buffer) const;
     Result readStep(sftp_file file, PendingQueue *queue, QByteArray *buffer, Sink *sink, quint64 *offset, bool *finished) const;
-    Result readChunks(sftp_file file, Sink *sink) const;
-    Result readRange(sftp_file file, const QByteArray &remote, qint64 length, QByteArray *out) const;
+    Result readChunks(sftp_file file, Sink *sink, quint64 start) const;
 
 private:
     const SftpBackend &m_b;
@@ -138,6 +222,38 @@ public:
 
 private:
     const SftpBackend &m_b;
+};
+
+// XC-13: one open file; every read is pipelined like a download (S-21) and
+// honours cancel() (C-9). Read-ahead across calls is not done (XS-7 later).
+class SftpBackend::Reader : public ReadHandle
+{
+public:
+    Reader(SftpBackend *backend, sftp_file file, qint64 size, const QByteArray &remote)
+        : m_b(backend), m_file(file), m_size(size), m_remote(remote) {}
+    Reader(const Reader &) = delete;
+    Reader &operator=(const Reader &) = delete;
+    ~Reader() override { close(); }
+
+    qint64 size() const override { return m_size; }
+    Result read(qint64 offset, qint64 maxBytes, QByteArray *out) override;
+    void readAhead(qint64, qint64) override {}
+    Result close() override;
+
+    // The backend closed the file because its connection ends.
+    void invalidate()
+    {
+        m_file = nullptr;
+        m_lost = true;
+    }
+    sftp_file file() const { return m_file; }
+
+private:
+    SftpBackend *m_b;
+    sftp_file m_file;
+    const qint64 m_size;
+    const QByteArray m_remote;
+    bool m_lost = false;
 };
 
 SftpBackend::~SftpBackend()
@@ -258,6 +374,13 @@ Result SftpBackend::sessionFailure() const
 
 void SftpBackend::closeSession()
 {
+    // XC-13: open handles end with the connection.
+    for (Reader *reader : m_readers) {
+        if (m_sftp && reader->file())
+            closeFile(reader->file(), false);
+        reader->invalidate();
+    }
+    m_readers.clear();
     if (m_sftp) {
         sftp_free(m_sftp);
         m_sftp = nullptr;
@@ -273,6 +396,8 @@ void SftpBackend::closeSession()
     m_hasFsync = false;
     m_hasStatvfs = false;
     m_hasPosixRename = false;
+    m_nativeNoReplace = false;
+    m_capabilities = Capabilities();
 }
 
 void SftpBackend::disconnect()
@@ -292,8 +417,11 @@ void SftpBackend::resetCancel()
 
 // --- authentication ---------------------------------------------------------
 
-Result SftpBackend::authenticate(const Credentials &credentials)
+Result SftpBackend::authenticate(const Credentials &credentials, AuthPrompter *prompter)
 {
+    // Keyboard-interactive with a prompter (XS-11) is not implemented yet;
+    // without one the v1 rules apply unchanged (S-11).
+    Q_UNUSED(prompter)
     if (!m_session || m_sftp)
         return Result(Error::Internal, QStringLiteral("authenticate() needs a fresh connection"));
     if (m_identityMismatch)
@@ -426,11 +554,35 @@ Result SftpBackend::openSftp()
     char *home = sftp_canonicalize_path(m_sftp, ".");
     m_home = home ? QByteArray(home) : QByteArray();
     ssh_string_free_char(home);
+    detectCapabilities();
 
     qCDebug(lcNetVfsSftp) << "SFTP version" << sftp_server_version(m_sftp) << "fsync" << m_hasFsync
                           << "statvfs" << m_hasStatvfs << "posix-rename" << m_hasPosixRename
+                          << "OpenSSH rename" << m_nativeNoReplace
                           << "chunk" << m_writeChunk << m_readChunk << "start" << m_home;
     return Result::success();
+}
+
+
+void SftpBackend::detectCapabilities()
+{
+    // XC-5: only what this backend implements and the interop suite tests.
+    m_nativeNoReplace = ssh_get_openssh_version(m_session) > 0;   // XS-6, by banner
+    m_capabilities = Capabilities();
+    m_capabilities.flags << Capability::ReadHandles << Capability::EfficientRanges;
+    if (m_hasStatvfs)
+        m_capabilities.flags << Capability::SpaceInfo;
+    if (m_hasPosixRename)
+        m_capabilities.flags << Capability::AtomicReplace;
+    if (m_nativeNoReplace)
+        m_capabilities.flags << Capability::NativeNoReplace;
+    m_capabilities.maxReadChunk = static_cast<qint64>(m_readChunk);
+    m_capabilities.maxWriteChunk = static_cast<qint64>(m_writeChunk);
+}
+
+Capabilities SftpBackend::capabilities() const
+{
+    return m_capabilities;
 }
 
 // --- helpers ----------------------------------------------------------------
@@ -449,20 +601,42 @@ Result SftpBackend::resolve(const QString &path, QByteArray *remote) const
     QString normalized;
     if (const Result r = Paths::normalize(path, &normalized); !r.ok())   // C-15
         return r;
+    if (!Names::isEncodable(normalized))   // XC-4
+        return Result(Error::InvalidName, QStringLiteral("The name cannot be sent to an SFTP server"));
+    const QByteArray bytes = Names::encode(normalized);
     if (Paths::isAbsolute(normalized))
-        *remote = normalized.toUtf8();
+        *remote = bytes;
     else if (normalized.isEmpty())
         *remote = m_home.isEmpty() ? QByteArray(".") : m_home;
-    else if (m_home.isEmpty())
-        *remote = normalized.toUtf8();
     else
-        *remote = Paths::join(display(m_home), normalized).toUtf8();
+        *remote = joinRemote(m_home, bytes);
     return Result::success();
+}
+
+Result SftpBackend::ready(const QString &path, QByteArray *remote) const
+{
+    Result r = checkReady();
+    if (r.ok())
+        r = resolve(path, remote);
+    return r;
+}
+
+bool SftpBackend::transportLost() const
+{
+    return !m_session || !ssh_is_connected(m_session) || (m_sftp && ssh_channel_is_closed(m_sftp->channel));
+}
+
+// XC-21: once signed in, a transport that went away is ConnectionLost.
+Result SftpBackend::established(const Result &failure) const
+{
+    if (m_sftp && !failure.ok() && failure.error() != Error::Canceled && transportLost())
+        return Result(Error::ConnectionLost, failure.message());
+    return failure;
 }
 
 Result SftpBackend::sftpFailure(const QString &context) const
 {
-    return sftpStatusFailure(sftp_get_error(m_sftp), text(ssh_get_error(m_session)), context);
+    return established(sftpStatusFailure(sftp_get_error(m_sftp), text(ssh_get_error(m_session)), context));
 }
 
 Result SftpBackend::writeFailure(const QByteArray &remote, qint64 attempted) const
@@ -477,15 +651,22 @@ Result SftpBackend::writeFailure(const QByteArray &remote, qint64 attempted) con
     return Result(Error::NoSpace, QStringLiteral("The server has no space left for %1").arg(display(remote)));
 }
 
+mode_t SftpBackend::directoryMode() const
+{
+    bool ok = false;
+    const uint mode = m_params.option(QLatin1String(DirModeOption)).toUInt(&ok, 8);
+    return ok && mode <= PermissionBits ? static_cast<mode_t>(mode) : DefaultDirectoryMode;
+}
+
 // --- metadata ---------------------------------------------------------------
 
-Result SftpBackend::statRemote(const QByteArray &remote, Entry *out) const
+Result SftpBackend::statRemote(const QByteArray &remote, Entry *out, bool follow) const
 {
-    sftp_attributes attributes = sftp_stat(m_sftp, remote.constData());
+    sftp_attributes attributes = follow ? sftp_stat(m_sftp, remote.constData()) : sftp_lstat(m_sftp, remote.constData());
     if (!attributes)
         return sftpFailure(display(remote));
     if (out)
-        *out = entryFrom(*attributes, Paths::fileName(display(remote)));
+        *out = entryFrom(*attributes, Names::decode(lastComponent(remote)));
     sftp_attributes_free(attributes);
     return Result::success();
 }
@@ -493,124 +674,209 @@ Result SftpBackend::statRemote(const QByteArray &remote, Entry *out) const
 Result SftpBackend::stat(const QString &path, Entry *out)
 {
     QByteArray remote;
-    Result r = checkReady();
-    if (r.ok())
-        r = resolve(path, &remote);
+    Result r = ready(path, &remote);
     if (r.ok())
         r = statRemote(remote, out);
     return r;
 }
 
-Result SftpBackend::list(const QString &dir, QVector<Entry> *out)
+Result SftpBackend::lstat(const QString &path, Entry *out)
 {
     QByteArray remote;
-    Result r = checkReady();
+    Result r = ready(path, &remote);
     if (r.ok())
-        r = resolve(dir, &remote);
+        r = statRemote(remote, out, false);
+    return r;
+}
+
+void SftpBackend::resolveTarget(const QByteArray &dir, Entry *entry, int *budget) const
+{
+    // XS-3: at most MaxSymlinkResolutions per listing.
+    Entry target;
+    if (*budget > 0 && statRemote(joinRemote(dir, Names::encode(entry->name)), &target).ok())
+        entry->targetType = target.type;
+    else
+        entry->flags |= EntryFlag::TargetUnknown;
+    --*budget;
+}
+
+Result SftpBackend::readEntries(sftp_dir handle, const QByteArray &remote, ListSink *sink,
+                                const ListOptions &options) const
+{
+    const int batchSize = qMax(1, options.batchSize);
+    int budget = MaxSymlinkResolutions;
+    QVector<Entry> batch;
+    for (;;) {
+        if (m_canceled)
+            return Result(Error::Canceled);   // C-9, between READDIR replies
+        sftp_attributes attributes = sftp_readdir(m_sftp, handle);
+        if (!attributes)
+            break;
+        // XC-6: READDIR is lstat-like; "." and ".." never appear.
+        if (const QByteArray name(attributes->name); name != "." && name != "..") {
+            Entry entry = entryFrom(*attributes, Names::decode(name));
+            if (options.resolveSymlinkTypes && entry.type == EntryType::Symlink)
+                resolveTarget(remote, &entry, &budget);
+            batch.append(entry);
+        }
+        sftp_attributes_free(attributes);
+        // A batch per READDIR reply: libssh drops its buffer after the last name.
+        const bool replyDone = handle->buffer == nullptr;
+        if (!batch.isEmpty() && (replyDone || batch.size() >= batchSize)) {
+            if (!sink->entries(batch))
+                return Result(Error::Canceled, QStringLiteral("The listing was stopped"));
+            batch.clear();
+        }
+    }
+    if (!sftp_dir_eof(handle))
+        return sftpFailure(display(remote));
+    if (!batch.isEmpty() && !sink->entries(batch))
+        return Result(Error::Canceled, QStringLiteral("The listing was stopped"));
+    return Result::success();
+}
+
+Result SftpBackend::list(const QString &dir, ListSink *sink, const ListOptions &options)
+{
+    QByteArray remote;
+    Result r = ready(dir, &remote);
     if (!r.ok())
         return r;
     sftp_dir handle = sftp_opendir(m_sftp, remote.constData());
-    if (!handle)
-        return sftpFailure(display(remote));
-    out->clear();
-    while (sftp_attributes attributes = sftp_readdir(m_sftp, handle)) {
-        if (const QString name = text(attributes->name); name != QLatin1String(".") && name != QLatin1String(".."))
-            out->append(entryFrom(*attributes, name));
-        sftp_attributes_free(attributes);
-    }
-    if (!sftp_dir_eof(handle))
+    if (!handle) {
         r = sftpFailure(display(remote));
+        // OpenSSH reports ENOTDIR as "no such file".
+        if (Entry entry; r.error() != Error::ConnectionLost && statRemote(remote, &entry).ok() && !entry.isDir())
+            return Result(Error::NotADirectory, QStringLiteral("%1 is not a folder").arg(display(remote)));
+        return r;
+    }
+    r = readEntries(handle, remote, sink, options);
     sftp_closedir(handle);
     return r;
 }
 
-Result SftpBackend::makeDirectory(const QByteArray &remote) const
+// --- namespace --------------------------------------------------------------
+
+Result SftpBackend::makeDir(const QString &path, bool exclusive)
 {
-    Entry entry;
-    Result r = statRemote(remote, &entry);
-    if (r.ok()) {
-        return entry.isDir ? r : Result(Error::AlreadyExists,
-                                        QStringLiteral("%1 exists and is not a folder").arg(display(remote)));
-    }
-    if (r.error() != Error::NotFound)
+    QByteArray remote;
+    Result r = ready(path, &remote);
+    if (!r.ok())
         return r;
-    if (sftp_mkdir(m_sftp, remote.constData(), DirectoryMode) == 0)   // S-20
+    if (sftp_mkdir(m_sftp, remote.constData(), directoryMode()) == 0)   // XC-8, XC-23, S-20
         return Result::success();
     r = sftpFailure(display(remote));
     // OpenSSH reports EEXIST as a plain failure; a concurrent creator is fine.
-    if (statRemote(remote, &entry).ok() && entry.isDir)
-        return Result::success();
-    return r;
-}
-
-Result SftpBackend::makePath(const QString &dir)
-{
-    QByteArray remote;
-    Result r = checkReady();
-    if (r.ok())
-        r = resolve(dir, &remote);
-    if (!r.ok())
-        return r;
-    if (Entry entry; statRemote(remote, &entry).ok() && entry.isDir)
-        return Result::success();
-
-    const QString full = display(remote);
-    QString prefix = Paths::isAbsolute(full) ? QStringLiteral("/") : QString();
-    for (const QString &component : Paths::components(full)) {
-        prefix = Paths::join(prefix, component);
-        r = makeDirectory(prefix.toUtf8());
-        if (!r.ok())
-            return r;
+    if (Entry existing; r.error() != Error::ConnectionLost && statRemote(remote, &existing).ok()) {
+        if (exclusive)
+            return Result(Error::AlreadyExists, QStringLiteral("%1 exists").arg(display(remote)));
+        if (existing.isDir())
+            return Result::success();
+        return Result(Error::AlreadyExists, QStringLiteral("%1 exists and is not a folder").arg(display(remote)));
     }
     return r;
 }
 
-Result SftpBackend::removeRemote(const QByteArray &remote) const
-{
-    if (sftp_unlink(m_sftp, remote.constData()) == 0)
-        return Result::success();
-    const Result failure = sftpFailure(display(remote));
-    if (Entry entry; failure.error() == Error::NotFound || !statRemote(remote, &entry).ok() || !entry.isDir)
-        return failure;
-    if (sftp_rmdir(m_sftp, remote.constData()) == 0)
-        return Result::success();
-    return sftpFailure(display(remote));
-}
-
-Result SftpBackend::remove(const QString &path)
+Result SftpBackend::removeFile(const QString &path)
 {
     QByteArray remote;
-    Result r = checkReady();
-    if (r.ok())
-        r = resolve(path, &remote);
-    if (r.ok())
-        r = removeRemote(remote);
+    Result r = ready(path, &remote);
+    if (!r.ok())
+        return r;
+    if (sftp_unlink(m_sftp, remote.constData()) == 0)
+        return Result::success();
+    r = sftpFailure(display(remote));
+    // XC-9: OpenSSH reports EISDIR as a plain failure.
+    if (Entry entry; r.error() != Error::ConnectionLost && statRemote(remote, &entry, false).ok()
+            && entry.type == EntryType::Directory)
+        return Result(Error::IsADirectory, QStringLiteral("%1 is a folder").arg(display(remote)));
     return r;
 }
 
-Result SftpBackend::rename(const QString &from, const QString &to)
+bool SftpBackend::hasChildren(const QByteArray &remote) const
+{
+    sftp_dir handle = sftp_opendir(m_sftp, remote.constData());
+    if (!handle)
+        return false;
+    bool found = false;
+    while (sftp_attributes attributes = found ? nullptr : sftp_readdir(m_sftp, handle)) {
+        const QByteArray name(attributes->name);
+        found = name != "." && name != "..";
+        sftp_attributes_free(attributes);
+    }
+    sftp_closedir(handle);
+    return found;
+}
+
+Result SftpBackend::removeDir(const QString &path)
+{
+    QByteArray remote;
+    Result r = ready(path, &remote);
+    if (!r.ok())
+        return r;
+    if (sftp_rmdir(m_sftp, remote.constData()) == 0)
+        return Result::success();
+    r = sftpFailure(display(remote));
+    Entry entry;
+    if (r.error() == Error::ConnectionLost || !statRemote(remote, &entry, false).ok())
+        return r;
+    // XC-9: OpenSSH reports ENOTDIR as "no such file" and ENOTEMPTY as a
+    // plain failure.
+    if (entry.type != EntryType::Directory)
+        return Result(Error::NotADirectory, QStringLiteral("%1 is not a folder").arg(display(remote)));
+    if (r.error() != Error::PermissionDenied && hasChildren(remote))
+        return Result(Error::DirectoryNotEmpty, QStringLiteral("%1 is not empty").arg(display(remote)));
+    return r;
+}
+
+Result SftpBackend::renameNoReplace(const QByteArray &source, const QByteArray &target, bool targetExists)
+{
+    // XC-10, XS-6: the stat check covers every server; a plain SSH_FXP_RENAME
+    // (never posix-rename) closes the race on servers that refuse to replace.
+    if (targetExists)
+        return Result(Error::AlreadyExists, QStringLiteral("%1 exists").arg(display(target)));
+    if (sftp_rename_noreplace(m_sftp, source.constData(), target.constData()) == 0)
+        return Result::success();
+    const Result failure = sftpFailure(display(source));
+    if (failure.error() != Error::NotFound && failure.error() != Error::ConnectionLost
+            && statRemote(target, nullptr, false).ok())
+        return Result(Error::AlreadyExists, QStringLiteral("%1 exists").arg(display(target)));
+    return failure;
+}
+
+Result SftpBackend::renameReplacing(const QByteArray &source, const QByteArray &target, bool targetExists)
+{
+    // With posix-rename@openssh.com, libssh's sftp_rename() replaces the
+    // target atomically (AtomicReplace). Plain SFTP rename does not replace
+    // (S-22, 7): stat, unlink and rename as in API v1.
+    if (!m_hasPosixRename && targetExists && sftp_unlink(m_sftp, target.constData()) != 0)
+        return sftpFailure(display(target));
+    if (sftp_rename(m_sftp, source.constData(), target.constData()) != 0)
+        return sftpFailure(display(source));
+    return Result::success();
+}
+
+Result SftpBackend::rename(const QString &from, const QString &to, RenameMode mode)
 {
     QByteArray source;
     QByteArray target;
-    Result r = checkReady();
-    if (r.ok())
-        r = resolve(from, &source);
+    Result r = ready(from, &source);
     if (r.ok())
         r = resolve(to, &target);
     if (!r.ok())
         return r;
-    // With posix-rename@openssh.com, libssh's sftp_rename() replaces the
-    // target atomically. Plain SFTP rename does not replace (S-22, 7).
-    if (!m_hasPosixRename) {
-        r = statRemote(target, nullptr);
-        if (r.ok() && sftp_unlink(m_sftp, target.constData()) != 0)
-            return sftpFailure(display(target));
-        if (!r.ok() && r.error() != Error::NotFound)
-            return r;
-    }
-    if (sftp_rename(m_sftp, source.constData(), target.constData()) != 0)
-        return sftpFailure(display(source));
-    return Result::success();
+    Entry existing;
+    r = statRemote(target, &existing, false);
+    if (!r.ok() && r.error() != Error::NotFound)
+        return r;
+    const bool targetExists = r.ok();
+    if (targetExists && source == target)
+        return Result::success();
+    // XC-10: a folder is never replaced.
+    if (targetExists && existing.type == EntryType::Directory)
+        return Result(Error::AlreadyExists, QStringLiteral("%1 is a folder").arg(display(target)));
+    if (mode == RenameMode::NoReplace)
+        return renameNoReplace(source, target, targetExists);
+    return renameReplacing(source, target, targetExists);
 }
 
 Result SftpBackend::freeBytes(const QByteArray &remote, qint64 *bytes) const
@@ -619,14 +885,12 @@ Result SftpBackend::freeBytes(const QByteArray &remote, qint64 *bytes) const
     if (!info)
         return sftpFailure(display(remote));
     const uint64_t unit = info->f_frsize ? info->f_frsize : info->f_bsize;
-    const auto limit = static_cast<uint64_t>(std::numeric_limits<qint64>::max());
-    const uint64_t available = (unit && info->f_bavail > limit / unit) ? limit : info->f_bavail * unit;
+    *bytes = scaled(info->f_bavail, unit);
     sftp_statvfs_free(info);
-    *bytes = static_cast<qint64>(available);
     return Result::success();
 }
 
-Result SftpBackend::freeSpace(const QString &dir, qint64 *bytes)
+Result SftpBackend::spaceInfo(const QString &dir, SpaceInfo *out)
 {
     Result r = checkReady();
     if (!r.ok())
@@ -635,9 +899,59 @@ Result SftpBackend::freeSpace(const QString &dir, qint64 *bytes)
         return Result(Error::Unsupported, QStringLiteral("The server cannot report free space"));
     QByteArray remote;
     r = resolve(dir, &remote);
-    if (r.ok())
-        r = freeBytes(remote, bytes);
-    return r;
+    if (!r.ok())
+        return r;
+    // XS-8: free = f_bavail x f_frsize, total = f_blocks x f_frsize.
+    sftp_statvfs_t info = sftp_statvfs(m_sftp, remote.constData());
+    if (!info)
+        return sftpFailure(display(remote));
+    const uint64_t unit = info->f_frsize ? info->f_frsize : info->f_bsize;
+    if (out) {
+        out->free = scaled(info->f_bavail, unit);
+        out->total = scaled(info->f_blocks, unit);
+        out->used = info->f_blocks >= info->f_bfree ? scaled(info->f_blocks - info->f_bfree, unit) : -1;
+    }
+    sftp_statvfs_free(info);
+    return Result::success();
+}
+
+// --- keepAlive --------------------------------------------------------------
+
+Result SftpBackend::waitGlobalReply(const QElapsedTimer &started) const
+{
+    if (m_canceled)
+        return Result(Error::Canceled);   // C-9
+    if (started.elapsed() >= m_params.requestTimeoutMs)
+        return Result(Error::Timeout, QStringLiteral("The server did not answer the keep-alive request"));
+    if (ssh_channel_poll_timeout(m_sftp->channel, PollIntervalMs, 0) == SSH_ERROR || transportLost())
+        return Result(Error::ConnectionLost, text(ssh_get_error(m_session)));
+    return Result::success();
+}
+
+Result SftpBackend::keepAlive()
+{
+    Result r = checkReady();
+    if (!r.ok())
+        return r;
+    if (transportLost())
+        return Result(Error::ConnectionLost, QStringLiteral("The connection to the server was lost"));
+    // XS-12: keepalive@openssh.com with want-reply; any reply proves the
+    // connection (OpenSSH answers with a failure).
+    ssh_set_blocking(m_session, 0);
+    QElapsedTimer started;
+    started.start();
+    int rc = ssh_global_request(m_session, KeepAliveRequest, nullptr, 1);
+    while (rc == SSH_AGAIN && r.ok()) {
+        r = waitGlobalReply(started);
+        if (r.ok())
+            rc = ssh_global_request(m_session, KeepAliveRequest, nullptr, 1);
+    }
+    ssh_set_blocking(m_session, 1);
+    if (!r.ok())
+        return r;
+    if (rc == SSH_OK || ssh_get_error_code(m_session) == SSH_REQUEST_DENIED)
+        return Result::success();
+    return Result(Error::ConnectionLost, text(ssh_get_error(m_session)));
 }
 
 // --- transfers --------------------------------------------------------------
@@ -663,7 +977,7 @@ Result SftpBackend::Io::waitForData(const QElapsedTimer &started) const
     if (overdue(started))
         return timedOut();
     if (ssh_channel_poll_timeout(m_b.m_sftp->channel, PollIntervalMs, 0) == SSH_ERROR)
-        return m_b.sessionFailure();
+        return m_b.established(m_b.sessionFailure());
     return Result::success();
 }
 
@@ -741,15 +1055,15 @@ Result SftpBackend::Io::fillWriteWindow(sftp_file file, QIODevice *source, QByte
 }
 
 Result SftpBackend::Io::writeChunks(sftp_file file, QIODevice *source, const QByteArray &remote,
-                                Progress *progress) const
+                                Progress *progress, qint64 base) const
 {
     PendingQueue queue;
     QByteArray buffer(static_cast<int>(m_b.m_writeChunk), Qt::Uninitialized);
-    const qint64 total = source->size();
-    qint64 done = 0;
+    const qint64 total = base + source->size();
+    qint64 done = base;
     bool eof = false;
     for (;;) {
-        if (m_b.m_canceled)
+        if (stopped(m_b.m_canceled, progress))
             return Result(Error::Canceled);
         Result r = fillWriteWindow(file, source, &buffer, &queue, &eof, remote);
         if (!r.ok() || queue.empty())
@@ -764,19 +1078,65 @@ Result SftpBackend::Io::writeChunks(sftp_file file, QIODevice *source, const QBy
     }
 }
 
-Result SftpBackend::upload(QIODevice *source, const QString &path, Progress *progress)
+Result SftpBackend::openForUpload(const QByteArray &remote, const WriteOptions &options, sftp_file *file) const
+{
+    int flags = O_WRONLY;
+    if (options.disposition == WriteOptions::CreateNew)
+        flags |= O_CREAT | O_EXCL;
+    else if (options.disposition == WriteOptions::Truncate)
+        flags |= O_CREAT | O_TRUNC;
+    // XC-23: the requested mode, else the server's default (S-20 for backups
+    // comes through TransferPolicy::createMode).
+    const mode_t mode = options.createMode >= 0 ? (static_cast<mode_t>(options.createMode) & PermissionBits)
+                                                : DefaultFileMode;
+    *file = sftp_open(m_sftp, remote.constData(), flags, mode);
+    if (!*file) {
+        const Result failure = sftpFailure(display(remote));
+        Entry existing;
+        if (failure.error() == Error::ConnectionLost || !statRemote(remote, &existing).ok())
+            return failure;
+        if (existing.isDir())
+            return Result(Error::IsADirectory, QStringLiteral("%1 is a folder").arg(display(remote)));
+        if (options.disposition == WriteOptions::CreateNew)
+            return Result(Error::AlreadyExists, QStringLiteral("%1 exists").arg(display(remote)));
+        return failure;
+    }
+    if (options.disposition != WriteOptions::Resume)
+        return Result::success();
+    // Resume: the remote size must be the offset the caller continues at.
+    Result r;
+    if (sftp_attributes attributes = sftp_fstat(*file)) {
+        if (static_cast<qint64>(attributes->size) != options.resumeOffset) {
+            r = Result(Error::ProtocolError, QStringLiteral("Cannot resume at %1: the file has %2 bytes")
+                                                 .arg(options.resumeOffset).arg(attributes->size));
+        }
+        sftp_attributes_free(attributes);
+    } else {
+        r = sftpFailure(display(remote));
+    }
+    if (r.ok() && options.resumeOffset < 0)
+        r = invalidRange();
+    if (r.ok() && sftp_seek64(*file, static_cast<quint64>(options.resumeOffset)) < 0)
+        r = sftpFailure(display(remote));
+    if (!r.ok()) {
+        closeFile(*file, true);
+        *file = nullptr;
+    }
+    return r;
+}
+
+Result SftpBackend::upload(QIODevice *source, const QString &path, const UploadOptions &options, Progress *progress)
 {
     QByteArray remote;
-    Result r = checkReady();
+    Result r = ready(path, &remote);
+    sftp_file file = nullptr;
     if (r.ok())
-        r = resolve(path, &remote);
+        r = openForUpload(remote, options.write, &file);
     if (!r.ok())
         return r;
-    sftp_file file = sftp_open(m_sftp, remote.constData(), O_WRONLY | O_CREAT | O_TRUNC, FileMode);
-    if (!file)
-        return sftpFailure(display(remote));
     sftp_file_set_nonblocking(file);
-    r = Io(*this).writeChunks(file, source, remote, progress);
+    const qint64 base = options.write.disposition == WriteOptions::Resume ? options.write.resumeOffset : 0;
+    r = Io(*this).writeChunks(file, source, remote, progress, base);
     if (r.ok() && m_hasFsync && sftp_fsync(file) != 0)   // C-12: flush to stable storage
         r = writeFailure(remote, 1);
     if (const int closed = closeFile(file, r.ok()); r.ok() && closed != 0)
@@ -784,11 +1144,12 @@ Result SftpBackend::upload(QIODevice *source, const QString &path, Progress *pro
     return r;
 }
 
-Result SftpBackend::Io::refillReadWindow(sftp_file file, PendingQueue *queue, quint64 *offset) const
+Result SftpBackend::Io::refillReadWindow(sftp_file file, PendingQueue *queue, quint64 *offset, quint64 end) const
 {
-    while (!queue->full()) {
+    while (!queue->full() && *offset < end) {
         Pending pending;
-        const ssize_t rc = sftp_aio_begin_read(file, m_b.m_readChunk, &pending.aio);
+        const auto wanted = static_cast<size_t>(std::min<quint64>(m_b.m_readChunk, end - *offset));
+        const ssize_t rc = sftp_aio_begin_read(file, wanted, &pending.aio);
         if (rc <= 0)
             return m_b.sftpFailure(QStringLiteral("read"));
         pending.length = static_cast<size_t>(rc);
@@ -840,16 +1201,21 @@ Result SftpBackend::Io::readStep(sftp_file file, PendingQueue *queue, QByteArray
     return r;
 }
 
-Result SftpBackend::Io::readChunks(sftp_file file, Sink *sink) const
+// Reads from `start` to the end of the file, or sink->limit bytes.
+Result SftpBackend::Io::readChunks(sftp_file file, Sink *sink, quint64 start) const
 {
     PendingQueue queue;
     QByteArray buffer(static_cast<int>(m_b.m_readChunk), Qt::Uninitialized);
-    quint64 offset = 0;
+    quint64 offset = start;
+    const quint64 end = sink->limit < 0 ? std::numeric_limits<quint64>::max()
+                                        : start + static_cast<quint64>(sink->limit);
     bool finished = false;
     while (!finished) {
-        if (m_b.m_canceled)
+        if (stopped(m_b.m_canceled, sink->progress))
             return Result(Error::Canceled);   // C-9, between requests
-        Result r = refillReadWindow(file, &queue, &offset);
+        Result r = refillReadWindow(file, &queue, &offset, end);
+        if (r.ok() && queue.empty())
+            break;                            // everything wanted has arrived
         if (r.ok())
             r = readStep(file, &queue, &buffer, sink, &offset, &finished);
         if (!r.ok())
@@ -858,63 +1224,103 @@ Result SftpBackend::Io::readChunks(sftp_file file, Sink *sink) const
     return Result::success();
 }
 
-Result SftpBackend::download(const QString &path, QIODevice *sink, Progress *progress)
+Result SftpBackend::openForDownload(const QByteArray &remote, const DownloadOptions &options, sftp_file *file,
+                                   Sink *sink) const
 {
-    QByteArray remote;
-    Result r = checkReady();
-    if (r.ok())
-        r = resolve(path, &remote);
-    if (!r.ok())
-        return r;
-    sftp_file file = sftp_open(m_sftp, remote.constData(), O_RDONLY, 0);
-    if (!file)
+    if (options.offset < 0 || options.length < -1)
+        return invalidRange();
+    *file = sftp_open(m_sftp, remote.constData(), O_RDONLY, 0);
+    if (!*file)
         return sftpFailure(display(remote));
-    Sink target { sink, progress, -1, 0 };
-    if (sftp_attributes attributes = sftp_fstat(file)) {
-        target.total = static_cast<qint64>(attributes->size);
+    Result r;
+    if (sftp_attributes attributes = sftp_fstat(*file)) {
+        const Entry entry = entryFrom(*attributes, QString());
         sftp_attributes_free(attributes);
+        if (entry.type == EntryType::Directory)
+            r = Result(Error::IsADirectory, QStringLiteral("%1 is a folder").arg(display(remote)));
+        sink->total = entry.size < 0 ? -1 : qMax<qint64>(0, entry.size - options.offset);
     }
-    sftp_file_set_nonblocking(file);
-    r = Io(*this).readChunks(file, &target);
-    closeFile(file, r.ok());
+    if (options.length >= 0)
+        sink->total = sink->total < 0 ? options.length : qMin(sink->total, options.length);
+    sink->limit = options.length;
+    if (r.ok() && options.offset > 0 && sftp_seek64(*file, static_cast<quint64>(options.offset)) < 0)
+        r = sftpFailure(display(remote));
+    if (!r.ok()) {
+        closeFile(*file, true);
+        *file = nullptr;
+    }
     return r;
 }
 
-Result SftpBackend::Io::readRange(sftp_file file, const QByteArray &remote, qint64 length, QByteArray *out) const
-{
-    QByteArray buffer(static_cast<int>(m_b.m_readChunk), Qt::Uninitialized);
-    while (out->size() < length) {
-        const auto wanted = static_cast<size_t>(qMin<qint64>(buffer.size(), length - out->size()));
-        const ssize_t n = sftp_read(file, buffer.data(), wanted);
-        if (n < 0)
-            return m_b.sftpFailure(display(remote));
-        if (n == 0)
-            break;
-        out->append(buffer.constData(), static_cast<int>(n));
-    }
-    return Result::success();
-}
-
-Result SftpBackend::read(const QString &path, qint64 offset, qint64 length, QByteArray *out)
+Result SftpBackend::download(const QString &path, QIODevice *sink, const DownloadOptions &options, Progress *progress)
 {
     QByteArray remote;
-    Result r = checkReady();
-    if (r.ok() && (offset < 0 || length < 0 || length > std::numeric_limits<int>::max()))
-        r = Result(Error::Internal, QStringLiteral("Invalid range"));
+    Result r = ready(path, &remote);
+    sftp_file file = nullptr;
+    Sink target { sink, progress, -1, 0, -1 };
     if (r.ok())
-        r = resolve(path, &remote);
+        r = openForDownload(remote, options, &file, &target);
     if (!r.ok())
         return r;
-    sftp_file file = sftp_open(m_sftp, remote.constData(), O_RDONLY, 0);
-    if (!file)
-        return sftpFailure(display(remote));
-    out->clear();
-    if (sftp_seek64(file, static_cast<quint64>(offset)) < 0)
-        r = sftpFailure(display(remote));
-    else
-        r = Io(*this).readRange(file, remote, length, out);
+    sftp_file_set_nonblocking(file);
+    r = Io(*this).readChunks(file, &target, static_cast<quint64>(options.offset));
     closeFile(file, r.ok());
     return r;
+}
+
+// --- handles ----------------------------------------------------------------
+
+Result SftpBackend::openRead(const QString &path, ReadHandle **out)
+{
+    *out = nullptr;
+    QByteArray remote;
+    Result r = ready(path, &remote);
+    sftp_file file = nullptr;
+    Sink probe;
+    if (r.ok())
+        r = openForDownload(remote, DownloadOptions(), &file, &probe);
+    if (!r.ok())
+        return r;
+    sftp_file_set_nonblocking(file);
+    auto *reader = new Reader(this, file, probe.total, remote);
+    m_readers.insert(reader);
+    *out = reader;
+    return r;
+}
+
+Result SftpBackend::Reader::read(qint64 offset, qint64 maxBytes, QByteArray *out)
+{
+    if (out)
+        out->clear();
+    if (m_lost)
+        return Result(Error::ConnectionLost, QStringLiteral("The connection was closed"));
+    if (!m_file)
+        return Result(Error::Internal, QStringLiteral("The file is closed"));
+    if (offset < 0 || maxBytes < 0 || maxBytes > MaxHandleRead)
+        return invalidRange();
+    if (Result r = m_b->checkReady(); !r.ok() || maxBytes == 0)
+        return r;
+    if (sftp_seek64(m_file, static_cast<quint64>(offset)) < 0)
+        return m_b->sftpFailure(display(m_remote));
+    QByteArray data;
+    QBuffer buffer(&data);
+    buffer.open(QIODevice::WriteOnly);
+    Sink sink { &buffer, nullptr, -1, 0, maxBytes };
+    const Result r = Io(*m_b).readChunks(m_file, &sink, static_cast<quint64>(offset));
+    buffer.close();
+    if (r.ok() && out)
+        *out = data;
+    return r;
+}
+
+Result SftpBackend::Reader::close()
+{
+    if (!m_file)
+        return m_lost ? Result(Error::ConnectionLost, QStringLiteral("The connection was closed")) : Result();
+    const int rc = m_b->closeFile(m_file, !m_b->m_canceled);
+    m_file = nullptr;
+    m_b->m_readers.remove(this);
+    return rc == 0 ? Result::success() : m_b->sftpFailure(display(m_remote));
 }
 
 } // namespace NetVfs::Sftp

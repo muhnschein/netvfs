@@ -288,8 +288,8 @@ private slots:
         QTest::newRow("write protect") << SSH_FX_WRITE_PROTECT << "" << Error::PermissionDenied;
         QTest::newRow("exists") << SSH_FX_FILE_ALREADY_EXISTS << "" << Error::AlreadyExists;
         QTest::newRow("unsupported") << SSH_FX_OP_UNSUPPORTED << "" << Error::Unsupported;
-        QTest::newRow("lost") << SSH_FX_CONNECTION_LOST << "gone" << Error::NetworkUnreachable;
-        QTest::newRow("no connection") << SSH_FX_NO_CONNECTION << "gone" << Error::NetworkUnreachable;
+        QTest::newRow("lost") << SSH_FX_CONNECTION_LOST << "gone" << Error::ConnectionLost;   // XC-21
+        QTest::newRow("no connection") << SSH_FX_NO_CONNECTION << "gone" << Error::ConnectionLost;
         QTest::newRow("timeout") << SSH_FX_FAILURE << "Timeout while reading sftp packet size" << Error::Timeout;
         QTest::newRow("failure") << SSH_FX_FAILURE << "SFTP server: Failure" << Error::ProtocolError;
         QTest::newRow("bad message") << SSH_FX_BAD_MESSAGE << "SFTP server: Bad message" << Error::ProtocolError;
@@ -633,14 +633,21 @@ private slots:
         qint64 bytes = 0;
         QByteArray data;
         QCOMPARE(b->stat(QStringLiteral("x"), &entry).error(), Error::Internal);
+        QCOMPARE(b->lstat(QStringLiteral("x"), &entry).error(), Error::Internal);
         QCOMPARE(b->list(QStringLiteral("x"), &entries).error(), Error::Internal);
         QCOMPARE(b->makePath(QStringLiteral("x")).error(), Error::Internal);
+        QCOMPARE(b->makeDir(QStringLiteral("x"), true).error(), Error::Internal);
         QCOMPARE(b->remove(QStringLiteral("x")).error(), Error::Internal);
-        QCOMPARE(b->rename(QStringLiteral("x"), QStringLiteral("y")).error(), Error::Internal);
+        QCOMPARE(b->removeDir(QStringLiteral("x")).error(), Error::Internal);
+        QCOMPARE(b->rename(QStringLiteral("x"), QStringLiteral("y"), RenameMode::Replace).error(), Error::Internal);
+        QCOMPARE(b->rename(QStringLiteral("x"), QStringLiteral("y"), RenameMode::NoReplace).error(), Error::Internal);
         QCOMPARE(b->freeSpace(QStringLiteral("x"), &bytes).error(), Error::Internal);
-        QCOMPARE(b->upload(nullptr, QStringLiteral("x"), nullptr).error(), Error::Internal);
-        QCOMPARE(b->download(QStringLiteral("x"), nullptr, nullptr).error(), Error::Internal);
+        QCOMPARE(b->upload(nullptr, QStringLiteral("x"), UploadOptions(), nullptr).error(), Error::Internal);
+        QCOMPARE(b->download(QStringLiteral("x"), nullptr, DownloadOptions(), nullptr).error(), Error::Internal);
         QCOMPARE(b->read(QStringLiteral("x"), 0, 1, &data).error(), Error::Internal);
+        QCOMPARE(b->keepAlive().error(), Error::Internal);
+        QVERIFY(b->capabilities().flags.isEmpty());   // XC-5: valid after authenticate()
+        QCOMPARE(b->setAttributes(QStringLiteral("x"), AttributeChanges()).error(), Error::Unsupported);
         QCOMPARE(b->authenticate(Credentials(QStringLiteral("u"), "p")).error(), Error::Internal);
         b->disconnect();
     }

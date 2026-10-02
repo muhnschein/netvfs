@@ -8,13 +8,15 @@
 #include <libssh/sftp.h>
 
 #include <QtCore/QElapsedTimer>
+#include <QtCore/QSet>
 
 #include <atomic>
 
 namespace NetVfs::Sftp {
 
-// Backend over libssh (SPEC-sftp). One ssh_session per instance, used from
-// one thread (S-4); only cancel() may be called from another thread.
+// Backend over libssh (SPEC-sftp, SPEC-v2 §6.1). One ssh_session per
+// instance, used from one thread (S-4); only cancel() may be called from
+// another thread.
 class SftpBackend : public Backend
 {
 public:
@@ -23,18 +25,28 @@ public:
     SftpBackend &operator=(const SftpBackend &) = delete;
     ~SftpBackend() override;
 
+    using Backend::authenticate;
+    using Backend::list;
+
     Result connect(const ConnectionParams &params, ServerIdentity *seen) override;
-    Result authenticate(const Credentials &credentials) override;
+    Result authenticate(const Credentials &credentials, AuthPrompter *prompter) override;
+    Capabilities capabilities() const override;
 
     Result stat(const QString &path, Entry *out) override;
-    Result list(const QString &dir, QVector<Entry> *out) override;
-    Result makePath(const QString &dir) override;
-    Result remove(const QString &path) override;
-    Result rename(const QString &from, const QString &to) override;
-    Result freeSpace(const QString &dir, qint64 *bytes) override;
-    Result upload(QIODevice *source, const QString &path, Progress *progress) override;
-    Result download(const QString &path, QIODevice *sink, Progress *progress) override;
-    Result read(const QString &path, qint64 offset, qint64 length, QByteArray *out) override;
+    Result lstat(const QString &path, Entry *out) override;
+    Result list(const QString &dir, ListSink *sink, const ListOptions &options) override;
+
+    Result makeDir(const QString &path, bool exclusive) override;
+    Result removeFile(const QString &path) override;
+    Result removeDir(const QString &path) override;
+    Result rename(const QString &from, const QString &to, RenameMode mode) override;
+
+    Result openRead(const QString &path, ReadHandle **out) override;
+    Result upload(QIODevice *source, const QString &path, const UploadOptions &options, Progress *progress) override;
+    Result download(const QString &path, QIODevice *sink, const DownloadOptions &options, Progress *progress) override;
+
+    Result spaceInfo(const QString &dir, SpaceInfo *out) override;
+    Result keepAlive() override;
 
     void cancel() override;
     void resetCancel() override;
@@ -55,11 +67,13 @@ private:
     class PendingQueue;
     class Io;      // transfers (sftpbackend.cpp)
     class Login;   // sign-in methods (sftpbackend.cpp)
+    class Reader;  // ReadHandle (sftpbackend.cpp)
     struct Sink {
         QIODevice *device = nullptr;
         Progress *progress = nullptr;
         qint64 total = -1;
         qint64 done = 0;
+        qint64 limit = -1;            // bytes wanted; -1: to the end of the file
     };
 
     void closeSession();
@@ -69,15 +83,26 @@ private:
     Result sessionFailure() const;
     Result sftpFailure(const QString &context) const;
     Result writeFailure(const QByteArray &remote, qint64 attempted) const;
+    Result established(const Result &failure) const;
+    bool transportLost() const;
     Result checkReady() const;
     Result resolve(const QString &path, QByteArray *remote) const;
+    Result ready(const QString &path, QByteArray *remote) const;
 
     Result openSftp();
+    void detectCapabilities();
 
-    Result statRemote(const QByteArray &remote, Entry *out) const;
+    Result statRemote(const QByteArray &remote, Entry *out, bool follow = true) const;
+    Result readEntries(sftp_dir handle, const QByteArray &remote, ListSink *sink, const ListOptions &options) const;
+    void resolveTarget(const QByteArray &dir, Entry *entry, int *budget) const;
     Result freeBytes(const QByteArray &remote, qint64 *bytes) const;
-    Result makeDirectory(const QByteArray &remote) const;
-    Result removeRemote(const QByteArray &remote) const;
+    bool hasChildren(const QByteArray &remote) const;
+    Result renameReplacing(const QByteArray &source, const QByteArray &target, bool targetExists);
+    Result renameNoReplace(const QByteArray &source, const QByteArray &target, bool targetExists);
+    Result openForUpload(const QByteArray &remote, const WriteOptions &options, sftp_file *file) const;
+    Result openForDownload(const QByteArray &remote, const DownloadOptions &options, sftp_file *file, Sink *sink) const;
+    Result waitGlobalReply(const QElapsedTimer &started) const;
+    mode_t directoryMode() const;
 
     int closeFile(sftp_file file, bool healthy) const;
 
@@ -89,8 +114,11 @@ private:
     bool m_hasFsync = false;
     bool m_hasStatvfs = false;
     bool m_hasPosixRename = false;
+    bool m_nativeNoReplace = false;   // XS-6: OpenSSH fails SSH_FXP_RENAME on an existing target
     size_t m_writeChunk = 0;
     size_t m_readChunk = 0;
+    Capabilities m_capabilities;
+    QSet<Reader *> m_readers;         // open handles, closed by closeSession()
     std::atomic<bool> m_canceled { false };
 };
 
