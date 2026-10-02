@@ -93,9 +93,9 @@ QString cleanText(const QString &text, int maxLength)
 
 bool hasOnlyKeys(const QJsonObject &object, const QStringList &keys)
 {
+    // Missing keys are caught by the type checks of the callers.
     const QStringList present = object.keys();
-    return object.size() == keys.size()
-        && std::all_of(present.begin(), present.end(), [&keys](const QString &key) { return keys.contains(key); });
+    return std::all_of(present.begin(), present.end(), [&keys](const QString &key) { return keys.contains(key); });
 }
 
 Result parseShare(const QJsonObject &object, ShareInfo *share)

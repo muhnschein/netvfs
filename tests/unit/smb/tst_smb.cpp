@@ -723,6 +723,11 @@ private slots:
         QTest::newRow("too many") << (many + "{\"end\":" + QByteArray::number(MaxShares + 1) + "}\n")
                                   << int(Error::ProtocolError) << 0;
         QTest::newRow("too much") << QByteArray(MaxShareOutputBytes + 1, '\n') << int(Error::ProtocolError) << 0;
+        // Well-formed but over 1 MiB: long remarks (each capped, each line short enough).
+        QByteArray large;
+        for (int i = 0; i < 200; ++i)
+            large += "{\"name\":\"s" + QByteArray::number(i) + "\",\"type\":0,\"remark\":\"" + QByteArray(6000, 'r') + "\"}\n";
+        QTest::newRow("too much, well-formed") << (large + "{\"end\":200}\n") << int(Error::ProtocolError) << 0;
     }
 
     // XM-7: the helper's output is parsed defensively.
@@ -823,6 +828,8 @@ private slots:
         QVector<ShareInfo> shares;
         const Result r = runShareHelper(program, &request, 10000, cancel, &shares);
         QVERIFY2(int(r.error()) == error, qPrintable(r.toString()));
+        if (QByteArray(QTest::currentDataTag()).startsWith("crash"))
+            QVERIFY2(r.message().contains(QLatin1String("crashed")), qPrintable(r.message()));
         QCOMPARE(shares.size(), count);
         // XSEC-6: the caller's copy of the request is wiped.
         QVERIFY(!request.contains("hunter2"));
