@@ -4,7 +4,7 @@
 #include "davio.h"
 #include "davlog.h"
 #include "davstatus.h"
-#include "davtls.h"
+#include "tlsidentity.h"
 #include "identity.h"
 #include "names.h"
 #include "paths.h"
@@ -13,6 +13,9 @@
 #include <QtCore/QIODevice>
 
 namespace NetVfs::WebDav {
+
+using CurlTls::ChainCheck;
+using CurlTls::identityFromChain;
 
 namespace {
 
@@ -252,7 +255,7 @@ Result WebDavBackend::connect(const ConnectionParams &params, ServerIdentity *se
     Result r = parseConfig(params, &m_config);
     if (!r.ok())
         return r;
-#ifdef NETVFS_WEBDAV_TEST_HOOKS
+#ifdef NETVFS_TLS_TEST_HOOKS
     m_config.testCaFile = params.option(QStringLiteral("test_ca_file")).toLocal8Bit();
 #endif
     r = m_client.open(m_config.origin, params.connectTimeoutMs, params.requestTimeoutMs);

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-#ifndef NETVFS_DAVTLS_H
-#define NETVFS_DAVTLS_H
+#ifndef NETVFS_TLSIDENTITY_H
+#define NETVFS_TLSIDENTITY_H
 
 #include "types.h"
 
@@ -8,10 +8,13 @@
 #include <QtCore/QDateTime>
 #include <QtCore/QVector>
 
-// TLS server identity of the WebDAV backend (SPEC-v2 XC-16, W-3, W-4): turns
-// the certificate chain libcurl reports (CURLOPT_CERTINFO, PEM, leaf first)
-// into a ServerIdentity with details and problems.
-namespace NetVfs::WebDav {
+#include <openssl/x509.h>
+
+// TLS server identity of the libcurl based backends (SPEC-v2 XC-16, W-3, W-4,
+// F-1): turns a certificate chain (WebDAV: CURLOPT_CERTINFO PEM, leaf first;
+// FTP: the chain OpenSSL presents during the identity probe) into a
+// ServerIdentity with details and problems. Protocol neutral.
+namespace NetVfs::CurlTls {
 
 // The CA certificates "system trust" means: libcurl's CA bundle and
 // directory (CURLINFO_CAINFO / CURLINFO_CAPATH). Both empty: OpenSSL's
@@ -42,6 +45,12 @@ ServerIdentity identityFromChain(const QVector<QByteArray> &pemChain, const QByt
                                  ChainCheck check, const TrustStore &store,
                                  const QDateTime &now = QDateTime::currentDateTimeUtc());
 
-} // namespace NetVfs::WebDav
+// The same for parsed certificates: `leaf` and the other certificates the
+// server presented (`presented` may be null and may contain the leaf).
+ServerIdentity identityFromCertificates(X509 *leaf, STACK_OF(X509) *presented, const QByteArray &host,
+                                        ChainCheck check, const TrustStore &store,
+                                        const QDateTime &now = QDateTime::currentDateTimeUtc());
+
+} // namespace NetVfs::CurlTls
 
 #endif
