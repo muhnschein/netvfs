@@ -1,0 +1,23 @@
+{
+    "description": "Namespace operations and metadata (XB-10)",
+    "consent": "granted",
+    "files": { "f.txt": "12345" },
+    "steps": [
+        { "call": "Hello", "sig": "us", "args": [1, "contract"], "reply": [1, "*", "*"] },
+        { "call": "MakeDir", "sig": "sayb", "args": ["account:1", { "bytes": "new" }, true], "reply": [] },
+        { "call": "MakeDir", "sig": "sayb", "args": ["account:1", { "bytes": "new" }, true],
+          "error": "org.netvfs.Error.AlreadyExists" },
+        { "call": "MakeDir", "sig": "sayb", "args": ["account:1", { "bytes": "new" }, false], "reply": [] },
+        { "call": "Rename", "sig": "sayayb", "args": ["account:1", { "bytes": "new" }, { "bytes": "renamed" }, false],
+          "reply": [] },
+        { "call": "Stat", "sig": "saybs", "args": ["account:1", { "bytes": "renamed" }, true, "interactive"],
+          "reply": [["*", 2, 0, "*", "*", "*", "*", "*", "*", "*", "*", "*", "*", "*", "*"]] },
+        { "call": "Stat", "sig": "saybs", "args": ["account:1", { "bytes": "f.txt" }, false, ""],
+          "reply": [["*", 1, 0, 5, "*", "*", "*", "*", "*", "*", "*", "*", "*", "*", "*"]] },
+        { "call": "RemoveDir", "sig": "say", "args": ["account:1", { "bytes": "renamed" }], "reply": [] },
+        { "call": "RemoveFile", "sig": "say", "args": ["account:1", { "bytes": "f.txt" }], "reply": [] },
+        { "call": "Stat", "sig": "saybs", "args": ["account:1", { "bytes": "f.txt" }, true, ""],
+          "error": "org.netvfs.Error.NotFound" },
+        { "call": "SpaceInfo", "sig": "say", "args": ["account:1", { "bytes": "" }], "reply": ["*", "*", "*"] }
+    ]
+}

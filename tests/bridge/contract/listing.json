@@ -1,0 +1,18 @@
+{
+    "description": "Streamed listing: the reply carries the request id, ListBatch signals the entries, ListDone the result (XB-10)",
+    "consent": "granted",
+    "files": { "docs/a.txt": "hello", "docs/b.txt": "x" },
+    "steps": [
+        { "call": "Hello", "sig": "us", "args": [1, "contract"], "reply": [1, "*", "*"] },
+        { "call": "List", "sig": "saysu", "args": ["account:1", { "bytes": "docs" }, "", 0], "reply": ["$req"] },
+        { "signal": "ListBatch", "args": ["$req", [
+            [{ "bytes": "a.txt" }, 1, 0, 5, "*", "*", "*", "*", "*", "*", "*", "*", "*", "*", "*"],
+            [{ "bytes": "b.txt" }, 1, 0, 1, "*", "*", "*", "*", "*", "*", "*", "*", "*", "*", "*"]
+        ]] },
+        { "signal": "ListDone", "args": ["$req", "", ""] },
+        { "call": "List", "sig": "saysu", "args": ["account:1", { "bytes": "nope" }, "bulk", 512], "reply": ["$req2"] },
+        { "signal": "ListDone", "args": ["$req2", "NotFound", "*"] },
+        { "call": "List", "sig": "saysu", "args": ["account:1", { "bytes": "docs" }, "", 513],
+          "error": "org.freedesktop.DBus.Error.InvalidArgs" }
+    ]
+}
