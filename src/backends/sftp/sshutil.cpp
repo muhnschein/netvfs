@@ -8,17 +8,21 @@
 namespace NetVfs::Sftp {
 
 namespace {
-thread_local ErrorTrail *activeTrail = nullptr;
+ErrorTrail *&activeTrail()
+{
+    thread_local ErrorTrail *trail = nullptr;
+    return trail;
+}
 } // namespace
 
 ErrorTrail::ErrorTrail()
     : m_previousLevel(ssh_get_log_level())
 {
-    activeTrail = this;
+    activeTrail() = this;
     // A generic lambda converts to ssh_logging_callback.
     ssh_set_log_callback([](int priority, const char *, const char *message, auto) {
-        if (activeTrail && priority == SSH_LOG_TRACE)
-            activeTrail->record(message);
+        if (ErrorTrail *trail = activeTrail(); trail && priority == SSH_LOG_TRACE)
+            trail->record(message);
     });
     ssh_set_log_level(SSH_LOG_TRACE);
 }
@@ -26,7 +30,7 @@ ErrorTrail::ErrorTrail()
 ErrorTrail::~ErrorTrail()
 {
     ssh_set_log_level(m_previousLevel);
-    activeTrail = nullptr;
+    activeTrail() = nullptr;
 }
 
 void ErrorTrail::record(const char *message)

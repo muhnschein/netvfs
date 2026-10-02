@@ -54,31 +54,42 @@ protected:
 
 // Debug output of the backend (category netvfs.sftp), for the negotiated
 // key exchange.
-QMutex logMutex;
-QStringList backendLog;
-QtMessageHandler previousHandler = nullptr;
+struct LogCapture {
+    QMutex mutex;
+    QStringList lines;
+    QtMessageHandler previous = nullptr;
+};
+
+LogCapture &logCapture()
+{
+    static LogCapture capture;
+    return capture;
+}
 
 void captureLog(QtMsgType type, const QMessageLogContext &context, const QString &message)
 {
+    LogCapture &capture = logCapture();
     if (context.category && qstrcmp(context.category, "netvfs.sftp") == 0) {
-        const QMutexLocker lock(&logMutex);
-        backendLog << message;
+        const QMutexLocker lock(&capture.mutex);
+        capture.lines << message;
         if (type == QtDebugMsg)
             return;
     }
-    previousHandler(type, context, message);
+    capture.previous(type, context, message);
 }
 
 QString capturedLog()
 {
-    const QMutexLocker lock(&logMutex);
-    return backendLog.join(QLatin1Char('\n'));
+    LogCapture &capture = logCapture();
+    const QMutexLocker lock(&capture.mutex);
+    return capture.lines.join(QLatin1Char('\n'));
 }
 
 void clearLog()
 {
-    const QMutexLocker lock(&logMutex);
-    backendLog.clear();
+    LogCapture &capture = logCapture();
+    const QMutexLocker lock(&capture.mutex);
+    capture.lines.clear();
 }
 
 QByteArray sha256(QIODevice *device)
@@ -107,14 +118,16 @@ public:
         if (m_passed || done < m_threshold)
             return;
         m_passed = true;
-        reached.release();
-        proceed.tryAcquire(1, 60000);
+        m_reached.release();
+        m_proceed.tryAcquire(1, 60000);
     }
 
-    QSemaphore reached;
-    QSemaphore proceed;
+    bool waitReached(int ms) { return m_reached.tryAcquire(1, ms); }
+    void proceed() { m_proceed.release(); }
 
 private:
+    QSemaphore m_reached;
+    QSemaphore m_proceed;
     qint64 m_threshold;
     bool m_passed = false;
 };
@@ -328,15 +341,15 @@ private:
                      const std::function<void()> &atGate, Result *result) const
     {
         QFuture<Result> future = QtConcurrent::run(work);
-        if (!gate->reached.tryAcquire(1, 120000)) {
-            gate->proceed.release();
+        if (!gate->waitReached(120000)) {
+            gate->proceed();
             *result = future.result();
             return -1;
         }
         QElapsedTimer timer;
         timer.start();
         atGate();
-        gate->proceed.release();
+        gate->proceed();
         *result = future.result();
         return timer.elapsed();
     }
@@ -375,14 +388,14 @@ private slots:
         big.close();
         m_bigSha = fileSha256(m_bigFile);
 
-        previousHandler = qInstallMessageHandler(captureLog);
+        logCapture().previous = qInstallMessageHandler(captureLog);
         QLoggingCategory::setFilterRules(QStringLiteral("netvfs.sftp.debug=true"));
     }
 
     void cleanupTestCase()
     {
-        if (previousHandler)
-            qInstallMessageHandler(previousHandler);
+        if (logCapture().previous)
+            qInstallMessageHandler(logCapture().previous);
         if (!m_servers.isEmpty())
             docker({ QStringLiteral("unpause"), container(QStringLiteral("o89")) });
     }
