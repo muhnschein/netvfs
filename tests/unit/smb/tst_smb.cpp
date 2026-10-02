@@ -579,7 +579,10 @@ private slots:
         free(const_cast<char *>(utf8));
         // A pair written as two 3-byte surrogates (CESU-8) is still refused.
         QVERIFY(!smb2_utf8_to_utf16("\xed\xa0\x80\xed\xb0\x80"));
-        QVERIFY(smb2_utf8_to_utf16("\xed\xb0\x80\xed\xa0\x80"));   // trail then lead: two lone units
+        smb2_utf16 *units16 = smb2_utf8_to_utf16("\xed\xb0\x80\xed\xa0\x80");   // trail then lead: two lone units
+        QVERIFY(units16);
+        QCOMPARE(units16->len, 2);
+        free(units16);
     }
 
     // XM-2
