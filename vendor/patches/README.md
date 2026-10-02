@@ -23,3 +23,4 @@ pin bump contains it.
 | Patch | Why |
 |---|---|
 | `0001-sftp-add-sftp_rename_noreplace.patch` | `sftp_rename()` always prefers `posix-rename@openssh.com`, which replaces the target; SPEC-v2 XS-6 needs a plain `SSH_FXP_RENAME` for `RenameMode::NoReplace` (OpenSSH fails it on an existing target). To be proposed upstream. |
+| `0002-sftp-interruptible-blocking-waits.patch` | Blocking sftp calls wait for the whole session timeout and cannot be stopped; C-9 needs `cancel()` to end every wait within 2 s. Adds `sftp_set_interrupt_callback()` (asked every 100 ms while no data of the response has arrived; the abandoned response is dropped when it comes) and `sftp_aio_discard()` (drop the late response of an abandoned asynchronous request instead of keeping it queued until `sftp_free()`, which bounds memory after cancels, C-10). Used by the SFTP backend for every request. To be proposed upstream. |
