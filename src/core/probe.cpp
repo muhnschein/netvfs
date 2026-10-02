@@ -29,7 +29,7 @@ Result verifyAccess(Backend *backend, const QString &dir, qint64 *freeBytes)
     QByteArray content("netvfs write test\n");
     QBuffer buffer(&content);
     buffer.open(QIODevice::ReadOnly);
-    r = backend->upload(&buffer, path, nullptr);
+    r = backend->upload(&buffer, path, UploadOptions(), nullptr);
     if (!r.ok()) {
         backend->remove(path);
         return r;

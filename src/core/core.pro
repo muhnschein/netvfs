@@ -3,7 +3,7 @@ include(../../common.pri)
 
 TEMPLATE = lib
 TARGET = netvfs
-VERSION = 0.1.0
+VERSION = 1.0.0
 DESTDIR = $$NETVFS_LIB_OUT
 
 QT = core dbus
@@ -18,17 +18,21 @@ PUBLIC_HEADERS = \
     accountstore.h \
     backend.h \
     backendloader.h \
+    boundedpipe.h \
     error.h \
     identity.h \
     logging.h \
+    names.h \
     netvfs_global.h \
+    ops.h \
     paths.h \
     probe.h \
     secretsource.h \
     secure.h \
     sshkeys.h \
     transfer.h \
-    types.h
+    types.h \
+    url.h
 
 HEADERS = $$PUBLIC_HEADERS
 
@@ -40,6 +44,7 @@ SOURCES = \
     error.cpp \
     identity.cpp \
     logging.cpp \
+    names.cpp \
     paths.cpp \
     probe.cpp \
     secretsource.cpp \

@@ -11,7 +11,7 @@ struct ErrorNameEntry {
     const char *name;
 };
 
-const std::array<ErrorNameEntry, 15> errorNames = { {
+const std::array<ErrorNameEntry, 25> errorNames = { {
     { Error::None, "None" },
     { Error::Canceled, "Canceled" },
     { Error::NetworkUnreachable, "NetworkUnreachable" },
@@ -27,6 +27,16 @@ const std::array<ErrorNameEntry, 15> errorNames = { {
     { Error::Unsupported, "Unsupported" },
     { Error::ProtocolError, "ProtocolError" },
     { Error::Internal, "Internal" },
+    { Error::ConnectionLost, "ConnectionLost" },
+    { Error::NotADirectory, "NotADirectory" },
+    { Error::IsADirectory, "IsADirectory" },
+    { Error::DirectoryNotEmpty, "DirectoryNotEmpty" },
+    { Error::InvalidName, "InvalidName" },
+    { Error::ReadOnlyFilesystem, "ReadOnlyFilesystem" },
+    { Error::Locked, "Locked" },
+    { Error::TooManyConnections, "TooManyConnections" },
+    { Error::RateLimited, "RateLimited" },
+    { Error::NotModified, "NotModified" },
 } };
 } // namespace
 
