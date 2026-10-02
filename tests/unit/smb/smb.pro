@@ -7,3 +7,4 @@ SOURCES = tst_smb.cpp \
     $$NETVFS_ROOT/src/backends/smb/smbutil.cpp \
     $$NETVFS_ROOT/src/backends/smb/noshareenum.c
 LIBS += $$VENDOR_PREFIX/lib/libsmb2.a
+PRE_TARGETDEPS += $$VENDOR_PREFIX/lib/libsmb2.a
