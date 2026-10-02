@@ -24,6 +24,8 @@ jobs:
         run: ./tools/ci/install-host-deps.sh
       - name: Build
         run: make -j"$(nproc)"
+      - name: Packaging checks (file lists, no share enumeration in the SMB plugin)
+        run: make check-packaging
       - name: Unit tests
         run: make check-unit
       - name: Interop tests
@@ -118,6 +120,9 @@ jobs:
     env:
       SDK_IMAGE: mirror.gcr.io/coderus/sailfishos-platform-sdk-aarch64:5.2.0.15@sha256:e5f7596d14502746b308c3dde36f65fc25d7f76c45a01acaed56a1f55b76f592
       TARGET: SailfishOS-5.2.0.15-aarch64
+      # netvfs 0.1.0 (main after PR #1), the last release before the package
+      # split: the SPEC-v2 XP-2 update check starts from its RPMs.
+      UPGRADE_BASE: 599828d1ab59a981f3cbf26b310c0d25962b5b24
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
@@ -126,8 +131,29 @@ jobs:
         run: ./tests/qmltarget/run-in-sdk.sh
       - name: Build RPMs in the Sailfish SDK
         run: ./tools/ci/build-rpm.sh
-      - name: Check installability on the target
+      - name: Check dependencies and installability on the target
         run: ./tools/ci/check-rpm.sh
+      - name: Cache the ${{ env.UPGRADE_BASE }} RPMs
+        id: base-rpms
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: build-upgrade/base-rpms
+          key: netvfs-rpms-${{ env.UPGRADE_BASE }}-${{ env.TARGET }}
+      - name: Check out ${{ env.UPGRADE_BASE }}
+        if: steps.base-rpms.outputs.cache-hit != 'true'
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: ${{ env.UPGRADE_BASE }}
+          path: build-upgrade/base
+          submodules: recursive
+      - name: Build the ${{ env.UPGRADE_BASE }} RPMs
+        if: steps.base-rpms.outputs.cache-hit != 'true'
+        run: |
+          ./build-upgrade/base/tools/ci/build-rpm.sh
+          mkdir -p build-upgrade/base-rpms
+          cp build-upgrade/base/RPMS/*.rpm build-upgrade/base-rpms/
+      - name: Update from 0.1.0 keeps the backups (XP-2)
+        run: ./tools/ci/check-upgrade.sh build-upgrade/base-rpms RPMS
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: netvfs-rpms-aarch64

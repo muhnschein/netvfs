@@ -4,6 +4,7 @@
 #   make check         unit tests, then the interop suite (needs docker)
 #   make check-unit    unit tests only
 #   make check-interop interop suite against containerised servers
+#   make check-packaging  install tree against the RPM %files (SPEC-v2 XP-1, XP-3)
 #   make coverage      unit + interop tests instrumented, writes build-coverage/coverage.xml
 #   make SANITIZE=1 check   the same under ASan + UBSan (vendored libraries included)
 #   make HOST_BUTEO=0  use the system buteosyncfw5 (pkg-config) instead of
@@ -34,7 +35,7 @@ QMAKE_ARGS += NETVFS_HOST_BUTEO=$(BUILD_DIR)/host-buteo
 endif
 TEST_ENV = QT_QPA_PLATFORM=offscreen
 
-.PHONY: all vendor host-buteo configure check check-unit check-interop coverage clean distclean
+.PHONY: all vendor host-buteo configure check check-unit check-interop check-packaging coverage clean distclean
 
 all: configure
 	$(MAKE) -C $(BUILD_DIR) $(if $(findstring -j,$(MAKEFLAGS)),,-j$(JOBS))
@@ -59,6 +60,21 @@ check-unit: all
 
 check-interop: all
 	$(TEST_ENV) ./tests/interop/run.sh $(BUILD_DIR)
+
+# SPEC-v2 XP-1: every installed file in exactly one package of rpm/netvfs.spec
+# (the host has no sailfish-svg2png, so no icons; tests install to /usr/tests,
+# package builds skip them). XP-3: no share enumeration in the SMB plugin,
+# and the check does find it in the share helper.
+PACKAGE_ROOT := $(BUILD_DIR)/install-root
+check-packaging: all
+	rm -rf $(PACKAGE_ROOT)
+	$(MAKE) -s -C $(BUILD_DIR) install INSTALL_ROOT=$(PACKAGE_ROOT) >/dev/null
+	rm -rf $(PACKAGE_ROOT)/usr/tests
+	./tools/ci/check-files.py --map "$$($(QMAKE) -query QT_INSTALL_LIBS)=/usr/lib64" \
+	    --allow-missing '/usr/share/themes/*' $(PACKAGE_ROOT)
+	./tools/ci/check-noshareenum.sh $(BUILD_DIR)/lib/netvfs/backends/libnetvfs-smb.so
+	! ./tools/ci/check-noshareenum.sh $(BUILD_DIR)/libexec/netvfs/netvfs-smb-shares >/dev/null
+	./tests/packaging/test_packaging.py
 
 coverage:
 	$(MAKE) COVERAGE=1 check

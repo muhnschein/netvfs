@@ -11,7 +11,9 @@ QT = core
 CONFIG += console
 CONFIG -= app_bundle
 LIBS += $$netvfsCoreLibs()
-QMAKE_RPATHDIR += $$NETVFS_LIB_OUT
+# Tests run the helper from the build tree; the installed helper finds
+# libnetvfs through the system library path (no RUNPATH in packages).
+!equals(NETVFS_BUILD_TESTS, 0): QMAKE_RPATHDIR += $$NETVFS_LIB_OUT
 QMAKE_LFLAGS += -Wl,--exclude-libs,ALL
 
 # The second libsmb2 build, with DCE/RPC (vendor/build-vendor.sh, variant

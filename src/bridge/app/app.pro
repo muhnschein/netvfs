@@ -11,7 +11,9 @@ PKGCONFIG += dbus-1 accounts-qt5 libsignon-qt5
 INCLUDEPATH += $$PWD/../lib
 LIBS += -L$$NETVFS_LIB_OUT -lnetvfsbridge $$netvfsCoreLibs()
 PRE_TARGETDEPS += $$NETVFS_LIB_OUT/libnetvfsbridge.a
-QMAKE_RPATHDIR += $$NETVFS_LIB_OUT
+# Tests start the daemon from the build tree; the installed daemon finds
+# libnetvfs through the system library path (no RUNPATH in packages).
+!equals(NETVFS_BUILD_TESTS, 0): QMAKE_RPATHDIR += $$NETVFS_LIB_OUT
 
 SOURCES = main.cpp
 

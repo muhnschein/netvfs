@@ -106,8 +106,10 @@ QtObject {
         _provider = params.provider
         _params = params
         _secret = secret
-        _signInService = NetVfsProviders.offersService(_provider, "backup")
-                ? NetVfsHelpers.backupServiceName(_provider) : NetVfsHelpers.filesServiceName(_provider)
+        // SPEC-v2 XP-1: the backup service comes with netvfs-backup-<provider>.
+        var backupService = NetVfsHelpers.backupServiceName(_provider)
+        _signInService = NetVfsProviders.offersService(_provider, "backup") && NetVfsHelpers.isServiceInstalled(backupService)
+                ? backupService : NetVfsHelpers.filesServiceName(_provider)
         _open(accountId, "update")
     }
 
