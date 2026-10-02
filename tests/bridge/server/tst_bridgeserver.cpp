@@ -15,6 +15,8 @@
 #include <QtCore/QFile>
 #include <QtTest/QtTest>
 
+#include <array>
+
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -189,8 +191,8 @@ void tst_BridgeServer::revocationMidJob()
     fake()->addFile(QStringLiteral("big"), QByteArray(4 << 20, 'x'));
     fake()->chunkDelayMs = 50;
     auto c = f.helloClient();
-    int pipeFds[2];
-    QCOMPARE(::pipe(pipeFds), 0);
+    std::array<int, 2> pipeFds {};
+    QCOMPARE(::pipe(pipeFds.data()), 0);
     const TestClient::Message job = c->call("Download", [&pipeFds](WireWriter &w) {
         w.string(Loc).bytes("big").unixFd(pipeFds[1]).variantMap(QVariantMap());
     });
@@ -438,8 +440,8 @@ void tst_BridgeServer::transferThroughPipes()
 {
     Fixture f;
     auto c = f.helloClient();
-    int up[2];
-    QCOMPARE(::pipe(up), 0);
+    std::array<int, 2> up {};
+    QCOMPARE(::pipe(up.data()), 0);
     QCOMPARE(::write(up[1], "streamed", 8), ssize_t(8));
     ::close(up[1]);
     TestClient::Message m = c->call("Upload", [&up](WireWriter &w) {
@@ -451,8 +453,8 @@ void tst_BridgeServer::transferThroughPipes()
     QVERIFY2(done.args.value(1).toString().isEmpty(), qPrintable(done.args.value(2).toString()));
     QCOMPARE(fake()->fileData(QStringLiteral("fifo.bin")), QByteArray("streamed"));
 
-    int down[2];
-    QCOMPARE(::pipe(down), 0);
+    std::array<int, 2> down {};
+    QCOMPARE(::pipe(down.data()), 0);
     m = c->call("Download", [&down](WireWriter &w) {
         w.string(Loc).bytes("fifo.bin").unixFd(down[1]).variantMap(QVariantMap());
     });
@@ -460,11 +462,11 @@ void tst_BridgeServer::transferThroughPipes()
     QVERIFY2(!m.isError, qPrintable(m.name));
     done = c->waitSignal(QStringLiteral("JobFinished"));
     QVERIFY(done.args.value(1).toString().isEmpty());
-    char buffer[16] = {};
-    QCOMPARE(::read(down[0], buffer, sizeof(buffer)), ssize_t(8));
-    QCOMPARE(QByteArray(buffer, 8), QByteArray("streamed"));
+    std::array<char, 16> buffer {};
+    QCOMPARE(::read(down[0], buffer.data(), buffer.size()), ssize_t(8));
+    QCOMPARE(QByteArray(buffer.data(), 8), QByteArray("streamed"));
     // The bridge closed its copy at the end of the job: EOF.
-    QCOMPARE(::read(down[0], buffer, sizeof(buffer)), ssize_t(0));
+    QCOMPARE(::read(down[0], buffer.data(), buffer.size()), ssize_t(0));
     ::close(down[0]);
 }
 

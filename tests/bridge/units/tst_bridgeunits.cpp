@@ -21,6 +21,8 @@
 
 #include <dbus/dbus.h>
 
+#include <array>
+
 #include <fcntl.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
@@ -435,8 +437,8 @@ void tst_BridgeUnits::fdChecks()
     QCOMPARE(checkTransferFd(folder, FdAccess::Read, &info).error(), Error::PermissionDenied);
     ::close(folder);
 
-    int pipeFds[2];
-    QCOMPARE(::pipe(pipeFds), 0);
+    std::array<int, 2> pipeFds {};
+    QCOMPARE(::pipe(pipeFds.data()), 0);
     QVERIFY(checkTransferFd(pipeFds[0], FdAccess::Read, &info).ok());
     QVERIFY(info.fifo);
     QCOMPARE(checkTransferFd(pipeFds[0], FdAccess::Write, &info).error(), Error::PermissionDenied);
@@ -490,8 +492,8 @@ void tst_BridgeUnits::fdDeviceOffsets()
     QCOMPARE(f.readAll(), QByteArray("01234567ABCD"));
 
     // A FIFO read gives up when canceled, without data arriving.
-    int pipeFds[2];
-    QCOMPARE(::pipe(pipeFds), 0);
+    std::array<int, 2> pipeFds {};
+    QCOMPARE(::pipe(pipeFds.data()), 0);
     FdInfo fifoInfo;
     QVERIFY(checkTransferFd(pipeFds[0], FdAccess::Read, &fifoInfo).ok());
     FdDevice fifo(pipeFds[0], fifoInfo, 0, -1, &canceled);
@@ -578,8 +580,8 @@ void tst_BridgeUnits::peerPidfd()
 void tst_BridgeUnits::peerRealProcess()
 {
     // The real /proc and SO_PEERCRED on a socketpair: this test process.
-    int sv[2];
-    QCOMPARE(::socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0);
+    std::array<int, 2> sv {};
+    QCOMPARE(::socketpair(AF_UNIX, SOCK_STREAM, 0, sv.data()), 0);
     QVERIFY(PeerChecker(QCoreApplication::applicationFilePath()).check(sv[0]).ok());
     QCOMPARE(PeerChecker(QStringLiteral("/bin/sh")).check(sv[0]).error(), Error::PermissionDenied);
     ::close(sv[0]);

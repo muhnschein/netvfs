@@ -159,7 +159,7 @@ static const char *parse_consumer(const char *path, struct consumer *c)
     FILE *f = fopen(path, "r");
     if (!f)
         return "cannot be read";
-    memset(c, 0, sizeof(*c));
+    *c = (struct consumer){ 0 };
     char line[MAX_LINE];
     int in_group = 0;
     long total = 0;
