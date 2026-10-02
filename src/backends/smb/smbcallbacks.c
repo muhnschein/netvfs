@@ -1,20 +1,33 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 #include "smbcallbacks.h"
 
-static void ignore_completion(struct smb2_context *smb2, int status, void *command_data, void *private_data)
+#include <stdlib.h>
+
+static void finish(struct smb2_context *smb2, struct NetVfsSmbCompletion *completion, int status);
+
+/* Completion of a close sent for an abandoned open: nothing waits for it. */
+static void release_completion(struct smb2_context *smb2, int status, void *command_data, void *private_data)
 {
-    /* Completion of a close sent for an abandoned open: nothing waits for it. */
-    (void)smb2;
-    (void)status;
+    struct NetVfsSmbCompletion *completion = (struct NetVfsSmbCompletion *)private_data;
+
     (void)command_data;
-    (void)private_data;
+    finish(smb2, completion, status);
+    free(completion);
+}
+
+static void close_orphaned_file(struct smb2_context *smb2, struct smb2fh *fh)
+{
+    struct NetVfsSmbCompletion *closing = calloc(1, sizeof(*closing));
+
+    if (closing && smb2_close_async(smb2, fh, release_completion, closing) < 0)
+        free(closing);
 }
 
 static void finish(struct smb2_context *smb2, struct NetVfsSmbCompletion *completion, int status)
 {
     /* A handle opened by a request that was abandoned is closed again. */
     if (completion->orphaned && completion->fh)
-        smb2_close_async(smb2, completion->fh, ignore_completion, NULL);
+        close_orphaned_file(smb2, completion->fh);
     if (completion->orphaned && completion->dir)
         smb2_closedir(smb2, completion->dir);
     completion->done = 1;

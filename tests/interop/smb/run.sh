@@ -40,7 +40,8 @@ samba() {
 }
 
 address() {
-    docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$prefix-$1"
+    server=$1
+    docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$prefix-$server"
 }
 
 ready() {
