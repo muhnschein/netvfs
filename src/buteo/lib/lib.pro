@@ -14,7 +14,8 @@ HEADERS = \
     backuprun.h \
     backupservice.h \
     backupsteps.h \
-    networkjob.h
+    networkjob.h \
+    replyhandler.h
 
 SOURCES = \
     backupclient.cpp \

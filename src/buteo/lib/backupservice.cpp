@@ -2,8 +2,6 @@
 #include "backupservice.h"
 
 #include <QtDBus/QDBusMessage>
-#include <QtDBus/QDBusPendingCallWatcher>
-#include <QtDBus/QDBusPendingReply>
 
 namespace NetVfs {
 
@@ -43,12 +41,10 @@ void BackupService::call(const QString &method, const QVariantList &arguments,
     QDBusMessage message = QDBusMessage::createMethodCall(QLatin1String(Service), QLatin1String(ObjectPath),
                                                           QLatin1String(Interface), method);
     message.setArguments(arguments);
-    m_calls.remove_if([](const PendingCall &pending) { return pending.delivered; });
-    PendingCall &pending = m_calls.emplace_back(m_connection.asyncCall(message));
-    connect(&pending.watcher, &QDBusPendingCallWatcher::finished, this, [&pending, done]() {
-        done(pending.watcher.reply());
-        pending.delivered = true;
-    });
+    m_calls.remove_if([](const ReplyHandler &handler) { return handler.delivered(); });
+    ReplyHandler &handler = m_calls.emplace_back(done);
+    m_connection.callWithCallback(message, &handler, SLOT(onReply(QDBusMessage)),
+                                  SLOT(onError(QDBusError,QDBusMessage)));
 }
 
 void BackupService::backupFileDeviceId(const StringReply &done)

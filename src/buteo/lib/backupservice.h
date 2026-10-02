@@ -3,19 +3,15 @@
 #define NETVFS_BUTEO_BACKUPSERVICE_H
 
 #include "error.h"
+#include "replyhandler.h"
 
 #include <QtCore/QObject>
 #include <QtCore/QStringList>
 #include <QtDBus/QDBusConnection>
-#include <QtDBus/QDBusPendingCallWatcher>
 
 #include <functional>
 
 #include <list>
-
-QT_BEGIN_NAMESPACE
-class QDBusMessage;
-QT_END_NAMESPACE
 
 namespace NetVfs {
 
@@ -57,14 +53,9 @@ private:
               const std::function<void(const QDBusMessage &)> &done);
 
     QDBusConnection m_connection;
-    // Watchers are held by value; a delivered one is only dropped on the next
-    // call or at destruction, never while its own finished() is being emitted.
-    struct PendingCall {
-        explicit PendingCall(const QDBusPendingCall &call) : watcher(call) {}
-        QDBusPendingCallWatcher watcher;
-        bool delivered = false;
-    };
-    std::list<PendingCall> m_calls;
+    // Handlers are held by value; a delivered one is only dropped on the next
+    // call or at destruction, never while its own callback is running.
+    std::list<ReplyHandler> m_calls;
 };
 
 } // namespace NetVfs
