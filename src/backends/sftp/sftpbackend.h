@@ -98,7 +98,7 @@ private:
     Result freeBytes(const QByteArray &remote, qint64 *bytes) const;
     bool hasChildren(const QByteArray &remote) const;
     Result renameReplacing(const QByteArray &source, const QByteArray &target, bool targetExists);
-    Result renameNoReplace(const QByteArray &source, const QByteArray &target, bool targetExists);
+    Result renameNoReplace(const QByteArray &source, const QByteArray &target);
     Result openForUpload(const QByteArray &remote, const WriteOptions &options, sftp_file *file) const;
     Result openForDownload(const QByteArray &remote, const DownloadOptions &options, sftp_file *file, Sink *sink) const;
     Result waitGlobalReply(const QElapsedTimer &started) const;

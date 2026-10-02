@@ -828,15 +828,22 @@ Result SftpBackend::removeDir(const QString &path)
     return r;
 }
 
-Result SftpBackend::renameNoReplace(const QByteArray &source, const QByteArray &target, bool targetExists)
+Result SftpBackend::renameNoReplace(const QByteArray &source, const QByteArray &target)
 {
-    // XC-10, XS-6: the stat check covers every server; a plain SSH_FXP_RENAME
-    // (never posix-rename) closes the race on servers that refuse to replace.
-    if (targetExists)
-        return Result(Error::AlreadyExists, QStringLiteral("%1 exists").arg(display(target)));
+    // XC-10, XS-6: OpenSSH fails a plain SSH_FXP_RENAME (never posix-rename)
+    // on an existing target, atomically for files (NativeNoReplace). Other
+    // servers get a stat check first (a documented race).
+    if (!m_nativeNoReplace) {
+        const Result r = statRemote(target, nullptr, false);
+        if (r.ok())
+            return Result(Error::AlreadyExists, QStringLiteral("%1 exists").arg(display(target)));
+        if (r.error() != Error::NotFound)
+            return r;
+    }
     if (sftp_rename_noreplace(m_sftp, source.constData(), target.constData()) == 0)
         return Result::success();
     const Result failure = sftpFailure(display(source));
+    // OpenSSH reports the existing target as a plain failure.
     if (failure.error() != Error::NotFound && failure.error() != Error::ConnectionLost
             && statRemote(target, nullptr, false).ok())
         return Result(Error::AlreadyExists, QStringLiteral("%1 exists").arg(display(target)));
@@ -864,6 +871,8 @@ Result SftpBackend::rename(const QString &from, const QString &to, RenameMode mo
         r = resolve(to, &target);
     if (!r.ok())
         return r;
+    if (mode == RenameMode::NoReplace)
+        return renameNoReplace(source, target);
     Entry existing;
     r = statRemote(target, &existing, false);
     if (!r.ok() && r.error() != Error::NotFound)
@@ -874,8 +883,6 @@ Result SftpBackend::rename(const QString &from, const QString &to, RenameMode mo
     // XC-10: a folder is never replaced.
     if (targetExists && existing.type == EntryType::Directory)
         return Result(Error::AlreadyExists, QStringLiteral("%1 is a folder").arg(display(target)));
-    if (mode == RenameMode::NoReplace)
-        return renameNoReplace(source, target, targetExists);
     return renameReplacing(source, target, targetExists);
 }
 
