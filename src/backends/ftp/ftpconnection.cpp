@@ -15,6 +15,19 @@ constexpr int MillisecondsPerSecond = 1000;
 constexpr long QuitTimeoutSeconds = 1;
 constexpr const char *Protocols = "ftp,ftps";
 constexpr int MaxSentCommands = 256;
+// The first libcurl release measured to reuse an explicit-TLS FTP control
+// connection in "TLS required" mode (8.20.0); builds before it may not (see
+// TlsGuard).
+constexpr unsigned int MinVersionForRequiredTls = 0x081400;
+
+// CURLOPT_USE_SSL for explicit FTPS (XSEC-2): libcurl's own "TLS required"
+// mode where the running libcurl can reuse the connection (the guard still
+// checks the replies), else "try" mode where the guard alone enforces TLS.
+long explicitUseSsl()
+{
+    const curl_version_info_data *info = curl_version_info(CURLVERSION_NOW);
+    return info && info->version_num >= MinVersionForRequiredTls ? long(CURLUSESSL_ALL) : long(CURLUSESSL_TRY);
+}
 
 long seconds(int milliseconds)
 {
@@ -242,9 +255,9 @@ Result Connection::configure(const Settings &settings, const ConnectionParams &p
 Result Connection::applyBase(const QByteArray &url)
 {
     curl_easy_reset(m_easy);
-    // Explicit TLS: libcurl's try mode plus TlsGuard (see there); implicit
-    // TLS cannot fall back.
-    const long useSsl = m_settings.tlsMode == TlsMode::Explicit ? long(CURLUSESSL_TRY) : long(CURLUSESSL_ALL);
+    // Explicit TLS: libcurl's required or try mode plus TlsGuard (see
+    // explicitUseSsl); implicit TLS cannot fall back.
+    const long useSsl = m_settings.tlsMode == TlsMode::Explicit ? explicitUseSsl() : long(CURLUSESSL_ALL);
     CURLcode code = applyCommon(m_easy, url, m_settings, m_params, useSsl);
     const std::initializer_list<std::function<CURLcode()>> steps = {
         [&] { return curl_easy_setopt(m_easy, CURLOPT_USERNAME, m_userName.constData()); },
