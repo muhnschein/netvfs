@@ -15,9 +15,16 @@ namespace NetVfsUi {
 NetVfs::ConnectionParams paramsFromVariant(const QVariantMap &map);
 QVariantMap paramsToVariant(const NetVfs::ConnectionParams &params);
 
-// Server identity as exposed to QML: { algorithm, fingerprint, pin }; empty
-// map for protocols without one.
+// Server identity as exposed to QML; empty map for protocols without one:
+// { kind: "ssh"|"tls", algorithm, fingerprint, pin, pinOptions: {host_key[,
+// tls_verify_peer]} } and for TLS also { subject, issuer, notBefore,
+// notAfter (ISO 8601 UTC), sans, certSha256 ("AB:CD:..."), systemTrusted,
+// problems, problemTexts } (SPEC-v2 XA-5, XC-16).
 QVariantMap identityToVariant(const NetVfs::ServerIdentity &identity);
+// Translated sentences for ServerIdentity::Problem bits, in bit order.
+QStringList tlsProblemTexts(int problems);
+// "ab12cd" -> "AB:12:CD".
+QString colonHex(const QString &hex);
 
 // "SHA256:<unpadded base64>" of a raw key blob, as printed by ssh-keygen -lf.
 QString sha256Fingerprint(const QByteArray &publicKeyBlob);
@@ -47,6 +54,9 @@ public:
     Q_INVOKABLE int portValue(const QString &port) const;
     Q_INVOKABLE QString userNameProblem(const QString &userName) const;
     Q_INVOKABLE QString shareProblem(const QString &share) const;
+    // A path on the server such as the WebDAV base path: absolute, no "."
+    // or ".." components.
+    Q_INVOKABLE QString serverPathProblem(const QString &path) const;
     Q_INVOKABLE QString backupsPathProblem(const QString &provider, const QString &path) const;
     Q_INVOKABLE QString cleanBackupsPath(const QString &provider, const QString &path) const;
 };
@@ -61,6 +71,7 @@ class Helpers : public QObject
     Q_PROPERTY(QString credentialsApplication READ credentialsApplication CONSTANT)
     Q_PROPERTY(QString credentialsName READ credentialsName CONSTANT)
     Q_PROPERTY(QString backupsPathKey READ backupsPathKey CONSTANT)
+    Q_PROPERTY(QString filesRootKey READ filesRootKey CONSTANT)
 
 public:
     explicit Helpers(QObject *parent = nullptr);
@@ -69,9 +80,21 @@ public:
     QString credentialsApplication() const;
     QString credentialsName() const;
     QString backupsPathKey() const;
+    QString filesRootKey() const;
 
     Q_INVOKABLE QString backupServiceName(const QString &provider) const;
+    Q_INVOKABLE QString filesServiceName(const QString &provider) const;
     Q_INVOKABLE bool isProviderInstalled(const QString &provider) const;
+    // Whether the accounts framework knows the service (the netvfs-files
+    // services are a separate package, SPEC-v2 XP-1).
+    Q_INVOKABLE bool isServiceInstalled(const QString &serviceName) const;
+
+    // SPEC-v2 XA-4: whether `params` may be used for "backup" or "files";
+    // serviceRefusalText() says why not ("" when allowed).
+    Q_INVOKABLE bool serviceAllowed(const QVariantMap &params, const QString &service) const;
+    Q_INVOKABLE QString serviceRefusalText(const QVariantMap &params, const QString &service) const;
+    // SPEC-v2 XA-7: the account has no secret by design (interactive, smb guest).
+    Q_INVOKABLE bool secretOptional(const QVariantMap &params) const;
 
     // SPEC A-1, A-2: "user@host".
     Q_INVOKABLE QString accountLabel(const QString &userName, const QString &host) const;
@@ -85,9 +108,12 @@ public:
     Q_INVOKABLE QVariantMap paramsFromConfiguration(const QString &provider,
                                                     const QVariantMap &configuration) const;
 
-    // Values written when an account is created (SPEC 6.2, 7.3 step 5):
-    // { global: {key: value}, service: {key: value}, serviceName: "<p>-backup" }.
-    Q_INVOKABLE QVariantMap creationSettings(const QVariantMap &params, const QString &backupsPath) const;
+    // Values written when an account is created (SPEC 6.2, 7.3 step 5,
+    // SPEC-v2 XA-1). `services`: { backup: bool, files: bool, backupsPath,
+    // filesRoot }. Result: { global: {key: value}, services: {<service name>:
+    // {key: value}}, enable: [service names], signInService: the service the
+    // identity is created for (backup if enabled, else files) }.
+    Q_INVOKABLE QVariantMap creationSettings(const QVariantMap &params, const QVariantMap &services) const;
     // Values written after credentials were created (A-2):
     // { global: { default_credentials_username: "user@host" } }.
     Q_INVOKABLE QVariantMap credentialsLabelSettings(const QVariantMap &params) const;
@@ -109,8 +135,6 @@ public:
     // SPEC-sftp S-8: where the same fingerprint can be printed on the server.
     Q_INVOKABLE QString hostKeyHint(const QString &algorithm) const;
 
-    // SPEC-smb M-3 labels; SFTP is always encrypted.
-    Q_INVOKABLE QString transportSecurityText(const QVariantMap &params) const;
     Q_INVOKABLE QString authModeText(const QString &authMode) const;
 };
 

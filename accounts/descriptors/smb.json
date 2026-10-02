@@ -1,0 +1,46 @@
+{
+    "provider": "smb",
+    "services": ["backup", "files"],
+    "defaultPort": 445,
+    "authModes": [
+        { "id": "password", "label": "settings-accounts-netvfs-me-password", "secret": "password" }
+    ],
+    "noSecretWhen": { "security_profile": ["guest"] },
+    "fields": [
+        { "key": "host", "type": "text", "label": "settings-accounts-netvfs-la-server",
+          "placeholder": "settings-accounts-netvfs-ph-server", "validation": "host", "input": "url" },
+        { "key": "port", "type": "text", "label": "settings-accounts-netvfs-la-port",
+          "validation": "port", "optional": true, "input": "digits" },
+        { "key": "share", "type": "text", "label": "settings-accounts-netvfs-la-share",
+          "placeholder": "settings-accounts-netvfs-ph-share", "description": "settings-accounts-netvfs-la-share_optional",
+          "validation": "share", "optional": true },
+        { "key": "show_admin_shares", "type": "switch", "label": "settings-accounts-netvfs-la-show_admin_shares",
+          "description": "settings-accounts-netvfs-la-show_admin_shares_description", "default": false,
+          "visibleWhen": { "share": [""] } },
+        { "key": "security_profile", "type": "choice", "label": "settings-accounts-netvfs-la-security_profile",
+          "description": "settings-accounts-netvfs-la-security_profile_description", "default": "strict",
+          "choices": [
+              { "value": "strict", "label": "settings-accounts-netvfs-me-profile_strict" },
+              { "value": "signed", "label": "settings-accounts-netvfs-me-profile_signed" },
+              { "value": "legacy", "label": "settings-accounts-netvfs-me-profile_legacy" },
+              { "value": "guest", "label": "settings-accounts-netvfs-me-profile_guest" }
+          ] },
+        { "key": "allow_insecure", "type": "switch", "label": "settings-accounts-netvfs-la-allow_insecure",
+          "description": "settings-accounts-netvfs-la-allow_insecure_smb", "default": false, "validation": "consent",
+          "visibleWhen": { "security_profile": ["legacy", "guest"] } },
+        { "key": "username", "type": "text", "label": "settings-accounts-netvfs-la-user", "validation": "userName",
+          "visibleWhen": { "security_profile": ["strict", "signed", "legacy"] } },
+        { "key": "domain", "type": "text", "label": "settings-accounts-netvfs-la-domain",
+          "visibleWhen": { "security_profile": ["strict", "signed", "legacy"] } },
+        { "key": "password_warning", "type": "note", "label": "settings-accounts-netvfs-la-smb_password_warning",
+          "visibleWhen": { "security_profile": ["strict", "signed", "legacy"] } },
+        { "key": "guest_hint", "type": "note", "label": "settings-accounts-netvfs-la-guest_hint",
+          "visibleWhen": { "security_profile": ["guest"] } },
+        { "key": "backups_path", "type": "text", "label": "settings-accounts-netvfs-la-backups_folder",
+          "description": "settings-accounts-netvfs-la-folder_in_share", "default": "Sailfish OS/Backups",
+          "validation": "folder", "service": "backup" },
+        { "key": "files_root", "type": "text", "label": "settings-accounts-netvfs-la-files_root",
+          "description": "settings-accounts-netvfs-la-files_root_smb", "validation": "folder", "optional": true,
+          "service": "files" }
+    ]
+}

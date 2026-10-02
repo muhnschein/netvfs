@@ -5,15 +5,24 @@ import Sailfish.Accounts 1.0
 import com.jolla.settings.accounts 1.0
 import org.netvfs.accounts 1.0
 
-// Account settings page (SPEC 7.4). A plain page with our own enable switch
-// and fields (U-2: not StandardAccountSettingsDisplay). Changes are saved
-// when the page is left (U-6), holding the agent's delayDeletion meanwhile
-// (U-5).
+// Account settings page (SPEC 7.4). A plain page with our own switches and
+// fields (U-2: not StandardAccountSettingsDisplay). Changes are saved when
+// the page is left (U-6), holding the agent's delayDeletion meanwhile (U-5).
+//
+// One switch per service the provider offers (SPEC-v2 XA-1, amends 7.4 "only
+// one service"): backups (<p>-backup, where the provider offers it and the
+// settings allow it, XA-4) and browsing files (<p>-files, when the
+// netvfs-files-services package is installed). The account is enabled
+// while any of its services is.
 //
 // "Test connection" runs NetVfsProbe.identify() on the stored settings and
-// then NetVfsProbe.verifyAccount(): the stored secret is read from signond by
-// the C++ core and never reaches QML. A changed server key is reported, never
-// accepted here (S-9); the update flow resolves it.
+// then NetVfsProbe.verifyAccount() for backups when they are on, else for
+// files (which writes nothing): the stored secret is read from signond by
+// the C++ core and never reaches QML. A changed server identity is
+// reported, never accepted here (S-9); the update flow resolves it.
+//
+// The pull-down menu also opens "Apps using network locations"
+// (NetVfsConsentPage, SPEC-v2 XB-6).
 Page {
     id: page
 
@@ -28,7 +37,9 @@ Page {
     property var _params: ({ "options": {} })
     property string _attention
     property string _storedBackupsPath
-    property bool _storedEnabled
+    property string _storedFilesRoot
+    property bool _storedBackup
+    property bool _storedFiles
     property string _storedName
     // "", "running", "ok" or "failed"
     property string _testState
@@ -36,11 +47,19 @@ Page {
     property string _testDetail
     property bool _testOffersUpdate
 
-    readonly property bool _isSftp: provider === "sftp"
-    readonly property bool _isSmb: provider === "smb"
-    readonly property string _serviceName: NetVfsHelpers.backupServiceName(provider)
-    readonly property string _folderProblem: NetVfsInput.backupsPathProblem(provider, folderField.text)
+    readonly property string _backupService: NetVfsHelpers.backupServiceName(provider)
+    readonly property string _filesService: NetVfsHelpers.filesServiceName(provider)
+    readonly property bool _offersBackup: NetVfsProviders.offersService(provider, "backup")
+    readonly property bool _offersFiles: NetVfsProviders.offersService(provider, "files")
+                                         && NetVfsHelpers.isServiceInstalled(_filesService)
+    readonly property bool _backupAllowed: NetVfsHelpers.serviceAllowed(_params, "backup")
+    readonly property bool _multipleAuthModes: (NetVfsProviders.descriptor(provider)["authModes"] || []).length > 1
+    readonly property string _folderProblem: backupSwitch.checked
+                                             ? NetVfsInput.backupsPathProblem(provider, folderField.text) : ""
+    readonly property string _rootProblem: filesSwitch.checked && filesRootField.text.trim() !== ""
+                                           ? NetVfsInput.backupsPathProblem(provider, filesRootField.text) : ""
     readonly property var _identity: NetVfsHelpers.identityFromPin(_option("host_key"))
+    readonly property var _details: NetVfsProviders.details(provider, _params)
 
     function _option(key) {
         var options = _params["options"] || {}
@@ -49,17 +68,66 @@ Page {
 
     function _load() {
         var values = account.configurationValues("")
-        var serviceValues = account.configurationValues(_serviceName)
-        var storedPath = serviceValues[NetVfsHelpers.backupsPathKey]
+        var backupValues = account.configurationValues(_backupService)
+        var filesValues = account.configurationValues(_filesService)
+        var storedPath = backupValues[NetVfsHelpers.backupsPathKey]
+        var storedRoot = filesValues[NetVfsHelpers.filesRootKey]
         _params = NetVfsHelpers.paramsFromConfiguration(provider, values)
         _attention = NetVfsHelpers.attentionState(values)
         _storedBackupsPath = storedPath ? String(storedPath) : NetVfsHelpers.defaultBackupsPath
-        _storedEnabled = account.enabled && account.isEnabledWithService(_serviceName)
+        _storedFilesRoot = storedRoot ? String(storedRoot) : ""
+        _storedBackup = _offersBackup && account.enabled && account.isEnabledWithService(_backupService)
+        _storedFiles = _offersFiles && account.enabled && account.isEnabledWithService(_filesService)
         _storedName = account.displayName
-        enableSwitch.checked = _storedEnabled
+        backupSwitch.checked = _storedBackup
+        filesSwitch.checked = _storedFiles
         descriptionField.text = _storedName
         folderField.text = _storedBackupsPath
+        filesRootField.text = _storedFilesRoot
         _loaded = true
+    }
+
+    function _saveService(name, on) {
+        if (on) {
+            account.enableWithService(name)
+        } else {
+            account.disableWithService(name)
+        }
+    }
+
+    function _saveServices() {
+        var backup = backupSwitch.checked && _backupAllowed
+        var files = filesSwitch.checked
+        if (backup === _storedBackup && files === _storedFiles) {
+            return false
+        }
+        account.enabled = backup || files
+        if (_offersBackup && backup !== _storedBackup) {
+            _saveService(_backupService, backup)
+        }
+        if (_offersFiles && files !== _storedFiles) {
+            _saveService(_filesService, files)
+        }
+        _storedBackup = backup
+        _storedFiles = files
+        return true
+    }
+
+    function _saveFolders() {
+        var changed = false
+        var path = NetVfsInput.cleanBackupsPath(provider, folderField.text)
+        if (_offersBackup && _folderProblem === "" && folderField.text.trim() !== "" && path !== _storedBackupsPath) {
+            account.setConfigurationValue(_backupService, NetVfsHelpers.backupsPathKey, path)
+            _storedBackupsPath = path
+            changed = true
+        }
+        var root = NetVfsInput.cleanBackupsPath(provider, filesRootField.text)
+        if (_offersFiles && _rootProblem === "" && root !== _storedFilesRoot) {
+            account.setConfigurationValue(_filesService, NetVfsHelpers.filesRootKey, root)
+            _storedFilesRoot = root
+            changed = true
+        }
+        return changed
     }
 
     // Returns true when a write was started.
@@ -67,29 +135,14 @@ Page {
         if (!_loaded || _saving) {
             return false
         }
-        var changed = false
-        if (enableSwitch.checked !== _storedEnabled) {
-            account.enabled = enableSwitch.checked
-            if (enableSwitch.checked) {
-                account.enableWithService(_serviceName)
-            } else {
-                account.disableWithService(_serviceName)
-            }
-            _storedEnabled = enableSwitch.checked
-            changed = true
-        }
+        var changed = _saveServices()
         var name = descriptionField.text.trim()
         if (name.length > 0 && name !== _storedName) {
             account.displayName = name
             _storedName = name
             changed = true
         }
-        var path = NetVfsInput.cleanBackupsPath(provider, folderField.text)
-        if (_folderProblem === "" && path !== _storedBackupsPath) {
-            account.setConfigurationValue(_serviceName, NetVfsHelpers.backupsPathKey, path)
-            _storedBackupsPath = path
-            changed = true
-        }
+        changed = _saveFolders() || changed
         if (!changed) {
             return false
         }
@@ -125,6 +178,10 @@ Page {
         credentialsUpdater.replaceWithCredentialsUpdatePage(agent.accountId)
     }
 
+    function _testService() {
+        return backupSwitch.checked && _offersBackup && _backupAllowed ? "backup" : "files"
+    }
+
     function _startTest() {
         _testState = "running"
         _testText = ""
@@ -147,7 +204,12 @@ Page {
             _finishTest("failed", qsTrId("settings-accounts-netvfs-la-test_key_changed"), "", true)
             return
         }
-        probe.verifyAccount(agent.accountId, "")
+        if (probe.identityStatus === NetVfsProbe.IdentityUnknown) {
+            //% "The server's identity has not been confirmed for this account. Use Update sign-in details to check it."
+            _finishTest("failed", qsTrId("settings-accounts-netvfs-la-test_identity_unknown"), "", true)
+            return
+        }
+        probe.verifyAccount(agent.accountId, {}, _testService())
     }
 
     function _verifiedForTest() {
@@ -204,6 +266,12 @@ Page {
         id: credentialsUpdater
     }
 
+    Component {
+        id: consentComponent
+
+        NetVfsConsentPage {}
+    }
+
     SilicaFlickable {
         anchors.fill: parent
         contentHeight: column.height + Theme.paddingLarge
@@ -216,6 +284,12 @@ Page {
             onAccountDeletionRequested: {
                 page.agent.accountDeletionRequested()
                 pageStack.pop()
+            }
+
+            MenuItem {
+                //% "Apps using network locations"
+                text: qsTrId("settings-accounts-netvfs-me-consent_page")
+                onClicked: pageStack.push(consentComponent)
             }
         }
 
@@ -256,12 +330,26 @@ Page {
             }
 
             TextSwitch {
-                id: enableSwitch
+                id: backupSwitch
 
+                visible: page._offersBackup
+                enabled: page._backupAllowed
                 //% "Back up to this server"
                 text: qsTrId("settings-accounts-netvfs-la-enable_backups")
-                //% "The account appears as a backup target in Settings > Backup."
-                description: qsTrId("settings-accounts-netvfs-la-enable_backups_description")
+                description: page._backupAllowed
+                             ? //% "The account appears as a backup target in Settings > Backup."
+                               qsTrId("settings-accounts-netvfs-la-enable_backups_description")
+                             : NetVfsHelpers.serviceRefusalText(page._params, "backup")
+            }
+
+            TextSwitch {
+                id: filesSwitch
+
+                visible: page._offersFiles
+                //% "Browse files"
+                text: qsTrId("settings-accounts-netvfs-la-enable_files")
+                //% "Apps that you allow can browse, open and save files on this server."
+                description: qsTrId("settings-accounts-netvfs-la-service_files_description")
             }
 
             TextField {
@@ -277,6 +365,7 @@ Page {
             TextField {
                 id: folderField
 
+                visible: page._offersBackup && backupSwitch.checked
                 width: parent.width
                 //% "Backups folder"
                 label: qsTrId("settings-accounts-netvfs-la-backups_folder")
@@ -287,66 +376,55 @@ Page {
                 EnterKey.onClicked: focus = false
             }
 
+            TextField {
+                id: filesRootField
+
+                visible: page._offersFiles && filesSwitch.checked
+                width: parent.width
+                //% "Start folder"
+                label: qsTrId("settings-accounts-netvfs-la-files_root")
+                //% "Default folder"
+                placeholderText: qsTrId("settings-accounts-netvfs-ph-files_root")
+                inputMethodHints: Qt.ImhNoPredictiveText
+                errorHighlight: page._rootProblem !== ""
+                description: page._rootProblem
+                EnterKey.iconSource: "image://theme/icon-m-enter-close"
+                EnterKey.onClicked: focus = false
+            }
+
             SectionHeader {
                 //% "Server"
                 text: qsTrId("settings-accounts-netvfs-he-server")
             }
 
-            DetailItem {
-                //% "Server"
-                label: qsTrId("settings-accounts-netvfs-la-server")
-                value: page._params["host"] || ""
+            Repeater {
+                // Fields of the provider descriptor (SPEC-v2 XA-5), read-only.
+                model: page._details
+
+                DetailItem {
+                    label: modelData["label"]
+                    value: modelData["value"]
+                }
             }
 
             DetailItem {
-                //% "Port"
-                label: qsTrId("settings-accounts-netvfs-la-port")
-                value: page._params["port"] > 0 ? String(page._params["port"])
-                                                : String(NetVfsInput.defaultPort(page.provider))
-            }
-
-            DetailItem {
-                visible: page._isSmb
-                //% "Share"
-                label: qsTrId("settings-accounts-netvfs-la-share")
-                value: page._option("share")
-            }
-
-            DetailItem {
-                //% "User name"
-                label: qsTrId("settings-accounts-netvfs-la-user")
-                value: page._params["username"] || ""
-            }
-
-            DetailItem {
-                visible: page._isSmb && page._option("domain") !== ""
-                //% "Domain"
-                label: qsTrId("settings-accounts-netvfs-la-domain_short")
-                value: page._option("domain")
-            }
-
-            DetailItem {
-                visible: page._isSftp
+                visible: page._multipleAuthModes
                 //% "Sign-in method"
                 label: qsTrId("settings-accounts-netvfs-la-sign_in_method")
                 value: NetVfsHelpers.authModeText(page._option("auth_mode"))
             }
 
-            DetailItem {
-                // SPEC-smb M-3: "Signed, not encrypted" when encryption is not required
-                //% "Connection"
-                label: qsTrId("settings-accounts-netvfs-la-connection_security")
-                value: NetVfsHelpers.transportSecurityText(page._params)
-            }
-
             SectionHeader {
-                visible: page._isSftp && page._identity["fingerprint"] !== undefined
-                //% "Server key"
-                text: qsTrId("settings-accounts-netvfs-he-server_key")
+                visible: page._identity["fingerprint"] !== undefined
+                text: page._identity["kind"] === "tls"
+                      ? //% "Server certificate"
+                        qsTrId("settings-accounts-netvfs-he-server_certificate")
+                      : //% "Server key"
+                        qsTrId("settings-accounts-netvfs-he-server_key")
             }
 
             Label {
-                visible: page._isSftp && page._identity["fingerprint"] !== undefined
+                visible: page._identity["fingerprint"] !== undefined
                 x: Theme.horizontalPageMargin
                 width: parent.width - 2 * x
                 wrapMode: Text.WrapAnywhere
@@ -357,13 +435,13 @@ Page {
             }
 
             SectionHeader {
-                visible: page._isSftp && page._option("public_key") !== ""
+                visible: page._option("public_key") !== ""
                 //% "Public key"
                 text: qsTrId("settings-accounts-netvfs-he-public_key")
             }
 
             Label {
-                visible: page._isSftp && page._option("public_key") !== ""
+                visible: page._option("public_key") !== ""
                 x: Theme.horizontalPageMargin
                 width: parent.width - 2 * x
                 wrapMode: Text.WrapAnywhere
@@ -374,7 +452,7 @@ Page {
             }
 
             Button {
-                visible: page._isSftp && page._option("public_key") !== ""
+                visible: page._option("public_key") !== ""
                 anchors.horizontalCenter: parent.horizontalCenter
                 //% "Copy to clipboard"
                 text: qsTrId("settings-accounts-netvfs-bt-copy_public_key")
@@ -389,6 +467,7 @@ Page {
             Button {
                 anchors.horizontalCenter: parent.horizontalCenter
                 enabled: page._loaded && page._testState !== "running" && page._folderProblem === ""
+                         && page._rootProblem === ""
                 //% "Test connection"
                 text: qsTrId("settings-accounts-netvfs-bt-test_connection")
                 onClicked: page._startTest()
