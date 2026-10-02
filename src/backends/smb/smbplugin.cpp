@@ -4,7 +4,7 @@
 
 #include <memory>
 
-namespace NetVfs::Smb {
+namespace NetVfs {
 
 QString SmbBackendFactory::provider() const
 {
@@ -13,7 +13,7 @@ QString SmbBackendFactory::provider() const
 
 Backend *SmbBackendFactory::create()
 {
-    return std::make_unique<SmbBackend>().release();    // the caller owns it
+    return std::make_unique<Smb::SmbBackend>().release();   // the caller owns it
 }
 
-} // namespace NetVfs::Smb
+} // namespace NetVfs

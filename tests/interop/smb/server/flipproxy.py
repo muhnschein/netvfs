@@ -12,6 +12,7 @@ connect come first, so frame 5 is the first reply after sign-in).
   flip   invert the low bit of the last byte of frame FRAME (M-T12)
   stall  stop forwarding server data from frame FRAME on (M-12 cancel tests)
   drop   close both connections instead of forwarding frame FRAME
+  dialect  set DialectRevision of reply FRAME (the negotiate reply) to SMB 2.1
 """
 import socket
 import sys
@@ -59,6 +60,9 @@ def server_to_client(server, client, mode, frame):
                 continue
             if mode == "drop" and count == frame:
                 break
+            if mode == "dialect" and count == frame and len(payload) >= 70:
+                # SMB2 header (64 bytes), StructureSize, SecurityMode, DialectRevision
+                payload = payload[:68] + b"\x10\x02" + payload[70:]
             if mode == "flip" and count == frame and payload:
                 payload = payload[:-1] + bytes([payload[-1] ^ 0x01])
                 print("flipped a byte in frame %d" % count, flush=True)

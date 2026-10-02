@@ -21,7 +21,7 @@ printf '%s\n%s\n' "$SMB_PASSWORD" "$SMB_PASSWORD" | smbpasswd -a -s backup >/dev
 printf 'username = backup\npassword = %s\n' "$SMB_PASSWORD" > /etc/netvfs-auth
 chmod 600 /etc/netvfs-auth
 
-mkdir -p /srv/smb/backup /srv/smb/readonly /srv/smb/small
+mkdir -p /srv/smb/backup /srv/smb/readonly /srv/smb/small /srv/work
 chown backup /srv/smb/backup /srv/smb/small
 echo "read-only share" > /srv/smb/readonly/existing.txt
 

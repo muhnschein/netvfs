@@ -16,6 +16,7 @@
 #include <smb2/smb2-errors.h>
 
 #include <atomic>
+#include <chrono>
 #include <cerrno>
 #include <memory>
 #include <thread>
@@ -93,6 +94,52 @@ private:
     std::atomic<int> m_accepted { 0 };
     std::vector<int> m_open;
     std::thread m_thread;
+};
+
+// A listener that never accepts, with its accept queue filled: a further
+// connect() neither completes nor fails (Linux drops the SYNs), which is a
+// local stand-in for an unreachable server.
+class FullListener
+{
+public:
+    FullListener()
+    {
+        m_listener = ::socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
+        sockaddr_in addr = {};
+        addr.sin_family = AF_INET;
+        addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+        socklen_t len = sizeof(addr);
+        ::bind(m_listener, reinterpret_cast<sockaddr *>(&addr), len);
+        ::listen(m_listener, 0);
+        ::getsockname(m_listener, reinterpret_cast<sockaddr *>(&addr), &len);
+        m_port = ntohs(addr.sin_port);
+        for (int i = 0; i < 8 && !m_full; ++i) {
+            const int fd = ::socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+            m_fillers.push_back(fd);
+            ::connect(fd, reinterpret_cast<sockaddr *>(&addr), len);
+            pollfd pfd = {};
+            pfd.fd = fd;
+            pfd.events = POLLOUT;
+            m_full = ::poll(&pfd, 1, 200) == 0;
+        }
+    }
+    ~FullListener()
+    {
+        for (const int fd : m_fillers)
+            ::close(fd);
+        ::close(m_listener);
+    }
+    FullListener(const FullListener &) = delete;
+    FullListener &operator=(const FullListener &) = delete;
+
+    int port() const { return m_port; }
+    bool full() const { return m_full; }
+
+private:
+    int m_listener = -1;
+    int m_port = 0;
+    bool m_full = false;
+    std::vector<int> m_fillers;
 };
 
 int closedPort()
@@ -360,6 +407,32 @@ private slots:
         const Result t = probeTcp(QStringLiteral("192.0.2.1"), 445, 300, running, &address);
         QVERIFY2(t.error() == Error::Timeout || t.error() == Error::NetworkUnreachable, qPrintable(t.toString()));
         QVERIFY(clock.elapsed() < 3000);
+    }
+
+    // M-10, C-9, C-14: a connect that hangs ends at the connect timeout, or
+    // within 2 s of a cancel.
+    void probeHanging()
+    {
+        const FullListener listener;
+        if (!listener.full())
+            QSKIP("the accept queue could not be filled here");
+        std::atomic<bool> cancel { false };
+        QString address;
+        QElapsedTimer clock;
+        clock.start();
+        const Result timedOut = probeTcp(QStringLiteral("127.0.0.1"), listener.port(), 500, cancel, &address);
+        QCOMPARE(timedOut.error(), Error::Timeout);
+        QVERIFY2(clock.elapsed() >= 450 && clock.elapsed() < 2000, qPrintable(QString::number(clock.elapsed())));
+
+        std::thread canceller([&cancel]() {
+            std::this_thread::sleep_for(std::chrono::milliseconds(300));
+            cancel = true;
+        });
+        clock.restart();
+        const Result canceled = probeTcp(QStringLiteral("127.0.0.1"), listener.port(), 15000, cancel, &address);
+        canceller.join();
+        QCOMPARE(canceled.error(), Error::Canceled);
+        QVERIFY2(clock.elapsed() < 2000, qPrintable(QString::number(clock.elapsed())));
     }
 
     void plugin()

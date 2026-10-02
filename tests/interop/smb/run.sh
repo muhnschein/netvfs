@@ -73,7 +73,8 @@ encoff=$(address encoff)
 strict=$(address strict)
 docker run -d --name "$prefix-proxy" "$image" proxy \
     "4450:pass:0:$encoff" "4451:flip:5:$encoff" "4452:flip:5:$strict" \
-    "4453:stall:5:$strict" "4454:stall:2:$strict" "4455:drop:5:$strict" "4456:drop:2:$strict" >/dev/null
+    "4453:stall:5:$strict" "4454:stall:2:$strict" "4455:drop:5:$strict" "4456:drop:2:$strict" \
+    "4457:dialect:1:$strict" >/dev/null
 i=0
 until docker logs "$prefix-proxy" 2>&1 | grep -q "proxies ready"; do
     i=$((i + 1))

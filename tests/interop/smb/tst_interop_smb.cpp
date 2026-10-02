@@ -14,6 +14,7 @@
 #include <QtCore/QFile>
 #include <QtCore/QHash>
 #include <QtCore/QProcess>
+#include <QtCore/QStandardPaths>
 #include <QtCore/QTemporaryDir>
 #include <QtTest/QtTest>
 
@@ -113,7 +114,8 @@ private:
     QByteArray docker(const QStringList &args, int *exitCode = nullptr) const
     {
         QProcess process;
-        process.start(QStringLiteral("docker"), args);
+        // An absolute path: the command is not looked up in PATH at start().
+        process.start(QStandardPaths::findExecutable(QStringLiteral("docker")), args);
         process.waitForFinished(120000);
         if (exitCode)
             *exitCode = process.exitCode();
@@ -244,9 +246,9 @@ private:
     {
         int code = -1;
         exec(server, { QStringLiteral("sh"), QStringLiteral("-c"),
-                       QStringLiteral("rm -f /tmp/capture.pcap; (tcpdump -Z root -i any -p -U --immediate-mode -w /tmp/capture.pcap "
-                                      "tcp port 445 >/tmp/tcpdump.log 2>&1 &); for i in $(seq 100); do "
-                                      "grep -q listening /tmp/tcpdump.log && exit 0; sleep 0.1; done; exit 1") },
+                       QStringLiteral("rm -f /srv/work/capture.pcap; (tcpdump -Z root -i any -p -U --immediate-mode -w /srv/work/capture.pcap "
+                                      "tcp port 445 >/srv/work/tcpdump.log 2>&1 &); for i in $(seq 100); do "
+                                      "grep -q listening /srv/work/tcpdump.log && exit 0; sleep 0.1; done; exit 1") },
              &code);
         QCOMPARE(code, 0);
     }
@@ -256,7 +258,7 @@ private:
         QTest::qWait(1000);
         exec(server, { QStringLiteral("pkill"), QStringLiteral("-INT"), QStringLiteral("tcpdump") });
         QTest::qWait(300);
-        return exec(server, { QStringLiteral("cat"), QStringLiteral("/tmp/capture.pcap") });
+        return exec(server, { QStringLiteral("cat"), QStringLiteral("/srv/work/capture.pcap") });
     }
 
     void uploadMarker(const ConnectionParams &p, const QString &dir, const QByteArray &payload)
@@ -312,15 +314,15 @@ private slots:
         exec(QStringLiteral("strict"),
              { QStringLiteral("smbclient"), QStringLiteral("//localhost/backup"), QStringLiteral("-A"),
                QStringLiteral("/etc/netvfs-auth"), QStringLiteral("-c"),
-               QStringLiteral("get \"%1\" /tmp/fetched.bin").arg(remote) }, &code);
+               QStringLiteral("get \"%1\" /srv/work/fetched.bin").arg(remote) }, &code);
         QCOMPARE(code, 0);
-        QCOMPARE(exec(QStringLiteral("strict"), { QStringLiteral("sha256sum"), QStringLiteral("/tmp/fetched.bin") })
+        QCOMPARE(exec(QStringLiteral("strict"), { QStringLiteral("sha256sum"), QStringLiteral("/srv/work/fetched.bin") })
                      .left(64), m_bigSha);
         // ... and we list and fetch an upload by smbclient.
         exec(QStringLiteral("strict"),
              { QStringLiteral("sh"), QStringLiteral("-c"),
-               QStringLiteral("head -c 3333333 /dev/urandom > /tmp/theirs.bin && smbclient //localhost/backup "
-                              "-A /etc/netvfs-auth -c 'put /tmp/theirs.bin \"%1/theirs.bin\"'")
+               QStringLiteral("head -c 3333333 /dev/urandom > /srv/work/theirs.bin && smbclient //localhost/backup "
+                              "-A /etc/netvfs-auth -c 'put /srv/work/theirs.bin \"%1/theirs.bin\"'")
                    .arg(QLatin1String(BackupsDir)) }, &code);
         QCOMPARE(code, 0);
         QVector<Entry> entries;
@@ -333,7 +335,7 @@ private slots:
         QVERIFY(Transfer::downloadFile(backend.get(), QLatin1String(BackupsDir) + QStringLiteral("/theirs.bin"),
                                        local).ok());
         QCOMPARE(sha256Of(local),
-                 exec(QStringLiteral("strict"), { QStringLiteral("sha256sum"), QStringLiteral("/tmp/theirs.bin") })
+                 exec(QStringLiteral("strict"), { QStringLiteral("sha256sum"), QStringLiteral("/srv/work/theirs.bin") })
                      .left(64));
         backend->disconnect();
     }
@@ -373,6 +375,19 @@ private slots:
         QVERIFY2(row.contains("SMB3_11"), row.constData());
         QVERIFY2(row.contains("AES-128-CMAC"), row.constData());
         QVERIFY2(!row.contains("AES-128-CCM"), row.constData());
+    }
+
+    // M-3: with "Require encryption" off the library still encrypts where the
+    // server mandates it (smb2_set_seal() is not called at all).
+    void encryptionOffServerRequires()
+    {
+        const auto backend = newBackend();
+        const Result r = signIn(backend.get(), params(QStringLiteral("strict"), false), credentials());
+        QVERIFY2(r.ok(), qPrintable(r.toString()));
+        Entry entry;
+        QVERIFY(backend->stat(QString(), &entry).ok());
+        const QByteArray row = sessionRow(QStringLiteral("strict"));
+        QVERIFY2(row.contains("SMB3_11") && row.contains("AES-128-CCM"), row.constData());
     }
 
     // M-T5: wrong password, unknown user.
@@ -434,8 +449,21 @@ private slots:
         const auto backend = newBackend();
         const Result r = signIn(backend.get(), params(QStringLiteral("smb2only")), credentials());
         QCOMPARE(r.error(), Error::SecurityPolicy);
+        // M-1: refused by the server's negotiate reply (STATUS_NOT_SUPPORTED),
+        // because the client offered SMB 3 dialects only.
+        QVERIFY2(r.message().contains(QLatin1String("0xc00000bb")), qPrintable(r.message()));
         const Result plain = signIn(backend.get(), params(QStringLiteral("smb2only"), false), credentials());
         QCOMPARE(plain.error(), Error::SecurityPolicy);
+    }
+
+    // M-1: a reply that picks a dialect the client never offered (SMB 2.1
+    // against SMB2_VERSION_ANY3) ends the sign-in.
+    void dialectNeverOffered()
+    {
+        const auto backend = newBackend();
+        const Result r = signIn(backend.get(), viaProxy(4457, true), credentials());
+        QVERIFY2(!r.ok(), "a dialect that was not offered was accepted");
+        qInfo("%s", qPrintable(r.toString()));
     }
 
     // M-T10: a current Samba release with the strict configuration.
@@ -534,6 +562,9 @@ private slots:
         const auto backend = newBackend();
         QVERIFY(signIn(backend.get(), params(QStringLiteral("strict"), true, QStringLiteral("small")),
                        credentials()).ok());
+        qint64 freeBytes = -1;
+        QVERIFY(backend->freeSpace(QString(), &freeBytes).ok());
+        QVERIFY2(freeBytes > 15 * 1024 * 1024 && freeBytes <= 16 * 1024 * 1024, qPrintable(QString::number(freeBytes)));
         // Free space known: refused before transferring.
         QCOMPARE(Transfer::uploadFile(backend.get(), m_big, QStringLiteral("full.tar")).error(), Error::NoSpace);
         // Size unknown: the server's DISK_FULL ends the upload.
