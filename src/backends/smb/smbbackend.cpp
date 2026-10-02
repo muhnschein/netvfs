@@ -266,6 +266,8 @@ public:
         return m_b->closeFile(fh, m_b->m_cancel ? Result(Error::Canceled) : Result());
     }
 
+    smb2fh *handle() const { return m_fh; }
+
     // The backend's context, and with it the file handle, is gone.
     void invalidate()
     {
@@ -365,12 +367,26 @@ void SmbBackend::abandon(std::unique_ptr<Call> &call)
     m_orphans.push_back(std::move(call));
 }
 
+void SmbBackend::releaseReaders()
+{
+    // XC-13: handles end with the connection. Their close requests are
+    // queued without waiting; libsmb2 frees each file handle when its close
+    // completes, at the latest with a shutdown status in
+    // smb2_destroy_context().
+    for (Reader *reader : m_readers) {
+        if (m_ctx && reader->handle()) {
+            auto call = std::make_unique<Call>();
+            if (smb2_close_async(m_ctx, reader->handle(), netvfs_smb_complete_plain, call->completion()) == 0)
+                abandon(call);
+        }
+        reader->invalidate();
+    }
+    m_readers.clear();
+}
+
 void SmbBackend::destroyContext()
 {
-    // XC-13: handles end with the connection; the context frees their files.
-    for (Reader *reader : m_readers)
-        reader->invalidate();
-    m_readers.clear();
+    releaseReaders();
     if (m_ctx) {
         // Pending requests complete with a shutdown status here, so the
         // orphans they refer to must still exist.
@@ -839,6 +855,7 @@ void SmbBackend::disconnect()
 
 void SmbBackend::shutdown() noexcept
 {
+    releaseReaders();
     if (m_ctx && !m_broken && m_stage == Stage::Established && std::this_thread::get_id() == m_owner) {
         auto call = std::make_unique<Call>();
         request(call, [](smb2_context *ctx, Call *c) {

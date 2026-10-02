@@ -74,6 +74,7 @@ private:
                    Wait wait = Wait::Cancellable);
     Result await(std::unique_ptr<Call> &call, Wait wait);
     void abandon(std::unique_ptr<Call> &call);
+    void releaseReaders();
     void destroyContext();
     // disconnect() without virtual dispatch; also used by the destructor.
     void shutdown() noexcept;
