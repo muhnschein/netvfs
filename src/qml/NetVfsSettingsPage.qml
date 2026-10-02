@@ -49,7 +49,9 @@ Page {
 
     readonly property string _backupService: NetVfsHelpers.backupServiceName(provider)
     readonly property string _filesService: NetVfsHelpers.filesServiceName(provider)
+    // SPEC-v2 XP-1: the backup service comes with netvfs-backup-<provider>.
     readonly property bool _offersBackup: NetVfsProviders.offersService(provider, "backup")
+                                          && NetVfsHelpers.isServiceInstalled(_backupService)
     readonly property bool _offersFiles: NetVfsProviders.offersService(provider, "files")
                                          && NetVfsHelpers.isServiceInstalled(_filesService)
     readonly property bool _backupAllowed: NetVfsHelpers.serviceAllowed(_params, "backup")
