@@ -2,4 +2,4 @@
 TEMPLATE = subdirs
 SUBDIRS = core transfer accounts cli buteo qml smb sftp
 # Helpers that need only the core library (ops, bounded pipe, URLs).
-SUBDIRS += pipe
+SUBDIRS += pipe url

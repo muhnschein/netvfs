@@ -52,7 +52,8 @@ SOURCES = \
     secure.cpp \
     sshkeys.cpp \
     transfer.cpp \
-    types.cpp
+    types.cpp \
+    url.cpp
 
 target.path = $$[QT_INSTALL_LIBS]
 headers.files = $$PUBLIC_HEADERS
