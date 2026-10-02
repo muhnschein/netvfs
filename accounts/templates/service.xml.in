@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: LGPL-2.1-or-later -->
+<!-- SPEC 3.2, 3.3, 6.1: a "storage" service named <provider>-backup. -->
+<service id="@PROVIDER@-backup">
+    <type>storage</type>
+    <name>Backups</name>
+    <icon>image://theme/icon-m-storage</icon>
+    <provider>@PROVIDER@</provider>
+    <template>
+        <setting name="sync_profile_templates" type="as">["@PROVIDER@.Backup", "@PROVIDER@.BackupQuery", "@PROVIDER@.BackupRestore"]</setting>
+        <group name="auth">
+            <setting name="method">password</setting>
+            <setting name="mechanism">password</setting>
+        </group>
+    </template>
+</service>
