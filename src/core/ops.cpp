@@ -200,19 +200,18 @@ Result Walker::finish(const Frame &frame)
 
 Result Walker::run(const QString &root)
 {
-    Frame top;
-    top.path = root;
-    top.identity = root;
-    top.depth = -1;
-    Result r = list(&top);
+    Frame rootFrame;
+    rootFrame.path = root;
+    rootFrame.identity = root;
+    rootFrame.depth = -1;
+    Result r = list(&rootFrame);
     if (!r.ok())
         return r;
     m_branch.insert(root);
-    m_stack.append(top);
+    m_stack.append(rootFrame);
     while (!m_stack.isEmpty()) {
         const int index = m_stack.size() - 1;
-        Frame &top = m_stack[index];
-        if (top.next < top.children.size()) {
+        if (Frame &top = m_stack[index]; top.next < top.children.size()) {
             const Entry entry = top.children.at(top.next++);
             // `step` appends to the stack: hand it a copy of the parent data.
             Frame parent;
@@ -237,8 +236,7 @@ Result Walker::run(const QString &root)
 Result walk(Backend *backend, const QString &root, WalkVisitor *visitor, const WalkOptions &options)
 {
     QString normalized;
-    const Result r = Paths::normalize(root, &normalized);
-    if (!r.ok())
+    if (const Result r = Paths::normalize(root, &normalized); !r.ok())
         return r;
     Walker walker(backend, visitor, options);
     return walker.run(normalized);
@@ -261,8 +259,7 @@ public:
             return removeEntry(path, false);
         // Never follow a link even if the backend listed it as a folder.
         Entry real;
-        const Result r = m_backend->lstat(path, &real);
-        if (!r.ok() || real.type != EntryType::Directory) {
+        if (const Result r = m_backend->lstat(path, &real); !r.ok() || real.type != EntryType::Directory) {
             *descend = false;
             if (r.error() == Error::NotFound)
                 return true;       // already gone
@@ -275,8 +272,7 @@ public:
     bool leave(const QString &path, const Entry &entry, int depth) override
     {
         Q_UNUSED(entry) Q_UNUSED(depth)
-        const qint64 mark = m_marks.takeLast();
-        if (mark != m_failures)
+        if (const qint64 mark = m_marks.takeLast(); mark != m_failures)
             return true;       // something below is left: removing the folder would fail
         return removeEntry(path, true);
     }
@@ -425,7 +421,10 @@ class SourceProgress : public Progress
 {
 public:
     explicit SourceProgress(BoundedPipe *pipe) : m_pipe(pipe) {}
-    void update(qint64, qint64) override {}
+    void update(qint64, qint64) override
+    {
+        // The caller's Progress belongs to the calling thread; the destination side reports.
+    }
     bool canceled() const override { return !m_pipe->result().ok(); }
 
 private:
@@ -533,9 +532,9 @@ Result copyFile(const FileJob &job, const CopyAcrossOptions &options, Progress *
         return Result(Error::Internal, QStringLiteral("Cannot start the download thread"));
 
     DestinationProgress destinationProgress(&pipe, progress, job.base, job.total);
-    const Result uploaded = Transfer::upload(job.destination, pipe.reader(), job.size, job.destinationPath,
-                                             &destinationProgress, policyFor(job, options));
-    if (!uploaded.ok()) {
+    if (const Result uploaded = Transfer::upload(job.destination, pipe.reader(), job.size, job.destinationPath,
+                                                 &destinationProgress, policyFor(job, options));
+        !uploaded.ok()) {
         pipe.fail(uploaded);       // wakes a download blocked on a full pipe
         worker.join();
         return pipe.result();
@@ -557,11 +556,11 @@ class CopyTreeVisitor : public WalkVisitor
 public:
     CopyTreeVisitor(Backend *source, const QString &sourceRoot, Backend *destination, const QString &destinationRoot,
                     const CopyAcrossOptions &options, Progress *progress)
-        : m_source(source), m_destination(destination), m_options(options), m_progress(progress)
+        : m_source(source), m_destination(destination), m_options(options), m_progress(progress),
+          m_sourcePrefix(sourceRoot.isEmpty() || sourceRoot.endsWith(QLatin1Char('/'))
+                             ? sourceRoot : sourceRoot + QLatin1Char('/')),
+          m_destinationRoot(destinationRoot)
     {
-        m_sourcePrefix = sourceRoot.isEmpty() || sourceRoot.endsWith(QLatin1Char('/'))
-            ? sourceRoot : sourceRoot + QLatin1Char('/');
-        m_destinationRoot = destinationRoot;
     }
 
     bool visit(const QString &path, const Entry &entry, int depth, bool *descend) override

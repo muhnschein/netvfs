@@ -9,8 +9,8 @@
   {
     "name": "XH-2 listed folder type trusted (symlink not verified with lstat)",
     "file": "src/core/ops.cpp",
-    "search": "if (!r.ok() || real.type != EntryType::Directory) {",
-    "replace": "if (!r.ok()) {",
+    "search": "!r.ok() || real.type != EntryType::Directory) {",
+    "replace": "!r.ok()) {",
     "test": "timeout 120 build/tests/unit/ops/tst_ops"
   },
   {
@@ -37,8 +37,8 @@
   {
     "name": "XH-2 folder with a failed entry below it is still removed",
     "file": "src/core/ops.cpp",
-    "search": "        if (mark != m_failures)\n            return true;",
-    "replace": "        if (mark != m_failures && false)\n            return true;",
+    "search": "if (const qint64 mark = m_marks.takeLast(); mark != m_failures)",
+    "replace": "if (const qint64 mark = m_marks.takeLast(); mark != m_failures && false)",
     "test": "timeout 120 build/tests/unit/ops/tst_ops"
   },
   {

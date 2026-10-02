@@ -78,8 +78,7 @@ QString windowsComponentProblem(const QString &component)
 Result checkWindowsPath(const QString &normalizedPath)
 {
     for (const QString &component : components(normalizedPath)) {
-        const QString problem = windowsComponentProblem(component);
-        if (!problem.isEmpty())
+        if (const QString problem = windowsComponentProblem(component); !problem.isEmpty())
             return Result(Error::Internal, problem);
     }
     return Result::success();
@@ -153,11 +152,9 @@ QString fitBytes(const QString &name, qint64 maxBytes)
 {
     if (maxBytes <= 0 || Names::encode(name).size() <= maxBytes)
         return name;
-    const int dot = name.lastIndexOf(QLatin1Char('.'));
-    if (dot > 0) {
+    if (const int dot = name.lastIndexOf(QLatin1Char('.')); dot > 0) {
         const QString extension = name.mid(dot);
-        const qint64 extensionBytes = Names::encode(extension).size();
-        if (extensionBytes < maxBytes) {
+        if (const qint64 extensionBytes = Names::encode(extension).size(); extensionBytes < maxBytes) {
             const QString stem = truncateBytes(name.left(dot), maxBytes - extensionBytes);
             if (!stem.isEmpty())
                 return stem + extension;

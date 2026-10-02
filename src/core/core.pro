@@ -38,6 +38,7 @@ PUBLIC_HEADERS = \
     url.h
 
 HEADERS = $$PUBLIC_HEADERS \
+    addressclass.h \
     discoverycache.h
 
 SOURCES = \

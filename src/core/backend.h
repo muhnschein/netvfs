@@ -53,6 +53,9 @@ public:
 class NETVFS_EXPORT Backend
 {
 public:
+    Backend() = default;
+    Backend(const Backend &) = delete;
+    Backend &operator=(const Backend &) = delete;
     virtual ~Backend();
 
     // Opens the transport and reports the server identity, if the protocol has
@@ -124,6 +127,8 @@ public:
 
 // Interface implemented by each backend plugin (libnetvfs-<provider>.so),
 // IID "org.netvfs.BackendFactory/2.0" (XC-1).
+constexpr const char BackendFactoryIid[] = "org.netvfs.BackendFactory/2.0";
+
 class NETVFS_EXPORT BackendFactory
 {
 public:
@@ -134,8 +139,7 @@ public:
 
 } // namespace NetVfs
 
-#define NETVFS_BACKEND_FACTORY_IID "org.netvfs.BackendFactory/2.0"
-// Plugins use the same IID string in Q_PLUGIN_METADATA (moc needs a literal).
+// moc needs a literal here and in Q_PLUGIN_METADATA; both repeat BackendFactoryIid.
 Q_DECLARE_INTERFACE(NetVfs::BackendFactory, "org.netvfs.BackendFactory/2.0")
 
 #endif

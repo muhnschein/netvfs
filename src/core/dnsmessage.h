@@ -10,6 +10,8 @@
 #include <QtCore/QVector>
 #include <QtNetwork/QHostAddress>
 
+#include <utility>
+
 // SPEC-v2 XD-1: the DNS wire format as far as multicast DNS service discovery
 // (RFC 6762, RFC 6763) needs it: questions and the record types A, AAAA, PTR,
 // SRV and TXT. No sockets, no clock: a pure encoder and decoder so that it can
@@ -34,14 +36,13 @@ constexpr int MaxLabelLength = 63;
 constexpr int MaxNameLength = 255;         // wire form, including length bytes and the root
 constexpr int MaxRecords = 512;            // questions + records per message accepted by decode()
 
-enum RecordType : quint16 {
-    TypeA = 1,
-    TypePtr = 12,
-    TypeTxt = 16,
-    TypeAaaa = 28,
-    TypeSrv = 33,
-    TypeAny = 255
-};
+// Record types (RFC 1035, 3596, 2782).
+constexpr quint16 TypeA = 1;
+constexpr quint16 TypePtr = 12;
+constexpr quint16 TypeTxt = 16;
+constexpr quint16 TypeAaaa = 28;
+constexpr quint16 TypeSrv = 33;
+constexpr quint16 TypeAny = 255;
 
 constexpr quint16 ClassIn = 1;
 
@@ -77,6 +78,35 @@ struct NETVFS_EXPORT Record {
     QList<QByteArray> txt;
     QHostAddress address;
     QByteArray rdata;
+
+    Record() = default;
+    Record(const Record &other) = default;
+    Record &operator=(const Record &other) = default;
+    ~Record() = default;
+    // QHostAddress has no move constructor in Qt 5: swapping it cannot fail.
+    Record(Record &&other) noexcept
+        : name(std::move(other.name)), type(other.type), cls(other.cls), cacheFlush(other.cacheFlush),
+          ttl(other.ttl), target(std::move(other.target)), priority(other.priority), weight(other.weight),
+          port(other.port), txt(std::move(other.txt)), rdata(std::move(other.rdata))
+    {
+        address.swap(other.address);
+    }
+    Record &operator=(Record &&other) noexcept
+    {
+        name = std::move(other.name);
+        type = other.type;
+        cls = other.cls;
+        cacheFlush = other.cacheFlush;
+        ttl = other.ttl;
+        target = std::move(other.target);
+        priority = other.priority;
+        weight = other.weight;
+        port = other.port;
+        txt = std::move(other.txt);
+        address.swap(other.address);
+        rdata = std::move(other.rdata);
+        return *this;
+    }
 };
 
 struct NETVFS_EXPORT Message {

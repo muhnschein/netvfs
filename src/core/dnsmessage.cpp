@@ -34,7 +34,7 @@ bool fail(QString *error, const char *why)
 
 void appendEscaped(QByteArray *out, char c)
 {
-    const uchar u = static_cast<uchar>(c);
+    const auto u = static_cast<uchar>(c);
     if (c == '.' || c == '\\') {
         out->append('\\');
         out->append(c);
@@ -331,8 +331,8 @@ public:
         }
         for (int i = 0; i < labels.size(); ++i) {
             const QByteArray suffix = canonicalName(joinName(labels.mid(i)));
-            const auto known = m_offsets.constFind(suffix);
-            if (allowPointer && m_compress && known != m_offsets.constEnd()) {
+            if (const auto known = m_offsets.constFind(suffix);
+                allowPointer && m_compress && known != m_offsets.constEnd()) {
                 u16(static_cast<quint16>((PointerFlag << 8) | known.value()));
                 return;
             }
@@ -516,8 +516,7 @@ bool parseEscape(const QByteArray &name, int *i, QByteArray *label)
     const int n = name.size();
     if (*i + 1 >= n)
         return false;
-    const char next = name.at(*i + 1);
-    if (next < '0' || next > '9') {
+    if (const char next = name.at(*i + 1); next < '0' || next > '9') {
         label->append(next);
         *i += 2;
         return true;
@@ -591,8 +590,7 @@ bool findTxt(const QList<QByteArray> &txt, const QByteArray &key, QByteArray *va
     const QByteArray wanted = key.toLower();
     for (const QByteArray &s : txt) {
         const int eq = s.indexOf('=');
-        const QByteArray k = (eq >= 0 ? s.left(eq) : s).toLower();
-        if (!k.isEmpty() && k == wanted) {
+        if (const QByteArray k = (eq >= 0 ? s.left(eq) : s).toLower(); !k.isEmpty() && k == wanted) {
             *value = eq >= 0 ? s.mid(eq + 1) : QByteArray();
             return true;
         }

@@ -115,9 +115,9 @@ public:
     void restartBackoff();
     void runTimers();
     void onDatagram(const QByteArray &data, const QHostAddress &sender);
-    void sendBrowse(qint64 at);
-    void sendQuestions(const QVector<Dns::Question> &questions);
-    void flush(const ServiceCache::Events &events);
+    void sendBrowse(qint64 at) const;
+    void sendQuestions(const QVector<Dns::Question> &questions) const;
+    void flush(const ServiceCache::Events &events) const;
     void arm();
 
     Discovery *q;
@@ -243,12 +243,11 @@ void Discovery::Private::runTimers()
 
 void Discovery::Private::onDatagram(const QByteArray &data, const QHostAddress &sender)
 {
-    Q_UNUSED(sender);
+    Q_UNUSED(sender)
     if (!q->isRunning())
         return;
     Dns::Message message;
-    QString why;
-    if (!Dns::decode(data, &message, &why)) {
+    if (QString why; !Dns::decode(data, &message, &why)) {
         qCDebug(lcNetVfsCore) << "discovery: dropped a malformed datagram:" << why;
         return;
     }
@@ -260,7 +259,7 @@ void Discovery::Private::onDatagram(const QByteArray &data, const QHostAddress &
     arm();
 }
 
-void Discovery::Private::sendBrowse(qint64 at)
+void Discovery::Private::sendBrowse(qint64 at) const
 {
     Dns::Message message;
     for (const BrowseType &t : browseTypeTable()) {
@@ -273,8 +272,7 @@ void Discovery::Private::sendBrowse(qint64 at)
     const QVector<Dns::Record> known = cache.knownAnswers(at);
     for (const Dns::Record &r : known) {
         message.answers.append(r);
-        const int size = Dns::encode(message).size();
-        if (size == 0 || size > MaxQueryBytes) {
+        if (const int size = Dns::encode(message).size(); size == 0 || size > MaxQueryBytes) {
             message.answers.removeLast();
             break;
         }
@@ -282,18 +280,17 @@ void Discovery::Private::sendBrowse(qint64 at)
     transport->send(Dns::encode(message));
 }
 
-void Discovery::Private::sendQuestions(const QVector<Dns::Question> &questions)
+void Discovery::Private::sendQuestions(const QVector<Dns::Question> &questions) const
 {
     for (int i = 0; i < questions.size(); i += QuestionsPerPacket) {
         Dns::Message message;
         message.questions = questions.mid(i, QuestionsPerPacket);
-        const QByteArray packet = Dns::encode(message);
-        if (!packet.isEmpty())
+        if (const QByteArray packet = Dns::encode(message); !packet.isEmpty())
             transport->send(packet);
     }
 }
 
-void Discovery::Private::flush(const ServiceCache::Events &events)
+void Discovery::Private::flush(const ServiceCache::Events &events) const
 {
     const quint64 gen = generation;
     for (const ServiceCache::Event &e : events) {
@@ -314,8 +311,7 @@ void Discovery::Private::arm()
         return;
     }
     qint64 next = nextBrowseAt;
-    const qint64 deadline = cache.nextDeadline();
-    if (deadline >= 0 && deadline < next)
+    if (const qint64 deadline = cache.nextDeadline(); deadline >= 0 && deadline < next)
         next = deadline;
     const qint64 delay = std::max<qint64>(MinTimerDelayMs, next - now());
     timer.start(static_cast<int>(std::min<qint64>(delay, INT_MAX)));

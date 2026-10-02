@@ -37,9 +37,9 @@ QObject *pluginFor(const QString &provider)
         // another API version is never instantiated (its classes may still
         // cast to the current interface).
         if (const QString iid = loader.metaData().value(QStringLiteral("IID")).toString();
-                !iid.isEmpty() && iid != QLatin1String(NETVFS_BACKEND_FACTORY_IID)) {
+                !iid.isEmpty() && iid != QLatin1String(BackendFactoryIid)) {
             qCWarning(lcNetVfsCore) << "Backend" << path << "has interface" << iid << "but"
-                                    << NETVFS_BACKEND_FACTORY_IID << "is expected";
+                                    << BackendFactoryIid << "is expected";
             continue;
         }
         QObject *root = loader.instance();

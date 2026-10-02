@@ -16,8 +16,8 @@
   {
     "name": "part not removed after failed upload",
     "file": "src/core/transfer.cpp",
-    "search": "    const Result r = backend->removeFile(path);\n    if (!r.ok() && r.error() != Error::NotFound)",
-    "replace": "    const Result r = Result();\n    Q_UNUSED(path)\n    if (!r.ok() && r.error() != Error::NotFound)",
+    "search": "    if (const Result r = backend->removeFile(path); !r.ok() && r.error() != Error::NotFound)",
+    "replace": "    Q_UNUSED(path)\n    if (const Result r = Result(); !r.ok() && r.error() != Error::NotFound)",
     "test": "build/tests/unit/transfer/tst_transfer"
   },
   {
@@ -149,22 +149,22 @@
   {
     "name": "XH-1 direct NoReplace upload truncates",
     "file": "src/core/transfer.cpp",
-    "search": "            ? WriteOptions::CreateNew : WriteOptions::Truncate;",
-    "replace": "            ? WriteOptions::Truncate : WriteOptions::Truncate;",
+    "search": "        ? WriteOptions::CreateNew : WriteOptions::Truncate;",
+    "replace": "        ? WriteOptions::Truncate : WriteOptions::Truncate;",
     "test": "build/tests/unit/transfer/tst_transfer"
   },
   {
     "name": "XH-1 create mode not passed",
     "file": "src/core/transfer.cpp",
-    "search": "        options.write.createMode = policy.createMode;",
+    "search": "    options.write.createMode = policy.createMode;",
     "replace": "",
     "test": "build/tests/unit/transfer/tst_transfer"
   },
   {
     "name": "XH-1 resume offset not checked",
     "file": "src/core/transfer.cpp",
-    "search": "        if (existing.size != policy.resumeOffset) {",
-    "replace": "        if (false) {",
+    "search": "    if (existing.size != policy.resumeOffset) {",
+    "replace": "    if (false) {",
     "test": "build/tests/unit/transfer/tst_transfer"
   },
   {
@@ -177,8 +177,8 @@
   {
     "name": "XH-1 failed resume removes the temporary file",
     "file": "src/core/transfer.cpp",
-    "search": "        if (policy.useTempName && !policy.resume)",
-    "replace": "        if (policy.useTempName)",
+    "search": "    if (policy.useTempName && !policy.resume)",
+    "replace": "    if (policy.useTempName)",
     "test": "build/tests/unit/transfer/tst_transfer"
   },
   {
@@ -296,14 +296,14 @@
   {
     "name": "XC-4 escapes not detected",
     "file": "src/core/names.cpp",
-    "search": "        if (isEscape(u))\n            return true;",
+    "search": "        if (isEscape(name.at(i).unicode()))\n            return true;",
     "replace": "",
     "test": "build/tests/unit/core/tst_core"
   },
   {
     "name": "XC-1 plugin IID not checked",
     "file": "src/core/backendloader.cpp",
-    "search": "!iid.isEmpty() && iid != QLatin1String(NETVFS_BACKEND_FACTORY_IID)",
+    "search": "!iid.isEmpty() && iid != QLatin1String(BackendFactoryIid)",
     "replace": "false",
     "test": "build/tests/unit/core/tst_core"
   },

@@ -120,15 +120,11 @@ Result Backend::read(const QString &path, qint64 offset, qint64 length, QByteArr
         return r;
     QByteArray data;
     qint64 position = offset;
-    for (;;) {
-        const qint64 want = length < 0 ? qint64(1) << 20 : length - data.size();
-        if (want <= 0)
-            break;
+    const auto wanted = [length, &data]() { return length < 0 ? qint64(1) << 20 : length - data.size(); };
+    while (wanted() > 0) {
         QByteArray chunk;
-        r = handle->read(position, want, &chunk);
-        if (!r.ok())
-            break;
-        if (chunk.isEmpty())
+        r = handle->read(position, wanted(), &chunk);
+        if (!r.ok() || chunk.isEmpty())
             break;
         data += chunk;
         position += chunk.size();
