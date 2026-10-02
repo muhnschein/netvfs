@@ -346,7 +346,7 @@ private slots:
         QCOMPARE(verified.count(), 0);
         QCOMPARE(failed.count(), 0);
         QCOMPARE(probe.state(), NetVfsProbe::State::Idle);
-        QVERIFY(!logHas(QStringLiteral("freeSpace:")));
+        QVERIFY(!logHas(QStringLiteral("spaceInfo:")));
 
         // The probe is usable again afterwards.
         FakeServer::instance()->chunkDelayMs = 0;

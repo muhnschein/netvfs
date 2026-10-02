@@ -22,6 +22,24 @@ using NetVfs::Test::FakeServer;
 
 namespace {
 
+class StaleReader : public ReadHandle
+{
+public:
+    qint64 size() const override { return -1; }
+    Result read(qint64, qint64, QByteArray *) override { return Result(); }
+    void readAhead(qint64, qint64) override {}
+    Result close() override { return Result(); }
+};
+
+class StaleWriter : public WriteHandle
+{
+public:
+    Result write(const char *, qint64) override { return Result(); }
+    qint64 position() const override { return 0; }
+    Result commit() override { return Result(); }
+    void abort() override {}
+};
+
 // Implements only the pure virtual methods, so that the defaults and the
 // non-virtual helpers of Backend can be checked (SPEC-v2 §4.10).
 class MinimalBackend : public Backend
@@ -604,10 +622,12 @@ private slots:
         QCOMPARE(b.readLink(QStringLiteral("x"), &target).error(), Error::Unsupported);
         QCOMPARE(b.makeSymlink(QStringLiteral("t"), QStringLiteral("x")).error(), Error::Unsupported);
         QCOMPARE(b.makeHardlink(QStringLiteral("t"), QStringLiteral("x")).error(), Error::Unsupported);
-        ReadHandle *reader = reinterpret_cast<ReadHandle *>(&b);
+        StaleReader staleReader;
+        ReadHandle *reader = &staleReader;
         QCOMPARE(b.openRead(QStringLiteral("x"), &reader).error(), Error::Unsupported);
         QVERIFY(!reader);
-        WriteHandle *writer = reinterpret_cast<WriteHandle *>(&b);
+        StaleWriter staleWriter;
+        WriteHandle *writer = &staleWriter;
         QCOMPARE(b.openWrite(QStringLiteral("x"), WriteOptions(), &writer).error(), Error::Unsupported);
         QVERIFY(!writer);
         QCOMPARE(b.copy(QStringLiteral("a"), QStringLiteral("b"), CopyOptions()).error(), Error::Unsupported);

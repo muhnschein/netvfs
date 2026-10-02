@@ -114,8 +114,8 @@
   {
     "name": "8.5 .part files listed",
     "file": "src/buteo/lib/backupsteps.cpp",
-    "search": "        if (!entry.isDir && !entry.name.endsWith(QLatin1String(PartSuffix)))",
-    "replace": "        if (!entry.isDir)",
+    "search": "        if (!entry.isDir() && !entry.name.endsWith(QLatin1String(PartSuffix)))",
+    "replace": "        if (!entry.isDir())",
     "test": "dbus-run-session -- build/tests/unit/buteo/tst_buteo"
   },
   {
@@ -163,7 +163,7 @@
   {
     "name": "8.7 network errors not CONNECTION_ERROR",
     "file": "src/buteo/lib/backupclient.cpp",
-    "search": "    case Error::NetworkUnreachable:\n    case Error::Timeout:\n        return Buteo::SyncResults::CONNECTION_ERROR;",
+    "search": "    case Error::NetworkUnreachable:\n    case Error::ConnectionLost:         // XC-21: retryable like an unreachable server\n    case Error::TooManyConnections:\n    case Error::RateLimited:\n    case Error::Timeout:\n        return Buteo::SyncResults::CONNECTION_ERROR;",
     "replace": "",
     "test": "dbus-run-session -- build/tests/unit/buteo/tst_buteo"
   },
@@ -200,6 +200,27 @@
     "file": "src/buteo/lib/networkjob.cpp",
     "search": "    if (m_backend && m_canceled)\n        m_backend->cancel();",
     "replace": "    Q_UNUSED(m_canceled)",
+    "test": "dbus-run-session -- build/tests/unit/buteo/tst_buteo"
+  },
+  {
+    "name": "XC-21 lost connection not CONNECTION_ERROR",
+    "file": "src/buteo/lib/backupclient.cpp",
+    "search": "    case Error::ConnectionLost:         // XC-21: retryable like an unreachable server\n",
+    "replace": "",
+    "test": "dbus-run-session -- build/tests/unit/buteo/tst_buteo"
+  },
+  {
+    "name": "XC-23 backup folders not private",
+    "file": "src/buteo/lib/backuprun.cpp",
+    "search": "withBackupDirMode(m_session->params())",
+    "replace": "m_session->params()",
+    "test": "dbus-run-session -- build/tests/unit/buteo/tst_buteo"
+  },
+  {
+    "name": "8.5 query drops non-file entries",
+    "file": "src/buteo/lib/backupsteps.cpp",
+    "search": "        if (!entry.isDir() && !entry.name.endsWith(QLatin1String(PartSuffix)))",
+    "replace": "        if (entry.isFile() && !entry.name.endsWith(QLatin1String(PartSuffix)))",
     "test": "dbus-run-session -- build/tests/unit/buteo/tst_buteo"
   }
 ]
