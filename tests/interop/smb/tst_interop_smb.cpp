@@ -1050,7 +1050,7 @@ private slots:
         QCOMPARE(backend->upload(&source, QStringLiteral("v2io/big.bin"), options, nullptr).error(), Error::AlreadyExists);
         QCOMPARE(backend->upload(&source, QStringLiteral("v2io"), options, nullptr).error(), Error::IsADirectory);
         QVERIFY(put(backend.get(), QStringLiteral("v2io/small.bin"), "0123456789"));
-        options.write.disposition = WriteOptions::Truncate;
+        options.write.disposition = WriteOptions::Disposition::Truncate;
         QVERIFY(backend->upload(&source, QStringLiteral("v2io/small.bin"), options, nullptr).ok());
         QCOMPARE(contentOf(backend.get(), QStringLiteral("v2io/small.bin")), small);
 

@@ -1235,7 +1235,7 @@ private slots:
         QCOMPARE(b->upload(&source, dir + QStringLiteral("/private.bin"), options, nullptr).error(),
                  Error::AlreadyExists);
         QCOMPARE(b->upload(&source, dir, options, nullptr).error(), Error::IsADirectory);
-        options.write.disposition = WriteOptions::Truncate;
+        options.write.disposition = WriteOptions::Disposition::Truncate;
         QVERIFY(b->upload(&source, dir + QStringLiteral("/private.bin"), options, nullptr).ok());
         QCOMPARE(exec(QStringLiteral("o103"), QStringLiteral("cat \"$P\""),
                       { QStringLiteral("P=") + disk + QStringLiteral("/private.bin") }),

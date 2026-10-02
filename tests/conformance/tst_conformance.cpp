@@ -582,7 +582,7 @@ void TestConformance::namesNormalization()
     const QString nfc = QStringLiteral("é.txt");
     const QString nfd = QStringLiteral("é.txt");
     QCOMPARE(putFile(m_backend.get(), p(nfc), "nfc"), Result::success());
-    QCOMPARE(putFile(m_backend.get(), p(nfd), "nfd", WriteOptions::CreateNew), Result::success());
+    QCOMPARE(putFile(m_backend.get(), p(nfd), "nfd", WriteOptions::Disposition::CreateNew), Result::success());
     QStringList expected { nfc, nfd };
     expected.sort();
     QCOMPARE(names(m_backend.get(), m_dir), expected);
@@ -822,7 +822,7 @@ void TestConformance::hardlinks()
     // One file under two names: a write through one shows through the other.
     WriteHandle *raw = nullptr;
     WriteOptions options;
-    options.disposition = WriteOptions::Truncate;
+    options.disposition = WriteOptions::Disposition::Truncate;
     const Result opened = m_backend->openWrite(p(QStringLiteral("hard")), options, &raw);
     std::unique_ptr<WriteHandle> handle(raw);
     if (opened.ok()) {
@@ -951,7 +951,7 @@ void TestConformance::writeHandle()
     QCOMPARE(getFile(m_backend.get(), p(QStringLiteral("written")), &read), Result::success());
     QCOMPARE(read, data);
 
-    options.disposition = WriteOptions::Truncate;
+    options.disposition = WriteOptions::Disposition::Truncate;
     options.createMode = 0600;
     QCOMPARE(m_backend->openWrite(p(QStringLiteral("written")), options, &raw), Result::success());
     handle.reset(raw);
@@ -973,14 +973,14 @@ void TestConformance::writeHandle()
         QCOMPARE(entry.mode, 0600);
 
     // abort(): closes without commit; whatever was written may remain.
-    options.disposition = WriteOptions::CreateNew;
+    options.disposition = WriteOptions::Disposition::CreateNew;
     QCOMPARE(m_backend->openWrite(p(QStringLiteral("aborted")), options, &raw), Result::success());
     handle.reset(raw);
     QCOMPARE(handle->write("partial", 7), Result::success());
     handle->abort();
     handle.reset();
     QCOMPARE(m_backend->makeDir(p(QStringLiteral("dir")), true), Result::success());
-    options.disposition = WriteOptions::Truncate;
+    options.disposition = WriteOptions::Disposition::Truncate;
     QVERIFY(!m_backend->openWrite(p(QStringLiteral("dir")), options, &raw).ok());
     QVERIFY(!raw);
 }
@@ -994,7 +994,7 @@ void TestConformance::writeResume()
     QCOMPARE(putFile(m_backend.get(), p(QStringLiteral("part")), head), Result::success());
     WriteHandle *raw = nullptr;
     WriteOptions options;
-    options.disposition = WriteOptions::Resume;
+    options.disposition = WriteOptions::Disposition::Resume;
     QByteArray read;
     // Wrong offsets are refused before anything is written.
     for (const qint64 wrong : { qint64(99), qint64(101), qint64(0) }) {
@@ -1063,7 +1063,7 @@ void TestConformance::uploadDownload()
     source.open(QIODevice::ReadOnly);
     RecordingProgress up;
     UploadOptions options;
-    options.write.disposition = WriteOptions::CreateNew;
+    options.write.disposition = WriteOptions::Disposition::CreateNew;
     QCOMPARE(m_backend->upload(&source, p(QStringLiteral("big")), options, &up), Result::success());
     QVERIFY(!up.updates.isEmpty());
     QVERIFY(up.monotonic);
@@ -1080,11 +1080,11 @@ void TestConformance::uploadDownload()
     QVERIFY(down.updates.last().second == -1 || down.updates.last().second == data.size());
 
     // CreateNew refuses an existing file and leaves it alone.
-    QCOMPARE(putFile(m_backend.get(), p(QStringLiteral("big")), "small", WriteOptions::CreateNew), Result(Error::AlreadyExists));
+    QCOMPARE(putFile(m_backend.get(), p(QStringLiteral("big")), "small", WriteOptions::Disposition::CreateNew), Result(Error::AlreadyExists));
     QByteArray read;
     QCOMPARE(getFile(m_backend.get(), p(QStringLiteral("big")), &read), Result::success());
     QCOMPARE(read, data);
-    QCOMPARE(putFile(m_backend.get(), p(QStringLiteral("big")), "small", WriteOptions::Truncate), Result::success());
+    QCOMPARE(putFile(m_backend.get(), p(QStringLiteral("big")), "small", WriteOptions::Disposition::Truncate), Result::success());
     QCOMPARE(getFile(m_backend.get(), p(QStringLiteral("big")), &read), Result::success());
     QCOMPARE(read, QByteArray("small"));
     QCOMPARE(putFile(m_backend.get(), p(QStringLiteral("empty")), QByteArray()), Result::success());
@@ -1118,7 +1118,7 @@ void TestConformance::uploadOptions()
 
     // XC-23: the default mode is the server's (umask applied); the owner
     // can always read and write a new file.
-    QCOMPARE(putFile(m_backend.get(), p(QStringLiteral("default")), "x", WriteOptions::CreateNew), Result::success());
+    QCOMPARE(putFile(m_backend.get(), p(QStringLiteral("default")), "x", WriteOptions::Disposition::CreateNew), Result::success());
     QCOMPARE(m_backend->stat(p(QStringLiteral("default")), &entry), Result::success());
     if (has(Capability::PosixModes))
         QCOMPARE(entry.mode & 0600, 0600);
@@ -1178,7 +1178,7 @@ void TestConformance::largeSparseChecks(const QString &path, qint64 size, qint64
     }
     if (has(Capability::WriteResume)) {
         WriteOptions options;
-        options.disposition = WriteOptions::Resume;
+        options.disposition = WriteOptions::Disposition::Resume;
         options.resumeOffset = size;
         WriteHandle *raw = nullptr;
         QCOMPARE(m_backend->openWrite(path, options, &raw), Result::success());
@@ -1363,7 +1363,7 @@ void TestConformance::unsupportedWithoutSideEffects()
     });
     expectUnsupported(Capability::WriteResume, [&]() {
         WriteOptions options;
-        options.disposition = WriteOptions::Resume;
+        options.disposition = WriteOptions::Disposition::Resume;
         options.resumeOffset = 7;
         WriteHandle *raw = nullptr;
         const Result r = m_backend->openWrite(p(QStringLiteral("file")), options, &raw);
@@ -1444,7 +1444,7 @@ void TestConformance::cancelStalledFifo()
     if (QTest::currentTestFailed())
         return;
     WriteOptions options;
-    options.disposition = WriteOptions::Truncate;
+    options.disposition = WriteOptions::Disposition::Truncate;
     WriteHandle *writer = nullptr;
     if (m_backend->openWrite(path, options, &writer).ok()) {
         std::unique_ptr<WriteHandle> handle(writer);

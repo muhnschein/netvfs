@@ -157,7 +157,7 @@ void FtpReadHandle::invalidate()
 FtpWriteHandle::FtpWriteHandle(FtpBackend *backend, const QByteArray &remote, const WriteOptions &options)
     : m_backend(backend), m_remote(remote), m_options(options)
 {
-    if (options.disposition == WriteOptions::Resume)
+    if (options.disposition == WriteOptions::Disposition::Resume)
         m_position = options.resumeOffset;
     m_backend->registerHandle(this);
 }
@@ -185,7 +185,7 @@ Result FtpWriteHandle::ensureStarted()
     Request request;
     request.kind = Request::Kind::Upload;
     request.path = m_remote;
-    request.append = m_options.disposition == WriteOptions::Resume;
+    request.append = m_options.disposition == WriteOptions::Disposition::Resume;
     // No CURLOPT_INFILESIZE: libcurl would end the upload by itself once the
     // announced size went out; the upload ends with commit().
     request.commands = m_backend->prefixed({});

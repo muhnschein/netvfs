@@ -241,8 +241,8 @@ struct SpaceInfo {
 // ------------------------------------------------------------ I/O (XC-13/14)
 
 struct WriteOptions {
-    enum Disposition { CreateNew, Truncate, Resume };
-    Disposition disposition = CreateNew;
+    enum class Disposition { CreateNew, Truncate, Resume };
+    Disposition disposition = Disposition::CreateNew;
     qint64 resumeOffset = 0;          // Resume: must equal current remote size
     qint32 createMode = -1;           // -1: backend default (XC-23)
     qint64 expectedSize = -1;         // allows preallocation / Content-Length

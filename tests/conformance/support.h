@@ -17,7 +17,7 @@ QByteArray pattern(qint64 size, int seed);
 
 // Writes `data` to `path` with upload() (Truncate unless given).
 NetVfs::Result putFile(NetVfs::Backend *backend, const QString &path, const QByteArray &data,
-                       NetVfs::WriteOptions::Disposition disposition = NetVfs::WriteOptions::Truncate);
+                       NetVfs::WriteOptions::Disposition disposition = NetVfs::WriteOptions::Disposition::Truncate);
 // The whole file through download().
 NetVfs::Result getFile(NetVfs::Backend *backend, const QString &path, QByteArray *data);
 NetVfs::Result download(NetVfs::Backend *backend, const QString &path, qint64 offset, qint64 length,

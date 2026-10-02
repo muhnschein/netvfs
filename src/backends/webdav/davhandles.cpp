@@ -19,7 +19,7 @@ qint64 announcedLength(const WriteOptions &options)
 {
     if (options.expectedSize < 0)
         return -1;
-    if (options.disposition == WriteOptions::Resume)
+    if (options.disposition == WriteOptions::Disposition::Resume)
         return options.expectedSize - options.resumeOffset;
     return options.expectedSize;
 }

@@ -262,7 +262,7 @@ private slots:
         QCOMPARE(server->node(QStringLiteral("f")).mode, 0600);   // nothing changed
         QVERIFY(b->makeHardlink(QStringLiteral("f"), QStringLiteral("h")).ok());
         UploadOptions truncate;
-        truncate.write.disposition = WriteOptions::Truncate;
+        truncate.write.disposition = WriteOptions::Disposition::Truncate;
         QVERIFY(put(QStringLiteral("h"), "new", truncate));
         QCOMPARE(server->fileData(QStringLiteral("f")), QByteArray("new"));
         server->addDir(QStringLiteral("d"));
@@ -296,7 +296,7 @@ private slots:
         QVERIFY(reader->close().ok());
 
         WriteOptions resume;
-        resume.disposition = WriteOptions::Resume;
+        resume.disposition = WriteOptions::Disposition::Resume;
         resume.resumeOffset = 7;
         WriteHandle *writer = nullptr;
         QCOMPARE(b->openWrite(QStringLiteral("f"), resume, &writer).error(), Error::ProtocolError);
@@ -384,7 +384,7 @@ private slots:
         QBuffer buffer(&data);
         buffer.open(QIODevice::ReadOnly);
         UploadOptions truncate;
-        truncate.write.disposition = WriteOptions::Truncate;
+        truncate.write.disposition = WriteOptions::Disposition::Truncate;
         QCOMPARE(b->upload(&buffer, QStringLiteral("f"), truncate, nullptr).error(), Error::ConnectionLost);
     }
 };

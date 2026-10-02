@@ -677,9 +677,9 @@ Result SmbBackend::openForUpload(const QByteArray &path, const WriteOptions &opt
 {
     // XC-14; SMB has no POSIX modes, createMode does not apply.
     int flags = O_WRONLY;
-    if (options.disposition == WriteOptions::CreateNew)
+    if (options.disposition == WriteOptions::Disposition::CreateNew)
         flags |= O_CREAT | O_EXCL;
-    else if (options.disposition == WriteOptions::Truncate)
+    else if (options.disposition == WriteOptions::Disposition::Truncate)
         flags |= O_CREAT | O_TRUNC;
     Result r = openFile(path, flags, fh);
     if (!r.ok()) {
@@ -687,7 +687,7 @@ Result SmbBackend::openForUpload(const QByteArray &path, const WriteOptions &opt
             return Result(Error::IsADirectory, QStringLiteral("open: a folder"));
         return r;
     }
-    if (options.disposition != WriteOptions::Resume)
+    if (options.disposition != WriteOptions::Disposition::Resume)
         return r;
     // Resume: the remote size must be the offset the caller continues at.
     Entry entry;
@@ -712,7 +712,7 @@ Result SmbBackend::upload(QIODevice *source, const QString &path, const UploadOp
         r = openForUpload(p, options.write, &fh);
     if (!r.ok())
         return r;
-    const qint64 base = options.write.disposition == WriteOptions::Resume ? options.write.resumeOffset : 0;
+    const qint64 base = options.write.disposition == WriteOptions::Disposition::Resume ? options.write.resumeOffset : 0;
     r = writeAll(fh, source, progress, quint64(base));
     if (r.ok()) {
         // C-12: flush to stable storage before the size check and rename.
