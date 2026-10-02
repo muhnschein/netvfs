@@ -14,6 +14,7 @@
 #include <QtQml/QQmlEngine>
 #include <QtTest/QtTest>
 
+#include <array>
 #include <memory>
 
 namespace {
@@ -198,10 +199,11 @@ private slots:
         // The target runs Qt 5.6: ES5 JavaScript and no QML features from later releases.
         QFETCH(QString, file);
         const QString code = codeOf(file);
-        const struct {
+        struct Rule {
             const char *pattern;
             const char *what;
-        } rules[] = {
+        };
+        const std::array<Rule, 9> rules = { {
             { "=>", "arrow function" },
             { "\\blet\\s+\\w", "let" },
             { "\\bconst\\s+\\w", "const" },
@@ -211,7 +213,7 @@ private slots:
             { "^\\s*component\\s+\\w+\\s*:", "inline component (5.15)" },
             { "\\b(top|bottom|left|right)?[pP]adding\\s*:", "positioner padding (5.7)" },
             { "Qt\\.callLater", "Qt.callLater (5.8)" },
-        };
+        } };
         for (const auto &rule : rules) {
             const QRegularExpression pattern(QLatin1String(rule.pattern), QRegularExpression::MultilineOption);
             QVERIFY2(!pattern.match(code).hasMatch(), rule.what);
