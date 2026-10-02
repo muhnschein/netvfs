@@ -110,5 +110,19 @@
     "search": "    r = backend->remove(path);\n    if (!r.ok())\n        return r;",
     "replace": "",
     "test": "build/tests/unit/core/tst_core"
+  },
+  {
+    "name": "authorized key duplicated",
+    "file": "src/core/sshkeys.cpp",
+    "search": "        if (keyPart(present) == key)\n            return Result::success();",
+    "replace": "",
+    "test": "build/tests/unit/core/tst_core"
+  },
+  {
+    "name": "authorized_keys overwritten",
+    "file": "src/core/sshkeys.cpp",
+    "search": "    QByteArray updated = existing;",
+    "replace": "    QByteArray updated;",
+    "test": "build/tests/unit/core/tst_core"
   }
 ]

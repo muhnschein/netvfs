@@ -30,7 +30,7 @@ TEST_ENV = QT_QPA_PLATFORM=offscreen
 .PHONY: all vendor configure check check-unit check-interop coverage clean distclean
 
 all: configure
-	$(MAKE) -C $(BUILD_DIR) $(if $(findstring j,$(firstword -$(MAKEFLAGS))),,-j$(JOBS))
+	$(MAKE) -C $(BUILD_DIR) $(if $(findstring -j,$(MAKEFLAGS)),,-j$(JOBS))
 
 vendor:
 	CFLAGS="$(VENDOR_CFLAGS)" LDFLAGS="$(VENDOR_CFLAGS)" ./vendor/build-vendor.sh $(BUILD_DIR)/vendor

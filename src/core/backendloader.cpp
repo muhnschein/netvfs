@@ -20,7 +20,7 @@ bool validProviderName(const QString &provider)
     return pattern.match(provider).hasMatch();
 }
 
-BackendFactory *factoryFor(const QString &provider)
+QObject *pluginFor(const QString &provider)
 {
     if (!validProviderName(provider))
         return nullptr;
@@ -42,9 +42,14 @@ BackendFactory *factoryFor(const QString &provider)
             qCWarning(lcNetVfsCore) << "Backend" << path << "reports provider" << factory->provider();
             continue;
         }
-        return factory;
+        return root;
     }
     return nullptr;
+}
+
+BackendFactory *factoryFor(const QString &provider)
+{
+    return qobject_cast<BackendFactory *>(pluginFor(provider));
 }
 } // namespace
 
@@ -73,6 +78,11 @@ Backend *BackendLoader::create(const QString &provider, Result *result)
 bool BackendLoader::isAvailable(const QString &provider)
 {
     return factoryFor(provider) != nullptr;
+}
+
+SshKeyTools *BackendLoader::sshKeyTools()
+{
+    return qobject_cast<SshKeyTools *>(pluginFor(QStringLiteral("sftp")));
 }
 
 } // namespace NetVfs

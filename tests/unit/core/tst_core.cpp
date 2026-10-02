@@ -6,6 +6,7 @@
 #include "paths.h"
 #include "probe.h"
 #include "secure.h"
+#include "sshkeys.h"
 #include "types.h"
 
 #include <QtCore/QScopedPointer>
@@ -247,6 +248,70 @@ private slots:
         QVERIFY(!BackendLoader::create(QStringLiteral("nosuch"), &r));
         QCOMPARE(r.error(), Error::Unsupported);
         QVERIFY(!BackendLoader::create(QStringLiteral("nosuch")));
+    }
+
+    void keySecrets()
+    {
+        const QByteArray key("-----BEGIN OPENSSH PRIVATE KEY-----\nabc\n-----END OPENSSH PRIVATE KEY-----\n");
+        const QByteArray secret = encodeKeySecret(key);
+        QVERIFY(secret.startsWith("netvfs-key-v1:"));
+        QVERIFY(!secret.contains('\n'));   // A-4: single line
+        QVERIFY(isKeySecret(secret));
+        QVERIFY(!isKeySecret("hunter2"));
+        QByteArray decoded;
+        QVERIFY(decodeKeySecret(secret, &decoded));
+        QCOMPARE(decoded, key);
+        QVERIFY(decodeKeySecret(secret, nullptr));
+        QVERIFY(!decodeKeySecret("hunter2", &decoded));
+        QVERIFY(!decodeKeySecret("netvfs-key-v1:", &decoded));
+        QVERIFY(!decodeKeySecret("netvfs-key-v1:%%%", &decoded));
+        SshKeyMaterial material;
+        material.privateKey = key;
+        SshKeyMaterial copy = material;
+        material.wipe();
+        QVERIFY(material.privateKey.isEmpty());
+        QCOMPARE(copy.privateKey, key);
+    }
+
+    void installAuthorizedKey()
+    {
+        FakeServer *server = FakeServer::instance();
+        FakeBackend backend;
+        QVERIFY(establish(&backend, ConnectionParams(), Credentials(QStringLiteral("user"), "secret")).ok());
+        const QString line = QStringLiteral("ssh-ed25519 AAAAC3Nza sailfish-backup");
+
+        QVERIFY(NetVfs::installAuthorizedKey(&backend, line).ok());
+        QVERIFY(server->nodes.value(QStringLiteral(".ssh")).isDir);
+        QCOMPARE(server->fileData(QStringLiteral(".ssh/authorized_keys")), QByteArray("ssh-ed25519 AAAAC3Nza sailfish-backup\n"));
+        QVERIFY(server->log.contains(QStringLiteral("rename:.ssh/authorized_keys.part->.ssh/authorized_keys")));
+
+        // Already present (other comment, with options): unchanged.
+        server->addFile(QStringLiteral(".ssh/authorized_keys"), "no-pty ssh-ed25519 AAAAC3Nza old comment");
+        QVERIFY(NetVfs::installAuthorizedKey(&backend, line).ok());
+        QCOMPARE(server->fileData(QStringLiteral(".ssh/authorized_keys")), QByteArray("no-pty ssh-ed25519 AAAAC3Nza old comment"));
+
+        // Appended after existing keys; missing final newline repaired.
+        server->addFile(QStringLiteral(".ssh/authorized_keys"), "ssh-rsa AAAAB3 other");
+        QVERIFY(NetVfs::installAuthorizedKey(&backend, line).ok());
+        QCOMPARE(server->fileData(QStringLiteral(".ssh/authorized_keys")),
+                 QByteArray("ssh-rsa AAAAB3 other\nssh-ed25519 AAAAC3Nza sailfish-backup\n"));
+
+        QCOMPARE(NetVfs::installAuthorizedKey(&backend, QStringLiteral("garbage")).error(), Error::Internal);
+        QCOMPARE(NetVfs::installAuthorizedKey(&backend, line + QStringLiteral("\nssh-rsa X")).error(), Error::Internal);
+        server->failOps.insert(QStringLiteral("makePath"), Result(Error::PermissionDenied));
+        QCOMPARE(NetVfs::installAuthorizedKey(&backend, line).error(), Error::PermissionDenied);
+        server->failOps.insert(QStringLiteral("stat"), Result(Error::Timeout));
+        QCOMPARE(NetVfs::installAuthorizedKey(&backend, line).error(), Error::Timeout);
+        server->failOps.insert(QStringLiteral("download"), Result(Error::PermissionDenied));
+        QCOMPARE(NetVfs::installAuthorizedKey(&backend, line).error(), Error::PermissionDenied);
+    }
+
+    void loaderHasNoKeyToolsWithoutSftp()
+    {
+        qputenv("NETVFS_BACKEND_PATH", NETVFS_TEST_FAKE_BACKEND_DIR);
+        if (BackendLoader::isAvailable(QStringLiteral("sftp")))
+            QSKIP("an SFTP backend is installed system-wide");
+        QVERIFY(!BackendLoader::sshKeyTools());
     }
 
     void loaderRejectsWrongProviderAndNonPlugins()

@@ -3,6 +3,7 @@
 #define NETVFS_BACKENDLOADER_H
 
 #include "backend.h"
+#include "sshkeys.h"
 
 #include <QtCore/QStringList>
 
@@ -17,6 +18,8 @@ public:
     // Returns a new backend for `provider`, or nullptr with `*result` set.
     static Backend *create(const QString &provider, Result *result = nullptr);
     static bool isAvailable(const QString &provider);
+    // The SFTP plugin's key operations, or nullptr if it is not installed.
+    static SshKeyTools *sshKeyTools();
 };
 
 } // namespace NetVfs
