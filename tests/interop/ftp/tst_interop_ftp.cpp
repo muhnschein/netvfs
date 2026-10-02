@@ -319,7 +319,7 @@ private slots:
         QVERIFY(m_tmp.isValid());
         m_data.resize(int(FileSize));
         for (int i = 0; i < m_data.size(); ++i)
-            m_data[i] = char((i * 7919 + (i >> 9)) & 0xFF);
+            m_data[i] = char((uint(i) * 7919u + (uint(i) >> 9)) & 0xFFu);
         QVERIFY(BackendLoader::isAvailable(QLatin1String(Provider)));
     }
 
