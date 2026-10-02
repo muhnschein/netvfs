@@ -10,5 +10,5 @@ CONFIG -= app_bundle
 LIBS += $$netvfsCoreLibs()
 QMAKE_RPATHDIR += $$NETVFS_LIB_OUT
 
-HEADERS = cli.h
-SOURCES = cli.cpp main.cpp
+include(cli.pri)
+SOURCES += main.cpp

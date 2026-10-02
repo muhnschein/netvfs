@@ -291,6 +291,10 @@ Result curlError(CURLcode code, const Reply &reply, bool canceled, const QString
     const QString detail = detailOf(reply).isEmpty()
         ? QStringLiteral("curl %1: %2").arg(int(code)).arg(QString::fromUtf8(curl_easy_strerror(code)))
         : detailOf(reply);
+    // libcurl reports any 421 ("service not available, closing control
+    // connection") as CURLE_OPERATION_TIMEDOUT; the reply says why (F-7).
+    if (reply.isValid() && reply.code == 421)
+        return replyError(reply, context);
     Result result;
     if (transportError(code, &result, detail))
         return result;
