@@ -43,28 +43,28 @@
   },
   {
     "name": "XC-16 failed verification without problems",
-    "file": "src/backends/webdav/davtls.cpp",
+    "file": "src/backends/curlcommon/tlsidentity.cpp",
     "search": "    if (check == ChainCheck::Failed && problems == 0)",
     "replace": "    if (false)",
     "test": "build/tests/unit/webdav/tst_webdav certificateFromAuthority"
   },
   {
     "name": "XC-16 expiry not reported",
-    "file": "src/backends/webdav/davtls.cpp",
+    "file": "src/backends/curlcommon/tlsidentity.cpp",
     "search": "    case X509_V_ERR_CERT_HAS_EXPIRED:\n        return ServerIdentity::Expired;",
     "replace": "    case X509_V_ERR_CERT_HAS_EXPIRED:\n        return ServerIdentity::UntrustedRoot;",
     "test": "build/tests/unit/webdav/tst_webdav certificateValidity"
   },
   {
     "name": "XC-16 verification time ignored",
-    "file": "src/backends/webdav/davtls.cpp",
+    "file": "src/backends/curlcommon/tlsidentity.cpp",
     "search": "    X509_STORE_CTX_set_time(ctx.get(), 0, at);",
     "replace": "    X509_STORE_CTX_set_time(ctx.get(), 0, at - at + time(nullptr));",
     "test": "build/tests/unit/webdav/tst_webdav certificateValidity"
   },
   {
     "name": "XC-16 host name not checked",
-    "file": "src/backends/webdav/davtls.cpp",
+    "file": "src/backends/curlcommon/tlsidentity.cpp",
     "search": "    return matches ? 0 : int(ServerIdentity::HostnameMismatch);",
     "replace": "    return matches ? 0 : 0;",
     "test": "build/tests/unit/webdav/tst_webdav certificateSelfSigned tlsSystemTrusted"

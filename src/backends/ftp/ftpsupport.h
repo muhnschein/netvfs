@@ -24,14 +24,15 @@ struct Settings {
     QString host;
     int port = 0;
     QString pin;              // "host_key", "tls-spki-sha256 <base64 SPKI>"
-    bool pinTrusted = false;  // "pin_trusted": the pin was taken from a system-trusted chain (W-4)
+    bool verifyPeer = false;  // "tls_verify_peer": the pinned chain was system trusted (W-4)
+    QByteArray testCaFile;    // "test_ca_file", builds with NETVFS_TLS_TEST_HOOKS only
 };
 
 constexpr int ExplicitPort = 21;
 constexpr int ImplicitPort = 990;
 
 // Reads the options "tls_mode" (explicit | implicit | none, default
-// explicit), "allow_insecure", "host_key" and "pin_trusted". `none`
+// explicit), "allow_insecure", "host_key" and "tls_verify_peer". `none`
 // without allow_insecure=true is SecurityPolicy (F-1); unknown modes are
 // SecurityPolicy as well (no silent fallback, XSEC-2).
 Result settingsFrom(const ConnectionParams &params, Settings *out);

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 #include "ftpbackend.h"
+#include "curlglobal.h"
 #include "ftphandles.h"
 #include "names.h"
 
@@ -16,10 +17,14 @@ constexpr int DefaultRequestTimeoutMs = 60000;   // C-14
 constexpr qint64 UploadChunk = 256 * 1024;
 constexpr int MinBatchSize = 1;
 
-void ensureLibraryInitialized()
+// The wiping initialisation shared with the WebDAV plugin (SEC-5): libcurl
+// takes the memory callbacks of the first initialisation in the process.
+bool curlReady()
 {
     static std::once_flag once;
-    std::call_once(once, [] { curl_global_init(CURL_GLOBAL_DEFAULT); });
+    static bool initialized = false;
+    std::call_once(once, [] { initialized = netvfs_curl_global_init() != 0; });
+    return initialized;
 }
 
 QByteArray baseName(const QByteArray &remote)
@@ -148,10 +153,7 @@ Backend *createFtpBackend()
     return new FtpBackend();
 }
 
-FtpBackend::FtpBackend()
-{
-    ensureLibraryInitialized();
-}
+FtpBackend::FtpBackend() = default;
 
 FtpBackend::~FtpBackend()
 {
@@ -167,6 +169,8 @@ Result FtpBackend::connect(const ConnectionParams &params, ServerIdentity *seen)
         *seen = ServerIdentity();
     if (m_canceled)
         return Result(Error::Canceled);
+    if (!curlReady())
+        return Result(Error::Internal, QStringLiteral("libcurl could not be initialised"));
     Result r = settingsFrom(params, &m_settings);
     if (!r.ok())
         return r;

@@ -37,6 +37,7 @@ port_enable=NO
 pasv_address=127.0.0.1
 pasv_min_port=$((PASV_BASE + offset))
 pasv_max_port=$((PASV_BASE + offset + 9))
+xferlog_enable=YES
 log_ftp_protocol=YES
 vsftpd_log_file=/var/log/vsftpd-$name.log
 max_per_ip=0

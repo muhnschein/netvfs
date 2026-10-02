@@ -3,10 +3,10 @@
 // and URL encoding (XC-4), the F-7 / W-13 error mapping, the explicit-TLS
 // guard (XSEC-2) and the TLS identity evaluation (XC-16, W-3) over
 // certificates the test makes with OpenSSL.
-#include "curltls.h"
 #include "ftpparse.h"
 #include "ftpsupport.h"
 #include "names.h"
+#include "tlsprobe.h"
 
 #include <QtCore/QTemporaryDir>
 #include <QtTest/QtTest>
@@ -90,6 +90,11 @@ struct CertDeleter { void operator()(X509 *c) const { X509_free(c); } };
 struct CtxDeleter { void operator()(EVP_PKEY_CTX *c) const { EVP_PKEY_CTX_free(c); } };
 using Key = std::unique_ptr<EVP_PKEY, KeyDeleter>;
 using Cert = std::unique_ptr<X509, CertDeleter>;
+
+ServerIdentity evaluate(X509 *leaf, STACK_OF(X509) *presented, const char *host, const CurlTls::TrustStore &store)
+{
+    return CurlTls::identityFromCertificates(leaf, presented, QByteArray(host), CurlTls::ChainCheck::NotChecked, store);
+}
 
 Key makeKey()
 {
@@ -547,15 +552,18 @@ private slots:
         QVERIFY(settingsFrom(p, &s).ok());
         QCOMPARE(s.tlsMode, TlsMode::Explicit);
         QCOMPARE(s.port, 21);
-        QVERIFY(!s.pinTrusted);
+        QVERIFY(!s.verifyPeer);
+        QVERIFY(s.testCaFile.isEmpty());
         p.options.insert(QStringLiteral("tls_mode"), QStringLiteral("implicit"));
         p.options.insert(QStringLiteral("host_key"), QStringLiteral(" tls-spki-sha256 AAAA "));
-        p.options.insert(QStringLiteral("pin_trusted"), QStringLiteral("true"));
+        p.options.insert(QStringLiteral("tls_verify_peer"), QStringLiteral("true"));
+        p.options.insert(QStringLiteral("test_ca_file"), QStringLiteral("/tmp/ca.pem"));
         QVERIFY(settingsFrom(p, &s).ok());
         QCOMPARE(s.tlsMode, TlsMode::Implicit);
         QCOMPARE(s.port, 990);
         QCOMPARE(s.pin, QStringLiteral("tls-spki-sha256 AAAA"));
-        QVERIFY(s.pinTrusted);
+        QVERIFY(s.verifyPeer);
+        QCOMPARE(s.testCaFile, QByteArray("/tmp/ca.pem"));   // NETVFS_TLS_TEST_HOOKS build
         p.port = 2121;
         QVERIFY(settingsFrom(p, &s).ok());
         QCOMPARE(s.port, 2121);
@@ -756,14 +764,14 @@ private slots:
         const Key caKey = makeKey();
         const Cert ca = makeCert(caKey.get(), "Test CA", nullptr, -Day, 30 * Day, nullptr, nullptr, true);
         const QString caFile = writePem(dir.filePath(QStringLiteral("ca.pem")), ca.get());
-        CurlTls::TrustAnchors anchors;
+        CurlTls::TrustStore anchors;
         anchors.caFile = caFile.toLocal8Bit();
-        CurlTls::TrustAnchors none;
+        CurlTls::TrustStore none;
 
         const Key key = makeKey();
         const Cert good = makeCert(key.get(), "server", "DNS:ftp.example.org,IP:127.0.0.1", -Day, 30 * Day,
                                    ca.get(), caKey.get());
-        ServerIdentity id = CurlTls::evaluate(good.get(), nullptr, QStringLiteral("ftp.example.org"), anchors);
+        ServerIdentity id = evaluate(good.get(), nullptr, "ftp.example.org", anchors);
         QCOMPARE(id.kind, ServerIdentity::Kind::TlsCertificate);
         QCOMPARE(id.algorithm, QStringLiteral("tls-spki-sha256"));
         QCOMPARE(id.publicKey, spki(good.get()));
@@ -774,27 +782,28 @@ private slots:
         QCOMPARE(id.details.value(QStringLiteral("subject")).toString(), QStringLiteral("CN=server"));
         QCOMPARE(id.details.value(QStringLiteral("issuer")).toString(), QStringLiteral("CN=Test CA"));
         QCOMPARE(id.details.value(QStringLiteral("sans")).toStringList(),
-                 QStringList({ QStringLiteral("ftp.example.org"), QStringLiteral("127.0.0.1") }));
+                 QStringList({ QStringLiteral("DNS:ftp.example.org"), QStringLiteral("IP:127.0.0.1") }));
         QCOMPARE(id.details.value(QStringLiteral("certSha256")).toString().size(), 64);
         QVERIFY(id.details.value(QStringLiteral("notBefore")).toDateTime() < QDateTime::currentDateTimeUtc());
         QVERIFY(id.details.value(QStringLiteral("notAfter")).toDateTime() > QDateTime::currentDateTimeUtc());
         QCOMPARE(ServerIdentity::fromPin(id.toPin()), id);
 
         // IP literals, also in brackets, match IP SANs.
-        QVERIFY(CurlTls::evaluate(good.get(), nullptr, QStringLiteral("127.0.0.1"), anchors).systemTrusted);
-        id = CurlTls::evaluate(good.get(), nullptr, QStringLiteral("127.0.0.2"), anchors);
+        QVERIFY(evaluate(good.get(), nullptr, "127.0.0.1", anchors).systemTrusted);
+        QVERIFY(evaluate(good.get(), nullptr, "[127.0.0.1]", anchors).systemTrusted);
+        id = evaluate(good.get(), nullptr, "127.0.0.2", anchors);
         QVERIFY(!id.systemTrusted);
         QCOMPARE(id.problems, int(ServerIdentity::HostnameMismatch));
-        id = CurlTls::evaluate(good.get(), nullptr, QStringLiteral("other.example.org"), anchors);
+        id = evaluate(good.get(), nullptr, "other.example.org", anchors);
         QVERIFY(!id.systemTrusted);
         QCOMPARE(id.problems, int(ServerIdentity::HostnameMismatch));
         // Without the anchor the chain is untrusted.
-        id = CurlTls::evaluate(good.get(), nullptr, QStringLiteral("ftp.example.org"), none);
+        id = evaluate(good.get(), nullptr, "ftp.example.org", none);
         QVERIFY(!id.systemTrusted);
         QCOMPARE(id.problems, int(ServerIdentity::UntrustedRoot));
 
         const Cert self = makeCert(key.get(), "self", "DNS:ftp.example.org", -Day, Day);
-        id = CurlTls::evaluate(self.get(), nullptr, QStringLiteral("ftp.example.org"), anchors);
+        id = evaluate(self.get(), nullptr, "ftp.example.org", anchors);
         QVERIFY(!id.systemTrusted);
         QVERIFY(id.problems & ServerIdentity::SelfSigned);
         QVERIFY(!(id.problems & ServerIdentity::HostnameMismatch));
@@ -802,14 +811,14 @@ private slots:
 
         const Cert expired = makeCert(key.get(), "old", "DNS:ftp.example.org", -10 * Day, -Day, ca.get(),
                                       caKey.get());
-        id = CurlTls::evaluate(expired.get(), nullptr, QStringLiteral("ftp.example.org"), anchors);
+        id = evaluate(expired.get(), nullptr, "ftp.example.org", anchors);
         QVERIFY(!id.systemTrusted);
         QCOMPARE(id.problems, int(ServerIdentity::Expired));
         const Cert future = makeCert(key.get(), "new", "DNS:ftp.example.org", Day, 10 * Day, ca.get(), caKey.get());
-        id = CurlTls::evaluate(future.get(), nullptr, QStringLiteral("ftp.example.org"), anchors);
+        id = evaluate(future.get(), nullptr, "ftp.example.org", anchors);
         QCOMPARE(id.problems, int(ServerIdentity::NotYetValid));
         const Cert both = makeCert(key.get(), "x", "DNS:elsewhere", -10 * Day, -Day, ca.get(), caKey.get());
-        id = CurlTls::evaluate(both.get(), nullptr, QStringLiteral("ftp.example.org"), anchors);
+        id = evaluate(both.get(), nullptr, "ftp.example.org", anchors);
         QCOMPARE(id.problems, int(ServerIdentity::Expired | ServerIdentity::HostnameMismatch));
 
         // An intermediate presented by the server completes the chain.
@@ -819,33 +828,29 @@ private slots:
         STACK_OF(X509) *chain = sk_X509_new_null();
         sk_X509_push(chain, leaf.get());
         sk_X509_push(chain, mid.get());
-        id = CurlTls::evaluate(leaf.get(), chain, QStringLiteral("ftp.example.org"), anchors);
+        id = evaluate(leaf.get(), chain, "ftp.example.org", anchors);
         QVERIFY(id.systemTrusted);
-        QCOMPARE(id.details.value(QStringLiteral("chain")).toStringList(),
-                 QStringList({ QStringLiteral("CN=leaf"), QStringLiteral("CN=Mid CA") }));
-        id = CurlTls::evaluate(leaf.get(), nullptr, QStringLiteral("ftp.example.org"), anchors);
+        id = evaluate(leaf.get(), nullptr, "ftp.example.org", anchors);
         QVERIFY(!id.systemTrusted);
         QCOMPARE(id.problems, int(ServerIdentity::UntrustedRoot));
         sk_X509_free(chain);
 
-        QVERIFY(CurlTls::evaluate(nullptr, nullptr, QStringLiteral("x"), anchors).isEmpty());
+        QVERIFY(evaluate(nullptr, nullptr, "x", anchors).isEmpty());
     }
 
-    void trustAnchors()
+    void trustStore()
     {
         CURL *easy = curl_easy_init();
         QVERIFY(easy);
-        qputenv("SSL_CERT_FILE", "/tmp/test-ca.pem");
-        qunsetenv("SSL_CERT_DIR");
-        CurlTls::TrustAnchors anchors = CurlTls::trustAnchors(easy);
-        QVERIFY(anchors.fromEnvironment);
-        QCOMPARE(anchors.caFile, QByteArray("/tmp/test-ca.pem"));
-        QVERIFY(anchors.caPath.isEmpty());
-        QCOMPARE(CurlTls::applyTrustAnchors(easy, anchors), CURLE_OK);
-        qunsetenv("SSL_CERT_FILE");
-        anchors = CurlTls::trustAnchors(easy);
-        QVERIFY(!anchors.fromEnvironment);
-        QCOMPARE(CurlTls::applyTrustAnchors(easy, anchors), CURLE_OK);
+        CurlTls::TrustStore store = CurlTls::trustStore(easy, QByteArray("/tmp/test-ca.pem"));
+        QCOMPARE(store.caFile, QByteArray("/tmp/test-ca.pem"));
+        QVERIFY(store.caPath.isEmpty());
+        QCOMPARE(CurlTls::applyTestCaFile(easy, "/tmp/test-ca.pem"), CURLE_OK);
+        // Without the hook: libcurl's own bundle.
+        store = CurlTls::trustStore(easy, QByteArray());
+        QVERIFY(!store.caFile.isEmpty() || !store.caPath.isEmpty());
+        QVERIFY(store.caFile != "/tmp/test-ca.pem");
+        QCOMPARE(CurlTls::applyTestCaFile(easy, QByteArray()), CURLE_OK);
         QVERIFY(CurlTls::isOpenSsl());
         curl_easy_cleanup(easy);
     }

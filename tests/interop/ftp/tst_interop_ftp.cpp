@@ -5,6 +5,7 @@
 // NETVFS_FTP_INTEROP_CONFIG. ftpstall.py provides the recording fake server
 // (identity tests) and the stalling proxy (cancel and timeout tests).
 #include "backendloader.h"
+#include "ftpbackend.h"
 #include "identity.h"
 #include "names.h"
 #include "paths.h"
@@ -128,18 +129,16 @@ private:
         p.options.insert(QStringLiteral("tls_mode"), s.value(QStringLiteral("tls")).toString());
         if (s.value(QStringLiteral("tls")).toString() == QLatin1String("none"))
             p.options.insert(QStringLiteral("allow_insecure"), QStringLiteral("true"));
+        p.options.insert(QStringLiteral("test_ca_file"), m_certs + QStringLiteral("/ca.crt"));
         p.connectTimeoutMs = 10000;
         p.requestTimeoutMs = 20000;
         return p;
     }
 
+    // The backend compiled in with the test CA hook (see ftp.pro).
     static std::unique_ptr<Backend> create()
     {
-        Result r;
-        std::unique_ptr<Backend> b(BackendLoader::create(QLatin1String(Provider), &r));
-        if (!b)
-            qWarning() << "cannot load the FTP backend:" << r.toString();
-        return b;
+        return std::unique_ptr<Backend>(Ftp::createFtpBackend());
     }
 
     // The identity a first connection reports (account creation).
@@ -291,7 +290,7 @@ private:
         return false;
     }
 
-    static ConnectionParams fakeParams(int port, const QString &tls)
+    ConnectionParams fakeParams(int port, const QString &tls) const
     {
         ConnectionParams p;
         p.provider = QLatin1String(Provider);
@@ -300,6 +299,7 @@ private:
         p.username = QStringLiteral("alice");
         p.options.insert(QStringLiteral("tls_mode"), tls);
         p.options.insert(QStringLiteral("allow_insecure"), QStringLiteral("true"));
+        p.options.insert(QStringLiteral("test_ca_file"), m_certs + QStringLiteral("/ca.crt"));
         p.connectTimeoutMs = 5000;
         p.requestTimeoutMs = 5000;
         return p;
@@ -346,7 +346,7 @@ private slots:
         std::unique_ptr<Backend> b = create();
         ServerIdentity seen;
         Result r = b->connect(p, &seen);
-        QVERIFY2(r.ok(), qPrintable(r.toString()));
+        QVERIFY2(r.ok(), qPrintable(r.toString() + QLatin1Char(' ') + r.detail()));
         QCOMPARE(seen.kind, ServerIdentity::Kind::TlsCertificate);
         QCOMPARE(seen.algorithm, QStringLiteral("tls-spki-sha256"));
         QVERIFY(!seen.systemTrusted);
@@ -395,7 +395,7 @@ private slots:
         std::unique_ptr<Backend> b = create();
         ServerIdentity seen;
         const Result r = b->connect(p, &seen);
-        QVERIFY2(r.ok(), qPrintable(r.toString()));
+        QVERIFY2(r.ok(), qPrintable(r.toString() + QLatin1Char(' ') + r.detail()));
         QVERIFY(seen.isEmpty());
         b->disconnect();
         QTRY_VERIFY(recorded(log).contains(QStringLiteral("CLOSED")));
@@ -411,7 +411,7 @@ private slots:
         const ServerIdentity seen = identify(p);
         QVERIFY(seen.systemTrusted);
         QCOMPARE(seen.problems, 0);
-        QVERIFY(seen.details.value(QStringLiteral("sans")).toStringList().contains(QStringLiteral("127.0.0.1")));
+        QVERIFY(seen.details.value(QStringLiteral("sans")).toStringList().contains(QStringLiteral("IP:127.0.0.1")));
         std::unique_ptr<Backend> b = create();
         const Result r = establish(b.get(), p, Credentials(p.username, m_password));
         QCOMPARE(r.error(), Error::AuthFailed);   // reached USER/PASS without a pin
@@ -438,21 +438,42 @@ private slots:
         QVERIFY(b->connect(p, nullptr).ok());
         QCOMPARE(b->authenticate(Credentials(p.username, m_password)).error(), Error::ServerIdentityChanged);
 
-        // pin_trusted on a self-signed certificate: no longer trusted.
+        // tls_verify_peer on a self-signed certificate: no longer trusted.
         p = params(QStringLiteral("pureftpd"));
         p.options.insert(QStringLiteral("host_key"), identify(p).toPin());
-        p.options.insert(QStringLiteral("pin_trusted"), QStringLiteral("true"));
+        p.options.insert(QStringLiteral("tls_verify_peer"), QStringLiteral("true"));
         b = create();
         QCOMPARE(establish(b.get(), p, Credentials(p.username, m_password)).error(), Error::ServerIdentityChanged);
 
         // A pinned trusted certificate (verification and pin).
         p = params(QStringLiteral("vsftpd"));
         p.options.insert(QStringLiteral("host_key"), identify(p).toPin());
-        p.options.insert(QStringLiteral("pin_trusted"), QStringLiteral("true"));
+        p.options.insert(QStringLiteral("tls_verify_peer"), QStringLiteral("true"));
         b = create();
         Result r = establish(b.get(), p, Credentials(p.username, m_password));
-        QVERIFY2(r.ok(), qPrintable(r.toString()));
+        QVERIFY2(r.ok(), qPrintable(r.toString() + QLatin1Char(' ') + r.detail()));
         QVERIFY(b->keepAlive().ok());
+    }
+
+    // The shipped plugin: loads, signs in with a pin, ignores test_ca_file.
+    void pluginLoads()
+    {
+        Result r;
+        const std::unique_ptr<Backend> plugin(BackendLoader::create(QLatin1String(Provider), &r));
+        QVERIFY2(plugin, qPrintable(r.toString()));
+        ConnectionParams p = params(QStringLiteral("pureftpd"));
+        p.options.insert(QStringLiteral("host_key"), identify(p).toPin());
+        r = establish(plugin.get(), p, Credentials(p.username, m_password));
+        QVERIFY2(r.ok(), qPrintable(r.toString() + QLatin1Char(' ') + r.detail()));
+        QVector<Entry> entries;
+        QVERIFY(plugin->list(QString(), &entries).ok());
+        // Without the hook the test CA means nothing: the CA-signed
+        // certificate is not trusted.
+        ServerIdentity seen;
+        const std::unique_ptr<Backend> other(BackendLoader::create(QLatin1String(Provider), &r));
+        QVERIFY(other->connect(params(QStringLiteral("vsftpd")), &seen).ok());
+        QVERIFY(!seen.systemTrusted);
+        QVERIFY(seen.problems & ServerIdentity::UntrustedRoot);
     }
 
     // F-1 / XSEC-2: no plain FTP without consent, no downgrade.
@@ -516,12 +537,12 @@ private slots:
             file.write(m_data);
         }
         Result r = Transfer::uploadFile(b.get(), local, target);
-        QVERIFY2(r.ok(), qPrintable(r.toString()));
+        QVERIFY2(r.ok(), qPrintable(r.toString() + QLatin1Char(' ') + r.detail()));
         QCOMPARE(serverSha(name, target), sha256(m_data));
         QCOMPARE(serverMode(name, target), QStringLiteral("600"));   // XC-23 createMode 0600 (backups)
         Entry entry;
         r = b->stat(target, &entry);
-        QVERIFY2(r.ok(), qPrintable(r.toString()));
+        QVERIFY2(r.ok(), qPrintable(r.toString() + QLatin1Char(' ') + r.detail()));
         QCOMPARE(entry.type, EntryType::File);
         QCOMPARE(entry.size, FileSize);
         QCOMPARE(entry.name, QStringLiteral("data.bin"));
@@ -529,7 +550,7 @@ private slots:
         QVERIFY(qAbs(entry.modified.secsTo(QDateTime::currentDateTimeUtc())) < 600);
         const QString back = m_tmp.filePath(unique(QStringLiteral("down-")));
         r = Transfer::downloadFile(b.get(), target, back);
-        QVERIFY2(r.ok(), qPrintable(r.toString()));
+        QVERIFY2(r.ok(), qPrintable(r.toString() + QLatin1Char(' ') + r.detail()));
         QFile file(back);
         QVERIFY(file.open(QIODevice::ReadOnly));
         QCOMPARE(sha256(file.readAll()), sha256(m_data));
@@ -572,7 +593,7 @@ private slots:
         ListOptions options;
         options.batchSize = 3;
         Result r = b->list(dir, &collector, options);
-        QVERIFY2(r.ok(), qPrintable(r.toString()));
+        QVERIFY2(r.ok(), qPrintable(r.toString() + QLatin1Char(' ') + r.detail()));
         QVERIFY(collector.batches >= 4);
         QCOMPARE(collector.all.size(), names.size() + 4);
         for (const QString &n : names) {
@@ -613,7 +634,7 @@ private slots:
         QCOMPARE(get(b.get(), Paths::join(dir, latin)), QByteArray("x"));
         const QString renamed = Names::decode(QByteArray("ren\xe9"));
         r = b->rename(Paths::join(dir, latin), Paths::join(dir, renamed), RenameMode::NoReplace);
-        QVERIFY2(r.ok(), qPrintable(r.toString()));
+        QVERIFY2(r.ok(), qPrintable(r.toString() + QLatin1Char(' ') + r.detail()));
         QCOMPARE(exec(name, QStringLiteral("ls \"$D\" | grep -c \"$(printf 'ren\\351')\""), { QStringLiteral("D=") + disk }).trimmed(),
                  QByteArray("1"));
         QVERIFY(b->removeFile(Paths::join(dir, renamed)).ok());
@@ -681,7 +702,7 @@ private slots:
         QCOMPARE(b->rename(file, other, RenameMode::NoReplace).error(), Error::AlreadyExists);
         QCOMPARE(get(b.get(), other), QByteArray("two"));
         Result r = b->rename(file, other, RenameMode::Replace);
-        QVERIFY2(r.ok(), qPrintable(r.toString()));
+        QVERIFY2(r.ok(), qPrintable(r.toString() + QLatin1Char(' ') + r.detail()));
         QCOMPARE(get(b.get(), other), QByteArray("one"));
         Entry entry;
         QCOMPARE(b->stat(file, &entry).error(), Error::NotFound);
@@ -690,9 +711,9 @@ private slots:
         QCOMPARE(b->rename(other, sub, RenameMode::Replace).error(), Error::AlreadyExists);
         QCOMPARE(b->rename(Paths::join(dir, QStringLiteral("nope")), file, RenameMode::NoReplace).error(), Error::NotFound);
         r = b->rename(other, Paths::join(sub, QStringLiteral("moved")), RenameMode::NoReplace);
-        QVERIFY2(r.ok(), qPrintable(r.toString()));
+        QVERIFY2(r.ok(), qPrintable(r.toString() + QLatin1Char(' ') + r.detail()));
         r = b->rename(sub, Paths::join(dir, QStringLiteral("sub2")), RenameMode::NoReplace);
-        QVERIFY2(r.ok(), qPrintable(r.toString()));
+        QVERIFY2(r.ok(), qPrintable(r.toString() + QLatin1Char(' ') + r.detail()));
         QCOMPARE(get(b.get(), Paths::join(dir, QStringLiteral("sub2/moved"))), QByteArray("one"));
 
         // Absolute paths address the same files.
@@ -715,14 +736,14 @@ private slots:
         AttributeChanges mode;
         mode.mode = 0640;
         Result r = b->setAttributes(file, mode);
-        QVERIFY2(r.ok(), qPrintable(r.toString()));
+        QVERIFY2(r.ok(), qPrintable(r.toString() + QLatin1Char(' ') + r.detail()));
         QCOMPARE(serverMode(name, file), QStringLiteral("640"));
         AttributeChanges time;
         time.modified = QDateTime(QDate(2021, 3, 4), QTime(5, 6, 7), Qt::UTC);
         r = b->setAttributes(file, time);
         Entry entry;
         if (b->capabilities().has(Capability::SetModified)) {
-            QVERIFY2(r.ok(), qPrintable(r.toString()));
+            QVERIFY2(r.ok(), qPrintable(r.toString() + QLatin1Char(' ') + r.detail()));
             QVERIFY(b->stat(file, &entry).ok());
             QCOMPARE(entry.modified, time.modified);
         } else {
@@ -749,7 +770,7 @@ private slots:
         ReadHandle *raw = nullptr;
         Result r = b->openRead(file, &raw);
         std::unique_ptr<ReadHandle> reader(raw);
-        QVERIFY2(r.ok(), qPrintable(r.toString()));
+        QVERIFY2(r.ok(), qPrintable(r.toString() + QLatin1Char(' ') + r.detail()));
         QCOMPARE(reader->size(), FileSize);
         QByteArray out;
         // Sequential reads of odd sizes.
@@ -757,7 +778,7 @@ private slots:
         qint64 offset = 0;
         while (offset < FileSize) {
             r = reader->read(offset, 100000, &out);
-            QVERIFY2(r.ok(), qPrintable(r.toString()));
+            QVERIFY2(r.ok(), qPrintable(r.toString() + QLatin1Char(' ') + r.detail()));
             QVERIFY(!out.isEmpty());
             collected += out;
             offset += out.size();
@@ -768,7 +789,7 @@ private slots:
         // Random access, also across another request on the connection.
         for (const qint64 at : { qint64(2000000), qint64(17), qint64(FileSize - 5), qint64(1048576) }) {
             r = reader->read(at, 4096, &out);
-            QVERIFY2(r.ok(), qPrintable(r.toString()));
+            QVERIFY2(r.ok(), qPrintable(r.toString() + QLatin1Char(' ') + r.detail()));
             QCOMPARE(out, m_data.mid(int(at), 4096));
             Entry entry;
             QVERIFY(b->stat(file, &entry).ok());
@@ -790,14 +811,14 @@ private slots:
         const QString part = unique(QStringLiteral("w-"));
         r = b->openWrite(part, create, &w);
         std::unique_ptr<WriteHandle> writer(w);
-        QVERIFY2(r.ok(), qPrintable(r.toString()));
+        QVERIFY2(r.ok(), qPrintable(r.toString() + QLatin1Char(' ') + r.detail()));
         r = writer->write(m_data.constData(), 1000000);
-        QVERIFY2(r.ok(), qPrintable(r.toString()));
+        QVERIFY2(r.ok(), qPrintable(r.toString() + QLatin1Char(' ') + r.detail()));
         r = writer->write(m_data.constData() + 1000000, 1);
-        QVERIFY2(r.ok(), qPrintable(r.toString()));
+        QVERIFY2(r.ok(), qPrintable(r.toString() + QLatin1Char(' ') + r.detail()));
         QCOMPARE(writer->position(), qint64(1000001));
         r = writer->commit();
-        QVERIFY2(r.ok(), qPrintable(r.toString()));
+        QVERIFY2(r.ok(), qPrintable(r.toString() + QLatin1Char(' ') + r.detail()));
         writer.reset();
         WriteOptions resume;
         resume.disposition = WriteOptions::Resume;
@@ -806,12 +827,12 @@ private slots:
         resume.resumeOffset = 1000001;
         r = b->openWrite(part, resume, &w);
         writer.reset(w);
-        QVERIFY2(r.ok(), qPrintable(r.toString()));
+        QVERIFY2(r.ok(), qPrintable(r.toString() + QLatin1Char(' ') + r.detail()));
         QCOMPARE(writer->position(), qint64(1000001));
         r = writer->write(m_data.constData() + 1000001, FileSize - 1000001);
-        QVERIFY2(r.ok(), qPrintable(r.toString()));
+        QVERIFY2(r.ok(), qPrintable(r.toString() + QLatin1Char(' ') + r.detail()));
         r = writer->commit();
-        QVERIFY2(r.ok(), qPrintable(r.toString()));
+        QVERIFY2(r.ok(), qPrintable(r.toString() + QLatin1Char(' ') + r.detail()));
         writer.reset();
         QCOMPARE(serverSha(name, part), sha256(m_data));
         // An empty file.
@@ -842,16 +863,16 @@ private slots:
         options.offset = 123456;
         Result r;
         QByteArray data = get(b.get(), file, &r, options);
-        QVERIFY2(r.ok(), qPrintable(r.toString()));
+        QVERIFY2(r.ok(), qPrintable(r.toString() + QLatin1Char(' ') + r.detail()));
         QCOMPARE(data, m_data.mid(123456));
         options.length = 1000;
         data = get(b.get(), file, &r, options);
-        QVERIFY2(r.ok(), qPrintable(r.toString()));
+        QVERIFY2(r.ok(), qPrintable(r.toString() + QLatin1Char(' ') + r.detail()));
         QCOMPARE(data, m_data.mid(123456, 1000));
         options.offset = FileSize - 10;
         options.length = 10;
         data = get(b.get(), file, &r, options);
-        QVERIFY2(r.ok(), qPrintable(r.toString()));
+        QVERIFY2(r.ok(), qPrintable(r.toString() + QLatin1Char(' ') + r.detail()));
         QCOMPARE(data, m_data.right(10));
         QVERIFY(b->keepAlive().ok());   // the reconnect after a partial download is expected
         get(b.get(), QStringLiteral("missing-file"), &r);

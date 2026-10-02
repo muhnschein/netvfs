@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 #include "ftpconnection.h"
-#include "curltls.h"
+#include "tlsprobe.h"
 #include "secure.h"
 
 #include <QtCore/QDebug>
@@ -39,7 +39,15 @@ CURLcode applyCommon(CURL *easy, const QByteArray &url, const Settings &settings
         [&] { return curl_easy_setopt(easy, CURLOPT_LOW_SPEED_TIME, seconds(params.requestTimeoutMs)); },
         [&] { return curl_easy_setopt(easy, CURLOPT_USE_SSL, settings.tlsMode == TlsMode::None ? long(CURLUSESSL_NONE) : useSsl); },
         [&] { return curl_easy_setopt(easy, CURLOPT_FTPSSLAUTH, long(CURLFTPAUTH_TLS)); },
-        [&] { return curl_easy_setopt(easy, CURLOPT_SSLVERSION, long(CURL_SSLVERSION_TLSv1_2)); },
+        // TLS 1.2 exactly. With TLS 1.3 the server sends session tickets
+        // after the handshake of every data connection; an upload never
+        // reads them, so closing the data connection resets it (RST over
+        // unread data) and the server may lose the end of the file ("426
+        // Failure reading network stream"); and servers that require session
+        // reuse for data connections (vsftpd's default require_ssl_reuse)
+        // issue single-use TLS 1.3 tickets that an upload cannot renew (522
+        // on the next transfer). A fixed policy, never a fallback (XSEC-2).
+        [&] { return curl_easy_setopt(easy, CURLOPT_SSLVERSION, long(CURL_SSLVERSION_TLSv1_2 | CURL_SSLVERSION_MAX_TLSv1_2)); },
         // Passive only (F-1): EPSV, then PASV; the address in a PASV reply is
         // ignored in favour of the control connection's (no bounce).
         [&] { return curl_easy_setopt(easy, CURLOPT_FTP_USE_EPSV, 1L); },
@@ -156,7 +164,7 @@ Result Connection::probe(const Settings &settings, const ConnectionParams &param
         return Result(Error::Unsupported, QStringLiteral("FTPS needs libcurl with OpenSSL"));
     ProbeState state;
     state.stopAfterGreeting = !tls;
-    CurlTls::IdentityProbe identity(settings.host, CurlTls::trustAnchors(easy.get()));
+    CurlTls::IdentityProbe identity(settings.host, CurlTls::trustStore(easy.get(), settings.testCaFile));
     CURLcode code = applyCommon(easy.get(), baseUrl(settings), settings, params, long(CURLUSESSL_ALL));
     if (code == CURLE_OK)
         code = curl_easy_setopt(easy.get(), CURLOPT_NOBODY, 1L);
@@ -240,12 +248,12 @@ Result Connection::applyBase(const QByteArray &url)
             code = step();
     }
     if (code == CURLE_OK && m_settings.tlsMode != TlsMode::None)
-        code = CurlTls::applyTrustAnchors(m_easy, CurlTls::trustAnchors(m_easy));
+        code = CurlTls::applyTestCaFile(m_easy, m_settings.testCaFile);
     if (code != CURLE_OK)
         return Result(Error::Internal, QStringLiteral("libcurl rejected the connection settings"),
                       QString::fromUtf8(curl_easy_strerror(code)));
     if (m_settings.tlsMode != TlsMode::None)
-        return CurlTls::applyIdentityPolicy(m_easy, m_settings.pin, m_settings.pinTrusted, m_seen);
+        return CurlTls::applyIdentityPolicy(m_easy, m_settings.pin, m_settings.verifyPeer, m_seen);
     return Result::success();
 }
 
@@ -291,14 +299,6 @@ Result Connection::applyRequest(const Request &request)
     case Request::Kind::Upload:
         if (code == CURLE_OK)
             code = curl_easy_setopt(m_easy, CURLOPT_UPLOAD, 1L);
-        // TLS 1.3 tickets of servers that insist on session reuse for data
-        // connections (vsftpd require_ssl_reuse) are single-use, and an
-        // upload's data connection never reads the replacement ticket. The
-        // next data connection would offer the spent one and be refused
-        // (522), so a TLS control connection ends with its upload; the next
-        // request signs in again and gets fresh tickets.
-        if (code == CURLE_OK && m_settings.tlsMode != TlsMode::None)
-            code = curl_easy_setopt(m_easy, CURLOPT_FORBID_REUSE, 1L);
         if (code == CURLE_OK && request.append)
             code = curl_easy_setopt(m_easy, CURLOPT_APPEND, 1L);
         break;
@@ -337,10 +337,8 @@ Result Connection::start(const Request &request, TransferSink *sink)
     if (curl_multi_add_handle(m_multi, m_easy) != CURLM_OK)
         return Result(Error::Internal, QStringLiteral("libcurl could not start the request"));
     m_started = true;
-    // A partial download makes libcurl close the control connection, as
-    // does an upload over TLS (see applyRequest()).
-    m_closesConnection = (request.kind == Request::Kind::Download && request.length >= 0)
-        || (request.kind == Request::Kind::Upload && m_settings.tlsMode != TlsMode::None);
+    // A partial download makes libcurl close the control connection.
+    m_closesConnection = request.kind == Request::Kind::Download && request.length >= 0;
     return Result::success();
 }
 

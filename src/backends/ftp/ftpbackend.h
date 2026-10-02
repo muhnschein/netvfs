@@ -29,6 +29,24 @@ public:
 // thread. Handles share the control connection: a paused handle transfer
 // is ended (and the connection reopened by the next request) when another
 // call needs the connection.
+//
+// Account options: "tls_mode" explicit (default, port 21) | implicit (990) |
+// none (needs "allow_insecure"=true); "host_key" (TLS pin
+// "tls-spki-sha256 <base64 SPKI>"); "tls_verify_peer" (W-4, as WebDAV);
+// test builds with NETVFS_TLS_TEST_HOOKS only: "test_ca_file".
+//
+// connect() (F-2, C-7) does not keep a connection: libcurl sends USER right
+// after AUTH TLS, so the identity comes from a probe connection whose TLS
+// handshake the client ends (CurlTls::IdentityProbe). authenticate() then
+// opens the control connection with that identity enforced by libcurl (the
+// pin, or verification when the certificate was system trusted).
+// Relative paths are relative to the login folder (PWD); every command
+// carries an absolute path. FTPS uses TLS 1.2 (see ftpconnection.cpp).
+//
+// Capabilities: ReadHandles, PosixModes (SITE CHMOD; removed when the
+// server refuses it, the documented F-4 exception), EfficientRanges and
+// WriteResume with "REST STREAM", SetModified with MFMT. No SpaceInfo
+// (F-6), no atomic rename or put, no links.
 class FtpBackend : public Backend
 {
 public:

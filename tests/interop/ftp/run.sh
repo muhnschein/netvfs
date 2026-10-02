@@ -11,9 +11,9 @@
 # loopback, at a base derived from the process id so that parallel runs do
 # not collide.
 #
-# The driver runs with SSL_CERT_FILE pointing at the test CA (the trust
-# anchor hook documented in src/backends/ftp/curltls.h), so the vsftpd
-# explicit instance, whose certificate the CA signed, is "system trusted".
+# The driver compiles the backend in with NETVFS_TLS_TEST_HOOKS and passes
+# the test CA as the option test_ca_file, so the vsftpd explicit instance,
+# whose certificate the CA signed, is "system trusted".
 #
 # Usage: run.sh <build dir> [tst_interop_ftp arguments]
 set -eu
@@ -119,6 +119,12 @@ EOF
 
 export NETVFS_BACKEND_PATH="$build/lib/netvfs/backends"
 export NETVFS_FTP_INTEROP_CONFIG="$config"
-export SSL_CERT_FILE="$work/certs/ca.crt"
 log "running tst_interop_ftp"
-"$build/tests/interop/ftp/tst_interop_ftp" "$@"
+status=0
+"$build/tests/interop/ftp/tst_interop_ftp" "$@" || status=1
+if [ "$status" -ne 0 ]; then
+    log "server logs (tail)"
+    docker exec "$vsftpd" sh -c 'tail -n 40 /var/log/vsftpd-*.log' >&2 || true
+    docker logs --tail 40 "$pureftpd" >&2 || true
+fi
+exit $status

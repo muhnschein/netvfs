@@ -14,7 +14,7 @@ namespace {
 constexpr const char *TlsModeOption = "tls_mode";
 constexpr const char *InsecureOption = "allow_insecure";
 constexpr const char *HostKeyOption = "host_key";
-constexpr const char *PinTrustedOption = "pin_trusted";
+constexpr const char *VerifyPeerOption = "tls_verify_peer";
 constexpr int MaxPort = 65535;
 
 bool unreserved(uchar c)
@@ -129,9 +129,8 @@ QString describe(Error error)
 }
 
 // Results that do not depend on a server reply.
-bool transportError(CURLcode code, Result *out, const QString &detail)
+bool transportError(CURLcode code, Result *out, const QString &d)
 {
-    const QString d = detail;
     switch (code) {
     case CURLE_OPERATION_TIMEDOUT:
         *out = Result(Error::Timeout, QStringLiteral("The server did not answer in time"), d);
@@ -213,7 +212,10 @@ Result settingsFrom(const ConnectionParams &params, Settings *out)
     if (settings.port == 0)
         settings.port = settings.tlsMode == TlsMode::Implicit ? ImplicitPort : ExplicitPort;
     settings.pin = params.option(QLatin1String(HostKeyOption)).trimmed();
-    settings.pinTrusted = params.flag(QLatin1String(PinTrustedOption));
+    settings.verifyPeer = params.flag(QLatin1String(VerifyPeerOption));
+#ifdef NETVFS_TLS_TEST_HOOKS
+    settings.testCaFile = params.option(QStringLiteral("test_ca_file")).toLocal8Bit();
+#endif
     *out = settings;
     return Result::success();
 }
@@ -235,16 +237,12 @@ QByteArray urlPath(const QByteArray &remotePath)
         out += "%2F";
         from = 1;
     }
-    static const char Hex[] = "0123456789ABCDEF";
     for (int i = from; i < remotePath.size(); ++i) {
         const auto c = uchar(remotePath.at(i));
-        if (c == '/' || unreserved(c)) {
+        if (c == '/' || unreserved(c))
             out += char(c);
-        } else {
-            out += '%';
-            out += Hex[c >> 4];
-            out += Hex[c & 0x0F];
-        }
+        else
+            out += '%' + QByteArray(1, char(c)).toHex().toUpper();
     }
     return out;
 }
