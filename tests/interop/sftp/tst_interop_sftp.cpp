@@ -1613,7 +1613,7 @@ private slots:
         QVERIFY(b->makePath(dir).ok());
         QByteArray content(6 * 1024 * 1024 + 123, Qt::Uninitialized);
         for (int i = 0; i < content.size(); ++i)
-            content[i] = static_cast<char>((i * 7919) >> 5);
+            content[i] = static_cast<char>((static_cast<quint32>(i) * 7919u) >> 5);
         QVERIFY(put(b.get(), dir + QStringLiteral("/data.bin"), content));
 
         // Four writers and four readers open together, used in turns.
