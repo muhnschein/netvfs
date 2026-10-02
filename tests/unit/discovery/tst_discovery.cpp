@@ -8,6 +8,7 @@
 #include <QtTest/QtTest>
 
 #include <climits>
+#include <utility>
 
 using namespace NetVfs;
 using NetVfs::Test::addressRecord;
@@ -65,7 +66,7 @@ public:
     QVector<Dns::Message> drain()
     {
         QVector<Dns::Message> out;
-        for (const QByteArray &d : qAsConst(sent)) {
+        for (const QByteArray &d : std::as_const(sent)) {
             Dns::Message m;
             if (Dns::decode(d, &m))
                 out.append(m);
@@ -659,7 +660,8 @@ private slots:
         QCOMPARE(rig.found.size(), 1);
         rig.advance(10000);
         QCOMPARE(rig.lost.size(), 1);
-        rig.advance(60000);                              // the resolution attempts run out meanwhile
+        for (int i = 0; i < 10; ++i)                     // the resolution attempts run out meanwhile
+            rig.advance(8000);
         QCOMPARE(rig.found.size(), 1);
         rig.transport->deliver(response({}, {addressRecord("box.local", QStringLiteral("192.0.2.98"))}));
         QCOMPARE(rig.found.size(), 2);                   // but a returning address brings it back

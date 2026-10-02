@@ -8,6 +8,7 @@
 #include <QtCore/QDateTime>
 #include <QtCore/QList>
 #include <QtCore/QObject>
+#include <QtCore/QScopedPointer>
 #include <QtCore/QString>
 #include <QtCore/QStringList>
 #include <QtCore/QTimer>
@@ -165,7 +166,7 @@ signals:
 
 private:
     class Private;
-    Private *d;
+    QScopedPointer<Private> d;
     int m_consumers = 0;
 
     Q_DISABLE_COPY(Discovery)

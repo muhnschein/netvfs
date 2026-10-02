@@ -144,18 +144,17 @@ Discovery::Discovery(QObject *parent)
 }
 
 Discovery::Discovery(DiscoveryTransport *transport, QObject *parent)
-    : QObject(parent), d(nullptr)
+    : QObject(parent)
 {
     qRegisterMetaType<DiscoveredService>("NetVfs::DiscoveredService");
     transport->setParent(this);
-    d = new Private(this, transport);
+    d.reset(new Private(this, transport));
 }
 
 Discovery::~Discovery()
 {
     if (m_consumers > 0)
         d->halt();
-    delete d;
 }
 
 bool Discovery::start()

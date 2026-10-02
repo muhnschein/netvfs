@@ -4,6 +4,8 @@
 #include "dnsmessage.h"
 #include "logging.h"
 
+#include <utility>
+
 namespace NetVfs {
 
 namespace {
@@ -141,11 +143,11 @@ void MulticastTransport::send(const QByteArray &datagram)
         m_v4.writeDatagram(datagram, m_options.unicastAddress, m_options.unicastPort);
         return;
     }
-    for (const QNetworkInterface &iface : qAsConst(m_joined4)) {
+    for (const QNetworkInterface &iface : std::as_const(m_joined4)) {
         m_v4.setMulticastInterface(iface);
         m_v4.writeDatagram(datagram, group4(), MdnsPort);
     }
-    for (const QNetworkInterface &iface : qAsConst(m_joined6)) {
+    for (const QNetworkInterface &iface : std::as_const(m_joined6)) {
         m_v6.setMulticastInterface(iface);
         m_v6.writeDatagram(datagram, group6(), MdnsPort);
     }

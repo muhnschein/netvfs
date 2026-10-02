@@ -182,7 +182,7 @@ bool decodeTxt(Reader *r, int end, QList<QByteArray> *txt, QString *error)
     while (r->pos() < end) {
         int len = 0;
         QByteArray s;
-        if (!r->u8(&len) || r->pos() + len > end || !r->bytes(len, &s))
+        if (!r->u8(&len) || !r->bytes(len, &s))
             return fail(error, "malformed TXT record");
         txt->append(s);
     }

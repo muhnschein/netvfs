@@ -2,6 +2,7 @@
 #include "discoverycache.h"
 
 #include <algorithm>
+#include <utility>
 
 namespace NetVfs {
 
@@ -449,7 +450,7 @@ void ServiceCache::evaluate(Instance *inst, Context *c)
 
 void ServiceCache::finishContext(Context *c)
 {
-    for (const QByteArray &host : qAsConst(c->dirtyHosts)) {
+    for (const QByteArray &host : std::as_const(c->dirtyHosts)) {
         for (auto it = m_instances.begin(); it != m_instances.end(); ++it) {
             if (it.value().hasSrv && it.value().target == host) {
                 if (c->wall.isValid())          // expiry is not "seen"
@@ -458,7 +459,7 @@ void ServiceCache::finishContext(Context *c)
             }
         }
     }
-    for (const QByteArray &key : qAsConst(c->dirty)) {
+    for (const QByteArray &key : std::as_const(c->dirty)) {
         const auto it = m_instances.find(key);
         if (it != m_instances.end())
             evaluate(&it.value(), c);
@@ -469,7 +470,7 @@ void ServiceCache::finishContext(Context *c)
 void ServiceCache::pruneHosts()
 {
     QSet<QByteArray> used;
-    for (const Instance &inst : qAsConst(m_instances)) {
+    for (const Instance &inst : std::as_const(m_instances)) {
         if (inst.hasSrv)
             used.insert(inst.target);
     }
@@ -614,9 +615,9 @@ qint64 ServiceCache::instanceDeadline(const Instance &inst) const
 qint64 ServiceCache::nextDeadline() const
 {
     qint64 best = -1;
-    for (const Instance &inst : qAsConst(m_instances))
+    for (const Instance &inst : std::as_const(m_instances))
         consider(&best, instanceDeadline(inst));
-    for (const QVector<AddressEntry> &entries : qAsConst(m_hosts)) {
+    for (const QVector<AddressEntry> &entries : std::as_const(m_hosts)) {
         for (const AddressEntry &e : entries) {
             consider(&best, e.life.expiresAt());
             consider(&best, e.life.refreshAt());
@@ -628,7 +629,7 @@ qint64 ServiceCache::nextDeadline() const
 QVector<Dns::Record> ServiceCache::knownAnswers(qint64 now) const
 {
     QVector<Dns::Record> out;
-    for (const Instance &inst : qAsConst(m_instances)) {
+    for (const Instance &inst : std::as_const(m_instances)) {
         const qint64 remaining = inst.ptr.expiresAt() - now;
         if (remaining * 2 < inst.ptr.ttlMs)
             continue;
@@ -645,7 +646,7 @@ QVector<Dns::Record> ServiceCache::knownAnswers(qint64 now) const
 QVector<DiscoveredService> ServiceCache::services() const
 {
     QVector<DiscoveredService> out;
-    for (const Instance &inst : qAsConst(m_instances)) {
+    for (const Instance &inst : std::as_const(m_instances)) {
         if (inst.announced)
             out.append(inst.last);
     }

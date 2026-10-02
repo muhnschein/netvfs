@@ -239,8 +239,8 @@ private slots:
         q.header(0, 0, 1, 0, 0, 0);                               // promises a question, has none
         QVERIFY(rejects(q.bytes()));
         Pkt r;
-        r.header(0, 0x8400, 0, 1000, 0, 0);                       // more than MaxRecords
-        r.raw(QByteArray(11 * 1000, '\0'));
+        r.header(0, 0x8400, 0, 700, 0, 0);                        // fits the packet, more than MaxRecords
+        r.raw(QByteArray(11 * 700, '\0'));
         QVERIFY(rejects(r.bytes()));
     }
 
@@ -330,6 +330,11 @@ private slots:
         QVERIFY(rejects(overrun.bytes()));
         // trailing garbage after a PTR name inside the record
         QVERIFY(rejects(answerWith(TypePtr, hexBytes("0161000000"))));
+        // truncated question: the class is missing
+        Pkt question;
+        question.header(0, 0, 1, 0, 0, 0);
+        question.name("x.local").u16(TypePtr);
+        QVERIFY(rejects(question.bytes()));
         // truncated record header
         Pkt p;
         p.header(0, 0x8400, 0, 1, 0, 0);
