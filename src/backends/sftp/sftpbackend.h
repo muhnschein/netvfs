@@ -53,6 +53,8 @@ private:
         quint64 offset = 0;
     };
     class PendingQueue;
+    class Io;      // transfers (sftpbackend.cpp)
+    class Login;   // sign-in methods (sftpbackend.cpp)
     struct Sink {
         QIODevice *device = nullptr;
         Progress *progress = nullptr;
@@ -70,11 +72,6 @@ private:
     Result checkReady() const;
     Result resolve(const QString &path, QByteArray *remote) const;
 
-    Result authenticateWith(int methods, const QByteArray &secret) const;
-    Result authPassword(int methods, const QByteArray &secret) const;
-    Result authKeyboardInteractive(const QByteArray &secret) const;
-    Result authPublicKey(int methods, const QByteArray &secret) const;
-    Result authOutcome(int rc) const;
     Result openSftp();
 
     Result statRemote(const QByteArray &remote, Entry *out) const;
@@ -82,20 +79,6 @@ private:
     Result makeDirectory(const QByteArray &remote) const;
     Result removeRemote(const QByteArray &remote) const;
 
-    Result fillWriteWindow(sftp_file file, QIODevice *source, QByteArray *buffer, PendingQueue *queue,
-                           bool *eof, const QByteArray &remote) const;
-    Result writeChunks(sftp_file file, QIODevice *source, const QByteArray &remote, Progress *progress) const;
-    Result refillReadWindow(sftp_file file, PendingQueue *queue, quint64 *offset) const;
-    Result drain(PendingQueue *queue, char *buffer) const;
-    Result readStep(sftp_file file, PendingQueue *queue, QByteArray *buffer, Sink *sink, quint64 *offset,
-                    bool *finished) const;
-    Result readChunks(sftp_file file, Sink *sink) const;
-    Result readRange(sftp_file file, const QByteArray &remote, qint64 length, QByteArray *out) const;
-    Result waitWrite(Pending *pending, const QByteArray &remote) const;
-    Result waitRead(Pending *pending, char *buffer, qint64 *received) const;
-    Result waitForData(const QElapsedTimer &started) const;
-    Result timedOut() const;
-    bool overdue(const QElapsedTimer &started) const;
     int closeFile(sftp_file file, bool healthy) const;
 
     ssh_session m_session = nullptr;

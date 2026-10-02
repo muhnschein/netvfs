@@ -18,8 +18,7 @@ Result fillMaterial(ssh_key key, SshKeyMaterial *out)
 
     const QString type = keyTypeName(publicKey.get());
     const QByteArray blob = publicKeyBlob(publicKey.get());
-    const Result r = checkKeyType(type, rsaBitsFromBlob(blob));
-    if (!r.ok())
+    if (const Result r = checkKeyType(type, rsaBitsFromBlob(blob)); !r.ok())
         return r;
 
     CString privateText;

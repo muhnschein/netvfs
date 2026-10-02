@@ -53,7 +53,8 @@ build_images() {
 }
 
 instance_port() {
-    case "$1" in
+    name=$1
+    case "$name" in
     default) echo 2201 ;;
     hardened) echo 2202 ;;
     kbdint) echo 2203 ;;
@@ -61,6 +62,7 @@ instance_port() {
     noext) echo 2205 ;;
     legacy) echo 2206 ;;
     hold) echo 2207 ;;
+    *) echo "unknown instance $name" >&2; return 1 ;;
     esac
 }
 
@@ -82,12 +84,13 @@ start() {
 }
 
 wait_ready() {
-    container="$prefix-$1"
+    server=$1
+    container="$prefix-$server"
     tries=0
     until docker exec "$container" test -f /run/netvfs-ready 2>/dev/null; do
         tries=$((tries + 1))
         if [ "$tries" -gt 120 ] || [ "$(docker inspect -f '{{.State.Running}}' "$container")" != true ]; then
-            log "server $1 did not become ready"
+            log "server $server did not become ready"
             docker logs "$container" >&2 || true
             return 1
         fi
@@ -97,10 +100,12 @@ wait_ready() {
 
 # JSON object {"<instance>": <host port>, ...} for one container.
 ports_json() {
-    container="$prefix-$1"
+    server=$1
+    instances=$2
+    container="$prefix-$server"
     separator=""
     printf '{'
-    for instance in $2; do
+    for instance in $instances; do
         port=$(docker port "$container" "$(instance_port "$instance")/tcp" | head -n 1 | sed 's/.*://')
         printf '%s "%s": %s' "$separator" "$instance" "$port"
         separator=","
@@ -109,7 +114,9 @@ ports_json() {
 }
 
 server_json() {
-    printf '    "%s": { "container": "%s", "ports": %s }' "$1" "$prefix-$1" "$(ports_json "$1" "$2")"
+    server=$1
+    instances=$2
+    printf '    "%s": { "container": "%s", "ports": %s }' "$server" "$prefix-$server" "$(ports_json "$server" "$instances")"
 }
 
 cli_check() {

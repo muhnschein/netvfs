@@ -2,7 +2,6 @@
 #include "sshutil.h"
 #include "secure.h"
 
-#include <cstring>
 #include <mutex>
 
 namespace NetVfs::Sftp {
@@ -57,9 +56,9 @@ void ensureLibraryInitialized()
 CString::~CString()
 {
     if (m_data) {
-        volatile char *p = m_data;
-        for (size_t n = std::strlen(m_data); n > 0; --n)
-            *p++ = 0;
+        // Stores through a volatile pointer cannot be elided (SEC-5).
+        for (volatile char *p = m_data; *p != '\0'; ++p)
+            *p = 0;
         ssh_string_free_char(m_data);
     }
 }

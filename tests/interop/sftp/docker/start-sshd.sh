@@ -78,7 +78,8 @@ penalties() {
 }
 
 instance_config() {
-    case "$1" in
+    instance=$1
+    case "$instance" in
     default)
         common 2201 default
         cat <<'EOF'
@@ -140,7 +141,7 @@ EOF
         echo "Subsystem sftp internal-sftp"
         ;;
     *)
-        echo "unknown instance $1" >&2
+        echo "unknown instance $instance" >&2
         exit 1
         ;;
     esac

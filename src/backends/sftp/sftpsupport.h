@@ -58,8 +58,8 @@ Result checkSecretForMode(const QString &authMode, const QByteArray &secret);
 // --- private key files (S-15) -----------------------------------------------
 
 struct KeyFileInfo {
-    enum Format { Unknown, OpenSsh, Pem, PublicKey };
-    Format format = Unknown;
+    enum class Format { Unknown, OpenSsh, Pem, PublicKey };
+    Format format = Format::Unknown;
     bool encrypted = false;
     QString keyType;        // from the OpenSSH container, the PEM label or a public line
 };

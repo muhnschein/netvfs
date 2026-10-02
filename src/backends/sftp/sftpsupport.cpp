@@ -91,7 +91,7 @@ KeyFileInfo inspectOpenSsh(const QByteArray &text)
     QByteArray body = text.mid(bodyStart, end - bodyStart).simplified();
     body.replace(' ', QByteArray());
     if (parseOpenSshContainer(QByteArray::fromBase64(body), &info))
-        info.format = KeyFileInfo::OpenSsh;
+        info.format = KeyFileInfo::Format::OpenSsh;
     return info;
 }
 
@@ -123,14 +123,14 @@ KeyFileInfo inspectPem(const QByteArray &text)
     for (const Label &entry : labels) {
         if (!text.contains(entry.label))
             continue;
-        info.format = KeyFileInfo::Pem;
+        info.format = KeyFileInfo::Format::Pem;
         info.keyType = QString::fromLatin1(entry.type);
         info.encrypted = entry.encrypted || text.contains("Proc-Type: 4,ENCRYPTED");
         break;
     }
     // PKCS#8 names the algorithm only inside the DER structure; DSA
     // (OID 1.2.840.10040.4.1) is the one S-15 needs to recognise there.
-    if (info.format == KeyFileInfo::Pem && info.keyType.isEmpty() && !info.encrypted
+    if (info.format == KeyFileInfo::Format::Pem && info.keyType.isEmpty() && !info.encrypted
             && pemBody(text).contains(QByteArray("\x06\x07\x2a\x86\x48\xce\x38\x04\x01", 9)))
         info.keyType = QString::fromLatin1(DsaType);
     return info;
@@ -141,7 +141,7 @@ KeyFileInfo inspectPublicLine(const QByteArray &text)
     KeyFileInfo info;
     if (const QList<QByteArray> fields = text.simplified().split(' ');
             fields.size() >= 2 && fields.at(1).startsWith("AAAA")) {
-        info.format = KeyFileInfo::PublicKey;
+        info.format = KeyFileInfo::Format::PublicKey;
         info.keyType = QString::fromLatin1(fields.at(0));
     }
     return info;
@@ -316,9 +316,9 @@ Result checkSecretForMode(const QString &authMode, const QByteArray &secret)
 KeyFileInfo inspectKeyFile(const QByteArray &contents)
 {
     KeyFileInfo info = inspectOpenSsh(contents);
-    if (info.format == KeyFileInfo::Unknown)
+    if (info.format == KeyFileInfo::Format::Unknown)
         info = inspectPem(contents);
-    if (info.format == KeyFileInfo::Unknown)
+    if (info.format == KeyFileInfo::Format::Unknown)
         info = inspectPublicLine(contents);
     return info;
 }
@@ -327,9 +327,9 @@ Result checkKeyFile(const KeyFileInfo &info)
 {
     if (isCertificate(info.keyType))
         return certificateRejected();
-    if (info.format == KeyFileInfo::PublicKey)
+    if (info.format == KeyFileInfo::Format::PublicKey)
         return unsupportedKey(QStringLiteral("This is a public key; choose the private key file"));
-    if (info.format == KeyFileInfo::Unknown)
+    if (info.format == KeyFileInfo::Format::Unknown)
         return unsupportedKey(QStringLiteral("The file is not a private key in OpenSSH or PEM format"));
     if (info.keyType == QLatin1String(DsaType))
         return unsupportedKey(QStringLiteral("DSA keys are not supported; use an Ed25519, ECDSA or RSA key"));
@@ -370,7 +370,7 @@ int rsaBitsFromBlob(const QByteArray &publicKeyBlob)
     if (start == modulus.size())
         return 0;
     int bits = (modulus.size() - start - 1) * 8;
-    for (auto top = static_cast<uchar>(modulus.at(start)); top != 0; top >>= 1)
+    for (auto top = static_cast<std::byte>(modulus.at(start)); top != std::byte { 0 }; top >>= 1)
         ++bits;
     return bits;
 }

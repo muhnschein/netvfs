@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 #include "smbbackend.h"
 #include "smb2api.h"
+#include "smbcallbacks.h"
 
 #include "logging.h"
 #include "paths.h"
@@ -18,22 +19,16 @@
 
 namespace NetVfs::Smb {
 
-enum class CallKind { Plain, Open, OpenDir };
-
 // One asynchronous libsmb2 request. Heap-allocated so that a request
 // abandoned on cancel or timeout can complete later without touching freed
-// memory: it then moves to SmbBackend::m_orphans and keeps its buffers.
-struct Call {
-    Call() = default;
-    explicit Call(CallKind callKind) : kind(callKind) {}
+// memory: it then moves to SmbBackend::m_orphans and keeps its buffers. The
+// completion state is filled in by the C callbacks of smbcallbacks.c.
+struct Call : NetVfsSmbCompletion {
+    Call() : NetVfsSmbCompletion {} {}
 
-    CallKind kind = CallKind::Plain;
-    bool done = false;
-    bool orphaned = false;
-    int status = 0;
-    quint32 ntStatus = 0;
-    smb2fh *fh = nullptr;           // result of an Open
-    smb2dir *dir = nullptr;         // result of an OpenDir
+    // The callback data handed to libsmb2 together with a netvfs_smb_complete_* callback.
+    NetVfsSmbCompletion *completion() { return this; }
+
     smb2_stat_64 st = {};
     struct smb2_statvfs vfs = {};   // "struct": a function has the same name
     QByteArray buffer;
@@ -44,37 +39,6 @@ namespace {
 const int DefaultPort = 445;
 const int PollSliceMs = 100;
 const char *const UserFileVariable = "NTLM_USER_FILE";
-
-// libsmb2 completion callbacks have the C signature smb2_command_cb.
-void ignoreCompletion(smb2_context *, int, void *, void *) // NOSONAR(cpp:S5008) C callback signature
-{
-    // Completion of a close sent for an abandoned open: nothing waits for it.
-}
-
-void storeResult(Call *call, int status, void *commandData) // NOSONAR(cpp:S5008) libsmb2 result pointer
-{
-    if (status < 0 || !commandData)
-        return;
-    if (call->kind == CallKind::Open)
-        call->fh = static_cast<smb2fh *>(commandData);
-    else if (call->kind == CallKind::OpenDir)
-        call->dir = static_cast<smb2dir *>(commandData);
-}
-
-void onComplete(smb2_context *ctx, int status, void *commandData, void *privateData) // NOSONAR(cpp:S5008)
-{
-    auto *call = static_cast<Call *>(privateData);
-    storeResult(call, status, commandData);
-    // A handle opened by a request that was abandoned is closed again.
-    if (call->orphaned && call->fh)
-        smb2_close_async(ctx, call->fh, ignoreCompletion, nullptr);
-    if (call->orphaned && call->dir)
-        smb2_closedir(ctx, call->dir);
-    call->done = true;
-    call->status = status;
-    // SPEC-smb 5: the NT status is the only input to classification.
-    call->ntStatus = static_cast<quint32>(smb2_get_nterror(ctx));
-}
 
 // libsmb2 writes with writev(); a peer that closed the connection would
 // otherwise kill the whole process with SIGPIPE. The signal is blocked on
@@ -126,11 +90,34 @@ void neutraliseUserFile()
     qunsetenv(UserFileVariable);
 }
 
+namespace {
+void applyPolicy(smb2_context *ctx, const ConnectionParams &params, const QString &user,
+                 const Credentials &credentials)
+{
+    // SPEC-smb section 3. Nothing here is configurable except M-3.
+    smb2_set_version(ctx, SMB2_VERSION_ANY3);                                  // M-1
+    smb2_set_security_mode(ctx, SMB2_NEGOTIATE_SIGNING_ENABLED | SMB2_NEGOTIATE_SIGNING_REQUIRED); // M-2
+    smb2_set_sign(ctx, 1);
+    if (requireEncryption(params.options))                                    // M-3; off: not called
+        smb2_set_seal(ctx, 1);
+    smb2_set_authentication(ctx, SMB2_SEC_NTLMSSP);                            // M-4
+    smb2_set_timeout(ctx, qMax(1, params.requestTimeoutMs / 1000));          // M-7
+
+    // M-5: smb2_set_user() and smb2_set_domain() read NTLM_USER_FILE and may
+    // replace the password, so the variable goes first and the password last.
+    neutraliseUserFile();
+    smb2_set_user(ctx, user.toUtf8().constData());
+    if (const QString domain = params.option(QStringLiteral("domain")); !domain.isEmpty())
+        smb2_set_domain(ctx, domain.toUtf8().constData());
+    smb2_set_password(ctx, credentials.secret.constData());
+}
+} // namespace
+
 SmbBackend::SmbBackend() = default;
 
 SmbBackend::~SmbBackend()
 {
-    disconnect();
+    shutdown();
 }
 
 Result SmbBackend::connect(const ConnectionParams &params, ServerIdentity *seen)
@@ -166,7 +153,7 @@ Result SmbBackend::authenticate(const Credentials &credentials)
     if (!m_ctx)
         return Result(Error::Internal, QStringLiteral("Cannot create an SMB context"));
     m_stage = Stage::SessionSetup;
-    applyPolicy(user, credentials);
+    applyPolicy(m_ctx, m_params, user, credentials);
 
     const QByteArray server = serverString(m_address, m_params.port);
     const QByteArray shareName = share.toUtf8();
@@ -175,7 +162,8 @@ Result SmbBackend::authenticate(const Credentials &credentials)
     Result r = request(call, [&server, &shareName](smb2_context *ctx, Call *c) {
         // The user is already set (applyPolicy); passing it again here would
         // make libsmb2 consult NTLM_USER_FILE once more.
-        return smb2_connect_share_async(ctx, server.constData(), shareName.constData(), nullptr, onComplete, c);
+        return smb2_connect_share_async(ctx, server.constData(), shareName.constData(), nullptr,
+                                        netvfs_smb_complete_plain, c->completion());
     }, QStringLiteral("Sign-in failed"));
     // SEC-5: drop libsmb2's copy of the password as soon as it is not needed.
     smb2_set_password(m_ctx, nullptr);
@@ -194,25 +182,6 @@ Result SmbBackend::authenticate(const Credentials &credentials)
     return r;
 }
 
-void SmbBackend::applyPolicy(const QString &user, const Credentials &credentials)
-{
-    // SPEC-smb section 3. Nothing here is configurable except M-3.
-    smb2_set_version(m_ctx, SMB2_VERSION_ANY3);                                  // M-1
-    smb2_set_security_mode(m_ctx, SMB2_NEGOTIATE_SIGNING_ENABLED | SMB2_NEGOTIATE_SIGNING_REQUIRED); // M-2
-    smb2_set_sign(m_ctx, 1);
-    if (requireEncryption(m_params.options))                                    // M-3; off: not called
-        smb2_set_seal(m_ctx, 1);
-    smb2_set_authentication(m_ctx, SMB2_SEC_NTLMSSP);                            // M-4
-    smb2_set_timeout(m_ctx, qMax(1, m_params.requestTimeoutMs / 1000));          // M-7
-
-    // M-5: smb2_set_user() and smb2_set_domain() read NTLM_USER_FILE and may
-    // replace the password, so the variable goes first and the password last.
-    neutraliseUserFile();
-    smb2_set_user(m_ctx, user.toUtf8().constData());
-    if (const QString domain = m_params.option(QStringLiteral("domain")); !domain.isEmpty())
-        smb2_set_domain(m_ctx, domain.toUtf8().constData());
-    smb2_set_password(m_ctx, credentials.secret.constData());
-}
 
 Result SmbBackend::checkUsable() const
 {
@@ -225,13 +194,15 @@ Result SmbBackend::checkUsable() const
     return Result::success();
 }
 
-Result SmbBackend::request(std::unique_ptr<Call> &call, const Starter &start, const QString &context, Wait wait)
+template <typename Starter>
+Result SmbBackend::request(std::unique_ptr<Call> &call, Starter start, const QString &context, Wait wait)
 {
     if (Result r = checkUsable(); !r.ok())
         return r;
     if (wait == Wait::Cancellable && m_cancel)
         return Result(Error::Canceled);
-    purgeOrphans();
+    auto finished = [](const std::unique_ptr<Call> &orphan) { return orphan->done != 0; };
+    m_orphans.erase(std::remove_if(m_orphans.begin(), m_orphans.end(), finished), m_orphans.end());
     smb2_set_error(m_ctx, "");      // clears the NT status of an earlier request
     if (start(m_ctx, call.get()) < 0)
         return Result(Error::Internal, context + QStringLiteral(": ") + QString::fromUtf8(smb2_get_error(m_ctx)));
@@ -251,7 +222,7 @@ Result SmbBackend::await(std::unique_ptr<Call> &call, Wait wait)
     const SigPipeGuard guard;
     QElapsedTimer clock;
     clock.start();
-    while (!call->done) {
+    while (call->done == 0) {
         // M-12, C-9: a cancel abandons the request at once.
         if (wait == Wait::Cancellable && m_cancel) {
             abandon(call);
@@ -265,12 +236,11 @@ Result SmbBackend::await(std::unique_ptr<Call> &call, Wait wait)
         pollfd pfd = {};
         pfd.fd = smb2_get_fd(m_ctx);
         pfd.events = static_cast<short>(smb2_which_events(m_ctx));
-        const int rc = ::poll(&pfd, 1, PollSliceMs);
         // Also called without events: libsmb2 expires timed-out requests there (M-7).
-        if (smb2_service(m_ctx, rc > 0 ? pfd.revents : 0) >= 0)
+        if (const int rc = ::poll(&pfd, 1, PollSliceMs); smb2_service(m_ctx, rc > 0 ? pfd.revents : 0) >= 0)
             continue;
         m_broken = true;
-        if (!call->done) {
+        if (call->done == 0) {
             abandon(call);
             return connectionLost(m_stage);
         }
@@ -280,14 +250,8 @@ Result SmbBackend::await(std::unique_ptr<Call> &call, Wait wait)
 
 void SmbBackend::abandon(std::unique_ptr<Call> &call)
 {
-    call->orphaned = true;
+    call->orphaned = 1;
     m_orphans.push_back(std::move(call));
-}
-
-void SmbBackend::purgeOrphans()
-{
-    auto finished = [](const std::unique_ptr<Call> &call) { return call->done; };
-    m_orphans.erase(std::remove_if(m_orphans.begin(), m_orphans.end(), finished), m_orphans.end());
 }
 
 void SmbBackend::destroyContext()
@@ -307,7 +271,7 @@ Result SmbBackend::statPath(const QByteArray &path, Entry *out)
 {
     auto call = std::make_unique<Call>();
     const Result r = request(call, [&path](smb2_context *ctx, Call *c) {
-        return smb2_stat_async(ctx, path.constData(), &c->st, onComplete, c);
+        return smb2_stat_async(ctx, path.constData(), &c->st, netvfs_smb_complete_plain, c->completion());
     }, QStringLiteral("stat"));
     if (r.ok() && out)
         *out = entryFrom(Paths::fileName(QString::fromUtf8(path)), call->st);
@@ -318,7 +282,7 @@ Result SmbBackend::unlinkPath(const QByteArray &path, const QString &context)
 {
     auto call = std::make_unique<Call>();
     return request(call, [&path](smb2_context *ctx, Call *c) {
-        return smb2_unlink_async(ctx, path.constData(), onComplete, c);
+        return smb2_unlink_async(ctx, path.constData(), netvfs_smb_complete_plain, c->completion());
     }, context);
 }
 
@@ -335,9 +299,9 @@ Result SmbBackend::list(const QString &dir, QVector<Entry> *out)
     QByteArray p;
     if (Result r = translatePath(dir, &p); !r.ok())
         return r;
-    auto call = std::make_unique<Call>(CallKind::OpenDir);
+    auto call = std::make_unique<Call>();
     const Result r = request(call, [&p](smb2_context *ctx, Call *c) {
-        return smb2_opendir_async(ctx, p.constData(), onComplete, c);
+        return smb2_opendir_async(ctx, p.constData(), netvfs_smb_complete_opendir, c->completion());
     }, QStringLiteral("list"));
     if (!r.ok())
         return r;
@@ -360,7 +324,7 @@ Result SmbBackend::makeDir(const QByteArray &path)
     if (r.error() == Error::NotFound) {
         auto call = std::make_unique<Call>();
         r = request(call, [&path](smb2_context *ctx, Call *c) {
-            return smb2_mkdir_async(ctx, path.constData(), onComplete, c);
+            return smb2_mkdir_async(ctx, path.constData(), netvfs_smb_complete_plain, c->completion());
         }, QStringLiteral("create folder"));
         if (r.error() != Error::AlreadyExists)
             return r;
@@ -421,7 +385,7 @@ Result SmbBackend::rename(const QString &from, const QString &to)
 
     auto call = std::make_unique<Call>();
     return request(call, [&f, &t](smb2_context *ctx, Call *c) {
-        return smb2_rename_async(ctx, f.constData(), t.constData(), onComplete, c);
+        return smb2_rename_async(ctx, f.constData(), t.constData(), netvfs_smb_complete_plain, c->completion());
     }, QStringLiteral("rename"));
 }
 
@@ -432,12 +396,12 @@ Result SmbBackend::freeSpace(const QString &dir, qint64 *bytes)
         return r;
     auto call = std::make_unique<Call>();
     const Result r = request(call, [&p](smb2_context *ctx, Call *c) {
-        return smb2_statvfs_async(ctx, p.constData(), &c->vfs, onComplete, c);
+        return smb2_statvfs_async(ctx, p.constData(), &c->vfs, netvfs_smb_complete_plain, c->completion());
     }, QStringLiteral("free space"));
     if (r.ok() && bytes) {
         const quint64 unit = call->vfs.f_bsize;
         const quint64 units = call->vfs.f_bavail;
-        constexpr quint64 limit = quint64(std::numeric_limits<qint64>::max());
+        constexpr auto limit = quint64(std::numeric_limits<qint64>::max());
         *bytes = (unit && units > limit / unit) ? std::numeric_limits<qint64>::max()
                                                 : static_cast<qint64>(units * unit);
     }
@@ -446,9 +410,9 @@ Result SmbBackend::freeSpace(const QString &dir, qint64 *bytes)
 
 Result SmbBackend::openFile(const QByteArray &path, int flags, smb2fh **fh)
 {
-    auto call = std::make_unique<Call>(CallKind::Open);
+    auto call = std::make_unique<Call>();
     const Result r = request(call, [&path, flags](smb2_context *ctx, Call *c) {
-        return smb2_open_async(ctx, path.constData(), flags, onComplete, c);
+        return smb2_open_async(ctx, path.constData(), flags, netvfs_smb_complete_open, c->completion());
     }, QStringLiteral("open"));
     if (r.ok())
         *fh = call->fh;
@@ -461,7 +425,7 @@ Result SmbBackend::closeFile(smb2fh *fh, const Result &outcome)
     // bounded time (C-9), and the first error is what the caller sees.
     auto call = std::make_unique<Call>();
     const Result r = request(call, [fh](smb2_context *ctx, Call *c) {
-        return smb2_close_async(ctx, fh, onComplete, c);
+        return smb2_close_async(ctx, fh, netvfs_smb_complete_plain, c->completion());
     }, QStringLiteral("close"), outcome.ok() ? Wait::Cancellable : Wait::Drain);
     return outcome.ok() ? r : outcome;
 }
@@ -475,10 +439,10 @@ Result SmbBackend::writeChunk(smb2fh *fh, const QByteArray &buffer, qint64 lengt
         const auto *data = reinterpret_cast<const uint8_t *>(call->buffer.constData()) + written;
         const auto count = static_cast<quint32>(length - written);
         const quint64 at = offset + quint64(written);
-        const Result r = request(call, [fh, data, count, at](smb2_context *ctx, Call *c) {
-            return smb2_pwrite_async(ctx, fh, data, count, at, onComplete, c);
-        }, QStringLiteral("write"));
-        if (!r.ok())
+        const auto start = [fh, data, count, at](smb2_context *ctx, Call *c) {
+            return smb2_pwrite_async(ctx, fh, data, count, at, netvfs_smb_complete_plain, c->completion());
+        };
+        if (const Result r = request(call, start, QStringLiteral("write")); !r.ok())
             return r;
         if (call->status == 0)
             return Result(Error::ProtocolError, QStringLiteral("write: the server accepted no data"));
@@ -523,7 +487,7 @@ Result SmbBackend::upload(QIODevice *source, const QString &path, Progress *prog
         // C-12: flush to stable storage before the size check and rename.
         auto call = std::make_unique<Call>();
         r = request(call, [fh](smb2_context *ctx, Call *c) {
-            return smb2_fsync_async(ctx, fh, onComplete, c);
+            return smb2_fsync_async(ctx, fh, netvfs_smb_complete_plain, c->completion());
         }, QStringLiteral("flush"));
     }
     return closeFile(fh, r);
@@ -537,7 +501,7 @@ Result SmbBackend::readChunk(smb2fh *fh, quint64 offset, quint32 count, QByteArr
         call->buffer.resize(static_cast<int>(count));
     auto *data = reinterpret_cast<uint8_t *>(call->buffer.data());
     const Result r = request(call, [fh, data, count, offset](smb2_context *ctx, Call *c) {
-        return smb2_pread_async(ctx, fh, data, count, offset, onComplete, c);
+        return smb2_pread_async(ctx, fh, data, count, offset, netvfs_smb_complete_plain, c->completion());
     }, QStringLiteral("read"));
     if (!r.ok())
         return r;
@@ -550,7 +514,7 @@ Result SmbBackend::fileSize(smb2fh *fh, qint64 *size)
 {
     auto call = std::make_unique<Call>();
     const Result r = request(call, [fh](smb2_context *ctx, Call *c) {
-        return smb2_fstat_async(ctx, fh, &c->st, onComplete, c);
+        return smb2_fstat_async(ctx, fh, &c->st, netvfs_smb_complete_plain, c->completion());
     }, QStringLiteral("stat"));
     if (r.ok())
         *size = static_cast<qint64>(call->st.smb2_size);
@@ -642,10 +606,15 @@ void SmbBackend::resetCancel()
 
 void SmbBackend::disconnect()
 {
+    shutdown();
+}
+
+void SmbBackend::shutdown() noexcept
+{
     if (m_ctx && !m_broken && m_stage == Stage::Established && std::this_thread::get_id() == m_owner) {
         auto call = std::make_unique<Call>();
         request(call, [](smb2_context *ctx, Call *c) {
-            return smb2_disconnect_share_async(ctx, onComplete, c);
+            return smb2_disconnect_share_async(ctx, netvfs_smb_complete_plain, c->completion());
         }, QStringLiteral("disconnect"), Wait::Drain);
     }
     destroyContext();

@@ -44,12 +44,13 @@ address() {
 }
 
 ready() {
+    server=$1
     i=0
-    until docker exec "$prefix-$1" smbclient //localhost/backup -A /etc/netvfs-auth -c ls >/dev/null 2>&1; do
+    until docker exec "$prefix-$server" smbclient //localhost/backup -A /etc/netvfs-auth -c ls >/dev/null 2>&1; do
         i=$((i + 1))
         if [ $i -ge 60 ]; then
-            echo "Samba server $1 did not come up:" >&2
-            docker logs "$prefix-$1" >&2
+            echo "Samba server $server did not come up:" >&2
+            docker logs "$prefix-$server" >&2
             return 1
         fi
         sleep 0.5

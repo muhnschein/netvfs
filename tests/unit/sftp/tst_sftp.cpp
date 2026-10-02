@@ -365,45 +365,45 @@ private slots:
         QTest::addColumn<bool>("encrypted");
         QTest::addColumn<QString>("type");
         QTest::addColumn<QString>("rejection");   // empty: accepted by checkKeyFile
-        QTest::newRow("openssh ed25519") << openSshKeyText("none", "ssh-ed25519") << int(KeyFileInfo::OpenSsh)
+        QTest::newRow("openssh ed25519") << openSshKeyText("none", "ssh-ed25519") << int(KeyFileInfo::Format::OpenSsh)
                                          << false << "ssh-ed25519" << "";
-        QTest::newRow("openssh encrypted") << openSshKeyText("aes256-ctr", "ssh-rsa") << int(KeyFileInfo::OpenSsh)
+        QTest::newRow("openssh encrypted") << openSshKeyText("aes256-ctr", "ssh-rsa") << int(KeyFileInfo::Format::OpenSsh)
                                            << true << "ssh-rsa" << "";
-        QTest::newRow("openssh dsa") << openSshKeyText("none", "ssh-dss") << int(KeyFileInfo::OpenSsh) << false
+        QTest::newRow("openssh dsa") << openSshKeyText("none", "ssh-dss") << int(KeyFileInfo::Format::OpenSsh) << false
                                      << "ssh-dss" << "DSA keys";
         QTest::newRow("openssh sk") << openSshKeyText("none", "sk-ssh-ed25519@openssh.com")
-                                    << int(KeyFileInfo::OpenSsh) << false << "sk-ssh-ed25519@openssh.com"
+                                    << int(KeyFileInfo::Format::OpenSsh) << false << "sk-ssh-ed25519@openssh.com"
                                     << "Security-key";
         QTest::newRow("openssh sk ecdsa") << openSshKeyText("none", "sk-ecdsa-sha2-nistp256@openssh.com")
-                                          << int(KeyFileInfo::OpenSsh) << false
+                                          << int(KeyFileInfo::Format::OpenSsh) << false
                                           << "sk-ecdsa-sha2-nistp256@openssh.com" << "Security-key";
         QTest::newRow("openssh cert") << openSshKeyText("none", "ssh-ed25519-cert-v01@openssh.com")
-                                      << int(KeyFileInfo::OpenSsh) << false << "ssh-ed25519-cert-v01@openssh.com"
+                                      << int(KeyFileInfo::Format::OpenSsh) << false << "ssh-ed25519-cert-v01@openssh.com"
                                       << "certificates";
         QTest::newRow("openssh truncated")
             << QByteArray("-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEA\n-----END OPENSSH PRIVATE KEY-----\n")
-            << int(KeyFileInfo::Unknown) << false << "" << "not a private key";
+            << int(KeyFileInfo::Format::Unknown) << false << "" << "not a private key";
         QTest::newRow("pem rsa") << QByteArray("-----BEGIN RSA PRIVATE KEY-----\nAAAA\n-----END RSA PRIVATE KEY-----\n")
-                                 << int(KeyFileInfo::Pem) << false << "ssh-rsa" << "";
+                                 << int(KeyFileInfo::Format::Pem) << false << "ssh-rsa" << "";
         QTest::newRow("pem rsa encrypted")
             << QByteArray("-----BEGIN RSA PRIVATE KEY-----\nProc-Type: 4,ENCRYPTED\nDEK-Info: AES-128-CBC,00\n\nAAAA\n")
-            << int(KeyFileInfo::Pem) << true << "ssh-rsa" << "";
-        QTest::newRow("pem ec") << QByteArray("-----BEGIN EC PRIVATE KEY-----\nAAAA\n") << int(KeyFileInfo::Pem)
+            << int(KeyFileInfo::Format::Pem) << true << "ssh-rsa" << "";
+        QTest::newRow("pem ec") << QByteArray("-----BEGIN EC PRIVATE KEY-----\nAAAA\n") << int(KeyFileInfo::Format::Pem)
                                 << false << "ecdsa" << "";
-        QTest::newRow("pem dsa") << QByteArray("-----BEGIN DSA PRIVATE KEY-----\nAAAA\n") << int(KeyFileInfo::Pem)
+        QTest::newRow("pem dsa") << QByteArray("-----BEGIN DSA PRIVATE KEY-----\nAAAA\n") << int(KeyFileInfo::Format::Pem)
                                  << false << "ssh-dss" << "DSA keys";
-        QTest::newRow("pkcs8") << QByteArray("-----BEGIN PRIVATE KEY-----\nAAAA\n") << int(KeyFileInfo::Pem) << false
+        QTest::newRow("pkcs8") << QByteArray("-----BEGIN PRIVATE KEY-----\nAAAA\n") << int(KeyFileInfo::Format::Pem) << false
                                << "" << "";
         QTest::newRow("pkcs8 encrypted") << QByteArray("-----BEGIN ENCRYPTED PRIVATE KEY-----\nAAAA\n")
-                                         << int(KeyFileInfo::Pem) << true << "" << "";
+                                         << int(KeyFileInfo::Format::Pem) << true << "" << "";
         QTest::newRow("public key") << QByteArray("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIA== me@host\n")
-                                    << int(KeyFileInfo::PublicKey) << false << "ssh-ed25519" << "public key";
+                                    << int(KeyFileInfo::Format::PublicKey) << false << "ssh-ed25519" << "public key";
         QTest::newRow("certificate") << QByteArray("ssh-ed25519-cert-v01@openssh.com AAAAIHNzaC1lZDI1NTE5 me\n")
-                                     << int(KeyFileInfo::PublicKey) << false << "ssh-ed25519-cert-v01@openssh.com"
+                                     << int(KeyFileInfo::Format::PublicKey) << false << "ssh-ed25519-cert-v01@openssh.com"
                                      << "certificates";
-        QTest::newRow("garbage") << QByteArray("hello world") << int(KeyFileInfo::Unknown) << false << ""
+        QTest::newRow("garbage") << QByteArray("hello world") << int(KeyFileInfo::Format::Unknown) << false << ""
                                  << "not a private key";
-        QTest::newRow("empty") << QByteArray() << int(KeyFileInfo::Unknown) << false << "" << "not a private key";
+        QTest::newRow("empty") << QByteArray() << int(KeyFileInfo::Format::Unknown) << false << "" << "not a private key";
     }
 
     void keyFiles()
@@ -467,7 +467,7 @@ private slots:
         QCOMPARE(first.algorithm, QStringLiteral("ssh-ed25519"));
         QVERIFY(first.privateKey.startsWith("-----BEGIN OPENSSH PRIVATE KEY-----"));
         const KeyFileInfo info = inspectKeyFile(first.privateKey);
-        QCOMPARE(int(info.format), int(KeyFileInfo::OpenSsh));
+        QCOMPARE(int(info.format), int(KeyFileInfo::Format::OpenSsh));
         QVERIFY(!info.encrypted);   // stored unencrypted in signond
         QVERIFY(first.publicLine.startsWith(QLatin1String("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5")));
         QVERIFY(first.publicLine.endsWith(QLatin1String(" sailfish-backup")));
@@ -545,7 +545,7 @@ private slots:
                  file(name + QStringLiteral(".pub")).split(' ').value(1));
         // Re-exported unencrypted in OpenSSH format.
         const KeyFileInfo info = inspectKeyFile(key.privateKey);
-        QCOMPARE(int(info.format), int(KeyFileInfo::OpenSsh));
+        QCOMPARE(int(info.format), int(KeyFileInfo::Format::OpenSsh));
         QVERIFY(!info.encrypted);
         SshKeyMaterial again;
         QVERIFY(m_tools->describe(key.privateKey, &again).ok());

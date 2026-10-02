@@ -93,29 +93,29 @@
   {
     "name": "M-3 seal not requested",
     "file": "src/backends/smb/smbbackend.cpp",
-    "search": "        smb2_set_seal(m_ctx, 1);",
-    "replace": "        smb2_set_sign(m_ctx, 1);",
+    "search": "        smb2_set_seal(ctx, 1);",
+    "replace": "        smb2_set_sign(ctx, 1);",
     "test": "sh tests/interop/smb/run.sh build encryptionRequiredServerOff"
   },
   {
     "name": "M-3 seal turned off instead of left alone",
     "file": "src/backends/smb/smbbackend.cpp",
-    "search": "    if (requireEncryption(m_params.options))                                    // M-3; off: not called\n        smb2_set_seal(m_ctx, 1);",
-    "replace": "    smb2_set_seal(m_ctx, requireEncryption(m_params.options) ? 1 : 0);",
+    "search": "    if (requireEncryption(params.options))                                    // M-3; off: not called\n        smb2_set_seal(ctx, 1);",
+    "replace": "    smb2_set_seal(ctx, requireEncryption(params.options) ? 1 : 0);",
     "test": "sh tests/interop/smb/run.sh build encryptionOffServerRequires"
   },
   {
     "name": "M-2 signing not required",
     "file": "src/backends/smb/smbbackend.cpp",
-    "search": "    smb2_set_security_mode(m_ctx, SMB2_NEGOTIATE_SIGNING_ENABLED | SMB2_NEGOTIATE_SIGNING_REQUIRED); // M-2\n    smb2_set_sign(m_ctx, 1);",
-    "replace": "    smb2_set_security_mode(m_ctx, SMB2_NEGOTIATE_SIGNING_ENABLED); // M-2\n    smb2_set_sign(m_ctx, 0);",
+    "search": "    smb2_set_security_mode(ctx, SMB2_NEGOTIATE_SIGNING_ENABLED | SMB2_NEGOTIATE_SIGNING_REQUIRED); // M-2\n    smb2_set_sign(ctx, 1);",
+    "replace": "    smb2_set_security_mode(ctx, SMB2_NEGOTIATE_SIGNING_ENABLED); // M-2\n    smb2_set_sign(ctx, 0);",
     "test": "sh tests/interop/smb/run.sh build encryptionOffSigned tamperedResponse"
   },
   {
     "name": "M-1 any SMB version offered",
     "file": "src/backends/smb/smbbackend.cpp",
-    "search": "    smb2_set_version(m_ctx, SMB2_VERSION_ANY3);",
-    "replace": "    smb2_set_version(m_ctx, SMB2_VERSION_ANY);",
+    "search": "    smb2_set_version(ctx, SMB2_VERSION_ANY3);",
+    "replace": "    smb2_set_version(ctx, SMB2_VERSION_ANY);",
     "test": "sh tests/interop/smb/run.sh build smb2OnlyServer"
   },
   {

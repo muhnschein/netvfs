@@ -6,7 +6,6 @@
 #include "smbutil.h"
 
 #include <atomic>
-#include <functional>
 #include <memory>
 #include <thread>
 #include <vector>
@@ -22,7 +21,7 @@ struct Call;
 // that called connect() (M-13). Requests go through libsmb2's asynchronous
 // API and a poll loop so that cancel() and timeouts can abandon a request
 // that is stalled on the network (M-12, C-9).
-class SmbBackend : public Backend
+class SmbBackend final : public Backend
 {
 public:
     SmbBackend();
@@ -56,17 +55,17 @@ public:
 
 private:
     enum class Wait { Cancellable, Drain };
-    using Starter = std::function<int(smb2_context *, Call *)>;
-
     Result checkUsable() const;
-    Result request(std::unique_ptr<Call> &call, const Starter &start, const QString &context,
+    // `start` issues the libsmb2 request: int (smb2_context *, Call *).
+    template <typename Starter>
+    Result request(std::unique_ptr<Call> &call, Starter start, const QString &context,
                    Wait wait = Wait::Cancellable);
     Result await(std::unique_ptr<Call> &call, Wait wait);
     void abandon(std::unique_ptr<Call> &call);
-    void purgeOrphans();
     void destroyContext();
+    // disconnect() without virtual dispatch; also used by the destructor.
+    void shutdown() noexcept;
 
-    void applyPolicy(const QString &user, const Credentials &credentials);
     Result statPath(const QByteArray &path, Entry *out);
     Result unlinkPath(const QByteArray &path, const QString &context);
     Result makeDir(const QByteArray &path);

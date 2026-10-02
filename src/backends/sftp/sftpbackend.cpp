@@ -101,6 +101,45 @@ private:
     std::deque<Pending> m_queue;
 };
 
+// Pipelined transfers over one open file (S-21, C-9, C-14).
+class SftpBackend::Io
+{
+public:
+    explicit Io(const SftpBackend &backend) : m_b(backend) {}
+
+    Result timedOut() const;
+    bool overdue(const QElapsedTimer &started) const;
+    Result waitForData(const QElapsedTimer &started) const;
+    Result waitWrite(Pending *pending, const QByteArray &remote) const;
+    Result waitRead(Pending *pending, char *buffer, qint64 *received) const;
+    Result fillWriteWindow(sftp_file file, QIODevice *source, QByteArray *buffer, PendingQueue *queue, bool *eof, const QByteArray &remote) const;
+    Result writeChunks(sftp_file file, QIODevice *source, const QByteArray &remote, Progress *progress) const;
+    Result refillReadWindow(sftp_file file, PendingQueue *queue, quint64 *offset) const;
+    Result drain(PendingQueue *queue, char *buffer) const;
+    Result readStep(sftp_file file, PendingQueue *queue, QByteArray *buffer, Sink *sink, quint64 *offset, bool *finished) const;
+    Result readChunks(sftp_file file, Sink *sink) const;
+    Result readRange(sftp_file file, const QByteArray &remote, qint64 length, QByteArray *out) const;
+
+private:
+    const SftpBackend &m_b;
+};
+
+// Sign-in with exactly one method (S-10 to S-14).
+class SftpBackend::Login
+{
+public:
+    explicit Login(const SftpBackend &backend) : m_b(backend) {}
+
+    Result authenticateWith(int methods, const QByteArray &secret) const;
+    Result authPassword(int methods, const QByteArray &secret) const;
+    Result authKeyboardInteractive(const QByteArray &secret) const;
+    Result authPublicKey(int methods, const QByteArray &secret) const;
+    Result authOutcome(int rc) const;
+
+private:
+    const SftpBackend &m_b;
+};
+
 SftpBackend::~SftpBackend()
 {
     closeSession();
@@ -275,7 +314,7 @@ Result SftpBackend::authenticate(const Credentials &credentials)
     if (rc == SSH_AUTH_ERROR)
         return sessionFailure();
     if (rc != SSH_AUTH_SUCCESS)
-        r = authenticateWith(ssh_userauth_list(m_session, nullptr), credentials.secret);
+        r = Login(*this).authenticateWith(ssh_userauth_list(m_session, nullptr), credentials.secret);
     if (r.ok())
         r = openSftp();
     if (r.ok() && !setTimeout(m_params.requestTimeoutMs))
@@ -283,48 +322,50 @@ Result SftpBackend::authenticate(const Credentials &credentials)
     return r;
 }
 
-Result SftpBackend::authenticateWith(int methods, const QByteArray &secret) const
+Result SftpBackend::Login::authenticateWith(int methods, const QByteArray &secret) const
 {
-    if (m_params.option(QLatin1String(AuthModeOption)) == QLatin1String(AuthModePublicKey))
+    if (m_b.m_params.option(QLatin1String(AuthModeOption)) == QLatin1String(AuthModePublicKey))
         return authPublicKey(methods, secret);
     return authPassword(methods, secret);
 }
 
-Result SftpBackend::authPassword(int methods, const QByteArray &secret) const
+Result SftpBackend::Login::authPassword(int methods, const QByteArray &secret) const
 {
     // S-11. QByteArray data is NUL terminated.
     const auto mask = static_cast<unsigned>(methods);
     if (mask & SSH_AUTH_METHOD_PASSWORD)
-        return authOutcome(ssh_userauth_password(m_session, nullptr, secret.constData()));
+        return authOutcome(ssh_userauth_password(m_b.m_session, nullptr, secret.constData()));
     if (mask & SSH_AUTH_METHOD_INTERACTIVE)
         return authKeyboardInteractive(secret);
     return authDenied(methods);
 }
 
-Result SftpBackend::authKeyboardInteractive(const QByteArray &secret) const
+Result SftpBackend::Login::authKeyboardInteractive(const QByteArray &secret) const
 {
     // S-11: the password answers a single non-echo prompt; rounds without
     // prompts (OpenSSH sends one after PAM succeeds) are acknowledged.
     bool answered = false;
-    int rc = ssh_userauth_kbdint(m_session, nullptr, nullptr);
-    for (int round = 0; rc == SSH_AUTH_INFO && round < MaxKeyboardInteractiveRounds; ++round) {
-        if (const int prompts = ssh_userauth_kbdint_getnprompts(m_session); prompts > 0) {
+    int rc = ssh_userauth_kbdint(m_b.m_session, nullptr, nullptr);
+    int round = 0;
+    while (rc == SSH_AUTH_INFO && round < MaxKeyboardInteractiveRounds) {
+        ++round;
+        if (const int prompts = ssh_userauth_kbdint_getnprompts(m_b.m_session); prompts > 0) {
             char echo = 1;
-            ssh_userauth_kbdint_getprompt(m_session, 0, &echo);
+            ssh_userauth_kbdint_getprompt(m_b.m_session, 0, &echo);
             if (prompts != 1 || echo || answered)
                 return interactiveNotSupported();
-            if (ssh_userauth_kbdint_setanswer(m_session, 0, secret.constData()) < 0)
-                return sessionFailure();
+            if (ssh_userauth_kbdint_setanswer(m_b.m_session, 0, secret.constData()) < 0)
+                return m_b.sessionFailure();
             answered = true;
         }
-        rc = ssh_userauth_kbdint(m_session, nullptr, nullptr);
+        rc = ssh_userauth_kbdint(m_b.m_session, nullptr, nullptr);
     }
     if (rc == SSH_AUTH_INFO)
         return interactiveNotSupported();
     return authOutcome(rc);
 }
 
-Result SftpBackend::authPublicKey(int methods, const QByteArray &secret) const
+Result SftpBackend::Login::authPublicKey(int methods, const QByteArray &secret) const
 {
     // S-12: the key comes from memory only; never from ~/.ssh or an agent (S-3).
     if (!(static_cast<unsigned>(methods) & SSH_AUTH_METHOD_PUBLICKEY))
@@ -336,10 +377,10 @@ Result SftpBackend::authPublicKey(int methods, const QByteArray &secret) const
     secureWipe(privateKey);
     if (!r.ok())
         return Result(Error::AuthFailed, QStringLiteral("The stored SSH key cannot be used"));
-    return authOutcome(ssh_userauth_publickey(m_session, nullptr, key.get()));
+    return authOutcome(ssh_userauth_publickey(m_b.m_session, nullptr, key.get()));
 }
 
-Result SftpBackend::authOutcome(int rc) const
+Result SftpBackend::Login::authOutcome(int rc) const
 {
     switch (rc) {
     case SSH_AUTH_SUCCESS:
@@ -347,9 +388,9 @@ Result SftpBackend::authOutcome(int rc) const
     case SSH_AUTH_PARTIAL:
         return authPartial();                                       // S-13
     case SSH_AUTH_DENIED:
-        return authDenied(ssh_userauth_list(m_session, nullptr));   // S-14
+        return authDenied(ssh_userauth_list(m_b.m_session, nullptr));   // S-14
     default:
-        return sessionFailure();
+        return m_b.sessionFailure();
     }
 }
 
@@ -430,8 +471,8 @@ Result SftpBackend::writeFailure(const QByteArray &remote, qint64 attempted) con
     const Result failure = sftpFailure(display(remote));
     if (status != SSH_FX_FAILURE || !m_hasStatvfs || m_canceled)
         return failure;
-    qint64 available = -1;
-    if (!freeBytes(remote, &available).ok() || !looksLikeFullDisk(status, available, attempted))
+    if (qint64 available = -1;
+            !freeBytes(remote, &available).ok() || !looksLikeFullDisk(status, available, attempted))
         return failure;
     return Result(Error::NoSpace, QStringLiteral("The server has no space left for %1").arg(display(remote)));
 }
@@ -601,32 +642,32 @@ Result SftpBackend::freeSpace(const QString &dir, qint64 *bytes)
 
 // --- transfers --------------------------------------------------------------
 
-Result SftpBackend::timedOut() const
+Result SftpBackend::Io::timedOut() const
 {
     return Result(Error::Timeout,
-                  QStringLiteral("The server did not answer within %1 s").arg(m_params.requestTimeoutMs / 1000));
+                  QStringLiteral("The server did not answer within %1 s").arg(m_b.m_params.requestTimeoutMs / 1000));
 }
 
 // A blocking read inside libssh that runs into the session timeout (the
 // request timeout) fails without an error message. By then the request is
 // overdue, and that is what the caller needs to know (C-14).
-bool SftpBackend::overdue(const QElapsedTimer &started) const
+bool SftpBackend::Io::overdue(const QElapsedTimer &started) const
 {
-    return started.elapsed() >= m_params.requestTimeoutMs;
+    return started.elapsed() >= m_b.m_params.requestTimeoutMs;
 }
 
-Result SftpBackend::waitForData(const QElapsedTimer &started) const
+Result SftpBackend::Io::waitForData(const QElapsedTimer &started) const
 {
-    if (m_canceled)
+    if (m_b.m_canceled)
         return Result(Error::Canceled);   // C-9
     if (overdue(started))
         return timedOut();
-    if (ssh_channel_poll_timeout(m_sftp->channel, PollIntervalMs, 0) == SSH_ERROR)
-        return sessionFailure();
+    if (ssh_channel_poll_timeout(m_b.m_sftp->channel, PollIntervalMs, 0) == SSH_ERROR)
+        return m_b.sessionFailure();
     return Result::success();
 }
 
-Result SftpBackend::waitWrite(Pending *pending, const QByteArray &remote) const
+Result SftpBackend::Io::waitWrite(Pending *pending, const QByteArray &remote) const
 {
     QElapsedTimer started;
     started.start();
@@ -640,14 +681,14 @@ Result SftpBackend::waitWrite(Pending *pending, const QByteArray &remote) const
             return r;
         }
         if (rc < 0)
-            return overdue(started) ? timedOut() : writeFailure(remote, static_cast<qint64>(pending->length));
+            return overdue(started) ? timedOut() : m_b.writeFailure(remote, static_cast<qint64>(pending->length));
         if (static_cast<size_t>(rc) != pending->length)
             return Result(Error::ProtocolError, QStringLiteral("The server stored only part of a block"));
         return Result::success();
     }
 }
 
-Result SftpBackend::waitRead(Pending *pending, char *buffer, qint64 *received) const
+Result SftpBackend::Io::waitRead(Pending *pending, char *buffer, qint64 *received) const
 {
     QElapsedTimer started;
     started.start();
@@ -661,7 +702,7 @@ Result SftpBackend::waitRead(Pending *pending, char *buffer, qint64 *received) c
             return r;
         }
         if (rc < 0)
-            return overdue(started) ? timedOut() : sftpFailure(QStringLiteral("read"));
+            return overdue(started) ? timedOut() : m_b.sftpFailure(QStringLiteral("read"));
         *received = static_cast<qint64>(rc);
         return Result::success();
     }
@@ -677,7 +718,7 @@ int SftpBackend::closeFile(sftp_file file, bool healthy) const
     return rc;
 }
 
-Result SftpBackend::fillWriteWindow(sftp_file file, QIODevice *source, QByteArray *buffer, PendingQueue *queue,
+Result SftpBackend::Io::fillWriteWindow(sftp_file file, QIODevice *source, QByteArray *buffer, PendingQueue *queue,
                                     bool *eof, const QByteArray &remote) const
 {
     while (!*eof && !queue->full()) {
@@ -690,7 +731,7 @@ Result SftpBackend::fillWriteWindow(sftp_file file, QIODevice *source, QByteArra
             const ssize_t rc = sftp_aio_begin_write(file, buffer->constData() + sent,
                                                     static_cast<size_t>(n - sent), &pending.aio);
             if (rc <= 0)
-                return writeFailure(remote, n - sent);
+                return m_b.writeFailure(remote, n - sent);
             pending.length = static_cast<size_t>(rc);
             queue->push(pending);
             sent += rc;
@@ -699,16 +740,16 @@ Result SftpBackend::fillWriteWindow(sftp_file file, QIODevice *source, QByteArra
     return Result::success();
 }
 
-Result SftpBackend::writeChunks(sftp_file file, QIODevice *source, const QByteArray &remote,
+Result SftpBackend::Io::writeChunks(sftp_file file, QIODevice *source, const QByteArray &remote,
                                 Progress *progress) const
 {
     PendingQueue queue;
-    QByteArray buffer(static_cast<int>(m_writeChunk), Qt::Uninitialized);
+    QByteArray buffer(static_cast<int>(m_b.m_writeChunk), Qt::Uninitialized);
     const qint64 total = source->size();
     qint64 done = 0;
     bool eof = false;
     for (;;) {
-        if (m_canceled)
+        if (m_b.m_canceled)
             return Result(Error::Canceled);
         Result r = fillWriteWindow(file, source, &buffer, &queue, &eof, remote);
         if (!r.ok() || queue.empty())
@@ -735,22 +776,21 @@ Result SftpBackend::upload(QIODevice *source, const QString &path, Progress *pro
     if (!file)
         return sftpFailure(display(remote));
     sftp_file_set_nonblocking(file);
-    r = writeChunks(file, source, remote, progress);
+    r = Io(*this).writeChunks(file, source, remote, progress);
     if (r.ok() && m_hasFsync && sftp_fsync(file) != 0)   // C-12: flush to stable storage
         r = writeFailure(remote, 1);
-    const int closed = closeFile(file, r.ok());
-    if (r.ok() && closed != 0)
+    if (const int closed = closeFile(file, r.ok()); r.ok() && closed != 0)
         r = writeFailure(remote, 1);
     return r;
 }
 
-Result SftpBackend::refillReadWindow(sftp_file file, PendingQueue *queue, quint64 *offset) const
+Result SftpBackend::Io::refillReadWindow(sftp_file file, PendingQueue *queue, quint64 *offset) const
 {
     while (!queue->full()) {
         Pending pending;
-        const ssize_t rc = sftp_aio_begin_read(file, m_readChunk, &pending.aio);
+        const ssize_t rc = sftp_aio_begin_read(file, m_b.m_readChunk, &pending.aio);
         if (rc <= 0)
-            return sftpFailure(QStringLiteral("read"));
+            return m_b.sftpFailure(QStringLiteral("read"));
         pending.length = static_cast<size_t>(rc);
         pending.offset = *offset;
         queue->push(pending);
@@ -759,7 +799,7 @@ Result SftpBackend::refillReadWindow(sftp_file file, PendingQueue *queue, quint6
     return Result::success();
 }
 
-Result SftpBackend::drain(PendingQueue *queue, char *buffer) const
+Result SftpBackend::Io::drain(PendingQueue *queue, char *buffer) const
 {
     // Collects and drops the answers to requests whose data is not wanted.
     Result r;
@@ -771,7 +811,7 @@ Result SftpBackend::drain(PendingQueue *queue, char *buffer) const
     return r;
 }
 
-Result SftpBackend::readStep(sftp_file file, PendingQueue *queue, QByteArray *buffer, Sink *sink,
+Result SftpBackend::Io::readStep(sftp_file file, PendingQueue *queue, QByteArray *buffer, Sink *sink,
                              quint64 *offset, bool *finished) const
 {
     Pending pending = queue->take();
@@ -796,18 +836,18 @@ Result SftpBackend::readStep(sftp_file file, PendingQueue *queue, QByteArray *bu
     *offset = pending.offset + static_cast<quint64>(n);
     Result r = drain(queue, buffer->data());
     if (r.ok() && sftp_seek64(file, *offset) < 0)
-        r = sftpFailure(QStringLiteral("seek"));
+        r = m_b.sftpFailure(QStringLiteral("seek"));
     return r;
 }
 
-Result SftpBackend::readChunks(sftp_file file, Sink *sink) const
+Result SftpBackend::Io::readChunks(sftp_file file, Sink *sink) const
 {
     PendingQueue queue;
-    QByteArray buffer(static_cast<int>(m_readChunk), Qt::Uninitialized);
+    QByteArray buffer(static_cast<int>(m_b.m_readChunk), Qt::Uninitialized);
     quint64 offset = 0;
     bool finished = false;
     while (!finished) {
-        if (m_canceled)
+        if (m_b.m_canceled)
             return Result(Error::Canceled);   // C-9, between requests
         Result r = refillReadWindow(file, &queue, &offset);
         if (r.ok())
@@ -835,19 +875,19 @@ Result SftpBackend::download(const QString &path, QIODevice *sink, Progress *pro
         sftp_attributes_free(attributes);
     }
     sftp_file_set_nonblocking(file);
-    r = readChunks(file, &target);
+    r = Io(*this).readChunks(file, &target);
     closeFile(file, r.ok());
     return r;
 }
 
-Result SftpBackend::readRange(sftp_file file, const QByteArray &remote, qint64 length, QByteArray *out) const
+Result SftpBackend::Io::readRange(sftp_file file, const QByteArray &remote, qint64 length, QByteArray *out) const
 {
-    QByteArray buffer(static_cast<int>(m_readChunk), Qt::Uninitialized);
+    QByteArray buffer(static_cast<int>(m_b.m_readChunk), Qt::Uninitialized);
     while (out->size() < length) {
         const auto wanted = static_cast<size_t>(qMin<qint64>(buffer.size(), length - out->size()));
         const ssize_t n = sftp_read(file, buffer.data(), wanted);
         if (n < 0)
-            return sftpFailure(display(remote));
+            return m_b.sftpFailure(display(remote));
         if (n == 0)
             break;
         out->append(buffer.constData(), static_cast<int>(n));
@@ -872,7 +912,7 @@ Result SftpBackend::read(const QString &path, qint64 offset, qint64 length, QByt
     if (sftp_seek64(file, static_cast<quint64>(offset)) < 0)
         r = sftpFailure(display(remote));
     else
-        r = readRange(file, remote, length, out);
+        r = Io(*this).readRange(file, remote, length, out);
     closeFile(file, r.ok());
     return r;
 }

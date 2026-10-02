@@ -5,12 +5,14 @@ include(../backend.pri)
 
 HEADERS = \
     smb2api.h \
+    smbcallbacks.h \
     smbbackend.h \
     smbplugin.h \
     smbutil.h
 
 SOURCES = \
-    noshareenum.cpp \
+    noshareenum.c \
+    smbcallbacks.c \
     smbbackend.cpp \
     smbplugin.cpp \
     smbutil.cpp
