@@ -134,13 +134,13 @@ private slots:
     void wrapAroundKeepsOrder()
     {
         BoundedPipe pipe(10);
-        char buffer[16];
+        QByteArray buffer(16, Qt::Uninitialized);
         for (int round = 0; round < 40; ++round) {
             const QByteArray piece = QByteArray::number(round * 7919 + 1000000).left(7);
             QCOMPARE(pipe.writer()->write(piece), qint64(piece.size()));
-            const qint64 n = pipe.reader()->read(buffer, sizeof buffer);
+            const qint64 n = pipe.reader()->read(buffer.data(), buffer.size());
             QCOMPARE(n, qint64(piece.size()));
-            QCOMPARE(QByteArray(buffer, int(n)), piece);
+            QCOMPARE(buffer.left(int(n)), piece);
         }
     }
 
@@ -156,12 +156,12 @@ private slots:
 
         QByteArray received;
         while (true) {
-            char buffer[5];
-            const qint64 n = pipe.reader()->read(buffer, sizeof buffer);
+            QByteArray buffer(5, Qt::Uninitialized);
+            const qint64 n = pipe.reader()->read(buffer.data(), buffer.size());
             QVERIFY(n >= 0);
             if (n == 0)
                 break;
-            received.append(buffer, int(n));
+            received.append(buffer.constData(), int(n));
         }
         QVERIFY(received == data);
         QVERIFY(pipe.peakBuffered() <= 8);
@@ -203,8 +203,8 @@ private slots:
         QCOMPARE(writer.result, qint64(-1));
         QCOMPARE(pipe.result().error(), Error::Timeout);
         QCOMPARE(pipe.result().message(), QStringLiteral("stalled"));
-        char buffer[8];
-        QCOMPARE(pipe.reader()->read(buffer, sizeof buffer), qint64(-1));
+        QByteArray buffer(8, Qt::Uninitialized);
+        QCOMPARE(pipe.reader()->read(buffer.data(), buffer.size()), qint64(-1));
         QCOMPARE(pipe.reader()->bytesAvailable(), qint64(0));
         QVERIFY(pipe.reader()->atEnd());
         QVERIFY(pipe.reader()->errorString().contains(QLatin1String("stalled")));
@@ -218,8 +218,8 @@ private slots:
         std::atomic<bool> done { false };
         qint64 result = 0;
         std::thread reader([&] {
-            char buffer[8];
-            result = pipe.reader()->read(buffer, sizeof buffer);
+            QByteArray buffer(8, Qt::Uninitialized);
+            result = pipe.reader()->read(buffer.data(), buffer.size());
             done = true;
         });
         QThread::msleep(100);

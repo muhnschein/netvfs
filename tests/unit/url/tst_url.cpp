@@ -458,6 +458,7 @@ private slots:
         QTest::newRow("max escapes are one byte") << false << qint64(3) << (QStringLiteral("x") + surrogate(0xFF).repeated(5)) << (QStringLiteral("x") + surrogate(0xFF).repeated(2));
         QTest::newRow("max 255") << false << qint64(255) << QString(300, QLatin1Char('a')) + QStringLiteral(".txt") << QString(251, QLatin1Char('a')) + QStringLiteral(".txt");
         QTest::newRow("windows and max") << true << qint64(8) << "a:very long name.txt" << "a_ve.txt";
+        QTest::newRow("windows trailing dot does not hide the extension") << true << qint64(10) << "aaaaaaaaaaaaaa.txt." << "aaaaaa.txt";
         QTest::newRow("windows max leaves trailing space") << true << qint64(5) << "abcd efgh" << "abcd";
         QTest::newRow("windows max reserved fits") << true << qint64(4) << "CON" << "CON_";
         QTest::newRow("windows max trims reserved stem") << true << qint64(7) << "CON.txt" << "CO.txt";

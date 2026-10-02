@@ -200,11 +200,9 @@ Result Walker::finish(const Frame &frame)
 
 Result Walker::run(const QString &root)
 {
-    Entry rootEntry;
     Frame top;
     top.path = root;
     top.identity = root;
-    top.entry = rootEntry;
     top.depth = -1;
     Result r = list(&top);
     if (!r.ok())

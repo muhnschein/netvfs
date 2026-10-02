@@ -931,6 +931,12 @@ private slots:
         // NoReplace: an existing destination folder is an error ...
         QCOMPARE(copyAcross(&source, QStringLiteral("src"), &destination, QStringLiteral("dst/copy"), options).error(),
                  Error::AlreadyExists);
+        // ... even an empty one, before any file is touched.
+        destination.addDir(QStringLiteral("dst/empty"));
+        QCOMPARE(copyAcross(&source, QStringLiteral("src"), &destination, QStringLiteral("dst/empty"), options).error(),
+                 Error::AlreadyExists);
+        QVERIFY(!destination.exists(QStringLiteral("dst/empty/top.txt")));
+        QVERIFY(!destination.exists(QStringLiteral("dst/empty/d1")));
         // ... Replace merges into it and overwrites files.
         destination.addFile(QStringLiteral("dst/copy/top.txt"), "stale");
         options.mode = RenameMode::Replace;

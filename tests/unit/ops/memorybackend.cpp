@@ -368,12 +368,12 @@ Result MemoryBackend::removeDir(const QString &path)
 
 Result MemoryBackend::removeTreeNative(const QString &path)
 {
-    if (!caps.has(Capability::RecursiveDelete))
-        return Backend::removeTreeNative(path);
     QString raw;
     Result r = begin("removeTreeNative", path, &raw);
     if (!r.ok())
         return r;
+    if (!caps.has(Capability::RecursiveDelete))
+        return Backend::removeTreeNative(path);
     QString key;
     r = resolve(raw, false, &key);
     if (!r.ok())
