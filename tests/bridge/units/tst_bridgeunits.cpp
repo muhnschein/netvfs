@@ -165,6 +165,10 @@ void tst_BridgeUnits::signaturesAndCounts()
     QCOMPARE(validate("Hello", "us", { 1u, QStringLiteral("x"), 2u }).error(), Error::ProtocolError);
     QCOMPARE(validate("Hello", "us", { QStringLiteral("x"), 1u }).error(), Error::ProtocolError); // types
     QCOMPARE(validate("Hello", "us", { 0u, QStringLiteral("x") }).error(), Error::ProtocolError); // protocol 0
+    // Same decoded value types, other D-Bus types (object path, signature):
+    // only the signature check refuses them.
+    QCOMPARE(validate("Hello", "uo", { 1u, QStringLiteral("/x") }).error(), Error::ProtocolError);
+    QCOMPARE(validate("Hello", "ug", { 1u, QStringLiteral("s") }).error(), Error::ProtocolError);
     QCOMPARE(validate("Frobnicate", "", {}).error(), Error::Unsupported);
     QCOMPARE(validate("Stat", "saybs", { QStringLiteral("account:1"), bytes("a"), true, QString() }).error(),
              Error::None);
