@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 #include "boundedpipe.h"
+#include "statemutex.h"
 
 #include <algorithm>
 #include <condition_variable>
@@ -28,9 +29,10 @@ struct BoundedPipe::State
     bool readerClosed = false;
     Result failure;                     // first fail() wins
 
-    // The only way to the mutex: callers hold the returned lock while they use the state.
-    Lock lock() const { return Lock(m_mutex); }
+    // Callers hold the returned lock while they use the state.
+    Lock lock() const { return guard.lock(); }
 
+    StateMutex guard;
     qint64 capacity() const { return buffer.size(); }
 
     bool failedLocked() const { return !failure.ok(); }
@@ -81,9 +83,6 @@ struct BoundedPipe::State
     {
         notFull.wait(*lock, [this] { return count < capacity() || failedLocked() || readerClosed; });
     }
-
-private:
-    mutable std::mutex m_mutex;
 };
 
 namespace {

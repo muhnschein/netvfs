@@ -191,7 +191,10 @@ public:
     // that wait end soon and answer() return false; BlockingPrompter
     // (prompter.h) does. The default does nothing, which is right only for
     // prompters that never block.
-    virtual void cancel() {}
+    virtual void cancel()
+    {
+        // Nothing to wake: this prompter never blocks.
+    }
 };
 
 // ---------------------------------------------------------------- progress

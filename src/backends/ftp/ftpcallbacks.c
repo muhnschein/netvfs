@@ -3,30 +3,30 @@
 
 static size_t on_write(char *data, size_t size, size_t count, void *user_data)
 {
-    return netvfs_ftp_on_write((struct NetVfsFtpHooks *)user_data, data, size * count);
+    return netvfs_ftp_on_write((const struct NetVfsFtpHooks *)user_data, data, size * count);
 }
 
 static size_t on_read(char *buffer, size_t size, size_t count, void *user_data)
 {
-    return netvfs_ftp_on_read((struct NetVfsFtpHooks *)user_data, buffer, size * count);
+    return netvfs_ftp_on_read((const struct NetVfsFtpHooks *)user_data, buffer, size * count);
 }
 
 static size_t on_header(char *data, size_t size, size_t count, void *user_data)
 {
-    return netvfs_ftp_on_header((struct NetVfsFtpHooks *)user_data, data, size * count);
+    return netvfs_ftp_on_header((const struct NetVfsFtpHooks *)user_data, data, size * count);
 }
 
 static int on_progress(void *user_data, curl_off_t download_total, curl_off_t downloaded, curl_off_t upload_total,
                        curl_off_t uploaded)
 {
-    return netvfs_ftp_on_progress((struct NetVfsFtpHooks *)user_data, download_total, downloaded, upload_total,
+    return netvfs_ftp_on_progress((const struct NetVfsFtpHooks *)user_data, download_total, downloaded, upload_total,
                                   uploaded);
 }
 
 static int on_debug(CURL *curl, curl_infotype type, char *data, size_t size, void *user_data)
 {
     (void)curl;
-    netvfs_ftp_on_debug((struct NetVfsFtpHooks *)user_data, type, data, size);
+    netvfs_ftp_on_debug((const struct NetVfsFtpHooks *)user_data, type, data, size);
     return 0;
 }
 

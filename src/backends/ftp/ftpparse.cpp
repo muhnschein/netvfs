@@ -34,11 +34,7 @@ bool allDigits(const QByteArray &text)
 {
     if (text.isEmpty())
         return false;
-    for (const char c : text) {
-        if (!isDigit(c))
-            return false;
-    }
-    return true;
+    return std::all_of(text.begin(), text.end(), isDigit);
 }
 
 // Non-negative decimal number; -1 if malformed or too large.
@@ -98,8 +94,8 @@ void setName(Entry *entry, const QByteArray &name)
 
 EntryType unixType(const QByteArray &value, QByteArray *target)
 {
-    // "OS.unix=slink:<target>" (vsftpd-style), "OS.unix=symlink",
-    // "OS.unix=chr-13/29", "OS.unix=blk-...", "OS.unix=fifo", "OS.unix=socket"
+    // The OS.unix fact: slink followed by the target (vsftpd), symlink, chr
+    // and blk with device numbers, fifo, socket.
     const QByteArray kind = value.mid(int(sizeof("os.unix=")) - 1);
     const QByteArray lower = kind.toLower();
     if (lower.startsWith("slink")) {
@@ -608,19 +604,19 @@ bool parsePathReply(const Reply &reply, QByteArray *path)
     int i = line.indexOf('"');
     if (i < 0)
         return false;
+    ++i;
     QByteArray result;
-    for (++i; i < line.size(); ++i) {
+    while (i < line.size()) {
         if (line.at(i) != '"') {
             result += line.at(i);
-            continue;
-        }
-        if (i + 1 < line.size() && line.at(i + 1) == '"') {
-            result += '"';
             ++i;
-            continue;
+        } else if (i + 1 < line.size() && line.at(i + 1) == '"') {
+            result += '"';
+            i += 2;
+        } else {
+            *path = result;
+            return !result.isEmpty();
         }
-        *path = result;
-        return !result.isEmpty();
     }
     return false;
 }

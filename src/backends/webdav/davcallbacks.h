@@ -20,10 +20,10 @@ struct NetVfsDavTransfer;
 
 /* Handlers, implemented in davclient.cpp. Return values follow libcurl's
  * callback conventions. */
-size_t netvfs_dav_on_header(struct NetVfsDavTransfer *transfer, const char *line, size_t length);
+size_t netvfs_dav_on_header(const struct NetVfsDavTransfer *transfer, const char *line, size_t length);
 size_t netvfs_dav_on_body(struct NetVfsDavTransfer *transfer, const char *data, size_t length);
 size_t netvfs_dav_on_read(struct NetVfsDavTransfer *transfer, char *buffer, size_t capacity);
-int netvfs_dav_on_seek(struct NetVfsDavTransfer *transfer, curl_off_t offset, int origin);
+int netvfs_dav_on_seek(const struct NetVfsDavTransfer *transfer, curl_off_t offset, int origin);
 int netvfs_dav_on_progress(const struct NetVfsDavTransfer *transfer);
 
 /* For CURLOPT_HEADERFUNCTION, _WRITEFUNCTION, _READFUNCTION, _SEEKFUNCTION and

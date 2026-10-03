@@ -10,7 +10,7 @@ namespace NetVfs::Ftp {
 // (paused between calls), so sequential reads cost one data connection.
 // Any other offset starts a new RETR with REST. Memory: at most maxBytes
 // plus one libcurl chunk (C-10).
-class FtpReadHandle : public ReadHandle, public StreamOwner, private TransferSink
+class FtpReadHandle final : public ReadHandle, public StreamOwner, private TransferSink
 {
 public:
     FtpReadHandle(FtpBackend *backend, const QByteArray &remote, qint64 size);
@@ -48,7 +48,7 @@ private:
 // running upload and returns once libcurl took all of them (the upload is
 // paused in between); commit() ends the upload and waits for the server's
 // confirmation, then applies the modification time (MFMT).
-class FtpWriteHandle : public WriteHandle, public StreamOwner, private TransferSink
+class FtpWriteHandle final : public WriteHandle, public StreamOwner, private TransferSink
 {
 public:
     FtpWriteHandle(FtpBackend *backend, const QByteArray &remote, const WriteOptions &options);

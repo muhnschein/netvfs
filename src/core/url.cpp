@@ -177,8 +177,8 @@ bool parsePort(const QString &text, int *port)
         return true;
     if (text.size() > MaxPortDigits)
         return false;
-    const auto isDigit = [](QChar c) { return c >= QLatin1Char('0') && c <= QLatin1Char('9'); };
-    if (!std::all_of(text.begin(), text.end(), isDigit))
+    if (!std::all_of(text.begin(), text.end(),
+                     [](QChar c) { return c >= QLatin1Char('0') && c <= QLatin1Char('9'); }))
         return false;
     *port = text.toInt();
     return *port >= 1 && *port <= MaxPort;
@@ -237,13 +237,12 @@ Result parseScheme(const QString &url, QString *scheme, QString *rest)
     if (separator <= 0)
         return invalid("no scheme");
     *scheme = url.left(separator).toLower();
-    const auto validCharacter = [](QChar c) {
-        const bool letter = c >= QLatin1Char('a') && c <= QLatin1Char('z');
-        const bool other = (c >= QLatin1Char('0') && c <= QLatin1Char('9')) || c == QLatin1Char('+')
-            || c == QLatin1Char('-') || c == QLatin1Char('.');
-        return letter || other;
-    };
-    if (!std::all_of(scheme->begin(), scheme->end(), validCharacter))
+    if (!std::all_of(scheme->begin(), scheme->end(), [](QChar c) {
+            const bool letter = c >= QLatin1Char('a') && c <= QLatin1Char('z');
+            const bool other = (c >= QLatin1Char('0') && c <= QLatin1Char('9')) || c == QLatin1Char('+')
+                || c == QLatin1Char('-') || c == QLatin1Char('.');
+            return letter || other;
+        }))
         return invalid("bad scheme");
     *rest = url.mid(separator + 3);
     return Result::success();

@@ -38,11 +38,7 @@ QString detailOf(const Reply &reply)
 
 bool mentions(const QByteArray &lower, std::initializer_list<const char *> needles)
 {
-    for (const char *needle : needles) {
-        if (lower.contains(needle))
-            return true;
-    }
-    return false;
+    return std::any_of(needles.begin(), needles.end(), [&lower](const char *needle) { return lower.contains(needle); });
 }
 
 // F-7: 550 "requested action not taken" covers missing files, missing
@@ -249,8 +245,7 @@ QByteArray urlPath(const QByteArray &remotePath)
 Result remotePath(const QString &path, const QByteArray &home, QByteArray *out)
 {
     QString normalized;
-    Result r = Paths::normalize(path, &normalized);
-    if (!r.ok())
+    if (Result r = Paths::normalize(path, &normalized); !r.ok())
         return r;
     if (!Names::isEncodable(normalized))
         return Result(Error::InvalidName, QStringLiteral("The name cannot be represented on the server"));
@@ -294,8 +289,7 @@ Result curlError(CURLcode code, const Reply &reply, bool canceled, const QString
     // connection") as CURLE_OPERATION_TIMEDOUT; the reply says why (F-7).
     if (reply.isValid() && reply.code == 421)
         return replyError(reply, context);
-    Result result;
-    if (transportError(code, &result, detail))
+    if (Result result; transportError(code, &result, detail))
         return result;
     if (reply.isValid() && reply.code >= 400)
         return replyError(reply, context);

@@ -240,8 +240,8 @@ Result FtpBackend::signIn(QVector<Reply> *replies)
 {
     Result r = command({ QByteArrayLiteral("FEAT") }, replies, QStringLiteral("Signing in"));
     for (const int delayMs : BusyGreetingDelaysMs) {
-        const QVector<Reply> &seen = m_connection->replies();
-        if (r.ok() || seen.size() != 1 || seen.first().code != 421)
+        if (const QVector<Reply> &seen = m_connection->replies();
+                r.ok() || seen.size() != 1 || seen.first().code != 421)
             break;
         qCDebug(lcNetVfsFtp) << "Busy greeting; signing in again in" << delayMs << "ms";
         for (int waited = 0; waited < delayMs && !m_canceled; waited += CancelSliceMs)
@@ -305,7 +305,7 @@ Result FtpBackend::claim(StreamOwner *owner)
     return r;
 }
 
-void FtpBackend::release(StreamOwner *owner)
+void FtpBackend::release(const StreamOwner *owner)
 {
     if (m_owner == owner)
         m_owner = nullptr;
@@ -597,8 +597,7 @@ Result FtpBackend::removeDir(const QString &path)
         return r;
     if (r.ok() && !existing.isDir())
         return Result(Error::NotADirectory, QStringLiteral("Removing a folder: not a folder"), failure.detail());
-    CollectSink contents;
-    if (r.ok() && Lookup(*this).listRemote(remote, &contents, ListOptions().batchSize).ok()
+    if (CollectSink contents; r.ok() && Lookup(*this).listRemote(remote, &contents, ListOptions().batchSize).ok()
         && !contents.collected.isEmpty())
         return Result(Error::DirectoryNotEmpty, QStringLiteral("Removing a folder: not empty"), failure.detail());
     return failure;

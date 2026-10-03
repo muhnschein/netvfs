@@ -50,12 +50,21 @@ public:
 //
 // Methods with a default implementation return Unsupported unless the
 // matching capability is reported (XC-5).
-class NETVFS_EXPORT Backend
+// Base of classes that must not be copied.
+class NonCopyable
+{
+protected:
+    NonCopyable() = default;
+    ~NonCopyable() = default;
+
+public:
+    NonCopyable(const NonCopyable &) = delete;
+    NonCopyable &operator=(const NonCopyable &) = delete;
+};
+
+class NETVFS_EXPORT Backend : private NonCopyable
 {
 public:
-    Backend() = default;
-    Backend(const Backend &) = delete;
-    Backend &operator=(const Backend &) = delete;
     virtual ~Backend();
 
     // Opens the transport and reports the server identity, if the protocol has

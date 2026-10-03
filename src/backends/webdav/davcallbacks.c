@@ -3,7 +3,7 @@
 
 static size_t on_header(char *data, size_t size, size_t count, void *user_data)
 {
-    return netvfs_dav_on_header((struct NetVfsDavTransfer *)user_data, data, size * count);
+    return netvfs_dav_on_header((const struct NetVfsDavTransfer *)user_data, data, size * count);
 }
 
 static size_t on_write(char *data, size_t size, size_t count, void *user_data)
@@ -18,7 +18,7 @@ static size_t on_read(char *buffer, size_t size, size_t count, void *user_data)
 
 static int on_seek(void *user_data, curl_off_t offset, int origin)
 {
-    return netvfs_dav_on_seek((struct NetVfsDavTransfer *)user_data, offset, origin);
+    return netvfs_dav_on_seek((const struct NetVfsDavTransfer *)user_data, offset, origin);
 }
 
 static int on_progress(void *user_data, curl_off_t dl_total, curl_off_t dl_now, curl_off_t ul_total,
