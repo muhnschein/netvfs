@@ -1,0 +1,10 @@
+211-Extensions supported:
+ UTF8
+ MLST type*;size*;modify*;
+ REST STREAM
+211 End.
+257 "/a ""q"" dir" created
+213 20210304050607
+250-Begin
+ type=file;size=5; /home/a b
+250 End.

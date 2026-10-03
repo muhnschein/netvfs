@@ -10,7 +10,7 @@ namespace NetVfs {
 class SftpPlugin : public QObject, public BackendFactory, public SshKeyTools
 {
     Q_OBJECT
-    Q_PLUGIN_METADATA(IID "org.netvfs.BackendFactory/1.0")
+    Q_PLUGIN_METADATA(IID "org.netvfs.BackendFactory/2.0")
     Q_INTERFACES(NetVfs::BackendFactory NetVfs::SshKeyTools)
 
 public:

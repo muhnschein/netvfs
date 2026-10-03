@@ -1,0 +1,265 @@
+<!DOCTYPE node PUBLIC "-//freedesktop//DTD D-BUS Object Introspection 1.0//EN"
+ "http://www.freedesktop.org/standards/dbus/1.0/introspect.dtd">
+<!-- SPDX-License-Identifier: LGPL-2.1-or-later -->
+<!--
+  netvfs-bridge protocol, SPEC-v2 section 8a (XB-8..XB-17).
+  Peer-to-peer D-Bus over the consumer's socket; object /org/netvfs/Bridge.
+
+  Types (XB-9):
+    Paths and names are "ay" (raw protocol bytes, XC-4).
+    Entry = (ay name, y type, y targetType, x size, x mtimeMs, x ctimeMs,
+             x atimeMs, i mode, x uid, x gid, s owner, s group, q flags,
+             ay etag, s contentType); -1 or empty for unknown.
+      type: 0 Unknown, 1 File, 2 Directory, 3 Symlink, 4 Special
+      flags: 0x1 Hidden, 0x2 ReadOnly, 0x4 System, 0x8 NameNotUtf8, 0x10 TargetUnknown
+    Errors are D-Bus errors org.netvfs.Error.<ErrorName> (XC-21 names); the
+    first argument is the message, an optional second argument a{sv} carries
+    "detail" (s) and "retryAfterMs" (x). Malformed calls fail with
+    org.freedesktop.DBus.Error.InvalidArgs. In ListDone and JobFinished the
+    error is the bare name ("" on success).
+    lane: "interactive", "bulk" or "stream" ("" = default of the method).
+    Request ids (List) and job ids share one numbering per connection; Cancel
+    takes either.
+  This file is the contract shared with consumers (tests/bridge/contract).
+-->
+<node>
+  <interface name="org.netvfs.Bridge1">
+    <!-- Session -->
+    <method name="Hello">
+      <arg name="protocol" type="u" direction="in"/>
+      <arg name="client" type="s" direction="in"/>
+      <arg name="protocol" type="u" direction="out"/>
+      <arg name="bridgeVersion" type="s" direction="out"/>
+      <arg name="features" type="as" direction="out"/>
+    </method>
+    <method name="GetConsent">
+      <arg name="consent" type="s" direction="out"/>
+    </method>
+    <method name="RequestConsent"/>
+    <signal name="ConsentChanged">
+      <arg name="consent" type="s"/>
+    </signal>
+
+    <!-- Locations -->
+    <method name="ListLocations">
+      <arg name="locations" type="a(sssa{sv})" direction="out"/>
+    </method>
+    <signal name="LocationsChanged"/>
+    <method name="Capabilities">
+      <arg name="loc" type="s" direction="in"/>
+      <arg name="capabilities" type="(asasx)" direction="out"/>
+    </method>
+    <method name="Disconnect">
+      <arg name="loc" type="s" direction="in"/>
+    </method>
+
+    <!-- Ad-hoc locations -->
+    <method name="ConnectAdHoc">
+      <arg name="url" type="s" direction="in"/>
+      <arg name="secret" type="ay" direction="in"/>
+      <arg name="opts" type="a{sv}" direction="in"/>
+      <arg name="loc" type="s" direction="out"/>
+    </method>
+    <method name="ForgetAdHoc">
+      <arg name="loc" type="s" direction="in"/>
+    </method>
+
+    <!-- Discovery -->
+    <method name="Discover">
+      <arg name="on" type="b" direction="in"/>
+    </method>
+    <signal name="NearbyChanged">
+      <arg name="nearby" type="a(sssqay)"/>
+    </signal>
+
+    <!-- Listing -->
+    <method name="List">
+      <arg name="loc" type="s" direction="in"/>
+      <arg name="dir" type="ay" direction="in"/>
+      <arg name="lane" type="s" direction="in"/>
+      <arg name="batch" type="u" direction="in"/>
+      <arg name="req" type="u" direction="out"/>
+    </method>
+    <signal name="ListBatch">
+      <arg name="req" type="u"/>
+      <arg name="entries" type="a(ayyyxxxxixxssqays)"/>
+    </signal>
+    <signal name="ListDone">
+      <arg name="req" type="u"/>
+      <arg name="error" type="s"/>
+      <arg name="message" type="s"/>
+    </signal>
+
+    <!-- Metadata -->
+    <method name="Stat">
+      <arg name="loc" type="s" direction="in"/>
+      <arg name="path" type="ay" direction="in"/>
+      <arg name="follow" type="b" direction="in"/>
+      <arg name="lane" type="s" direction="in"/>
+      <arg name="entry" type="(ayyyxxxxixxssqays)" direction="out"/>
+    </method>
+    <method name="ReadLink">
+      <arg name="loc" type="s" direction="in"/>
+      <arg name="path" type="ay" direction="in"/>
+      <arg name="target" type="ay" direction="out"/>
+    </method>
+    <method name="SpaceInfo">
+      <arg name="loc" type="s" direction="in"/>
+      <arg name="path" type="ay" direction="in"/>
+      <arg name="free" type="x" direction="out"/>
+      <arg name="total" type="x" direction="out"/>
+      <arg name="used" type="x" direction="out"/>
+    </method>
+    <method name="Checksum">
+      <arg name="loc" type="s" direction="in"/>
+      <arg name="path" type="ay" direction="in"/>
+      <arg name="algo" type="s" direction="in"/>
+      <arg name="digest" type="ay" direction="out"/>
+    </method>
+
+    <!-- Namespace -->
+    <method name="MakeDir">
+      <arg name="loc" type="s" direction="in"/>
+      <arg name="path" type="ay" direction="in"/>
+      <arg name="exclusive" type="b" direction="in"/>
+    </method>
+    <method name="RemoveFile">
+      <arg name="loc" type="s" direction="in"/>
+      <arg name="path" type="ay" direction="in"/>
+    </method>
+    <method name="RemoveDir">
+      <arg name="loc" type="s" direction="in"/>
+      <arg name="path" type="ay" direction="in"/>
+    </method>
+    <method name="Rename">
+      <arg name="loc" type="s" direction="in"/>
+      <arg name="from" type="ay" direction="in"/>
+      <arg name="to" type="ay" direction="in"/>
+      <arg name="replace" type="b" direction="in"/>
+    </method>
+    <method name="SetAttributes">
+      <arg name="loc" type="s" direction="in"/>
+      <arg name="path" type="ay" direction="in"/>
+      <arg name="changes" type="a{sv}" direction="in"/>
+    </method>
+    <method name="MakeSymlink">
+      <arg name="loc" type="s" direction="in"/>
+      <arg name="target" type="ay" direction="in"/>
+      <arg name="linkPath" type="ay" direction="in"/>
+    </method>
+    <method name="MakeHardlink">
+      <arg name="loc" type="s" direction="in"/>
+      <arg name="existing" type="ay" direction="in"/>
+      <arg name="newPath" type="ay" direction="in"/>
+    </method>
+    <method name="ServerCopy">
+      <arg name="loc" type="s" direction="in"/>
+      <arg name="from" type="ay" direction="in"/>
+      <arg name="to" type="ay" direction="in"/>
+      <arg name="opts" type="a{sv}" direction="in"/>
+    </method>
+
+    <!-- Handles -->
+    <method name="OpenRead">
+      <arg name="loc" type="s" direction="in"/>
+      <arg name="path" type="ay" direction="in"/>
+      <arg name="lane" type="s" direction="in"/>
+      <arg name="handle" type="u" direction="out"/>
+      <arg name="size" type="x" direction="out"/>
+    </method>
+    <method name="Read">
+      <arg name="handle" type="u" direction="in"/>
+      <arg name="offset" type="x" direction="in"/>
+      <arg name="max" type="u" direction="in"/>
+      <arg name="data" type="ay" direction="out"/>
+    </method>
+    <method name="ReadAhead">
+      <arg name="handle" type="u" direction="in"/>
+      <arg name="offset" type="x" direction="in"/>
+      <arg name="bytes" type="x" direction="in"/>
+    </method>
+    <method name="Close">
+      <arg name="handle" type="u" direction="in"/>
+    </method>
+
+    <!-- Jobs -->
+    <method name="Upload">
+      <arg name="loc" type="s" direction="in"/>
+      <arg name="path" type="ay" direction="in"/>
+      <arg name="fd" type="h" direction="in"/>
+      <arg name="opts" type="a{sv}" direction="in"/>
+      <arg name="job" type="u" direction="out"/>
+    </method>
+    <method name="Download">
+      <arg name="loc" type="s" direction="in"/>
+      <arg name="path" type="ay" direction="in"/>
+      <arg name="fd" type="h" direction="in"/>
+      <arg name="opts" type="a{sv}" direction="in"/>
+      <arg name="job" type="u" direction="out"/>
+    </method>
+    <method name="CopyAcross">
+      <arg name="srcLoc" type="s" direction="in"/>
+      <arg name="src" type="ay" direction="in"/>
+      <arg name="dstLoc" type="s" direction="in"/>
+      <arg name="dst" type="ay" direction="in"/>
+      <arg name="opts" type="a{sv}" direction="in"/>
+      <arg name="job" type="u" direction="out"/>
+    </method>
+    <method name="RemoveTree">
+      <arg name="loc" type="s" direction="in"/>
+      <arg name="path" type="ay" direction="in"/>
+      <arg name="job" type="u" direction="out"/>
+    </method>
+    <method name="Walk">
+      <arg name="loc" type="s" direction="in"/>
+      <arg name="root" type="ay" direction="in"/>
+      <arg name="opts" type="a{sv}" direction="in"/>
+      <arg name="job" type="u" direction="out"/>
+    </method>
+    <method name="Cancel">
+      <arg name="id" type="u" direction="in"/>
+    </method>
+    <signal name="JobProgress">
+      <arg name="job" type="u"/>
+      <arg name="done" type="x"/>
+      <arg name="total" type="x"/>
+    </signal>
+    <signal name="WalkBatch">
+      <arg name="job" type="u"/>
+      <arg name="entries" type="a(ay(ayyyxxxxixxssqays))"/>
+    </signal>
+    <signal name="JobFinished">
+      <arg name="job" type="u"/>
+      <arg name="error" type="s"/>
+      <arg name="message" type="s"/>
+      <arg name="extra" type="a{sv}"/>
+    </signal>
+
+    <!-- Questions -->
+    <signal name="Question">
+      <arg name="id" type="s"/>
+      <arg name="kind" type="s"/>
+      <arg name="details" type="a{sv}"/>
+    </signal>
+    <method name="Answer">
+      <arg name="id" type="s" direction="in"/>
+      <arg name="answer" type="a{sv}" direction="in"/>
+    </method>
+
+    <!-- Handoff -->
+    <method name="OpenAccountSettings">
+      <arg name="loc" type="s" direction="in"/>
+    </method>
+    <method name="AddAccount">
+      <arg name="provider" type="s" direction="in"/>
+    </method>
+  </interface>
+  <interface name="org.freedesktop.DBus.Introspectable">
+    <method name="Introspect">
+      <arg name="xml_data" type="s" direction="out"/>
+    </method>
+  </interface>
+  <interface name="org.freedesktop.DBus.Peer">
+    <method name="Ping"/>
+  </interface>
+</node>

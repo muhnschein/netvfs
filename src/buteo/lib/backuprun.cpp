@@ -10,6 +10,7 @@
 #include "backupservice.h"
 #include "backupsteps.h"
 #include "logging.h"
+#include "probe.h"
 
 #include <Accounts/Manager>
 
@@ -58,7 +59,7 @@ void BackupRun::start()
 {
     m_running = true;
     m_session.reset(m_sessionFactory ? m_sessionFactory(m_spec.accountId, nullptr)
-                                     : AccountSession::open(m_spec.accountId, nullptr));
+                                     : AccountSession::open(m_spec.accountId, Service::Backup, nullptr));
     connect(m_session.get(), &AccountSession::ready, this, &BackupRun::onSessionReady);
     connect(m_session.get(), &AccountSession::failed, this, &BackupRun::fail);
     qCDebug(lcNetVfsButeo) << "Starting" << m_spec.profileName << "for account" << m_spec.accountId;
@@ -124,7 +125,7 @@ void BackupRun::startOperation()
 void BackupRun::startJob(const NetworkJob::Body &body, const std::function<void()> &next)
 {
     m_next = next;
-    m_job = std::make_unique<NetworkJob>(m_session->config().provider, m_session->params(),
+    m_job = std::make_unique<NetworkJob>(m_session->config().provider, withBackupDirMode(m_session->params()),
                                          m_session->credentials(), body);
     connect(m_job.get(), &QThread::finished, this, &BackupRun::onJobFinished);
     m_job->start();
@@ -285,7 +286,7 @@ void BackupRun::recordAttention(const Result &result)
     if (!m_manager)
         m_manager = std::make_unique<Accounts::Manager>();
     const QString pin = attention == Attention::ServerIdentityChanged ? m_seenPin : QString();
-    if (const Result stored = AccountStore(m_manager.get()).setAttention(m_spec.accountId, attention, pin); !stored.ok())
+    if (const Result stored = AccountStore(m_manager.get()).setAttention(m_spec.accountId, Service::Backup, attention, pin); !stored.ok())
         qCWarning(lcNetVfsButeo) << "Cannot record the attention state:" << stored.toString();
 }
 

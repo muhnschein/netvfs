@@ -1,0 +1,219 @@
+[
+  {
+    "name": "XH-2 removeTree stats the root through links (symlink root followed)",
+    "file": "src/core/ops.cpp",
+    "search": "    r = backend->lstat(normalized, &entry);",
+    "replace": "    r = backend->stat(normalized, &entry);",
+    "test": "timeout 120 build/tests/unit/ops/tst_ops"
+  },
+  {
+    "name": "XH-2 listed folder type trusted (symlink not verified with lstat)",
+    "file": "src/core/ops.cpp",
+    "search": "!r.ok() || real.type != EntryType::Directory) {",
+    "replace": "!r.ok()) {",
+    "test": "timeout 120 build/tests/unit/ops/tst_ops"
+  },
+  {
+    "name": "XH-2 root folder may be removed",
+    "file": "src/core/ops.cpp",
+    "search": "if (normalized.isEmpty() || normalized == QLatin1String(\"/\"))",
+    "replace": "if (false)",
+    "test": "timeout 120 build/tests/unit/ops/tst_ops"
+  },
+  {
+    "name": "XH-2 continueOnError ignored",
+    "file": "src/core/ops.cpp",
+    "search": "if (isFatal(r) || !m_continue) {",
+    "replace": "if (true) {",
+    "test": "timeout 120 build/tests/unit/ops/tst_ops"
+  },
+  {
+    "name": "XH-2 connection loss not fatal under continueOnError",
+    "file": "src/core/ops.cpp",
+    "search": "return r.error() == Error::Canceled || r.error() == Error::ConnectionLost;",
+    "replace": "return r.error() == Error::Canceled;",
+    "test": "timeout 120 build/tests/unit/ops/tst_ops"
+  },
+  {
+    "name": "XH-2 folder with a failed entry below it is still removed",
+    "file": "src/core/ops.cpp",
+    "search": "if (const qint64 mark = m_marks.takeLast(); mark != m_failures)",
+    "replace": "if (const qint64 mark = m_marks.takeLast(); mark != m_failures && false)",
+    "test": "timeout 120 build/tests/unit/ops/tst_ops"
+  },
+  {
+    "name": "XH-2 cancel from TreeProgress ignored between entries",
+    "file": "src/core/ops.cpp",
+    "search": "if (m_progress && !m_progress->removed(path, isDir, m_counts->files, m_counts->dirs)) {",
+    "replace": "if (false) {",
+    "test": "timeout 120 build/tests/unit/ops/tst_ops"
+  },
+  {
+    "name": "XH-2 native delete never used",
+    "file": "src/core/ops.cpp",
+    "search": "if (options.useNative && backend->capabilities().has(Capability::RecursiveDelete)) {",
+    "replace": "if (false) {",
+    "test": "timeout 120 build/tests/unit/ops/tst_ops"
+  },
+  {
+    "name": "XH-2 native delete used without the RecursiveDelete capability",
+    "file": "src/core/ops.cpp",
+    "search": "if (options.useNative && backend->capabilities().has(Capability::RecursiveDelete)) {",
+    "replace": "if (options.useNative) {",
+    "test": "timeout 120 build/tests/unit/ops/tst_ops"
+  },
+  {
+    "name": "XH-2 no fallback when native delete is Unsupported",
+    "file": "src/core/ops.cpp",
+    "search": "        if (r.error() != Error::Unsupported)\n            return r;",
+    "replace": "        return r;",
+    "test": "timeout 120 build/tests/unit/ops/tst_ops"
+  },
+  {
+    "name": "XH-3 symlink loops are followed (no loop detection)",
+    "file": "src/core/ops.cpp",
+    "search": "if (!folder || m_branch.contains(identity))",
+    "replace": "if (!folder)",
+    "test": "timeout 30 build/tests/unit/ops/tst_ops"
+  },
+  {
+    "name": "XH-3 Never policy follows symlinks",
+    "file": "src/core/ops.cpp",
+    "search": "m_options.symlinks == SymlinkPolicy::Follow)",
+    "replace": "m_options.symlinks != SymlinkPolicy::Follow)",
+    "test": "timeout 30 build/tests/unit/ops/tst_ops"
+  },
+  {
+    "name": "XH-3 depth limit off by one",
+    "file": "src/core/ops.cpp",
+    "search": "if (m_options.maxDepth >= 0 && depth >= m_options.maxDepth) {",
+    "replace": "if (m_options.maxDepth >= 0 && depth > m_options.maxDepth) {",
+    "test": "timeout 120 build/tests/unit/ops/tst_ops"
+  },
+  {
+    "name": "XH-3 descend=false ignored",
+    "file": "src/core/ops.cpp",
+    "search": "        if (!descend)\n            return Result::success();",
+    "replace": "        if (false)\n            return Result::success();",
+    "test": "timeout 120 build/tests/unit/ops/tst_ops"
+  },
+  {
+    "name": "XH-5 destination cancel request not turned into a pipe failure",
+    "file": "src/core/ops.cpp",
+    "search": "        if (m_outer && m_outer->canceled())\n            m_pipe->cancel();",
+    "replace": "        if (false)\n            m_pipe->cancel();",
+    "test": "timeout 120 build/tests/unit/ops/tst_ops"
+  },
+  {
+    "name": "XH-5 source failure ends the pipe as a clean EOF",
+    "file": "src/core/ops.cpp",
+    "search": "        else\n            m_pipe->fail(m_result);",
+    "replace": "        else\n            m_pipe->writer()->close();",
+    "test": "timeout 120 build/tests/unit/ops/tst_ops"
+  },
+  {
+    "name": "XH-5 destination failure does not release the source thread",
+    "file": "src/core/ops.cpp",
+    "search": "        pipe.fail(uploaded);       // wakes a download blocked on a full pipe",
+    "replace": "        ;",
+    "test": "timeout 120 build/tests/unit/ops/tst_ops"
+  },
+  {
+    "name": "XH-5 recursive copy not required for folders",
+    "file": "src/core/ops.cpp",
+    "search": "        if (!options.recursive)",
+    "replace": "        if (false)",
+    "test": "timeout 120 build/tests/unit/ops/tst_ops"
+  },
+  {
+    "name": "XH-5 same backend allowed as source and destination",
+    "file": "src/core/ops.cpp",
+    "search": "    if (source == destination)",
+    "replace": "    if (false)",
+    "test": "timeout 120 build/tests/unit/ops/tst_ops"
+  },
+  {
+    "name": "XH-5 commit mode ignored (always replaces)",
+    "file": "src/core/ops.cpp",
+    "search": "    policy.commitMode = options.mode;",
+    "replace": "    policy.commitMode = RenameMode::Replace;",
+    "test": "timeout 120 build/tests/unit/ops/tst_ops"
+  },
+  {
+    "name": "XH-5 modification time copied although preserveModified is off",
+    "file": "src/core/ops.cpp",
+    "search": "    if (options.preserveModified && job.modified.isValid()",
+    "replace": "    if (job.modified.isValid()",
+    "test": "timeout 120 build/tests/unit/ops/tst_ops"
+  },
+  {
+    "name": "XH-5 root folder created non-exclusively under NoReplace",
+    "file": "src/core/ops.cpp",
+    "search": "destination->makeDir(destinationPath, options.mode == RenameMode::NoReplace);",
+    "replace": "destination->makeDir(destinationPath, false);",
+    "test": "timeout 120 build/tests/unit/ops/tst_ops"
+  },
+  {
+    "name": "XH-5 links to folders copied as files",
+    "file": "src/core/ops.cpp",
+    "search": "resolved.type != EntryType::File)",
+    "replace": "resolved.type == EntryType::Unknown)",
+    "test": "timeout 120 build/tests/unit/ops/tst_ops"
+  },
+  {
+    "name": "XH-4 ring may hold more than its capacity",
+    "file": "src/core/boundedpipe.cpp",
+    "search": "const qint64 n = std::min(length, capacity() - count);",
+    "replace": "const qint64 n = std::min(length, capacity() - count + 1);",
+    "test": "timeout 120 build/tests/unit/pipe/tst_boundedpipe"
+  },
+  {
+    "name": "XH-4 high-water mark not tracked",
+    "file": "src/core/boundedpipe.cpp",
+    "search": "        peak = std::max(peak, count);",
+    "replace": "        peak = 0;",
+    "test": "timeout 120 build/tests/unit/pipe/tst_boundedpipe"
+  },
+  {
+    "name": "XH-4 writer close does not signal EOF",
+    "file": "src/core/boundedpipe.cpp",
+    "search": "            m_state->writerClosed = true;",
+    "replace": "            m_state->writerClosed = false;",
+    "test": "timeout 120 build/tests/unit/pipe/tst_boundedpipe"
+  },
+  {
+    "name": "XH-4 fail does not wake a blocked writer",
+    "file": "src/core/boundedpipe.cpp",
+    "search": "        notEmpty.notify_all();\n        notFull.notify_all();\n    }",
+    "replace": "        notEmpty.notify_all();\n    }",
+    "test": "timeout 120 build/tests/unit/pipe/tst_boundedpipe"
+  },
+  {
+    "name": "XH-4 fail does not wake a blocked reader",
+    "file": "src/core/boundedpipe.cpp",
+    "search": "        notEmpty.notify_all();\n        notFull.notify_all();\n    }",
+    "replace": "        notFull.notify_all();\n    }",
+    "test": "timeout 120 build/tests/unit/pipe/tst_boundedpipe"
+  },
+  {
+    "name": "XH-4 a later failure replaces the first",
+    "file": "src/core/boundedpipe.cpp",
+    "search": "        if (failure.ok())\n            failure = ",
+    "replace": "        if (true)\n            failure = ",
+    "test": "timeout 120 build/tests/unit/pipe/tst_boundedpipe"
+  },
+  {
+    "name": "XH-4 buffered data still readable after a failure",
+    "file": "src/core/boundedpipe.cpp",
+    "search": "        if (m_state->failedLocked()) {\n            setErrorString(m_state->failure.message());\n            return -1;\n        }\n        if (m_state->count == 0)",
+    "replace": "        if (m_state->count == 0)",
+    "test": "timeout 120 build/tests/unit/pipe/tst_boundedpipe"
+  },
+  {
+    "name": "XH-4 closing the reader early does not fail the writer",
+    "file": "src/core/boundedpipe.cpp",
+    "search": "            if (!m_state->failedLocked() && m_state->readerClosed)\n",
+    "replace": "            if (false)\n",
+    "test": "timeout 120 build/tests/unit/pipe/tst_boundedpipe"
+  }
+]

@@ -1,0 +1,401 @@
+[
+  {
+    "name": "XA-4 allow_insecure allowed for backup",
+    "file": "src/core/servicepolicy.cpp",
+    "search": "    if (params.flag(str(OptionKeys::AllowInsecure)))\n        return refused(",
+    "replace": "    if (false)\n        return refused(",
+    "test": "dbus-run-session -- build/tests/unit/accounts/tst_accounts"
+  },
+  {
+    "name": "XA-4 insecure configuration allowed for backup",
+    "file": "src/core/servicepolicy.cpp",
+    "search": "    if (insecure)\n        return refused(",
+    "replace": "    if (insecure && params.provider.isEmpty())\n        return refused(",
+    "test": "dbus-run-session -- build/tests/unit/accounts/tst_accounts"
+  },
+  {
+    "name": "XA-4 interactive sign-in allowed for backup",
+    "file": "src/core/servicepolicy.cpp",
+    "search": "    if (params.option(str(OptionKeys::AuthMode)) == QLatin1String(AuthInteractive))\n        return refused(",
+    "replace": "    if (false)\n        return refused(",
+    "test": "dbus-run-session -- build/tests/unit/accounts/tst_accounts"
+  },
+  {
+    "name": "XA-4 smb backup without a share allowed",
+    "file": "src/core/servicepolicy.cpp",
+    "search": "    if (isSmb(params) && params.option(str(OptionKeys::Share)).trimmed().isEmpty())",
+    "replace": "    if (isSmb(params) && params.option(str(OptionKeys::Share)).isEmpty())",
+    "test": "dbus-run-session -- build/tests/unit/accounts/tst_accounts"
+  },
+  {
+    "name": "XA-4 unknown smb profile accepted",
+    "file": "src/core/servicepolicy.cpp",
+    "search": "    if (isSmb(params) && !isKnownProfile(securityProfile(params)))",
+    "replace": "    if (isSmb(params) && !isKnownProfile(securityProfile(params)) && params.host.isNull() && false)",
+    "test": "dbus-run-session -- build/tests/unit/accounts/tst_accounts"
+  },
+  {
+    "name": "XA-4 files use insecure settings without consent",
+    "file": "src/core/servicepolicy.cpp",
+    "search": "    if (insecure && !params.flag(str(OptionKeys::AllowInsecure)))",
+    "replace": "    if (false)",
+    "test": "dbus-run-session -- build/tests/unit/accounts/tst_accounts"
+  },
+  {
+    "name": "XA-4 files check also applies backup rules",
+    "file": "src/core/servicepolicy.cpp",
+    "search": "    if (service == Service::Backup)\n        return checkBackup(params, insecure);",
+    "replace": "    if (service == Service::Backup || params.flag(str(OptionKeys::AllowShell)))\n        return checkBackup(params, insecure);",
+    "test": "dbus-run-session -- build/tests/unit/accounts/tst_accounts"
+  },
+  {
+    "name": "XM-1 legacy profile counted as secure",
+    "file": "src/core/servicepolicy.cpp",
+    "search": "        return profile == QLatin1String(SecurityProfiles::Legacy) || profile == QLatin1String(SecurityProfiles::Guest);",
+    "replace": "        return profile == QLatin1String(SecurityProfiles::Guest);",
+    "test": "dbus-run-session -- build/tests/unit/accounts/tst_accounts"
+  },
+  {
+    "name": "XM-1 guest profile counted as secure",
+    "file": "src/core/servicepolicy.cpp",
+    "search": "QLatin1String(SecurityProfiles::Legacy) || profile == QLatin1String(SecurityProfiles::Guest);\n    }",
+    "replace": "QLatin1String(SecurityProfiles::Legacy);\n    }",
+    "test": "dbus-run-session -- build/tests/unit/accounts/tst_accounts"
+  },
+  {
+    "name": "M-3 missing require_encryption read as signed",
+    "file": "src/core/servicepolicy.cpp",
+    "search": "params.flag(str(OptionKeys::RequireEncryption), true)",
+    "replace": "params.flag(str(OptionKeys::RequireEncryption), false)",
+    "test": "dbus-run-session -- build/tests/unit/accounts/tst_accounts"
+  },
+  {
+    "name": "XM-1 security_profile ignored",
+    "file": "src/core/servicepolicy.cpp",
+    "search": "    if (const QString profile = params.option(str(OptionKeys::SecurityProfile)).trimmed(); !profile.isEmpty())",
+    "replace": "    if (const QString profile = params.option(str(OptionKeys::SecurityProfile)).trimmed(); false)",
+    "test": "dbus-run-session -- build/tests/unit/accounts/tst_accounts"
+  },
+  {
+    "name": "W-2 plain http not insecure",
+    "file": "src/core/servicepolicy.cpp",
+    "search": "params.option(str(OptionKeys::Tls), QStringLiteral(\"https\")) == QLatin1String(\"http\")",
+    "replace": "params.option(str(OptionKeys::Tls), QStringLiteral(\"https\")) == QLatin1String(\"none\")",
+    "test": "dbus-run-session -- build/tests/unit/accounts/tst_accounts"
+  },
+  {
+    "name": "F-1 tls_mode none not insecure",
+    "file": "src/core/servicepolicy.cpp",
+    "search": "params.option(str(OptionKeys::TlsMode), QStringLiteral(\"explicit\")) == QLatin1String(\"none\")",
+    "replace": "params.option(str(OptionKeys::TlsMode), QStringLiteral(\"explicit\")) == QLatin1String(\"plain\")",
+    "test": "dbus-run-session -- build/tests/unit/accounts/tst_accounts"
+  },
+  {
+    "name": "S-3 allow_shell kept for backup",
+    "file": "src/core/servicepolicy.cpp",
+    "search": "        result.options.remove(str(OptionKeys::AllowShell));",
+    "replace": "        Q_UNUSED(service)",
+    "test": "dbus-run-session -- build/tests/unit/accounts/tst_accounts"
+  },
+  {
+    "name": "XA-7 guest needs a secret",
+    "file": "src/core/servicepolicy.cpp",
+    "search": "    return params.option(str(OptionKeys::AuthMode)) == QLatin1String(AuthInteractive)\n            || securityProfile(params) == QLatin1String(SecurityProfiles::Guest);",
+    "replace": "    return params.option(str(OptionKeys::AuthMode)) == QLatin1String(AuthInteractive);",
+    "test": "dbus-run-session -- build/tests/unit/accounts/tst_accounts"
+  },
+  {
+    "name": "XA-7 interactive needs a secret",
+    "file": "src/core/servicepolicy.cpp",
+    "search": "    return params.option(str(OptionKeys::AuthMode)) == QLatin1String(AuthInteractive)\n            || securityProfile",
+    "replace": "    return false\n            || securityProfile",
+    "test": "dbus-run-session -- build/tests/unit/accounts/tst_accounts"
+  },
+  {
+    "name": "W-4 tls_verify_peer not from systemTrusted",
+    "file": "src/core/servicepolicy.cpp",
+    "search": "options.insert(str(OptionKeys::TlsVerifyPeer), identity.systemTrusted);",
+    "replace": "options.insert(str(OptionKeys::TlsVerifyPeer), false);",
+    "test": "dbus-run-session -- build/tests/unit/accounts/tst_accounts"
+  },
+  {
+    "name": "W-4 tls_verify_peer not written with a TLS pin",
+    "file": "src/core/servicepolicy.cpp",
+    "search": "    if (identity.kind == ServerIdentity::Kind::TlsCertificate)\n        options.insert",
+    "replace": "    if (false)\n        options.insert",
+    "test": "dbus-run-session -- build/tests/unit/accounts/tst_accounts"
+  },
+  {
+    "name": "XA-7 optional secret ignored",
+    "file": "src/core/secretsource.cpp",
+    "search": "    if (acceptsMissingSecret(lookup, secretOptional()))",
+    "replace": "    if (acceptsMissingSecret(lookup, false))",
+    "test": "dbus-run-session -- build/tests/unit/accounts/tst_accounts"
+  },
+  {
+    "name": "XA-7 optional secret hides a signond outage",
+    "file": "src/core/secretsource.cpp",
+    "search": "    return secretOptional && lookup.error() == Error::AuthFailed;",
+    "replace": "    return secretOptional && lookup.error() != Error::None;",
+    "test": "dbus-run-session -- build/tests/unit/accounts/tst_accounts"
+  },
+  {
+    "name": "A-6 kept: missing secret accepted for everyone",
+    "file": "src/core/secretsource.cpp",
+    "search": "    if (acceptsMissingSecret(lookup, secretOptional()))",
+    "replace": "    if (acceptsMissingSecret(lookup, true))",
+    "test": "dbus-run-session -- build/tests/unit/accounts/tst_accounts"
+  },
+  {
+    "name": "XA-4 session skips the policy check",
+    "file": "src/core/accountsession.cpp",
+    "search": "    if (const Result r = checkServicePolicy(m_config.params, service); !r.ok()) {",
+    "replace": "    if (const Result r = checkServicePolicy(m_config.params, service); false) {",
+    "test": "dbus-run-session -- build/tests/unit/accounts/tst_accounts"
+  },
+  {
+    "name": "XA-4 session hands out unfiltered params",
+    "file": "src/core/accountsession.cpp",
+    "search": "    m_config.params = paramsForService(m_config.params, service);",
+    "replace": "",
+    "test": "dbus-run-session -- build/tests/unit/accounts/tst_accounts"
+  },
+  {
+    "name": "XA-7 session never marks the secret optional",
+    "file": "src/core/accountsession.cpp",
+    "search": "    m_secrets->setSecretOptional(secretOptional(m_config.params));   // XA-7",
+    "replace": "",
+    "test": "dbus-run-session -- build/tests/unit/accounts/tst_accounts"
+  },
+  {
+    "name": "XA-1 filesAccounts lists disabled accounts",
+    "file": "src/core/accountstore.cpp",
+    "search": "        if (!account->isEnabled())\n            continue;\n        bool filesEnabled",
+    "replace": "        bool filesEnabled",
+    "test": "dbus-run-session -- build/tests/unit/accounts/tst_accounts"
+  },
+  {
+    "name": "XA-1 filesAccounts ignores the files service",
+    "file": "src/core/accountstore.cpp",
+    "search": "        if (filesEnabled)\n            ids << static_cast<int>(id);",
+    "replace": "        ids << static_cast<int>(id);",
+    "test": "dbus-run-session -- build/tests/unit/accounts/tst_accounts"
+  },
+  {
+    "name": "XA-1 serviceEnabled reads the wrong service",
+    "file": "src/core/accountstore.cpp",
+    "search": "(service == Service::Backup ? backupEnabled : filesEnabled)",
+    "replace": "(service == Service::Backup ? filesEnabled : backupEnabled)",
+    "test": "dbus-run-session -- build/tests/unit/accounts/tst_accounts"
+  },
+  {
+    "name": "review 2.17 files_root read from the backup service",
+    "file": "src/core/accountstore.cpp",
+    "search": "serviceValue(m_manager, account, Service::Files, Keys::FilesRoot, &filesEnabled).trimmed()",
+    "replace": "serviceValue(m_manager, account, Service::Backup, Keys::FilesRoot, &filesEnabled).trimmed()",
+    "test": "dbus-run-session -- build/tests/unit/accounts/tst_accounts"
+  },
+  {
+    "name": "review 2.18 attention always from the backup service",
+    "file": "src/core/accountstore.cpp",
+    "search": "serviceName(provider, service));",
+    "replace": "serviceName(provider, service == Service::Files ? Service::Backup : service));",
+    "test": "dbus-run-session -- build/tests/unit/accounts/tst_accounts"
+  },
+  {
+    "name": "review 2.19 files verify writes the probe file",
+    "file": "src/qml/netvfsprobe.cpp",
+    "search": "                                                    : verifyBrowseAccess(backend, folder, &outcome.freeBytes);",
+    "replace": "                                                    : verifyAccess(backend, folder, &outcome.freeBytes);",
+    "test": "dbus-run-session -- build/tests/unit/qml/probe/tst_qmlprobe"
+  },
+  {
+    "name": "review 2.19 files verify gets the backup folder mode",
+    "file": "src/qml/netvfsprobe.cpp",
+    "search": "service == Service::Backup ? withBackupDirMode(params) : params;",
+    "replace": "withBackupDirMode(params);",
+    "test": "dbus-run-session -- build/tests/unit/qml/probe/tst_qmlprobe"
+  },
+  {
+    "name": "XA-4 probe verify skips the policy",
+    "file": "src/qml/netvfsprobe.cpp",
+    "search": "    outcome.result = checkServicePolicy(params, service);   // XA-4, before anything is sent",
+    "replace": "    outcome.result = Result();",
+    "test": "dbus-run-session -- build/tests/unit/qml/probe/tst_qmlprobe"
+  },
+  {
+    "name": "interactive verify sends credentials",
+    "file": "src/qml/netvfsprobe.cpp",
+    "search": "    if (params.option(QLatin1String(OptionKeys::AuthMode)) == QLatin1String(AuthInteractive)) {",
+    "replace": "    if (false) {",
+    "test": "dbus-run-session -- build/tests/unit/qml/probe/tst_qmlprobe"
+  },
+  {
+    "name": "interactive verify ignores the identity",
+    "file": "src/qml/netvfsprobe.cpp",
+    "search": "    outcome->result = outcome->identityCheck;",
+    "replace": "    outcome->result = Result();",
+    "test": "dbus-run-session -- build/tests/unit/qml/probe/tst_qmlprobe"
+  },
+  {
+    "name": "XC-16 trusted certificate reported as matching",
+    "file": "src/qml/netvfsprobe.cpp",
+    "search": "    if (!outcome.pinned && outcome.identity.kind == ServerIdentity::Kind::TlsCertificate)",
+    "replace": "    if (false)",
+    "test": "dbus-run-session -- build/tests/unit/qml/probe/tst_qmlprobe"
+  },
+  {
+    "name": "XA-3 pin_trusted ignored",
+    "file": "src/qml/netvfsprobe.cpp",
+    "search": "            && params.flag(QLatin1String(OptionKeys::PinTrusted)))",
+    "replace": "            && false)",
+    "test": "dbus-run-session -- build/tests/unit/qml/probe/tst_qmlprobe"
+  },
+  {
+    "name": "XA-3 pin_trusted applied to pinned certificates",
+    "file": "src/qml/netvfsprobe.cpp",
+    "search": "    if (r.ok() && pin.isEmpty() && seen.kind",
+    "replace": "    if (r.ok() && seen.kind",
+    "test": "dbus-run-session -- build/tests/unit/qml/probe/tst_qmlprobe"
+  },
+  {
+    "name": "files verify error texts use backup wording",
+    "file": "src/qml/netvfsprobe.cpp",
+    "search": "    if (service == Service::Files)\n        return Activity::Browse;",
+    "replace": "    if (service == Service::Files)\n        return Activity::Connect;",
+    "test": "dbus-run-session -- build/tests/unit/qml/probe/tst_qmlprobe"
+  },
+  {
+    "name": "verifyAccount ignores the service",
+    "file": "src/qml/netvfsprobe.cpp",
+    "search": "const QString folder = service == Service::Backup ? session->backupsPath() : session->filesRoot();",
+    "replace": "const QString folder = session->backupsPath();",
+    "test": "dbus-run-session -- build/tests/unit/qml/probe/tst_qmlprobe"
+  },
+  {
+    "name": "files verify accepts a file as start folder",
+    "file": "src/core/probe.cpp",
+    "search": "    if (!entry.isDir())\n        return Result(Error::NotADirectory",
+    "replace": "    if (false)\n        return Result(Error::NotADirectory",
+    "test": "dbus-run-session -- build/tests/unit/qml/probe/tst_qmlprobe"
+  },
+  {
+    "name": "review 2.17 files_root written to the backup service",
+    "file": "src/qml/netvfshelpers.cpp",
+    "search": "        const QString name = NetVfs::filesServiceName(params.provider);\n        QVariantMap files;",
+    "replace": "        const QString name = NetVfs::backupServiceName(params.provider);\n        QVariantMap files;",
+    "test": "build/tests/unit/qml/helpers/tst_qmlhelpers"
+  },
+  {
+    "name": "XA-1 backup service enabled when not chosen",
+    "file": "src/qml/netvfshelpers.cpp",
+    "search": "    if (services.value(QStringLiteral(\"backup\")).toBool()) {",
+    "replace": "    if (true) {",
+    "test": "build/tests/unit/qml/helpers/tst_qmlhelpers"
+  },
+  {
+    "name": "TLS problems not explained",
+    "file": "src/qml/netvfshelpers.cpp",
+    "search": "    if (problems & ServerIdentity::Expired) {",
+    "replace": "    if (false) {",
+    "test": "build/tests/unit/qml/helpers/tst_qmlhelpers"
+  },
+  {
+    "name": "XA-5 unknown labels accepted",
+    "file": "src/qml/providerdescriptors.cpp",
+    "search": "    if (!isTextId(field.value(QStringLiteral(\"label\")), known))",
+    "replace": "    if (false)",
+    "test": "build/tests/unit/qml/descriptors/tst_qmldescriptors"
+  },
+  {
+    "name": "XA-5 bad services accepted",
+    "file": "src/qml/providerdescriptors.cpp",
+    "search": "        if (!list({ \"backup\", \"files\" }).contains(id) || seen.contains(id))",
+    "replace": "        if (false)",
+    "test": "build/tests/unit/qml/descriptors/tst_qmldescriptors"
+  },
+  {
+    "name": "XA-5 condition on unknown key accepted",
+    "file": "src/qml/providerdescriptors.cpp",
+    "search": "        if (it.key() != QLatin1String(KeyAuthMode) && !keys.contains(it.key()))",
+    "replace": "        if (it.key() != QLatin1String(KeyAuthMode) && !keys.contains(it.key()) && keys.isEmpty())",
+    "test": "build/tests/unit/qml/descriptors/tst_qmldescriptors"
+  },
+  {
+    "name": "XA-5 duplicate keys accepted",
+    "file": "src/qml/providerdescriptors.cpp",
+    "search": "!keyPattern.match(key).hasMatch() || keys.contains(key) ||",
+    "replace": "!keyPattern.match(key).hasMatch() ||",
+    "test": "build/tests/unit/qml/descriptors/tst_qmldescriptors"
+  },
+  {
+    "name": "XA-5 service settings shown without their service",
+    "file": "src/qml/providerdescriptors.cpp",
+    "search": "        !service.isEmpty() && !services.contains(service))",
+    "replace": "        !service.isEmpty() && services.isEmpty() && service.isNull())",
+    "test": "build/tests/unit/qml/descriptors/tst_qmldescriptors"
+  },
+  {
+    "name": "XA-5 optional fields validated when empty",
+    "file": "src/qml/providerdescriptors.cpp",
+    "search": "    if (field.value(QStringLiteral(\"optional\")).toBool() && value.toString().trimmed().isEmpty())",
+    "replace": "    if (false)",
+    "test": "build/tests/unit/qml/descriptors/tst_qmldescriptors"
+  },
+  {
+    "name": "XA-5 consent not required",
+    "file": "src/qml/providerdescriptors.cpp",
+    "search": "    if (rule == QLatin1String(\"consent\") && !value.toBool()) {",
+    "replace": "    if (false) {",
+    "test": "build/tests/unit/qml/descriptors/tst_qmldescriptors"
+  },
+  {
+    "name": "XA-7 guest still asked for a secret",
+    "file": "src/qml/providerdescriptors.cpp",
+    "search": "        !noSecret.isEmpty() && conditionHolds(noSecret, values))",
+    "replace": "        !noSecret.isEmpty() && false)",
+    "test": "build/tests/unit/qml/descriptors/tst_qmldescriptors"
+  },
+  {
+    "name": "XA-5 hidden fields stored",
+    "file": "src/qml/providerdescriptors.cpp",
+    "search": "            stored && isVisible(field, values, QStringList()))",
+    "replace": "            stored)",
+    "test": "build/tests/unit/qml/descriptors/tst_qmldescriptors"
+  },
+  {
+    "name": "XA-5 guest keeps the user name",
+    "file": "src/qml/providerdescriptors.cpp",
+    "search": "        if (key == QLatin1String(KeyUserName) && isVisible(field, values, QStringList()))",
+    "replace": "        if (key == QLatin1String(KeyUserName))",
+    "test": "build/tests/unit/qml/descriptors/tst_qmldescriptors"
+  },
+  {
+    "name": "XA-5 auth_mode not stored",
+    "file": "src/qml/providerdescriptors.cpp",
+    "search": "    if (d.value(QStringLiteral(\"authModes\")).toList().size() > 1)",
+    "replace": "    if (false)",
+    "test": "build/tests/unit/qml/descriptors/tst_qmldescriptors"
+  },
+  {
+    "name": "XA-5 accepted pin dropped",
+    "file": "src/qml/providerdescriptors.cpp",
+    "search": "    for (auto it = extraOptions.constBegin(); it != extraOptions.constEnd(); ++it)\n        options.insert(it.key(), it.value());",
+    "replace": "    for (auto it = extraOptions.constBegin(); it != extraOptions.constEnd(); ++it)\n        Q_UNUSED(it);",
+    "test": "build/tests/unit/qml/descriptors/tst_qmldescriptors"
+  },
+  {
+    "name": "XB-6 model grants unregistered consumers",
+    "file": "src/qml/consentmodel.cpp",
+    "search": "        if (m_consumers.at(row).id != consumerId)\n            continue;",
+    "replace": "",
+    "test": "build/tests/unit/qml/descriptors/tst_qmldescriptors"
+  },
+  {
+    "name": "XB-6 revoke grants",
+    "file": "src/qml/consentmodel.cpp",
+    "search": "    return store(consumerId, Consent::Denied);",
+    "replace": "    return store(consumerId, Consent::Granted);",
+    "test": "build/tests/unit/qml/descriptors/tst_qmldescriptors"
+  }
+]

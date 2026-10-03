@@ -1,116 +1,47 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 #include "smbbackend.h"
-#include "smb2api.h"
-#include "smbcallbacks.h"
+#include "smbfiles.h"
+#include "smbhelper.h"
+#include "smbops.h"
+#include "smbsession.h"
 
 #include "logging.h"
 #include "paths.h"
+#include "secure.h"
 
-#include <QtCore/QElapsedTimer>
 #include <QtCore/QIODevice>
 
 #include <algorithm>
-#include <limits>
-
-#include <fcntl.h>
-#include <poll.h>
-#include <pthread.h>
-#include <signal.h>
 
 namespace NetVfs::Smb {
-
-// One asynchronous libsmb2 request. Heap-allocated so that a request
-// abandoned on cancel or timeout can complete later without touching freed
-// memory: it then moves to SmbBackend::m_orphans and keeps its buffers. The
-// completion state is filled in by the C callbacks of smbcallbacks.c.
-struct Call : NetVfsSmbCompletion {
-    Call() : NetVfsSmbCompletion {} {}
-
-    // The callback data handed to libsmb2 together with a netvfs_smb_complete_* callback.
-    NetVfsSmbCompletion *completion() { return this; }
-
-    smb2_stat_64 st = {};
-    struct smb2_statvfs vfs = {};   // "struct": a function has the same name
-    QByteArray buffer;
-};
 
 namespace {
 
 const int DefaultPort = 445;
-const int PollSliceMs = 100;
-const char *const UserFileVariable = "NTLM_USER_FILE";
+const char *const IpcShare = "IPC$";
+const qint64 MaxNameBytes = 255;        // UTF-8 bytes; Samba on Linux file systems, NTFS in ASCII
 
-// libsmb2 writes with writev(); a peer that closed the connection would
-// otherwise kill the whole process with SIGPIPE. The signal is blocked on
-// this thread while libsmb2 runs and one raised meanwhile is discarded.
-class SigPipeGuard
+Result invalidRange()
 {
-public:
-    SigPipeGuard()
-    {
-        sigemptyset(&m_set);
-        sigaddset(&m_set, SIGPIPE);
-        pthread_sigmask(SIG_BLOCK, &m_set, &m_old);
-    }
-    ~SigPipeGuard()
-    {
-        const timespec zero = { 0, 0 };
-        while (sigtimedwait(&m_set, nullptr, &zero) > 0) {
-            // drain
-        }
-        pthread_sigmask(SIG_SETMASK, &m_old, nullptr);
-    }
-    SigPipeGuard(const SigPipeGuard &) = delete;
-    SigPipeGuard &operator=(const SigPipeGuard &) = delete;
-
-private:
-    sigset_t m_set = {};
-    sigset_t m_old = {};
-};
-
-Entry entryFrom(const QString &name, const smb2_stat_64 &st)
-{
-    Entry entry;
-    entry.name = name;
-    entry.size = static_cast<qint64>(st.smb2_size);
-    entry.isDir = st.smb2_type == SMB2_TYPE_DIRECTORY;
-    entry.modified = QDateTime::fromMSecsSinceEpoch(static_cast<qint64>(st.smb2_mtime) * 1000
-                                                        + static_cast<qint64>(st.smb2_mtime_nsec / 1000000),
-                                                    Qt::UTC);
-    return entry;
+    return Result(Error::Internal, QStringLiteral("invalid range"));
 }
 
-} // namespace
-
-void neutraliseUserFile()
+// XM-2: what the root of server mode allows.
+Result rootDenied(const QString &what)
 {
-    if (!qEnvironmentVariableIsSet(UserFileVariable))
-        return;
-    qCWarning(lcNetVfsSmb) << "Ignoring NTLM_USER_FILE: the account's own password is used (SPEC-smb M-5)";
-    qunsetenv(UserFileVariable);
+    return Result(Error::PermissionDenied, QStringLiteral("%1: the server root holds only the shares").arg(what));
 }
 
-namespace {
-void applyPolicy(smb2_context *ctx, const ConnectionParams &params, const QString &user,
-                 const Credentials &credentials)
+Result shareRootDenied(const QString &what)
 {
-    // SPEC-smb section 3. Nothing here is configurable except M-3.
-    smb2_set_version(ctx, SMB2_VERSION_ANY3);                                  // M-1
-    smb2_set_security_mode(ctx, SMB2_NEGOTIATE_SIGNING_ENABLED | SMB2_NEGOTIATE_SIGNING_REQUIRED); // M-2
-    smb2_set_sign(ctx, 1);
-    if (requireEncryption(params.options))                                    // M-3; off: not called
-        smb2_set_seal(ctx, 1);
-    smb2_set_authentication(ctx, SMB2_SEC_NTLMSSP);                            // M-4
-    smb2_set_timeout(ctx, qMax(1, params.requestTimeoutMs / 1000));          // M-7
-
-    // M-5: smb2_set_user() and smb2_set_domain() read NTLM_USER_FILE and may
-    // replace the password, so the variable goes first and the password last.
-    neutraliseUserFile();
-    smb2_set_user(ctx, user.toUtf8().constData());
-    if (const QString domain = params.option(QStringLiteral("domain")); !domain.isEmpty())
-        smb2_set_domain(ctx, domain.toUtf8().constData());
-    smb2_set_password(ctx, credentials.secret.constData());
+    return Result(Error::PermissionDenied, QStringLiteral("%1: a share cannot be removed or renamed").arg(what));
 }
+
+Result stopped()
+{
+    return Result(Error::Canceled, QStringLiteral("The listing was stopped"));
+}
+
 } // namespace
 
 SmbBackend::SmbBackend() = default;
@@ -122,477 +53,487 @@ SmbBackend::~SmbBackend()
 
 Result SmbBackend::connect(const ConnectionParams &params, ServerIdentity *seen)
 {
-    disconnect();
-    // SMB has no server identity (SPEC-smb 3); signing keyed by the password
-    // authenticates the server instead.
-    if (seen)
-        *seen = ServerIdentity();
-    m_params = params;
-    m_owner = std::this_thread::get_id();
-    const int port = params.port > 0 ? params.port : DefaultPort;
-    qCDebug(lcNetVfsSmb) << "Connecting to" << params.host << "port" << port;
-    // M-10: only resolve and check that the port answers; the library call
-    // needs the credentials and happens in authenticate().
-    Result r = probeTcp(params.host, port, params.connectTimeoutMs, m_cancel, &m_address);
-    m_probed = r.ok();
-    return r;
+    // M-13
+    return GateHold::run(&m_gate, [this, &params, seen]() {
+        disconnect();
+        // SMB has no server identity (SPEC-smb 3); signing keyed by the password
+        // authenticates the server instead. XT-5 is vacuous here: nothing is
+        // sent before authenticate(), which must send the credentials.
+        if (seen)
+            *seen = ServerIdentity();
+        m_params = params;
+        const int port = params.port > 0 ? params.port : DefaultPort;
+        qCDebug(lcNetVfsSmb) << "Connecting to" << params.host << "port" << port;
+        // M-10: only resolve and check that the port answers; the library call
+        // needs the credentials and happens in authenticate().
+        Result r = probeTcp(params.host, port, params.connectTimeoutMs, m_cancel, &m_address);
+        m_probed = r.ok();
+        return r;
+    });
 }
 
-Result SmbBackend::authenticate(const Credentials &credentials)
+Result SmbBackend::authenticate(const Credentials &credentials, AuthPrompter *prompter)
 {
-    if (!m_probed || m_ctx || std::this_thread::get_id() != m_owner)
-        return Result(Error::Internal, QStringLiteral("authenticate() needs a successful connect() on this thread"));
-    const QString share = m_params.option(QStringLiteral("share"));
-    if (share.isEmpty())
-        return Result(Error::NotFound, QStringLiteral("share not found: no share name is set"));
-    const QString user = credentials.userName.isEmpty() ? m_params.username : credentials.userName;
-    if (user.isEmpty() || credentials.secret.isEmpty())
+    Q_UNUSED(prompter)   // NTLMSSP has no interactive step
+    // M-13
+    return GateHold::run(&m_gate, [this, &credentials]() { return authenticateInGate(credentials); });
+}
+
+// authenticate() inside the gate.
+Result SmbBackend::authenticateInGate(const Credentials &credentials)
+{
+    if (!m_probed || m_main)
+        return Result(Error::Internal, QStringLiteral("authenticate() needs a successful connect()"));
+    // XM-1: the backend enforces the profile it is given; which profile a
+    // service may use is AccountSession's decision (XA-4). XSEC-2: a
+    // failure is never retried with a weaker one.
+    if (Result r = profileFromOptions(m_params.options, &m_profile); !r.ok())
+        return r;
+    const bool guest = settingsFor(m_profile).guest;
+    const QString share = m_params.option(QStringLiteral("share")).trimmed();
+    m_serverMode = share.isEmpty();
+    m_user = credentials.userName.isEmpty() ? m_params.username : credentials.userName;
+    m_domain = m_params.option(QStringLiteral("domain"));
+    if (!guest && (m_user.isEmpty() || credentials.secret.isEmpty()))
         return Result(Error::AuthFailed, QStringLiteral("A user name and a password are required"));
+    if (guest)
+        m_user.clear();
 
-    m_ctx = smb2_init_context();
-    if (!m_ctx)
-        return Result(Error::Internal, QStringLiteral("Cannot create an SMB context"));
-    m_stage = Stage::SessionSetup;
-    applyPolicy(m_ctx, m_params, user, credentials);
-
-    const QByteArray server = serverString(m_address, m_params.port);
-    const QByteArray shareName = share.toUtf8();
-    qCDebug(lcNetVfsSmb) << "Signing in to share" << share << "as" << user;
-    auto call = std::make_unique<Call>();
-    Result r = request(call, [&server, &shareName](smb2_context *ctx, Call *c) {
-        // The user is already set (applyPolicy); passing it again here would
-        // make libsmb2 consult NTLM_USER_FILE once more.
-        return smb2_connect_share_async(ctx, server.constData(), shareName.constData(), nullptr,
-                                        netvfs_smb_complete_plain, c->completion());
-    }, QStringLiteral("Sign-in failed"));
-    // SEC-5: drop libsmb2's copy of the password as soon as it is not needed.
-    smb2_set_password(m_ctx, nullptr);
-
-    if (r.ok() && !isSmb3Dialect(smb2_get_dialect(m_ctx))) {
-        // M-1, defence in depth: never accept a dialect that was not offered.
-        r = Result(Error::SecurityPolicy, QStringLiteral("The server negotiated SMB %1; SMB 3 is required")
-                                              .arg(dialectName(smb2_get_dialect(m_ctx))));
-    }
-    if (!r.ok()) {
-        destroyContext();
-        return r;
-    }
-    m_stage = Stage::Established;
-    qCDebug(lcNetVfsSmb) << "Signed in, dialect" << dialectName(smb2_get_dialect(m_ctx));
-    return r;
-}
-
-
-Result SmbBackend::checkUsable() const
-{
-    if (!m_ctx)
-        return Result(Error::Internal, QStringLiteral("Not signed in"));
-    if (std::this_thread::get_id() != m_owner)          // M-13
-        return Result(Error::Internal, QStringLiteral("An SMB connection is used from one thread only"));
-    if (m_broken)
-        return connectionLost(Stage::Established);
-    return Result::success();
-}
-
-template <typename Starter>
-Result SmbBackend::request(std::unique_ptr<Call> &call, Starter start, const QString &context, Wait wait)
-{
-    if (Result r = checkUsable(); !r.ok())
-        return r;
-    if (wait == Wait::Cancellable && m_cancel)
-        return Result(Error::Canceled);
-    auto finished = [](const std::unique_ptr<Call> &orphan) { return orphan->done != 0; };
-    m_orphans.erase(std::remove_if(m_orphans.begin(), m_orphans.end(), finished), m_orphans.end());
-    smb2_set_error(m_ctx, "");      // clears the NT status of an earlier request
-    if (start(m_ctx, call.get()) < 0)
-        return Result(Error::Internal, context + QStringLiteral(": ") + QString::fromUtf8(smb2_get_error(m_ctx)));
-    const Result r = await(call, wait);
-    if (r.error() == Error::Canceled)
-        return r;
+    auto session = std::make_unique<Session>(m_serverMode ? QLatin1String(IpcShare) : share, m_cancel,
+                                             m_params.requestTimeoutMs, &m_gate);
+    const Result r = session->signIn(serverString(m_address, m_params.port), m_profile, m_user, m_domain,
+                                     credentials.secret);
     if (!r.ok())
-        return Result(r.error(), context + QStringLiteral(": ") + r.message());
-    if (call->status < 0)
-        return errorForStatus(call->ntStatus, -call->status, m_stage, context);
+        return r;
+    m_main = std::move(session);
+    // Server mode opens shares later with the same credentials (XM-2).
+    if (m_serverMode && !guest)
+        m_secret = credentials.secret;
     return r;
 }
 
-Result SmbBackend::await(std::unique_ptr<Call> &call, Wait wait)
+Result SmbBackend::checkSignedIn() const
 {
-    const qint64 limitMs = wait == Wait::Drain ? DrainMs : qint64(m_params.requestTimeoutMs) + BackstopMs;
-    const SigPipeGuard guard;
-    QElapsedTimer clock;
-    clock.start();
-    while (call->done == 0) {
-        // M-12, C-9: a cancel abandons the request at once.
-        if (wait == Wait::Cancellable && m_cancel) {
-            abandon(call);
-            return Result(Error::Canceled);
-        }
-        if (clock.elapsed() > limitMs) {
-            abandon(call);
-            m_broken = m_broken || wait == Wait::Cancellable;
-            return Result(Error::Timeout, QStringLiteral("the server did not answer in time"));
-        }
-        pollfd pfd = {};
-        pfd.fd = smb2_get_fd(m_ctx);
-        pfd.events = static_cast<short>(smb2_which_events(m_ctx));
-        // Also called without events: libsmb2 expires timed-out requests there (M-7).
-        if (const int rc = ::poll(&pfd, 1, PollSliceMs); smb2_service(m_ctx, rc > 0 ? pfd.revents : 0) >= 0)
-            continue;
-        m_broken = true;
-        if (call->done == 0) {
-            abandon(call);
-            return connectionLost(m_stage);
-        }
+    if (!m_main)
+        return Result(Error::Internal, QStringLiteral("Not signed in"));
+    return m_main->checkUsable();
+}
+
+bool SmbBackend::shareLevel(const QString &path) const
+{
+    QString share;
+    QByteArray inside;
+    return m_serverMode && splitServerPath(path, &share, &inside).ok() && inside.isEmpty();
+}
+
+bool SmbBackend::enumerationEnabled() const
+{
+    // XM-7: on by default in server mode; reported only with the helper.
+    return m_serverMode && m_params.flag(QStringLiteral("share_enumeration"), true) && shareHelperInstalled();
+}
+
+Capabilities SmbBackend::capabilities() const
+{
+    // XC-5: what this backend implements and the interop suite tests.
+    Capabilities caps;
+    if (!m_main || !m_main->established())
+        return caps;
+    caps.flags << Capability::NativeNoReplace << Capability::AtomicReplace   // XM-5
+               << Capability::ReadHandles << Capability::EfficientRanges     // XM-6
+               << Capability::WriteResume << Capability::SetModified << Capability::SetModifiedOnUpload
+               << Capability::SpaceInfo                                     // XM-8
+               // XM-4, M-9. SMB clients treat every share as case-insensitive
+               // (Windows does, Samba's default "case sensitive = auto" does
+               // for clients without POSIX extensions); a consumer that
+               // avoids names differing only in case is right on a
+               // case-sensitive share too. FILE_CASE_SENSITIVE_SEARCH would
+               // not tell: Samba reports it either way.
+               << Capability::CaseInsensitive << Capability::WindowsNames;
+    if (enumerationEnabled())
+        caps.flags << Capability::ShareEnumeration;
+    caps.maxNameBytes = MaxNameBytes;
+    caps.maxReadChunk = m_main->readChunk();
+    caps.maxWriteChunk = m_main->writeChunk();
+    return caps;
+}
+
+// ----------------------------------------------------------- sessions (XM-2)
+
+Result SmbBackend::evictOne()
+{
+    Session *oldest = nullptr;
+    for (const auto &session : m_shares) {
+        if (!session->hasFiles() && (!oldest || session->lastUse() < oldest->lastUse()))
+            oldest = session.get();
     }
+    if (!oldest) {
+        return Result(Error::TooManyConnections,
+                      QStringLiteral("Files are open on %1 shares already; close some first").arg(MaxShareSessions));
+    }
+    qCDebug(lcNetVfsSmb) << "Closing the least recently used share" << oldest->share();
+    oldest->close();
+    m_shares.erase(std::find_if(m_shares.begin(), m_shares.end(),
+                                [oldest](const std::unique_ptr<Session> &s) { return s.get() == oldest; }));
     return Result::success();
 }
 
-void SmbBackend::abandon(std::unique_ptr<Call> &call)
+Result SmbBackend::sessionFor(const QString &share, Session **out)
 {
-    call->orphaned = 1;
-    m_orphans.push_back(std::move(call));
-}
-
-void SmbBackend::destroyContext()
-{
-    if (m_ctx) {
-        // Pending requests complete with a shutdown status here, so the
-        // orphans they refer to must still exist.
-        smb2_destroy_context(m_ctx);
-        m_ctx = nullptr;
+    for (auto it = m_shares.begin(); it != m_shares.end(); ++it) {
+        if ((*it)->share().compare(share, Qt::CaseInsensitive) != 0)
+            continue;
+        // A broken context is replaced unless files still refer to it
+        // (they, and it, answer ConnectionLost).
+        if ((*it)->broken() && !(*it)->hasFiles()) {
+            m_shares.erase(it);
+            break;
+        }
+        (*it)->touch(++m_useClock);
+        *out = it->get();
+        return Result::success();
     }
-    m_orphans.clear();
-    m_broken = false;
-    m_stage = Stage::SessionSetup;
+    if (static_cast<int>(m_shares.size()) >= MaxShareSessions) {
+        if (Result r = evictOne(); !r.ok())
+            return r;
+    }
+    auto session = std::make_unique<Session>(share, m_cancel, m_params.requestTimeoutMs, &m_gate);
+    if (Result r = session->signIn(serverString(m_address, m_params.port), m_profile, m_user, m_domain, m_secret);
+        !r.ok())
+        return r;
+    session->touch(++m_useClock);
+    *out = session.get();
+    m_shares.push_back(std::move(session));
+    return Result::success();
 }
 
-Result SmbBackend::statPath(const QByteArray &path, Entry *out)
+Result SmbBackend::locate(const QString &path, Location *out)
 {
-    auto call = std::make_unique<Call>();
-    const Result r = request(call, [&path](smb2_context *ctx, Call *c) {
-        return smb2_stat_async(ctx, path.constData(), &c->st, netvfs_smb_complete_plain, c->completion());
-    }, QStringLiteral("stat"));
-    if (r.ok() && out)
-        *out = entryFrom(Paths::fileName(QString::fromUtf8(path)), call->st);
+    // M-9: an invalid name is refused before anything else.
+    if (const Result valid = m_serverMode ? splitServerPath(path, &out->share, &out->path)
+                                          : translatePath(path, &out->path);
+        !valid.ok())
+        return valid;
+    if (Result r = checkSignedIn(); !r.ok())
+        return r;
+    if (!m_serverMode) {
+        out->session = m_main.get();
+        return Result::success();
+    }
+    out->root = out->share.isEmpty();
+    if (out->root)
+        return Result::success();
+    return sessionFor(out->share, &out->session);
+}
+
+// ------------------------------------------------------------ share list
+
+Result SmbBackend::enumerateShares(QStringList *names, QVariantMap *remarks) const
+{
+    ShareRequest request;
+    request.server = serverString(m_address, m_params.port);
+    request.user = m_user.toUtf8();
+    request.domain = m_domain.toUtf8();
+    request.profile = profileName(m_profile).toUtf8();
+    request.requestTimeoutMs = m_params.requestTimeoutMs;
+    request.secret = m_secret;
+    QByteArray encoded = encodeShareRequest(request);
+    secureWipe(request.secret);
+    QVector<ShareInfo> found;
+    const int timeoutMs = m_params.connectTimeoutMs + m_params.requestTimeoutMs;
+    const Result r = runShareHelper(shareHelperPath(), &encoded, timeoutMs, m_cancel, &found);
+    if (!r.ok())
+        return r;
+    const bool showAdmin = m_params.flag(QStringLiteral("show_admin_shares"), false);
+    for (const ShareInfo &share : found) {
+        if (!shareVisible(share, showAdmin))
+            continue;
+        names->append(share.name);
+        if (!share.remark.isEmpty())
+            remarks->insert(share.name.toLower(), share.remark);
+    }
     return r;
 }
 
-Result SmbBackend::unlinkPath(const QByteArray &path, const QString &context)
+Result SmbBackend::listRoot(ListSink *sink, const ListOptions &options) const
 {
-    auto call = std::make_unique<Call>();
-    return request(call, [&path](smb2_context *ctx, Call *c) {
-        return smb2_unlink_async(ctx, path.constData(), netvfs_smb_complete_plain, c->completion());
-    }, context);
+    // XM-3: the shares the user saved, then what enumeration finds.
+    QStringList names = configuredShares(m_params.options);
+    QVariantMap remarks;
+    if (enumerationEnabled()) {
+        QStringList found;
+        if (Result r = enumerateShares(&found, &remarks); !r.ok())
+            return r;
+        mergeShareNames(&names, found);
+    }
+    QVector<Entry> batch;
+    const int batchSize = qMax(1, options.batchSize);
+    for (const QString &name : names) {
+        Entry entry;
+        entry.name = name;
+        entry.type = EntryType::Directory;
+        if (const QVariant remark = remarks.value(name.toLower()); remark.isValid())
+            entry.extra.insert(QStringLiteral("remark"), remark);
+        batch.append(entry);
+        if (batch.size() < batchSize)
+            continue;
+        if (m_cancel)
+            return Result(Error::Canceled);
+        if (!sink->entries(batch))
+            return stopped();
+        batch.clear();
+    }
+    if (!batch.isEmpty() && !sink->entries(batch))
+        return stopped();
+    return Result::success();
 }
+
+// ------------------------------------------------------------ namespace
 
 Result SmbBackend::stat(const QString &path, Entry *out)
 {
-    QByteArray p;
-    if (Result r = translatePath(path, &p); !r.ok())
-        return r;
-    return statPath(p, out);
-}
-
-Result SmbBackend::list(const QString &dir, QVector<Entry> *out)
-{
-    QByteArray p;
-    if (Result r = translatePath(dir, &p); !r.ok())
-        return r;
-    auto call = std::make_unique<Call>();
-    const Result r = request(call, [&p](smb2_context *ctx, Call *c) {
-        return smb2_opendir_async(ctx, p.constData(), netvfs_smb_complete_opendir, c->completion());
-    }, QStringLiteral("list"));
-    if (!r.ok())
-        return r;
-    QVector<Entry> entries;
-    while (const smb2dirent *ent = smb2_readdir(m_ctx, call->dir)) {
-        const QString name = QString::fromUtf8(ent->name);
-        if (name != QLatin1String(".") && name != QLatin1String(".."))
-            entries.append(entryFrom(name, ent->st));
-    }
-    smb2_closedir(m_ctx, call->dir);
-    if (out)
-        *out = entries;
-    return r;
-}
-
-Result SmbBackend::makeDir(const QByteArray &path)
-{
-    Entry entry;
-    Result r = statPath(path, &entry);
-    if (r.error() == Error::NotFound) {
-        auto call = std::make_unique<Call>();
-        r = request(call, [&path](smb2_context *ctx, Call *c) {
-            return smb2_mkdir_async(ctx, path.constData(), netvfs_smb_complete_plain, c->completion());
-        }, QStringLiteral("create folder"));
-        if (r.error() != Error::AlreadyExists)
+    // M-13
+    return GateHold::run(&m_gate, [this, &path, out]() {
+        Location at;
+        if (Result r = locate(path, &at); !r.ok())
             return r;
-        r = statPath(path, &entry);     // created concurrently by someone else
-    }
-    if (r.ok() && !entry.isDir)
-        return Result(Error::AlreadyExists, QStringLiteral("create folder: a file has the folder's name"));
-    return r;
-}
-
-Result SmbBackend::makePath(const QString &dir)
-{
-    QByteArray p;
-    Result r = translatePath(dir, &p);
-    QByteArray prefix;
-    for (const QByteArray &component : p.split('/')) {
-        if (!r.ok())
-            break;
-        if (component.isEmpty())
-            continue;
-        prefix = prefix.isEmpty() ? component : prefix + '/' + component;
-        r = makeDir(prefix);
-    }
-    return r;
-}
-
-Result SmbBackend::remove(const QString &path)
-{
-    QByteArray p;
-    if (Result r = translatePath(path, &p); !r.ok())
-        return r;
-    return unlinkPath(p, QStringLiteral("remove"));
-}
-
-Result SmbBackend::rename(const QString &from, const QString &to)
-{
-    QByteArray f;
-    QByteArray t;
-    Result r = translatePath(from, &f);
-    if (r.ok())
-        r = translatePath(to, &t);
-    if (r.ok())
-        r = statPath(f, nullptr);
-    if (!r.ok())
-        return r;
-
-    // libsmb2 renames without ReplaceIfExists: remove the target first.
-    Entry target;
-    r = statPath(t, &target);
-    if (r.ok() && target.isDir)
-        return Result(Error::AlreadyExists, QStringLiteral("rename: the target is a folder"));
-    if (r.ok())
-        r = unlinkPath(t, QStringLiteral("replace"));
-    if (r.error() == Error::NotFound)
-        r = Result::success();
-    if (!r.ok())
-        return r;
-
-    auto call = std::make_unique<Call>();
-    return request(call, [&f, &t](smb2_context *ctx, Call *c) {
-        return smb2_rename_async(ctx, f.constData(), t.constData(), netvfs_smb_complete_plain, c->completion());
-    }, QStringLiteral("rename"));
-}
-
-Result SmbBackend::freeSpace(const QString &dir, qint64 *bytes)
-{
-    QByteArray p;
-    if (Result r = translatePath(dir, &p); !r.ok())
-        return r;
-    auto call = std::make_unique<Call>();
-    const Result r = request(call, [&p](smb2_context *ctx, Call *c) {
-        return smb2_statvfs_async(ctx, p.constData(), &c->vfs, netvfs_smb_complete_plain, c->completion());
-    }, QStringLiteral("free space"));
-    if (r.ok() && bytes) {
-        const quint64 unit = call->vfs.f_bsize;
-        const quint64 units = call->vfs.f_bavail;
-        constexpr auto limit = quint64(std::numeric_limits<qint64>::max());
-        *bytes = (unit && units > limit / unit) ? std::numeric_limits<qint64>::max()
-                                                : static_cast<qint64>(units * unit);
-    }
-    return r;
-}
-
-Result SmbBackend::openFile(const QByteArray &path, int flags, smb2fh **fh)
-{
-    auto call = std::make_unique<Call>();
-    const Result r = request(call, [&path, flags](smb2_context *ctx, Call *c) {
-        return smb2_open_async(ctx, path.constData(), flags, netvfs_smb_complete_open, c->completion());
-    }, QStringLiteral("open"));
-    if (r.ok())
-        *fh = call->fh;
-    return r;
-}
-
-Result SmbBackend::closeFile(smb2fh *fh, const Result &outcome)
-{
-    // After a failure or a cancel the handle is still closed, but within a
-    // bounded time (C-9), and the first error is what the caller sees.
-    auto call = std::make_unique<Call>();
-    const Result r = request(call, [fh](smb2_context *ctx, Call *c) {
-        return smb2_close_async(ctx, fh, netvfs_smb_complete_plain, c->completion());
-    }, QStringLiteral("close"), outcome.ok() ? Wait::Cancellable : Wait::Drain);
-    return outcome.ok() ? r : outcome;
-}
-
-Result SmbBackend::writeChunk(smb2fh *fh, const QByteArray &buffer, qint64 length, quint64 offset)
-{
-    qint64 written = 0;
-    while (written < length) {
-        auto call = std::make_unique<Call>();
-        call->buffer = buffer;      // shared: stays valid if the request is abandoned
-        const auto *data = reinterpret_cast<const uint8_t *>(call->buffer.constData()) + written;
-        const auto count = static_cast<quint32>(length - written);
-        const quint64 at = offset + quint64(written);
-        const auto start = [fh, data, count, at](smb2_context *ctx, Call *c) {
-            return smb2_pwrite_async(ctx, fh, data, count, at, netvfs_smb_complete_plain, c->completion());
-        };
-        if (const Result r = request(call, start, QStringLiteral("write")); !r.ok())
-            return r;
-        if (call->status == 0)
-            return Result(Error::ProtocolError, QStringLiteral("write: the server accepted no data"));
-        written += call->status;
-    }
-    return Result::success();
-}
-
-Result SmbBackend::writeAll(smb2fh *fh, QIODevice *source, Progress *progress)
-{
-    const quint32 chunk = chunkSize(smb2_get_max_write_size(m_ctx));     // M-11
-    QByteArray buffer(static_cast<int>(chunk), Qt::Uninitialized);
-    const qint64 total = source->size();
-    quint64 offset = 0;
-    for (;;) {
-        if (m_cancel)
-            return Result(Error::Canceled);
-        const qint64 n = source->read(buffer.data(), chunk);
-        if (n < 0)
-            return Result(Error::Internal, QStringLiteral("Cannot read the data to upload"));
-        if (n == 0)
+        if (at.root) {
+            // XM-2: the server root is a folder of shares.
+            if (out) {
+                *out = Entry();
+                out->type = EntryType::Directory;
+            }
             return Result::success();
-        if (Result r = writeChunk(fh, buffer, n, offset); !r.ok())
+        }
+        const Result r = Ops::statPath(*at.session, at.path, out);
+        if (r.ok() && out && at.path.isEmpty())
+            out->name = at.share;
+        return r;
+    });
+}
+
+Result SmbBackend::list(const QString &dir, ListSink *sink, const ListOptions &options)
+{
+    // M-13
+    return GateHold::run(&m_gate, [this, &dir, sink, &options]() {
+        Location at;
+        if (Result r = locate(dir, &at); !r.ok())
             return r;
-        offset += quint64(n);
-        if (progress)
-            progress->update(qint64(offset), total);
-    }
+        if (at.root)
+            return listRoot(sink, options);
+        return Ops::listPath(*at.session, at.path, sink, options);
+    });
 }
 
-Result SmbBackend::upload(QIODevice *source, const QString &path, Progress *progress)
+Result SmbBackend::makeDir(const QString &path, bool exclusive)
 {
-    QByteArray p;
-    Result r = translatePath(path, &p);
+    // M-13
+    return GateHold::run(&m_gate, [this, &path, exclusive]() {
+        Location at;
+        const Result r = locate(path, &at);
+        // XM-2: a share that does not exist cannot be made.
+        if (r.error() == Error::NotFound && m_serverMode && at.path.isEmpty())
+            return rootDenied(QStringLiteral("create folder"));
+        if (!r.ok())
+            return r;
+        if (at.root)
+            return rootDenied(QStringLiteral("create folder"));
+        if (at.path.isEmpty())   // the share root exists
+            return exclusive ? Result(Error::AlreadyExists, QStringLiteral("create folder: the share root exists"))
+                             : Result::success();
+        return Ops::makeDirectory(*at.session, at.path, exclusive);
+    });
+}
+
+Result SmbBackend::removeFile(const QString &path)
+{
+    // M-13
+    return GateHold::run(&m_gate, [this, &path]() {
+        Location at;
+        if (Result r = locate(path, &at); !r.ok())
+            return r;
+        if (at.root)
+            return rootDenied(QStringLiteral("remove"));
+        return Ops::removeFile(*at.session, at.path);
+    });
+}
+
+Result SmbBackend::removeDir(const QString &path)
+{
+    // M-13
+    return GateHold::run(&m_gate, [this, &path]() {
+        Location at;
+        if (Result r = locate(path, &at); !r.ok())
+            return r;
+        if (at.root)
+            return rootDenied(QStringLiteral("remove folder"));
+        if (at.path.isEmpty())
+            return shareRootDenied(QStringLiteral("remove folder"));
+        return Ops::removeDirectory(*at.session, at.path);
+    });
+}
+
+Result SmbBackend::rename(const QString &from, const QString &to, RenameMode mode)
+{
+    // M-13
+    return GateHold::run(&m_gate, [this, &from, &to, mode]() {
+        // XM-2: the root and the shares themselves are refused before any
+        // share is opened.
+        if (shareLevel(from) || shareLevel(to))
+            return shareRootDenied(QStringLiteral("rename"));
+        Location source;
+        Location target;
+        Result r = locate(from, &source);
+        if (r.ok())
+            r = locate(to, &target);
+        if (!r.ok())
+            return r;
+        if (source.path.isEmpty() || target.path.isEmpty())
+            return shareRootDenied(QStringLiteral("rename"));
+        if (source.session != target.session)
+            return Result(Error::Unsupported, QStringLiteral("rename: SMB cannot move between shares"));
+        if (mode == RenameMode::Replace)
+            return Ops::renameReplacing(*source.session, source.path, target.path);
+        // XM-5, XC-10: the server refuses an existing target (NativeNoReplace).
+        return Ops::renamePath(*source.session, source.path, target.path);
+    });
+}
+
+Result SmbBackend::setAttributes(const QString &path, const AttributeChanges &changes)
+{
+    // M-13
+    return GateHold::run(&m_gate, [this, &path, &changes]() {
+        // XC-11: every field is checked before anything changes.
+        if (changes.mode >= 0)
+            return Result(Error::Unsupported, QStringLiteral("SMB has no permission bits"));
+        if (!timeRepresentable(changes.modified) || !timeRepresentable(changes.accessed))
+            return Result(Error::Unsupported, QStringLiteral("SMB stores times between 1970 and 30828 only"));
+        Location at;
+        if (Result r = locate(path, &at); !r.ok())
+            return r;
+        if (at.root)
+            return rootDenied(QStringLiteral("set attributes"));
+        if (changes.isEmpty())
+            return Ops::statPath(*at.session, at.path, nullptr);
+        return setTimes(*at.session, at.path, changes.modified, changes.accessed);
+    });
+}
+
+Result SmbBackend::spaceInfo(const QString &dir, SpaceInfo *out)
+{
+    // M-13
+    return GateHold::run(&m_gate, [this, &dir, out]() {
+        Location at;
+        if (Result r = locate(dir, &at); !r.ok())
+            return r;
+        if (at.root)
+            return rootDenied(QStringLiteral("free space"));
+        return Ops::spaceInfo(*at.session, at.path, out);
+    });
+}
+
+Result SmbBackend::keepAlive()
+{
+    // M-13
+    return GateHold::run(&m_gate, [this]() {
+        // XM-8: SMB2 ECHO, on IPC$ in server mode.
+        if (Result r = checkSignedIn(); !r.ok())
+            return r;
+        return Ops::echo(*m_main);
+    });
+}
+
+// ------------------------------------------------------------- files (XM-6)
+
+Result SmbBackend::openWriter(const QString &path, const WriteOptions &options, std::unique_ptr<WriteHandle> *out)
+{
+    if (options.disposition == WriteOptions::Disposition::Resume && options.resumeOffset < 0)
+        return invalidRange();
+    // XM-2: no files beside the shares ("/name" is a share, not a file).
+    if (shareLevel(path))
+        return rootDenied(QStringLiteral("open"));
+    Location at;
+    if (Result r = locate(path, &at); !r.ok())
+        return r;
     smb2fh *fh = nullptr;
+    const Result r = Ops::openForWrite(*at.session, at.path, options, &fh);
     if (r.ok())
-        r = openFile(p, O_WRONLY | O_CREAT | O_TRUNC, &fh);
-    if (!r.ok())
-        return r;
-    r = writeAll(fh, source, progress);
-    if (r.ok()) {
-        // C-12: flush to stable storage before the size check and rename.
-        auto call = std::make_unique<Call>();
-        r = request(call, [fh](smb2_context *ctx, Call *c) {
-            return smb2_fsync_async(ctx, fh, netvfs_smb_complete_plain, c->completion());
-        }, QStringLiteral("flush"));
-    }
-    return closeFile(fh, r);
-}
-
-Result SmbBackend::readChunk(smb2fh *fh, quint64 offset, quint32 count, QByteArray *buffer, quint32 *got)
-{
-    auto call = std::make_unique<Call>();
-    call->buffer.swap(*buffer);     // owned by the request while it runs
-    if (call->buffer.size() < static_cast<int>(count))
-        call->buffer.resize(static_cast<int>(count));
-    auto *data = reinterpret_cast<uint8_t *>(call->buffer.data());
-    const Result r = request(call, [fh, data, count, offset](smb2_context *ctx, Call *c) {
-        return smb2_pread_async(ctx, fh, data, count, offset, netvfs_smb_complete_plain, c->completion());
-    }, QStringLiteral("read"));
-    if (!r.ok())
-        return r;
-    buffer->swap(call->buffer);
-    *got = qMin(static_cast<quint32>(call->status), count);
+        *out = std::make_unique<Writer>(at.session, fh, at.path, options);
     return r;
 }
 
-Result SmbBackend::fileSize(smb2fh *fh, qint64 *size)
+Result SmbBackend::openWrite(const QString &path, const WriteOptions &options, WriteHandle **out)
 {
-    auto call = std::make_unique<Call>();
-    const Result r = request(call, [fh](smb2_context *ctx, Call *c) {
-        return smb2_fstat_async(ctx, fh, &c->st, netvfs_smb_complete_plain, c->completion());
-    }, QStringLiteral("stat"));
-    if (r.ok())
-        *size = static_cast<qint64>(call->st.smb2_size);
-    return r;
-}
-
-Result SmbBackend::copyToSink(smb2fh *fh, qint64 size, QIODevice *sink, Progress *progress)
-{
-    const quint32 chunk = chunkSize(smb2_get_max_read_size(m_ctx));      // M-11
-    QByteArray buffer;
-    qint64 offset = 0;
-    while (offset < size) {
-        quint32 got = 0;
-        const auto want = static_cast<quint32>(qMin<qint64>(chunk, size - offset));
-        if (Result r = readChunk(fh, quint64(offset), want, &buffer, &got); !r.ok())
-            return r;
-        if (got == 0)
-            break;      // the file shrank; the caller compares sizes
-        if (sink->write(buffer.constData(), got) != qint64(got))
-            return Result(Error::Internal, QStringLiteral("Cannot store the downloaded data"));
-        offset += got;
-        if (progress)
-            progress->update(offset, size);
-    }
-    return Result::success();
-}
-
-Result SmbBackend::download(const QString &path, QIODevice *sink, Progress *progress)
-{
-    QByteArray p;
-    Result r = translatePath(path, &p);
-    smb2fh *fh = nullptr;
-    if (r.ok())
-        r = openFile(p, O_RDONLY, &fh);
-    if (!r.ok())
+    // M-13
+    return GateHold::run(&m_gate, [this, &path, &options, out]() {
+        std::unique_ptr<WriteHandle> writer;
+        const Result r = openWriter(path, options, &writer);
+        *out = writer.release();    // XC-13: the caller owns the handle
         return r;
-    qint64 size = 0;
-    r = fileSize(fh, &size);
-    if (r.ok())
-        r = copyToSink(fh, size, sink, progress);
-    return closeFile(fh, r);
+    });
 }
 
-Result SmbBackend::readRange(smb2fh *fh, qint64 offset, qint64 length, QByteArray *out)
+Result SmbBackend::upload(QIODevice *source, const QString &path, const UploadOptions &options, Progress *progress)
 {
-    const quint32 chunk = chunkSize(smb2_get_max_read_size(m_ctx));
-    QByteArray buffer;
-    QByteArray result;
-    while (result.size() < length) {
-        quint32 got = 0;
-        const auto want = static_cast<quint32>(qMin<qint64>(chunk, length - result.size()));
-        if (Result r = readChunk(fh, quint64(offset + result.size()), want, &buffer, &got); !r.ok())
+    // M-13
+    return GateHold::run(&m_gate, [this, source, &path, &options, progress]() {
+        std::unique_ptr<WriteHandle> writer;
+        if (Result r = openWriter(path, options.write, &writer); !r.ok())
             return r;
-        if (got == 0)
-            break;
-        result.append(buffer.constData(), static_cast<int>(got));
-    }
-    *out = result;
-    return Result::success();
+        const qint64 base = options.write.disposition == WriteOptions::Disposition::Resume ? options.write.resumeOffset : 0;
+        if (Result r = Ops::writeAll(*m_main, source, writer.get(), progress, base); !r.ok()) {
+            writer->abort();
+            return r;
+        }
+        return writer->commit();
+    });
 }
 
-Result SmbBackend::read(const QString &path, qint64 offset, qint64 length, QByteArray *out)
+Result SmbBackend::openRead(const QString &path, ReadHandle **out)
 {
-    if (offset < 0 || length < 0 || length > std::numeric_limits<int>::max())
-        return Result(Error::Internal, QStringLiteral("read: invalid range"));
-    QByteArray p;
-    Result r = translatePath(path, &p);
-    smb2fh *fh = nullptr;
-    if (r.ok())
-        r = openFile(p, O_RDONLY, &fh);
-    if (!r.ok())
+    // M-13
+    return GateHold::run(&m_gate, [this, &path, out]() {
+        *out = nullptr;
+        Location at;
+        if (Result r = locate(path, &at); !r.ok())
+            return r;
+        if (at.root)
+            return rootDenied(QStringLiteral("open"));
+        smb2fh *fh = nullptr;
+        qint64 size = -1;
+        const Result r = Ops::openForRead(*at.session, at.path, &fh, &size);
+        if (r.ok()) {
+            auto reader = std::make_unique<Reader>(at.session, fh, size);
+            *out = reader.release();    // XC-13: the caller owns the handle
+        }
         return r;
-    QByteArray data;
-    r = closeFile(fh, readRange(fh, offset, length, &data));
-    if (r.ok() && out)
-        *out = data;
-    return r;
+    });
 }
+
+Result SmbBackend::download(const QString &path, QIODevice *sink, const DownloadOptions &options, Progress *progress)
+{
+    // M-13
+    return GateHold::run(&m_gate, [this, &path, sink, &options, progress]() {
+        if (options.offset < 0 || options.length < -1)
+            return invalidRange();
+        Location at;
+        if (Result r = locate(path, &at); !r.ok())
+            return r;
+        if (at.root)
+            return rootDenied(QStringLiteral("download"));
+        smb2fh *fh = nullptr;
+        qint64 size = -1;
+        if (Result r = Ops::openForRead(*at.session, at.path, &fh, &size); !r.ok())
+            return r;
+        Reader reader(at.session, fh, size);
+        const qint64 known = qMax<qint64>(size, 0);
+        const qint64 end = options.length < 0 ? known : qMin(known, options.offset + options.length);
+        const Result r = Ops::copyToSink(*at.session, &reader, options.offset, end, sink, progress);
+        return reader.closeWith(r);
+    });
+}
+
+
+// ------------------------------------------------------------- lifetime
 
 void SmbBackend::cancel()
 {
@@ -611,13 +552,18 @@ void SmbBackend::disconnect()
 
 void SmbBackend::shutdown() noexcept
 {
-    if (m_ctx && !m_broken && m_stage == Stage::Established && std::this_thread::get_id() == m_owner) {
-        auto call = std::make_unique<Call>();
-        request(call, [](smb2_context *ctx, Call *c) {
-            return smb2_disconnect_share_async(ctx, netvfs_smb_complete_plain, c->completion());
-        }, QStringLiteral("disconnect"), Wait::Drain);
-    }
-    destroyContext();
+    // Called while another thread is inside only by a caller that breaks
+    // C-8; the contexts go anyway, just without a graceful tree disconnect.
+    const GateHold hold(&m_gate);
+    // Every context of this instance: the shares, then IPC$ or the share.
+    for (const auto &session : m_shares)
+        session->close();
+    m_shares.clear();
+    if (m_main)
+        m_main->close();
+    m_main.reset();
+    secureWipe(m_secret);
+    m_secret.clear();
     m_probed = false;
 }
 

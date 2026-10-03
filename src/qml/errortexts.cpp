@@ -6,9 +6,34 @@ using namespace NetVfs;
 namespace NetVfsUi {
 
 namespace {
+// Files verify (SPEC-v2-review 2.19): nothing is written, so the backup
+// wording does not apply.
+QString browseText(Error error)
+{
+    switch (error) {
+    case Error::PermissionDenied:
+        //% "The server does not allow reading the start folder."
+        return qtTrId("settings-accounts-netvfs-la-error_browse_permission");
+    case Error::NotFound:
+        //% "The start folder was not found on the server."
+        return qtTrId("settings-accounts-netvfs-la-error_browse_not_found");
+    case Error::NotADirectory:
+        //% "The start folder on the server is not a folder."
+        return qtTrId("settings-accounts-netvfs-la-error_browse_not_a_folder");
+    default:
+        return QString();
+    }
+}
+
 // Errors whose meaning depends on the activity; empty when the generic text applies.
 QString activityText(Error error, Activity activity)
 {
+    if (activity == Activity::Browse)
+        return browseText(error);
+    if (activity == Activity::ServicePolicy && error == Error::SecurityPolicy) {
+        //% "These settings cannot be used for backups. Backups need an encrypted and signed connection, a share and a sign-in that works without you."
+        return qtTrId("settings-accounts-netvfs-la-error_service_policy_backup");
+    }
     if (activity == Activity::StoredSecret && error == Error::AuthFailed) {
         //% "The stored password or key for this account could not be read. Update the sign-in details."
         return qtTrId("settings-accounts-netvfs-la-error_stored_secret");
@@ -76,6 +101,36 @@ QString genericText(Error error)
     case Error::ProtocolError:
         //% "The server reported an error."
         return qtTrId("settings-accounts-netvfs-la-error_protocol");
+    case Error::ConnectionLost:
+        //% "The connection to the server was lost."
+        return qtTrId("settings-accounts-netvfs-la-error_connection_lost");
+    case Error::NotADirectory:
+        //% "A part of the folder path on the server is not a folder."
+        return qtTrId("settings-accounts-netvfs-la-error_not_a_directory");
+    case Error::IsADirectory:
+        //% "A folder on the server is in the way of a file."
+        return qtTrId("settings-accounts-netvfs-la-error_is_a_directory");
+    case Error::DirectoryNotEmpty:
+        //% "The folder on the server is not empty."
+        return qtTrId("settings-accounts-netvfs-la-error_directory_not_empty");
+    case Error::InvalidName:
+        //% "The server does not accept this name."
+        return qtTrId("settings-accounts-netvfs-la-error_invalid_name");
+    case Error::ReadOnlyFilesystem:
+        //% "The storage on the server is read-only."
+        return qtTrId("settings-accounts-netvfs-la-error_read_only");
+    case Error::Locked:
+        //% "The file is in use on the server."
+        return qtTrId("settings-accounts-netvfs-la-error_locked");
+    case Error::TooManyConnections:
+        //% "The server does not accept more connections right now."
+        return qtTrId("settings-accounts-netvfs-la-error_too_many_connections");
+    case Error::RateLimited:
+        //% "The server asks to wait before trying again."
+        return qtTrId("settings-accounts-netvfs-la-error_rate_limited");
+    case Error::NotModified:
+        //% "The server reported no change."
+        return qtTrId("settings-accounts-netvfs-la-error_not_modified");
     case Error::Internal:
         break;
     }

@@ -3,23 +3,29 @@
 // size, the TCP probe of connect(), and the plugin's behaviour against local
 // TCP peers that accept and then close or never answer.
 #include "backendloader.h"
+#include "smbhelper.h"
+#include "smbshares.h"
 #include "smbutil.h"
 
 #include <QtCore/QBuffer>
 #include <QtCore/QElapsedTimer>
+#include <QtCore/QFile>
 #include <QtCore/QProcess>
 #include <QtCore/QStandardPaths>
+#include <QtCore/QTemporaryDir>
 #include <QtCore/QUuid>
-#include <QtConcurrent/QtConcurrentRun>
 #include <QtTest/QtTest>
 
 #include "smb2api.h"
 
 #include <smb2/libsmb2-share-enum.h>
 
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cerrno>
+#include <cstring>
+#include <functional>
 #include <memory>
 #include <thread>
 #include <vector>
@@ -180,6 +186,55 @@ Credentials testCredentials()
     return Credentials(QStringLiteral("backup"), QUuid::createUuid().toByteArray());
 }
 
+// A thread that is joined when it goes out of scope; `stop` (for example
+// Backend::cancel) runs first, so a failed check cannot leave it blocked.
+class JoinedThread
+{
+public:
+    template <typename Work>
+    JoinedThread(Work work, std::function<void()> stop) : m_stop(std::move(stop)), m_thread(work) {}
+    ~JoinedThread()
+    {
+        if (m_thread.joinable() && m_stop)
+            m_stop();
+        join();
+    }
+    JoinedThread(const JoinedThread &) = delete;
+    JoinedThread &operator=(const JoinedThread &) = delete;
+    void join()
+    {
+        if (m_thread.joinable())
+            m_thread.join();
+    }
+
+private:
+    std::function<void()> m_stop;
+    std::thread m_thread;
+};
+
+// A stand-in for netvfs-smb-shares: a shell script in `dir`.
+QString writeScript(const QTemporaryDir &dir, const QByteArray &body)
+{
+    const QString path = dir.filePath(QStringLiteral("helper.sh"));
+    QFile file(path);
+    if (!file.open(QIODevice::WriteOnly) || file.write("#!/bin/sh\n" + body) < 0)
+        return QString();
+    file.close();
+    file.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner);
+    return path;
+}
+
+QByteArray testRequest()
+{
+    ShareRequest request;
+    request.server = "127.0.0.1";
+    request.user = "backup";
+    request.profile = "strict";
+    request.requestTimeoutMs = 1000;
+    request.secret = "hunter2";
+    return encodeShareRequest(request);
+}
+
 } // namespace
 
 class TestSmb : public QObject
@@ -267,7 +322,11 @@ private slots:
         row("quota", SMB2_STATUS_QUOTA_EXCEEDED, Error::NoSpace, policy);
         row("not supported", SMB2_STATUS_NOT_SUPPORTED, Error::ProtocolError, policy);
         row("invalid parameter", SMB2_STATUS_INVALID_PARAMETER, Error::ProtocolError, policy);
-        row("sharing violation", SMB2_STATUS_SHARING_VIOLATION, Error::ProtocolError, policy);
+        // SPEC-v2 XC-9, XC-21
+        row("sharing violation", SMB2_STATUS_SHARING_VIOLATION, Error::Locked, policy);
+        row("file is a directory", SMB2_STATUS_FILE_IS_A_DIRECTORY, Error::IsADirectory, policy);
+        row("not a directory", SMB2_STATUS_NOT_A_DIRECTORY, Error::NotADirectory, policy);
+        row("directory not empty", SMB2_STATUS_DIRECTORY_NOT_EMPTY, Error::DirectoryNotEmpty, policy);
     }
     void ntStatus()
     {
@@ -295,7 +354,7 @@ private slots:
         QCOMPARE(closed.message(), QStringLiteral("the server closed the connection; it may not support SMB 3, "
                                                   "signing or encryption"));
         QCOMPARE(connectionLost(Stage::SessionSetup).toString(), closed.toString());
-        QCOMPARE(connectionLost(Stage::Established).error(), Error::NetworkUnreachable);
+        QCOMPARE(connectionLost(Stage::Established).error(), Error::ConnectionLost);   // XC-21
         QVERIFY(errorForStatus(SMB2_STATUS_NOT_SUPPORTED, 0, Stage::SessionSetup, QString())
                     .message().startsWith(QLatin1String(SessionRefusedMessage)));
         // ACCESS_DENIED at tree connect: no share access or no common cipher (M-T14).
@@ -325,7 +384,10 @@ private slots:
         row("session: eperm", EPERM, false, Error::PermissionDenied);
         row("session: eexist", EEXIST, false, Error::AlreadyExists);
         row("session: enospc", ENOSPC, false, Error::NoSpace);
-        row("session: enetreset", ENETRESET, false, Error::NetworkUnreachable);
+        row("session: enetreset", ENETRESET, false, Error::ConnectionLost);
+        row("session: enotdir", ENOTDIR, false, Error::NotADirectory);
+        row("session: enotempty", ENOTEMPTY, false, Error::DirectoryNotEmpty);
+        row("session: etxtbsy", ETXTBSY, false, Error::Locked);
         row("session: other", EIO, false, Error::ProtocolError);
     }
     void withoutStatus()
@@ -346,17 +408,96 @@ private slots:
         QCOMPARE(errorForSocket(ECONNREFUSED, QString()).error(), Error::NetworkUnreachable);
     }
 
-    // M-3
+    // M-3, XM-1: the v1 option maps to strict or signed.
     void encryptionOption()
     {
         QVariantMap options;
-        QVERIFY(requireEncryption(options));
+        Profile profile = Profile::Guest;
+        QVERIFY(profileFromOptions(options, &profile).ok());
+        QCOMPARE(profile, Profile::Strict);
         options.insert(QStringLiteral("require_encryption"), false);
-        QVERIFY(!requireEncryption(options));
+        QVERIFY(profileFromOptions(options, &profile).ok());
+        QCOMPARE(profile, Profile::Signed);
         options.insert(QStringLiteral("require_encryption"), QStringLiteral("false"));
-        QVERIFY(!requireEncryption(options));
+        QVERIFY(profileFromOptions(options, &profile).ok());
+        QCOMPARE(profile, Profile::Signed);
         options.insert(QStringLiteral("require_encryption"), QStringLiteral("true"));
-        QVERIFY(requireEncryption(options));
+        QVERIFY(profileFromOptions(options, &profile).ok());
+        QCOMPARE(profile, Profile::Strict);
+    }
+
+    // XM-1: the profile option wins; unknown names fail closed.
+    void profiles_data()
+    {
+        QTest::addColumn<QString>("name");
+        QTest::addColumn<bool>("valid");
+        QTest::addColumn<int>("profile");
+        QTest::newRow("strict") << "strict" << true << int(Profile::Strict);
+        QTest::newRow("signed") << "signed" << true << int(Profile::Signed);
+        QTest::newRow("legacy") << "legacy" << true << int(Profile::Legacy);
+        QTest::newRow("guest") << "guest" << true << int(Profile::Guest);
+        QTest::newRow("padded") << " legacy " << true << int(Profile::Legacy);
+        QTest::newRow("case") << "Strict" << false << 0;
+        QTest::newRow("unknown") << "smb1" << false << 0;
+        QTest::newRow("none") << "none" << false << 0;
+    }
+
+    void profiles()
+    {
+        QFETCH(QString, name);
+        QFETCH(bool, valid);
+        QFETCH(int, profile);
+        QVariantMap options;
+        options.insert(QStringLiteral("security_profile"), name);
+        options.insert(QStringLiteral("require_encryption"), false);   // ignored next to a profile
+        Profile out = Profile::Signed;
+        const Result r = profileFromOptions(options, &out);
+        QCOMPARE(r.ok(), valid);
+        if (valid) {
+            QCOMPARE(int(out), profile);
+            QCOMPARE(profileName(out), name.trimmed());
+        } else {
+            QCOMPARE(r.error(), Error::SecurityPolicy);
+        }
+    }
+
+    // XM-1 table.
+    void profileSettings()
+    {
+        const ProfileSettings strict = settingsFor(Profile::Strict);
+        QCOMPARE(strict.version, quint16(SMB2_VERSION_ANY3));
+        QVERIFY(strict.signing);
+        QCOMPARE(strict.encryption, Encryption::Required);
+        QVERIFY(!strict.guest);
+        const ProfileSettings signedOnly = settingsFor(Profile::Signed);
+        QCOMPARE(signedOnly.version, quint16(SMB2_VERSION_ANY3));
+        QVERIFY(signedOnly.signing);
+        QCOMPARE(signedOnly.encryption, Encryption::IfServerAsks);
+        QVERIFY(!signedOnly.guest);
+        const ProfileSettings legacy = settingsFor(Profile::Legacy);
+        QCOMPARE(legacy.version, quint16(SMB2_VERSION_ANY));
+        QVERIFY(legacy.signing);
+        QCOMPARE(legacy.encryption, Encryption::IfServerAsks);
+        QVERIFY(!legacy.guest);
+        const ProfileSettings guest = settingsFor(Profile::Guest);
+        QCOMPARE(guest.version, quint16(SMB2_VERSION_ANY));
+        QVERIFY(!guest.signing);
+        QCOMPARE(guest.encryption, Encryption::Off);
+        QVERIFY(guest.guest);
+    }
+
+    // M-1, XM-1: what applyProfile() puts into a libsmb2 context.
+    void appliedProfile()
+    {
+        for (const Profile profile : { Profile::Strict, Profile::Signed, Profile::Legacy, Profile::Guest }) {
+            smb2_context *ctx = smb2_init_context();
+            QVERIFY(ctx);
+            applyProfile(ctx, profile, QStringLiteral("user"), QStringLiteral("DOM"), "secret", 30000);
+            const bool guest = profile == Profile::Guest;
+            QCOMPARE(QByteArray(smb2_get_user(ctx)), guest ? QByteArray() : QByteArray("user"));
+            QCOMPARE(smb2_get_domain(ctx) != nullptr, !guest);
+            smb2_destroy_context(ctx);
+        }
     }
 
     // M-1
@@ -371,6 +512,450 @@ private slots:
         QVERIFY(isSmb3Dialect(0x0311));
         QCOMPARE(dialectName(0x0311), QStringLiteral("3.1.1"));
         QCOMPARE(dialectName(0x0210), QStringLiteral("2.1.0"));
+        // XM-1: SMB 2.x only where the profile offered it.
+        for (const Profile profile : { Profile::Strict, Profile::Signed }) {
+            QVERIFY(!dialectAllowed(profile, 0x0202));
+            QVERIFY(!dialectAllowed(profile, 0x0210));
+            QVERIFY(dialectAllowed(profile, 0x0300));
+            QVERIFY(dialectAllowed(profile, 0x0311));
+            QVERIFY(!dialectAllowed(profile, 0));
+        }
+        for (const Profile profile : { Profile::Legacy, Profile::Guest }) {
+            QVERIFY(dialectAllowed(profile, 0x0202));
+            QVERIFY(dialectAllowed(profile, 0x0210));
+            QVERIFY(dialectAllowed(profile, 0x0302));
+            QVERIFY(!dialectAllowed(profile, 0x02ff));     // the SMB 2 wildcard is no dialect
+            QVERIFY(!dialectAllowed(profile, 0x0100));
+        }
+    }
+
+    // XM-1: a guest mapping is never accepted for an account.
+    void sessionFlags()
+    {
+        for (const Profile profile : { Profile::Strict, Profile::Signed, Profile::Legacy }) {
+            QVERIFY(checkSessionFlags(profile, 0).ok());
+            QVERIFY(checkSessionFlags(profile, SMB2_SESSION_FLAG_IS_ENCRYPT_DATA).ok());
+            const Result guest = checkSessionFlags(profile, SMB2_SESSION_FLAG_IS_GUEST);
+            QCOMPARE(guest.error(), Error::SecurityPolicy);
+            QCOMPARE(guest.message(), QLatin1String(GuestMappedMessage));
+            QCOMPARE(checkSessionFlags(profile, SMB2_SESSION_FLAG_IS_NULL).error(), Error::SecurityPolicy);
+            QCOMPARE(checkSessionFlags(profile, SMB2_SESSION_FLAG_IS_GUEST | SMB2_SESSION_FLAG_IS_ENCRYPT_DATA).error(),
+                     Error::SecurityPolicy);
+        }
+        QVERIFY(checkSessionFlags(Profile::Guest, SMB2_SESSION_FLAG_IS_GUEST).ok());
+        QVERIFY(checkSessionFlags(Profile::Guest, SMB2_SESSION_FLAG_IS_NULL).ok());
+        QVERIFY(checkSessionFlags(Profile::Guest, 0).ok());
+    }
+
+    // XM-9
+    void dfsReferrals()
+    {
+        for (const Stage stage : { Stage::SessionSetup, Stage::Established }) {
+            const Result r = errorForStatus(SMB2_STATUS_PATH_NOT_COVERED, 0, stage, QStringLiteral("open"));
+            QCOMPARE(r.error(), Error::Unsupported);
+            QCOMPARE(r.detail(), QStringLiteral("DFS referral"));
+            QCOMPARE(errorForStatus(0xC000026D, 0, stage, QString()).detail(), QStringLiteral("DFS referral"));
+        }
+        // Compound requests: -nterror_to_errno(STATUS_PATH_NOT_COVERED).
+        const Result compound = errorForStatus(0, ENOEXEC, Stage::Established, QStringLiteral("stat"));
+        QCOMPARE(compound.error(), Error::Unsupported);
+        QCOMPARE(compound.detail(), QStringLiteral("DFS referral"));
+        QCOMPARE(nterror_to_errno(SMB2_STATUS_PATH_NOT_COVERED), ENOEXEC);
+        // XC-24: other statuses carry their code as the detail.
+        QVERIFY(errorForStatus(SMB2_STATUS_ACCESS_DENIED, 0, Stage::Established, QString())
+                    .detail().contains(QLatin1String("0xc0000022")));
+    }
+
+    // XC-4 for SMB: unpaired UTF-16 surrogates survive (WTF-8).
+    void names()
+    {
+        const QString plain = QStringLiteral("ünïcödé €.txt");
+        QCOMPARE(encodeName(plain), plain.toUtf8());
+        QCOMPARE(decodeName(plain.toUtf8().constData()), plain);
+        const QString emoji = QString::fromUtf8("a\xf0\x9f\x98\x80z");
+        QCOMPARE(encodeName(emoji), emoji.toUtf8());
+        QCOMPARE(decodeName(emoji.toUtf8().constData()), emoji);
+
+        QString lone = QStringLiteral("x");
+        lone.append(QChar(0xd800));
+        lone.append(QStringLiteral("y"));
+        lone.append(QChar(0xdc80));
+        QCOMPARE(encodeName(lone), QByteArray("x\xed\xa0\x80y\xed\xb2\x80"));
+        QCOMPARE(decodeName(encodeName(lone).constData()), lone);
+        QString trailing = QStringLiteral("end");
+        trailing.append(QChar(0xdbff));
+        QCOMPARE(decodeName(encodeName(trailing).constData()), trailing);
+        // Malformed input (libsmb2 never sends it) becomes U+FFFD, not a crash.
+        QCOMPARE(decodeName("a\xff" "b"), QString::fromUtf8("a\xef\xbf\xbd" "b"));
+        QCOMPARE(decodeName("\xc0\x80"), QString(QChar(0xfffd)));
+        QCOMPARE(decodeName("\xe2\x82"), QString(2, QChar(0xfffd)));
+
+        // libsmb2 with vendor/patches/libsmb2/0006: UTF-16 -> WTF-8 -> UTF-16.
+        const std::array<uint16_t, 4> units = { 'a', 0xd800, 'b', 0xdc01 };
+        const char *utf8 = smb2_utf16_to_utf8(units.data(), units.size());
+        QVERIFY(utf8);
+        QCOMPARE(QByteArray(utf8), QByteArray("a\xed\xa0\x80" "b\xed\xb0\x81"));
+        QCOMPARE(decodeName(utf8).size(), 4);
+        QCOMPARE(decodeName(utf8).at(1).unicode(), ushort(0xd800));
+        smb2_utf16 *back = smb2_utf8_to_utf16(utf8);
+        QVERIFY(back);
+        QCOMPARE(back->len, 4);
+        QCOMPARE(std::memcmp(back->val, units.data(), sizeof(units)), 0);
+        free(back);
+        free(const_cast<char *>(utf8));
+        // A pair written as two 3-byte surrogates (CESU-8) is still refused.
+        QVERIFY(!smb2_utf8_to_utf16("\xed\xa0\x80\xed\xb0\x80"));
+        smb2_utf16 *units16 = smb2_utf8_to_utf16("\xed\xb0\x80\xed\xa0\x80");   // trail then lead: two lone units
+        QVERIFY(units16);
+        QCOMPARE(units16->len, 2);
+        free(units16);
+    }
+
+    // XM-2
+    void serverPaths()
+    {
+        QString share;
+        QByteArray rest;
+        QVERIFY(splitServerPath(QStringLiteral("/"), &share, &rest).ok());
+        QVERIFY(share.isEmpty() && rest.isEmpty());
+        QVERIFY(splitServerPath(QString(), &share, &rest).ok());
+        QVERIFY(share.isEmpty() && rest.isEmpty());
+        QVERIFY(splitServerPath(QStringLiteral("/data"), &share, &rest).ok());
+        QCOMPARE(share, QStringLiteral("data"));
+        QVERIFY(rest.isEmpty());
+        QVERIFY(splitServerPath(QStringLiteral("/data//a/b/"), &share, &rest).ok());
+        QCOMPARE(share, QStringLiteral("data"));
+        QCOMPARE(rest, QByteArray("a/b"));
+        QVERIFY(splitServerPath(QStringLiteral("C$/x"), &share, &rest).ok());
+        QCOMPARE(share, QStringLiteral("C$"));
+        QCOMPARE(splitServerPath(QStringLiteral("/da:ta/x"), &share, &rest).error(), Error::InvalidName);
+        QVERIFY(!splitServerPath(QStringLiteral("/data/a:b"), &share, &rest).ok());
+        QVERIFY(!splitServerPath(QStringLiteral("/data/../x"), &share, &rest).ok());
+        QCOMPARE(splitServerPath(QStringLiteral("/") + QString(81, QLatin1Char('s')), &share, &rest).error(),
+                 Error::InvalidName);
+    }
+
+    // XM-3
+    void configuredShareList()
+    {
+        QVariantMap options;
+        QVERIFY(configuredShares(options).isEmpty());
+        options.insert(QStringLiteral("shares"), QStringLiteral(" media, backup ,,Media,bad:name, docs"));
+        QCOMPARE(configuredShares(options), QStringList({ QStringLiteral("media"), QStringLiteral("backup"),
+                                                         QStringLiteral("docs") }));
+        options.insert(QStringLiteral("shares"),
+                       QStringList({ QStringLiteral("a,b"), QStringLiteral("x"), QStringLiteral("X"), QString() }));
+        QCOMPARE(configuredShares(options), QStringList({ QStringLiteral("x") }));
+        options.insert(QStringLiteral("shares"), QVariantList({ QStringLiteral("one"), QStringLiteral("two") }));
+        QCOMPARE(configuredShares(options), QStringList({ QStringLiteral("one"), QStringLiteral("two") }));
+        QStringList merged { QStringLiteral("Media") };
+        mergeShareNames(&merged, { QStringLiteral("media"), QStringLiteral("public") });
+        QCOMPARE(merged, QStringList({ QStringLiteral("Media"), QStringLiteral("public") }));
+
+        QVERIFY(validShareName(QStringLiteral("public")));
+        QVERIFY(validShareName(QStringLiteral("C$")));
+        QVERIFY(validShareName(QString(80, QLatin1Char('n'))));
+        QVERIFY(!validShareName(QString(81, QLatin1Char('n'))));
+        QVERIFY(!validShareName(QString()));
+        QVERIFY(!validShareName(QStringLiteral("..")));
+        QVERIFY(!validShareName(QStringLiteral("a/b")));
+        QVERIFY(!validShareName(QStringLiteral("a\\b")));
+        QVERIFY(!validShareName(QStringLiteral("a\tb")));
+        QVERIFY(!validShareName(QString(QChar(0xd800))));
+    }
+
+    // XM-7: the request goes through stdin in this form only.
+    void shareRequests()
+    {
+        ShareRequest request;
+        request.server = "10.0.0.1:4450";
+        request.user = "backup";
+        request.domain = "WORK";
+        request.profile = "legacy";
+        request.requestTimeoutMs = 60000;
+        request.secret = QByteArray("p\0ss:\nword", 10);
+        const QByteArray encoded = encodeShareRequest(request);
+        ShareRequest decoded;
+        QVERIFY(decodeShareRequest(encoded, &decoded));
+        QCOMPARE(decoded.server, request.server);
+        QCOMPARE(decoded.user, request.user);
+        QCOMPARE(decoded.domain, request.domain);
+        QCOMPARE(decoded.profile, request.profile);
+        QCOMPARE(decoded.requestTimeoutMs, 60000);
+        QCOMPARE(decoded.secret, request.secret);
+        QVERIFY(!decodeShareRequest(encoded + 'x', &decoded));
+        QVERIFY(!decodeShareRequest(encoded.left(encoded.size() - 1), &decoded));
+        QVERIFY(!decodeShareRequest(QByteArray(), &decoded));
+        QByteArray wrongMagic = encoded;
+        wrongMagic[5] = 'X';
+        QVERIFY(!decodeShareRequest(wrongMagic, &decoded));
+        request.server.clear();
+        QVERIFY(!decodeShareRequest(encodeShareRequest(request), &decoded));
+        request.server = "h";
+        request.secret = QByteArray(MaxShareRequestBytes, 's');
+        QVERIFY(!decodeShareRequest(encodeShareRequest(request), &decoded));
+        QByteArray huge = encoded;
+        huge[4 + 19] = '\x7f';          // the server field's length, high byte
+        QVERIFY(!decodeShareRequest(huge, &decoded));
+    }
+
+    void shareOutput_data()
+    {
+        QTest::addColumn<QByteArray>("output");
+        QTest::addColumn<int>("error");
+        QTest::addColumn<int>("count");
+        const QByteArray a = "{\"name\":\"media\",\"type\":0,\"remark\":\"Films\"}\n";
+        const QByteArray ipc = "{\"name\":\"IPC$\",\"type\":2147483651,\"remark\":\"IPC\"}\n";
+        QTest::newRow("empty list") << QByteArray("{\"end\":0}\n") << int(Error::None) << 0;
+        QTest::newRow("two") << (a + ipc + "{\"end\":2}\n") << int(Error::None) << 2;
+        QTest::newRow("duplicate kept once") << (a + a + "{\"end\":2}\n") << int(Error::None) << 1;
+        QTest::newRow("no end") << a << int(Error::ProtocolError) << 0;
+        QTest::newRow("no newline") << (a + "{\"end\":1}") << int(Error::ProtocolError) << 0;
+        QTest::newRow("count mismatch") << (a + "{\"end\":2}\n") << int(Error::ProtocolError) << 0;
+        QTest::newRow("end with more") << (a + "{\"end\":1,\"x\":1}\n") << int(Error::ProtocolError) << 0;
+        QTest::newRow("after end") << ("{\"end\":0}\n" + a) << int(Error::ProtocolError) << 0;
+        QTest::newRow("empty") << QByteArray() << int(Error::ProtocolError) << 0;
+        QTest::newRow("blank line") << (a + "\n{\"end\":1}\n") << int(Error::ProtocolError) << 0;
+        QTest::newRow("not json") << QByteArray("hello\n") << int(Error::ProtocolError) << 0;
+        QTest::newRow("array") << QByteArray("[1]\n{\"end\":0}\n") << int(Error::ProtocolError) << 0;
+        QTest::newRow("extra field") << QByteArray("{\"name\":\"a\",\"type\":0,\"remark\":\"\",\"path\":\"/\"}\n{\"end\":1}\n")
+                                     << int(Error::ProtocolError) << 0;
+        QTest::newRow("missing remark") << QByteArray("{\"name\":\"a\",\"type\":0}\n{\"end\":1}\n") << int(Error::ProtocolError) << 0;
+        QTest::newRow("type string") << QByteArray("{\"name\":\"a\",\"type\":\"0\",\"remark\":\"\"}\n{\"end\":1}\n")
+                                     << int(Error::ProtocolError) << 0;
+        QTest::newRow("type negative") << QByteArray("{\"name\":\"a\",\"type\":-1,\"remark\":\"\"}\n{\"end\":1}\n")
+                                       << int(Error::ProtocolError) << 0;
+        QTest::newRow("type fraction") << QByteArray("{\"name\":\"a\",\"type\":0.5,\"remark\":\"\"}\n{\"end\":1}\n")
+                                       << int(Error::ProtocolError) << 0;
+        QTest::newRow("type too big") << QByteArray("{\"name\":\"a\",\"type\":4294967296,\"remark\":\"\"}\n{\"end\":1}\n")
+                                      << int(Error::ProtocolError) << 0;
+        QTest::newRow("name with slash") << QByteArray("{\"name\":\"a/b\",\"type\":0,\"remark\":\"\"}\n{\"end\":1}\n")
+                                         << int(Error::ProtocolError) << 0;
+        QTest::newRow("name dotdot") << QByteArray("{\"name\":\"..\",\"type\":0,\"remark\":\"\"}\n{\"end\":1}\n")
+                                     << int(Error::ProtocolError) << 0;
+        QTest::newRow("name empty") << QByteArray("{\"name\":\"\",\"type\":0,\"remark\":\"\"}\n{\"end\":1}\n")
+                                    << int(Error::ProtocolError) << 0;
+        QTest::newRow("error") << QByteArray("{\"error\":\"AuthFailed\",\"message\":\"wrong password\"}\n")
+                               << int(Error::AuthFailed) << 0;
+        QTest::newRow("error after shares") << (a + "{\"error\":\"Timeout\",\"message\":\"slow\"}\n") << int(Error::Timeout) << 0;
+        QTest::newRow("error not last") << QByteArray("{\"error\":\"Timeout\",\"message\":\"\"}\n{\"end\":0}\n")
+                                        << int(Error::ProtocolError) << 0;
+        QTest::newRow("error unknown") << QByteArray("{\"error\":\"Bogus\",\"message\":\"\"}\n") << int(Error::ProtocolError) << 0;
+        QTest::newRow("error internal") << QByteArray("{\"error\":\"Canceled\",\"message\":\"\"}\n") << int(Error::ProtocolError) << 0;
+        QTest::newRow("error none") << QByteArray("{\"error\":\"None\",\"message\":\"\"}\n") << int(Error::ProtocolError) << 0;
+        QTest::newRow("long line") << (QByteArray("{\"name\":\"a\",\"type\":0,\"remark\":\"") + QByteArray(MaxShareLineBytes, 'r')
+                                       + "\"}\n{\"end\":1}\n")
+                                   << int(Error::ProtocolError) << 0;
+        QByteArray many;
+        for (int i = 0; i <= MaxShares; ++i)
+            many += "{\"name\":\"s" + QByteArray::number(i) + "\",\"type\":0,\"remark\":\"\"}\n";
+        QTest::newRow("too many") << (many + "{\"end\":" + QByteArray::number(MaxShares + 1) + "}\n")
+                                  << int(Error::ProtocolError) << 0;
+        QTest::newRow("too much") << QByteArray(MaxShareOutputBytes + 1, '\n') << int(Error::ProtocolError) << 0;
+        // Well-formed but over 1 MiB: long remarks (each capped, each line short enough).
+        QByteArray large;
+        for (int i = 0; i < 200; ++i)
+            large += "{\"name\":\"s" + QByteArray::number(i) + "\",\"type\":0,\"remark\":\"" + QByteArray(6000, 'r') + "\"}\n";
+        QTest::newRow("too much, well-formed") << (large + "{\"end\":200}\n") << int(Error::ProtocolError) << 0;
+    }
+
+    // XM-7: the helper's output is parsed defensively.
+    void shareOutput()
+    {
+        QFETCH(QByteArray, output);
+        QFETCH(int, error);
+        QFETCH(int, count);
+        QVector<ShareInfo> shares;
+        shares.append(ShareInfo());   // replaced, also on failure
+        const Result r = parseShareOutput(output, &shares);
+        QCOMPARE(int(r.error()), error);
+        QCOMPARE(shares.size(), count);
+    }
+
+    void shareOutputFields()
+    {
+        QVector<ShareInfo> shares;
+        QByteArray remark = "{\"name\":\"media\",\"type\":0,\"remark\":\"a\\u0007b";
+        remark += QByteArray(300, 'r') + "\"}\n{\"end\":1}\n";
+        QVERIFY(parseShareOutput(remark, &shares).ok());
+        QCOMPARE(shares.size(), 1);
+        QCOMPARE(shares.first().name, QStringLiteral("media"));
+        QCOMPARE(shares.first().type, quint32(0));
+        QCOMPARE(shares.first().remark.size(), MaxRemarkLength - 1);   // capped, BEL removed
+        QVERIFY(shares.first().remark.startsWith(QLatin1String("abr")));
+        const Result error = parseShareOutput("{\"error\":\"SecurityPolicy\",\"message\":\"guest\"}\n", &shares);
+        QCOMPARE(error.message(), QStringLiteral("guest"));
+        // Round trip through the helper's own writers.
+        ShareInfo info;
+        info.name = QStringLiteral("Fotos 2026 ü ©");
+        info.type = 0x80000000;
+        info.remark = QStringLiteral("ünï");
+        QVERIFY(parseShareOutput(shareLine(info) + '\n' + endLine(1) + '\n', &shares).ok());
+        QCOMPARE(shares.first().name, info.name);
+        QCOMPARE(shares.first().type, info.type);
+        QCOMPARE(shares.first().remark, info.remark);
+        QCOMPARE(parseShareOutput(errorLine(Result(Error::AuthFailed, QStringLiteral("no"))) + '\n', &shares).error(),
+                 Error::AuthFailed);
+    }
+
+    // XM-7: disk shares only; '$' shares on request.
+    void shareFilter()
+    {
+        ShareInfo share;
+        share.name = QStringLiteral("media");
+        QVERIFY(shareVisible(share, false));
+        share.type = 0x80000000;            // STYPE_SPECIAL disk share
+        QVERIFY(shareVisible(share, false));
+        share.type = 1;                     // print queue
+        QVERIFY(!shareVisible(share, true));
+        share.type = 2;                     // device
+        QVERIFY(!shareVisible(share, true));
+        share.type = 0x80000003;            // IPC$
+        share.name = QStringLiteral("IPC$");
+        QVERIFY(!shareVisible(share, true));
+        share.type = 0x80000000;
+        share.name = QStringLiteral("C$");
+        QVERIFY(!shareVisible(share, false));
+        QVERIFY(shareVisible(share, true));
+        share.name = QStringLiteral("a$b");
+        QVERIFY(shareVisible(share, false));
+        share.type = 0x02000000;            // cluster file system share: a disk share
+        QVERIFY(shareVisible(share, false));
+    }
+
+    // XM-7: runShareHelper() against stand-in helpers.
+    void helperProcess_data()
+    {
+        QTest::addColumn<QByteArray>("script");
+        QTest::addColumn<int>("error");
+        QTest::addColumn<int>("count");
+        const QByteArray ok = "printf '{\"name\":\"a\",\"type\":0,\"remark\":\"r\"}\\n{\"end\":1}\\n'";
+        QTest::newRow("ok") << ok << int(Error::None) << 1;
+        QTest::newRow("ok but exit 3") << (ok + "; exit 3") << int(Error::ProtocolError) << 0;
+        QTest::newRow("crash") << QByteArray("kill -SEGV $$") << int(Error::ProtocolError) << 0;
+        QTest::newRow("crash after output") << (ok + "; kill -KILL $$") << int(Error::ProtocolError) << 0;
+        QTest::newRow("garbage") << QByteArray("echo hello") << int(Error::ProtocolError) << 0;
+        QTest::newRow("silent") << QByteArray("true") << int(Error::ProtocolError) << 0;
+        QTest::newRow("error line") << QByteArray("printf '{\"error\":\"AuthFailed\",\"message\":\"no\"}\\n'; exit 1")
+                                    << int(Error::AuthFailed) << 0;
+        QTest::newRow("error line, exit 0") << QByteArray("printf '{\"error\":\"AuthFailed\",\"message\":\"no\"}\\n'")
+                                            << int(Error::ProtocolError) << 0;
+        QTest::newRow("flood") << QByteArray("yes '{\"end\":0}'") << int(Error::ProtocolError) << 0;
+    }
+
+    void helperProcess()
+    {
+        QFETCH(QByteArray, script);
+        QFETCH(int, error);
+        QFETCH(int, count);
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString program = writeScript(dir, "cat > \"$(dirname \"$0\")/stdin\"\n" + script + '\n');
+        QByteArray request = testRequest();
+        const QByteArray sent = request;
+        const std::atomic<bool> cancel { false };
+        QVector<ShareInfo> shares;
+        const Result r = runShareHelper(program, &request, 10000, cancel, &shares);
+        QVERIFY2(int(r.error()) == error, qPrintable(r.toString()));
+        if (QByteArray(QTest::currentDataTag()).startsWith("crash"))
+            QVERIFY2(r.message().contains(QLatin1String("crashed")), qPrintable(r.message()));
+        QCOMPARE(shares.size(), count);
+        // XSEC-6: the caller's copy of the request is wiped.
+        QVERIFY(!request.contains("hunter2"));
+        // The request arrived on stdin, whole.
+        QFile in(dir.filePath(QStringLiteral("stdin")));
+        QVERIFY(in.open(QIODevice::ReadOnly));
+        QCOMPARE(in.readAll(), sent);
+    }
+
+    // XM-7: the secret is never in argv or the environment; M-5 applies.
+    void helperEnvironment()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString program = writeScript(dir, "d=$(dirname \"$0\"); cat > /dev/null; echo \"$@\" > \"$d/argv\"; "
+                                                 "env > \"$d/env\"; printf '{\"end\":0}\\n'\n");
+        qputenv("NTLM_USER_FILE", "/nonexistent");
+        QByteArray request = testRequest();
+        const std::atomic<bool> cancel { false };
+        QVector<ShareInfo> shares;
+        QVERIFY(runShareHelper(program, &request, 10000, cancel, &shares).ok());
+        QFile argv(dir.filePath(QStringLiteral("argv")));
+        QFile env(dir.filePath(QStringLiteral("env")));
+        QVERIFY(argv.open(QIODevice::ReadOnly) && env.open(QIODevice::ReadOnly));
+        const QByteArray environment = env.readAll();
+        QVERIFY(!argv.readAll().contains("hunter2"));
+        QVERIFY(!environment.contains("hunter2"));
+        QVERIFY(!environment.contains("NTLM_USER_FILE"));
+    }
+
+    // C-9, C-14: a stalled helper is killed on cancel and at the timeout.
+    void helperStalls()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString program = writeScript(dir, "exec sleep 30\n");
+        QVector<ShareInfo> shares;
+        QElapsedTimer clock;
+        clock.start();
+        QByteArray request = testRequest();
+        std::atomic<bool> cancel { false };
+        QCOMPARE(runShareHelper(program, &request, 500, cancel, &shares).error(), Error::Timeout);
+        QVERIFY2(clock.elapsed() < 2000, qPrintable(QString::number(clock.elapsed())));
+        JoinedThread canceller([&cancel]() {
+            std::this_thread::sleep_for(std::chrono::milliseconds(300));
+            cancel = true;
+        }, nullptr);
+        clock.restart();
+        request = testRequest();
+        QCOMPARE(runShareHelper(program, &request, 30000, cancel, &shares).error(), Error::Canceled);
+        canceller.join();
+        QVERIFY2(clock.elapsed() < 2000, qPrintable(QString::number(clock.elapsed())));
+        QVERIFY(!request.contains("hunter2"));
+        request = testRequest();
+        QCOMPARE(runShareHelper(dir.filePath(QStringLiteral("missing")), &request, 1000, cancel, &shares).error(),
+                 Error::ProtocolError);
+        QVERIFY(!request.contains("hunter2"));
+    }
+
+    // XM-7: the real helper rejects a bad request and reports a server it
+    // cannot reach as an error line.
+    void helperBinary()
+    {
+        const QString program = QStringLiteral(NETVFS_TEST_SHARES_HELPER);
+        if (!QFile::exists(program))
+            QSKIP("netvfs-smb-shares is not built");
+        QByteArray garbage = "not a request";
+        const std::atomic<bool> cancel { false };
+        QVector<ShareInfo> shares;
+        const Result bad = runShareHelper(program, &garbage, 10000, cancel, &shares);
+        QCOMPARE(bad.error(), Error::ProtocolError);
+        ShareRequest request;
+        request.server = "127.0.0.1:" + QByteArray::number(closedPort());
+        request.user = "backup";
+        request.profile = "strict";
+        request.requestTimeoutMs = 5000;
+        request.secret = "hunter2";
+        QByteArray encoded = encodeShareRequest(request);
+        const Result unreachable = runShareHelper(program, &encoded, 10000, cancel, &shares);
+        QVERIFY2(unreachable.error() == Error::NetworkUnreachable || unreachable.error() == Error::SecurityPolicy,
+                 qPrintable(unreachable.toString()));
+        request.profile = "weak";
+        encoded = encodeShareRequest(request);
+        QCOMPARE(runShareHelper(program, &encoded, 10000, cancel, &shares).error(), Error::ProtocolError);
+        QVERIFY(shares.isEmpty());
+    }
+
+    // SPEC-v2 XM-7: ShareEnumeration only with an installed helper.
+    void helperInstalled()
+    {
+        qputenv("NETVFS_SMB_SHARES_HELPER", "/nonexistent/netvfs-smb-shares");
+        QVERIFY(!shareHelperInstalled());
+        QCOMPARE(shareHelperPath(), QStringLiteral("/nonexistent/netvfs-smb-shares"));
+        qputenv("NETVFS_SMB_SHARES_HELPER", QFile::encodeName(QStandardPaths::findExecutable(QStringLiteral("true"))));
+        QVERIFY(shareHelperInstalled());
+        qunsetenv("NETVFS_SMB_SHARES_HELPER");
+        QCOMPARE(shareHelperPath(), QStringLiteral("/usr/libexec/netvfs/netvfs-smb-shares"));
     }
 
     void serverStrings()
@@ -429,10 +1014,10 @@ private slots:
         QCOMPARE(timedOut.error(), Error::Timeout);
         QVERIFY2(clock.elapsed() >= 450 && clock.elapsed() < 2000, qPrintable(QString::number(clock.elapsed())));
 
-        std::thread canceller([&cancel]() {
+        JoinedThread canceller([&cancel]() {
             std::this_thread::sleep_for(std::chrono::milliseconds(300));
             cancel = true;
-        });
+        }, nullptr);
         clock.restart();
         const Result canceled = probeTcp(QStringLiteral("127.0.0.1"), listener.port(), 15000, cancel, &address);
         canceller.join();
@@ -494,13 +1079,33 @@ private slots:
         QCOMPARE(backend->stat(QString(), &entry).error(), Error::Internal);
         QCOMPARE(backend->list(QString(), &entries).error(), Error::Internal);
         QCOMPARE(backend->makePath(QStringLiteral("a/b")).error(), Error::Internal);
+        QCOMPARE(backend->makeDir(QStringLiteral("a"), true).error(), Error::Internal);
         QCOMPARE(backend->remove(QStringLiteral("a")).error(), Error::Internal);
-        QCOMPARE(backend->rename(QStringLiteral("a"), QStringLiteral("b")).error(), Error::Internal);
+        QCOMPARE(backend->removeDir(QStringLiteral("a")).error(), Error::Internal);
+        QCOMPARE(backend->rename(QStringLiteral("a"), QStringLiteral("b"), RenameMode::Replace).error(), Error::Internal);
+        QCOMPARE(backend->rename(QStringLiteral("a"), QStringLiteral("b"), RenameMode::NoReplace).error(), Error::Internal);
         QCOMPARE(backend->freeSpace(QString(), &bytes).error(), Error::Internal);
-        QCOMPARE(backend->upload(&buffer, QStringLiteral("a"), nullptr).error(), Error::Internal);
-        QCOMPARE(backend->download(QStringLiteral("a"), &buffer, nullptr).error(), Error::Internal);
+        QCOMPARE(backend->upload(&buffer, QStringLiteral("a"), UploadOptions(), nullptr).error(), Error::Internal);
+        QCOMPARE(backend->download(QStringLiteral("a"), &buffer, DownloadOptions(), nullptr).error(), Error::Internal);
         QCOMPARE(backend->read(QStringLiteral("a"), 0, 1, &data).error(), Error::Internal);
         QCOMPARE(backend->read(QStringLiteral("a"), -1, 1, &data).error(), Error::Internal);
+        QCOMPARE(backend->keepAlive().error(), Error::Internal);
+        AttributeChanges times;
+        times.modified = QDateTime::currentDateTimeUtc();
+        QCOMPARE(backend->setAttributes(QStringLiteral("a"), times).error(), Error::Internal);
+        WriteHandle *writer = nullptr;
+        QCOMPARE(backend->openWrite(QStringLiteral("a"), WriteOptions(), &writer).error(), Error::Internal);
+        QVERIFY(!writer);
+        ReadHandle *reader = nullptr;
+        QCOMPARE(backend->openRead(QStringLiteral("a"), &reader).error(), Error::Internal);
+        QVERIFY(!reader);
+        SpaceInfo space;
+        QCOMPARE(backend->spaceInfo(QString(), &space).error(), Error::Internal);
+        // XC-11: what SMB cannot store is refused before anything else.
+        AttributeChanges mode;
+        mode.mode = 0644;
+        QCOMPARE(backend->setAttributes(QStringLiteral("a"), mode).error(), Error::Unsupported);
+        QVERIFY(backend->capabilities().flags.isEmpty());   // XC-5: valid after authenticate()
         // M-9: rejected before anything is sent.
         QCOMPARE(backend->stat(QStringLiteral("bad:name"), &entry).error(), Error::Internal);
         QVERIFY(backend->stat(QStringLiteral("bad:name"), &entry).message().contains(QLatin1Char(':')));
@@ -525,17 +1130,27 @@ private slots:
 
     void authenticateChecksInput()
     {
-        const LocalPeer peer(LocalPeer::Mode::Silent);
+        const LocalPeer peer(LocalPeer::Mode::CloseAtOnce);
         const auto backend = smbBackend();
         ConnectionParams params = localParams(peer.port());
-        params.options.remove(QStringLiteral("share"));
         QVERIFY(backend->connect(params, nullptr).ok());
-        QCOMPARE(backend->authenticate(testCredentials()).error(), Error::NotFound);
-
-        QVERIFY(backend->connect(localParams(peer.port()), nullptr).ok());
         QCOMPARE(backend->authenticate(Credentials(QStringLiteral("backup"), QByteArray())).error(),
                  Error::AuthFailed);
+        // XM-1, XSEC-2: an unknown profile is refused, nothing weaker tried.
+        params.options.insert(QStringLiteral("security_profile"), QStringLiteral("smb1"));
+        QVERIFY(backend->connect(params, nullptr).ok());
+        const Result unknown = backend->authenticate(testCredentials());
+        QCOMPARE(unknown.error(), Error::SecurityPolicy);
+        QVERIFY2(unknown.message().contains(QLatin1String("smb1")), qPrintable(unknown.message()));
         QTRY_COMPARE(peer.accepted(), 2);   // nothing beyond the two probes
+
+        // XM-1: guest needs no credentials; XM-2: no share is server mode
+        // (IPC$). Both go on to the session setup, which this peer ends.
+        params.options.insert(QStringLiteral("security_profile"), QStringLiteral("guest"));
+        params.options.remove(QStringLiteral("share"));
+        QVERIFY(backend->connect(params, nullptr).ok());
+        QCOMPARE(backend->authenticate(Credentials()).error(), Error::SecurityPolicy);
+        QTRY_COMPARE(peer.accepted(), 4);
     }
 
     // SPEC-smb 5: no NT status, failure after TCP connect.
@@ -560,20 +1175,31 @@ private slots:
     {
         const LocalPeer peer(LocalPeer::Mode::Silent);
         const auto backend = smbBackend();
-        QFuture<Result> future = QtConcurrent::run([&backend, &peer]() {
+        std::atomic<bool> signingIn { false };
+        std::atomic<bool> finished { false };
+        Result result;
+        // Joined on every way out of this function, also when a check below
+        // fails: the worker never outlives the backend or the process.
+        JoinedThread worker([&backend, &peer, &signingIn, &finished, &result]() {
             Result r = backend->connect(localParams(peer.port()), nullptr);
-            if (r.ok())
+            if (r.ok()) {
+                signingIn = true;
                 r = backend->authenticate(testCredentials());
-            return r;
-        });
-        QTest::qWait(500);
-        QVERIFY(future.isRunning());
+            }
+            result = r;
+            finished = true;
+        }, [&backend]() { backend->cancel(); });
+        // Inside the sign-in, waiting for a server that never answers.
+        QTRY_VERIFY_WITH_TIMEOUT(signingIn, 10000);
+        QTest::qWait(300);
+        QVERIFY(!finished);
         QElapsedTimer clock;
         clock.start();
         backend->cancel();
-        future.waitForFinished();
+        QTRY_VERIFY_WITH_TIMEOUT(finished, 2000);   // C-9
+        worker.join();
         QVERIFY2(clock.elapsed() < 2000, qPrintable(QString::number(clock.elapsed())));
-        QCOMPARE(future.result().error(), Error::Canceled);
+        QCOMPARE(result.error(), Error::Canceled);
 
         // Still canceled until resetCancel().
         QCOMPARE(backend->connect(localParams(peer.port()), nullptr).error(), Error::Canceled);
@@ -596,10 +1222,10 @@ private slots:
         QVERIFY2(clock.elapsed() < 1000 + 5000, qPrintable(QString::number(clock.elapsed())));
     }
 
-    // M-13: one context per thread.
+    // M-13 (C-8 hand-over): an idle connection may move to another thread.
     void otherThread()
     {
-        const LocalPeer peer(LocalPeer::Mode::Silent);
+        const LocalPeer peer(LocalPeer::Mode::CloseAtOnce);
         const auto backend = smbBackend();
         QVERIFY(backend->connect(localParams(peer.port()), nullptr).ok());
         // A real second thread: QFuture::result() may run a task that has not
@@ -607,7 +1233,35 @@ private slots:
         Result r;
         std::thread other([&backend, &r]() { r = backend->authenticate(testCredentials()); });
         other.join();
-        QVERIFY2(r.error() == Error::Internal, qPrintable(r.toString()));
+        // It got as far as the session setup, which this peer ends.
+        QVERIFY2(r.error() == Error::SecurityPolicy, qPrintable(r.toString()));
+    }
+
+    // M-13: but never two threads at once.
+    void concurrentThreads()
+    {
+        const LocalPeer peer(LocalPeer::Mode::Silent);
+        const auto backend = smbBackend();
+        QVERIFY(backend->connect(localParams(peer.port()), nullptr).ok());
+        std::atomic<bool> inside { false };
+        Result signIn;
+        JoinedThread other([&backend, &signIn, &inside]() {
+            inside = true;
+            signIn = backend->authenticate(testCredentials());   // stalls: the peer never answers
+        }, [&backend]() { backend->cancel(); });
+        QTRY_VERIFY(inside);
+        QTest::qWait(300);
+        Entry entry;
+        const Result busy = backend->stat(QStringLiteral("x"), &entry);
+        QCOMPARE(busy.error(), Error::Internal);
+        QVERIFY2(busy.message().contains(QLatin1String("one thread at a time")), qPrintable(busy.message()));
+        QCOMPARE(backend->keepAlive().error(), Error::Internal);
+        backend->cancel();                          // thread-safe (C-9)
+        other.join();
+        QCOMPARE(signIn.error(), Error::Canceled);
+        backend->resetCancel();
+        // Idle again: this thread may use it.
+        QCOMPARE(backend->stat(QStringLiteral("x"), &entry).message(), QStringLiteral("Not signed in"));
     }
 };
 

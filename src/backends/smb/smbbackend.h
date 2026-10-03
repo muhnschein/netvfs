@@ -3,24 +3,27 @@
 #define NETVFS_SMBBACKEND_H
 
 #include "backend.h"
+#include "smbsession.h"
 #include "smbutil.h"
 
 #include <atomic>
 #include <memory>
-#include <thread>
 #include <vector>
-
-struct smb2_context;
-struct smb2fh;
 
 namespace NetVfs::Smb {
 
-struct Call;
-
-// SPEC-smb. One instance owns one smb2_context, used only from the thread
-// that called connect() (M-13). Requests go through libsmb2's asynchronous
-// API and a poll loop so that cancel() and timeouts can abandon a request
-// that is stalled on the network (M-12, C-9).
+// SPEC-smb, SPEC-v2 §6.2. All libsmb2 contexts of one instance, and its
+// handles, are used by one thread at a time (M-13, ThreadGate; a hand-over
+// between calls is allowed, C-8); cancel() and disconnect() cover every
+// one of them.
+//
+// Share mode (option "share" set): one context, paths relative to the share.
+// Server mode (XM-2, "share" empty): authenticate() signs in to IPC$, which
+// proves the credentials and the profile and serves keepAlive(); the root
+// "/" lists shares (XM-3, XM-7); "/<share>/<rest>" goes through a context of
+// its own per share, opened on first use with the same credentials, at most
+// MaxShareSessions at a time (least recently used closed first; a context
+// with open handles is never closed for that).
 class SmbBackend final : public Backend
 {
 public:
@@ -29,72 +32,75 @@ public:
     SmbBackend(const SmbBackend &) = delete;
     SmbBackend &operator=(const SmbBackend &) = delete;
 
+    using Backend::authenticate;
+    using Backend::list;
+
     Result connect(const ConnectionParams &params, ServerIdentity *seen) override;
-    Result authenticate(const Credentials &credentials) override;
+    Result authenticate(const Credentials &credentials, AuthPrompter *prompter) override;
+    Capabilities capabilities() const override;
 
     Result stat(const QString &path, Entry *out) override;
-    Result list(const QString &dir, QVector<Entry> *out) override;
-    Result makePath(const QString &dir) override;
-    Result remove(const QString &path) override;
-    Result rename(const QString &from, const QString &to) override;
-    Result freeSpace(const QString &dir, qint64 *bytes) override;
-    Result upload(QIODevice *source, const QString &path, Progress *progress) override;
-    Result download(const QString &path, QIODevice *sink, Progress *progress) override;
-    Result read(const QString &path, qint64 offset, qint64 length, QByteArray *out) override;
+    Result list(const QString &dir, ListSink *sink, const ListOptions &options) override;
+
+    Result makeDir(const QString &path, bool exclusive) override;
+    Result removeFile(const QString &path) override;
+    Result removeDir(const QString &path) override;
+    Result rename(const QString &from, const QString &to, RenameMode mode) override;
+    Result setAttributes(const QString &path, const AttributeChanges &changes) override;
+
+    Result openRead(const QString &path, ReadHandle **out) override;
+    Result openWrite(const QString &path, const WriteOptions &options, WriteHandle **out) override;
+    Result upload(QIODevice *source, const QString &path, const UploadOptions &options, Progress *progress) override;
+    Result download(const QString &path, QIODevice *sink, const DownloadOptions &options, Progress *progress) override;
+
+    Result spaceInfo(const QString &dir, SpaceInfo *out) override;
+    Result keepAlive() override;
 
     void cancel() override;
     void resetCancel() override;
     void disconnect() override;
 
-    // How long closing a file after a cancel or failure may take before that
-    // request is abandoned too, so that Canceled comes back within C-9's 2 s.
-    static constexpr int DrainMs = 1000;
-    // Margin over the library's own request timeout (M-7) before the poll
-    // loop gives up on a request by itself.
-    static constexpr int BackstopMs = 5000;
+    static constexpr int MaxShareSessions = 4;      // XM-2
 
 private:
-    enum class Wait { Cancellable, Drain };
-    Result checkUsable() const;
-    // `start` issues the libsmb2 request: int (smb2_context *, Call *).
-    template <typename Starter>
-    Result request(std::unique_ptr<Call> &call, Starter start, const QString &context,
-                   Wait wait = Wait::Cancellable);
-    Result await(std::unique_ptr<Call> &call, Wait wait);
-    void abandon(std::unique_ptr<Call> &call);
-    void destroyContext();
+    // Where a path leads: the server-mode root, or a session and the path
+    // inside its share (empty for the share's own root).
+    struct Location {
+        bool root = false;
+        Session *session = nullptr;
+        QByteArray path;
+        QString share;
+    };
+    // authenticate() for a caller that holds the gate.
+    Result authenticateInGate(const Credentials &credentials);
+    Result checkSignedIn() const;
+    Result locate(const QString &path, Location *out);
+    Result sessionFor(const QString &share, Session **out);
+    Result evictOne();
+    // openWrite() for a caller that holds the gate and keeps the handle in a unique_ptr.
+    Result openWriter(const QString &path, const WriteOptions &options, std::unique_ptr<WriteHandle> *out);
+    // Server mode: the root or a share itself ("/", "/<share>").
+    bool shareLevel(const QString &path) const;
+    bool enumerationEnabled() const;
+    Result enumerateShares(QStringList *names, QVariantMap *remarks) const;
+    Result listRoot(ListSink *sink, const ListOptions &options) const;
     // disconnect() without virtual dispatch; also used by the destructor.
     void shutdown() noexcept;
 
-    Result statPath(const QByteArray &path, Entry *out);
-    Result unlinkPath(const QByteArray &path, const QString &context);
-    Result makeDir(const QByteArray &path);
-    Result openFile(const QByteArray &path, int flags, smb2fh **fh);
-    Result closeFile(smb2fh *fh, const Result &outcome);
-    Result writeAll(smb2fh *fh, QIODevice *source, Progress *progress);
-    Result writeChunk(smb2fh *fh, const QByteArray &buffer, qint64 length, quint64 offset);
-    Result readChunk(smb2fh *fh, quint64 offset, quint32 count, QByteArray *buffer, quint32 *got);
-    Result fileSize(smb2fh *fh, qint64 *size);
-    Result copyToSink(smb2fh *fh, qint64 size, QIODevice *sink, Progress *progress);
-    Result readRange(smb2fh *fh, qint64 offset, qint64 length, QByteArray *out);
-
-    smb2_context *m_ctx = nullptr;
     ConnectionParams m_params;
+    Profile m_profile = Profile::Strict;
+    QString m_user;
+    QString m_domain;
+    QByteArray m_secret;            // server mode: for shares opened later; wiped on disconnect
     QString m_address;              // numeric address that answered connect()
     bool m_probed = false;
-    bool m_broken = false;
-    Stage m_stage = Stage::SessionSetup;
-    std::thread::id m_owner;
+    bool m_serverMode = false;
+    ThreadGate m_gate;                  // M-13: one thread at a time
     std::atomic<bool> m_cancel { false };
-    std::vector<std::unique_ptr<Call>> m_orphans;
+    std::unique_ptr<Session> m_main;                    // the share, or IPC$ in server mode
+    std::vector<std::unique_ptr<Session>> m_shares;     // server mode (XM-2)
+    quint64 m_useClock = 0;
 };
-
-// M-5: libsmb2 lets a file named by NTLM_USER_FILE replace the password set
-// with smb2_set_password() (lib/init.c: smb2_set_user() and smb2_set_domain()
-// call smb2_set_password_from_file(); lib/ntlmssp.c does it again when the
-// server's challenge supplies the domain). The variable is removed from the
-// process environment before every session setup.
-void neutraliseUserFile();
 
 } // namespace NetVfs::Smb
 

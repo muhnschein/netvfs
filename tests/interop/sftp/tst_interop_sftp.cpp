@@ -4,8 +4,12 @@
 // password in the JSON file named by NETVFS_SFTP_INTEROP_CONFIG.
 #include "backendloader.h"
 #include "identity.h"
+#include "names.h"
 #include "paths.h"
+#include "probe.h"
+#include "prompter.h"
 #include "sftpbackend.h"
+#include "shellexec.h"
 #include "sshkeys.h"
 #include "transfer.h"
 
@@ -33,6 +37,11 @@ template<>
 char *toString(const NetVfs::Error &error)
 {
     return qstrdup(qPrintable(NetVfs::errorName(error)));
+}
+template<>
+char *toString(const NetVfs::EntryType &type)
+{
+    return qstrdup(QByteArray::number(static_cast<int>(type)).constData());
 }
 } // namespace QTest
 
@@ -140,6 +149,100 @@ protected:
     qint64 writeData(const char *, qint64) override { return -1; }
 };
 
+// XC-21: a backend that can hold a session channel of its own, so that the
+// next channel the backend opens is one too many for MaxSessions.
+class ChannelHog : public Sftp::SftpBackend
+{
+public:
+    ~ChannelHog() override { release(); }
+
+    bool occupy()
+    {
+        m_channel = ssh_channel_new(m_session);
+        return m_channel && ssh_channel_open_session(m_channel) == SSH_OK;
+    }
+    void release()
+    {
+        if (m_channel) {
+            if (ssh_channel_is_open(m_channel))
+                ssh_channel_close(m_channel);
+            ssh_channel_free(m_channel);
+            m_channel = nullptr;
+        }
+    }
+
+protected:
+    void configureSession(ssh_session session) override { m_session = session; }
+
+private:
+    ssh_session m_session = nullptr;
+    ssh_channel m_channel = nullptr;
+};
+
+// XS-11: answers by prompt text and records what it was asked.
+class AnsweringPrompter : public AuthPrompter
+{
+public:
+    AnsweringPrompter(const QByteArray &password, const QByteArray &code) : m_password(password), m_code(code) {}
+
+    bool answer(const QString &, const QString &, const QVector<AuthPrompt> &prompts,
+                QVector<QByteArray> *answers) override
+    {
+        for (const AuthPrompt &prompt : prompts) {
+            asked << prompt.text;
+            if (prompt.echo)
+                echoed << prompt.text;
+            if (prompt.text.contains(QLatin1String("Password")))
+                answers->append(m_password);
+            else if (prompt.text.contains(QLatin1String("Verification code")))
+                answers->append(m_code);
+            else
+                answers->append("label");
+        }
+        return !decline;
+    }
+
+    QStringList asked;
+    QStringList echoed;
+    bool decline = false;
+
+private:
+    QByteArray m_password;
+    QByteArray m_code;
+};
+
+// XC-22: a person who never answers. cancel() ends the wait; without it
+// the prompter gives up after 10 s (so a broken cancel fails, not hangs).
+class SilentPrompter : public AuthPrompter
+{
+public:
+    bool answer(const QString &, const QString &, const QVector<AuthPrompt> &, QVector<QByteArray> *) override
+    {
+        m_asked.release();
+        m_canceled.tryAcquire(1, 10000);
+        return false;
+    }
+    void cancel() override { m_canceled.release(); }
+    bool waitAsked(int ms) { return m_asked.tryAcquire(1, ms); }
+
+private:
+    QSemaphore m_asked;
+    QSemaphore m_canceled;
+};
+
+// Runs `call` on another thread and cancel()s the backend after 300 ms;
+// returns the milliseconds from cancel() to the end of the call (C-9).
+qint64 runCanceled(Backend *backend, const std::function<Result()> &call, Result *result)
+{
+    QFuture<Result> future = QtConcurrent::run(call);
+    QThread::msleep(300);
+    QElapsedTimer timer;
+    timer.start();
+    backend->cancel();
+    *result = future.result();
+    return timer.elapsed();
+}
+
 QString unique(const QString &prefix)
 {
     return prefix + QUuid::createUuid().toString().mid(1, 8);
@@ -154,6 +257,7 @@ class TestInteropSftp : public QObject
 private:
     QJsonObject m_servers;
     QByteArray m_password;
+    QByteArray m_otp;
     QTemporaryDir m_tmp;
     QString m_bigFile;
     QByteArray m_bigSha;
@@ -173,7 +277,28 @@ private:
         p.port = m_servers.value(server).toObject().value(QStringLiteral("ports")).toObject().value(instance).toInt();
         p.username = user;
         p.options.insert(QStringLiteral("auth_mode"), authMode);
+        // The matrix runs the backup flow: folders 0700 (S-20, XC-23).
+        return withBackupDirMode(p);
+    }
+
+    // Parameters of a file-browsing consumer: server defaults for new folders.
+    ConnectionParams filesParams(const QString &server, const QString &instance, const QString &user) const
+    {
+        ConnectionParams p = params(server, instance, user);
+        p.options.remove(QLatin1String(DirModeOption));
         return p;
+    }
+
+    static bool put(Backend *b, const QString &path, const QByteArray &data,
+                    const UploadOptions &options = UploadOptions())
+    {
+        QByteArray copy = data;
+        QBuffer buffer(&copy);
+        buffer.open(QIODevice::ReadOnly);
+        const Result r = b->upload(&buffer, path, options, nullptr);
+        if (!r.ok())
+            qWarning() << "upload failed:" << r.toString();
+        return r.ok();
     }
 
     // docker exec <container> sh -c <script>, with optional environment and stdin.
@@ -254,10 +379,10 @@ private:
     }
 
     // Pins the server key, then connects and signs in (SEC-1 order).
-    Result signIn(Backend *b, ConnectionParams p, const QByteArray &secret) const
+    Result signIn(Backend *b, ConnectionParams p, const QByteArray &secret, AuthPrompter *prompter = nullptr) const
     {
         p.options.insert(QStringLiteral("host_key"), pinOf(p));
-        return establish(b, p, Credentials(p.username, secret));
+        return establish(b, p, Credentials(p.username, secret), nullptr, prompter);
     }
 
     std::unique_ptr<Backend> signedIn(const ConnectionParams &p, const QByteArray &secret) const
@@ -292,7 +417,8 @@ private:
         QCOMPARE(entries.size(), 1);   // no .part left behind (C-12)
         QCOMPARE(entries.at(0).name, QStringLiteral("backup.tar"));
         QCOMPARE(entries.at(0).size, BigFileSize);
-        QVERIFY(!entries.at(0).isDir);
+        QCOMPARE(entries.at(0).type, EntryType::File);   // XC-2
+        QCOMPARE(entries.at(0).mode, 0600);
         QVERIFY(entries.at(0).modified.isValid());
 
         qint64 available = -1;
@@ -377,6 +503,7 @@ private slots:
         const QJsonObject root = QJsonDocument::fromJson(config.readAll()).object();
         m_servers = root.value(QStringLiteral("servers")).toObject();
         m_password = root.value(QStringLiteral("password")).toString().toLatin1();
+        m_otp = root.value(QStringLiteral("otp")).toString().toLatin1();
         QVERIFY(!m_password.isEmpty());
         QVERIFY(m_tmp.isValid());
         m_tools = BackendLoader::sshKeyTools();
@@ -465,7 +592,7 @@ private slots:
                  QStringLiteral("700"));
         Entry entry;
         QVERIFY(b->stat(QStringLiteral("/"), &entry).ok());
-        QVERIFY(entry.isDir);
+        QVERIFY(entry.isDir());
 
         // The 10.3p1 sftp client reads what we uploaded.
         QByteArray data(300000, 'h');
@@ -667,7 +794,7 @@ private slots:
         QCOMPARE(seen.fingerprint, serverFingerprint(server, seen.algorithm));
         Entry entry;
         QVERIFY(b->stat(QString(), &entry).ok());
-        QVERIFY(entry.isDir);
+        QVERIFY(entry.isDir());
     }
 
     // S-T11, S-11
@@ -830,7 +957,7 @@ private slots:
         Result r;
         Backend *raw = b.get();
         qint64 ms = interrupt(
-            &cancelGate, [&]() { return raw->download(QStringLiteral("stall.bin"), &sink, &cancelGate); },
+            &cancelGate, [&]() { return raw->download(QStringLiteral("stall.bin"), &sink, DownloadOptions(), &cancelGate); },
             [&]() { exec(QStringLiteral("o89"), QStringLiteral("touch /tmp/hold")); },
             [&]() {
                 QThread::msleep(1000);
@@ -853,7 +980,7 @@ private slots:
         const QString paused = container(QStringLiteral("o89"));
         GateProgress timeoutGate(1024 * 1024);
         ms = interrupt(
-            &timeoutGate, [&]() { return raw->download(QStringLiteral("stall.bin"), &sink, &timeoutGate); },
+            &timeoutGate, [&]() { return raw->download(QStringLiteral("stall.bin"), &sink, DownloadOptions(), &timeoutGate); },
             [&]() { docker({ QStringLiteral("pause"), paused }); }, &r);
         docker({ QStringLiteral("unpause"), paused });
         QVERIFY2(r.error() == Error::Timeout, qPrintable(r.toString()));
@@ -945,21 +1072,22 @@ private slots:
         QCOMPARE(b->stat(dir + QStringLiteral("/nope"), &entry).error(), Error::NotFound);
         QCOMPARE(b->list(dir + QStringLiteral("/nope"), &entries).error(), Error::NotFound);
         QCOMPARE(b->remove(dir + QStringLiteral("/nope")).error(), Error::NotFound);
-        QCOMPARE(b->rename(dir + QStringLiteral("/nope"), dir + QStringLiteral("/x")).error(), Error::NotFound);
+        QCOMPARE(b->rename(dir + QStringLiteral("/nope"), dir + QStringLiteral("/x"), RenameMode::Replace).error(),
+                 Error::NotFound);
         QCOMPARE(b->freeSpace(dir + QStringLiteral("/nope"), &bytes).error(), Error::NotFound);
         QCOMPARE(b->read(dir + QStringLiteral("/nope"), 0, 1, &data).error(), Error::NotFound);
         QBuffer sink;
         QVERIFY(sink.open(QIODevice::WriteOnly));
-        QCOMPARE(b->download(dir + QStringLiteral("/nope"), &sink, nullptr).error(), Error::NotFound);
-        QCOMPARE(b->stat(dir + QStringLiteral("/../x"), &entry).error(), Error::Internal);   // C-15
+        QCOMPARE(b->download(dir + QStringLiteral("/nope"), &sink, DownloadOptions(), nullptr).error(), Error::NotFound);
+        QCOMPARE(b->stat(dir + QStringLiteral("/../x"), &entry).error(), Error::InvalidName);   // C-15, XC-4
         QCOMPARE(b->makePath(QStringLiteral("/root/netvfs")).error(), Error::PermissionDenied);
         QByteArray content("0123456789abcdefghij");
         QBuffer source(&content);
         QVERIFY(source.open(QIODevice::ReadOnly));
-        QCOMPARE(b->upload(&source, QStringLiteral("/root/x"), nullptr).error(), Error::PermissionDenied);
+        QCOMPARE(b->upload(&source, QStringLiteral("/root/x"), UploadOptions(), nullptr).error(), Error::PermissionDenied);
 
         source.seek(0);
-        QVERIFY(b->upload(&source, dir + QStringLiteral("/a.txt"), nullptr).ok());
+        QVERIFY(b->upload(&source, dir + QStringLiteral("/a.txt"), UploadOptions(), nullptr).ok());
         QCOMPARE(b->makePath(dir + QStringLiteral("/a.txt/sub")).error(), Error::AlreadyExists);
         QCOMPARE(b->makePath(dir + QStringLiteral("/a.txt")).error(), Error::AlreadyExists);
         QVERIFY(b->read(dir + QStringLiteral("/a.txt"), 5, 10, &data).ok());   // C-11
@@ -968,12 +1096,12 @@ private slots:
         QCOMPARE(data, QByteArray("fghij"));
         QCOMPARE(b->read(dir + QStringLiteral("/a.txt"), -1, 1, &data).error(), Error::Internal);
 
-        // rename replaces an existing target (posix-rename here).
+        // rename(Replace) replaces an existing target (posix-rename here).
         QByteArray other("other");
         QBuffer otherSource(&other);
         QVERIFY(otherSource.open(QIODevice::ReadOnly));
-        QVERIFY(b->upload(&otherSource, dir + QStringLiteral("/b.txt"), nullptr).ok());
-        QVERIFY(b->rename(dir + QStringLiteral("/b.txt"), dir + QStringLiteral("/a.txt")).ok());
+        QVERIFY(b->upload(&otherSource, dir + QStringLiteral("/b.txt"), UploadOptions(), nullptr).ok());
+        QVERIFY(b->rename(dir + QStringLiteral("/b.txt"), dir + QStringLiteral("/a.txt"), RenameMode::Replace).ok());
         QVERIFY(b->stat(dir + QStringLiteral("/a.txt"), &entry).ok());
         QCOMPARE(entry.size, qint64(5));
         QCOMPARE(entry.name, QStringLiteral("a.txt"));
@@ -981,26 +1109,26 @@ private slots:
         // A local sink that cannot be written, a source that cannot be read.
         QBuffer readOnly;
         QVERIFY(readOnly.open(QIODevice::ReadOnly));
-        QCOMPARE(b->download(dir + QStringLiteral("/a.txt"), &readOnly, nullptr).error(), Error::NoSpace);
+        QCOMPARE(b->download(dir + QStringLiteral("/a.txt"), &readOnly, DownloadOptions(), nullptr).error(), Error::NoSpace);
         FailingSource failing;
         QVERIFY(failing.open(QIODevice::ReadOnly));
-        QCOMPARE(b->upload(&failing, dir + QStringLiteral("/c.txt"), nullptr).error(), Error::Internal);
+        QCOMPARE(b->upload(&failing, dir + QStringLiteral("/c.txt"), UploadOptions(), nullptr).error(), Error::Internal);
 
         // Directories: remove() takes empty ones too.
         QVERIFY(b->makePath(dir + QStringLiteral("/empty")).ok());
         QVERIFY(b->remove(dir + QStringLiteral("/empty")).ok());
         QCOMPARE(b->stat(dir + QStringLiteral("/empty"), &entry).error(), Error::NotFound);
         QVERIFY(b->makePath(dir + QStringLiteral("/full/sub")).ok());
-        QVERIFY(!b->remove(dir + QStringLiteral("/full")).ok());
+        QCOMPARE(b->remove(dir + QStringLiteral("/full")).error(), Error::DirectoryNotEmpty);   // XC-9
 
         // The start directory and the root.
         QVERIFY(b->list(QString(), &entries).ok());
         bool found = false;
         for (const Entry &e : entries)
-            found = found || (e.name == QLatin1String("netvfs-it") && e.isDir);
+            found = found || (e.name == QLatin1String("netvfs-it") && e.isDir());
         QVERIFY(found);
         QVERIFY(b->stat(QStringLiteral("/"), &entry).ok());
-        QVERIFY(entry.isDir);
+        QVERIFY(entry.isDir());
 
         // A canceled backend refuses work until resetCancel().
         b->cancel();
@@ -1013,6 +1141,856 @@ private slots:
         ServerIdentity seen;
         QVERIFY(b->connect(params(QStringLiteral("o103"), QStringLiteral("default"), QStringLiteral("alice")), &seen).ok());
         QCOMPARE(b->stat(dir, &entry).error(), Error::Internal);
+    }
+
+    // ---- API v2 (SPEC-v2 §4, §6.1) ---------------------------------------
+
+    void v2Namespace_data()
+    {
+        QTest::addColumn<QString>("server");
+        QTest::addColumn<QString>("instance");
+        QTest::addColumn<bool>("posixRename");
+        QTest::newRow("10.3p1") << "o103" << "default" << true;
+        QTest::newRow("10.3p1 noext") << "o103" << "noext" << false;
+        QTest::newRow("9.6p1") << "o96" << "default" << true;
+    }
+
+    // XC-5, XC-8, XC-9, XC-10, XS-6
+    void v2Namespace()
+    {
+        QFETCH(QString, server);
+        QFETCH(QString, instance);
+        QFETCH(bool, posixRename);
+        auto b = signedIn(filesParams(server, instance, QStringLiteral("alice")), m_password);
+        QVERIFY(b);
+        const Capabilities caps = b->capabilities();
+        QVERIFY(caps.has(Capability::NativeNoReplace));   // OpenSSH, by banner
+        QCOMPARE(caps.has(Capability::AtomicReplace), posixRename);
+        QCOMPARE(caps.has(Capability::SpaceInfo), posixRename);   // statvfs@openssh.com
+        QVERIFY(caps.has(Capability::ReadHandles));
+        QVERIFY(caps.has(Capability::WriteResume));
+        QVERIFY(caps.has(Capability::Symlinks));
+        QVERIFY(caps.maxReadChunk > 0);
+
+        const QString dir = unique(QStringLiteral("netvfs-it/v2-"));
+        const QString disk = QStringLiteral("/home/alice/") + dir;
+        QVERIFY(b->makePath(dir).ok());
+        // XC-8
+        QCOMPARE(b->makeDir(dir, true).error(), Error::AlreadyExists);
+        QVERIFY(b->makeDir(dir, false).ok());
+        QVERIFY(b->makeDir(dir + QStringLiteral("/new"), true).ok());
+        // XC-23: the server's umask decides (022 or 002 in these images), not 0700.
+        const QString newMode = serverMode(server, disk + QStringLiteral("/new"));
+        QVERIFY2(newMode == QLatin1String("755") || newMode == QLatin1String("775"), qPrintable(newMode));
+        QVERIFY(put(b.get(), dir + QStringLiteral("/a.txt"), "aaa"));
+        QVERIFY(put(b.get(), dir + QStringLiteral("/b.txt"), "bbbb"));
+        QCOMPARE(b->makeDir(dir + QStringLiteral("/a.txt"), false).error(), Error::AlreadyExists);
+        QCOMPARE(b->makeDir(dir + QStringLiteral("/a.txt"), true).error(), Error::AlreadyExists);
+
+        // XC-10 NoReplace: the target is untouched.
+        QCOMPARE(b->rename(dir + QStringLiteral("/b.txt"), dir + QStringLiteral("/a.txt"), RenameMode::NoReplace).error(),
+                 Error::AlreadyExists);
+        QCOMPARE(exec(server, QStringLiteral("cat \"$P\""), { QStringLiteral("P=") + disk + QStringLiteral("/a.txt") }),
+                 QByteArray("aaa"));
+        QVERIFY(b->rename(dir + QStringLiteral("/b.txt"), dir + QStringLiteral("/c.txt"), RenameMode::NoReplace).ok());
+        QCOMPARE(b->rename(dir + QStringLiteral("/nope"), dir + QStringLiteral("/x"), RenameMode::NoReplace).error(),
+                 Error::NotFound);
+        // XC-10 Replace, and never onto a folder.
+        QVERIFY(b->rename(dir + QStringLiteral("/c.txt"), dir + QStringLiteral("/a.txt"), RenameMode::Replace).ok());
+        QCOMPARE(exec(server, QStringLiteral("cat \"$P\""), { QStringLiteral("P=") + disk + QStringLiteral("/a.txt") }),
+                 QByteArray("bbbb"));
+        QCOMPARE(b->rename(dir + QStringLiteral("/a.txt"), dir + QStringLiteral("/new"), RenameMode::Replace).error(),
+                 Error::AlreadyExists);
+        QVERIFY(b->makeDir(dir + QStringLiteral("/empty"), true).ok());
+        QCOMPARE(b->rename(dir + QStringLiteral("/empty"), dir + QStringLiteral("/new"), RenameMode::Replace).error(),
+                 Error::AlreadyExists);
+        QVERIFY(b->rename(dir + QStringLiteral("/empty"), dir + QStringLiteral("/moved"), RenameMode::NoReplace).ok());
+
+        // XC-9
+        QVERIFY(put(b.get(), dir + QStringLiteral("/new/inner.txt"), "x"));
+        QCOMPARE(b->removeFile(dir + QStringLiteral("/new")).error(), Error::IsADirectory);
+        QCOMPARE(b->removeDir(dir + QStringLiteral("/new")).error(), Error::DirectoryNotEmpty);
+        QCOMPARE(b->removeDir(dir + QStringLiteral("/a.txt")).error(), Error::NotADirectory);
+        QCOMPARE(b->removeFile(dir + QStringLiteral("/nope")).error(), Error::NotFound);
+        QCOMPARE(b->removeDir(dir + QStringLiteral("/nope")).error(), Error::NotFound);
+        QVERIFY(b->removeFile(dir + QStringLiteral("/new/inner.txt")).ok());
+        QVERIFY(b->removeDir(dir + QStringLiteral("/new")).ok());
+        QVERIFY(b->removeDir(dir + QStringLiteral("/moved")).ok());
+        QVERIFY(b->remove(dir + QStringLiteral("/a.txt")).ok());
+
+        QVERIFY(b->keepAlive().ok());   // XS-12
+    }
+
+    // XC-6, XS-1, XS-2, XS-3, XC-7
+    void v2Listing()
+    {
+        auto b = signedIn(filesParams(QStringLiteral("o103"), QStringLiteral("default"), QStringLiteral("alice")), m_password);
+        QVERIFY(b);
+        const QString dir = unique(QStringLiteral("netvfs-it/list-"));
+        const QString disk = QStringLiteral("/home/alice/") + dir;
+        QVERIFY(b->makePath(dir).ok());
+        // 300 files, a symlink to a file, one to a folder, a dangling one, a
+        // FIFO and a name that is not UTF-8.
+        exec(QStringLiteral("o103"),
+             QStringLiteral("cd \"$P\" && for i in $(seq 1 300); do echo $i > f$i; done && mkdir sub && "
+                            "ln -s f1 tofile && ln -s sub todir && ln -s nowhere dangling && mkfifo fifo && "
+                            "printf x > \"$(printf 'caf\\351')\" && chmod 644 f1 && chown -R alice \"$P\""),
+             { QStringLiteral("P=") + disk });
+
+        struct Batches : ListSink {
+            QVector<int> sizes;
+            QVector<Entry> all;
+            bool entries(const QVector<Entry> &batch) override
+            {
+                sizes << batch.size();
+                all += batch;
+                return true;
+            }
+        } sink;
+        ListOptions options;
+        options.batchSize = 7;
+        options.resolveSymlinkTypes = true;
+        Result r = b->list(dir, &sink, options);
+        QVERIFY2(r.ok(), qPrintable(r.toString()));
+        QCOMPARE(sink.all.size(), 306);
+        QVERIFY(sink.sizes.size() >= 306 / 7);
+        for (const int size : sink.sizes)
+            QVERIFY(size >= 1 && size <= 7);
+        QHash<QString, Entry> byName;
+        for (const Entry &e : sink.all)
+            byName.insert(e.name, e);
+        QVERIFY(!byName.contains(QStringLiteral(".")) && !byName.contains(QStringLiteral("..")));
+        QCOMPARE(byName.value(QStringLiteral("f1")).type, EntryType::File);
+        QCOMPARE(byName.value(QStringLiteral("f1")).size, qint64(2));
+        QCOMPARE(byName.value(QStringLiteral("f1")).mode, 0644);
+        QVERIFY(byName.value(QStringLiteral("f1")).uid > 0);
+        QVERIFY(byName.value(QStringLiteral("f1")).modified.isValid());
+        QCOMPARE(byName.value(QStringLiteral("sub")).type, EntryType::Directory);
+        QCOMPARE(byName.value(QStringLiteral("tofile")).type, EntryType::Symlink);
+        QCOMPARE(byName.value(QStringLiteral("tofile")).targetType, EntryType::File);
+        QVERIFY(byName.value(QStringLiteral("todir")).isDir());
+        QVERIFY(byName.value(QStringLiteral("dangling")).flags.testFlag(EntryFlag::TargetUnknown));
+        QCOMPARE(byName.value(QStringLiteral("fifo")).type, EntryType::Special);
+
+        // XS-1: the Latin-1 name is escaped, flagged and usable.
+        const QString latin1 = Names::decode(QByteArray("caf\xe9"));
+        QVERIFY(byName.contains(latin1));
+        QVERIFY(byName.value(latin1).flags.testFlag(EntryFlag::NameNotUtf8));
+        Entry entry;
+        QVERIFY(b->stat(Paths::join(dir, latin1), &entry).ok());
+        QCOMPARE(entry.name, latin1);
+        QCOMPARE(entry.size, qint64(1));
+        QVERIFY(b->rename(Paths::join(dir, latin1), Paths::join(dir, latin1 + QStringLiteral(".old")),
+                          RenameMode::NoReplace).ok());
+        QVERIFY(b->removeFile(Paths::join(dir, latin1 + QStringLiteral(".old"))).ok());
+
+        // XC-7: stat follows links, lstat does not; removeFile removes the link.
+        QVERIFY(b->stat(dir + QStringLiteral("/todir"), &entry).ok());
+        QCOMPARE(entry.type, EntryType::Directory);
+        QCOMPARE(entry.name, QStringLiteral("todir"));
+        QVERIFY(b->lstat(dir + QStringLiteral("/todir"), &entry).ok());
+        QCOMPARE(entry.type, EntryType::Symlink);
+        QCOMPARE(b->stat(dir + QStringLiteral("/dangling"), &entry).error(), Error::NotFound);
+        QVERIFY(b->removeFile(dir + QStringLiteral("/todir")).ok());
+        QVERIFY(b->stat(dir + QStringLiteral("/sub"), &entry).ok());
+
+        // Without resolution the target type stays unknown; a sink can stop.
+        struct StopAfterOne : ListSink {
+            int calls = 0;
+            bool entries(const QVector<Entry> &) override { return ++calls < 1; }
+        } stop;
+        QCOMPARE(b->list(dir, &stop, ListOptions()).error(), Error::Canceled);
+        QCOMPARE(stop.calls, 1);
+        QVector<Entry> plain;
+        QVERIFY(b->list(dir, &plain).ok());
+        for (const Entry &e : plain) {
+            if (e.name == QLatin1String("tofile"))
+                QCOMPARE(e.targetType, EntryType::Unknown);
+        }
+        QCOMPARE(b->list(dir + QStringLiteral("/f1"), &plain).error(), Error::NotADirectory);
+        exec(QStringLiteral("o103"), QStringLiteral("rm -rf \"$P\""), { QStringLiteral("P=") + disk });
+    }
+
+    // XC-13, XC-14, XC-23
+    void v2Transfers()
+    {
+        auto b = signedIn(filesParams(QStringLiteral("o103"), QStringLiteral("default"), QStringLiteral("alice")), m_password);
+        QVERIFY(b);
+        const QString dir = unique(QStringLiteral("netvfs-it/io-"));
+        const QString disk = QStringLiteral("/home/alice/") + dir;
+        QVERIFY(b->makePath(dir).ok());
+        QByteArray content(3 * 1024 * 1024 + 17, Qt::Uninitialized);
+        for (int i = 0; i < content.size(); ++i)
+            content[i] = static_cast<char>((i * 131) >> 3);
+
+        // Create modes: the server default (umask 022) or the requested one.
+        UploadOptions options;
+        QVERIFY(put(b.get(), dir + QStringLiteral("/default.bin"), content, options));
+        QCOMPARE(serverMode(QStringLiteral("o103"), disk + QStringLiteral("/default.bin")), QStringLiteral("644"));
+        options.write.createMode = 0640;
+        QVERIFY(put(b.get(), dir + QStringLiteral("/private.bin"), "p", options));
+        QCOMPARE(serverMode(QStringLiteral("o103"), disk + QStringLiteral("/private.bin")), QStringLiteral("640"));
+        // CreateNew refuses an existing file; Truncate replaces its content.
+        options.write.createMode = -1;
+        QByteArray small("small");
+        QBuffer source(&small);
+        QVERIFY(source.open(QIODevice::ReadOnly));
+        QCOMPARE(b->upload(&source, dir + QStringLiteral("/private.bin"), options, nullptr).error(),
+                 Error::AlreadyExists);
+        QCOMPARE(b->upload(&source, dir, options, nullptr).error(), Error::IsADirectory);
+        options.write.disposition = WriteOptions::Disposition::Truncate;
+        QVERIFY(b->upload(&source, dir + QStringLiteral("/private.bin"), options, nullptr).ok());
+        QCOMPARE(exec(QStringLiteral("o103"), QStringLiteral("cat \"$P\""),
+                      { QStringLiteral("P=") + disk + QStringLiteral("/private.bin") }),
+                 small);
+        QCOMPARE(serverMode(QStringLiteral("o103"), disk + QStringLiteral("/private.bin")), QStringLiteral("640"));
+
+        // Ranged downloads.
+        QByteArray received;
+        QBuffer sink(&received);
+        QVERIFY(sink.open(QIODevice::WriteOnly));
+        DownloadOptions range;
+        range.offset = 1000;
+        range.length = 1024 * 1024 + 5;
+        QVERIFY(b->download(dir + QStringLiteral("/default.bin"), &sink, range, nullptr).ok());
+        QCOMPARE(received, content.mid(1000, 1024 * 1024 + 5));
+        sink.close();
+        received.clear();
+        QVERIFY(sink.open(QIODevice::WriteOnly));
+        range.offset = content.size() - 10;
+        range.length = -1;
+        QVERIFY(b->download(dir + QStringLiteral("/default.bin"), &sink, range, nullptr).ok());
+        QCOMPARE(received, content.right(10));
+        QCOMPARE(b->download(dir, &sink, DownloadOptions(), nullptr).error(), Error::IsADirectory);
+
+        // XC-13: a handle reads ranges on one open file, also at EOF.
+        ReadHandle *raw = nullptr;
+        QVERIFY(b->openRead(dir + QStringLiteral("/default.bin"), &raw).ok());
+        std::unique_ptr<ReadHandle> handle(raw);
+        QCOMPARE(handle->size(), qint64(content.size()));
+        QByteArray part;
+        QVERIFY(handle->read(5, 100, &part).ok());
+        QCOMPARE(part, content.mid(5, 100));
+        QVERIFY(handle->read(1024 * 1024 - 3, 2 * 1024 * 1024, &part).ok());
+        QCOMPARE(part, content.mid(1024 * 1024 - 3, 2 * 1024 * 1024));
+        QVERIFY(handle->read(content.size() - 4, 100, &part).ok());   // short read at EOF
+        QCOMPARE(part, content.right(4));
+        QVERIFY(handle->read(content.size(), 100, &part).ok());
+        QVERIFY(part.isEmpty());
+        QVERIFY(handle->read(content.size() + 100, 100, &part).ok());
+        QVERIFY(part.isEmpty());
+        QVERIFY(handle->read(0, 0, &part).ok());
+        QVERIFY(part.isEmpty());
+        QCOMPARE(handle->read(-1, 1, &part).error(), Error::Internal);
+        QVERIFY(handle->close().ok());
+        QCOMPARE(handle->read(0, 1, &part).error(), Error::Internal);
+        ReadHandle *missing = nullptr;
+        QCOMPARE(b->openRead(dir + QStringLiteral("/nope"), &missing).error(), Error::NotFound);
+        QVERIFY(!missing);
+
+        // A handle outlives the connection only as a stale object.
+        QVERIFY(b->openRead(dir + QStringLiteral("/default.bin"), &raw).ok());
+        handle.reset(raw);
+        b->disconnect();
+        QCOMPARE(handle->read(0, 1, &part).error(), Error::ConnectionLost);
+        handle.reset();
+
+        // XS-8
+        b = signedIn(filesParams(QStringLiteral("o103"), QStringLiteral("default"), QStringLiteral("alice")), m_password);
+        QVERIFY(b);
+        SpaceInfo space;
+        QVERIFY(b->spaceInfo(dir, &space).ok());
+        QVERIFY(space.total > 0 && space.free >= 0 && space.used >= 0 && space.free <= space.total);
+        exec(QStringLiteral("o103"), QStringLiteral("rm -rf \"$P\""), { QStringLiteral("P=") + disk });
+    }
+
+    // XC-20, XC-21: a dropped connection is ConnectionLost, not NetworkUnreachable.
+    void v2ConnectionLost()
+    {
+        auto b = signedIn(params(QStringLiteral("o96"), QStringLiteral("default"), QStringLiteral("carol")), m_password);
+        QVERIFY(b);
+        QVERIFY(b->keepAlive().ok());
+        Entry entry;
+        QVERIFY(b->stat(QString(), &entry).ok());
+        // No procps in the image: find carol's processes in /proc.
+        exec(QStringLiteral("o96"), QStringLiteral("for p in /proc/[0-9]*; do [ \"$(stat -c %U $p)\" = carol ] "
+                                                   "&& kill -9 ${p#/proc/}; done; true"));
+        QTest::qWait(500);
+        QCOMPARE(b->keepAlive().error(), Error::ConnectionLost);
+        QCOMPARE(b->stat(QString(), &entry).error(), Error::ConnectionLost);
+    }
+
+    // XS-4, XS-2, XS-5 on every server family. The symlink rows verify
+    // libssh's SSH_FXP_SYMLINK argument order on the server's disk.
+    void v2LinksAndAttributes_data()
+    {
+        QTest::addColumn<QString>("server");
+        QTest::addColumn<QString>("instance");
+        QTest::addColumn<bool>("ownership");
+        QTest::addColumn<bool>("verbatim");
+        QTest::newRow("10.3p1") << "o103" << "default" << true << true;
+        QTest::newRow("10.3p1 noext") << "o103" << "noext" << false << true;
+        QTest::newRow("9.6p1") << "o96" << "default" << true << true;
+        QTest::newRow("8.9p1") << "o89" << "default" << false << true;   // no users-groups-by-id
+        // mod_sftp answers READLINK with relative targets made absolute.
+        QTest::newRow("ProFTPD") << "pro" << "sftp" << false << false;
+    }
+
+    void v2LinksAndAttributes()
+    {
+        QFETCH(QString, server);
+        QFETCH(QString, instance);
+        QFETCH(bool, ownership);
+        QFETCH(bool, verbatim);
+        auto b = signedIn(filesParams(server, instance, QStringLiteral("alice")), m_password);
+        QVERIFY(b);
+        const Capabilities caps = b->capabilities();
+        QVERIFY(caps.has(Capability::Symlinks));   // XS-4: verified below for this family
+        QVERIFY(caps.has(Capability::PosixModes) && caps.has(Capability::SetModified));
+        QCOMPARE(caps.has(Capability::Ownership), ownership);
+        const QString dir = unique(QStringLiteral("netvfs-it/links-"));
+        const QString disk = QStringLiteral("/home/alice/") + dir;
+        QVERIFY(b->makePath(dir).ok());
+        QVERIFY(put(b.get(), dir + QStringLiteral("/target.txt"), "target"));
+
+        // The link is where we asked for it and points where we said.
+        Result r = b->makeSymlink(QStringLiteral("target.txt"), dir + QStringLiteral("/link"));
+        QVERIFY2(r.ok(), qPrintable(r.toString()));
+        QCOMPARE(exec(server, QStringLiteral("readlink \"$P\""), { QStringLiteral("P=") + disk + QStringLiteral("/link") }),
+                 QByteArray("target.txt\n"));
+        const QString odd = QStringLiteral("../sub dir/ü'x");
+        QVERIFY(b->makeSymlink(odd, dir + QStringLiteral("/odd")).ok());
+        QCOMPARE(QString::fromUtf8(exec(server, QStringLiteral("readlink \"$P\""),
+                                        { QStringLiteral("P=") + disk + QStringLiteral("/odd") })),
+                 odd + QLatin1Char('\n'));
+        QString target;
+        QVERIFY(b->readLink(dir + QStringLiteral("/odd"), &target).ok());
+        if (verbatim)
+            QCOMPARE(target, odd);   // XC-12: verbatim
+        else
+            QCOMPARE(target, disk.left(disk.lastIndexOf(QLatin1Char('/'))) + odd.mid(2));
+        exec(server, QStringLiteral("ln -s target.txt \"$P\" && chown -h alice:alice \"$P\""),
+             { QStringLiteral("P=") + disk + QStringLiteral("/theirs") });
+        QVERIFY(b->readLink(dir + QStringLiteral("/theirs"), &target).ok());
+        QCOMPARE(target, verbatim ? QStringLiteral("target.txt") : disk + QStringLiteral("/target.txt"));
+        Entry entry;
+        QVERIFY(b->lstat(dir + QStringLiteral("/link"), &entry).ok());
+        QVERIFY2(entry.type == EntryType::Symlink, qPrintable(QStringLiteral("type %1 size %2 mode %3")
+                                                                  .arg(int(entry.type)).arg(entry.size).arg(entry.mode, 0, 8)));
+        QVERIFY(b->stat(dir + QStringLiteral("/link"), &entry).ok());
+        QCOMPARE(entry.type, EntryType::File);
+        QCOMPARE(entry.size, qint64(6));
+        QCOMPARE(b->makeSymlink(QStringLiteral("other"), dir + QStringLiteral("/link")).error(), Error::AlreadyExists);
+        QCOMPARE(b->readLink(dir + QStringLiteral("/target.txt"), &target).error(), Error::InvalidName);
+        QCOMPARE(b->readLink(dir + QStringLiteral("/missing"), &target).error(), Error::NotFound);
+
+        // Hard links where hardlink@openssh.com is offered.
+        if (caps.has(Capability::Hardlinks)) {
+            QVERIFY(b->makeHardlink(dir + QStringLiteral("/target.txt"), dir + QStringLiteral("/hard")).ok());
+            QCOMPARE(exec(server, QStringLiteral("stat -c %h \"$P\""), { QStringLiteral("P=") + disk + QStringLiteral("/hard") }),
+                     QByteArray("2\n"));
+            QCOMPARE(b->makeHardlink(dir + QStringLiteral("/target.txt"), dir + QStringLiteral("/hard")).error(),
+                     Error::AlreadyExists);
+            QCOMPARE(b->makeHardlink(dir + QStringLiteral("/missing"), dir + QStringLiteral("/hard2")).error(),
+                     Error::NotFound);
+            // One name of the file onto the other: one name is left (XC-10).
+            QVERIFY(b->rename(dir + QStringLiteral("/hard"), dir + QStringLiteral("/target.txt"), RenameMode::Replace).ok());
+            QCOMPARE(b->stat(dir + QStringLiteral("/hard"), &entry).error(), Error::NotFound);
+        } else {
+            QCOMPARE(b->makeHardlink(dir + QStringLiteral("/target.txt"), dir + QStringLiteral("/hard")).error(),
+                     Error::Unsupported);
+        }
+
+        // XS-5: modes and times arrive on the server's disk.
+        const QString file = dir + QStringLiteral("/target.txt");
+        const QStringList env { QStringLiteral("P=") + disk + QStringLiteral("/target.txt") };
+        AttributeChanges changes;
+        changes.mode = 0640;
+        QVERIFY(b->setAttributes(file, changes).ok());
+        QCOMPARE(exec(server, QStringLiteral("stat -c %a \"$P\""), env), QByteArray("640\n"));
+        changes = AttributeChanges();
+        changes.modified = QDateTime(QDate(2001, 2, 3), QTime(4, 5, 6), Qt::UTC);
+        QVERIFY(b->setAttributes(file, changes).ok());
+        QCOMPARE(exec(server, QStringLiteral("stat -c %Y \"$P\""), env).trimmed().toLongLong(),
+                 changes.modified.toMSecsSinceEpoch() / 1000);
+        const QByteArray mtime = exec(server, QStringLiteral("stat -c %Y \"$P\""), env);
+        changes = AttributeChanges();
+        changes.accessed = QDateTime(QDate(2002, 3, 4), QTime(5, 6, 7), Qt::UTC);
+        QVERIFY(b->setAttributes(file, changes).ok());
+        QCOMPARE(exec(server, QStringLiteral("stat -c %Y \"$P\""), env), mtime);   // kept
+        QCOMPARE(exec(server, QStringLiteral("stat -c %X \"$P\""), env).trimmed().toLongLong(),
+                 changes.accessed.toMSecsSinceEpoch() / 1000);
+        QVERIFY(b->stat(file, &entry).ok());
+        QCOMPARE(entry.accessed, changes.accessed);   // XS-2
+        changes.mode = 0170644;   // checked first: nothing changes
+        changes.accessed = QDateTime();
+        changes.modified = QDateTime::currentDateTimeUtc();
+        QCOMPARE(b->setAttributes(file, changes).error(), Error::Internal);
+        QCOMPARE(exec(server, QStringLiteral("stat -c %Y \"$P\""), env), mtime);
+        QCOMPARE(b->setAttributes(dir + QStringLiteral("/missing"), changes = AttributeChanges()).error(), Error::NotFound);
+
+        // XS-2: names by users-groups-by-id@openssh.com, never Hidden; a
+        // file of another user needs a lookup beyond the start directory's.
+        exec(server, QStringLiteral("touch \"$P\" && chown root:root \"$P\""),
+             { QStringLiteral("P=") + disk + QStringLiteral("/.rootfile") });
+        QVector<Entry> entries;
+        QVERIFY(b->list(dir, &entries).ok());
+        for (const Entry &e : entries) {
+            if (e.name == QLatin1String(".rootfile")) {
+                QCOMPARE(e.uid, qint64(0));
+                if (ownership || !e.owner.isEmpty())
+                    QCOMPARE(e.owner, QStringLiteral("root"));
+                QVERIFY(!e.flags.testFlag(EntryFlag::Hidden));
+                continue;
+            }
+            QVERIFY(e.uid > 0 && e.gid > 0);
+            // Without the extension libssh may still take names from
+            // OpenSSH's "ls -l" style long names in listings.
+            if (ownership || !e.owner.isEmpty())
+                QCOMPARE(e.owner, QStringLiteral("alice"));
+            if (ownership || !e.group.isEmpty())
+                QCOMPARE(e.group, QStringLiteral("alice"));
+            QVERIFY(!e.flags.testFlag(EntryFlag::Hidden));
+        }
+        QVERIFY(b->stat(dir, &entry).ok());
+        QCOMPARE(entry.owner, ownership ? QStringLiteral("alice") : QString());
+        // stat has no "ls -l" long name: only the extension names the owner.
+        QVERIFY(b->stat(dir + QStringLiteral("/.rootfile"), &entry).ok());
+        QCOMPARE(entry.owner, ownership ? QStringLiteral("root") : QString());
+        QCOMPARE(entry.group, ownership ? QStringLiteral("root") : QString());
+        exec(server, QStringLiteral("rm -rf \"$P\""), { QStringLiteral("P=") + disk });
+    }
+
+    // XS-3: at most 512 symlink targets are resolved per listing.
+    void v2SymlinkCap()
+    {
+        auto b = signedIn(filesParams(QStringLiteral("o103"), QStringLiteral("default"), QStringLiteral("alice")), m_password);
+        QVERIFY(b);
+        const QString dir = unique(QStringLiteral("netvfs-it/cap-"));
+        const QString disk = QStringLiteral("/home/alice/") + dir;
+        QVERIFY(b->makePath(dir).ok());
+        exec(QStringLiteral("o103"), QStringLiteral("cd \"$P\" && touch t && for i in $(seq 1 515); do ln -s t l$i; done "
+                                                    "&& chown -R alice \"$P\""),
+             { QStringLiteral("P=") + disk });
+        ListOptions options;
+        options.resolveSymlinkTypes = true;
+        QVector<Entry> all;
+        struct Collect : ListSink {
+            QVector<Entry> *out = nullptr;
+            bool entries(const QVector<Entry> &batch) override
+            {
+                *out += batch;
+                return true;
+            }
+        } sink;
+        sink.out = &all;
+        QVERIFY(b->list(dir, &sink, options).ok());
+        int resolved = 0;
+        int unknown = 0;
+        for (const Entry &e : all) {
+            if (e.type != EntryType::Symlink)
+                continue;
+            if (e.targetType == EntryType::File)
+                ++resolved;
+            if (e.flags.testFlag(EntryFlag::TargetUnknown))
+                ++unknown;
+        }
+        QCOMPARE(resolved, 512);
+        QCOMPARE(unknown, 3);
+        exec(QStringLiteral("o103"), QStringLiteral("rm -rf \"$P\""), { QStringLiteral("P=") + disk });
+    }
+
+    // XS-7: several handles at once, read-ahead, resume, commit with mtime.
+    void v2Handles()
+    {
+        auto b = signedIn(filesParams(QStringLiteral("o103"), QStringLiteral("default"), QStringLiteral("alice")), m_password);
+        QVERIFY(b);
+        const Capabilities caps = b->capabilities();
+        QVERIFY(caps.has(Capability::ReadHandles) && caps.has(Capability::EfficientRanges));
+        QVERIFY(caps.has(Capability::WriteResume) && caps.has(Capability::SetModifiedOnUpload));
+        const QString dir = unique(QStringLiteral("netvfs-it/handles-"));
+        const QString disk = QStringLiteral("/home/alice/") + dir;
+        QVERIFY(b->makePath(dir).ok());
+        QByteArray content(6 * 1024 * 1024 + 123, Qt::Uninitialized);
+        for (int i = 0; i < content.size(); ++i)
+            content[i] = static_cast<char>((static_cast<quint32>(i) * 7919u) >> 5);
+        QVERIFY(put(b.get(), dir + QStringLiteral("/data.bin"), content));
+
+        // Four writers and four readers open together, used in turns.
+        std::vector<std::unique_ptr<WriteHandle>> writers;
+        std::vector<std::unique_ptr<ReadHandle>> readers;
+        for (int i = 0; i < 4; ++i) {
+            WriteHandle *w = nullptr;
+            QVERIFY(b->openWrite(dir + QStringLiteral("/w%1").arg(i), WriteOptions(), &w).ok());
+            writers.emplace_back(w);
+            ReadHandle *rh = nullptr;
+            QVERIFY(b->openRead(dir + QStringLiteral("/data.bin"), &rh).ok());
+            readers.emplace_back(rh);
+        }
+        const int piece = 300000;
+        for (int round = 0; round < 3; ++round) {
+            for (int i = 0; i < 4; ++i) {
+                QVERIFY(writers[i]->write(content.constData() + round * piece, piece).ok());
+                QByteArray part;
+                const qint64 offset = qint64(i) * 1000000 + round * piece;
+                QVERIFY(readers[i]->read(offset, piece, &part).ok());
+                QCOMPARE(part, content.mid(int(offset), piece));
+            }
+        }
+        for (int i = 0; i < 4; ++i) {
+            QCOMPARE(writers[i]->position(), qint64(3 * piece));
+            QVERIFY(writers[i]->commit().ok());
+            QVERIFY(readers[i]->close().ok());
+        }
+        QCOMPARE(serverSha(QStringLiteral("o103"), disk + QStringLiteral("/w3")),
+                 QCryptographicHash::hash(content.left(3 * piece), QCryptographicHash::Sha256).toHex());
+
+        // Sequential reads with a read-ahead hint, then jumps.
+        ReadHandle *raw = nullptr;
+        QVERIFY(b->openRead(dir + QStringLiteral("/data.bin"), &raw).ok());
+        std::unique_ptr<ReadHandle> reader(raw);
+        reader->readAhead(0, 4 * 1024 * 1024);
+        QByteArray all;
+        QByteArray part;
+        for (qint64 offset = 0; offset < content.size(); offset += 65536) {
+            QVERIFY(reader->read(offset, 65536, &part).ok());
+            all += part;
+        }
+        QCOMPARE(all, content);
+        for (const qint64 offset : { qint64(5000000), qint64(17), qint64(3000001), qint64(content.size() - 5) }) {
+            QVERIFY(reader->read(offset, 70000, &part).ok());
+            QCOMPARE(part, content.mid(int(offset), 70000));
+        }
+        reader->readAhead(content.size() - 100, 1000);
+        QVERIFY(reader->read(content.size() - 100, 1000, &part).ok());
+        QCOMPARE(part, content.right(100));
+        QVERIFY(reader->close().ok());
+
+        // Resume: only at the remote size (ProtocolError, as Transfer reports).
+        WriteOptions resume;
+        resume.disposition = WriteOptions::Disposition::Resume;
+        resume.resumeOffset = 3 * piece + 1;
+        WriteHandle *w = nullptr;
+        QCOMPARE(b->openWrite(dir + QStringLiteral("/w0"), resume, &w).error(), Error::ProtocolError);
+        QVERIFY(!w);
+        resume.resumeOffset = 3 * piece;
+        resume.modified = QDateTime(QDate(2010, 1, 2), QTime(3, 4, 5), Qt::UTC);
+        QVERIFY(b->openWrite(dir + QStringLiteral("/w0"), resume, &w).ok());
+        std::unique_ptr<WriteHandle> writer(w);
+        QCOMPARE(writer->position(), qint64(3 * piece));
+        QVERIFY(writer->write(content.constData() + 3 * piece, 1000).ok());
+        QVERIFY(writer->commit().ok());
+        QCOMPARE(serverSha(QStringLiteral("o103"), disk + QStringLiteral("/w0")),
+                 QCryptographicHash::hash(content.left(3 * piece + 1000), QCryptographicHash::Sha256).toHex());
+        QCOMPARE(exec(QStringLiteral("o103"), QStringLiteral("stat -c %Y \"$P\""), { QStringLiteral("P=") + disk + QStringLiteral("/w0") })
+                     .trimmed().toLongLong(),
+                 resume.modified.toMSecsSinceEpoch() / 1000);
+        QCOMPARE(writer->write("x", 1).error(), Error::Internal);   // committed
+
+        // upload() honours WriteOptions::modified too (SetModifiedOnUpload).
+        UploadOptions upload;
+        upload.write.modified = resume.modified.addDays(1);
+        QVERIFY(put(b.get(), dir + QStringLiteral("/stamped"), "s", upload));
+        QCOMPARE(exec(QStringLiteral("o103"), QStringLiteral("stat -c %Y \"$P\""),
+                      { QStringLiteral("P=") + disk + QStringLiteral("/stamped") })
+                     .trimmed().toLongLong(),
+                 upload.write.modified.toMSecsSinceEpoch() / 1000);
+
+        // abort() leaves what was written; a lost connection invalidates.
+        QVERIFY(b->openWrite(dir + QStringLiteral("/aborted"), WriteOptions(), &w).ok());
+        writer.reset(w);
+        QVERIFY(writer->write("partial", 7).ok());
+        writer->abort();
+        QVERIFY(b->openWrite(dir + QStringLiteral("/lost"), WriteOptions(), &w).ok());
+        writer.reset(w);
+        QVERIFY(b->openRead(dir + QStringLiteral("/data.bin"), &raw).ok());
+        reader.reset(raw);
+        b->disconnect();
+        QCOMPARE(writer->write("x", 1).error(), Error::ConnectionLost);
+        QCOMPARE(writer->commit().error(), Error::ConnectionLost);
+        QCOMPARE(reader->read(0, 1, &part).error(), Error::ConnectionLost);
+        exec(QStringLiteral("o103"), QStringLiteral("rm -rf \"$P\""), { QStringLiteral("P=") + disk });
+    }
+
+    // XS-9: the exec channel with allow_shell=true, and its helpers.
+    void v2Shell()
+    {
+        ConnectionParams p = filesParams(QStringLiteral("o103"), QStringLiteral("default"), QStringLiteral("alice"));
+        auto plain = signedIn(p, m_password);
+        QVERIFY(plain);
+        QVERIFY(!plain->capabilities().has(Capability::ShellExec));   // S-3 without the option
+        QVERIFY(!ShellExec::of(plain.get()));
+        ExecResult result;
+        QCOMPARE(dynamic_cast<ShellExec *>(plain.get())->exec({ QStringLiteral("true") }, ExecOptions(), &result).error(),
+                 Error::Unsupported);
+        QCOMPARE(plain->copy(QStringLiteral("a"), QStringLiteral("b"), CopyOptions()).error(), Error::Unsupported);
+        plain.reset();
+
+        p.options.insert(QStringLiteral("allow_shell"), QStringLiteral("true"));
+        auto b = signedIn(p, m_password);
+        QVERIFY(b);
+        const Capabilities caps = b->capabilities();
+        QVERIFY(caps.has(Capability::ShellExec) && caps.has(Capability::ServerCopy)
+                && caps.has(Capability::ServerCopyRecursive) && caps.has(Capability::Checksums));
+        QCOMPARE(caps.checksumAlgorithms, QStringList { QStringLiteral("sha256") });
+        ShellExec *shell = ShellExec::of(b.get());
+        QVERIFY(shell);
+
+        const QString tricky = QStringLiteral("a'b \"c\" $HOME `id` ; | & \\ * ü");
+        QVERIFY(shell->exec({ QStringLiteral("printf"), QStringLiteral("%s"), tricky }, ExecOptions(), &result).ok());
+        QCOMPARE(QString::fromUtf8(result.out), tricky);
+        QCOMPARE(result.exitStatus, 0);
+        QVERIFY(shell->exec({ QStringLiteral("sh"), QStringLiteral("-c"), QStringLiteral("echo oops >&2; exit 3") },
+                            ExecOptions(), &result).ok());
+        QCOMPARE(result.exitStatus, 3);
+        QCOMPARE(result.err, QByteArray("oops\n"));
+        ExecOptions small;
+        small.maxOutput = 1000;
+        QVERIFY(shell->exec({ QStringLiteral("head"), QStringLiteral("-c"), QStringLiteral("100000"), QStringLiteral("/dev/zero") },
+                            small, &result).ok());
+        QVERIFY(result.truncated);
+        QCOMPARE(result.out.size(), 1000);
+        ExecOptions quick;
+        quick.timeoutMs = 500;
+        QElapsedTimer timer;
+        timer.start();
+        QCOMPARE(shell->exec({ QStringLiteral("sleep"), QStringLiteral("10") }, quick, &result).error(), Error::Timeout);
+        QVERIFY(timer.elapsed() < 3000);
+        // cancel() closes the channel (C-9).
+        Result r;
+        qint64 ms = runCanceled(b.get(), [&shell, &result]() {
+            return shell->exec({ QStringLiteral("sleep"), QStringLiteral("30") }, ExecOptions(), &result);
+        }, &r);
+        QCOMPARE(r.error(), Error::Canceled);
+        QVERIFY2(ms <= CancelBoundMs, qPrintable(QString::number(ms)));
+        b->resetCancel();
+        Entry entry;
+        QVERIFY(b->stat(QString(), &entry).ok());
+
+        // copy() and checksum() over the fixed templates.
+        const QString dir = unique(QStringLiteral("netvfs-it/shell-"));
+        const QString disk = QStringLiteral("/home/alice/") + dir;
+        QVERIFY(b->makePath(dir + QStringLiteral("/tree/sub")).ok());
+        QByteArray data(1234567, 'q');
+        data[100] = 'x';
+        QVERIFY(put(b.get(), dir + QStringLiteral("/-dash file"), data));
+        QVERIFY(put(b.get(), dir + QStringLiteral("/tree/sub/inner.txt"), "inner"));
+        QByteArray digest;
+        QVERIFY(b->checksum(dir + QStringLiteral("/-dash file"), QStringLiteral("sha256"), &digest).ok());
+        QCOMPARE(digest, QCryptographicHash::hash(data, QCryptographicHash::Sha256));
+        QCOMPARE(b->checksum(dir + QStringLiteral("/missing"), QStringLiteral("sha256"), &digest).error(), Error::NotFound);
+        QCOMPARE(b->checksum(dir + QStringLiteral("/-dash file"), QStringLiteral("md5"), &digest).error(), Error::Unsupported);
+        QVERIFY(b->copy(dir + QStringLiteral("/-dash file"), dir + QStringLiteral("/copy"), CopyOptions()).ok());
+        QCOMPARE(serverSha(QStringLiteral("o103"), disk + QStringLiteral("/copy")),
+                 QCryptographicHash::hash(data, QCryptographicHash::Sha256).toHex());
+        QCOMPARE(b->copy(dir + QStringLiteral("/-dash file"), dir + QStringLiteral("/copy"), CopyOptions()).error(),
+                 Error::AlreadyExists);
+        CopyOptions recursive;
+        recursive.recursive = true;
+        QCOMPARE(b->copy(dir + QStringLiteral("/tree"), dir + QStringLiteral("/tree2"), CopyOptions()).error(),
+                 Error::IsADirectory);
+        QVERIFY(b->copy(dir + QStringLiteral("/tree"), dir + QStringLiteral("/tree2"), recursive).ok());
+        QCOMPARE(exec(QStringLiteral("o103"), QStringLiteral("cat \"$P\""),
+                      { QStringLiteral("P=") + disk + QStringLiteral("/tree2/sub/inner.txt") }),
+                 QByteArray("inner"));
+
+        // serverFind
+        QStringList found;
+        QVERIFY(shell->find(dir, QStringLiteral("*.txt"), 10, &found).ok());
+        QCOMPARE(found.size(), 2);
+        for (const QString &path : found)
+            QVERIFY2(path.startsWith(dir + QStringLiteral("/tree")) && path.endsWith(QLatin1String("/sub/inner.txt")),
+                     qPrintable(path));
+        QVERIFY(shell->find(dir, QStringLiteral("*"), 3, &found).ok());
+        QCOMPARE(found.size(), 3);
+        QCOMPARE(shell->find(dir + QStringLiteral("/copy"), QStringLiteral("*"), 3, &found).error(), Error::NotADirectory);
+        exec(QStringLiteral("o103"), QStringLiteral("rm -rf \"$P\""), { QStringLiteral("P=") + disk });
+
+        // A forced internal-sftp account grants no usable exec channel.
+        SshKeyMaterial key;
+        QVERIFY(m_tools->generate(&key).ok());
+        authorizeKey(QStringLiteral("o103"), QStringLiteral("backup"), key.publicLine);
+        ConnectionParams jailed = params(QStringLiteral("o103"), QStringLiteral("hardened"), QStringLiteral("backup"),
+                                         QStringLiteral("publickey"));
+        jailed.options.insert(QStringLiteral("allow_shell"), QStringLiteral("true"));
+        b = signedIn(jailed, encodeKeySecret(key.privateKey));
+        QVERIFY(b);
+        QVERIFY(!b->capabilities().has(Capability::ShellExec));
+        QVERIFY(!b->capabilities().has(Capability::ServerCopy));
+    }
+
+    // XC-21: OpenSSH refuses a session beyond MaxSessions (2 on "otp").
+    void v2MaxSessions()
+    {
+        ConnectionParams p = filesParams(QStringLiteral("o96"), QStringLiteral("otp"), QStringLiteral("alice"));
+        p.options.insert(QStringLiteral("allow_shell"), QStringLiteral("true"));
+        ChannelHog b;
+        Result r = signIn(&b, p, m_password);
+        QVERIFY2(r.ok(), qPrintable(r.toString()));
+        QVERIFY(b.capabilities().has(Capability::ShellExec));   // sftp + the probe: two
+        ExecResult result;
+        Result first = b.exec({ QStringLiteral("true") }, ExecOptions(), &result);
+        QVERIFY2(first.ok(), qPrintable(first.toString()));
+        // The second session, as soon as the server let the exec's go.
+        bool occupied = false;
+        for (int attempt = 0; attempt < 20 && !occupied; ++attempt) {
+            b.release();
+            occupied = b.occupy();
+            if (!occupied)
+                QTest::qWait(100);
+        }
+        QVERIFY(occupied);
+        r = b.exec({ QStringLiteral("true") }, ExecOptions(), &result);
+        QCOMPARE(r.error(), Error::TooManyConnections);
+        b.release();
+        // The server frees the slot once it has handled the close.
+        for (int attempt = 0; attempt < 20 && !r.ok(); ++attempt) {
+            QTest::qWait(100);
+            r = b.exec({ QStringLiteral("true") }, ExecOptions(), &result);
+        }
+        QVERIFY2(r.ok(), qPrintable(r.toString()));
+        Entry entry;
+        QVERIFY(b.stat(QString(), &entry).ok());
+    }
+
+    // XS-11 against PAM with the one-time password stub.
+    void v2KeyboardInteractive()
+    {
+        const QByteArray code = m_otp;
+        ConnectionParams p = params(QStringLiteral("o96"), QStringLiteral("otp"), QStringLiteral("otp"));
+        auto b = std::unique_ptr<Backend>(BackendLoader::create(QStringLiteral("sftp")));
+
+        // Without a prompter S-11 is unchanged: the password answers its
+        // round, the code round is refused.
+        Result r = signIn(b.get(), p, m_password);
+        QCOMPARE(r.error(), Error::AuthFailed);
+        QVERIFY2(r.message().contains(QLatin1String("interactive sign-in")), qPrintable(r.message()));
+
+        // Password mode with a prompter: only the code is asked.
+        AnsweringPrompter prompter(m_password, code);
+        r = signIn(b.get(), p, m_password, &prompter);
+        QVERIFY2(r.ok(), qPrintable(r.toString()));
+        QCOMPARE(prompter.asked, QStringList { QStringLiteral("Verification code: ") });
+        Entry entry;
+        QVERIFY(b->stat(QString(), &entry).ok());
+
+        // auth_mode=interactive without a stored secret: both rounds asked.
+        ConnectionParams interactive = params(QStringLiteral("o96"), QStringLiteral("otp"), QStringLiteral("otp"),
+                                              QStringLiteral("interactive"));
+        prompter.asked.clear();
+        r = signIn(b.get(), interactive, QByteArray(), &prompter);
+        QVERIFY2(r.ok(), qPrintable(r.toString()));
+        QCOMPARE(prompter.asked.size(), 2);
+        QVERIFY(prompter.asked.first().startsWith(QLatin1String("Password")));
+        QCOMPARE(signIn(b.get(), interactive, QByteArray()).error(), Error::AuthFailed);   // no prompter
+        AnsweringPrompter wrong(m_password, "000000");
+        QCOMPARE(signIn(b.get(), p, m_password, &wrong).error(), Error::AuthFailed);
+        AnsweringPrompter declining(m_password, code);
+        declining.decline = true;
+        r = signIn(b.get(), p, m_password, &declining);
+        QCOMPARE(r.error(), Error::AuthFailed);
+        QVERIFY2(r.message().contains(QLatin1String("not completed")), qPrintable(r.message()));
+
+        // Partial success: publickey, then the code.
+        SshKeyMaterial key;
+        QVERIFY(m_tools->generate(&key).ok());
+        authorizeKey(QStringLiteral("o96"), QStringLiteral("keyotp"), key.publicLine);
+        const ConnectionParams keyotp = params(QStringLiteral("o96"), QStringLiteral("otp"), QStringLiteral("keyotp"),
+                                               QStringLiteral("publickey"));
+        r = signIn(b.get(), keyotp, encodeKeySecret(key.privateKey));
+        QCOMPARE(r.error(), Error::AuthFailed);   // S-13 without a prompter
+        QVERIFY2(r.message().contains(QLatin1String("second sign-in step")), qPrintable(r.message()));
+        prompter.asked.clear();
+        r = signIn(b.get(), keyotp, encodeKeySecret(key.privateKey), &prompter);
+        QVERIFY2(r.ok(), qPrintable(r.toString()));
+        QCOMPARE(prompter.asked, QStringList { QStringLiteral("Verification code: ") });
+
+        // Partial success: password, then the code.
+        const ConnectionParams pwotp = params(QStringLiteral("o96"), QStringLiteral("otp"), QStringLiteral("pwotp"));
+        QCOMPARE(signIn(b.get(), pwotp, m_password).error(), Error::AuthFailed);
+        prompter.asked.clear();
+        r = signIn(b.get(), pwotp, m_password, &prompter);
+        QVERIFY2(r.ok(), qPrintable(r.toString()));
+        QCOMPARE(prompter.asked, QStringList { QStringLiteral("Verification code: ") });
+
+        // An echoed round: refused without a prompter (S-11), asked with one.
+        const ConnectionParams echo = params(QStringLiteral("o96"), QStringLiteral("otp"), QStringLiteral("twoprompt"));
+        QCOMPARE(signIn(b.get(), echo, m_password).error(), Error::AuthFailed);
+        prompter.asked.clear();
+        r = signIn(b.get(), echo, m_password, &prompter);
+        QVERIFY2(r.ok(), qPrintable(r.toString()));
+        QCOMPARE(prompter.asked.size(), 2);
+        QVERIFY(prompter.echoed.contains(QStringLiteral("Token label: ")));
+
+        // XC-22: cancel() ends a wait in the prompter.
+        SilentPrompter nobody;
+        Backend *raw = b.get();
+        QFuture<Result> future = QtConcurrent::run([this, raw, &p, &nobody]() { return signIn(raw, p, m_password, &nobody); });
+        QVERIFY(nobody.waitAsked(30000));   // the backend waits in the prompter now
+        QElapsedTimer timer;
+        timer.start();
+        raw->cancel();
+        r = future.result();
+        QCOMPARE(r.error(), Error::Canceled);
+        QVERIFY2(timer.elapsed() <= CancelBoundMs, qPrintable(QString::number(timer.elapsed())));
+        b->resetCancel();
+    }
+
+    // C-9: cancel() ends blocking requests while the server holds its
+    // answers back (vendor/patches/libssh/0002), and the connection stays
+    // usable afterwards.
+    void v2CancelBlocking()
+    {
+        auto b = signedIn(filesParams(QStringLiteral("o89"), QStringLiteral("hold"), QStringLiteral("alice")), m_password);
+        QVERIFY(b);
+        QVERIFY(b->makePath(QStringLiteral("netvfs-it/cancel")).ok());
+        Backend *raw = b.get();
+        const QVector<QPair<QString, std::function<Result()>>> calls = {
+            { QStringLiteral("stat"), [raw]() { Entry e; return raw->stat(QStringLiteral("netvfs-it/cancel"), &e); } },
+            { QStringLiteral("list"), [raw]() { QVector<Entry> e; return raw->list(QStringLiteral("netvfs-it/cancel"), &e); } },
+            { QStringLiteral("makeDir"), [raw]() { return raw->makeDir(QStringLiteral("netvfs-it/cancel/new"), false); } },
+        };
+        for (const auto &call : calls) {
+            exec(QStringLiteral("o89"), QStringLiteral("touch /tmp/hold"));
+            Result r;
+            const qint64 ms = runCanceled(raw, call.second, &r);
+            exec(QStringLiteral("o89"), QStringLiteral("rm -f /tmp/hold"));
+            QVERIFY2(r.error() == Error::Canceled, qPrintable(call.first + QLatin1String(": ") + r.toString()));
+            QVERIFY2(ms <= CancelBoundMs, qPrintable(call.first + QLatin1String(": ") + QString::number(ms)));
+            raw->resetCancel();
+            Entry entry;
+            const Result after = raw->stat(QStringLiteral("netvfs-it/cancel"), &entry);
+            QVERIFY2(after.ok(), qPrintable(call.first + QLatin1String(" then stat: ") + after.toString()));
+        }
+    }
+
+    // XS-6 (stat-check rename path) and XS-9 on a server that is not OpenSSH.
+    void v2ProFtpd()
+    {
+        ConnectionParams p = filesParams(QStringLiteral("pro"), QStringLiteral("sftp"), QStringLiteral("alice"));
+        p.options.insert(QStringLiteral("allow_shell"), QStringLiteral("true"));
+        clearLog();
+        auto b = signedIn(p, m_password);
+        QVERIFY(b);
+        QVERIFY2(capturedLog().contains(QLatin1String("mod_sftp")), qPrintable(capturedLog()));
+        const Capabilities caps = b->capabilities();
+        QVERIFY(!caps.has(Capability::NativeNoReplace));
+        QVERIFY(!caps.has(Capability::ShellExec));   // mod_sftp runs no commands
+        QVERIFY(!caps.has(Capability::ServerCopy) && !caps.has(Capability::Checksums));
+        QVERIFY(caps.has(Capability::AtomicReplace) && caps.has(Capability::SpaceInfo));
+        const QString dir = unique(QStringLiteral("netvfs-it/pro-"));
+        QVERIFY(b->makePath(dir).ok());
+        QVERIFY(put(b.get(), dir + QStringLiteral("/a"), "a"));
+        QVERIFY(put(b.get(), dir + QStringLiteral("/b"), "bb"));
+        QCOMPARE(b->rename(dir + QStringLiteral("/b"), dir + QStringLiteral("/a"), RenameMode::NoReplace).error(),
+                 Error::AlreadyExists);
+        QVERIFY(b->rename(dir + QStringLiteral("/b"), dir + QStringLiteral("/c"), RenameMode::NoReplace).ok());
+        QVERIFY(b->rename(dir + QStringLiteral("/c"), dir + QStringLiteral("/a"), RenameMode::Replace).ok());
+        QCOMPARE(exec(QStringLiteral("pro"), QStringLiteral("cat \"$P\""),
+                      { QStringLiteral("P=/home/alice/") + dir + QStringLiteral("/a") }),
+                 QByteArray("bb"));
+        QVERIFY(b->keepAlive().ok());
+        exec(QStringLiteral("pro"), QStringLiteral("rm -rf \"$P\""), { QStringLiteral("P=/home/alice/") + dir });
     }
 };
 

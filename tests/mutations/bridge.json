@@ -1,0 +1,352 @@
+[
+  {
+    "name": "XB-5 peer uid not checked",
+    "file": "src/bridge/lib/peercheck.cpp",
+    "search": "    if (credentials.uid != m_env.ownUid)",
+    "replace": "    if (false)",
+    "test": "build/tests/bridge/units/tst_bridgeunits"
+  },
+  {
+    "name": "XB-5 peer executable not checked",
+    "file": "src/bridge/lib/peercheck.cpp",
+    "search": "    if (exe.st_dev != expected.st_dev || exe.st_ino != expected.st_ino)",
+    "replace": "    if (false)",
+    "test": "build/tests/bridge/units/tst_bridgeunits"
+  },
+  {
+    "name": "XB-5 pid reuse during the check not detected",
+    "file": "src/bridge/lib/peercheck.cpp",
+    "search": "    if (qint64 after = 0; !startTime(pid, &after) || after != before)",
+    "replace": "    if (qint64 after = 0; !startTime(pid, &after))",
+    "test": "build/tests/bridge/units/tst_bridgeunits"
+  },
+  {
+    "name": "XB-5 process started after accept passes",
+    "file": "src/bridge/lib/peercheck.cpp",
+    "search": "    if (const qint64 now = m_env.bootTicksNow(); now >= 0 && before > now)",
+    "replace": "    if (const qint64 now = m_env.bootTicksNow(); false && now)",
+    "test": "build/tests/bridge/units/tst_bridgeunits"
+  },
+  {
+    "name": "XB-5 exited pidfd process passes",
+    "file": "src/bridge/lib/peercheck.cpp",
+    "search": "    if (pidfd >= 0 && !pidfdAlive(pidfd, pid))",
+    "replace": "    if (false)",
+    "test": "build/tests/bridge/units/tst_bridgeunits"
+  },
+  {
+    "name": "XB-5 refused connection is kept",
+    "file": "src/bridge/lib/bridgeserver.cpp",
+    "search": "        if (const Result r = m_peerChecker->check(connection->socketFd()); !r.ok()) {",
+    "replace": "        if (const Result r = m_peerChecker->check(connection->socketFd()); false) {",
+    "test": "build/tests/bridge/server/tst_bridgeserver"
+  },
+  {
+    "name": "XB-6 location calls without consent",
+    "file": "src/bridge/lib/session.cpp",
+    "search": "        info && info->needsConsent && m_server->consent() != Consent::Granted) {",
+    "replace": "        info && false) {",
+    "test": "build/tests/bridge/server/tst_bridgeserver"
+  },
+  {
+    "name": "XB-6 ListLocations lists without consent",
+    "file": "src/bridge/lib/session.cpp",
+    "search": "    const QVector<LocationSpec> locations = m_session.m_server->consent() == Consent::Granted",
+    "replace": "    const QVector<LocationSpec> locations = true",
+    "test": "build/tests/bridge/server/tst_bridgeserver"
+  },
+  {
+    "name": "XB-6 first Hello does not ask",
+    "file": "src/bridge/lib/session.cpp",
+    "search": "    if (server->consent() == Consent::Unknown)\n        server->requestConsent();",
+    "replace": "    if (false)\n        server->requestConsent();",
+    "test": "build/tests/bridge/server/tst_bridgeserver"
+  },
+  {
+    "name": "XB-6 revocation keeps connections open",
+    "file": "src/bridge/lib/bridgeserver.cpp",
+    "search": "            s->closeConnection();",
+    "replace": "            Q_UNUSED(s)",
+    "test": "build/tests/bridge/server/tst_bridgeserver"
+  },
+  {
+    "name": "XB-6 consent file changes ignored",
+    "file": "src/bridge/lib/bridgeserver.cpp",
+    "search": "    applyConsent(m_consentStore.consent(m_config.consumer.id));\n}",
+    "replace": "}",
+    "test": "build/tests/bridge/server/tst_bridgeserver"
+  },
+  {
+    "name": "XB-8 calls before Hello accepted",
+    "file": "src/bridge/lib/session.cpp",
+    "search": "    if (!m_hello && call.method != Method::Hello) {",
+    "replace": "    if (false) {",
+    "test": "build/tests/bridge/server/tst_bridgeserver"
+  },
+  {
+    "name": "XB-11 fd access mode not checked",
+    "file": "src/bridge/lib/fdcheck.cpp",
+    "search": "    if (!accessModeAllows(flags, need)) {",
+    "replace": "    if (false) {",
+    "test": "build/tests/bridge/units/tst_bridgeunits"
+  },
+  {
+    "name": "XB-11 fd type not checked",
+    "file": "src/bridge/lib/fdcheck.cpp",
+    "search": "    if (!regular && !fifo)\n",
+    "replace": "    if (false)\n",
+    "test": "build/tests/bridge/units/tst_bridgeunits"
+  },
+  {
+    "name": "XB-11 O_APPEND accepted for downloads",
+    "file": "src/bridge/lib/fdcheck.cpp",
+    "search": "    if (need == FdAccess::Write && regular && (flags & O_APPEND))",
+    "replace": "    if (false)",
+    "test": "build/tests/bridge/units/tst_bridgeunits"
+  },
+  {
+    "name": "XB-11 FIFO upload without size accepted",
+    "file": "src/bridge/lib/fdcheck.cpp",
+    "search": "    if (info.fifo && size < 0 && provider == QLatin1String(\"webdav\"))",
+    "replace": "    if (false)",
+    "test": "build/tests/bridge/units/tst_bridgeunits"
+  },
+  {
+    "name": "XB-11 regular files read at the consumer's offset",
+    "file": "src/bridge/lib/fdcheck.cpp",
+    "search": "            n = ::pread(m_fd, data, static_cast<size_t>(want), static_cast<off_t>(m_offset + position));",
+    "replace": "            n = ::read(m_fd, data, static_cast<size_t>(want));",
+    "test": "build/tests/bridge/units/tst_bridgeunits"
+  },
+  {
+    "name": "XB-11 fd checked after the network work",
+    "file": "src/bridge/lib/sessionjobs.cpp",
+    "search": "        !checked.ok()) {\n",
+    "replace": "        false) {\n",
+    "test": "build/tests/bridge/server/tst_bridgeserver"
+  },
+  {
+    "name": "XB-13 disconnect does not cancel",
+    "file": "src/bridge/lib/session.cpp",
+    "search": "    for (auto it = m_ops.begin(); it != m_ops.end(); ++it)\n        it->token->cancel();",
+    "replace": "    for (auto it = m_ops.begin(); it != m_ops.end(); ++it)\n        Q_UNUSED(it);",
+    "test": "build/tests/bridge/server/tst_bridgeserver"
+  },
+  {
+    "name": "XB-14 ad-hoc identity not checked",
+    "file": "src/bridge/lib/connector.cpp",
+    "search": "    r = checkAdHocIdentity(seen, spec, context);",
+    "replace": "    r = Result::success();",
+    "test": "build/tests/bridge/server/tst_bridgeserver"
+  },
+  {
+    "name": "XB-14 accepted ad-hoc identity not pinned",
+    "file": "src/bridge/lib/connector.cpp",
+    "search": "    if (!m_knownHosts->setPin(key, seen.toPin()))",
+    "replace": "    if (false)",
+    "test": "build/tests/bridge/server/tst_bridgeserver"
+  },
+  {
+    "name": "XB-14 account attention not set",
+    "file": "src/bridge/lib/connector.cpp",
+    "search": "; attention != Attention::None) {",
+    "replace": "; false) {",
+    "test": "build/tests/bridge/server/tst_bridgeserver"
+  },
+  {
+    "name": "XB-14 ForgetAdHoc keeps the pin",
+    "file": "src/bridge/lib/locationbook.cpp",
+    "search": "    m_knownHosts.remove(it->second.hostKey());",
+    "replace": "",
+    "test": "build/tests/bridge/server/tst_bridgeserver"
+  },
+  {
+    "name": "XB-16 secret left in the argument list",
+    "file": "src/bridge/lib/args.cpp",
+    "search": "    if (method == Method::ConnectAdHoc || method == Method::Answer)\n        (*args)[1] = QVariant();",
+    "replace": "    if (method == Method::Answer)\n        (*args)[1] = QVariant();",
+    "test": "build/tests/bridge/units/tst_bridgeunits"
+  },
+  {
+    "name": "XB-16 secret not wiped",
+    "file": "src/bridge/lib/args.cpp",
+    "search": "    secureWipe(call->secret);",
+    "replace": "",
+    "test": "build/tests/bridge/units/tst_bridgeunits"
+  },
+  {
+    "name": "XB-16 password in ad-hoc URL accepted",
+    "file": "src/bridge/lib/session.cpp",
+    "search": "    Result r = Url::parse(call.text, params, path);",
+    "replace": "    Result r = Url::parse(call.text, params, path);\n    if (r.error() == Error::SecurityPolicy)\n        r = Result::success();",
+    "test": "build/tests/bridge/server/tst_bridgeserver"
+  },
+  {
+    "name": "XB-11 local ad-hoc location accepted",
+    "file": "src/bridge/lib/session.cpp",
+    "search": "    if (r.ok() && params->provider == QLatin1String(\"local\"))",
+    "replace": "    if (false)",
+    "test": "build/tests/bridge/server/tst_bridgeserver"
+  },
+  {
+    "name": "XB-17 request limit",
+    "file": "src/bridge/lib/serverparts.cpp",
+    "search": "    if (m_requests >= ConsumerLimits::Requests)",
+    "replace": "    if (false)",
+    "test": "build/tests/bridge/server/tst_bridgeserver"
+  },
+  {
+    "name": "XB-17 handle limit",
+    "file": "src/bridge/lib/serverparts.cpp",
+    "search": "    if (m_handles >= ConsumerLimits::Handles)",
+    "replace": "    if (false)",
+    "test": "build/tests/bridge/server/tst_bridgeserver"
+  },
+  {
+    "name": "XB-17 job limit",
+    "file": "src/bridge/lib/serverparts.cpp",
+    "search": "    if (m_jobs >= ConsumerLimits::Jobs)",
+    "replace": "    if (false)",
+    "test": "build/tests/bridge/server/tst_bridgeserver"
+  },
+  {
+    "name": "XB-17 retryAfterMs missing",
+    "file": "src/bridge/lib/protocol.cpp",
+    "search": "    if (result.retryAfterMs() >= 0)\n        extra.insert",
+    "replace": "    if (false)\n        extra.insert",
+    "test": "build/tests/bridge/units/tst_bridgeunits"
+  },
+  {
+    "name": "XB-17 Read above 1 MiB",
+    "file": "src/bridge/lib/args.cpp",
+    "search": "    if (max > Limits::MaxReadBytes)",
+    "replace": "    if (false)",
+    "test": "build/tests/bridge/units/tst_bridgeunits"
+  },
+  {
+    "name": "XB-17 ListBatch above 512",
+    "file": "src/bridge/lib/args.cpp",
+    "search": "    if (call->number > static_cast<quint32>(Limits::MaxListBatch))",
+    "replace": "    if (false)",
+    "test": "build/tests/bridge/units/tst_bridgeunits"
+  },
+  {
+    "name": "XB-17 list batches not split",
+    "file": "src/bridge/lib/streaming.h",
+    "search": "        if (m_items.size() >= m_maxItems)\n            return flush();",
+    "replace": "",
+    "test": "build/tests/bridge/server/tst_bridgeserver"
+  },
+  {
+    "name": "XSEC-7 paths not normalised",
+    "file": "src/bridge/lib/args.cpp",
+    "search": "    return Paths::normalize(Names::decode(raw), out);",
+    "replace": "    *out = Names::decode(raw);\n    return Result::success();",
+    "test": "build/tests/bridge/units/tst_bridgeunits"
+  },
+  {
+    "name": "XSEC-7 offsets not range-checked",
+    "file": "src/bridge/lib/args.cpp",
+    "search": "    if (v < 0 || v > Limits::MaxOffset)",
+    "replace": "    if (false)",
+    "test": "build/tests/bridge/units/tst_bridgeunits"
+  },
+  {
+    "name": "XSEC-7 unknown options accepted",
+    "file": "src/bridge/lib/args.cpp",
+    "search": "    if (key == QLatin1String(\"atimeMs\"))\n        return optionTime(key, value, &call->attributes.accessed);\n    return unknownOption(key);",
+    "replace": "    if (key == QLatin1String(\"atimeMs\"))\n        return optionTime(key, value, &call->attributes.accessed);\n    return Result::success();",
+    "test": "build/tests/bridge/units/tst_bridgeunits"
+  },
+  {
+    "name": "XSEC-7 signature not checked",
+    "file": "src/bridge/lib/args.cpp",
+    "search": "    if (signature != QLatin1String(it->info.in))",
+    "replace": "    if (false)",
+    "test": "build/tests/bridge/units/tst_bridgeunits"
+  },
+  {
+    "name": "XSEC-7 argument count not checked",
+    "file": "src/bridge/lib/args.cpp",
+    "search": "    if (args->size() != completeTypeCount(it->info.in))",
+    "replace": "    if (false)",
+    "test": "build/tests/bridge/units/tst_bridgeunits"
+  },
+  {
+    "name": "XB-3 consumer DataDir with '..' accepted",
+    "file": "src/core/consentstore.cpp",
+    "search": "        && hasOnlyPathChars(dataDir) && hasCleanComponents(dataDir);",
+    "replace": "        && hasOnlyPathChars(dataDir);",
+    "test": "build/tests/bridge/units/tst_bridgeunits"
+  },
+  {
+    "name": "XB-3 generator accepts invalid ids",
+    "file": "src/bridge/generator/netvfs-bridge-generator.c",
+    "search": "        if (netvfs_valid_id(stem))\n            memcpy",
+    "replace": "        if (stem[0] != '\\0')\n            memcpy",
+    "test": "build/tests/bridge/generator/tst_generator"
+  },
+  {
+    "name": "XB-3 generator accepts DataDir outside home",
+    "file": "src/bridge/generator/netvfs-bridge-generator.c",
+    "search": "    if (!netvfs_valid_data_dir(c->data_dir))",
+    "replace": "    if (0)",
+    "test": "build/tests/bridge/generator/tst_generator"
+  },
+  {
+    "name": "XB-4 rendezvous restarts a healthy socket",
+    "file": "src/bridge/generator/netvfs-bridge-generator.c",
+    "search": "'test -S \\\"$$0\\\" && systemctl",
+    "replace": "'false && systemctl",
+    "test": "build/tests/bridge/generator/tst_generator"
+  },
+  {
+    "name": "XB-4 socket mode",
+    "file": "src/bridge/generator/netvfs-bridge-generator.c",
+    "search": "\"SocketMode=0600\\n\"",
+    "replace": "\"SocketMode=0666\\n\"",
+    "test": "build/tests/bridge/generator/tst_generator"
+  },
+  {
+    "name": "XB-9 entry flags not sent",
+    "file": "src/bridge/lib/protocol.cpp",
+    "search": "        .uint16(static_cast<quint16>(entry.flags))",
+    "replace": "        .uint16(0)",
+    "test": "build/tests/bridge/units/tst_bridgeunits"
+  },
+  {
+    "name": "XB-9 contract XML differs from the method table",
+    "file": "src/bridge/lib/args.cpp",
+    "search": "{ Method::Rename, \"Rename\", \"sayayb\", \"\"",
+    "replace": "{ Method::Rename, \"Rename\", \"sayay\", \"\"",
+    "test": "build/tests/bridge/contract/tst_contract"
+  },
+  {
+    "name": "XB-3 generator links folders open to others",
+    "file": "src/bridge/generator/netvfs-bridge-generator.c",
+    "search": "    if (mkdir(wants, 0700) != 0 && errno != EEXIST)",
+    "replace": "    if (mkdir(wants, 0755) != 0 && errno != EEXIST)",
+    "test": "build/tests/bridge/generator/tst_generator"
+  },
+  {
+    "name": "XB-3 generator takes any folder override",
+    "file": "src/bridge/generator/netvfs-bridge-generator.c",
+    "search": "    if (overridden && overridden[0] == '/' && strlen(overridden) <= MAX_PATH_LENGTH / 2 && clean_folder(overridden))",
+    "replace": "    if (overridden && overridden[0] != '\\0' && (clean_folder(overridden) || 1))",
+    "test": "build/tests/bridge/generator/tst_generator"
+  },
+  {
+    "name": "XB-3 generator logs file names raw",
+    "file": "src/bridge/generator/netvfs-bridge-generator.c",
+    "search": "    escaped(name, shown, sizeof(shown));",
+    "replace": "    snprintf(shown, sizeof(shown), \"%s\", name);\n    (void)escaped;",
+    "test": "build/tests/bridge/generator/tst_generator"
+  },
+  {
+    "name": "XB-3 generator follows links out of the folder",
+    "file": "src/bridge/generator/netvfs-bridge-generator.c",
+    "search": "    return strncmp(resolved, base, n) == 0 && resolved[n] == '/';",
+    "replace": "    return n > 0;",
+    "test": "build/tests/bridge/generator/tst_generator"
+  }
+]

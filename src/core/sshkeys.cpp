@@ -101,7 +101,7 @@ Result installAuthorizedKey(Backend *backend, const QString &publicLine)
     if (r.ok()) {
         QBuffer sink(&existing);
         sink.open(QIODevice::WriteOnly);
-        r = backend->download(QLatin1String(AuthorizedKeys), &sink, nullptr);
+        r = backend->download(QLatin1String(AuthorizedKeys), &sink, DownloadOptions(), nullptr);
         if (!r.ok())
             return r;
     } else if (r.error() != Error::NotFound) {

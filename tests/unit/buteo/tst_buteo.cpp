@@ -71,7 +71,7 @@ struct SessionSource
         auto session = std::make_unique<AccountSession>(manager.get(), secrets.release(), parent);
         manager.release()->setParent(session.get());
         AccountSession *raw = session.release();   // owned by `parent`
-        QTimer::singleShot(0, raw, [raw, accountId]() { raw->start(accountId); });
+        QTimer::singleShot(0, raw, [raw, accountId]() { raw->start(accountId, Service::Backup); });
         last = raw;
         return raw;
     }
@@ -429,11 +429,17 @@ private slots:
         QCOMPARE(BackupClient::minorCodeFor(Error::Canceled), Buteo::SyncResults::ABORTED);
         QCOMPARE(BackupClient::minorCodeFor(Error::NetworkUnreachable), Buteo::SyncResults::CONNECTION_ERROR);
         QCOMPARE(BackupClient::minorCodeFor(Error::Timeout), Buteo::SyncResults::CONNECTION_ERROR);
+        // XC-21: a dropped connection and server limits are retryable like an unreachable server.
+        QCOMPARE(BackupClient::minorCodeFor(Error::ConnectionLost), Buteo::SyncResults::CONNECTION_ERROR);
+        QCOMPARE(BackupClient::minorCodeFor(Error::TooManyConnections), Buteo::SyncResults::CONNECTION_ERROR);
+        QCOMPARE(BackupClient::minorCodeFor(Error::RateLimited), Buteo::SyncResults::CONNECTION_ERROR);
         QCOMPARE(BackupClient::minorCodeFor(Error::AuthFailed), Buteo::SyncResults::AUTHENTICATION_FAILURE);
         QCOMPARE(BackupClient::minorCodeFor(Error::ServerIdentityChanged), Buteo::SyncResults::AUTHENTICATION_FAILURE);
         QCOMPARE(BackupClient::minorCodeFor(Error::ServerIdentityUnknown), Buteo::SyncResults::AUTHENTICATION_FAILURE);
         for (Error e : { Error::SecurityPolicy, Error::PermissionDenied, Error::NotFound, Error::AlreadyExists,
-                         Error::NoSpace, Error::Unsupported, Error::ProtocolError, Error::Internal })
+                         Error::NoSpace, Error::Unsupported, Error::ProtocolError, Error::Internal,
+                         Error::NotADirectory, Error::IsADirectory, Error::DirectoryNotEmpty, Error::InvalidName,
+                         Error::ReadOnlyFilesystem, Error::Locked, Error::NotModified })
             QCOMPARE(BackupClient::minorCodeFor(e), Buteo::SyncResults::INTERNAL_ERROR);
 
         QCOMPARE(BackupClient::minorCodeForAbort(Sync::SYNC_ABORTED), Buteo::SyncResults::ABORTED);
@@ -502,9 +508,9 @@ private slots:
         const QStringList before = service->serverLogAtCreate;
         QCOMPARE(before.value(0), QStringLiteral("connect"));
         QCOMPARE(before.value(1), QStringLiteral("authenticate"));
-        QVERIFY(before.contains(QStringLiteral("makePath:") + dir));
-        QVERIFY(before.contains(QStringLiteral("remove:") + dir + QStringLiteral("/old.tar.part")));
-        QVERIFY(!before.contains(QStringLiteral("remove:") + dir + QStringLiteral("/recent.tar.part")));
+        QVERIFY(before.contains(QStringLiteral("makeDir:") + dir));
+        QVERIFY(before.contains(QStringLiteral("removeFile:") + dir + QStringLiteral("/old.tar.part")));
+        QVERIFY(!before.contains(QStringLiteral("removeFile:") + dir + QStringLiteral("/recent.tar.part")));
         QCOMPARE(before.last(), QStringLiteral("disconnect"));
 
         QTest::qWait(50);
@@ -526,6 +532,12 @@ private slots:
         QCOMPARE(serverLog().count(QStringLiteral("connect")), 2);
         QCOMPARE(serverLog().count(QStringLiteral("disconnect")), 2);
         QVERIFY(serverLog().contains(QStringLiteral("upload:") + remote + QStringLiteral(".part")));
+        // XT-6: backup behaviour unchanged by API v2: private files and
+        // folders (S-20), ".part" naming, Replace on commit.
+        QVERIFY(serverLog().contains(QStringLiteral("rename:") + remote + QStringLiteral(".part->") + remote
+                                     + QStringLiteral(":replace")));
+        QCOMPARE(FakeServer::instance()->node(remote).mode, 0600);
+        QCOMPARE(FakeServer::instance()->lastParams.option(QStringLiteral("dir_mode")), QStringLiteral("0700"));
         QCOMPARE(FakeServer::instance()->liveBackends, 0);
 
         // The local archive and its directory are gone.
@@ -550,6 +562,9 @@ private slots:
         Outcome outcome = run(makeClient(Op::Backup, id));
         QCOMPARE(outcome.d->successes, 1);
         QVERIFY(serverHas(QStringLiteral("Backups/device-1/") + QFileInfo(service->lastArchivePath).fileName()));
+        // S-20 kept by XC-23: folders the backup creates are private.
+        QCOMPARE(FakeServer::instance()->node(QStringLiteral("Backups")).mode, 0700);
+        QCOMPARE(FakeServer::instance()->node(QStringLiteral("Backups/device-1")).mode, 0700);
     }
 
     // Signals for other accounts are ignored; a parent directory that still
@@ -655,7 +670,11 @@ private slots:
                                      << int(Buteo::SyncResults::CONNECTION_ERROR);
         QTest::newRow("timeout") << QStringLiteral("connect") << int(Error::Timeout)
                                  << int(Buteo::SyncResults::CONNECTION_ERROR);
-        QTest::newRow("makePath") << QStringLiteral("makePath") << int(Error::PermissionDenied)
+        QTest::newRow("connection lost") << QStringLiteral("list") << int(Error::ConnectionLost)
+                                         << int(Buteo::SyncResults::CONNECTION_ERROR);
+        QTest::newRow("too many connections") << QStringLiteral("connect") << int(Error::TooManyConnections)
+                                              << int(Buteo::SyncResults::CONNECTION_ERROR);
+        QTest::newRow("makePath") << QStringLiteral("makeDir") << int(Error::PermissionDenied)
                                   << int(Buteo::SyncResults::INTERNAL_ERROR);
         QTest::newRow("stale parts") << QStringLiteral("list") << int(Error::ProtocolError)
                                      << int(Buteo::SyncResults::INTERNAL_ERROR);
@@ -1010,6 +1029,25 @@ private slots:
         QCOMPARE(serverLog().count(QStringLiteral("disconnect")), 1);
     }
 
+    // SPEC 8.5, XT-6: every non-folder entry except ".part" files is listed,
+    // as in API v1, also symlinks whose target type is unknown and specials.
+    void queryListsNonFolders()
+    {
+        const int id = createAccount();
+        FakeServer *server = FakeServer::instance();
+        server->addFile(QStringLiteral("Backups/device-1/a.tar"), "a");
+        server->addSymlink(QStringLiteral("Backups/device-1/link.tar"), QStringLiteral("a.tar"));
+        server->addSymlink(QStringLiteral("Backups/device-1/dangling.tar"), QStringLiteral("nowhere"));
+        server->addSpecial(QStringLiteral("Backups/device-1/fifo"));
+        server->addDir(QStringLiteral("Backups/device-1/sub"));
+        server->addFile(QStringLiteral("Backups/device-1/c.tar.part"), "c");
+        Outcome outcome = run(makeClient(Op::BackupQuery, id));
+        QCOMPARE(outcome.d->successes, 1);
+        QCOMPARE(service->cloudBackups.at(0).second,
+                 QStringList() << QStringLiteral("Backups/device-1/a.tar") << QStringLiteral("Backups/device-1/dangling.tar")
+                               << QStringLiteral("Backups/device-1/fifo") << QStringLiteral("Backups/device-1/link.tar"));
+    }
+
     // B-2 with an absolute, untidy backups_path.
     void queryRemoteDirectory()
     {
@@ -1282,7 +1320,7 @@ private slots:
         FakeServer::instance()->failOps.insert(QStringLiteral("list"), Result(Error::Timeout));
         QCOMPARE(BackupSteps::listBackups(&backend, QStringLiteral("d"), &paths).error(), Error::Timeout);
         QVERIFY(paths.isEmpty());
-        FakeServer::instance()->failOps.insert(QStringLiteral("makePath"), Result(Error::NoSpace));
+        FakeServer::instance()->failOps.insert(QStringLiteral("makeDir"), Result(Error::NoSpace));
         QCOMPARE(BackupSteps::preflight(&backend, QStringLiteral("d")).error(), Error::NoSpace);
         QCOMPARE(serverLog().count(QStringLiteral("list:d")), 1);   // only the listBackups() above
     }

@@ -2,22 +2,22 @@
   {
     "name": "free space check skipped",
     "file": "src/core/transfer.cpp",
-    "search": "if (r.ok() && available >= 0 && available < size) {",
+    "search": "if (r.ok() && available >= 0 && available < needed) {",
     "replace": "if (false) {",
     "test": "build/tests/unit/transfer/tst_transfer"
   },
   {
     "name": "upload goes straight to final name",
     "file": "src/core/transfer.cpp",
-    "search": "const QString part = partName(target);\n    CountingReader",
-    "replace": "const QString part = target;\n    CountingReader",
+    "search": "        return partName(target);\n    return Paths::join(Paths::parent(target), policy.tempName);",
+    "replace": "        return target;\n    return Paths::join(Paths::parent(target), policy.tempName);",
     "test": "build/tests/unit/transfer/tst_transfer"
   },
   {
     "name": "part not removed after failed upload",
     "file": "src/core/transfer.cpp",
-    "search": "    const Result r = backend->remove(path);\n    if (!r.ok() && r.error() != Error::NotFound)",
-    "replace": "    const Result r = Result();\n    Q_UNUSED(path)\n    if (!r.ok() && r.error() != Error::NotFound)",
+    "search": "    if (const Result r = backend->removeFile(path); !r.ok() && r.error() != Error::NotFound)",
+    "replace": "    Q_UNUSED(path)\n    if (const Result r = Result(); !r.ok() && r.error() != Error::NotFound)",
     "test": "build/tests/unit/transfer/tst_transfer"
   },
   {
@@ -30,7 +30,7 @@
   {
     "name": "remote size not compared",
     "file": "src/core/transfer.cpp",
-    "search": "if (r.ok() && entry.size != reader.count()) {",
+    "search": "if (r.ok() && entry.size != sent) {",
     "replace": "if (false) {",
     "test": "build/tests/unit/transfer/tst_transfer"
   },
@@ -138,5 +138,187 @@
     "search": "    qCWarning(lcNetVfsCore) << \"Could not remove\" << what << errorName(r.error());",
     "replace": "    qCWarning(lcNetVfsCore) << \"Could not remove\" << what << r.toString();",
     "test": "build/tests/unit/transfer/tst_transfer"
+  },
+  {
+    "name": "XH-1 commit ignores the rename mode",
+    "file": "src/core/transfer.cpp",
+    "search": "r = backend->rename(part, target, policy.commitMode);",
+    "replace": "r = backend->rename(part, target, RenameMode::Replace);",
+    "test": "build/tests/unit/transfer/tst_transfer"
+  },
+  {
+    "name": "XH-1 direct NoReplace upload truncates",
+    "file": "src/core/transfer.cpp",
+    "search": "        ? WriteOptions::Disposition::CreateNew : WriteOptions::Disposition::Truncate;",
+    "replace": "        ? WriteOptions::Disposition::Truncate : WriteOptions::Disposition::Truncate;",
+    "test": "build/tests/unit/transfer/tst_transfer"
+  },
+  {
+    "name": "XH-1 create mode not passed",
+    "file": "src/core/transfer.cpp",
+    "search": "    options.write.createMode = policy.createMode;",
+    "replace": "",
+    "test": "build/tests/unit/transfer/tst_transfer"
+  },
+  {
+    "name": "XH-1 resume offset not checked",
+    "file": "src/core/transfer.cpp",
+    "search": "    if (existing.size != policy.resumeOffset) {",
+    "replace": "    if (false) {",
+    "test": "build/tests/unit/transfer/tst_transfer"
+  },
+  {
+    "name": "XH-1 resume source not positioned",
+    "file": "src/core/transfer.cpp",
+    "search": "        return source->seek(offset);",
+    "replace": "        return source->seek(0);",
+    "test": "build/tests/unit/transfer/tst_transfer"
+  },
+  {
+    "name": "XH-1 failed resume removes the temporary file",
+    "file": "src/core/transfer.cpp",
+    "search": "    if (policy.useTempName && !policy.resume)",
+    "replace": "    if (policy.useTempName)",
+    "test": "build/tests/unit/transfer/tst_transfer"
+  },
+  {
+    "name": "XH-1 stale pattern ignored",
+    "file": "src/core/transfer.cpp",
+    "search": "const QRegExp matcher(pattern, Qt::CaseSensitive, QRegExp::WildcardUnix);",
+    "replace": "const QRegExp matcher(QStringLiteral(\"*.part\"), Qt::CaseSensitive, QRegExp::WildcardUnix);",
+    "test": "build/tests/unit/transfer/tst_transfer"
+  },
+  {
+    "name": "XC-16 trusted TLS without pin prompts",
+    "file": "src/core/identity.cpp",
+    "search": "    if (pin.isEmpty() && tls && seen.systemTrusted)\n        return Result::success();",
+    "replace": "",
+    "test": "build/tests/unit/core/tst_core"
+  },
+  {
+    "name": "XC-16 systemTrusted accepted for SSH",
+    "file": "src/core/identity.cpp",
+    "search": "    if (pin.isEmpty() && tls && seen.systemTrusted)",
+    "replace": "    if (pin.isEmpty() && seen.systemTrusted)",
+    "test": "build/tests/unit/core/tst_core"
+  },
+  {
+    "name": "XC-16 untrusted TLS without pin accepted",
+    "file": "src/core/identity.cpp",
+    "search": "    if (pin.isEmpty() && tls && seen.systemTrusted)",
+    "replace": "    if (pin.isEmpty() && tls)",
+    "test": "build/tests/unit/core/tst_core"
+  },
+  {
+    "name": "XC-16 trust overrides a pin mismatch",
+    "file": "src/core/identity.cpp",
+    "search": "if (ServerIdentity::fromPin(pin) == seen)",
+    "replace": "if (ServerIdentity::fromPin(pin) == seen || seen.systemTrusted)",
+    "test": "build/tests/unit/core/tst_core"
+  },
+  {
+    "name": "XC-16 TLS fingerprint not SHA-256",
+    "file": "src/core/types.cpp",
+    "search": "QCryptographicHash::hash(spkiDer, QCryptographicHash::Sha256)",
+    "replace": "QCryptographicHash::hash(spkiDer, QCryptographicHash::Sha1)",
+    "test": "build/tests/unit/core/tst_core"
+  },
+  {
+    "name": "XC-16 TLS pin read as SSH",
+    "file": "src/core/types.cpp",
+    "search": "    if (parts.at(0) == QLatin1String(TlsAlgorithm))\n        return fromTlsSpki(blob);",
+    "replace": "",
+    "test": "build/tests/unit/core/tst_core"
+  },
+  {
+    "name": "XC-4 overlong 3-byte sequences decoded",
+    "file": "src/core/names.cpp",
+    "search": "            lo = 0xA0;          // overlong",
+    "replace": "            lo = 0x80;          // overlong",
+    "test": "build/tests/unit/core/tst_core"
+  },
+  {
+    "name": "XC-4 surrogates in UTF-8 decoded",
+    "file": "src/core/names.cpp",
+    "search": "            hi = 0x9F;          // UTF-16 surrogates",
+    "replace": "            hi = 0xBF;          // UTF-16 surrogates",
+    "test": "build/tests/unit/core/tst_core"
+  },
+  {
+    "name": "XC-4 code points above U+10FFFF decoded",
+    "file": "src/core/names.cpp",
+    "search": "            hi = 0x8F;          // > U+10FFFF",
+    "replace": "            hi = 0xBF;          // > U+10FFFF",
+    "test": "build/tests/unit/core/tst_core"
+  },
+  {
+    "name": "XC-4 overlong 4-byte sequences decoded",
+    "file": "src/core/names.cpp",
+    "search": "            lo = 0x90;          // overlong",
+    "replace": "            lo = 0x80;          // overlong",
+    "test": "build/tests/unit/core/tst_core"
+  },
+  {
+    "name": "XC-4 overlong 2-byte lead accepted",
+    "file": "src/core/names.cpp",
+    "search": "if (b0 >= 0xC2 && b0 <= 0xDF) {",
+    "replace": "if (b0 >= 0xC0 && b0 <= 0xDF) {",
+    "test": "build/tests/unit/core/tst_core"
+  },
+  {
+    "name": "XC-4 broken continuation accepted",
+    "file": "src/core/names.cpp",
+    "search": "        if (!isContinuation(b))\n            return 0;",
+    "replace": "",
+    "test": "build/tests/unit/core/tst_core"
+  },
+  {
+    "name": "XC-4 escapes not restored by encode",
+    "file": "src/core/names.cpp",
+    "search": "            out.append(char(u - EscapeBase));",
+    "replace": "            appendUtf8(&out, u);",
+    "test": "build/tests/unit/core/tst_core"
+  },
+  {
+    "name": "XC-4 foreign surrogates encodable",
+    "file": "src/core/names.cpp",
+    "search": "        if (const char16_t u = name.at(i).unicode(); QChar::isSurrogate(u) && !isEscape(u))\n            return false;",
+    "replace": "",
+    "test": "build/tests/unit/core/tst_core"
+  },
+  {
+    "name": "XC-4 escapes shown raw",
+    "file": "src/core/names.cpp",
+    "search": "            result[i] = QChar(ushort(Replacement));",
+    "replace": "            continue;",
+    "test": "build/tests/unit/core/tst_core"
+  },
+  {
+    "name": "XC-4 escapes not detected",
+    "file": "src/core/names.cpp",
+    "search": "        if (isEscape(name.at(i).unicode()))\n            return true;",
+    "replace": "",
+    "test": "build/tests/unit/core/tst_core"
+  },
+  {
+    "name": "XC-1 plugin IID not checked",
+    "file": "src/core/backendloader.cpp",
+    "search": "!iid.isEmpty() && iid != QLatin1String(BackendFactoryIid)",
+    "replace": "false",
+    "test": "build/tests/unit/core/tst_core"
+  },
+  {
+    "name": "remove() helper does not fall back to removeDir",
+    "file": "src/core/backend.cpp",
+    "search": "    if (r.error() == Error::IsADirectory)\n        return removeDir(path);",
+    "replace": "",
+    "test": "build/tests/unit/core/tst_core"
+  },
+  {
+    "name": "makePath() helper exclusive",
+    "file": "src/core/backend.cpp",
+    "search": "        r = makeDir(current, false);",
+    "replace": "        r = makeDir(current, true);",
+    "test": "build/tests/unit/core/tst_core"
   }
 ]

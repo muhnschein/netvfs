@@ -6,7 +6,8 @@ import org.netvfs.accounts 1.0
 // Creates or updates a netvfs account and its signond identity through
 // Sailfish.Accounts (SPEC 6.2, 6.3, 7.3 step 5, 7.5).
 //
-// create(): account -> settings, display name, backup service enabled ->
+// create(): account -> settings, display name, the chosen services enabled
+// (<p>-backup and/or <p>-files, SPEC-v2 XA-1) ->
 // identity via createSignInCredentials("netvfs", "default", ...) without a
 // symmetric key (A-3) -> default_credentials_username = user@host (A-2) ->
 // done(accountId). Any failure after the account exists removes it again,
@@ -32,7 +33,8 @@ QtObject {
     property string _provider
     property var _params: ({})
     property string _secret
-    property string _backupsPath
+    property var _services: ({})
+    property string _signInService
     property int _accountId
     property bool _creating
     property Account _account: null
@@ -61,9 +63,11 @@ QtObject {
         }
     }
 
-    // params: NetVfsHelpers.makeParams() result with the accepted pin;
-    // secret: password or "netvfs-key-v1:..." (SshKeyTool.secret()).
-    function create(params, secret, backupsPath, name) {
+    // params: connection parameters with the accepted pin options;
+    // secret: password, token, "netvfs-key-v1:..." (SshKeyTool.secret()), or
+    // "" for accounts without a secret (XA-7: interactive, smb guest);
+    // services: { backup: bool, files: bool, backupsPath, filesRoot }.
+    function create(params, secret, services, name) {
         if (busy) {
             failed(_busyText())
             return
@@ -78,7 +82,8 @@ QtObject {
         _provider = params.provider
         _params = params
         _secret = secret
-        _backupsPath = backupsPath
+        _services = services
+        _signInService = NetVfsHelpers.creationSettings(params, services)["signInService"]
         displayName = name.length > 0 ? name : NetVfsHelpers.accountLabel(params.username, params.host)
         _stage = "account"
         if (!_manager.createAccount(_provider)) {
@@ -101,6 +106,10 @@ QtObject {
         _provider = params.provider
         _params = params
         _secret = secret
+        // SPEC-v2 XP-1: the backup service comes with netvfs-backup-<provider>.
+        var backupService = NetVfsHelpers.backupServiceName(_provider)
+        _signInService = NetVfsProviders.offersService(_provider, "backup") && NetVfsHelpers.isServiceInstalled(backupService)
+                ? backupService : NetVfsHelpers.filesServiceName(_provider)
         _open(accountId, "update")
     }
 
@@ -136,14 +145,17 @@ QtObject {
         for (var i = 0; i < removed.length; ++i) {
             account.removeConfigurationValue("", removed[i])
         }
-        var service = changes["service"] || {}
-        for (key in service) {
-            account.setConfigurationValue(changes["serviceName"], key, service[key])
+        var services = changes["services"] || {}
+        for (var name in services) {
+            var values = services[name]
+            for (key in values) {
+                account.setConfigurationValue(name, key, values[key])
+            }
         }
     }
 
     function _signInParameters(account) {
-        return account.signInParameters(NetVfsHelpers.backupServiceName(_provider), _params.username, _secret)
+        return account.signInParameters(_signInService, _params.username, _secret)
     }
 
     function _statusChanged(account) {
@@ -184,10 +196,13 @@ QtObject {
     }
 
     function _configure(account) {
-        var changes = NetVfsHelpers.creationSettings(_params, _backupsPath)
+        var changes = NetVfsHelpers.creationSettings(_params, _services)
         account.displayName = displayName
         _apply(account, changes)
-        account.enableWithService(changes["serviceName"])
+        var enable = changes["enable"] || []
+        for (var i = 0; i < enable.length; ++i) {
+            account.enableWithService(enable[i])
+        }
         account.enabled = true
         _stage = "configured"
         account.sync()

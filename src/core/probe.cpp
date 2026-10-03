@@ -8,6 +8,15 @@
 namespace NetVfs {
 
 const char ProbeFilePrefix[] = ".netvfs-probe-";
+const char DirModeOption[] = "dir_mode";
+const char BackupDirMode[] = "0700";
+
+ConnectionParams withBackupDirMode(const ConnectionParams &params)
+{
+    ConnectionParams result = params;
+    result.options.insert(QLatin1String(DirModeOption), QLatin1String(BackupDirMode));
+    return result;
+}
 
 Result verifyAccess(Backend *backend, const QString &dir, qint64 *freeBytes)
 {
@@ -29,7 +38,7 @@ Result verifyAccess(Backend *backend, const QString &dir, qint64 *freeBytes)
     QByteArray content("netvfs write test\n");
     QBuffer buffer(&content);
     buffer.open(QIODevice::ReadOnly);
-    r = backend->upload(&buffer, path, nullptr);
+    r = backend->upload(&buffer, path, UploadOptions(), nullptr);
     if (!r.ok()) {
         backend->remove(path);
         return r;
@@ -45,6 +54,27 @@ Result verifyAccess(Backend *backend, const QString &dir, qint64 *freeBytes)
     if (r.error() == Error::Unsupported)
         r = Result::success();
     return r;
+}
+
+Result verifyBrowseAccess(Backend *backend, const QString &root, qint64 *freeBytes)
+{
+    if (freeBytes)
+        *freeBytes = -1;
+
+    QString target;
+    Result r = Paths::normalize(root, &target);
+    if (!r.ok())
+        return r;
+    Entry entry;
+    r = backend->stat(target, &entry);
+    if (!r.ok())
+        return r;
+    if (!entry.isDir())
+        return Result(Error::NotADirectory, QStringLiteral("The start folder is not a folder"));
+
+    if (qint64 available = -1; backend->freeSpace(target, &available).ok() && freeBytes)
+        *freeBytes = available;
+    return Result::success();
 }
 
 } // namespace NetVfs

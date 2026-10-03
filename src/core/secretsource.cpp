@@ -37,13 +37,13 @@ void SignonSecretSource::fetch(quint32 credentialsId)
 {
     finish();
     if (credentialsId == 0) {
-        emit failed(Result(Error::AuthFailed, QStringLiteral("The account has no stored credentials")));
+        noSecret(Result(Error::AuthFailed, QStringLiteral("The account has no stored credentials")));
         return;
     }
 
     m_identity = SignOn::Identity::existingIdentity(credentialsId, this);
     if (!m_identity) {
-        emit failed(Result(Error::AuthFailed, QStringLiteral("The stored credentials are missing")));
+        noSecret(Result(Error::AuthFailed, QStringLiteral("The stored credentials are missing")));
         return;
     }
     m_session = m_identity->createSession(QLatin1String(AuthMethod));
@@ -69,9 +69,22 @@ void SignonSecretSource::onResponse(const SignOn::SessionData &data)
     secureWipe(bytes);
     finish();
     if (credentials.secret.isEmpty())
-        emit failed(Result(Error::AuthFailed, QStringLiteral("The stored secret is empty")));
+        noSecret(Result(Error::AuthFailed, QStringLiteral("The stored secret is empty")), credentials.userName);
     else
         emit fetched(credentials);
+}
+
+bool acceptsMissingSecret(const Result &lookup, bool secretOptional)
+{
+    return secretOptional && lookup.error() == Error::AuthFailed;
+}
+
+void SignonSecretSource::noSecret(const Result &lookup, const QString &userName)
+{
+    if (acceptsMissingSecret(lookup, secretOptional()))
+        emit fetched(Credentials(userName, QByteArray()));
+    else
+        emit failed(lookup);
 }
 
 Result secretErrorFromSignon(int signonErrorType)
@@ -97,7 +110,7 @@ void SignonSecretSource::onError(const SignOn::Error &error)
     qCWarning(lcNetVfsCore) << "Credentials lookup failed with signond error" << error.type();
     qCDebug(lcNetVfsCore) << "signond:" << error.message();
     finish();
-    emit failed(secretErrorFromSignon(error.type()));
+    noSecret(secretErrorFromSignon(error.type()));
 }
 
 void SignonSecretSource::finish()

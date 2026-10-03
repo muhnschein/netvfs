@@ -1,0 +1,103 @@
+From: muhnschein <tan_anemone.0l@icloud.com>
+Date: Fri, 2 Oct 2026 16:00:00 +0000
+Subject: [PATCH] sftp: add sftp_rename_noreplace()
+
+sftp_rename() prefers posix-rename@openssh.com, which replaces an
+existing target, and asks SFTP v4+ servers to overwrite. Callers that must
+not replace the target have no way to send a plain SSH_FXP_RENAME, which
+the draft protocol defines to fail on an existing target (OpenSSH
+implements it with link(2) + unlink(2) for files).
+
+Add sftp_rename_noreplace(), sharing the request code with sftp_rename().
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+diff -ru a/include/libssh/sftp.h b/include/libssh/sftp.h
+--- a/include/libssh/sftp.h	2026-10-02 15:29:34.633085703 +0000
++++ b/include/libssh/sftp.h	2026-10-02 15:29:45.865442912 +0000
+@@ -967,6 +967,25 @@
+ LIBSSH_API int sftp_rename(sftp_session sftp, const char *original, const  char *newname);
+ 
+ /**
++ * @brief Rename or move a file or directory with a plain SSH_FXP_RENAME.
++ *
++ * Unlike sftp_rename(), never uses posix-rename@openssh.com and never asks
++ * the server to overwrite: the draft protocol requires the rename to fail
++ * when newname exists (OpenSSH implements this atomically for files).
++ *
++ * @param sftp          The sftp session handle.
++ *
++ * @param original      The original path of the file or directory.
++ *
++ * @param newname       The new path, which must not exist.
++ *
++ * @return              0 on success, < 0 on error with ssh and sftp error set.
++ *
++ * @see sftp_get_error()
++ */
++LIBSSH_API int sftp_rename_noreplace(sftp_session sftp, const char *original, const char *newname);
++
++/**
+  * @brief Set file attributes on a file, directory or symbolic link.
+  *
+  * Note, that this function can only set time values using 32 bit values due to
+diff -ru a/src/sftp.c b/src/sftp.c
+--- a/src/sftp.c	2026-10-02 15:29:34.630653198 +0000
++++ b/src/sftp.c	2026-10-02 15:29:45.862502796 +0000
+@@ -1849,7 +1849,10 @@
+ }
+ 
+ /* code written by nick */
+-int sftp_rename(sftp_session sftp, const char *original, const char *newname)
++static int sftp_rename_request(sftp_session sftp,
++                               const char *original,
++                               const char *newname,
++                               int replace)
+ {
+     sftp_status_message status = NULL;
+     sftp_message msg = NULL;
+@@ -1873,11 +1876,12 @@
+ 
+     /*
+      * posix-rename@openssh.com extension will be used
+-     * if it is supported by sftp
++     * if it is supported by sftp, unless the caller asked for
++     * a plain rename that does not replace newname
+      */
+-    if (sftp_extension_supported(sftp,
+-                                 extension_name,
+-                                 "1")) {
++    if (replace && sftp_extension_supported(sftp,
++                                            extension_name,
++                                            "1")) {
+         rc = ssh_buffer_pack(buffer,
+                              "dsss",
+                              id,
+@@ -1905,7 +1909,7 @@
+             return -1;
+         }
+ 
+-        if (sftp->version >= 4) {
++        if (replace && sftp->version >= 4) {
+             /*
+              * POSIX rename atomically replaces newpath,
+              * we should do the same only available on >=v4
+@@ -1961,6 +1965,18 @@
+     return -1;
+ }
+ 
++int sftp_rename(sftp_session sftp, const char *original, const char *newname)
++{
++    return sftp_rename_request(sftp, original, newname, 1);
++}
++
++int sftp_rename_noreplace(sftp_session sftp,
++                          const char *original,
++                          const char *newname)
++{
++    return sftp_rename_request(sftp, original, newname, 0);
++}
++
+ /* Code written by Nick */
+ /* Set file attributes on a file, directory or symbolic link. */
+ int sftp_setstat(sftp_session sftp, const char *file, sftp_attributes attr)

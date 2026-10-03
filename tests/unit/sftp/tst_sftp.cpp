@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 // SFTP backend behaviour that needs no SSH server (SPEC-sftp 2, 3, 5.1, 7).
 #include "backendloader.h"
+#include "sftpshell.h"
 #include "sftpsupport.h"
+#include "shellexec.h"
 #include "sshkeys.h"
 
 #include <libssh/libssh.h>
@@ -34,6 +36,34 @@ using namespace NetVfs::Sftp;
 Q_DECLARE_METATYPE(NetVfs::Error)
 
 namespace {
+
+// A prompter that answers from a script and records what it was asked.
+class ScriptedPrompter : public AuthPrompter
+{
+public:
+    bool answer(const QString &n, const QString &i, const QVector<AuthPrompt> &p, QVector<QByteArray> *answers) override
+    {
+        name = n;
+        instruction = i;
+        prompts = p;
+        *answers = reply;
+        for (QByteArray &a : *answers)
+            a.detach();
+        return !decline;
+    }
+    QVector<QByteArray> reply;
+    bool decline = false;
+    QString name;
+    QString instruction;
+    QVector<AuthPrompt> prompts;
+};
+
+void writeLocal(const QString &path, const QByteArray &data)
+{
+    QFile file(path);
+    if (file.open(QIODevice::WriteOnly))
+        file.write(data);
+}
 
 QByteArray wireUint32(quint32 n)
 {
@@ -288,11 +318,17 @@ private slots:
         QTest::newRow("write protect") << SSH_FX_WRITE_PROTECT << "" << Error::PermissionDenied;
         QTest::newRow("exists") << SSH_FX_FILE_ALREADY_EXISTS << "" << Error::AlreadyExists;
         QTest::newRow("unsupported") << SSH_FX_OP_UNSUPPORTED << "" << Error::Unsupported;
-        QTest::newRow("lost") << SSH_FX_CONNECTION_LOST << "gone" << Error::NetworkUnreachable;
-        QTest::newRow("no connection") << SSH_FX_NO_CONNECTION << "gone" << Error::NetworkUnreachable;
+        QTest::newRow("lost") << SSH_FX_CONNECTION_LOST << "gone" << Error::ConnectionLost;   // XC-21
+        QTest::newRow("no connection") << SSH_FX_NO_CONNECTION << "gone" << Error::ConnectionLost;
         QTest::newRow("timeout") << SSH_FX_FAILURE << "Timeout while reading sftp packet size" << Error::Timeout;
         QTest::newRow("failure") << SSH_FX_FAILURE << "SFTP server: Failure" << Error::ProtocolError;
         QTest::newRow("bad message") << SSH_FX_BAD_MESSAGE << "SFTP server: Bad message" << Error::ProtocolError;
+        // strerror() texts with SSH_FX_FAILURE (ProFTPD)
+        QTest::newRow("not a directory") << SSH_FX_FAILURE << "SFTP server: Not a directory" << Error::NotADirectory;
+        QTest::newRow("is a directory") << SSH_FX_FAILURE << "SFTP server: Is a directory" << Error::IsADirectory;
+        QTest::newRow("not empty") << SSH_FX_FAILURE << "SFTP server: Directory not empty" << Error::DirectoryNotEmpty;
+        QTest::newRow("text with another code") << SSH_FX_BAD_MESSAGE << "SFTP server: Not a directory"
+                                                << Error::ProtocolError;
     }
 
     void sftpStatuses()
@@ -356,6 +392,315 @@ private slots:
         QCOMPARE(checkSecretForMode(QStringLiteral("publickey"), "hunter2").error(), Error::AuthFailed);
         QCOMPARE(checkSecretForMode(QStringLiteral("publickey"), "netvfs-key-v1:%%%").error(), Error::AuthFailed);
         QCOMPARE(checkSecretForMode(QStringLiteral("kerberos"), "x").error(), Error::Internal);
+    }
+
+    void secretForInteractive()
+    {
+        // XS-11: auth_mode=interactive, the stored secret is optional.
+        const QByteArray key = encodeKeySecret("-----BEGIN OPENSSH PRIVATE KEY-----\n");
+        QVERIFY(checkSecretForMode(QStringLiteral("interactive"), QByteArray()).ok());
+        QVERIFY(checkSecretForMode(QStringLiteral("interactive"), "hunter2").ok());
+        QCOMPARE(checkSecretForMode(QStringLiteral("interactive"), key).error(), Error::AuthFailed);
+        QCOMPARE(interactiveDeclined().error(), Error::AuthFailed);
+    }
+
+    // --- keyboard-interactive (S-11, XS-11) --------------------------------
+
+    void roundActions_data()
+    {
+        QTest::addColumn<int>("prompts");
+        QTest::addColumn<bool>("echo");
+        QTest::addColumn<bool>("password");
+        QTest::addColumn<bool>("secretUsable");
+        QTest::addColumn<bool>("prompter");
+        QTest::addColumn<int>("action");
+        const int ack = int(RoundAction::Acknowledge);
+        const int secret = int(RoundAction::AnswerWithSecret);
+        const int ask = int(RoundAction::AskPrompter);
+        const int refuse = int(RoundAction::Refuse);
+        // S-11 exactly, without a prompter; the prompt's text does not matter.
+        QTest::newRow("no prompts") << 0 << false << false << true << false << ack;
+        QTest::newRow("one hidden prompt") << 1 << false << true << true << false << secret;
+        QTest::newRow("one hidden prompt, any text") << 1 << false << false << true << false << secret;
+        QTest::newRow("one echoed prompt") << 1 << true << true << true << false << refuse;
+        QTest::newRow("two prompts") << 2 << false << true << true << false << refuse;
+        QTest::newRow("password used already") << 1 << false << true << false << false << refuse;
+        // XS-11, with a prompter: the password answers only a password prompt.
+        QTest::newRow("prompter, no prompts") << 0 << true << false << false << true << ack;
+        QTest::newRow("prompter, password round") << 1 << false << true << true << true << secret;
+        QTest::newRow("prompter, code round") << 1 << false << false << true << true << ask;
+        QTest::newRow("prompter, second round") << 1 << false << true << false << true << ask;
+        QTest::newRow("prompter, echoed prompt") << 1 << true << true << true << true << ask;
+        QTest::newRow("prompter, two prompts") << 2 << false << true << true << true << ask;
+    }
+
+    void roundActions()
+    {
+        QFETCH(int, prompts);
+        QFETCH(bool, echo);
+        QFETCH(bool, password);
+        QFETCH(bool, secretUsable);
+        QFETCH(bool, prompter);
+        QFETCH(int, action);
+        QCOMPARE(int(keyboardInteractiveAction(prompts, echo, password, secretUsable, prompter)), action);
+    }
+
+    void passwordPrompts()
+    {
+        QVERIFY(isPasswordPrompt(QStringLiteral("Password: ")));
+        QVERIFY(isPasswordPrompt(QStringLiteral("alice@host's password:")));
+        QVERIFY(isPasswordPrompt(QStringLiteral("PASSWORD")));
+        QVERIFY(!isPasswordPrompt(QStringLiteral("Verification code: ")));
+        QVERIFY(!isPasswordPrompt(QStringLiteral("Token label: ")));
+        QVERIFY(!isPasswordPrompt(QString()));
+    }
+
+    void promptRounds()
+    {
+        QVector<AuthPrompt> prompts(2);
+        prompts[0].text = QStringLiteral("Token label: ");
+        prompts[0].echo = true;
+        prompts[1].text = QStringLiteral("Verification code: ");
+        ScriptedPrompter prompter;
+        prompter.reply = { QByteArray("label"), QByteArray("123456") };
+        QVector<QByteArray> answers;
+        QList<QPair<int, QByteArray>> set;
+        const auto record = [&set](int index, const QByteArray &answer) {
+            set.append(qMakePair(index, answer));
+            return true;
+        };
+        QCOMPARE(promptRound(&prompter, QStringLiteral("name"), QStringLiteral("instruction"), prompts, &answers, record),
+                 PromptOutcome::Answered);
+        QCOMPARE(prompter.name, QStringLiteral("name"));
+        QCOMPARE(prompter.instruction, QStringLiteral("instruction"));
+        QCOMPARE(prompter.prompts.size(), 2);
+        QVERIFY(prompter.prompts.at(0).echo);
+        QCOMPARE(prompter.prompts.at(1).text, QStringLiteral("Verification code: "));
+        QCOMPARE(set.size(), 2);
+        QCOMPARE(set.at(0), qMakePair(0, QByteArray("label")));
+        QCOMPARE(set.at(1), qMakePair(1, QByteArray("123456")));
+        // XSEC-6: the answers are overwritten, in place, before the call returns.
+        QCOMPARE(answers.size(), 2);
+        QCOMPARE(answers.at(0), QByteArray(5, '\0'));
+        QCOMPARE(answers.at(1), QByteArray(6, '\0'));
+
+        // One answer for two prompts: nothing is handed on; still wiped.
+        set.clear();
+        prompter.reply = { QByteArray("123456") };
+        QCOMPARE(promptRound(&prompter, QString(), QString(), prompts, &answers, record), PromptOutcome::BadAnswers);
+        QVERIFY(set.isEmpty());
+        QCOMPARE(answers, QVector<QByteArray>({ QByteArray(6, '\0') }));
+        // libssh refused an answer.
+        prompter.reply = { QByteArray("label"), QByteArray("123456") };
+        const auto refuse = [](int, const QByteArray &) { return false; };
+        QCOMPARE(promptRound(&prompter, QString(), QString(), prompts, &answers, refuse), PromptOutcome::Rejected);
+        QCOMPARE(answers.at(1), QByteArray(6, '\0'));
+        // Declined (or canceled): whatever the prompter left is wiped too.
+        prompter.decline = true;
+        QCOMPARE(promptRound(&prompter, QString(), QString(), prompts, &answers, record), PromptOutcome::Declined);
+        QVERIFY(set.isEmpty());
+        QCOMPARE(answers.at(0), QByteArray(5, '\0'));
+    }
+
+    // --- channels, links, attributes, resume -------------------------------
+
+    void channelOpenFailures()
+    {
+        // XC-21: OpenSSH beyond MaxSessions (libssh's wording).
+        Result r = channelOpenFailure(QStringLiteral("Channel opening failure: channel 2 error (1) open failed"));
+        QCOMPARE(r.error(), Error::TooManyConnections);
+        QVERIFY(r.detail().contains(QLatin1String("open failed")));
+        QCOMPARE(channelOpenFailure(QStringLiteral("Channel opening failure: channel 45 error (2) open failed")).error(),
+                 Error::TooManyConnections);   // what OpenSSH sends
+        QCOMPARE(channelOpenFailure(QStringLiteral("Channel opening failure: channel 2 error (4) no memory")).error(),
+                 Error::TooManyConnections);
+        QCOMPARE(channelOpenFailure(QStringLiteral("Channel opening failure: channel 2 error (2) connect failed")).error(),
+                 Error::ProtocolError);
+        QCOMPARE(channelOpenFailure(QStringLiteral("Channel opening failure: channel 2 error (3) open failed")).error(),
+                 Error::ProtocolError);
+        QCOMPARE(channelOpenFailure(QStringLiteral("Socket error: error (1)")).error(), Error::ProtocolError);
+    }
+
+    void symlinkOrders()
+    {
+        // XS-4: libssh's order for OpenSSH (by banner) and verified families.
+        QCOMPARE(symlinkOrderFor(QStringLiteral("SSH-2.0-OpenSSH_10.3"), true), SymlinkOrder::AsLibssh);
+        QCOMPARE(symlinkOrderFor(QStringLiteral("SSH-2.0-mod_sftp"), false), SymlinkOrder::Swapped);
+        QCOMPARE(symlinkOrderFor(QStringLiteral("SSH-2.0-mod_sftp/1.3.8"), false), SymlinkOrder::Swapped);
+        QCOMPARE(symlinkOrderFor(QStringLiteral("SSH-2.0-SFTPGo_2.6.0"), false), SymlinkOrder::Unverified);
+        QCOMPARE(symlinkOrderFor(QStringLiteral("SSH-2.0-dropbear_2024.86"), false), SymlinkOrder::Unverified);
+        QCOMPARE(symlinkOrderFor(QStringLiteral("SSH-2.0-OpenSSH_10.3"), false), SymlinkOrder::Unverified);
+        QCOMPARE(symlinkOrderFor(QString(), false), SymlinkOrder::Unverified);
+    }
+
+    void lstatQuirks()
+    {
+        QVERIFY(lstatFollowsLinks(QStringLiteral("SSH-2.0-mod_sftp")));
+        QVERIFY(!lstatFollowsLinks(QStringLiteral("SSH-2.0-OpenSSH_9.6p1 Ubuntu-3ubuntu13")));
+        QVERIFY(!lstatFollowsLinks(QString()));
+    }
+
+    void resumeOffsets()
+    {
+        // XC-13: only at the current remote size; ProtocolError like Transfer.
+        QVERIFY(checkResumeOffset(100, 100).ok());
+        QVERIFY(checkResumeOffset(0, 0).ok());
+        QCOMPARE(checkResumeOffset(100, 99).error(), Error::ProtocolError);
+        QCOMPARE(checkResumeOffset(100, 101).error(), Error::ProtocolError);
+        QCOMPARE(checkResumeOffset(100, 0).error(), Error::ProtocolError);
+        QVERIFY(checkResumeOffset(100, 0).message().contains(QLatin1String("100 bytes")));
+    }
+
+    void attributeChanges()
+    {
+        // XC-11, XS-5: checked before anything is sent.
+        AttributeChanges changes;
+        QVERIFY(checkAttributeChanges(changes).ok());
+        changes.mode = 07777;
+        QVERIFY(checkAttributeChanges(changes).ok());
+        changes.mode = 0;
+        QVERIFY(checkAttributeChanges(changes).ok());
+        changes.mode = 0170644;
+        QCOMPARE(checkAttributeChanges(changes).error(), Error::Internal);
+        changes.mode = 010000;
+        QCOMPARE(checkAttributeChanges(changes).error(), Error::Internal);
+        changes.mode = -2;
+        QCOMPARE(checkAttributeChanges(changes).error(), Error::Internal);
+        changes.mode = -1;
+        changes.modified = QDateTime::fromMSecsSinceEpoch(0, Qt::UTC);
+        QVERIFY(checkAttributeChanges(changes).ok());
+        changes.modified = QDateTime::fromMSecsSinceEpoch(qint64(0xffffffffLL) * 1000, Qt::UTC);
+        QVERIFY(checkAttributeChanges(changes).ok());
+        changes.modified = QDateTime::fromMSecsSinceEpoch((qint64(0xffffffffLL) + 1) * 1000, Qt::UTC);
+        QCOMPARE(checkAttributeChanges(changes).error(), Error::Internal);
+        changes.modified = QDateTime();
+        changes.accessed = QDateTime(QDate(1969, 12, 31), QTime(23, 59, 59), Qt::UTC);
+        QCOMPARE(checkAttributeChanges(changes).error(), Error::Internal);
+    }
+
+    // --- shell exec helpers (XS-9) -----------------------------------------
+
+    void shellQuoting()
+    {
+        QCOMPARE(shellQuote("abc"), QByteArray("'abc'"));
+        QCOMPARE(shellQuote(""), QByteArray("''"));
+        QCOMPARE(shellQuote("it's"), QByteArray("'it'\\''s'"));
+        QCOMPARE(shellQuote("''"), QByteArray("''\\'''\\'''"));
+        QCOMPARE(shellCommand({ "cp", "-p", "--", "a b", "c" }), QByteArray("'cp' '-p' '--' 'a b' 'c'"));
+        QCOMPARE(sha256sumCommand("/x"), QList<QByteArray>({ "sha256sum", "--", "/x" }));
+        QCOMPARE(shasumCommand("/x"), QList<QByteArray>({ "shasum", "-a", "256", "--", "/x" }));
+        QCOMPARE(copyCommand("/a", "/b", false), QList<QByteArray>({ "cp", "-p", "--", "/a", "/b" }));
+        QCOMPARE(copyCommand("/a", "/b", true), QList<QByteArray>({ "cp", "-pR", "--", "/a", "/b" }));
+        QCOMPARE(findCommand("/d", "*.txt"), QList<QByteArray>({ "find", "/d", "-name", "*.txt", "-print0" }));
+    }
+
+    void shellQuotingRoundTrip()
+    {
+        // Whatever the bytes, a POSIX shell sees exactly these words.
+        const QList<QByteArray> words = {
+            "printf", "%s\\0", "-n", "--", "a b", "it's", "\"q\"", "$HOME", "`id`", "$(id)", "\\", "*", "~",
+            "line\nbreak", "tab\there", ";|&<>", "caf\xe9 \xff", "''", "",
+        };
+        // Through a script file: command line arguments would be recoded.
+        QTemporaryDir dir;
+        const QString script = dir.filePath(QStringLiteral("command.sh"));
+        writeLocal(script, shellCommand(words) + '\n');
+        QProcess shell;
+        shell.start(QStringLiteral("/bin/sh"), { script });
+        QVERIFY(shell.waitForFinished(10000));
+        QCOMPARE(shell.exitCode(), 0);
+        QList<QByteArray> printed = shell.readAllStandardOutput().split('\0');
+        QCOMPARE(printed.takeLast(), QByteArray());
+        QCOMPARE(printed, words.mid(2));
+    }
+
+    void probe()
+    {
+        // The probe runs through a real POSIX shell and is understood.
+        QProcess shell;
+        shell.start(QStringLiteral("/bin/sh"), { QStringLiteral("-c"), QString::fromLatin1(probeCommand()) });
+        QVERIFY(shell.waitForFinished(10000));
+        ShellTools tools;
+        QVERIFY(parseProbe(shell.readAllStandardOutput(), &tools));
+        QVERIFY(tools.cp);
+        QVERIFY(tools.find);
+
+        const QByteArray head = "netvfs-probe\nit's \"q\" $HOME \\ * `x` ;|&\n";
+        QVERIFY(parseProbe(head + "cp\nsha256sum\n", &tools));
+        QVERIFY(tools.cp && tools.sha256sum && !tools.shasum && !tools.find);
+        QVERIFY(parseProbe(head + "shasum\nfind\n", &tools));
+        QVERIFY(!tools.cp && !tools.sha256sum && tools.shasum && tools.find);
+        QVERIFY(parseProbe(head, &tools));
+        QVERIFY(!tools.cp);
+        tools.cp = true;
+        QVERIFY(!parseProbe(head + "rm\n", &tools));                               // unknown line
+        QVERIFY(tools.cp);                                                          // untouched on failure
+        QVERIFY(!parseProbe(head + "cp", &tools));                                 // not terminated
+        QVERIFY(!parseProbe("netvfs-probe\nit's q $HOME \\ * `x` ;|&\ncp\n", &tools));   // quoting lost
+        QVERIFY(!parseProbe("This account is currently not available.\n", &tools));
+        QVERIFY(!parseProbe(QByteArray(), &tools));
+    }
+
+    void sha256Output()
+    {
+        const QByteArray hex = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+        QByteArray digest;
+        QVERIFY(parseSha256Output(hex + "  /home/a/file\n", &digest));
+        QCOMPARE(digest, QByteArray::fromHex(hex));
+        QCOMPARE(digest.size(), 32);
+        digest.clear();
+        QVERIFY(parseSha256Output("\\" + hex + "  /home/a/new\\nline\n", &digest));   // escaped name
+        QCOMPARE(digest, QByteArray::fromHex(hex));
+        QVERIFY(parseSha256Output(hex.toUpper() + " */x\n", &digest));
+        QCOMPARE(digest, QByteArray::fromHex(hex));
+        digest = "unchanged";
+        QVERIFY(!parseSha256Output(hex.left(63) + "  x\n", &digest));
+        QVERIFY(!parseSha256Output(hex + "0  x\n", &digest));                 // 65 digits
+        QVERIFY(!parseSha256Output(hex, &digest));                           // nothing after
+        QVERIFY(!parseSha256Output(hex.left(63) + "g  x\n", &digest));        // not hex
+        QVERIFY(!parseSha256Output("sha256sum: x: No such file or directory\n", &digest));
+        QVERIFY(!parseSha256Output(QByteArray(), &digest));
+        QVERIFY(!parseSha256Output("\\", &digest));
+        QCOMPARE(digest, QByteArray("unchanged"));
+
+        // The real tool, where the host has it.
+        QTemporaryDir dir;
+        const QString path = dir.filePath(QStringLiteral("data"));
+        writeLocal(path, "abc");
+        QProcess shell;
+        shell.start(QStringLiteral("/bin/sh"),
+                    { QStringLiteral("-c"), QString::fromLatin1(shellCommand(sha256sumCommand(path.toLocal8Bit()))) });
+        QVERIFY(shell.waitForFinished(10000));
+        if (shell.exitCode() != 0)
+            QSKIP("no sha256sum on this host");
+        QVERIFY(parseSha256Output(shell.readAllStandardOutput(), &digest));
+        QCOMPARE(digest.toHex(), QByteArray("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"));
+    }
+
+    void findOutput()
+    {
+        QList<QByteArray> paths;
+        const QByteArray out = QByteArray("/d/a.txt\0/d/sub/b.txt\0/d\0", 25);
+        QVERIFY(parseFindOutput(out, "/d", false, 10, &paths));
+        QCOMPARE(paths, QList<QByteArray>({ "/d/a.txt", "/d/sub/b.txt", "/d" }));
+        QVERIFY(parseFindOutput(out, "/d", false, 2, &paths));
+        QCOMPARE(paths, QList<QByteArray>({ "/d/a.txt", "/d/sub/b.txt" }));
+        QVERIFY(parseFindOutput(QByteArray(), "/d", false, 10, &paths));
+        QVERIFY(paths.isEmpty());
+        // A cut-off output loses its last, unterminated piece.
+        QVERIFY(parseFindOutput(QByteArray("/d/a\0/d/b", 9), "/d", true, 10, &paths));
+        QCOMPARE(paths, QList<QByteArray>({ "/d/a" }));
+        QVERIFY(!parseFindOutput(QByteArray("/d/a\0/d/b", 9), "/d", false, 10, &paths));
+        // Anything outside the folder is not understood.
+        QVERIFY(!parseFindOutput(QByteArray("/d/a\0/etc/passwd\0", 17), "/d", false, 10, &paths));
+        QVERIFY(!parseFindOutput(QByteArray("/dx/a\0", 6), "/d", false, 10, &paths));
+        QVERIFY(!parseFindOutput(QByteArray("/d/\0", 4), "/d", false, 10, &paths));
+        QVERIFY(!parseFindOutput("find: '/d': Permission denied\n", "/d", false, 10, &paths));
+        // Below the root and relative starts.
+        QVERIFY(parseFindOutput(QByteArray("/\0/etc\0", 7), "/", false, 10, &paths));
+        QCOMPARE(paths, QList<QByteArray>({ "/", "/etc" }));
+        QVERIFY(parseFindOutput(QByteArray("./x/y\0", 6), "./x", false, 10, &paths));
+        QCOMPARE(paths, QList<QByteArray>({ "./x/y" }));
     }
 
     void keyFiles_data()
@@ -633,14 +978,40 @@ private slots:
         qint64 bytes = 0;
         QByteArray data;
         QCOMPARE(b->stat(QStringLiteral("x"), &entry).error(), Error::Internal);
+        QCOMPARE(b->lstat(QStringLiteral("x"), &entry).error(), Error::Internal);
         QCOMPARE(b->list(QStringLiteral("x"), &entries).error(), Error::Internal);
         QCOMPARE(b->makePath(QStringLiteral("x")).error(), Error::Internal);
+        QCOMPARE(b->makeDir(QStringLiteral("x"), true).error(), Error::Internal);
         QCOMPARE(b->remove(QStringLiteral("x")).error(), Error::Internal);
-        QCOMPARE(b->rename(QStringLiteral("x"), QStringLiteral("y")).error(), Error::Internal);
+        QCOMPARE(b->removeDir(QStringLiteral("x")).error(), Error::Internal);
+        QCOMPARE(b->rename(QStringLiteral("x"), QStringLiteral("y"), RenameMode::Replace).error(), Error::Internal);
+        QCOMPARE(b->rename(QStringLiteral("x"), QStringLiteral("y"), RenameMode::NoReplace).error(), Error::Internal);
         QCOMPARE(b->freeSpace(QStringLiteral("x"), &bytes).error(), Error::Internal);
-        QCOMPARE(b->upload(nullptr, QStringLiteral("x"), nullptr).error(), Error::Internal);
-        QCOMPARE(b->download(QStringLiteral("x"), nullptr, nullptr).error(), Error::Internal);
+        QCOMPARE(b->upload(nullptr, QStringLiteral("x"), UploadOptions(), nullptr).error(), Error::Internal);
+        QCOMPARE(b->download(QStringLiteral("x"), nullptr, DownloadOptions(), nullptr).error(), Error::Internal);
         QCOMPARE(b->read(QStringLiteral("x"), 0, 1, &data).error(), Error::Internal);
+        QCOMPARE(b->keepAlive().error(), Error::Internal);
+        QVERIFY(b->capabilities().flags.isEmpty());   // XC-5: valid after authenticate()
+        QCOMPARE(b->setAttributes(QStringLiteral("x"), AttributeChanges()).error(), Error::Internal);
+        QString target;
+        QCOMPARE(b->readLink(QStringLiteral("x"), &target).error(), Error::Internal);
+        QCOMPARE(b->makeSymlink(QStringLiteral("x"), QStringLiteral("y")).error(), Error::Internal);
+        QCOMPARE(b->makeHardlink(QStringLiteral("x"), QStringLiteral("y")).error(), Error::Internal);
+        WriteHandle *writer = nullptr;
+        QCOMPARE(b->openWrite(QStringLiteral("x"), WriteOptions(), &writer).error(), Error::Internal);
+        QVERIFY(!writer);
+        QCOMPARE(b->copy(QStringLiteral("x"), QStringLiteral("y"), CopyOptions()).error(), Error::Internal);
+        QCOMPARE(b->checksum(QStringLiteral("x"), QStringLiteral("sha256"), &data).error(), Error::Internal);
+        SpaceInfo space;
+        QCOMPARE(b->spaceInfo(QStringLiteral("x"), &space).error(), Error::Internal);
+        // XS-9: the interface is there, the capability is not.
+        auto *shell = dynamic_cast<ShellExec *>(b.get());
+        QVERIFY(shell);
+        QVERIFY(!ShellExec::of(b.get()));
+        ExecResult result;
+        QCOMPARE(shell->exec({ QStringLiteral("true") }, ExecOptions(), &result).error(), Error::Internal);
+        QStringList found;
+        QCOMPARE(shell->find(QStringLiteral("x"), QStringLiteral("*"), 1, &found).error(), Error::Internal);
         QCOMPARE(b->authenticate(Credentials(QStringLiteral("u"), "p")).error(), Error::Internal);
         b->disconnect();
     }

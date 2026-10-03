@@ -4,6 +4,7 @@
 #include "../qmltestutil.h"
 
 #include <QtCore/QSet>
+#include <QtCore/QTemporaryDir>
 #include <QtTest/QtTest>
 
 using namespace NetVfs;
@@ -48,10 +49,16 @@ class TestQmlHelpers : public QObject
 private:
     Helpers helpers;
     NetVfsUi::InputRules input;
+    QTemporaryDir accountsDir;
 
 private slots:
     void initTestCase()
     {
+        // isServiceInstalled() opens an accounts database: a private one.
+        QVERIFY(accountsDir.isValid());
+        qputenv("ACCOUNTS", accountsDir.path().toLocal8Bit());
+        qputenv("AG_SERVICES", accountsDir.path().toLocal8Bit());
+        qputenv("AG_PROVIDERS", accountsDir.path().toLocal8Bit());
         QVERIFY2(Test::installEngineeringEnglish(this), "netvfs_eng_en.qm missing from the build tree");
     }
 
@@ -276,8 +283,13 @@ private slots:
 
     void creationSettings()
     {
-        // SPEC 6.2, SPEC-sftp 2
-        const QVariantMap settings = helpers.creationSettings(sftpParams(), QStringLiteral("/srv//backups/"));
+        // SPEC 6.2, SPEC-sftp 2, SPEC-v2 XA-1
+        QVariantMap services;
+        services.insert(QStringLiteral("backup"), true);
+        services.insert(QStringLiteral("files"), true);
+        services.insert(QStringLiteral("backupsPath"), QStringLiteral("/srv//backups/"));
+        services.insert(QStringLiteral("filesRoot"), QStringLiteral("/home/alice/"));
+        const QVariantMap settings = helpers.creationSettings(sftpParams(), services);
         const QVariantMap global = settings.value(QStringLiteral("global")).toMap();
         QVariantMap expected;
         expected.insert(QStringLiteral("netvfs/host"), QStringLiteral("nas.example"));
@@ -287,23 +299,45 @@ private slots:
         expected.insert(QStringLiteral("netvfs/sftp/host_key"), QStringLiteral("ssh-ed25519 AAAA"));
         expected.insert(QStringLiteral("netvfs/sftp/public_key"), QStringLiteral("ssh-ed25519 BBBB sailfish-backup"));
         QCOMPARE(global, expected);   // no host_key_seen, no default_credentials_username yet (A-2)
-        QVariantMap service;
-        service.insert(QStringLiteral("backups_path"), QStringLiteral("/srv/backups"));
-        QCOMPARE(settings.value(QStringLiteral("service")).toMap(), service);
-        QCOMPARE(settings.value(QStringLiteral("serviceName")).toString(), QStringLiteral("sftp-backup"));
+        const QVariantMap values = settings.value(QStringLiteral("services")).toMap();
+        QCOMPARE(values.size(), 2);
+        QCOMPARE(values.value(QStringLiteral("sftp-backup")).toMap().value(QStringLiteral("backups_path")).toString(),
+                 QStringLiteral("/srv/backups"));
+        // SPEC-v2-review 2.17: files_root belongs to the files service.
+        QCOMPARE(values.value(QStringLiteral("sftp-files")).toMap().value(QStringLiteral("files_root")).toString(),
+                 QStringLiteral("/home/alice"));
+        QCOMPARE(settings.value(QStringLiteral("enable")).toStringList(),
+                 QStringList({ QStringLiteral("sftp-backup"), QStringLiteral("sftp-files") }));
+        QCOMPARE(settings.value(QStringLiteral("signInService")).toString(), QStringLiteral("sftp-backup"));
+
+        // Files only: no backup service is touched.
+        services.insert(QStringLiteral("backup"), false);
+        const QVariantMap filesOnly = helpers.creationSettings(sftpParams(), services);
+        QCOMPARE(filesOnly.value(QStringLiteral("enable")).toStringList(), QStringList({ QStringLiteral("sftp-files") }));
+        QVERIFY(!filesOnly.value(QStringLiteral("services")).toMap().contains(QStringLiteral("sftp-backup")));
+        QCOMPARE(filesOnly.value(QStringLiteral("signInService")).toString(), QStringLiteral("sftp-files"));
+        services.insert(QStringLiteral("files"), false);
+        services.insert(QStringLiteral("backup"), true);
+        const QVariantMap backupOnly = helpers.creationSettings(sftpParams(), services);
+        QCOMPARE(backupOnly.value(QStringLiteral("enable")).toStringList(), QStringList({ QStringLiteral("sftp-backup") }));
+        QVERIFY(!backupOnly.value(QStringLiteral("services")).toMap().contains(QStringLiteral("sftp-files")));
     }
 
     void creationSettingsSmb()
     {
-        const QVariantMap settings = helpers.creationSettings(smbParams(false), QStringLiteral("/Backups"));
+        QVariantMap services;
+        services.insert(QStringLiteral("backup"), true);
+        services.insert(QStringLiteral("backupsPath"), QStringLiteral("/Backups"));
+        const QVariantMap settings = helpers.creationSettings(smbParams(false), services);
         const QVariantMap global = settings.value(QStringLiteral("global")).toMap();
         QCOMPARE(global.value(QStringLiteral("netvfs/smb/share")).toString(), QStringLiteral("backup"));
         QCOMPARE(global.value(QStringLiteral("netvfs/smb/require_encryption")), QVariant(false));
         QCOMPARE(global.value(QStringLiteral("netvfs/port")).toInt(), 0);
         QVERIFY(!global.contains(QStringLiteral("netvfs/smb/host_key")));
-        QCOMPARE(settings.value(QStringLiteral("service")).toMap().value(QStringLiteral("backups_path")).toString(),
+        QCOMPARE(settings.value(QStringLiteral("services")).toMap().value(QStringLiteral("smb-backup")).toMap()
+                         .value(QStringLiteral("backups_path")).toString(),
                  QStringLiteral("Backups"));
-        QCOMPARE(settings.value(QStringLiteral("serviceName")).toString(), QStringLiteral("smb-backup"));
+        QCOMPARE(settings.value(QStringLiteral("enable")).toStringList(), QStringList({ QStringLiteral("smb-backup") }));
     }
 
     void credentialsLabel()
@@ -340,6 +374,10 @@ private slots:
         QVERIFY(switched.value(QStringLiteral("remove")).toStringList().contains(QStringLiteral("netvfs/sftp/public_key")));
         QCOMPARE(switched.value(QStringLiteral("global")).toMap().value(QStringLiteral("netvfs/sftp/auth_mode")).toString(),
                  QStringLiteral("password"));
+        // ... and so does switching to interactive sign-in.
+        password.insert(QStringLiteral("auth_mode"), QStringLiteral("interactive"));
+        const QVariantMap interactive = helpers.updateSettings(helpers.withOptions(sftpParams(), password));
+        QVERIFY(interactive.value(QStringLiteral("remove")).toStringList().contains(QStringLiteral("netvfs/sftp/public_key")));
     }
 
     void attention()
@@ -410,14 +448,94 @@ private slots:
                  QStringLiteral("To compare, run this command on the server: ssh-keygen -lf /etc/ssh/") + file);
     }
 
+    void tlsIdentity()
+    {
+        // SPEC-v2 XA-5: what the identity dialog shows for a certificate.
+        ServerIdentity tls = ServerIdentity::fromTlsSpki(QByteArray("spki"));
+        tls.systemTrusted = false;
+        tls.problems = ServerIdentity::SelfSigned | ServerIdentity::Expired | ServerIdentity::HostnameMismatch;
+        tls.details.insert(QStringLiteral("subject"), QStringLiteral("CN=nas"));
+        tls.details.insert(QStringLiteral("issuer"), QStringLiteral("CN=nas"));
+        tls.details.insert(QStringLiteral("notBefore"), QDateTime(QDate(2025, 1, 2), QTime(3, 4, 5), Qt::UTC));
+        tls.details.insert(QStringLiteral("notAfter"), QDateTime());
+        tls.details.insert(QStringLiteral("sans"), QStringList({ QStringLiteral("nas"), QStringLiteral("nas.lan") }));
+        tls.details.insert(QStringLiteral("certSha256"), QStringLiteral("ab01ff"));
+        const QVariantMap map = NetVfsUi::identityToVariant(tls);
+        QCOMPARE(map.value(QStringLiteral("kind")).toString(), QStringLiteral("tls"));
+        QCOMPARE(map.value(QStringLiteral("fingerprint")).toString(), tls.fingerprint);
+        QCOMPARE(map.value(QStringLiteral("subject")).toString(), QStringLiteral("CN=nas"));
+        QCOMPARE(map.value(QStringLiteral("issuer")).toString(), QStringLiteral("CN=nas"));
+        QCOMPARE(map.value(QStringLiteral("notBefore")).toString(), QStringLiteral("2025-01-02T03:04:05Z"));
+        QCOMPARE(map.value(QStringLiteral("notAfter")).toString(), QString());
+        QCOMPARE(map.value(QStringLiteral("sans")).toStringList(), QStringList({ QStringLiteral("nas"), QStringLiteral("nas.lan") }));
+        QCOMPARE(map.value(QStringLiteral("certSha256")).toString(), QStringLiteral("AB:01:FF"));
+        QCOMPARE(map.value(QStringLiteral("systemTrusted")).toBool(), false);
+        QCOMPARE(map.value(QStringLiteral("problems")).toInt(), tls.problems);
+        QCOMPARE(map.value(QStringLiteral("problemTexts")).toStringList(),
+                 QStringList({ QStringLiteral("The certificate is self-signed: no certificate authority vouches for it."),
+                               QStringLiteral("The certificate has expired."),
+                               QStringLiteral("The certificate is issued for a different server name.") }));
+        // W-4: accepting stores the pin and whether the system trusted it.
+        const QVariantMap pin = map.value(QStringLiteral("pinOptions")).toMap();
+        QCOMPARE(pin.value(QStringLiteral("host_key")).toString(), tls.toPin());
+        QCOMPARE(pin.value(QStringLiteral("tls_verify_peer")), QVariant(false));
+        tls.systemTrusted = true;
+        QCOMPARE(NetVfsUi::identityToVariant(tls).value(QStringLiteral("pinOptions")).toMap()
+                         .value(QStringLiteral("tls_verify_peer")), QVariant(true));
+
+        QCOMPARE(NetVfsUi::tlsProblemTexts(0), QStringList());
+        QCOMPARE(NetVfsUi::tlsProblemTexts(ServerIdentity::UntrustedRoot | ServerIdentity::NotYetValid),
+                 QStringList({ QStringLiteral("The certificate is issued by an authority this device does not trust."),
+                               QStringLiteral("The certificate is not valid yet.") }));
+        QCOMPARE(NetVfsUi::colonHex(QStringLiteral("0a")), QStringLiteral("0A"));
+        QCOMPARE(NetVfsUi::colonHex(QString()), QString());
+
+        // A stored TLS pin shows as a certificate (no details).
+        const QVariantMap stored = helpers.identityFromPin(tls.toPin());
+        QCOMPARE(stored.value(QStringLiteral("kind")).toString(), QStringLiteral("tls"));
+        QCOMPARE(stored.value(QStringLiteral("fingerprint")).toString(), tls.fingerprint);
+        // SSH identities carry no TLS fields.
+        const QVariantMap ssh = helpers.identityFromPin(QStringLiteral("ssh-ed25519 AAAA"));
+        QCOMPARE(ssh.value(QStringLiteral("kind")).toString(), QStringLiteral("ssh"));
+        QVERIFY(!ssh.contains(QStringLiteral("problemTexts")));
+        QVERIFY(!ssh.value(QStringLiteral("pinOptions")).toMap().contains(QStringLiteral("tls_verify_peer")));
+    }
+
+    void serviceRules()
+    {
+        // SPEC-v2 XA-4 in the UI: the backup switch follows the policy table.
+        QVERIFY(helpers.serviceAllowed(smbParams(true), QStringLiteral("backup")));
+        QVERIFY(helpers.serviceAllowed(smbParams(true), QStringLiteral("files")));
+        QVERIFY(helpers.serviceRefusalText(smbParams(true), QStringLiteral("backup")).isEmpty());
+        QVariantMap guest = helpers.withOptions(smbParams(true), { { QStringLiteral("security_profile"), QStringLiteral("guest") },
+                                                                    { QStringLiteral("allow_insecure"), true } });
+        QVERIFY(!helpers.serviceAllowed(guest, QStringLiteral("backup")));
+        QVERIFY(helpers.serviceAllowed(guest, QStringLiteral("files")));
+        QCOMPARE(helpers.serviceRefusalText(guest, QStringLiteral("backup")),
+                 NetVfsUi::userErrorText(Error::SecurityPolicy, NetVfsUi::Activity::ServicePolicy));
+        QVERIFY(!helpers.serviceAllowed(guest, QStringLiteral("storage")));
+        QVERIFY(!helpers.serviceRefusalText(guest, QStringLiteral("storage")).isEmpty());
+        QVERIFY(helpers.secretOptional(guest));
+        QVERIFY(!helpers.secretOptional(smbParams(true)));
+        QCOMPARE(helpers.filesServiceName(QStringLiteral("webdav")), QStringLiteral("webdav-files"));
+        QCOMPARE(helpers.filesRootKey(), QStringLiteral("files_root"));
+        QVERIFY(!helpers.isServiceInstalled(QStringLiteral("no-such-service")));
+    }
+
+    void serverPath()
+    {
+        QVERIFY(input.serverPathProblem(QStringLiteral("/")).isEmpty());
+        QVERIFY(input.serverPathProblem(QStringLiteral(" /remote.php/dav/files/me/ ")).isEmpty());
+        QVERIFY(!input.serverPathProblem(QStringLiteral("dav")).isEmpty());
+        QVERIFY(!input.serverPathProblem(QStringLiteral("/a/../b")).isEmpty());
+        QVERIFY(!input.serverPathProblem(QStringLiteral("/a\nb")).isEmpty());
+        QVERIFY(!input.serverPathProblem(QString()).isEmpty());
+    }
+
     void labels()
     {
-        // SPEC-smb M-3
-        QCOMPARE(helpers.transportSecurityText(sftpParams()), QStringLiteral("Encrypted (SSH)"));
-        QCOMPARE(helpers.transportSecurityText(smbParams(true)), QStringLiteral("Signed and encrypted"));
-        QCOMPARE(helpers.transportSecurityText(smbParams(QVariant())), QStringLiteral("Signed and encrypted"));
-        QCOMPARE(helpers.transportSecurityText(smbParams(false)), QStringLiteral("Signed, not encrypted"));
-        QCOMPARE(helpers.transportSecurityText(smbParams(QStringLiteral("false"))), QStringLiteral("Signed, not encrypted"));
+        QCOMPARE(helpers.authModeText(QStringLiteral("interactive")), QStringLiteral("Asked each time"));
+        QCOMPARE(helpers.authModeText(QStringLiteral("token")), QStringLiteral("Access token"));
         QCOMPARE(helpers.authModeText(QStringLiteral("publickey")), QStringLiteral("SSH key"));
         QCOMPARE(helpers.authModeText(QStringLiteral("password")), QStringLiteral("Password"));
         QCOMPARE(helpers.authModeText(QString()), QStringLiteral("Password"));
@@ -427,7 +545,7 @@ private slots:
     {
         // U-4: a specific text for every error.
         QSet<QString> texts;
-        const int last = static_cast<int>(Error::Internal);
+        const int last = static_cast<int>(Error::NotModified);
         for (int i = static_cast<int>(Error::Canceled); i <= last; ++i) {
             const QString text = NetVfsUi::userErrorText(static_cast<Error>(i));
             QVERIFY2(!text.isEmpty() && !text.startsWith(QStringLiteral("settings-accounts-")),
@@ -460,6 +578,18 @@ private slots:
         QCOMPARE(NetVfsUi::userErrorText(Error::Timeout, Activity::StoredSecret), NetVfsUi::userErrorText(Error::Timeout));
         QCOMPARE(NetVfsUi::userErrorText(Error::NotFound, Activity::InstallKey), NetVfsUi::userErrorText(Error::NotFound));
         QCOMPARE(NetVfsUi::userErrorText(Error::None, Activity::KeyFile), QString());
+        // SPEC-v2-review 2.19: a Files verify writes nothing, so no backup wording.
+        QCOMPARE(NetVfsUi::userErrorText(Error::PermissionDenied, Activity::Browse),
+                 QStringLiteral("The server does not allow reading the start folder."));
+        QCOMPARE(NetVfsUi::userErrorText(Error::NotFound, Activity::Browse),
+                 QStringLiteral("The start folder was not found on the server."));
+        QCOMPARE(NetVfsUi::userErrorText(Error::NotADirectory, Activity::Browse),
+                 QStringLiteral("The start folder on the server is not a folder."));
+        QCOMPARE(NetVfsUi::userErrorText(Error::Timeout, Activity::Browse), NetVfsUi::userErrorText(Error::Timeout));
+        QVERIFY(NetVfsUi::userErrorText(Error::SecurityPolicy, Activity::ServicePolicy).startsWith(
+                    QStringLiteral("These settings cannot be used for backups.")));
+        QCOMPARE(NetVfsUi::userErrorText(Error::AuthFailed, Activity::ServicePolicy),
+                 NetVfsUi::userErrorText(Error::AuthFailed));
     }
 };
 

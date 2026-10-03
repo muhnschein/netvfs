@@ -110,22 +110,41 @@ private:
     NetVfsProbe::SessionFactory sessionFactory(const Result &secretResult)
     {
         Accounts::Manager *manager = fixture->manager();
-        return [manager, secretResult](int accountId, QObject *parent) {
+        return [manager, secretResult](int accountId, Service service, QObject *parent) {
             auto secrets = std::make_unique<StaticSecretSource>(secretResult, Credentials(QString(), "secret"));
             auto session = std::make_unique<AccountSession>(manager, secrets.release(), parent);
             AccountSession *raw = session.release();
-            QTimer::singleShot(0, raw, [raw, accountId]() { raw->start(accountId); });
+            QTimer::singleShot(0, raw, [raw, accountId, service]() { raw->start(accountId, service); });
             return raw;
         };
     }
 
-    int createAccount(const QString &pin, const QString &backupsPath = QString())
+    int createAccount(const QString &pin, const QString &backupsPath = QString(),
+                      const QVariantMap &options = QVariantMap())
     {
         QVariantMap globals;
         globals.insert(QStringLiteral("netvfs/host"), QStringLiteral("server.example"));
         globals.insert(QStringLiteral("netvfs/username"), QStringLiteral("user"));
         globals.insert(QStringLiteral("netvfs/fake/host_key"), pin);
+        for (auto it = options.constBegin(); it != options.constEnd(); ++it)
+            globals.insert(QStringLiteral("netvfs/fake/") + it.key(), it.value());
         return fixture->createAccount(QStringLiteral("fake"), globals, backupsPath, 7);
+    }
+
+    static QVariantMap pinOptions(const QString &pin)
+    {
+        QVariantMap options;
+        options.insert(QStringLiteral("host_key"), pin);
+        return options;
+    }
+
+    static ServerIdentity tlsIdentity(bool trusted)
+    {
+        ServerIdentity identity = ServerIdentity::fromTlsSpki(QByteArray("server-spki"));
+        identity.systemTrusted = trusted;
+        if (!trusted)
+            identity.problems = ServerIdentity::SelfSigned;
+        return identity;
     }
 
 private slots:
@@ -241,7 +260,11 @@ private slots:
         QCOMPARE(log.value(0), QStringLiteral("connect"));
         QCOMPARE(log.value(1), QStringLiteral("authenticate"));
         QVERIFY(logHas(QStringLiteral("upload:Sailfish OS/Backups/.netvfs-probe-")));
-        QVERIFY(logHas(QStringLiteral("remove:Sailfish OS/Backups/.netvfs-probe-")));
+        QVERIFY(logHas(QStringLiteral("removeFile:Sailfish OS/Backups/.netvfs-probe-")));
+        // S-20 via XC-23: the backups folder is created the way backups create it.
+        QCOMPARE(server->lastParams.option(QStringLiteral("dir_mode")), QStringLiteral("0700"));
+        QCOMPARE(server->node(QStringLiteral("Sailfish OS")).mode, 0700);
+        QCOMPARE(server->node(QStringLiteral("Sailfish OS/Backups")).mode, 0700);
         QCOMPARE(log.last(), QStringLiteral("disconnect"));
     }
 
@@ -291,7 +314,7 @@ private slots:
         QTest::addColumn<QString>("text");
         QTest::newRow("wrong secret") << "wrong" << QString() << int(NetVfsProbe::ErrorCode::AuthFailed)
                                       << "The server refused the sign-in. Check the user name and the password or key.";
-        QTest::newRow("no permission") << "secret" << "makePath" << int(NetVfsProbe::ErrorCode::PermissionDenied)
+        QTest::newRow("no permission") << "secret" << "makeDir" << int(NetVfsProbe::ErrorCode::PermissionDenied)
                                        << "The server does not allow writing to the backups folder.";
         QTest::newRow("upload fails") << "secret" << "upload" << int(NetVfsProbe::ErrorCode::PermissionDenied)
                                       << "The server does not allow writing to the backups folder.";
@@ -342,7 +365,7 @@ private slots:
         QCOMPARE(verified.count(), 0);
         QCOMPARE(failed.count(), 0);
         QCOMPARE(probe.state(), NetVfsProbe::State::Idle);
-        QVERIFY(!logHas(QStringLiteral("freeSpace:")));
+        QVERIFY(!logHas(QStringLiteral("spaceInfo:")));
 
         // The probe is usable again afterwards.
         FakeServer::instance()->chunkDelayMs = 0;
@@ -437,7 +460,7 @@ private slots:
         QTRY_COMPARE(failed.count(), 1);
         QCOMPARE(probe.error(), NetVfsProbe::ErrorCode::ServerIdentityChanged);
         QVERIFY(!logHas(QStringLiteral("authenticate")));
-        probe.verifyAccount(accountId, pinOf(OtherBlob));
+        probe.verifyAccount(accountId, pinOptions(pinOf(OtherBlob)));
         QTRY_COMPARE(verified.count(), 1);
         QVERIFY(FakeServer::instance()->exists(QStringLiteral("Sailfish OS/Backups")));
     }
@@ -468,6 +491,213 @@ private slots:
         QTest::qWait(100);
         QCOMPARE(verified.count(), 0);
         QCOMPARE(probe.state(), NetVfsProbe::State::Idle);
+        QVERIFY(serverLog().isEmpty());
+    }
+
+    // SPEC-v2-review 2.19: a Files verify authenticates and stats the start folder, nothing more.
+    void verifyFilesWritesNothing()
+    {
+        FakeServer *server = FakeServer::instance();
+        server->identity = identityOf(KeyBlob);
+        server->addDir(QStringLiteral("media/photos"));
+        server->freeBytes = 4242;
+        NetVfsProbe probe;
+        QSignalSpy verified(&probe, &NetVfsProbe::verified);
+        probe.verify(params(pinOf(KeyBlob)), credentials(QStringLiteral("secret")), QStringLiteral("media/photos"),
+                     QStringLiteral("files"));
+        QTRY_COMPARE(verified.count(), 1);
+        QCOMPARE(probe.freeBytes(), Q_INT64_C(4242));
+        const QStringList log = serverLog();
+        QCOMPARE(log.value(0), QStringLiteral("connect"));
+        QCOMPARE(log.value(1), QStringLiteral("authenticate"));
+        QVERIFY(log.contains(QStringLiteral("stat:media/photos")));
+        for (const QString &entry : log) {
+            QVERIFY2(!entry.startsWith(QStringLiteral("upload")) && !entry.startsWith(QStringLiteral("makeDir"))
+                     && !entry.startsWith(QStringLiteral("removeFile")) && !entry.startsWith(QStringLiteral("openWrite")),
+                     qPrintable(entry));
+        }
+        QVERIFY(!server->lastParams.options.contains(QStringLiteral("dir_mode")));
+        QCOMPARE(log.last(), QStringLiteral("disconnect"));
+
+        // The backend's base folder by default.
+        probe.verify(params(pinOf(KeyBlob)), credentials(QStringLiteral("secret")), QString(), QStringLiteral("files"));
+        QTRY_COMPARE(verified.count(), 2);
+    }
+
+    void verifyFilesErrors_data()
+    {
+        QTest::addColumn<QString>("folder");
+        QTest::addColumn<int>("error");
+        QTest::addColumn<QString>("text");
+        QTest::newRow("missing") << "nope" << int(NetVfsProbe::ErrorCode::NotFound)
+                                 << "The start folder was not found on the server.";
+        QTest::newRow("file") << "file.txt" << int(Error::NotADirectory)
+                              << "The start folder on the server is not a folder.";
+        QTest::newRow("dots") << "a/../b" << -1 << QString();
+    }
+
+    void verifyFilesErrors()
+    {
+        QFETCH(QString, folder);
+        QFETCH(int, error);
+        QFETCH(QString, text);
+        FakeServer::instance()->addFile(QStringLiteral("file.txt"), "x");
+        NetVfsProbe probe;
+        QSignalSpy failed(&probe, &NetVfsProbe::failed);
+        probe.verify(params(), credentials(QStringLiteral("secret")), folder, QStringLiteral("files"));
+        QTRY_COMPARE(failed.count(), 1);
+        if (error >= 0)
+            QCOMPARE(int(probe.error()), error);
+        if (!text.isEmpty())
+            QCOMPARE(probe.errorText(), text);
+        QVERIFY(!logHas(QStringLiteral("upload")));
+    }
+
+    // SPEC-v2 XA-4: refused before anything is sent.
+    void verifyRefusedByPolicy()
+    {
+        QVariantMap guest = params();
+        QVariantMap options;
+        options.insert(QStringLiteral("allow_insecure"), true);
+        guest.insert(QStringLiteral("options"), options);
+        NetVfsProbe probe;
+        QSignalSpy failed(&probe, &NetVfsProbe::failed);
+        QSignalSpy verified(&probe, &NetVfsProbe::verified);
+        probe.verify(guest, credentials(QStringLiteral("secret")), QStringLiteral("b"), QStringLiteral("backup"));
+        QTRY_COMPARE(failed.count(), 1);
+        QCOMPARE(probe.error(), NetVfsProbe::ErrorCode::SecurityPolicy);
+        QVERIFY(probe.errorText().startsWith(QStringLiteral("These settings cannot be used for backups.")));
+        QVERIFY(serverLog().isEmpty());
+
+        // The same configuration is fine for files.
+        probe.verify(guest, credentials(QStringLiteral("secret")), QString(), QStringLiteral("files"));
+        QTRY_COMPARE(verified.count(), 1);
+
+        probe.verify(guest, credentials(QStringLiteral("secret")), QString(), QStringLiteral("storage"));
+        QCOMPARE(probe.state(), NetVfsProbe::State::Failed);
+        QCOMPARE(probe.error(), NetVfsProbe::ErrorCode::Internal);
+    }
+
+    void verifyInteractiveChecksIdentityOnly()
+    {
+        // Interactive sign-in needs a person: connect and identity only.
+        FakeServer::instance()->identity = identityOf(KeyBlob);
+        QVariantMap interactive = params(pinOf(KeyBlob));
+        QVariantMap options = interactive.value(QStringLiteral("options")).toMap();
+        options.insert(QStringLiteral("auth_mode"), QStringLiteral("interactive"));
+        interactive.insert(QStringLiteral("options"), options);
+        NetVfsProbe probe;
+        QSignalSpy verified(&probe, &NetVfsProbe::verified);
+        QSignalSpy failed(&probe, &NetVfsProbe::failed);
+        probe.verify(interactive, credentials(QString()), QString(), QStringLiteral("files"));
+        QTRY_COMPARE(verified.count(), 1);
+        QCOMPARE(serverLog(), QStringList({ QStringLiteral("connect"), QStringLiteral("disconnect") }));
+        QCOMPARE(probe.identityStatus(), NetVfsProbe::IdentityStatus::IdentityMatches);
+
+        // An unconfirmed identity still fails, before any credential.
+        options.remove(QStringLiteral("host_key"));
+        interactive.insert(QStringLiteral("options"), options);
+        probe.verify(interactive, credentials(QString()), QString(), QStringLiteral("files"));
+        QTRY_COMPARE(failed.count(), 1);
+        QCOMPARE(probe.error(), NetVfsProbe::ErrorCode::ServerIdentityUnknown);
+
+        // Never for backups.
+        probe.verify(interactive, credentials(QString()),
+                     QStringLiteral("b"), QStringLiteral("backup"));
+        QTRY_COMPARE(failed.count(), 2);
+        QCOMPARE(probe.error(), NetVfsProbe::ErrorCode::SecurityPolicy);
+    }
+
+    // XC-16: TLS identities in the account flow.
+    void tlsIdentityStatus_data()
+    {
+        QTest::addColumn<bool>("trusted");
+        QTest::addColumn<bool>("pinTrusted");
+        QTest::addColumn<bool>("pinned");
+        QTest::addColumn<int>("status");
+        QTest::newRow("trusted") << true << false << false << int(NetVfsProbe::IdentityStatus::IdentityTrusted);
+        QTest::newRow("trusted, pin wanted") << true << true << false << int(NetVfsProbe::IdentityStatus::IdentityUnknown);
+        QTest::newRow("untrusted") << false << false << false << int(NetVfsProbe::IdentityStatus::IdentityUnknown);
+        QTest::newRow("untrusted, pin wanted") << false << true << false << int(NetVfsProbe::IdentityStatus::IdentityUnknown);
+        QTest::newRow("pinned") << false << false << true << int(NetVfsProbe::IdentityStatus::IdentityMatches);
+        QTest::newRow("pinned trusted") << true << true << true << int(NetVfsProbe::IdentityStatus::IdentityMatches);
+    }
+
+    void tlsIdentityStatus()
+    {
+        QFETCH(bool, trusted);
+        QFETCH(bool, pinTrusted);
+        QFETCH(bool, pinned);
+        QFETCH(int, status);
+        const ServerIdentity identity = tlsIdentity(trusted);
+        FakeServer::instance()->identity = identity;
+        QVariantMap map = params(pinned ? identity.toPin() : QString());
+        QVariantMap options = map.value(QStringLiteral("options")).toMap();
+        options.insert(QStringLiteral("pin_trusted"), pinTrusted);
+        map.insert(QStringLiteral("options"), options);
+        NetVfsProbe probe;
+        QSignalSpy identified(&probe, &NetVfsProbe::identified);
+        probe.identify(map);
+        QTRY_COMPARE(identified.count(), 1);
+        QCOMPARE(int(probe.identityStatus()), status);
+        const QVariantMap seen = probe.serverIdentity();
+        QCOMPARE(seen.value(QStringLiteral("kind")).toString(), QStringLiteral("tls"));
+        // W-4: the accepted pin records whether the certificate was system trusted.
+        const QVariantMap accepted = seen.value(QStringLiteral("pinOptions")).toMap();
+        QCOMPARE(accepted.value(QStringLiteral("host_key")).toString(), identity.toPin());
+        QCOMPARE(accepted.value(QStringLiteral("tls_verify_peer")), QVariant(trusted));
+    }
+
+    void identityCheckForPinTrusted()
+    {
+        ConnectionParams params;
+        ServerIdentity trusted = tlsIdentity(true);
+        QVERIFY(NetVfsUi::identityCheckFor(trusted, params).ok());
+        params.options.insert(QStringLiteral("pin_trusted"), true);
+        QCOMPARE(NetVfsUi::identityCheckFor(trusted, params).error(), Error::ServerIdentityUnknown);
+        params.options.insert(QStringLiteral("host_key"), trusted.toPin());
+        QVERIFY(NetVfsUi::identityCheckFor(trusted, params).ok());
+        // SSH is unaffected by pin_trusted.
+        params.options.remove(QStringLiteral("host_key"));
+        QCOMPARE(NetVfsUi::identityCheckFor(identityOf(KeyBlob), params).error(), Error::ServerIdentityUnknown);
+        params.options.insert(QStringLiteral("host_key"), pinOf(KeyBlob));
+        QVERIFY(NetVfsUi::identityCheckFor(identityOf(KeyBlob), params).ok());
+    }
+
+    void verifyAccountFiles()
+    {
+        // The stored start folder of the files service; nothing written.
+        FakeServer *server = FakeServer::instance();
+        server->identity = identityOf(KeyBlob);
+        server->addDir(QStringLiteral("shared"));
+        const int accountId = createAccount(pinOf(KeyBlob));
+        QVERIFY(fixture->setService(accountId, QStringLiteral("fake-files"), true,
+                                    { { QStringLiteral("files_root"), QStringLiteral("shared") } }));
+        NetVfsProbe probe;
+        probe.setSessionFactory(sessionFactory(Result()));
+        QSignalSpy verified(&probe, &NetVfsProbe::verified);
+        probe.verifyAccount(accountId, QVariantMap(), QStringLiteral("files"));
+        QTRY_COMPARE(verified.count(), 1);
+        QVERIFY(logHas(QStringLiteral("stat:shared")));
+        QVERIFY(!logHas(QStringLiteral("upload")));
+        QVERIFY(!server->exists(QStringLiteral("Sailfish OS/Backups")));
+
+        probe.verifyAccount(accountId, QVariantMap(), QStringLiteral("nope"));
+        QCOMPARE(probe.error(), NetVfsProbe::ErrorCode::Internal);
+    }
+
+    void verifyAccountRefusedForBackup()
+    {
+        QVariantMap options;
+        options.insert(QStringLiteral("allow_insecure"), true);
+        const int accountId = createAccount(QString(), QString(), options);
+        NetVfsProbe probe;
+        probe.setSessionFactory(sessionFactory(Result()));
+        QSignalSpy failed(&probe, &NetVfsProbe::failed);
+        probe.verifyAccount(accountId);
+        QTRY_COMPARE(failed.count(), 1);
+        QCOMPARE(probe.error(), NetVfsProbe::ErrorCode::SecurityPolicy);
+        QVERIFY(probe.errorText().startsWith(QStringLiteral("These settings cannot be used for backups.")));
         QVERIFY(serverLog().isEmpty());
     }
 

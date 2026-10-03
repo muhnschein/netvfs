@@ -1,0 +1,14 @@
+{
+    "description": "Hello first, then consent and the locations in scope (XB-6, XB-7, XB-8)",
+    "consent": "granted",
+    "steps": [
+        { "call": "Hello", "sig": "us", "args": [1, "contract"], "reply": [1, "*", "*"] },
+        { "call": "GetConsent", "sig": "", "args": [], "reply": ["granted"] },
+        { "call": "ListLocations", "sig": "", "args": [],
+          "reply": [[["account:1", "fake", "Fake 1", { "kind": "account", "host": "fake.example", "accountId": 1 }]]] },
+        { "call": "Capabilities", "sig": "s", "args": ["account:1"], "reply": [["*", "*", "*"]] },
+        { "call": "Disconnect", "sig": "s", "args": ["account:1"], "reply": [] },
+        { "call": "Disconnect", "sig": "s", "args": ["account:2"], "error": "org.netvfs.Error.NotFound" },
+        { "call": "RequestConsent", "sig": "", "args": [], "reply": [] }
+    ]
+}

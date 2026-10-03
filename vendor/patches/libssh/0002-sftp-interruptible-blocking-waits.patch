@@ -1,0 +1,291 @@
+From: muhnschein <tan_anemone.0l@icloud.com>
+Date: Fri, 2 Oct 2026 18:00:00 +0000
+Subject: [PATCH] sftp: interruptible blocking waits, discarding responses
+
+Blocking sftp calls wait for their response for the whole session timeout
+and cannot be stopped from outside, so a caller cannot honour a user's
+cancel while the server does not answer.
+
+Add sftp_set_interrupt_callback(): while a blocking call waits for its
+response and no data of it has arrived, the callback is asked between
+100 ms polls; a non-zero return fails the call, and the response is
+dropped when it arrives. With a callback the wait also ends after the
+session timeout. Partially received responses are read to their end, so
+the sftp stream stays in sync and the session stays usable.
+
+Add sftp_aio_discard(), which abandons an asynchronous request the same
+way. sftp_aio_free() keeps the late response in the queue until the
+session is freed.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+diff -ru a/include/libssh/sftp.h b/include/libssh/sftp.h
+--- a/include/libssh/sftp.h	2026-10-02 16:52:21.198461795 +0000
++++ b/include/libssh/sftp.h	2026-10-02 16:53:00.840944722 +0000
+diff -ru a/include/libssh/sftp.h b/include/libssh/sftp.h
+--- a/include/libssh/sftp.h	2026-10-02 16:52:21.198461795 +0000
++++ b/include/libssh/sftp.h	2026-10-02 17:12:30.561200466 +0000
+@@ -96,6 +96,20 @@
+ typedef struct sftp_aio_struct* sftp_aio;
+ typedef struct sftp_name_id_map_struct *sftp_name_id_map;
+ 
++/**
++ * @brief Caller-defined state handed to an sftp_interrupt_callback.
++ *
++ * libssh only passes the pointer on; the application defines the struct.
++ */
++struct sftp_interrupt_struct;
++
++/**
++ * @brief Callback asked while a blocking sftp call waits for its response.
++ *
++ * @see sftp_set_interrupt_callback()
++ */
++typedef int (*sftp_interrupt_callback)(const struct sftp_interrupt_struct *interrupt);
++
+ struct sftp_session_struct {
+     ssh_session session;
+     ssh_channel channel;
+@@ -110,6 +124,9 @@
+     sftp_packet read_packet;
+     sftp_limits_t limits;
+     struct ssh_list *outstanding_ids;
++    sftp_interrupt_callback interrupt_cb;
++    const struct sftp_interrupt_struct *interrupt;
++    struct ssh_list *discarded_ids;
+ };
+ 
+ struct sftp_packet_struct {
+@@ -289,6 +306,27 @@
+ LIBSSH_API void sftp_free(sftp_session sftp);
+ 
+ /**
++ * @brief Make the blocking waits of an sftp session interruptible.
++ *
++ * While a blocking sftp call waits for the server's response and nothing has
++ * arrived yet, the callback is asked about every 100 ms. When it returns
++ * non-zero the call fails with an error ("Interrupted while waiting for an
++ * sftp response") and the response, when it arrives later, is dropped. The
++ * session stays usable. A response that has started to arrive is read to
++ * its end first, so that the sftp stream stays in sync.
++ *
++ * With a callback set, such waits also end after the session timeout
++ * (SSH_OPTIONS_TIMEOUT) with "Timeout while waiting for an sftp response".
++ *
++ * @param sftp          The sftp session.
++ * @param callback      The callback, or NULL to restore plain blocking waits.
++ * @param interrupt     Passed to the callback.
++ */
++LIBSSH_API void sftp_set_interrupt_callback(sftp_session sftp,
++                                            sftp_interrupt_callback callback,
++                                            const struct sftp_interrupt_struct *interrupt);
++
++/**
+  * @brief Initialize the sftp protocol with the server.
+  *
+  * This function involves the SFTP protocol initialization (as described
+@@ -648,6 +686,18 @@
+  * @see sftp_aio_wait_write()
+  */
+ LIBSSH_API void sftp_aio_free(sftp_aio aio);
++
++/**
++ * @brief Abandon an outstanding asynchronous request.
++ *
++ * Unlike sftp_aio_free(), the response is dropped when it arrives (or now,
++ * if it has already been received) instead of being kept in the response
++ * queue until the sftp session is freed. Call it before closing the file
++ * the request belongs to.
++ *
++ * @param aio           The sftp aio handle to discard, may be NULL.
++ */
++LIBSSH_API void sftp_aio_discard(sftp_aio aio);
+ #define SFTP_AIO_FREE(x) \
+     do { if(x != NULL) {sftp_aio_free(x); x = NULL;} } while(0)
+ 
+diff -ru a/include/libssh/sftp_priv.h b/include/libssh/sftp_priv.h
+--- a/include/libssh/sftp_priv.h	2026-10-02 16:43:39.161364668 +0000
++++ b/include/libssh/sftp_priv.h	2026-10-02 16:53:00.841591300 +0000
+@@ -63,6 +63,7 @@
+ int sftp_read_and_dispatch(sftp_session sftp);
+ 
+ sftp_message sftp_dequeue(sftp_session sftp, uint32_t id);
++void sftp_discard_response(sftp_session sftp, uint32_t id);
+ 
+ /**
+  * @brief Receive the response of an sftp request
+diff -ru a/src/sftp.c b/src/sftp.c
+--- a/src/sftp.c	2026-10-02 16:52:21.199392537 +0000
++++ b/src/sftp.c	2026-10-02 16:53:00.843374992 +0000
+@@ -386,6 +386,14 @@
+     }
+     ssh_list_free(sftp->outstanding_ids);
+ 
++    if (sftp->discarded_ids != NULL) {
++        id_it = ssh_list_get_iterator(sftp->discarded_ids);
++        for (; id_it != NULL; id_it = id_it->next) {
++            free((uint32_t *)id_it->data);
++        }
++        ssh_list_free(sftp->discarded_ids);
++    }
++
+     SAFE_FREE(sftp);
+ }
+ 
+diff -ru a/src/sftp_aio.c b/src/sftp_aio.c
+--- a/src/sftp_aio.c	2026-10-02 16:43:39.213844572 +0000
++++ b/src/sftp_aio.c	2026-10-02 16:53:00.844055451 +0000
+@@ -50,6 +50,17 @@
+     SAFE_FREE(aio);
+ }
+ 
++void sftp_aio_discard(sftp_aio aio)
++{
++    if (aio == NULL) {
++        return;
++    }
++    if (aio->file != NULL && aio->file->sftp != NULL) {
++        sftp_discard_response(aio->file->sftp, aio->id);
++    }
++    SAFE_FREE(aio);
++}
++
+ ssize_t sftp_aio_begin_read(sftp_file file, size_t len, sftp_aio *aio)
+ {
+     sftp_session sftp = NULL;
+diff -ru a/src/sftp_common.c b/src/sftp_common.c
+--- a/src/sftp_common.c	2026-10-02 16:43:39.217364672 +0000
++++ b/src/sftp_common.c	2026-10-02 17:12:30.563511398 +0000
+@@ -901,6 +901,107 @@
+     return SSH_OK;
+ }
+ 
++/* Removes `id` from the discarded responses; true if it was there. */
++static bool sftp_take_discarded(sftp_session sftp, uint32_t id)
++{
++    struct ssh_iterator *it = NULL;
++
++    if (sftp->discarded_ids == NULL) {
++        return false;
++    }
++    it = ssh_list_get_iterator(sftp->discarded_ids);
++    for (; it != NULL; it = it->next) {
++        uint32_t *stored_id = (uint32_t *)it->data;
++        if (*stored_id == id) {
++            ssh_list_remove(sftp->discarded_ids, it);
++            free(stored_id);
++            return true;
++        }
++    }
++    return false;
++}
++
++void sftp_discard_response(sftp_session sftp, uint32_t id)
++{
++    sftp_message msg = NULL;
++    uint32_t *stored_id = NULL;
++
++    msg = sftp_dequeue(sftp, id);
++    if (msg != NULL) {
++        sftp_message_free(msg);
++        return;
++    }
++    if (sftp->discarded_ids == NULL) {
++        sftp->discarded_ids = ssh_list_new();
++        if (sftp->discarded_ids == NULL) {
++            /* the response then stays in the queue */
++            return;
++        }
++    }
++    stored_id = malloc(sizeof(uint32_t));
++    if (stored_id == NULL) {
++        return;
++    }
++    *stored_id = id;
++    if (ssh_list_append(sftp->discarded_ids, stored_id) != SSH_OK) {
++        free(stored_id);
++    }
++}
++
++void sftp_set_interrupt_callback(sftp_session sftp,
++                                 sftp_interrupt_callback callback,
++                                 const struct sftp_interrupt_struct *interrupt)
++{
++    if (sftp == NULL) {
++        return;
++    }
++    sftp->interrupt_cb = callback;
++    sftp->interrupt = interrupt;
++}
++
++#define SFTP_INTERRUPT_POLL_MS 100
++
++/*
++ * Waits until data of a response is available on the channel, asking the
++ * interrupt callback between short polls (see sftp_set_interrupt_callback).
++ */
++static int sftp_wait_interruptible(sftp_session sftp, uint32_t id)
++{
++    struct ssh_timestamp ts;
++    int timeout_ms;
++    int rc;
++
++    timeout_ms = ssh_make_milliseconds(sftp->session->opts.timeout,
++                                       sftp->session->opts.timeout_usec);
++    ssh_timestamp_init(&ts);
++    for (;;) {
++        rc = ssh_channel_poll_timeout(sftp->channel, SFTP_INTERRUPT_POLL_MS, 0);
++        if (rc == SSH_ERROR) {
++            sftp_set_error(sftp, SSH_FX_FAILURE);
++            return SSH_ERROR;
++        }
++        if (rc != 0) {
++            /* data or EOF: sftp_read_and_dispatch() takes it from here */
++            return SSH_OK;
++        }
++        if (sftp->interrupt_cb(sftp->interrupt) != 0) {
++            ssh_set_error(sftp->session,
++                          SSH_FATAL,
++                          "Interrupted while waiting for an sftp response");
++            break;
++        }
++        if (timeout_ms > 0 && ssh_timeout_elapsed(&ts, timeout_ms)) {
++            ssh_set_error(sftp->session,
++                          SSH_FATAL,
++                          "Timeout while waiting for an sftp response");
++            break;
++        }
++    }
++    sftp_discard_response(sftp, id);
++    sftp_set_error(sftp, SSH_FX_FAILURE);
++    return SSH_ERROR;
++}
++
+ int sftp_read_and_dispatch(sftp_session sftp)
+ {
+     sftp_packet packet = NULL;
+@@ -917,6 +1018,12 @@
+         return -1;
+     }
+ 
++    if (sftp_take_discarded(sftp, msg->id)) {
++        /* nobody waits for this response any more */
++        sftp_message_free(msg);
++        return 0;
++    }
++
+     if (sftp_enqueue(sftp, msg) < 0) {
+         sftp_message_free(msg);
+         return -1;
+@@ -1000,6 +1107,11 @@
+                 /* nothing available and we cannot block */
+                 return SSH_AGAIN;
+             }
++        } else if (sftp->interrupt_cb != NULL) {
++            rc = sftp_wait_interruptible(sftp, id);
++            if (rc != SSH_OK) {
++                return SSH_ERROR;
++            }
+         }
+ 
+         rc = sftp_read_and_dispatch(sftp);

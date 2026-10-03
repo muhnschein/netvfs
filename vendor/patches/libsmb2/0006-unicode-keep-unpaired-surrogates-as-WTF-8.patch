@@ -1,0 +1,135 @@
+From: muhnschein <tan_anemone.0l@icloud.com>
+Subject: [PATCH] unicode: keep unpaired surrogates (WTF-8)
+
+Windows (NTFS, ReFS) stores names as arbitrary sequences of UTF-16 code
+units, unpaired surrogates included. smb2_utf16_to_utf8() replaced such a
+unit with U+FFFD, so the name a client saw named no file on the server:
+the file could be listed but not opened, renamed or deleted, and two
+different names could collapse into one.
+
+Write an unpaired surrogate as the 3-byte form of its code point (the
+generalized UTF-8 known as WTF-8) and accept that form again in
+smb2_utf8_to_utf16(). Well-formed input converts exactly as before;
+a lead and a trail surrogate written one by one (CESU-8) are still
+rejected, so every UTF-16 name has exactly one UTF-8 spelling.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+diff -ruN a/lib/unicode.c b/lib/unicode.c
+--- a/lib/unicode.c
++++ b/lib/unicode.c
+@@ -127,8 +127,14 @@
+                         *ret = cp;
+                         return 1;
+                 } else if (cp < 0xe000) {
+-                        /* invalid unicode range */
+-                        return -1;
++                        /*
++                         * A surrogate code point (WTF-8): one unpaired
++                         * UTF-16 code unit, as smb2_utf16_to_utf8()
++                         * produces it for names that Windows allows but
++                         * that are not valid Unicode.
++                         */
++                        *ret = cp;
++                        return 1;
+                 } else if (cp < 0x110000) {
+                         cp -= 0x10000;
+                         *ret = 0xd800 | (cp >> 10);
+@@ -151,6 +157,7 @@
+         const char *u = utf8;
+         int i = 0;
+         int cp_length;
++        int after_lead = 0;
+         uint16_t cp[2];
+ 
+         while (*u) {
+@@ -158,6 +165,17 @@
+                 if (cp_length < 0) {
+                         return -1;
+                 }
++                /*
++                 * A lead and a trail surrogate encoded one by one
++                 * (CESU-8) would alias the 4-byte form of the same
++                 * character. Only unpaired surrogates are accepted.
++                 */
++                if (cp_length == 1 && after_lead &&
++                    cp[0] >= 0xdc00 && cp[0] < 0xe000) {
++                        return -1;
++                }
++                after_lead = cp_length == 1 &&
++                        cp[0] >= 0xd800 && cp[0] < 0xdc00;
+                 i += cp_length;
+         }
+         return i;
+@@ -219,7 +237,7 @@
+                 } else if (code < 0xdc00) { /* Surrogate pair */
+                         uint32_t trail;
+                         if (utf16 == utf16_end) { /* It's possible the stream ends with a leading code unit, which is an error */
+-                                return length + 3; /* Replacement char */
++                                return length + 3; /* unpaired surrogate (WTF-8) */
+                         }
+ 
+                         trail = le16toh(*utf16);
+@@ -232,10 +250,10 @@
+                                 }
+                                 utf16++;
+                         } else { /* Invalid trailing code unit. It's still valid on its own though so only the first unit gets replaced */
+-                                length += 3; /* Replacement char */
++                                length += 3; /* unpaired surrogate (WTF-8) */
+                         }
+                 } else { /* 0xdc00 <= code < 0xe00, which makes code a trailing code unit without a leading one, which is invalid */
+-                        length += 3; /* Replacement char */
++                        length += 3; /* unpaired surrogate (WTF-8) */
+                 }
+         }
+ 
+@@ -245,6 +263,21 @@
+ /*
+  * Convert a UTF-16LE string into UTF8
+  */
++/*
++ * Windows allows names with unpaired UTF-16 surrogates. They are written
++ * as the 3-byte form of the surrogate code point (WTF-8) instead of
++ * U+FFFD, so that such a name survives the round trip through UTF-8 and
++ * the file can still be opened, renamed or deleted.
++ */
++static char *
++wtf8_unit(char *tmp, uint32_t code)
++{
++        *tmp++ = 0xe0 |  (code >> 12);
++        *tmp++ = 0x80 | ((code >>  6) & 0x3f);
++        *tmp++ = 0x80 | ((code      ) & 0x3f);
++        return tmp;
++}
++
+ const char *
+ smb2_utf16_to_utf8(const uint16_t *utf16, size_t utf16_len)
+ {
+@@ -275,8 +308,8 @@
+                         *tmp++ = 0x80 | ((code      ) & 0x3f);
+                 } else if (code < 0xdc00) { /* Surrogate pair */
+                         uint32_t trail;
+-                        if (utf16 == utf16_end) { /* It's possible the stream ends with a leading code unit, which is an error */
+-                                *tmp++ = 0xef; *tmp++ = 0xbf; *tmp++ = 0xbd; /* Replacement char */
++                        if (utf16 == utf16_end) { /* The stream ends with a lead code unit: keep it (WTF-8) */
++                                tmp = wtf8_unit(tmp, code);
+                                 return str;
+                         }
+ 
+@@ -295,12 +328,12 @@
+                                 }
+                                 utf16++;
+                         } else {
+-                                /* Invalid trailing code unit. It's still valid on its own though so only the first unit gets replaced */
+-                                *tmp++ = 0xef; *tmp++ = 0xbf; *tmp++ = 0xbd; /* Replacement char */
++                                /* A lead code unit without a trail: keep it (WTF-8); the next unit is converted on its own */
++                                tmp = wtf8_unit(tmp, code);
+                         }
+                 } else {
+-                        /* 0xdc00 <= code < 0xe00, which makes code a trailing code unit without a leading one, which is invalid */
+-                        *tmp++ = 0xef; *tmp++ = 0xbf; *tmp++ = 0xbd; /* Replacement char */
++                        /* 0xdc00 <= code < 0xe000: a trail code unit without a lead: keep it (WTF-8) */
++                        tmp = wtf8_unit(tmp, code);
+                 }
+         }
+ 

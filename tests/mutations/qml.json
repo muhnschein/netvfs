@@ -9,8 +9,8 @@
   {
     "name": "verify skips the folder and probe-file check (7.2)",
     "file": "src/qml/netvfsprobe.cpp",
-    "search": "        outcome.result = verifyAccess(backend, backupsPath, &outcome.freeBytes);",
-    "replace": "        outcome.freeBytes = 0;",
+    "search": "? verifyAccess(backend, folder, &outcome.freeBytes)",
+    "replace": "? Result()",
     "test": "dbus-run-session -- build/tests/unit/qml/probe/tst_qmlprobe"
   },
   {
@@ -23,22 +23,22 @@
   {
     "name": "protocol without identity reported as matching",
     "file": "src/qml/netvfsprobe.cpp",
-    "search": "outcome.identity.isEmpty() ? Status::NoIdentity : Status::IdentityMatches",
-    "replace": "Status::IdentityMatches",
+    "search": "    if (outcome.identity.isEmpty())\n        return Status::NoIdentity;\n",
+    "replace": "",
     "test": "dbus-run-session -- build/tests/unit/qml/probe/tst_qmlprobe"
   },
   {
     "name": "accepted new pin ignored by verifyAccount (7.5)",
     "file": "src/qml/netvfsprobe.cpp",
-    "search": "        if (!pin.isEmpty())\n            params.options.insert",
-    "replace": "        if (pin.isNull())\n            params.options.insert",
+    "search": "            params.options.insert(it.key(), it.value());\n        const Credentials",
+    "replace": "            Q_UNUSED(it)\n        const Credentials",
     "test": "dbus-run-session -- build/tests/unit/qml/probe/tst_qmlprobe"
   },
   {
     "name": "stored-secret failure gets the generic text (U-4)",
     "file": "src/qml/netvfsprobe.cpp",
-    "search": "userErrorText(result.error(), Activity::StoredSecret)",
-    "replace": "userErrorText(result.error())",
+    "search": "Activity activity = Activity::StoredSecret;",
+    "replace": "Activity activity = Activity::Connect;",
     "test": "dbus-run-session -- build/tests/unit/qml/probe/tst_qmlprobe"
   },
   {
@@ -88,13 +88,6 @@
     "file": "src/qml/netvfshelpers.cpp",
     "search": "    QVariantMap global;\n    global.insert(str(Keys::DefaultCredentialsUsername), accountLabel(params.username, params.host));\n    QVariantMap result;",
     "replace": "    QVariantMap global;\n    global.insert(str(Keys::DefaultCredentialsUsername), params.username);\n    QVariantMap result;",
-    "test": "build/tests/unit/qml/helpers/tst_qmlhelpers"
-  },
-  {
-    "name": "missing require_encryption shown as unencrypted (M-3)",
-    "file": "src/qml/netvfshelpers.cpp",
-    "search": "params.options.value(str(OptRequireEncryption), true).toBool()",
-    "replace": "params.options.value(str(OptRequireEncryption), false).toBool()",
     "test": "build/tests/unit/qml/helpers/tst_qmlhelpers"
   },
   {
@@ -166,5 +159,12 @@
     "search": "NetVfsCreationAgent {",
     "replace": "OnlineSyncAccountCreationAgent {",
     "test": "build/tests/unit/qml/module/tst_qmlmodule"
+  },
+  {
+    "name": "XC-23 verify creates the backups folder with server defaults",
+    "file": "src/qml/netvfsprobe.cpp",
+    "search": "service == Service::Backup ? withBackupDirMode(params) : params;",
+    "replace": "params;",
+    "test": "dbus-run-session -- build/tests/unit/qml/probe/tst_qmlprobe"
   }
 ]

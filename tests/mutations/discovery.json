@@ -1,0 +1,233 @@
+[
+  {
+    "name": "dns: compression pointers may point forward or to themselves (loop guard)",
+    "file": "src/core/dnsmessage.cpp",
+    "search": "if (target >= *p)",
+    "replace": "if (false)",
+    "test": "timeout 20 build/tests/unit/discovery/tst_discovery"
+  },
+  {
+    "name": "dns: record counts are not capped",
+    "file": "src/core/dnsmessage.cpp",
+    "search": "if (c.questions + c.records() > MaxRecords)",
+    "replace": "if (false)",
+    "test": "timeout 120 build/tests/unit/discovery/tst_discovery"
+  },
+  {
+    "name": "dns: header fields are read without a bounds check",
+    "file": "src/core/dnsmessage.cpp",
+    "search": "        if (remaining() < 2)\n            return false;\n        *v = static_cast<quint16>",
+    "replace": "        if (remaining() < 0)\n            return false;\n        *v = static_cast<quint16>",
+    "test": "timeout 120 build/tests/unit/discovery/tst_discovery"
+  },
+  {
+    "name": "dns: names may grow beyond 255 bytes (cap loosened, loops still end)",
+    "file": "src/core/dnsmessage.cpp",
+    "search": "if (wireLength > MaxNameLength)",
+    "replace": "if (wireLength > MaxNameLength + 1000)",
+    "test": "timeout 120 build/tests/unit/discovery/tst_discovery"
+  },
+  {
+    "name": "dns: record data may be shorter or longer than its length field says",
+    "file": "src/core/dnsmessage.cpp",
+    "search": "    if (r->pos() != end)\n        return fail(error, \"record data length mismatch\");",
+    "replace": "",
+    "test": "timeout 120 build/tests/unit/discovery/tst_discovery"
+  },
+  {
+    "name": "dns: encoder accepts labels of 64 bytes",
+    "file": "src/core/dnsmessage.cpp",
+    "search": "if (label.isEmpty() || label.size() > MaxLabelLength)",
+    "replace": "if (label.isEmpty() || label.size() > MaxLabelLength + 1)",
+    "test": "timeout 120 build/tests/unit/discovery/tst_discovery"
+  },
+  {
+    "name": "dns: encoder compresses SRV targets",
+    "file": "src/core/dnsmessage.cpp",
+    "search": "w->name(rec.target, false);",
+    "replace": "w->name(rec.target, true);",
+    "test": "timeout 120 build/tests/unit/discovery/tst_discovery"
+  },
+  {
+    "name": "cache: a PTR goodbye (TTL 0) does not remove the service",
+    "file": "src/core/discoverycache.cpp",
+    "search": "if (rec.ttl == 0) {                             // RFC 6762 section 10.1: goodbye",
+    "replace": "if (false) {",
+    "test": "timeout 120 build/tests/unit/discovery/tst_discovery"
+  },
+  {
+    "name": "cache: an SRV goodbye does not remove the service",
+    "file": "src/core/discoverycache.cpp",
+    "search": "    if (rec.ttl == 0) {\n        removeInstance(key, c);\n        return;\n    }\n    QString host;",
+    "replace": "    QString host;",
+    "test": "timeout 120 build/tests/unit/discovery/tst_discovery"
+  },
+  {
+    "name": "cache: records live one millisecond too long",
+    "file": "src/core/discoverycache.h",
+    "search": "qint64 expiresAt() const { return received + ttlMs; }",
+    "replace": "qint64 expiresAt() const { return received + ttlMs + 1; }",
+    "test": "timeout 120 build/tests/unit/discovery/tst_discovery"
+  },
+  {
+    "name": "cache: TTLs are not clamped",
+    "file": "src/core/discoverycache.cpp",
+    "search": "std::min<quint32>(ttlSeconds, MaxTtlSeconds)",
+    "replace": "ttlSeconds",
+    "test": "timeout 120 build/tests/unit/discovery/tst_discovery"
+  },
+  {
+    "name": "cache: the last refresh query comes at 100 percent",
+    "file": "src/core/discoverycache.cpp",
+    "search": "{{80, 90, 95}}",
+    "replace": "{{80, 90, 100}}",
+    "test": "timeout 120 build/tests/unit/discovery/tst_discovery"
+  },
+  {
+    "name": "cache: known-answer suppression offers records with little TTL left",
+    "file": "src/core/discoverycache.cpp",
+    "search": "if (remaining * 2 < inst.ptr.ttlMs)",
+    "replace": "if (false)",
+    "test": "timeout 120 build/tests/unit/discovery/tst_discovery"
+  },
+  {
+    "name": "cache: a cache-flush record does not replace older addresses",
+    "file": "src/core/discoverycache.cpp",
+    "search": "if (rec.cacheFlush && rec.ttl > 0)",
+    "replace": "if (false)",
+    "test": "timeout 120 build/tests/unit/discovery/tst_discovery"
+  },
+  {
+    "name": "cache: four resolution attempts instead of three",
+    "file": "src/core/discoverycache.h",
+    "search": "static constexpr int MaxResolveAttempts = 3;",
+    "replace": "static constexpr int MaxResolveAttempts = 4;",
+    "test": "timeout 120 build/tests/unit/discovery/tst_discovery"
+  },
+  {
+    "name": "cache: a service that lost its address is announced again without one",
+    "file": "src/core/discoverycache.cpp",
+    "search": "(inst->gaveUp && !inst->everAnnounced)",
+    "replace": "inst->gaveUp",
+    "test": "timeout 120 build/tests/unit/discovery/tst_discovery"
+  },
+  {
+    "name": "cache: SRV targets are not restricted to host name characters",
+    "file": "src/core/discoverycache.cpp",
+    "search": "    return (u >= '0' && u <= '9') ||",
+    "replace": "    return true || (u >= '0' && u <= '9') ||",
+    "test": "timeout 120 build/tests/unit/discovery/tst_discovery"
+  },
+  {
+    "name": "cache: SRV port 0 is accepted",
+    "file": "src/core/discoverycache.cpp",
+    "search": "if (rec.port == 0 || !cleanHost(rec.target, &host))",
+    "replace": "if (!cleanHost(rec.target, &host))",
+    "test": "timeout 120 build/tests/unit/discovery/tst_discovery"
+  },
+  {
+    "name": "cache: the instance count is unbounded",
+    "file": "src/core/discoverycache.cpp",
+    "search": "if (m_instances.size() >= MaxInstances)",
+    "replace": "if (false)",
+    "test": "timeout 120 build/tests/unit/discovery/tst_discovery"
+  },
+  {
+    "name": "cache: the address count per host is unbounded",
+    "file": "src/core/discoverycache.cpp",
+    "search": "} else if (entries.size() < MaxAddressesPerHost) {",
+    "replace": "} else {",
+    "test": "timeout 120 build/tests/unit/discovery/tst_discovery"
+  },
+  {
+    "name": "cache: loopback, multicast and link-local addresses are kept",
+    "file": "src/core/discoverycache.cpp",
+    "search": "if (it == m_hosts.end() || !usableAddress(rec.address))",
+    "replace": "if (it == m_hosts.end() || (false && !usableAddress(rec.address)))",
+    "test": "timeout 120 build/tests/unit/discovery/tst_discovery"
+  },
+  {
+    "name": "cache: queries and error responses are processed",
+    "file": "src/core/discoverycache.cpp",
+    "search": "if (!message.isResponse() || message.opcode() != 0 || message.rcode() != 0)",
+    "replace": "if (false)",
+    "test": "timeout 120 build/tests/unit/discovery/tst_discovery"
+  },
+  {
+    "name": "cache: control characters stay in names",
+    "file": "src/core/discoverycache.cpp",
+    "search": "const bool control = u < ControlLimit ||",
+    "replace": "const bool control = false ||",
+    "test": "timeout 120 build/tests/unit/discovery/tst_discovery"
+  },
+  {
+    "name": "discovery: the backoff gap is capped at ten minutes",
+    "file": "src/core/discovery.h",
+    "search": "static constexpr int MaxQueryIntervalMs = 60000;",
+    "replace": "static constexpr int MaxQueryIntervalMs = 600000;",
+    "test": "timeout 120 build/tests/unit/discovery/tst_discovery"
+  },
+  {
+    "name": "discovery: the backoff grows linearly",
+    "file": "src/core/discovery.cpp",
+    "search": "static_cast<qint64>(FirstQueryIntervalMs) << shift",
+    "replace": "static_cast<qint64>(FirstQueryIntervalMs) * (shift + 1)",
+    "test": "timeout 120 build/tests/unit/discovery/tst_discovery"
+  },
+  {
+    "name": "discovery: the last stop() does not stop when other consumers remain (count ignored)",
+    "file": "src/core/discovery.cpp",
+    "search": "    --m_consumers;\n    if (m_consumers == 0)\n        d->halt();",
+    "replace": "    --m_consumers;\n    d->halt();",
+    "test": "timeout 120 build/tests/unit/discovery/tst_discovery"
+  },
+  {
+    "name": "discovery: every start() restarts the browser",
+    "file": "src/core/discovery.cpp",
+    "search": "    if (m_consumers == 1)\n        d->begin();",
+    "replace": "    d->begin();",
+    "test": "timeout 120 build/tests/unit/discovery/tst_discovery"
+  },
+  {
+    "name": "discovery: queries continue after the last stop()",
+    "file": "src/core/discovery.cpp",
+    "search": "    if (!q->isRunning())\n        return;\n    const qint64 t = now();",
+    "replace": "    const qint64 t = now();",
+    "test": "timeout 120 build/tests/unit/discovery/tst_discovery"
+  },
+  {
+    "name": "discovery: signals continue after a handler stopped the browser",
+    "file": "src/core/discovery.cpp",
+    "search": "if (gen != generation || !q->isRunning())",
+    "replace": "if (gen == generation + 1)",
+    "test": "timeout 120 build/tests/unit/discovery/tst_discovery"
+  },
+  {
+    "name": "discovery: _webdavs is reported as plain http",
+    "file": "src/core/discoverycache.cpp",
+    "search": "{\"_webdavs._tcp\", \"webdav\", \"https\"},",
+    "replace": "{\"_webdavs._tcp\", \"webdav\", \"http\"},",
+    "test": "timeout 120 build/tests/unit/discovery/tst_discovery"
+  },
+  {
+    "name": "discovery: an ftp template drops the TXT path",
+    "file": "src/core/discovery.cpp",
+    "search": "location = service.path;",
+    "replace": "location = QStringLiteral(\"/\");",
+    "test": "timeout 120 build/tests/unit/discovery/tst_discovery"
+  },
+  {
+    "name": "transport: datagrams from any source port are accepted",
+    "file": "src/core/discoverytransport.cpp",
+    "search": "senderPort != m_options.requiredSourcePort",
+    "replace": "false",
+    "test": "timeout 120 build/tests/unit/discovery/tst_discovery"
+  },
+  {
+    "name": "transport: every sender counts as on-link",
+    "file": "src/core/discoverytransport.cpp",
+    "search": "&& sender.isInSubnet(e.ip(), e.prefixLength());",
+    "replace": "&& true;",
+    "test": "timeout 120 build/tests/unit/discovery/tst_discovery"
+  }
+]

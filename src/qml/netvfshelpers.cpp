@@ -2,7 +2,12 @@
 #include "netvfshelpers.h"
 #include "accountstore.h"
 #include "backendloader.h"
+#include "errortexts.h"
 #include "paths.h"
+#include "servicepolicy.h"
+
+#include <Accounts/Manager>
+#include <Accounts/Service>
 
 #include <QtCore/QCryptographicHash>
 #include <QtCore/QRegularExpression>
@@ -18,9 +23,9 @@ namespace {
 constexpr const char *OptHostKey = "host_key";
 constexpr const char *OptAuthMode = "auth_mode";
 constexpr const char *OptPublicKey = "public_key";
-constexpr const char *OptRequireEncryption = "require_encryption";
-constexpr const char *AuthPassword = "password";
 constexpr const char *AuthPublicKey = "publickey";
+constexpr const char *AuthInteractive = "interactive";
+constexpr const char *AuthToken = "token";
 constexpr const char *ProviderSftp = "sftp";
 constexpr const char *ProviderSmb = "smb";
 constexpr const char *StateCredentialsMissing = "credentials-missing";
@@ -123,15 +128,78 @@ QString sha256Fingerprint(const QByteArray &publicKeyBlob)
     return QStringLiteral("SHA256:") + QString::fromLatin1(encoded);
 }
 
+QStringList tlsProblemTexts(int problems)
+{
+    QStringList texts;
+    if (problems & ServerIdentity::SelfSigned) {
+        //% "The certificate is self-signed: no certificate authority vouches for it."
+        texts << qtTrId("settings-accounts-netvfs-la-tls_self_signed");
+    }
+    if (problems & ServerIdentity::UntrustedRoot) {
+        //% "The certificate is issued by an authority this device does not trust."
+        texts << qtTrId("settings-accounts-netvfs-la-tls_untrusted_root");
+    }
+    if (problems & ServerIdentity::Expired) {
+        //% "The certificate has expired."
+        texts << qtTrId("settings-accounts-netvfs-la-tls_expired");
+    }
+    if (problems & ServerIdentity::NotYetValid) {
+        //% "The certificate is not valid yet."
+        texts << qtTrId("settings-accounts-netvfs-la-tls_not_yet_valid");
+    }
+    if (problems & ServerIdentity::HostnameMismatch) {
+        //% "The certificate is issued for a different server name."
+        texts << qtTrId("settings-accounts-netvfs-la-tls_hostname_mismatch");
+    }
+    return texts;
+}
+
+QString colonHex(const QString &hex)
+{
+    QStringList pairs;
+    const QString upper = hex.toUpper();
+    for (int i = 0; i + 1 < upper.size(); i += 2)
+        pairs << upper.mid(i, 2);
+    return pairs.join(QLatin1Char(':'));
+}
+
+namespace {
+QString dateText(const QVariant &value)
+{
+    const QDateTime time = value.toDateTime();
+    return time.isValid() ? time.toUTC().toString(Qt::ISODate) : QString();
+}
+
+void insertTlsDetails(QVariantMap *map, const ServerIdentity &identity)
+{
+    const QVariantMap &details = identity.details;
+    map->insert(QStringLiteral("subject"), details.value(QStringLiteral("subject")).toString());
+    map->insert(QStringLiteral("issuer"), details.value(QStringLiteral("issuer")).toString());
+    map->insert(QStringLiteral("notBefore"), dateText(details.value(QStringLiteral("notBefore"))));
+    map->insert(QStringLiteral("notAfter"), dateText(details.value(QStringLiteral("notAfter"))));
+    map->insert(QStringLiteral("sans"), details.value(QStringLiteral("sans")).toStringList());
+    map->insert(QStringLiteral("certSha256"), colonHex(details.value(QStringLiteral("certSha256")).toString()));
+    map->insert(QStringLiteral("systemTrusted"), identity.systemTrusted);
+    map->insert(QStringLiteral("problems"), identity.problems);
+    map->insert(QStringLiteral("problemTexts"), tlsProblemTexts(identity.problems));
+}
+} // namespace
+
 QVariantMap identityToVariant(const ServerIdentity &identity)
 {
     QVariantMap map;
     if (identity.isEmpty())
         return map;
+    const bool tls = identity.kind == ServerIdentity::Kind::TlsCertificate;
+    map.insert(QStringLiteral("kind"), tls ? QStringLiteral("tls") : QStringLiteral("ssh"));
     map.insert(QStringLiteral("algorithm"), identity.algorithm);
     map.insert(QStringLiteral("fingerprint"),
                identity.fingerprint.isEmpty() ? sha256Fingerprint(identity.publicKey) : identity.fingerprint);
     map.insert(QStringLiteral("pin"), identity.toPin());
+    // XC-16, W-4: what to store on acceptance (host_key, tls_verify_peer).
+    map.insert(QStringLiteral("pinOptions"), pinOptions(identity));
+    if (tls)
+        insertTlsDetails(&map, identity);
     return map;
 }
 
@@ -165,6 +233,11 @@ QString Helpers::backupsPathKey() const
     return QLatin1String(Keys::BackupsPath);
 }
 
+QString Helpers::filesRootKey() const
+{
+    return QLatin1String(Keys::FilesRoot);
+}
+
 int InputRules::defaultPort(const QString &provider) const
 {
     if (provider == QLatin1String(ProviderSftp))
@@ -179,9 +252,42 @@ QString Helpers::backupServiceName(const QString &provider) const
     return NetVfs::backupServiceName(provider);
 }
 
+QString Helpers::filesServiceName(const QString &provider) const
+{
+    return NetVfs::filesServiceName(provider);
+}
+
 bool Helpers::isProviderInstalled(const QString &provider) const
 {
     return BackendLoader::isAvailable(provider);
+}
+
+bool Helpers::isServiceInstalled(const QString &serviceName) const
+{
+    Accounts::Manager manager;
+    return manager.service(serviceName).isValid();
+}
+
+bool Helpers::serviceAllowed(const QVariantMap &params, const QString &service) const
+{
+    Service s = Service::Backup;
+    return serviceFromId(service, &s) && checkServicePolicy(paramsFromVariant(params), s).ok();
+}
+
+QString Helpers::serviceRefusalText(const QVariantMap &params, const QString &service) const
+{
+    Service s = Service::Backup;
+    if (!serviceFromId(service, &s))
+        return userErrorText(Error::Internal);
+    const Result r = checkServicePolicy(paramsFromVariant(params), s);
+    if (r.ok())
+        return QString();
+    return userErrorText(r.error(), s == Service::Backup ? Activity::ServicePolicy : Activity::Connect);
+}
+
+bool Helpers::secretOptional(const QVariantMap &params) const
+{
+    return NetVfs::secretOptional(paramsFromVariant(params));
 }
 
 QString InputRules::hostProblem(const QString &host) const
@@ -255,6 +361,17 @@ QString InputRules::shareProblem(const QString &share) const
     if (value.size() > MaxShareLength || !Paths::windowsComponentProblem(value).isEmpty()) {
         //% "This is not a valid share name."
         return qtTrId("settings-accounts-netvfs-la-share_invalid");
+    }
+    return QString();
+}
+
+QString InputRules::serverPathProblem(const QString &path) const
+{
+    const QString value = path.trimmed();
+    if (QString normalized;
+        !value.startsWith(QLatin1Char('/')) || hasControlCharacter(value) || !Paths::normalize(value, &normalized).ok()) {
+        //% "Enter a path that starts with /, for example /remote.php/dav/files/me/."
+        return qtTrId("settings-accounts-netvfs-la-server_path_invalid");
     }
     return QString();
 }
@@ -343,7 +460,7 @@ QVariantMap Helpers::paramsFromConfiguration(const QString &provider, const QVar
     return paramsToVariant(params);
 }
 
-QVariantMap Helpers::creationSettings(const QVariantMap &paramsMap, const QString &backupsPath) const
+QVariantMap Helpers::creationSettings(const QVariantMap &paramsMap, const QVariantMap &services) const
 {
     const ConnectionParams params = paramsFromVariant(paramsMap);
     QVariantMap global;
@@ -352,13 +469,31 @@ QVariantMap Helpers::creationSettings(const QVariantMap &paramsMap, const QStrin
     global.insert(str(Keys::Username), params.username);
     insertOptions(&global, params);
 
-    QVariantMap service;
-    service.insert(str(Keys::BackupsPath), cleanFolderPath(params.provider, backupsPath));
+    QVariantMap values;
+    QStringList enable;
+    if (services.value(QStringLiteral("backup")).toBool()) {
+        const QString name = NetVfs::backupServiceName(params.provider);
+        QVariantMap backup;
+        backup.insert(str(Keys::BackupsPath),
+                      cleanFolderPath(params.provider, services.value(QStringLiteral("backupsPath")).toString()));
+        values.insert(name, backup);
+        enable << name;
+    }
+    if (services.value(QStringLiteral("files")).toBool()) {
+        // SPEC-v2-review 2.17: files_root is a setting of the files service.
+        const QString name = NetVfs::filesServiceName(params.provider);
+        QVariantMap files;
+        files.insert(str(Keys::FilesRoot),
+                     cleanFolderPath(params.provider, services.value(QStringLiteral("filesRoot")).toString()));
+        values.insert(name, files);
+        enable << name;
+    }
 
     QVariantMap result;
     result.insert(QStringLiteral("global"), global);
-    result.insert(QStringLiteral("service"), service);
-    result.insert(QStringLiteral("serviceName"), backupServiceName(params.provider));
+    result.insert(QStringLiteral("services"), values);
+    result.insert(QStringLiteral("enable"), enable);
+    result.insert(QStringLiteral("signInService"), enable.value(0, NetVfs::filesServiceName(params.provider)));
     return result;
 }
 
@@ -383,7 +518,7 @@ QVariantMap Helpers::updateSettings(const QVariantMap &paramsMap) const
     QStringList remove;
     remove << str(Keys::Attention) << str(Keys::CredentialsNeedUpdateFrom)
            << providerOptionKey(params.provider, str(Keys::HostKeySeen));
-    if (params.option(str(OptAuthMode)) == QLatin1String(AuthPassword))
+    if (params.option(str(OptAuthMode)) != QLatin1String(AuthPublicKey))
         remove << providerOptionKey(params.provider, str(OptPublicKey));
 
     QVariantMap result;
@@ -443,26 +578,19 @@ QString Helpers::hostKeyHint(const QString &algorithm) const
     return qtTrId("settings-accounts-netvfs-la-host_key_hint").arg(command);
 }
 
-QString Helpers::transportSecurityText(const QVariantMap &paramsMap) const
-{
-    const ConnectionParams params = paramsFromVariant(paramsMap);
-    if (params.provider != QLatin1String(ProviderSmb)) {
-        //% "Encrypted (SSH)"
-        return qtTrId("settings-accounts-netvfs-la-security_ssh");
-    }
-    if (params.options.value(str(OptRequireEncryption), true).toBool()) {
-        //% "Signed and encrypted"
-        return qtTrId("settings-accounts-netvfs-la-security_smb_encrypted");
-    }
-    //% "Signed, not encrypted"
-    return qtTrId("settings-accounts-netvfs-la-security_smb_signed");
-}
-
 QString Helpers::authModeText(const QString &authMode) const
 {
     if (authMode == QLatin1String(AuthPublicKey)) {
         //% "SSH key"
         return qtTrId("settings-accounts-netvfs-la-auth_key");
+    }
+    if (authMode == QLatin1String(AuthInteractive)) {
+        //% "Asked each time"
+        return qtTrId("settings-accounts-netvfs-la-auth_interactive");
+    }
+    if (authMode == QLatin1String(AuthToken)) {
+        //% "Access token"
+        return qtTrId("settings-accounts-netvfs-la-auth_token");
     }
     //% "Password"
     return qtTrId("settings-accounts-netvfs-la-auth_password");

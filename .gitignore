@@ -13,3 +13,4 @@ Makefile.qmake
 compile_commands.json
 coverage*.xml
 /.claude/
+__pycache__/

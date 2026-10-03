@@ -1,0 +1,100 @@
+[
+  {
+    "name": "XP-1 file in two packages accepted",
+    "file": "tools/ci/check-files.py",
+    "search": "        elif len(owners) > 1:",
+    "replace": "        elif len(owners) > 2:",
+    "test": "tests/packaging/test_packaging.py"
+  },
+  {
+    "name": "XP-1 unpackaged file accepted",
+    "file": "tools/ci/check-files.py",
+    "search": "        if not owners:\n",
+    "replace": "        if owners is None:\n",
+    "test": "tests/packaging/test_packaging.py"
+  },
+  {
+    "name": "XP-1 entry matching nothing accepted",
+    "file": "tools/ci/check-files.py",
+    "search": "            if not matches and kind not in (\"ghost\", \"exclude\") \\",
+    "replace": "            if not matches and kind not in (\"ghost\", \"exclude\", \"file\") \\",
+    "test": "tests/packaging/test_packaging.py"
+  },
+  {
+    "name": "XP-1 allowed missing entries ignored",
+    "file": "tools/ci/check-files.py",
+    "search": "and not any(fnmatch.fnmatchcase(pattern, glob) for glob in allow_missing)",
+    "replace": "and not any(fnmatch.fnmatchcase(glob, pattern) for glob in allow_missing)",
+    "test": "tests/packaging/test_packaging.py"
+  },
+  {
+    "name": "XP-1 netvfs directories not checked",
+    "file": "tools/ci/check-files.py",
+    "search": "            if any(part.startswith(\"netvfs\") for part in path.split(\"/\")):",
+    "replace": "            if any(part == \"netvfs\" for part in path.split(\"/\")):",
+    "test": "tests/packaging/test_packaging.py"
+  },
+  {
+    "name": "XP-1 directory entries not recursive",
+    "file": "tools/ci/check-files.py",
+    "search": "                    target.update(tree.below(path))",
+    "replace": "                    target.update([])",
+    "test": "tests/packaging/test_packaging.py"
+  },
+  {
+    "name": "XP-1 %if condition inverted",
+    "file": "tools/ci/check-files.py",
+    "search": "        return (int(value) != 0) != negate",
+    "replace": "        return (int(value) == 0) != negate",
+    "test": "tests/packaging/test_packaging.py"
+  },
+  {
+    "name": "XP-1 %bcond_with defaults to on",
+    "file": "tools/ci/check-files.py",
+    "search": "            self.conditions[name] = words[0] == \"%bcond_without\"",
+    "replace": "            self.conditions[name] = True",
+    "test": "tests/packaging/test_packaging.py"
+  },
+  {
+    "name": "XP-1 brace alternatives: first only",
+    "file": "tools/ci/check-files.py",
+    "search": "    for alternative in match.group(1).split(\",\"):",
+    "replace": "    for alternative in match.group(1).split(\",\")[:1]:",
+    "test": "tests/packaging/test_packaging.py"
+  },
+  {
+    "name": "XP-1 install path mapping ignored",
+    "file": "tools/ci/check-files.py",
+    "search": "                return destination + path[len(source):]",
+    "replace": "                return path",
+    "test": "tests/packaging/test_packaging.py"
+  },
+  {
+    "name": "XP-1 * matches across folders",
+    "file": "tools/ci/check-files.py",
+    "search": "                      if len(path.split(\"/\")) == len(parts)\n                      and all(",
+    "replace": "                      if all(",
+    "test": "tests/packaging/test_packaging.py"
+  },
+  {
+    "name": "XP-3 DCE/RPC strings not checked",
+    "file": "tools/ci/check-noshareenum.sh",
+    "search": "strings_pattern='DCERPC|srvsvc|NetrShareEnum'",
+    "replace": "strings_pattern='NetrShareEnum'",
+    "test": "tests/packaging/test_packaging.py"
+  },
+  {
+    "name": "XP-3 symbols not checked",
+    "file": "tools/ci/check-noshareenum.sh",
+    "search": "    found=$(readelf -W -s \"$file\" 2>/dev/null",
+    "replace": "    found=$(readelf -W -S \"$file\" 2>/dev/null",
+    "test": "tests/packaging/test_packaging.py"
+  },
+  {
+    "name": "XP-3 non-ELF input accepted",
+    "file": "tools/ci/check-noshareenum.sh",
+    "search": "        echo \"$file: not an ELF file\"\n        return 1",
+    "replace": "        echo \"$file: not an ELF file\"\n        return 0",
+    "test": "tests/packaging/test_packaging.py"
+  }
+]

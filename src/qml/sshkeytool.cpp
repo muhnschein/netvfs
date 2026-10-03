@@ -5,6 +5,7 @@
 #include "identity.h"
 #include "logging.h"
 #include "netvfshelpers.h"
+#include "probe.h"
 #include "secure.h"
 
 #include <QtCore/QFile>
@@ -157,6 +158,7 @@ void SshKeyTool::installWithPassword(const QVariantMap &paramsMap, const QString
     }
     ConnectionParams params = paramsFromVariant(paramsMap);
     params.options.insert(QStringLiteral("auth_mode"), QStringLiteral("password"));
+    params = withBackupDirMode(params);   // ~/.ssh stays private (S-20)
     Result result;
     Backend *backend = BackendLoader::create(params.provider, &result);
     if (!backend) {

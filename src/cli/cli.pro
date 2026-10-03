@@ -8,7 +8,13 @@ QT = core
 CONFIG += console
 CONFIG -= app_bundle
 LIBS += $$netvfsCoreLibs()
-QMAKE_RPATHDIR += $$NETVFS_LIB_OUT
+# Tests run the tool from the build tree; the installed tool finds libnetvfs
+# through the system library path (no RUNPATH in packages).
+!equals(NETVFS_BUILD_TESTS, 0): QMAKE_RPATHDIR += $$NETVFS_LIB_OUT
 
-HEADERS = cli.h
-SOURCES = cli.cpp main.cpp
+include(cli.pri)
+SOURCES += main.cpp
+
+# SPEC-v2 XP-1: package netvfs-cli
+target.path = /usr/bin
+INSTALLS += target
