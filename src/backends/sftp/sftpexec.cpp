@@ -130,7 +130,9 @@ Result SftpBackend::Shell::open()
     // right after another one ended can still meet MaxSessions: try again
     // for a moment before reporting TooManyConnections (XC-21).
     Result r = openOnce();
-    for (int attempt = 1; attempt < SessionOpenAttempts && r.error() == Error::TooManyConnections; ++attempt) {
+    for (int attempt = 1; attempt < SessionOpenAttempts; ++attempt) {
+        if (r.error() != Error::TooManyConnections)
+            break;
         closeChannel();
         for (int waited = 0; waited < SessionRetryMs; waited += PollIntervalMs) {
             if (const Result stop = wait(); !stop.ok())
@@ -272,9 +274,9 @@ Result SftpBackend::Tools::checkCopyTarget(const QByteArray &source, const QByte
         return Result(Error::IsADirectory, QStringLiteral("%1 is a folder").arg(display(source)));
     Entry to;
     const Result r = m_q.statRemote(target, &to, false);
-    const bool refused = to.type == EntryType::Directory || options.mode == RenameMode::NoReplace
-        || from.type == EntryType::Directory || source == target;
-    if (r.ok() && refused)
+    if (const bool refused = to.type == EntryType::Directory || options.mode == RenameMode::NoReplace
+            || from.type == EntryType::Directory || source == target;
+        r.ok() && refused)
         return Result(Error::AlreadyExists, QStringLiteral("%1 exists").arg(display(target)));
     if (r.ok() || r.error() != Error::NotFound)
         return r;
@@ -314,8 +316,7 @@ Result SftpBackend::Tools::find(const QByteArray &start, const QString &base, co
     options.maxOutput = std::min(MaxFindOutput, FindBytesPerResult * (static_cast<qint64>(maxResults) + 1));
     options.timeoutMs = 0;   // cancel() ends a long search
     ExecResult result;
-    const Result r = run(findCommand(start, Names::encode(namePattern)), options, &result);
-    if (!r.ok())
+    if (const Result r = run(findCommand(start, Names::encode(namePattern)), options, &result); !r.ok())
         return r;
     // find exits 1 when it could not enter some folders; what it printed counts.
     QList<QByteArray> found;

@@ -41,7 +41,7 @@ diff -ru a/include/libssh/sftp.h b/include/libssh/sftp.h
 + *
 + * @see sftp_set_interrupt_callback()
 + */
-+typedef int (*sftp_interrupt_callback)(struct sftp_interrupt_struct *interrupt);
++typedef int (*sftp_interrupt_callback)(const struct sftp_interrupt_struct *interrupt);
 +
  struct sftp_session_struct {
      ssh_session session;
@@ -51,7 +51,7 @@ diff -ru a/include/libssh/sftp.h b/include/libssh/sftp.h
      sftp_limits_t limits;
      struct ssh_list *outstanding_ids;
 +    sftp_interrupt_callback interrupt_cb;
-+    struct sftp_interrupt_struct *interrupt;
++    const struct sftp_interrupt_struct *interrupt;
 +    struct ssh_list *discarded_ids;
  };
  
@@ -78,7 +78,7 @@ diff -ru a/include/libssh/sftp.h b/include/libssh/sftp.h
 + */
 +LIBSSH_API void sftp_set_interrupt_callback(sftp_session sftp,
 +                                            sftp_interrupt_callback callback,
-+                                            struct sftp_interrupt_struct *interrupt);
++                                            const struct sftp_interrupt_struct *interrupt);
 +
 +/**
   * @brief Initialize the sftp protocol with the server.
@@ -209,7 +209,7 @@ diff -ru a/src/sftp_common.c b/src/sftp_common.c
 +
 +void sftp_set_interrupt_callback(sftp_session sftp,
 +                                 sftp_interrupt_callback callback,
-+                                 struct sftp_interrupt_struct *interrupt)
++                                 const struct sftp_interrupt_struct *interrupt)
 +{
 +    if (sftp == NULL) {
 +        return;

@@ -251,7 +251,7 @@ Result SftpBackend::Requests::writeFailure(const QByteArray &remote, qint64 atte
 {
     const int status = sftp_get_error(m_b.m_sftp);
     const Result failure = sftpFailure(display(remote));
-    if (status != SSH_FX_FAILURE || !m_b.m_hasStatvfs || m_b.m_canceled)
+    if (status != SSH_FX_FAILURE || !m_b.m_features.statvfs || m_b.m_canceled)
         return failure;
     if (qint64 available = -1;
             !freeBytes(remote, &available).ok() || !looksLikeFullDisk(status, available, attempted))
@@ -274,6 +274,7 @@ Result SftpBackend::Requests::existsAs(const QByteArray &remote, const Result &f
 Entry SftpBackend::Requests::entryOf(const sftp_attributes_struct &attributes, const QString &name) const
 {
     Entry entry = entryFrom(attributes, name);
+    const std::scoped_lock lock(m_b.m_namesMutex);
     nameOwners(&entry, m_b.m_userNames, m_b.m_groupNames);
     return entry;
 }
@@ -282,7 +283,7 @@ void SftpBackend::Requests::resolveOwners(QVector<Entry> *entries) const
 {
     // XS-2: one users-groups-by-id@openssh.com request per batch for the ids
     // the connection's cache does not know yet.
-    if (!m_b.m_hasUsersGroups)
+    if (!m_b.m_features.usersGroups)
         return;
     QSet<quint32> uids;
     QSet<quint32> gids;
@@ -292,9 +293,17 @@ void SftpBackend::Requests::resolveOwners(QVector<Entry> *entries) const
         if (entry.gid >= 0)
             gids.insert(static_cast<quint32>(entry.gid));
     }
-    sftp_name_id_map users = mapOf(missing(uids, m_b.m_userNames));
-    sftp_name_id_map groups = mapOf(missing(gids, m_b.m_groupNames));
-    if ((users || groups) && sftp_get_users_groups_by_id(m_b.m_sftp, users, groups) == 0) {
+    sftp_name_id_map users = nullptr;
+    sftp_name_id_map groups = nullptr;
+    {
+        const std::scoped_lock lock(m_b.m_namesMutex);
+        users = mapOf(missing(uids, m_b.m_userNames));
+        groups = mapOf(missing(gids, m_b.m_groupNames));
+    }
+    // The request itself runs outside the lock.
+    const bool answered = (users || groups) && sftp_get_users_groups_by_id(m_b.m_sftp, users, groups) == 0;
+    const std::scoped_lock lock(m_b.m_namesMutex);
+    if (answered) {
         remember(users, &m_b.m_userNames);
         remember(groups, &m_b.m_groupNames);
     }
@@ -316,7 +325,7 @@ Result SftpBackend::Requests::statRemote(const QByteArray &remote, Entry *out, b
     } else {
         r = sftpFailure(display(remote));
     }
-    if (!follow && m_b.m_lstatFollows && entry.type != EntryType::Symlink)
+    if (!follow && m_b.m_features.lstatFollows && entry.type != EntryType::Symlink)
         r = linkAware(remote, r, &entry);
     if (r.ok() && out)
         *out = entry;
@@ -383,8 +392,8 @@ Result SftpBackend::Requests::readEntries(sftp_dir handle, const QByteArray &rem
         }
         sftp_attributes_free(attributes);
         // A batch per READDIR reply: libssh drops its buffer after the last name.
-        const bool replyDone = handle->buffer == nullptr;
-        if (batch.isEmpty() || (!replyDone && batch.size() < batchSize))
+        if (const bool replyDone = handle->buffer == nullptr;
+            batch.isEmpty() || (!replyDone && batch.size() < batchSize))
             continue;
         if (const Result r = deliver(&batch, sink); !r.ok())
             return r;
@@ -416,7 +425,7 @@ Result SftpBackend::Requests::renameNoReplace(const QByteArray &source, const QB
     // XC-10, XS-6: OpenSSH fails a plain SSH_FXP_RENAME (never posix-rename)
     // on an existing target, atomically for files (NativeNoReplace). Other
     // servers get a stat check first (a documented race).
-    if (!m_b.m_nativeNoReplace) {
+    if (!m_b.m_features.nativeNoReplace) {
         const Result r = statRemote(target, nullptr, false);
         if (r.ok())
             return Result(Error::AlreadyExists, QStringLiteral("%1 exists").arg(display(target)));
@@ -438,14 +447,14 @@ Result SftpBackend::Requests::renameReplacing(const QByteArray &source, const QB
     // With posix-rename@openssh.com, libssh's sftp_rename() replaces the
     // target atomically (AtomicReplace). Plain SFTP rename does not replace
     // (S-22, 7): stat, unlink and rename as in API v1.
-    if (!m_b.m_hasPosixRename && targetExists && sftp_unlink(m_b.m_sftp, target.constData()) != 0)
+    if (!m_b.m_features.posixRename && targetExists && sftp_unlink(m_b.m_sftp, target.constData()) != 0)
         return sftpFailure(display(target));
     if (sftp_rename(m_b.m_sftp, source.constData(), target.constData()) != 0)
         return sftpFailure(display(source));
     // rename(2) of one hard link onto another of the same file succeeds and
     // keeps both names; XC-10 leaves one.
-    const bool mayRemain = m_b.m_hasPosixRename && targetExists && existing.type == EntryType::File;
-    if (mayRemain && statRemote(source, nullptr, false).ok() && sftp_unlink(m_b.m_sftp, source.constData()) != 0)
+    if (const bool mayRemain = m_b.m_features.posixRename && targetExists && existing.type == EntryType::File;
+        mayRemain && statRemote(source, nullptr, false).ok() && sftp_unlink(m_b.m_sftp, source.constData()) != 0)
         return sftpFailure(display(source));
     return Result::success();
 }

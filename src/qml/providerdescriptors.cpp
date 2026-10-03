@@ -10,6 +10,7 @@
 #include <QtCore/QRegularExpression>
 #include <QtCore/QSet>
 
+#include <algorithm>
 #include <initializer_list>
 #include <memory>
 
@@ -117,8 +118,8 @@ Result checkAuthMode(const QJsonObject &mode, const QSet<QString> &known)
         return invalid(QStringLiteral("bad secret kind for ") + id);
     if (!isTextId(mode.value(QStringLiteral("label")), known))
         return invalid(QStringLiteral("unknown label for auth mode ") + id);
-    const QJsonValue source = mode.value(QStringLiteral("source"));
-    if (!source.isUndefined() && (id != QLatin1String("publickey")
+    if (const QJsonValue source = mode.value(QStringLiteral("source"));
+        !source.isUndefined() && (id != QLatin1String("publickey")
                                   || !list({ "generate", "import" }).contains(source.toString())))
         return invalid(QStringLiteral("bad key source for ") + id);
     return Result::success();
@@ -139,8 +140,7 @@ Result checkAuthModes(const QJsonObject &descriptor, const QSet<QString> &known)
 Result checkChoices(const QJsonObject &field, const QSet<QString> &known, const QString &key)
 {
     const QJsonArray choices = field.value(QStringLiteral("choices")).toArray();
-    const bool isChoice = field.value(QStringLiteral("type")).toString() == QLatin1String(TypeChoice);
-    if (!isChoice)
+    if (const bool isChoice = field.value(QStringLiteral("type")).toString() == QLatin1String(TypeChoice); !isChoice)
         return field.contains(QStringLiteral("choices")) ? invalid(key + QStringLiteral(": choices on a non-choice"))
                                                          : Result::success();
     if (choices.isEmpty())
@@ -152,8 +152,7 @@ Result checkChoices(const QJsonObject &field, const QSet<QString> &known, const 
             return invalid(key + QStringLiteral(": bad choice"));
         values << object.value(QStringLiteral("value")).toString();
     }
-    const QJsonValue def = field.value(QStringLiteral("default"));
-    if (!def.isUndefined() && !values.contains(def.toString()))
+    if (const QJsonValue def = field.value(QStringLiteral("default")); !def.isUndefined() && !values.contains(def.toString()))
         return invalid(key + QStringLiteral(": default is not a choice"));
     return Result::success();
 }
@@ -175,15 +174,15 @@ Result checkFieldShape(const QJsonObject &field, const QString &key)
     const QString type = field.value(QStringLiteral("type")).toString();
     if (!list({ TypeText, TypeSwitch, TypeChoice, TypeNote }).contains(type))
         return invalid(key + QStringLiteral(": bad type ") + type);
-    const QJsonValue def = field.value(QStringLiteral("default"));
-    if (!def.isUndefined() && (type == QLatin1String(TypeSwitch) ? !def.isBool() : !def.isString()))
+    if (const QJsonValue def = field.value(QStringLiteral("default"));
+        !def.isUndefined() && (type == QLatin1String(TypeSwitch) ? !def.isBool() : !def.isString()))
         return invalid(key + QStringLiteral(": default has the wrong type"));
-    const QJsonValue rule = field.value(QStringLiteral("validation"));
-    if (!rule.isUndefined()
+    if (const QJsonValue rule = field.value(QStringLiteral("validation"));
+        !rule.isUndefined()
             && !list({ "host", "port", "userName", "share", "folder", "path", "consent" }).contains(rule.toString()))
         return invalid(key + QStringLiteral(": unknown validation ") + rule.toString());
-    const QJsonValue input = field.value(QStringLiteral("input"));
-    if (!input.isUndefined() && !list({ "url", "digits", "text" }).contains(input.toString()))
+    if (const QJsonValue input = field.value(QStringLiteral("input"));
+        !input.isUndefined() && !list({ "url", "digits", "text" }).contains(input.toString()))
         return invalid(key + QStringLiteral(": bad input"));
     const QJsonValue service = field.value(QStringLiteral("service"));
     if (!service.isUndefined() && !list({ "backup", "files" }).contains(service.toString()))
@@ -267,8 +266,8 @@ Result ProviderDescriptors::validate(const QJsonObject &descriptor, const QStrin
 {
     if (descriptor.value(QStringLiteral("provider")).toString() != provider)
         return invalid(QStringLiteral("provider is not \"%1\"").arg(provider));
-    const QJsonValue port = descriptor.value(QStringLiteral("defaultPort"));
-    if (!port.isDouble() || port.toInt(-1) < 0 || port.toInt(-1) > MaxPort || port.toDouble() != port.toInt(-1))
+    if (const QJsonValue port = descriptor.value(QStringLiteral("defaultPort"));
+        !port.isDouble() || port.toInt(-1) < 0 || port.toInt(-1) > MaxPort || port.toDouble() != port.toInt(-1))
         return invalid(QStringLiteral("bad defaultPort"));
     QSet<QString> known;
     for (const QString &id : knownTextIds())
@@ -283,8 +282,8 @@ Result ProviderDescriptors::validate(const QJsonObject &descriptor, const QStrin
 
 Result ProviderDescriptors::load(const QString &provider, QVariantMap *descriptor)
 {
-    static const QRegularExpression idPattern(QStringLiteral("^[a-z][a-z0-9_-]*$"));
-    if (!idPattern.match(provider).hasMatch())
+    if (static const QRegularExpression idPattern(QStringLiteral("^[a-z][a-z0-9_-]*$"));
+        !idPattern.match(provider).hasMatch())
         return Result(Error::InvalidName, QStringLiteral("Bad provider id"));
     QFile file(QDir(directory()).filePath(provider + QStringLiteral(".json")));
     if (!file.open(QIODevice::ReadOnly))
@@ -301,8 +300,7 @@ Result ProviderDescriptors::load(const QString &provider, QVariantMap *descripto
 
 QVariantMap ProviderDescriptors::descriptor(const QString &provider)
 {
-    const auto cached = m_cache.constFind(provider);
-    if (cached != m_cache.constEnd())
+    if (const auto cached = m_cache.constFind(provider); cached != m_cache.constEnd())
         return cached.value();
     QVariantMap loaded;
     if (const Result r = load(provider, &loaded); !r.ok())
@@ -342,8 +340,8 @@ QVariantMap ProviderDescriptors::initialValues(const QString &provider)
             value = type == QLatin1String(TypeSwitch) ? QVariant(false) : QVariant(QString());
         values.insert(field.value(QStringLiteral("key")).toString(), value);
     }
-    const int port = d.value(QStringLiteral("defaultPort")).toInt();
-    if (values.contains(str(KeyPort)) && values.value(str(KeyPort)).toString().isEmpty() && port > 0)
+    if (const int port = d.value(QStringLiteral("defaultPort")).toInt();
+        values.contains(str(KeyPort)) && values.value(str(KeyPort)).toString().isEmpty() && port > 0)
         values.insert(str(KeyPort), QString::number(port));
     const QVariantMap mode = d.value(QStringLiteral("authModes")).toList().value(0).toMap();
     values.insert(str(KeyAuthMode), mode.value(QStringLiteral("id")).toString());
@@ -354,8 +352,8 @@ QVariantMap ProviderDescriptors::initialValues(const QString &provider)
 bool ProviderDescriptors::isVisible(const QVariantMap &field, const QVariantMap &values,
                                     const QStringList &services) const
 {
-    const QString service = field.value(QStringLiteral("service")).toString();
-    if (!service.isEmpty() && !services.contains(service))
+    if (const QString service = field.value(QStringLiteral("service")).toString();
+        !service.isEmpty() && !services.contains(service))
         return false;
     return conditionHolds(field.value(QStringLiteral("visibleWhen")).toMap(), values);
 }
@@ -401,11 +399,10 @@ bool ProviderDescriptors::isValid(const QString &provider, const QVariantMap &va
     const QVariantMap d = descriptor(provider);
     if (d.isEmpty())
         return false;
-    for (const QVariant &field : fieldsOf(d)) {
-        if (!problem(provider, field.toMap(), values, services).isEmpty())
-            return false;
-    }
-    return true;
+    const QVariantList fields = fieldsOf(d);
+    return std::all_of(fields.cbegin(), fields.cend(), [this, &provider, &values, &services](const QVariant &field) {
+        return problem(provider, field.toMap(), values, services).isEmpty();
+    });
 }
 
 bool ProviderDescriptors::offersService(const QString &provider, const QString &service)
@@ -430,8 +427,8 @@ QVariantMap ProviderDescriptors::authMode(const QString &provider, const QVarian
 QString ProviderDescriptors::secretKind(const QString &provider, const QVariantMap &values)
 {
     const QVariantMap d = descriptor(provider);
-    const QVariantMap noSecret = d.value(QStringLiteral("noSecretWhen")).toMap();
-    if (!noSecret.isEmpty() && conditionHolds(noSecret, values))
+    if (const QVariantMap noSecret = d.value(QStringLiteral("noSecretWhen")).toMap();
+        !noSecret.isEmpty() && conditionHolds(noSecret, values))
         return str(SecretNone);
     const QString kind = authMode(provider, values).value(QStringLiteral("secret")).toString();
     return kind.isEmpty() ? str(SecretNone) : kind;
@@ -446,9 +443,9 @@ QVariantMap ProviderDescriptors::makeParams(const QString &provider, const QVari
     for (const QVariant &item : fieldsOf(d)) {
         const QVariantMap field = item.toMap();
         const QString key = field.value(QStringLiteral("key")).toString();
-        const bool stored = field.value(QStringLiteral("type")).toString() != QLatin1String(TypeNote)
-                && !field.contains(QStringLiteral("service")) && !isConnectionKey(key);
-        if (stored && isVisible(field, values, QStringList()))
+        if (const bool stored = field.value(QStringLiteral("type")).toString() != QLatin1String(TypeNote)
+                    && !field.contains(QStringLiteral("service")) && !isConnectionKey(key);
+            stored && isVisible(field, values, QStringList()))
             options.insert(key, values.value(key));
         if (key == QLatin1String(KeyUserName) && isVisible(field, values, QStringList()))
             user = values.value(key).toString();
@@ -468,7 +465,7 @@ QVariantMap ProviderDescriptors::makeParams(const QString &provider, const QVari
     return paramsToVariant(params);
 }
 
-QString ProviderDescriptors::serviceValue(const QString &provider, const QVariantMap &values, const QString &key)
+QString ProviderDescriptors::serviceValue(const QString &provider, const QVariantMap &values, const QString &key) const
 {
     return cleanFolderPath(provider, values.value(key).toString());
 }

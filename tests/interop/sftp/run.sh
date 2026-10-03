@@ -190,7 +190,8 @@ cli_check() {
     # What the server can do decides which attribute and link checks apply.
     caps=$("$cli" "$@" caps | sed -n 's/^capabilities: //p')
     has_cap() {
-        case " $caps " in *" $1 "*) return 0 ;; esac
+        wanted=$1
+        case " $caps " in *" $wanted "*) return 0 ;; esac
         return 1
     }
     # touch creates an empty file; chmod and touch --mtime need the capabilities

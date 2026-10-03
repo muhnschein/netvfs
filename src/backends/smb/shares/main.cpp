@@ -66,7 +66,7 @@ QByteArray readRequest()
 class Context
 {
 public:
-    Context() : m_ctx(smb2_init_context()) {}
+    Context() = default;
     ~Context()
     {
         if (!m_ctx)
@@ -82,7 +82,7 @@ public:
     void setConnected() { m_connected = true; }
 
 private:
-    smb2_context *m_ctx;
+    smb2_context *m_ctx = smb2_init_context();
     bool m_connected = false;
 };
 

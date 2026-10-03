@@ -111,7 +111,8 @@ Result SftpBackend::authenticate(const Credentials &credentials, AuthPrompter *p
 Result SftpBackend::Login::run()
 {
     Step step = first(ssh_userauth_list(m_b.m_session, nullptr));
-    for (int steps = 1; !step.stopped(); ++steps) {
+    int steps = 1;
+    while (!step.stopped()) {
         if (step.rc == SSH_AUTH_SUCCESS)
             return Result::success();
         const bool another = steps < MaxAuthSteps && m_prompter;
@@ -127,6 +128,7 @@ Result SftpBackend::Login::run()
         } else {
             return Requests(m_b).established(Requests(m_b).sessionFailure());
         }
+        ++steps;
     }
     return step.failure;
 }
@@ -189,7 +191,9 @@ Step SftpBackend::Login::keyboardInteractive()
     // are acknowledged; XS-11: the others go to the prompter.
     m_triedInteractive = true;
     int rc = ssh_userauth_kbdint(m_b.m_session, nullptr, nullptr);
-    for (int rounds = 0; rc == SSH_AUTH_INFO && rounds < MaxKeyboardInteractiveRounds; ++rounds) {
+    for (int rounds = 0; rounds < MaxKeyboardInteractiveRounds; ++rounds) {
+        if (rc != SSH_AUTH_INFO)
+            return Step::of(rc);
         if (const Step step = round(); step.stopped())
             return step;
         rc = ssh_userauth_kbdint(m_b.m_session, nullptr, nullptr);
@@ -213,9 +217,10 @@ Step SftpBackend::Login::round()
         prompts.append(entry);
     }
     const bool secretUsable = passwordMode() && !m_secretUsed;
-    const bool first = count > 0;
-    switch (keyboardInteractiveAction(count, first && prompts.first().echo, first && isPasswordPrompt(prompts.first().text),
-                                      secretUsable, m_prompter != nullptr)) {
+    switch (const bool first = count > 0;
+            keyboardInteractiveAction(count, first && prompts.first().echo,
+                                      first && isPasswordPrompt(prompts.first().text), secretUsable,
+                                      m_prompter != nullptr)) {
     case RoundAction::Acknowledge:
         return Step();
     case RoundAction::AnswerWithSecret:
@@ -228,13 +233,13 @@ Step SftpBackend::Login::round()
     case RoundAction::Refuse:
         return Step::fail(interactiveNotSupported());
     }
-    const PromptOutcome outcome = ask(text(ssh_userauth_kbdint_getname(session)),
-                                      text(ssh_userauth_kbdint_getinstruction(session)), prompts,
-                                      [session](int index, const QByteArray &answer) {
-                                          return ssh_userauth_kbdint_setanswer(session, static_cast<unsigned>(index),
-                                                                               answer.constData()) >= 0;
-                                      });
-    if (outcome != PromptOutcome::Answered)
+    if (const PromptOutcome outcome = ask(text(ssh_userauth_kbdint_getname(session)),
+                                          text(ssh_userauth_kbdint_getinstruction(session)), prompts,
+                                          [session](int index, const QByteArray &answer) {
+                                              return ssh_userauth_kbdint_setanswer(
+                                                         session, static_cast<unsigned>(index), answer.constData()) >= 0;
+                                          });
+        outcome != PromptOutcome::Answered)
         return Step::fail(promptFailure(outcome));
     return Step();
 }

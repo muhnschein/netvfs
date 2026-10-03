@@ -74,14 +74,36 @@ RoundAction keyboardInteractiveAction(int prompts, bool firstEchoes, bool passwo
 bool isPasswordPrompt(const QString &text);
 
 enum class PromptOutcome { Answered, Declined, BadAnswers, Rejected };
+// The two halves of promptRound() that need no template.
+PromptOutcome askPrompter(AuthPrompter *prompter, const QString &name, const QString &instruction,
+                          const QVector<AuthPrompt> &prompts, QVector<QByteArray> *answers);
+void wipeAnswers(QVector<QByteArray> *answers);
 // One round through `prompter`: the answers come back in `*answers` (the
 // caller's), each goes to `setAnswer(index, answer)`, and every answer is
 // overwritten with zero bytes before this returns, whatever the outcome
 // (SEC-5, XSEC-6). BadAnswers: not one answer per prompt. Rejected:
 // `setAnswer` failed.
+template <typename SetAnswer>
+bool applyAnswers(const QVector<QByteArray> &answers, const SetAnswer &setAnswer)
+{
+    for (int i = 0; i < answers.size(); ++i) {
+        if (!setAnswer(i, answers.at(i)))
+            return false;
+    }
+    return true;
+}
+// `setAnswer` is any callable (int, const QByteArray &) -> bool.
+template <typename SetAnswer>
 PromptOutcome promptRound(AuthPrompter *prompter, const QString &name, const QString &instruction,
                           const QVector<AuthPrompt> &prompts, QVector<QByteArray> *answers,
-                          const std::function<bool(int, const QByteArray &)> &setAnswer);
+                          const SetAnswer &setAnswer)
+{
+    PromptOutcome outcome = askPrompter(prompter, name, instruction, prompts, answers);
+    if (outcome == PromptOutcome::Answered && !applyAnswers(*answers, setAnswer))
+        outcome = PromptOutcome::Rejected;
+    wipeAnswers(answers);
+    return outcome;
+}
 
 // --- channels, links, attributes, resume --------------------------------------
 

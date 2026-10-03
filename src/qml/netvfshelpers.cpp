@@ -368,8 +368,8 @@ QString InputRules::shareProblem(const QString &share) const
 QString InputRules::serverPathProblem(const QString &path) const
 {
     const QString value = path.trimmed();
-    QString normalized;
-    if (!value.startsWith(QLatin1Char('/')) || hasControlCharacter(value) || !Paths::normalize(value, &normalized).ok()) {
+    if (QString normalized;
+        !value.startsWith(QLatin1Char('/')) || hasControlCharacter(value) || !Paths::normalize(value, &normalized).ok()) {
         //% "Enter a path that starts with /, for example /remote.php/dav/files/me/."
         return qtTrId("settings-accounts-netvfs-la-server_path_invalid");
     }

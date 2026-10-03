@@ -10,6 +10,7 @@
 
 #include <array>
 #include <cerrno>
+#include <cstddef>
 #include <cstring>
 #include <memory>
 
@@ -219,22 +220,23 @@ void appendUtf8(QByteArray *out, uint u)
     }
 }
 
-int sequenceLength(uchar lead)
+int sequenceLength(std::byte lead)
 {
-    if (lead < 0x80)
+    const auto value = std::to_integer<unsigned>(lead);
+    if (value < 0x80)
         return 1;
-    if ((lead & 0xe0) == 0xc0)
+    if ((value & 0xe0) == 0xc0)
         return 2;
-    if ((lead & 0xf0) == 0xe0)
+    if ((value & 0xf0) == 0xe0)
         return 3;
-    if ((lead & 0xf8) == 0xf0)
+    if ((value & 0xf8) == 0xf0)
         return 4;
     return 0;
 }
 
 // One code point (surrogates included) of a WTF-8 string, or U+FFFD for a
 // malformed sequence (libsmb2 never produces one); advances `*at`.
-uint nextCodePoint(const uchar *bytes, int size, int *at)
+uint nextCodePoint(const std::byte *bytes, int size, int *at)
 {
     constexpr uint Replacement = 0xfffd;
     constexpr std::array<uint, 5> minimum = { 0, 0, 0x80, 0x800, 0x10000 };
@@ -243,11 +245,10 @@ uint nextCodePoint(const uchar *bytes, int size, int *at)
         ++*at;
         return Replacement;
     }
-    uint u = bytes[*at] & (0x7fu >> length);
-    if (length == 1)
-        u = bytes[*at];
+    const auto lead = std::to_integer<uint>(bytes[*at]);
+    uint u = length == 1 ? lead : lead & (0x7fu >> length);
     for (int i = 1; i < length; ++i) {
-        const uchar c = bytes[*at + i];
+        const auto c = std::to_integer<uint>(bytes[*at + i]);
         if ((c & 0xc0) != 0x80) {
             ++*at;
             return Replacement;
@@ -262,8 +263,9 @@ uint nextCodePoint(const uchar *bytes, int size, int *at)
 
 QString decodeName(const char *utf8)
 {
-    const auto *bytes = reinterpret_cast<const uchar *>(utf8);
-    const int size = static_cast<int>(std::strlen(utf8));
+    const QByteArray raw(utf8);
+    const auto *bytes = reinterpret_cast<const std::byte *>(raw.constData());
+    const int size = raw.size();
     QString name;
     name.reserve(size);
     int at = 0;
@@ -469,8 +471,7 @@ Result checkSession(smb2_context *ctx, Profile profile, const Result &signIn)
         return r;
     if (!signIn.ok())
         return signIn;
-    const quint16 dialect = smb2_get_dialect(ctx);
-    if (!dialectAllowed(profile, dialect)) {
+    if (const quint16 dialect = smb2_get_dialect(ctx); !dialectAllowed(profile, dialect)) {
         // M-1, defence in depth: never accept a dialect that was not offered.
         return Result(Error::SecurityPolicy, QStringLiteral("The server negotiated SMB %1, which the %2 profile does not allow")
                                                  .arg(dialectName(dialect), profileName(profile)));

@@ -75,10 +75,12 @@ private:
     Result locate(const QString &path, Location *out);
     Result sessionFor(const QString &share, Session **out);
     Result evictOne();
+    // openWrite() for a caller that holds the gate and keeps the handle in a unique_ptr.
+    Result openWriter(const QString &path, const WriteOptions &options, std::unique_ptr<WriteHandle> *out);
     // Server mode: the root or a share itself ("/", "/<share>").
     bool shareLevel(const QString &path) const;
     bool enumerationEnabled() const;
-    Result enumerateShares(QStringList *names, QVariantMap *remarks);
+    Result enumerateShares(QStringList *names, QVariantMap *remarks) const;
     Result listRoot(ListSink *sink, const ListOptions &options);
     // disconnect() without virtual dispatch; also used by the destructor.
     void shutdown() noexcept;

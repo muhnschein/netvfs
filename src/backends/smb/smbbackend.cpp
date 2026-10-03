@@ -53,59 +53,59 @@ SmbBackend::~SmbBackend()
 
 Result SmbBackend::connect(const ConnectionParams &params, ServerIdentity *seen)
 {
-    const GateHold hold(&m_gate);     // M-13
-    if (!hold.entered())
-        return GateHold::busy();
-    disconnect();
-    // SMB has no server identity (SPEC-smb 3); signing keyed by the password
-    // authenticates the server instead. XT-5 is vacuous here: nothing is
-    // sent before authenticate(), which must send the credentials.
-    if (seen)
-        *seen = ServerIdentity();
-    m_params = params;
-    const int port = params.port > 0 ? params.port : DefaultPort;
-    qCDebug(lcNetVfsSmb) << "Connecting to" << params.host << "port" << port;
-    // M-10: only resolve and check that the port answers; the library call
-    // needs the credentials and happens in authenticate().
-    Result r = probeTcp(params.host, port, params.connectTimeoutMs, m_cancel, &m_address);
-    m_probed = r.ok();
-    return r;
+    // M-13
+    return GateHold::run(&m_gate, [this, &params, seen]() -> Result {
+        disconnect();
+        // SMB has no server identity (SPEC-smb 3); signing keyed by the password
+        // authenticates the server instead. XT-5 is vacuous here: nothing is
+        // sent before authenticate(), which must send the credentials.
+        if (seen)
+            *seen = ServerIdentity();
+        m_params = params;
+        const int port = params.port > 0 ? params.port : DefaultPort;
+        qCDebug(lcNetVfsSmb) << "Connecting to" << params.host << "port" << port;
+        // M-10: only resolve and check that the port answers; the library call
+        // needs the credentials and happens in authenticate().
+        Result r = probeTcp(params.host, port, params.connectTimeoutMs, m_cancel, &m_address);
+        m_probed = r.ok();
+        return r;
+    });
 }
 
 Result SmbBackend::authenticate(const Credentials &credentials, AuthPrompter *prompter)
 {
-    const GateHold hold(&m_gate);     // M-13
-    if (!hold.entered())
-        return GateHold::busy();
     Q_UNUSED(prompter)   // NTLMSSP has no interactive step
-    if (!m_probed || m_main)
-        return Result(Error::Internal, QStringLiteral("authenticate() needs a successful connect()"));
-    // XM-1: the backend enforces the profile it is given; which profile a
-    // service may use is AccountSession's decision (XA-4). XSEC-2: a
-    // failure is never retried with a weaker one.
-    if (Result r = profileFromOptions(m_params.options, &m_profile); !r.ok())
-        return r;
-    const bool guest = settingsFor(m_profile).guest;
-    const QString share = m_params.option(QStringLiteral("share")).trimmed();
-    m_serverMode = share.isEmpty();
-    m_user = credentials.userName.isEmpty() ? m_params.username : credentials.userName;
-    m_domain = m_params.option(QStringLiteral("domain"));
-    if (!guest && (m_user.isEmpty() || credentials.secret.isEmpty()))
-        return Result(Error::AuthFailed, QStringLiteral("A user name and a password are required"));
-    if (guest)
-        m_user.clear();
+    // M-13
+    return GateHold::run(&m_gate, [this, &credentials]() -> Result {
+        if (!m_probed || m_main)
+            return Result(Error::Internal, QStringLiteral("authenticate() needs a successful connect()"));
+        // XM-1: the backend enforces the profile it is given; which profile a
+        // service may use is AccountSession's decision (XA-4). XSEC-2: a
+        // failure is never retried with a weaker one.
+        if (Result r = profileFromOptions(m_params.options, &m_profile); !r.ok())
+            return r;
+        const bool guest = settingsFor(m_profile).guest;
+        const QString share = m_params.option(QStringLiteral("share")).trimmed();
+        m_serverMode = share.isEmpty();
+        m_user = credentials.userName.isEmpty() ? m_params.username : credentials.userName;
+        m_domain = m_params.option(QStringLiteral("domain"));
+        if (!guest && (m_user.isEmpty() || credentials.secret.isEmpty()))
+            return Result(Error::AuthFailed, QStringLiteral("A user name and a password are required"));
+        if (guest)
+            m_user.clear();
 
-    auto session = std::make_unique<Session>(m_serverMode ? QLatin1String(IpcShare) : share, m_cancel,
-                                             m_params.requestTimeoutMs, &m_gate);
-    const Result r = session->signIn(serverString(m_address, m_params.port), m_profile, m_user, m_domain,
-                                     credentials.secret);
-    if (!r.ok())
+        auto session = std::make_unique<Session>(m_serverMode ? QLatin1String(IpcShare) : share, m_cancel,
+                                                 m_params.requestTimeoutMs, &m_gate);
+        const Result r = session->signIn(serverString(m_address, m_params.port), m_profile, m_user, m_domain,
+                                         credentials.secret);
+        if (!r.ok())
+            return r;
+        m_main = std::move(session);
+        // Server mode opens shares later with the same credentials (XM-2).
+        if (m_serverMode && !guest)
+            m_secret = credentials.secret;
         return r;
-    m_main = std::move(session);
-    // Server mode opens shares later with the same credentials (XM-2).
-    if (m_serverMode && !guest)
-        m_secret = credentials.secret;
-    return r;
+    });
 }
 
 Result SmbBackend::checkSignedIn() const
@@ -159,7 +159,7 @@ Result SmbBackend::evictOne()
 {
     Session *oldest = nullptr;
     for (const auto &session : m_shares) {
-        if (!session->hasFiles() && (!oldest || session->lastUse < oldest->lastUse))
+        if (!session->hasFiles() && (!oldest || session->lastUse() < oldest->lastUse()))
             oldest = session.get();
     }
     if (!oldest) {
@@ -184,7 +184,7 @@ Result SmbBackend::sessionFor(const QString &share, Session **out)
             m_shares.erase(it);
             break;
         }
-        (*it)->lastUse = ++m_useClock;
+        (*it)->touch(++m_useClock);
         *out = it->get();
         return Result::success();
     }
@@ -196,7 +196,7 @@ Result SmbBackend::sessionFor(const QString &share, Session **out)
     if (Result r = session->signIn(serverString(m_address, m_params.port), m_profile, m_user, m_domain, m_secret);
         !r.ok())
         return r;
-    session->lastUse = ++m_useClock;
+    session->touch(++m_useClock);
     *out = session.get();
     m_shares.push_back(std::move(session));
     return Result::success();
@@ -205,8 +205,9 @@ Result SmbBackend::sessionFor(const QString &share, Session **out)
 Result SmbBackend::locate(const QString &path, Location *out)
 {
     // M-9: an invalid name is refused before anything else.
-    const Result valid = m_serverMode ? splitServerPath(path, &out->share, &out->path) : translatePath(path, &out->path);
-    if (!valid.ok())
+    if (const Result valid = m_serverMode ? splitServerPath(path, &out->share, &out->path)
+                                          : translatePath(path, &out->path);
+        !valid.ok())
         return valid;
     if (Result r = checkSignedIn(); !r.ok())
         return r;
@@ -222,7 +223,7 @@ Result SmbBackend::locate(const QString &path, Location *out)
 
 // ------------------------------------------------------------ share list
 
-Result SmbBackend::enumerateShares(QStringList *names, QVariantMap *remarks)
+Result SmbBackend::enumerateShares(QStringList *names, QVariantMap *remarks) const
 {
     ShareRequest request;
     request.server = serverString(m_address, m_params.port);
@@ -286,165 +287,161 @@ Result SmbBackend::listRoot(ListSink *sink, const ListOptions &options)
 
 Result SmbBackend::stat(const QString &path, Entry *out)
 {
-    const GateHold hold(&m_gate);     // M-13
-    if (!hold.entered())
-        return GateHold::busy();
-    Location at;
-    if (Result r = locate(path, &at); !r.ok())
-        return r;
-    if (at.root) {
-        // XM-2: the server root is a folder of shares.
-        if (out) {
-            *out = Entry();
-            out->type = EntryType::Directory;
+    // M-13
+    return GateHold::run(&m_gate, [this, &path, out]() -> Result {
+        Location at;
+        if (Result r = locate(path, &at); !r.ok())
+            return r;
+        if (at.root) {
+            // XM-2: the server root is a folder of shares.
+            if (out) {
+                *out = Entry();
+                out->type = EntryType::Directory;
+            }
+            return Result::success();
         }
-        return Result::success();
-    }
-    const Result r = Ops::statPath(*at.session, at.path, out);
-    if (r.ok() && out && at.path.isEmpty())
-        out->name = at.share;
-    return r;
+        const Result r = Ops::statPath(*at.session, at.path, out);
+        if (r.ok() && out && at.path.isEmpty())
+            out->name = at.share;
+        return r;
+    });
 }
 
 Result SmbBackend::list(const QString &dir, ListSink *sink, const ListOptions &options)
 {
-    const GateHold hold(&m_gate);     // M-13
-    if (!hold.entered())
-        return GateHold::busy();
-    Location at;
-    if (Result r = locate(dir, &at); !r.ok())
-        return r;
-    if (at.root)
-        return listRoot(sink, options);
-    return Ops::listPath(*at.session, at.path, sink, options);
+    // M-13
+    return GateHold::run(&m_gate, [this, &dir, sink, &options]() -> Result {
+        Location at;
+        if (Result r = locate(dir, &at); !r.ok())
+            return r;
+        if (at.root)
+            return listRoot(sink, options);
+        return Ops::listPath(*at.session, at.path, sink, options);
+    });
 }
 
 Result SmbBackend::makeDir(const QString &path, bool exclusive)
 {
-    const GateHold hold(&m_gate);     // M-13
-    if (!hold.entered())
-        return GateHold::busy();
-    Location at;
-    const Result r = locate(path, &at);
-    // XM-2: a share that does not exist cannot be made.
-    if (r.error() == Error::NotFound && m_serverMode && at.path.isEmpty())
-        return rootDenied(QStringLiteral("create folder"));
-    if (!r.ok())
-        return r;
-    if (at.root)
-        return rootDenied(QStringLiteral("create folder"));
-    if (at.path.isEmpty())   // the share root exists
-        return exclusive ? Result(Error::AlreadyExists, QStringLiteral("create folder: the share root exists"))
-                         : Result::success();
-    return Ops::makeDirectory(*at.session, at.path, exclusive);
+    // M-13
+    return GateHold::run(&m_gate, [this, &path, exclusive]() -> Result {
+        Location at;
+        const Result r = locate(path, &at);
+        // XM-2: a share that does not exist cannot be made.
+        if (r.error() == Error::NotFound && m_serverMode && at.path.isEmpty())
+            return rootDenied(QStringLiteral("create folder"));
+        if (!r.ok())
+            return r;
+        if (at.root)
+            return rootDenied(QStringLiteral("create folder"));
+        if (at.path.isEmpty())   // the share root exists
+            return exclusive ? Result(Error::AlreadyExists, QStringLiteral("create folder: the share root exists"))
+                             : Result::success();
+        return Ops::makeDirectory(*at.session, at.path, exclusive);
+    });
 }
 
 Result SmbBackend::removeFile(const QString &path)
 {
-    const GateHold hold(&m_gate);     // M-13
-    if (!hold.entered())
-        return GateHold::busy();
-    Location at;
-    if (Result r = locate(path, &at); !r.ok())
-        return r;
-    if (at.root)
-        return rootDenied(QStringLiteral("remove"));
-    return Ops::removeFile(*at.session, at.path);
+    // M-13
+    return GateHold::run(&m_gate, [this, &path]() -> Result {
+        Location at;
+        if (Result r = locate(path, &at); !r.ok())
+            return r;
+        if (at.root)
+            return rootDenied(QStringLiteral("remove"));
+        return Ops::removeFile(*at.session, at.path);
+    });
 }
 
 Result SmbBackend::removeDir(const QString &path)
 {
-    const GateHold hold(&m_gate);     // M-13
-    if (!hold.entered())
-        return GateHold::busy();
-    Location at;
-    if (Result r = locate(path, &at); !r.ok())
-        return r;
-    if (at.root)
-        return rootDenied(QStringLiteral("remove folder"));
-    if (at.path.isEmpty())
-        return shareRootDenied(QStringLiteral("remove folder"));
-    return Ops::removeDirectory(*at.session, at.path);
+    // M-13
+    return GateHold::run(&m_gate, [this, &path]() -> Result {
+        Location at;
+        if (Result r = locate(path, &at); !r.ok())
+            return r;
+        if (at.root)
+            return rootDenied(QStringLiteral("remove folder"));
+        if (at.path.isEmpty())
+            return shareRootDenied(QStringLiteral("remove folder"));
+        return Ops::removeDirectory(*at.session, at.path);
+    });
 }
 
 Result SmbBackend::rename(const QString &from, const QString &to, RenameMode mode)
 {
-    const GateHold hold(&m_gate);     // M-13
-    if (!hold.entered())
-        return GateHold::busy();
-    // XM-2: the root and the shares themselves are refused before any
-    // share is opened.
-    if (shareLevel(from) || shareLevel(to))
-        return shareRootDenied(QStringLiteral("rename"));
-    Location source;
-    Location target;
-    Result r = locate(from, &source);
-    if (r.ok())
-        r = locate(to, &target);
-    if (!r.ok())
-        return r;
-    if (source.path.isEmpty() || target.path.isEmpty())
-        return shareRootDenied(QStringLiteral("rename"));
-    if (source.session != target.session)
-        return Result(Error::Unsupported, QStringLiteral("rename: SMB cannot move between shares"));
-    if (mode == RenameMode::Replace)
-        return Ops::renameReplacing(*source.session, source.path, target.path);
-    // XM-5, XC-10: the server refuses an existing target (NativeNoReplace).
-    return Ops::renamePath(*source.session, source.path, target.path);
+    // M-13
+    return GateHold::run(&m_gate, [this, &from, &to, mode]() -> Result {
+        // XM-2: the root and the shares themselves are refused before any
+        // share is opened.
+        if (shareLevel(from) || shareLevel(to))
+            return shareRootDenied(QStringLiteral("rename"));
+        Location source;
+        Location target;
+        Result r = locate(from, &source);
+        if (r.ok())
+            r = locate(to, &target);
+        if (!r.ok())
+            return r;
+        if (source.path.isEmpty() || target.path.isEmpty())
+            return shareRootDenied(QStringLiteral("rename"));
+        if (source.session != target.session)
+            return Result(Error::Unsupported, QStringLiteral("rename: SMB cannot move between shares"));
+        if (mode == RenameMode::Replace)
+            return Ops::renameReplacing(*source.session, source.path, target.path);
+        // XM-5, XC-10: the server refuses an existing target (NativeNoReplace).
+        return Ops::renamePath(*source.session, source.path, target.path);
+    });
 }
 
 Result SmbBackend::setAttributes(const QString &path, const AttributeChanges &changes)
 {
-    const GateHold hold(&m_gate);     // M-13
-    if (!hold.entered())
-        return GateHold::busy();
-    // XC-11: every field is checked before anything changes.
-    if (changes.mode >= 0)
-        return Result(Error::Unsupported, QStringLiteral("SMB has no permission bits"));
-    if (!timeRepresentable(changes.modified) || !timeRepresentable(changes.accessed))
-        return Result(Error::Unsupported, QStringLiteral("SMB stores times between 1970 and 30828 only"));
-    Location at;
-    if (Result r = locate(path, &at); !r.ok())
-        return r;
-    if (at.root)
-        return rootDenied(QStringLiteral("set attributes"));
-    if (changes.isEmpty())
-        return Ops::statPath(*at.session, at.path, nullptr);
-    return setTimes(*at.session, at.path, changes.modified, changes.accessed);
+    // M-13
+    return GateHold::run(&m_gate, [this, &path, &changes]() -> Result {
+        // XC-11: every field is checked before anything changes.
+        if (changes.mode >= 0)
+            return Result(Error::Unsupported, QStringLiteral("SMB has no permission bits"));
+        if (!timeRepresentable(changes.modified) || !timeRepresentable(changes.accessed))
+            return Result(Error::Unsupported, QStringLiteral("SMB stores times between 1970 and 30828 only"));
+        Location at;
+        if (Result r = locate(path, &at); !r.ok())
+            return r;
+        if (at.root)
+            return rootDenied(QStringLiteral("set attributes"));
+        if (changes.isEmpty())
+            return Ops::statPath(*at.session, at.path, nullptr);
+        return setTimes(*at.session, at.path, changes.modified, changes.accessed);
+    });
 }
 
 Result SmbBackend::spaceInfo(const QString &dir, SpaceInfo *out)
 {
-    const GateHold hold(&m_gate);     // M-13
-    if (!hold.entered())
-        return GateHold::busy();
-    Location at;
-    if (Result r = locate(dir, &at); !r.ok())
-        return r;
-    if (at.root)
-        return rootDenied(QStringLiteral("free space"));
-    return Ops::spaceInfo(*at.session, at.path, out);
+    // M-13
+    return GateHold::run(&m_gate, [this, &dir, out]() -> Result {
+        Location at;
+        if (Result r = locate(dir, &at); !r.ok())
+            return r;
+        if (at.root)
+            return rootDenied(QStringLiteral("free space"));
+        return Ops::spaceInfo(*at.session, at.path, out);
+    });
 }
 
 Result SmbBackend::keepAlive()
 {
-    const GateHold hold(&m_gate);     // M-13
-    if (!hold.entered())
-        return GateHold::busy();
-    // XM-8: SMB2 ECHO, on IPC$ in server mode.
-    if (Result r = checkSignedIn(); !r.ok())
-        return r;
-    return Ops::echo(*m_main);
+    // M-13
+    return GateHold::run(&m_gate, [this]() -> Result {
+        // XM-8: SMB2 ECHO, on IPC$ in server mode.
+        if (Result r = checkSignedIn(); !r.ok())
+            return r;
+        return Ops::echo(*m_main);
+    });
 }
 
 // ------------------------------------------------------------- files (XM-6)
 
-Result SmbBackend::openWrite(const QString &path, const WriteOptions &options, WriteHandle **out)
+Result SmbBackend::openWriter(const QString &path, const WriteOptions &options, std::unique_ptr<WriteHandle> *out)
 {
-    const GateHold hold(&m_gate);     // M-13
-    if (!hold.entered())
-        return GateHold::busy();
-    *out = nullptr;
     if (options.disposition == WriteOptions::Disposition::Resume && options.resumeOffset < 0)
         return invalidRange();
     // XM-2: no files beside the shares ("/name" is a share, not a file).
@@ -455,72 +452,80 @@ Result SmbBackend::openWrite(const QString &path, const WriteOptions &options, W
         return r;
     smb2fh *fh = nullptr;
     const Result r = Ops::openForWrite(*at.session, at.path, options, &fh);
-    if (r.ok()) {
-        auto writer = std::make_unique<Writer>(at.session, fh, at.path, options);
-        *out = writer.release();    // XC-13: the caller owns the handle
-    }
+    if (r.ok())
+        *out = std::make_unique<Writer>(at.session, fh, at.path, options);
     return r;
+}
+
+Result SmbBackend::openWrite(const QString &path, const WriteOptions &options, WriteHandle **out)
+{
+    // M-13
+    return GateHold::run(&m_gate, [this, &path, &options, out]() -> Result {
+        std::unique_ptr<WriteHandle> writer;
+        const Result r = openWriter(path, options, &writer);
+        *out = writer.release();    // XC-13: the caller owns the handle
+        return r;
+    });
 }
 
 Result SmbBackend::upload(QIODevice *source, const QString &path, const UploadOptions &options, Progress *progress)
 {
-    const GateHold hold(&m_gate);     // M-13
-    if (!hold.entered())
-        return GateHold::busy();
-    WriteHandle *raw = nullptr;
-    if (Result r = openWrite(path, options.write, &raw); !r.ok())
-        return r;
-    const std::unique_ptr<WriteHandle> writer(raw);
-    const qint64 base = options.write.disposition == WriteOptions::Disposition::Resume ? options.write.resumeOffset : 0;
-    if (Result r = Ops::writeAll(*m_main, source, writer.get(), progress, base); !r.ok()) {
-        writer->abort();
-        return r;
-    }
-    return writer->commit();
+    // M-13
+    return GateHold::run(&m_gate, [this, source, &path, &options, progress]() -> Result {
+        std::unique_ptr<WriteHandle> writer;
+        if (Result r = openWriter(path, options.write, &writer); !r.ok())
+            return r;
+        const qint64 base = options.write.disposition == WriteOptions::Disposition::Resume ? options.write.resumeOffset : 0;
+        if (Result r = Ops::writeAll(*m_main, source, writer.get(), progress, base); !r.ok()) {
+            writer->abort();
+            return r;
+        }
+        return writer->commit();
+    });
 }
 
 Result SmbBackend::openRead(const QString &path, ReadHandle **out)
 {
-    const GateHold hold(&m_gate);     // M-13
-    if (!hold.entered())
-        return GateHold::busy();
-    *out = nullptr;
-    Location at;
-    if (Result r = locate(path, &at); !r.ok())
+    // M-13
+    return GateHold::run(&m_gate, [this, &path, out]() -> Result {
+        *out = nullptr;
+        Location at;
+        if (Result r = locate(path, &at); !r.ok())
+            return r;
+        if (at.root)
+            return rootDenied(QStringLiteral("open"));
+        smb2fh *fh = nullptr;
+        qint64 size = -1;
+        const Result r = Ops::openForRead(*at.session, at.path, &fh, &size);
+        if (r.ok()) {
+            auto reader = std::make_unique<Reader>(at.session, fh, size);
+            *out = reader.release();    // XC-13: the caller owns the handle
+        }
         return r;
-    if (at.root)
-        return rootDenied(QStringLiteral("open"));
-    smb2fh *fh = nullptr;
-    qint64 size = -1;
-    const Result r = Ops::openForRead(*at.session, at.path, &fh, &size);
-    if (r.ok()) {
-        auto reader = std::make_unique<Reader>(at.session, fh, size);
-        *out = reader.release();    // XC-13: the caller owns the handle
-    }
-    return r;
+    });
 }
 
 Result SmbBackend::download(const QString &path, QIODevice *sink, const DownloadOptions &options, Progress *progress)
 {
-    const GateHold hold(&m_gate);     // M-13
-    if (!hold.entered())
-        return GateHold::busy();
-    if (options.offset < 0 || options.length < -1)
-        return invalidRange();
-    Location at;
-    if (Result r = locate(path, &at); !r.ok())
-        return r;
-    if (at.root)
-        return rootDenied(QStringLiteral("download"));
-    smb2fh *fh = nullptr;
-    qint64 size = -1;
-    if (Result r = Ops::openForRead(*at.session, at.path, &fh, &size); !r.ok())
-        return r;
-    Reader reader(at.session, fh, size);
-    const qint64 known = qMax<qint64>(size, 0);
-    const qint64 end = options.length < 0 ? known : qMin(known, options.offset + options.length);
-    const Result r = Ops::copyToSink(*at.session, &reader, options.offset, end, sink, progress);
-    return reader.closeWith(r);
+    // M-13
+    return GateHold::run(&m_gate, [this, &path, sink, &options, progress]() -> Result {
+        if (options.offset < 0 || options.length < -1)
+            return invalidRange();
+        Location at;
+        if (Result r = locate(path, &at); !r.ok())
+            return r;
+        if (at.root)
+            return rootDenied(QStringLiteral("download"));
+        smb2fh *fh = nullptr;
+        qint64 size = -1;
+        if (Result r = Ops::openForRead(*at.session, at.path, &fh, &size); !r.ok())
+            return r;
+        Reader reader(at.session, fh, size);
+        const qint64 known = qMax<qint64>(size, 0);
+        const qint64 end = options.length < 0 ? known : qMin(known, options.offset + options.length);
+        const Result r = Ops::copyToSink(*at.session, &reader, options.offset, end, sink, progress);
+        return reader.closeWith(r);
+    });
 }
 
 

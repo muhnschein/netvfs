@@ -135,8 +135,8 @@ Result parseError(const QJsonObject &object)
 
 Result parseEnd(const QJsonObject &object, int count)
 {
-    const QJsonValue end = object.value(QStringLiteral("end"));
-    if (object.size() != 1 || !end.isDouble() || end.toDouble() != count)
+    if (const QJsonValue end = object.value(QStringLiteral("end"));
+        object.size() != 1 || !end.isDouble() || end.toDouble() != count)
         return malformed(QStringLiteral("the share count does not match"));
     return Result::success();
 }

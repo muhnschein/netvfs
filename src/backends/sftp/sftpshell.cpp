@@ -11,7 +11,7 @@ constexpr int Sha256HexLength = 64;
 constexpr const char *ProbeMarker = "netvfs-probe";
 // Every character a shell would otherwise interpret, so that the probe
 // proves the quoting rules hold on this server.
-constexpr const char *ProbeQuoted = "it's \"q\" $HOME \\ * `x` ;|&";
+constexpr const char *ProbeQuoted = R"(it's "q" $HOME \ * `x` ;|&)";
 
 bool isHex(char c)
 {
@@ -57,7 +57,7 @@ QByteArray shellCommand(const QList<QByteArray> &argv)
 QByteArray probeCommand()
 {
     return shellCommand({ "printf", "%s\\n", ProbeMarker, ProbeQuoted })
-        + "; for t in cp sha256sum shasum find; do command -v \"$t\" >/dev/null 2>&1 && printf '%s\\n' \"$t\"; done; true";
+        + R"(; for t in cp sha256sum shasum find; do command -v "$t" >/dev/null 2>&1 && printf '%s\n' "$t"; done; true)";
 }
 
 bool parseProbe(const QByteArray &out, ShellTools *tools)
@@ -121,8 +121,7 @@ bool parseFindOutput(const QByteArray &out, const QByteArray &dir, bool truncate
 {
     QList<QByteArray> pieces = out.split('\0');
     // A complete output ends with NUL, so the last piece is empty.
-    const QByteArray rest = pieces.takeLast();
-    if (!rest.isEmpty() && !truncated)
+    if (const QByteArray rest = pieces.takeLast(); !rest.isEmpty() && !truncated)
         return false;
     QList<QByteArray> found;
     for (const QByteArray &piece : pieces) {

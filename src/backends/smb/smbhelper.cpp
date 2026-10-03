@@ -87,8 +87,7 @@ public:
             *status = m_status;
             return true;
         }
-        const pid_t rc = ::waitpid(m_pid, &m_status, WNOHANG);
-        if (rc == 0)
+        if (const pid_t rc = ::waitpid(m_pid, &m_status, WNOHANG); rc == 0)
             return false;
         m_pid = -1;
         *status = m_status;
