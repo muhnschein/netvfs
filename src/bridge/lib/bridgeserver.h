@@ -83,7 +83,7 @@ public:
     const BridgeConfig &config() const { return m_config; }
     Consent consent() const { return m_consent; }
     void requestConsent();
-    MainQueue *mainQueue() const { return &m_queue; }   // post() is thread-safe
+    MainQueue *mainQueue() const { return m_queue.get(); }
     QuestionBroker *questions() { return &m_questions; }
     const Handoff &handoff() const { return m_handoff; }
     Session *session(quint64 id) const { return m_sessions.value(id); }
@@ -95,7 +95,7 @@ public:
     NearbyService *nearby() const { return m_nearby.get(); }
 
     // Cancels the running work whose tokens were set (XB-13).
-    void kickAll();
+    void kickAll() const;
     // The work in flight or the sessions changed: (re)starts or stops the idle timer.
     void updateIdleTimer();
     // Sends the signal `member` to every session that said Hello.
@@ -114,7 +114,7 @@ private:
     void watchConsentFile();
 
     BridgeConfig m_config;
-    mutable MainQueue m_queue;
+    std::unique_ptr<MainQueue> m_queue = std::make_unique<MainQueue>();
     WireServer m_wire;
     ConsentStore m_consentStore;
     Consent m_consent = Consent::Unknown;

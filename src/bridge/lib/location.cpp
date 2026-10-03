@@ -43,8 +43,6 @@ AccountDirectory::~AccountDirectory() = default;
 
 // ----------------------------------------------------------- libaccounts
 
-const char LibAccountsDirectory::FilesServiceType[] = "netvfs-files";
-
 class LibAccountsDirectory::Private
 {
 public:

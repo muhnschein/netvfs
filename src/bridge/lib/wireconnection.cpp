@@ -11,6 +11,7 @@
 
 #include <array>
 #include <memory>
+#include <unistd.h>
 
 namespace NetVfs::Bridge {
 
@@ -434,17 +435,24 @@ void netvfs_loop_timeout_toggled(DBusTimeout *timeout)
         timer->toggle();
 }
 
-DBusHandlerResult netvfs_loop_message(NetVfsLoopOwner *owner, DBusMessage *message)
+DBusHandlerResult netvfs_loop_message(NetVfsLoopOwner *owner, DBusConnection *, DBusMessage *message)
 {
     return owner->message(message);
 }
 
-void netvfs_loop_dispatch_status(NetVfsLoopOwner *owner, DBusDispatchStatus status)
+void netvfs_loop_dispatch_status(NetVfsLoopOwner *owner, DBusConnection *, DBusDispatchStatus status)
 {
     owner->dispatchStatus(status);
 }
 
-void netvfs_loop_new_connection(NetVfsLoopOwner *owner, DBusConnection *connection)
+void netvfs_loop_new_connection(NetVfsLoopOwner *owner, DBusServer *, DBusConnection *connection)
 {
     owner->accepted(connection);
+}
+
+// XB-5 first line: only the bridge's own uid authenticates (libdbus would
+// otherwise also accept root).
+dbus_bool_t netvfs_loop_uid_allowed(DBusConnection *, unsigned long uid)
+{
+    return uid == static_cast<unsigned long>(::geteuid()) ? TRUE : FALSE;
 }

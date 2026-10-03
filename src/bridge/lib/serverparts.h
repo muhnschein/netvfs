@@ -92,7 +92,7 @@ public:
     Connector *connector() { return m_connector.get(); }
 
 private:
-    void wipeAdHocSecrets();
+    void wipeAdHocSecrets() const;
 
     BridgeServer *m_server;
     KnownHosts m_knownHosts;

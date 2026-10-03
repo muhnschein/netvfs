@@ -83,9 +83,6 @@ public:
     void fetch(int accountId, const Fetched &done) override;
     void setAttention(int accountId, Attention attention, const QString &seenPin) override;
 
-    // XA-1: service type of the "<provider>-files" services.
-    static const char FilesServiceType[];
-
 private:
     class Private;
     std::unique_ptr<Private> d;

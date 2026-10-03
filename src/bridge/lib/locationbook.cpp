@@ -95,7 +95,7 @@ void LocationBook::revoke()
     m_adHoc.clear();
 }
 
-void LocationBook::wipeAdHocSecrets()
+void LocationBook::wipeAdHocSecrets() const
 {
     for (const auto &[id, spec] : m_adHoc) {
         if (spec.adHocCredentials)

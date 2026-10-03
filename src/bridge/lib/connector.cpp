@@ -110,7 +110,7 @@ Result BridgeConnector::establish(Backend *backend, const LocationSpec &spec, co
 Result BridgeConnector::establishAccount(Backend *backend, const LocationSpec &spec, const TaskContext &context)
 {
     auto fetched = std::make_shared<Rendezvous<std::shared_ptr<Fetch>>>();
-    BridgeServer *server = m_server;
+    const BridgeServer *server = m_server;
     const int accountId = spec.accountId;
     server->mainQueue()->post([server, fetched, accountId]() {
         server->locations()->fetch(accountId, [fetched](const Result &r, const ConnectionParams &p, const Credentials &c) {
