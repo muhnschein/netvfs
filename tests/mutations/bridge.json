@@ -338,8 +338,15 @@
   {
     "name": "XB-3 generator logs file names raw",
     "file": "src/bridge/generator/netvfs-bridge-generator.c",
-    "search": "            printable(path, shown, sizeof(shown));",
-    "replace": "            snprintf(shown, sizeof(shown), \"%s\", path);",
+    "search": "    escaped(name, shown, sizeof(shown));",
+    "replace": "    snprintf(shown, sizeof(shown), \"%s\", name);",
+    "test": "build/tests/bridge/generator/tst_generator"
+  },
+  {
+    "name": "XB-3 generator follows links out of the folder",
+    "file": "src/bridge/generator/netvfs-bridge-generator.c",
+    "search": "    return strncmp(resolved, base, n) == 0 && resolved[n] == '/';",
+    "replace": "    return n > 0;",
     "test": "build/tests/bridge/generator/tst_generator"
   }
 ]

@@ -43,6 +43,7 @@
 #define MAX_LINE 2048
 #define MAX_PATH_LENGTH 4096
 #define MAX_FILE_BYTES 16384
+#define MAX_CONSUMERS 256
 
 struct consumer {
     char id[MAX_ID + 1];
@@ -315,6 +316,7 @@ static int emit(const char *dir, const struct consumer *c, const char *source)
     return rc;
 }
 
+/* "<stem>.conf": copies the stem. */
 static int has_conf_suffix(const char *name, char *stem, size_t size)
 {
     size_t n = strlen(name);
@@ -325,9 +327,9 @@ static int has_conf_suffix(const char *name, char *stem, size_t size)
     return 1;
 }
 
-static int compare_names(const void *a, const void *b)
+static int compare_ids(const void *a, const void *b)
 {
-    return strcmp(*(const char *const *)a, *(const char *const *)b);
+    return strcmp((const char *)a, (const char *)b);
 }
 
 /* No control characters, no ".." component. */
@@ -356,13 +358,86 @@ static const char *consumers_dir(void)
     return CONSUMERS_DIR;
 }
 
-/* A file name for a message: control characters cannot forge log lines. */
-static void printable(const char *in, char *out, size_t size)
+/* A file name for a message: only [A-Za-z0-9._-] are copied, anything else as \xNN, so a name
+ * can neither forge a log line nor carry control characters. */
+static void escaped(const char *in, char *out, size_t size)
 {
+    static const char hex[] = "0123456789abcdef";
     size_t n = 0;
-    for (const unsigned char *p = (const unsigned char *)in; *p && n + 1 < size; ++p)
-        out[n++] = (*p < 0x20 || *p == 0x7f) ? '?' : (char)*p;
+    const unsigned char *p = (const unsigned char *)in;
+    while (*p && n + 4 < size) {
+        if (is_id_char((char)*p) || (*p >= 'A' && *p <= 'Z') || *p == '.' || *p == '_') {
+            out[n++] = (char)*p;
+        } else {
+            out[n++] = '\\';
+            out[n++] = 'x';
+            out[n++] = hex[*p >> 4];
+            out[n++] = hex[*p & 15];
+        }
+        ++p;
+    }
     out[n] = '\0';
+}
+
+/* The consumer file of a validated id below the canonical `base`: the canonical path of
+ * "<base>/<id>.conf", which must still be inside `base` (no symbolic link leads out). */
+static int resolve_inside(const char *base, const char *id, char *resolved)
+{
+    char path[MAX_PATH_LENGTH];
+    if (!netvfs_valid_id(id) || snprintf(path, sizeof(path), "%s/%s.conf", base, id) >= (int)sizeof(path))
+        return 0;
+    if (!realpath(path, resolved))
+        return 0;
+    size_t n = strlen(base);
+    return strncmp(resolved, base, n) == 0 && resolved[n] == '/';
+}
+
+static void report(const char *name, const char *problem)
+{
+    char shown[MAX_PATH_LENGTH];
+    escaped(name, shown, sizeof(shown));
+    fprintf(stderr, "netvfs-bridge-generator: skipping %s: %s\n", shown, problem);
+}
+
+/* Reads the ids of the "<id>.conf" files of `dir`; other names are reported and skipped. */
+static size_t collect_ids(DIR *dir, char ids[][MAX_ID + 2], size_t capacity)
+{
+    size_t count = 0;
+    const struct dirent *entry;
+    while (count < capacity && (entry = readdir(dir)) != NULL) {
+        char stem[MAX_ID + 2];
+        if (entry->d_name[0] == '.' || !has_conf_suffix(entry->d_name, stem, sizeof(stem)))
+            continue;
+        if (netvfs_valid_id(stem))
+            memcpy(ids[count++], stem, sizeof(stem));
+        else
+            report(entry->d_name, "Id must match [a-z0-9-]+ and the file name");
+    }
+    return count;
+}
+
+/* One consumer: read, validate, emit. Returns 0 unless the output folder is unusable. */
+static int generate_one(const char *out, const char *base, const char *dir_name, const char *id)
+{
+    char resolved[MAX_PATH_LENGTH];
+    char name[MAX_ID + 8];
+    char source[MAX_PATH_LENGTH];
+    struct consumer c;
+    snprintf(name, sizeof(name), "%.*s.conf", MAX_ID + 1, id);
+    const char *problem = NULL;
+    if (!resolve_inside(base, id, resolved))
+        problem = "is not a file of the consumers folder";
+    else
+        problem = parse_consumer(resolved, &c);
+    if (!problem)
+        problem = validate(&c, id);
+    if (problem) {
+        report(name, problem);
+        return 0;
+    }
+    if (snprintf(source, sizeof(source), "%s/%s", dir_name, name) >= (int)sizeof(source))
+        return 0;
+    return emit(out, &c, source) != 0;
 }
 
 int main(int argc, char **argv)
@@ -373,43 +448,22 @@ int main(int argc, char **argv)
     }
     const char *out = argv[1];
     const char *dir_name = consumers_dir();
-    DIR *dir = opendir(dir_name);
-    if (!dir)
+    char base[MAX_PATH_LENGTH];
+    if (!realpath(dir_name, base))
         return 0; /* nothing registered */
+    DIR *dir = opendir(base);
+    if (!dir)
+        return 0;
 
-    char *names[256];
-    size_t count = 0;
-    const struct dirent *entry;
-    while ((entry = readdir(dir)) != NULL && count < sizeof(names) / sizeof(names[0])) {
-        char stem[MAX_ID + 2];
-        if (entry->d_name[0] != '.' && has_conf_suffix(entry->d_name, stem, sizeof(stem)))
-            names[count++] = strdup(entry->d_name);
-    }
+    char ids[MAX_CONSUMERS][MAX_ID + 2];
+    const size_t count = collect_ids(dir, ids, MAX_CONSUMERS);
     closedir(dir);
-    qsort(names, count, sizeof(names[0]), compare_names);
+    qsort(ids, count, sizeof(ids[0]), compare_ids);
 
     int status = 0;
     for (size_t i = 0; i < count; ++i) {
-        char stem[MAX_ID + 2];
-        char path[MAX_PATH_LENGTH];
-        struct consumer c;
-        if (!names[i])
-            continue;
-        has_conf_suffix(names[i], stem, sizeof(stem));
-        if (snprintf(path, sizeof(path), "%s/%s", dir_name, names[i]) >= (int)sizeof(path)) {
-            free(names[i]);
-            continue;
-        }
-        const char *problem = parse_consumer(path, &c);
-        if (!problem)
-            problem = validate(&c, stem);
-        if (problem) {
-            char shown[MAX_PATH_LENGTH];
-            printable(path, shown, sizeof(shown));
-            fprintf(stderr, "netvfs-bridge-generator: skipping %s: %s\n", shown, problem);
-        } else if (emit(out, &c, path) != 0)
+        if (generate_one(out, base, dir_name, ids[i]))
             status = 1;
-        free(names[i]);
     }
     return status;
 }
