@@ -694,11 +694,11 @@ Result FtpBackend::Writes::prepare(const QByteArray &remote, const WriteOptions 
     if (const Result r = checkTarget(remote, &existing, &exists); !r.ok())
         return r;
     switch (options.disposition) {
-    case WriteOptions::CreateNew:
+    case WriteOptions::Disposition::CreateNew:
         if (exists)
             return Result(Error::AlreadyExists, QStringLiteral("Writing: the file exists"));
         break;
-    case WriteOptions::Resume:
+    case WriteOptions::Disposition::Resume:
         if (!m_b.m_capabilities.has(Capability::WriteResume))
             return Result(Error::Unsupported, QStringLiteral("The server cannot resume uploads (no REST STREAM)"));
         if (!exists || existing.size != options.resumeOffset) {
@@ -706,7 +706,7 @@ Result FtpBackend::Writes::prepare(const QByteArray &remote, const WriteOptions 
                                                     .arg(options.resumeOffset).arg(exists ? existing.size : 0));
         }
         return Result::success();
-    case WriteOptions::Truncate:
+    case WriteOptions::Disposition::Truncate:
         break;
     }
     if (options.createMode < 0 || !m_b.m_capabilities.has(Capability::PosixModes))
@@ -837,7 +837,7 @@ Result FtpBackend::upload(QIODevice *source, const QString &path, const UploadOp
     if (!r.ok())
         return r;
     QByteArray buffer(int(UploadChunk), Qt::Uninitialized);
-    const qint64 base = options.write.disposition == WriteOptions::Resume ? options.write.resumeOffset : 0;
+    const qint64 base = options.write.disposition == WriteOptions::Disposition::Resume ? options.write.resumeOffset : 0;
     for (;;) {
         if (m_canceled || (progress && progress->canceled())) {
             handle->abort();

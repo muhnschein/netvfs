@@ -431,7 +431,7 @@ Result MemoryBackend::checkWritable(const QString &key, const WriteOptions &opti
         return Result::success();
     if (existing->second.type == EntryType::Directory)
         return Result(Error::IsADirectory, key);
-    if (options.disposition == WriteOptions::CreateNew)
+    if (options.disposition == WriteOptions::Disposition::CreateNew)
         return Result(Error::AlreadyExists, key);
     return Result::success();
 }

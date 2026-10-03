@@ -312,7 +312,7 @@ Result createEmptyFile(const Context &c, const QString &path, const QDateTime &t
     QBuffer empty;
     empty.open(QIODevice::ReadOnly);
     UploadOptions options;
-    options.write.disposition = WriteOptions::CreateNew;
+    options.write.disposition = WriteOptions::Disposition::CreateNew;
     options.write.modified = time;
     Result r = c.backend->upload(&empty, path, options, nullptr);
     if (r.ok() && c.backend->capabilities().has(Capability::SetModified)) {

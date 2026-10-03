@@ -110,7 +110,7 @@ Result writeResumed(Backend *backend, CountingReader *reader, const QString &pat
                     const TransferPolicy &policy, Progress *progress)
 {
     WriteOptions options;
-    options.disposition = WriteOptions::Resume;
+    options.disposition = WriteOptions::Disposition::Resume;
     options.resumeOffset = policy.resumeOffset;
     options.createMode = policy.createMode;
     options.expectedSize = size;
@@ -175,7 +175,7 @@ Result writeFresh(Backend *backend, CountingReader *reader, const QString &path,
 {
     UploadOptions options;
     options.write.disposition = !policy.useTempName && policy.commitMode == RenameMode::NoReplace
-        ? WriteOptions::CreateNew : WriteOptions::Truncate;
+        ? WriteOptions::Disposition::CreateNew : WriteOptions::Disposition::Truncate;
     options.write.createMode = policy.createMode;
     options.write.expectedSize = size;
     options.write.modified = policy.modified;

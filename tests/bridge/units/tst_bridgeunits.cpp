@@ -252,7 +252,7 @@ void tst_BridgeUnits::options()
     QVERIFY(validate("Upload", "sayha{sv}", { loc, bytes("a"), fd, upload }, &call).ok());
     QCOMPARE(call.transfer.offset, qint64(10));
     QCOMPARE(call.transfer.size, qint64(5));
-    QCOMPARE(call.transfer.disposition, WriteOptions::Resume);
+    QCOMPARE(call.transfer.disposition, WriteOptions::Disposition::Resume);
     QCOMPARE(call.transfer.createMode, 0600);
     QCOMPARE(call.lane, Lane::Stream);
     QCOMPARE(validate("Upload", "sayha{sv}", { loc, bytes("a"), fd, QVariantMap { { "disposition", "resume" } } }).error(),

@@ -319,7 +319,7 @@ void Reader::invalidate()
 
 Writer::Writer(Session *session, smb2fh *fh, const QByteArray &path, const WriteOptions &options)
     : m_session(session), m_gate(session->gate()), m_fh(fh), m_path(path), m_modified(options.modified), m_chunk(session->writeChunk()),
-      m_position(options.disposition == WriteOptions::Resume ? options.resumeOffset : 0),
+      m_position(options.disposition == WriteOptions::Disposition::Resume ? options.resumeOffset : 0),
       m_sent(static_cast<quint64>(m_position))
 {
     m_session->attach(this);

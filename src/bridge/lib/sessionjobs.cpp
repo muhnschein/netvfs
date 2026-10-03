@@ -109,7 +109,7 @@ UploadOptions uploadOptionsFor(const TransferOptions &t, qint64 length)
 {
     UploadOptions options;
     options.write.disposition = t.disposition;
-    const bool resume = t.disposition == WriteOptions::Resume;
+    const bool resume = t.disposition == WriteOptions::Disposition::Resume;
     options.write.resumeOffset = resume ? t.offset : 0;
     options.write.createMode = t.createMode;
     if (length >= 0)

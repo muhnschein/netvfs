@@ -1071,7 +1071,7 @@ private slots:
         QCOMPARE(backend->upload(&source, QStringLiteral("v2io/big.bin"), options, nullptr).error(), Error::AlreadyExists);
         QCOMPARE(backend->upload(&source, QStringLiteral("v2io"), options, nullptr).error(), Error::IsADirectory);
         QVERIFY(put(backend.get(), QStringLiteral("v2io/small.bin"), "0123456789"));
-        options.write.disposition = WriteOptions::Truncate;
+        options.write.disposition = WriteOptions::Disposition::Truncate;
         QVERIFY(backend->upload(&source, QStringLiteral("v2io/small.bin"), options, nullptr).ok());
         QCOMPARE(contentOf(backend.get(), QStringLiteral("v2io/small.bin")), small);
 
@@ -1564,7 +1564,7 @@ private slots:
         QCOMPARE(entry.modified, when);
         // XC-14: WriteOptions::modified on commit.
         UploadOptions upload;
-        upload.write.disposition = WriteOptions::Truncate;
+        upload.write.disposition = WriteOptions::Disposition::Truncate;
         upload.write.modified = when.addYears(1);
         QVERIFY(put(backend.get(), QStringLiteral("attr.txt"), "again", upload));
         QVERIFY(backend->stat(QStringLiteral("attr.txt"), &entry).ok());
@@ -1648,7 +1648,7 @@ private slots:
         QVERIFY(signIn(backend.get(), params(QStringLiteral("strict")), credentials()).ok());
         QVERIFY(put(backend.get(), QStringLiteral("resume.bin"), "0123456789"));
         WriteOptions options;
-        options.disposition = WriteOptions::Resume;
+        options.disposition = WriteOptions::Disposition::Resume;
         options.resumeOffset = 9;
         WriteHandle *raw = nullptr;
         const Result wrong = backend->openWrite(QStringLiteral("resume.bin"), options, &raw);

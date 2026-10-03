@@ -73,7 +73,7 @@ constexpr qint64 MaxTimeMs = Q_INT64_C(253402300799999);   // 9999-12-31
 struct TransferOptions {
     qint64 offset = 0;                 // first byte, in the local file and remotely
     qint64 size = -1;                  // Upload: bytes to send (-1: to EOF); Download: length
-    WriteOptions::Disposition disposition = WriteOptions::CreateNew;   // XC-13 default
+    WriteOptions::Disposition disposition = WriteOptions::Disposition::CreateNew;   // XC-13 default
     qint32 createMode = -1;
     qint64 mtimeMs = -1;               // -1: none (only with "mtimeMs" absent)
     bool hasMtime = false;

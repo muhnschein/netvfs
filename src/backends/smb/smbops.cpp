@@ -196,9 +196,9 @@ Result openForWrite(Session &session, const QByteArray &path, const WriteOptions
 {
     // XC-14; SMB has no POSIX modes, createMode does not apply.
     int flags = O_WRONLY;
-    if (options.disposition == WriteOptions::CreateNew)
+    if (options.disposition == WriteOptions::Disposition::CreateNew)
         flags |= O_CREAT | O_EXCL;
-    else if (options.disposition == WriteOptions::Truncate)
+    else if (options.disposition == WriteOptions::Disposition::Truncate)
         flags |= O_CREAT | O_TRUNC;
     else
         flags = O_RDWR;     // Resume: the size check needs FILE_READ_ATTRIBUTES
@@ -209,7 +209,7 @@ Result openForWrite(Session &session, const QByteArray &path, const WriteOptions
             return Result(Error::IsADirectory, QStringLiteral("open: a folder"));
         return r;
     }
-    if (options.disposition != WriteOptions::Resume)
+    if (options.disposition != WriteOptions::Disposition::Resume)
         return r;
     // Resume: the remote size must be the offset the caller continues at.
     Entry entry;

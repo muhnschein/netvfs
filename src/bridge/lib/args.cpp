@@ -215,11 +215,11 @@ Result dispositionOption(const QString &key, const QVariant &value, Call *call)
 {
     if (const QString s = isType(value, QMetaType::QString) ? value.toString() : QString();
         s == QLatin1String("create"))
-        call->transfer.disposition = WriteOptions::CreateNew;
+        call->transfer.disposition = WriteOptions::Disposition::CreateNew;
     else if (s == QLatin1String("truncate"))
-        call->transfer.disposition = WriteOptions::Truncate;
+        call->transfer.disposition = WriteOptions::Disposition::Truncate;
     else if (s == QLatin1String("resume"))
-        call->transfer.disposition = WriteOptions::Resume;
+        call->transfer.disposition = WriteOptions::Disposition::Resume;
     else
         return invalidArgs(QStringLiteral("Option \"%1\" must be create, truncate or resume").arg(key));
     return Result::success();
@@ -502,7 +502,7 @@ Result vTransfer(const QVariantList &args, Call *call, const OptionHandler &hand
     call->lane = Lane::Bulk;
     if (const Result r = forEachOption(args, 3, call, handler); !r.ok())
         return r;
-    if (const TransferOptions &t = call->transfer; t.disposition == WriteOptions::Resume && t.offset == 0)
+    if (const TransferOptions &t = call->transfer; t.disposition == WriteOptions::Disposition::Resume && t.offset == 0)
         return invalidArgs(QStringLiteral("Resume needs an offset"));
     return Result::success();
 }

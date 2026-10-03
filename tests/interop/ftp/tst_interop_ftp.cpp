@@ -216,8 +216,8 @@ private:
         source.open(QIODevice::ReadOnly);
         UploadOptions options;
         options.write = write;
-        if (options.write.disposition == WriteOptions::CreateNew)
-            options.write.disposition = WriteOptions::Truncate;
+        if (options.write.disposition == WriteOptions::Disposition::CreateNew)
+            options.write.disposition = WriteOptions::Disposition::Truncate;
         return b->upload(&source, path, options, nullptr);
     }
 
@@ -1188,7 +1188,7 @@ private slots:
         QVERIFY2(r.ok(), qPrintable(r.toString() + QLatin1Char(' ') + r.detail()));
         writer.reset();
         WriteOptions resume;
-        resume.disposition = WriteOptions::Resume;
+        resume.disposition = WriteOptions::Disposition::Resume;
         resume.resumeOffset = 999;
         QCOMPARE(b->openWrite(part, resume, &w).error(), Error::ProtocolError);
         resume.resumeOffset = 1000001;

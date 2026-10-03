@@ -445,7 +445,7 @@ Result SmbBackend::openWrite(const QString &path, const WriteOptions &options, W
     if (!hold.entered())
         return GateHold::busy();
     *out = nullptr;
-    if (options.disposition == WriteOptions::Resume && options.resumeOffset < 0)
+    if (options.disposition == WriteOptions::Disposition::Resume && options.resumeOffset < 0)
         return invalidRange();
     // XM-2: no files beside the shares ("/name" is a share, not a file).
     if (shareLevel(path))
@@ -471,7 +471,7 @@ Result SmbBackend::upload(QIODevice *source, const QString &path, const UploadOp
     if (Result r = openWrite(path, options.write, &raw); !r.ok())
         return r;
     const std::unique_ptr<WriteHandle> writer(raw);
-    const qint64 base = options.write.disposition == WriteOptions::Resume ? options.write.resumeOffset : 0;
+    const qint64 base = options.write.disposition == WriteOptions::Disposition::Resume ? options.write.resumeOffset : 0;
     if (Result r = Ops::writeAll(*m_main, source, writer.get(), progress, base); !r.ok()) {
         writer->abort();
         return r;

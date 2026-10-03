@@ -1338,7 +1338,7 @@ private slots:
         QCOMPARE(b->upload(&source, dir + QStringLiteral("/private.bin"), options, nullptr).error(),
                  Error::AlreadyExists);
         QCOMPARE(b->upload(&source, dir, options, nullptr).error(), Error::IsADirectory);
-        options.write.disposition = WriteOptions::Truncate;
+        options.write.disposition = WriteOptions::Disposition::Truncate;
         QVERIFY(b->upload(&source, dir + QStringLiteral("/private.bin"), options, nullptr).ok());
         QCOMPARE(exec(QStringLiteral("o103"), QStringLiteral("cat \"$P\""),
                       { QStringLiteral("P=") + disk + QStringLiteral("/private.bin") }),
@@ -1668,7 +1668,7 @@ private slots:
 
         // Resume: only at the remote size (ProtocolError, as Transfer reports).
         WriteOptions resume;
-        resume.disposition = WriteOptions::Resume;
+        resume.disposition = WriteOptions::Disposition::Resume;
         resume.resumeOffset = 3 * piece + 1;
         WriteHandle *w = nullptr;
         QCOMPARE(b->openWrite(dir + QStringLiteral("/w0"), resume, &w).error(), Error::ProtocolError);

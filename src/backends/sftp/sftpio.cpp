@@ -385,12 +385,12 @@ Result SftpBackend::Io::readChunks(sftp_file file, Sink *sink, quint64 start) co
 
 Result SftpBackend::Io::openForUpload(const QByteArray &remote, const WriteOptions &options, sftp_file *file) const
 {
-    if (options.disposition == WriteOptions::Resume && options.resumeOffset < 0)
+    if (options.disposition == WriteOptions::Disposition::Resume && options.resumeOffset < 0)
         return invalidRange();
     int flags = O_WRONLY;
-    if (options.disposition == WriteOptions::CreateNew)
+    if (options.disposition == WriteOptions::Disposition::CreateNew)
         flags |= O_CREAT | O_EXCL;
-    else if (options.disposition == WriteOptions::Truncate)
+    else if (options.disposition == WriteOptions::Disposition::Truncate)
         flags |= O_CREAT | O_TRUNC;
     // XC-23: the requested mode, else the server's default (S-20 for backups
     // comes through TransferPolicy::createMode). Resume: no O_TRUNC, no O_CREAT.
@@ -405,11 +405,11 @@ Result SftpBackend::Io::openForUpload(const QByteArray &remote, const WriteOptio
             return failure;
         if (existing.isDir())
             return Result(Error::IsADirectory, QStringLiteral("%1 is a folder").arg(display(remote)));
-        if (options.disposition == WriteOptions::CreateNew)
+        if (options.disposition == WriteOptions::Disposition::CreateNew)
             return Result(Error::AlreadyExists, QStringLiteral("%1 exists").arg(display(remote)));
         return failure;
     }
-    if (options.disposition != WriteOptions::Resume)
+    if (options.disposition != WriteOptions::Disposition::Resume)
         return Result::success();
     // XC-13: the remote size must be the offset the caller continues at.
     Result r;
@@ -441,7 +441,7 @@ Result SftpBackend::upload(QIODevice *source, const QString &path, const UploadO
     if (!r.ok())
         return r;
     sftp_file_set_nonblocking(file);
-    const qint64 base = options.write.disposition == WriteOptions::Resume ? options.write.resumeOffset : 0;
+    const qint64 base = options.write.disposition == WriteOptions::Disposition::Resume ? options.write.resumeOffset : 0;
     r = io.writeChunks(file, source, remote, progress, base);
     if (r.ok() && m_hasFsync && sftp_fsync(file) != 0)   // C-12: flush to stable storage
         r = q.writeFailure(remote, 1);
@@ -541,7 +541,7 @@ Result SftpBackend::openWrite(const QString &path, const WriteOptions &options, 
     if (!r.ok())
         return r;
     sftp_file_set_nonblocking(file);
-    const qint64 position = options.disposition == WriteOptions::Resume ? options.resumeOffset : 0;
+    const qint64 position = options.disposition == WriteOptions::Disposition::Resume ? options.resumeOffset : 0;
     auto writer = std::make_unique<Writer>(this, file, remote, position, options.modified);
     m_writers.insert(writer.get());
     *out = writer.release();   // XC-13: the caller owns the handle
