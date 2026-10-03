@@ -20,11 +20,11 @@ extern "C" {
 struct NetVfsFtpHooks;
 struct NetVfsFtpProbeState;
 
-size_t netvfs_ftp_on_write(struct NetVfsFtpHooks *hooks, const char *data, size_t length);
-size_t netvfs_ftp_on_read(struct NetVfsFtpHooks *hooks, char *buffer, size_t capacity);
-size_t netvfs_ftp_on_header(struct NetVfsFtpHooks *hooks, const char *data, size_t length);
-void netvfs_ftp_on_debug(struct NetVfsFtpHooks *hooks, curl_infotype type, const char *data, size_t length);
-int netvfs_ftp_on_progress(struct NetVfsFtpHooks *hooks, curl_off_t download_total, curl_off_t downloaded,
+size_t netvfs_ftp_on_write(const struct NetVfsFtpHooks *hooks, const char *data, size_t length);
+size_t netvfs_ftp_on_read(const struct NetVfsFtpHooks *hooks, char *buffer, size_t capacity);
+size_t netvfs_ftp_on_header(const struct NetVfsFtpHooks *hooks, const char *data, size_t length);
+void netvfs_ftp_on_debug(const struct NetVfsFtpHooks *hooks, curl_infotype type, const char *data, size_t length);
+int netvfs_ftp_on_progress(const struct NetVfsFtpHooks *hooks, curl_off_t download_total, curl_off_t downloaded,
                            curl_off_t upload_total, curl_off_t uploaded);
 
 size_t netvfs_ftp_probe_header(struct NetVfsFtpProbeState *state, const char *data, size_t length);

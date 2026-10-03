@@ -96,7 +96,7 @@ private:
 
     Result checkUsable() const;
     Result urlFor(const QString &path, bool collection, QByteArray *url) const;
-    Result send(Request &request, Response *response);
+    Result send(const Request &request, Response *response);
     // Calls callback(resource, resolver) for every resource of the answer; false from it stops.
     template<typename Callback>
     Result propfind(const QByteArray &url, int depth, Callback &&callback, Response *response);

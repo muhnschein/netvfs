@@ -153,8 +153,7 @@ bool isEncodable(const QString &name)
             i += 2;
             continue;
         }
-        const char16_t u = name.at(i).unicode();
-        if (QChar::isSurrogate(u) && !isEscape(u))
+        if (const char16_t u = name.at(i).unicode(); QChar::isSurrogate(u) && !isEscape(u))
             return false;
         ++i;
     }

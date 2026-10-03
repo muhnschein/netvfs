@@ -57,7 +57,7 @@ Result FtpReadHandle::read(qint64 offset, qint64 maxBytes, QByteArray *out)
     }
     if (const Result r = fill(maxBytes); !r.ok())
         return r;
-    const int take = int(std::min<qint64>(maxBytes, m_buffer.size()));
+    const auto take = int(std::min<qint64>(maxBytes, m_buffer.size()));
     *out = m_buffer.left(take);
     m_buffer.remove(0, take);
     m_bufferStart += take;

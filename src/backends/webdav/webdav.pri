@@ -11,6 +11,7 @@ include(../curlcommon/curlcommon.pri)
 HEADERS += \
     $$PWD/davcallbacks.h \
     $$PWD/davclient.h \
+    $$PWD/davtransfer.h \
     $$PWD/davconfig.h \
     $$PWD/davhandles.h \
     $$PWD/davio.h \

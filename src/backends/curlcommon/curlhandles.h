@@ -4,66 +4,92 @@
 
 #include <curl/curl.h>
 
-#include <memory>
+#include <utility>
 
 // Owners for libcurl's handles. libcurl declares all of them as void, so the
-// deleter is what gives each kind its own type.
+// owner type is what gives each kind its own type.
 namespace NetVfs::Curl {
 
-using EasyHandle = std::unique_ptr<CURL, decltype(&curl_easy_cleanup)>;
-using MultiHandle = std::unique_ptr<CURLM, decltype(&curl_multi_cleanup)>;
-using ShareHandle = std::unique_ptr<CURLSH, decltype(&curl_share_cleanup)>;
+// Owns what `Init` returned and releases it with `Cleanup`. Movable, not
+// copyable; empty by default.
+template<auto Init, auto Cleanup>
+class Handle
+{
+public:
+    using Pointer = decltype(Init());
 
+    Handle() = default;
+    explicit Handle(Pointer pointer) : m_pointer(pointer) {}
+    ~Handle() { release(); }
+    Handle(const Handle &) = delete;
+    Handle &operator=(const Handle &) = delete;
+    Handle(Handle &&other) noexcept : m_pointer(std::exchange(other.m_pointer, nullptr)) {}
+    Handle &operator=(Handle &&other) noexcept
+    {
+        if (this != &other) {
+            release();
+            m_pointer = std::exchange(other.m_pointer, nullptr);
+        }
+        return *this;
+    }
+
+    static Handle create() { return Handle(Init()); }
+
+    explicit operator bool() const { return m_pointer != nullptr; }
+    Pointer get() const { return m_pointer; }
+    void reset() { release(); }
+
+private:
+    void release()
+    {
+        if (m_pointer)
+            Cleanup(m_pointer);
+        m_pointer = nullptr;
+    }
+
+    Pointer m_pointer = nullptr;
+};
+
+using EasyHandle = Handle<&curl_easy_init, &curl_easy_cleanup>;
+using MultiHandle = Handle<&curl_multi_init, &curl_multi_cleanup>;
+using ShareHandle = Handle<&curl_share_init, &curl_share_cleanup>;
+
+// XSEC-2: every easy handle starts with TLS 1.2 as its floor, whatever
+// libcurl's default is. Backends that pin the version more tightly set their
+// own after this.
 inline EasyHandle newEasyHandle()
 {
-    return EasyHandle(curl_easy_init(), &curl_easy_cleanup);
+    EasyHandle easy(curl_easy_init());
+    if (easy)
+        curl_easy_setopt(easy.get(), CURLOPT_SSLVERSION,
+                         long(CURL_SSLVERSION_TLSv1_2 | CURL_SSLVERSION_MAX_DEFAULT));
+    return easy;
 }
 
 inline MultiHandle newMultiHandle()
 {
-    return MultiHandle(curl_multi_init(), &curl_multi_cleanup);
+    return MultiHandle::create();
 }
 
 inline ShareHandle newShareHandle()
 {
-    return ShareHandle(curl_share_init(), &curl_share_cleanup);
+    return ShareHandle::create();
 }
 
-// Sets options of an easy handle one after the other and keeps the first
-// failure: later options are not applied once one was refused.
-class OptionChain
-{
-public:
-    explicit OptionChain(const EasyHandle &easy) : m_easy(easy) {}
-
-    template<typename Value>
-    OptionChain &set(CURLoption option, Value value)
-    {
-        if (m_code == CURLE_OK)
-            m_code = curl_easy_setopt(m_easy.get(), option, value);
-        return *this;
-    }
-    CURLcode code() const { return m_code; }
-
-private:
-    const EasyHandle &m_easy;
-    CURLcode m_code = CURLE_OK;
-};
-
-// An empty owner, for members that are filled later.
+// Empty owners, for members that are filled later.
 inline EasyHandle noEasyHandle()
 {
-    return EasyHandle(nullptr, &curl_easy_cleanup);
+    return EasyHandle();
 }
 
 inline MultiHandle noMultiHandle()
 {
-    return MultiHandle(nullptr, &curl_multi_cleanup);
+    return MultiHandle();
 }
 
 inline ShareHandle noShareHandle()
 {
-    return ShareHandle(nullptr, &curl_share_cleanup);
+    return ShareHandle();
 }
 
 } // namespace NetVfs::Curl

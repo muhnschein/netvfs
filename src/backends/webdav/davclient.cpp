@@ -2,6 +2,7 @@
 #include "davclient.h"
 #include "curlglobal.h"
 #include "davcallbacks.h"
+#include "davtransfer.h"
 #include "davlog.h"
 #include "secure.h"
 #include "tlsprobe.h"
@@ -10,35 +11,6 @@
 #include <array>
 #include <cstring>
 
-// The state of one transfer while its easy handle is attached to the multi
-// handle (davcallbacks.h): the callbacks of libcurl reach it as their user
-// data.
-struct NetVfsDavTransfer {
-    NetVfs::WebDav::Client *client = nullptr;
-    CURL *easy = nullptr;
-    NetVfs::Curl::EasyHandle owned = NetVfs::Curl::noEasyHandle();   // set when the transfer owns its handle
-    const NetVfs::WebDav::Request *request = nullptr;
-    NetVfs::WebDav::Response *response = nullptr;
-    curl_slist *headers = nullptr;
-    std::array<char, CURL_ERROR_SIZE> error {};
-    bool attached = false;
-    bool done = false;
-    CURLcode code = CURLE_OK;
-    bool sinkStopped = false;
-    bool sourceFailed = false;
-    bool paused = false;
-
-    NetVfsDavTransfer() = default;
-    ~NetVfsDavTransfer() { curl_slist_free_all(headers); }
-    NetVfsDavTransfer(const NetVfsDavTransfer &) = delete;
-    NetVfsDavTransfer &operator=(const NetVfsDavTransfer &) = delete;
-
-    size_t receiveHeader(const char *data, size_t length) const;
-    size_t receiveBody(const char *data, size_t length);
-    size_t supplyBody(char *buffer, size_t capacity);
-    int rewindBody() const;
-    bool cancelRequested() const;
-};
 
 namespace NetVfs::WebDav {
 
@@ -47,8 +19,6 @@ namespace {
 constexpr int PollMs = 100;
 constexpr long MsPerSecond = 1000;
 constexpr const char *UserAgent = "netvfs-webdav/0.2";
-// XSEC-2: TLS 1.2 is the floor, whatever the libcurl default is.
-constexpr long MinTlsVersion = CURL_SSLVERSION_TLSv1_2;
 constexpr char CertField[] = "Cert:";
 constexpr size_t CertFieldLength = sizeof(CertField) - 1;
 
@@ -232,7 +202,7 @@ void Client::close()
     m_authMask = 0;
 }
 
-Curl::EasyHandle Client::newEasy()
+Curl::EasyHandle Client::newEasy() const
 {
     Curl::EasyHandle easy = Curl::newEasyHandle();
     if (!easy)
@@ -243,7 +213,6 @@ Curl::EasyHandle Client::newEasy()
     // XSEC-4: explicit protocol allow-lists, no .netrc, no proxy from the
     // environment.
     setProtocols(easy, m_origin.scheme == "http");
-    curl_easy_setopt(raw, CURLOPT_SSLVERSION, MinTlsVersion);
     curl_easy_setopt(raw, CURLOPT_NETRC, long(CURL_NETRC_IGNORED));
     curl_easy_setopt(raw, CURLOPT_PROXY, "");
     // W-6: redirects are followed by perform() after an origin check;
@@ -334,27 +303,27 @@ void Client::applyAuth(const Curl::EasyHandle &easy) const
 
 void Client::applyRequest(Transfer *transfer, const Request &request, const QByteArray &url) const
 {
-    CURL *easy = transfer->easy;
-    curl_easy_setopt(easy, CURLOPT_URL, url.constData());
-    curl_easy_setopt(easy, CURLOPT_HTTPGET, 1L);            // resets upload/nobody state
-    curl_easy_setopt(easy, CURLOPT_CUSTOMREQUEST, static_cast<const char *>(nullptr));
-    curl_easy_setopt(easy, CURLOPT_INFILESIZE_LARGE, curl_off_t(-1));
+    const Curl::EasyHandle &easy = *transfer->easy;
+    curl_easy_setopt(easy.get(), CURLOPT_URL, url.constData());
+    curl_easy_setopt(easy.get(), CURLOPT_HTTPGET, 1L);            // resets upload/nobody state
+    curl_easy_setopt(easy.get(), CURLOPT_CUSTOMREQUEST, static_cast<const char *>(nullptr));
+    curl_easy_setopt(easy.get(), CURLOPT_INFILESIZE_LARGE, curl_off_t(-1));
     if (request.body) {
-        curl_easy_setopt(easy, CURLOPT_UPLOAD, 1L);
-        curl_easy_setopt(easy, CURLOPT_INFILESIZE_LARGE, curl_off_t(request.body->size()));
+        curl_easy_setopt(easy.get(), CURLOPT_UPLOAD, 1L);
+        curl_easy_setopt(easy.get(), CURLOPT_INFILESIZE_LARGE, curl_off_t(request.body->size()));
     }
     if (request.method != Method::Get && request.method != Method::Put) {
         const QByteArray method = methodName(request.method);
-        curl_easy_setopt(easy, CURLOPT_CUSTOMREQUEST, method.constData());
+        curl_easy_setopt(easy.get(), CURLOPT_CUSTOMREQUEST, method.constData());
     }
     // W-4: verification and pin; host name checks follow peer checks.
-    curl_easy_setopt(easy, CURLOPT_SSL_VERIFYPEER, m_tls.verifyPeer ? 1L : 0L);
-    curl_easy_setopt(easy, CURLOPT_SSL_VERIFYHOST, m_tls.verifyPeer ? 2L : 0L);
-    curl_easy_setopt(easy, CURLOPT_PINNEDPUBLICKEY,
+    curl_easy_setopt(easy.get(), CURLOPT_SSL_VERIFYPEER, m_tls.verifyPeer ? 1L : 0L);
+    curl_easy_setopt(easy.get(), CURLOPT_SSL_VERIFYHOST, m_tls.verifyPeer ? 2L : 0L);
+    curl_easy_setopt(easy.get(), CURLOPT_PINNEDPUBLICKEY,
                      m_tls.pinnedKey.isEmpty() ? static_cast<const char *>(nullptr) : m_tls.pinnedKey.constData());
     if (!m_tls.caFile.isEmpty())
-        curl_easy_setopt(easy, CURLOPT_CAINFO, m_tls.caFile.constData());
-    curl_easy_setopt(easy, CURLOPT_CERTINFO, request.certificateInfo ? 1L : 0L);
+        curl_easy_setopt(easy.get(), CURLOPT_CAINFO, m_tls.caFile.constData());
+    curl_easy_setopt(easy.get(), CURLOPT_CERTINFO, request.certificateInfo ? 1L : 0L);
 
     curl_slist_free_all(transfer->headers);
     transfer->headers = nullptr;
@@ -363,16 +332,16 @@ void Client::applyRequest(Transfer *transfer, const Request &request, const QByt
     transfer->headers = curl_slist_append(transfer->headers, upload ? "Expect: 100-continue" : "Expect:");
     for (const QByteArray &header : request.headers)
         transfer->headers = curl_slist_append(transfer->headers, header.constData());
-    curl_easy_setopt(easy, CURLOPT_HTTPHEADER, transfer->headers);
+    curl_easy_setopt(easy.get(), CURLOPT_HTTPHEADER, transfer->headers);
 
     transfer->error.fill(0);
-    curl_easy_setopt(easy, CURLOPT_ERRORBUFFER, transfer->error.data());
-    curl_easy_setopt(easy, CURLOPT_PRIVATE, transfer);
-    curl_easy_setopt(easy, CURLOPT_HEADERDATA, transfer);
-    curl_easy_setopt(easy, CURLOPT_WRITEDATA, transfer);
-    curl_easy_setopt(easy, CURLOPT_READDATA, transfer);
-    curl_easy_setopt(easy, CURLOPT_SEEKDATA, transfer);
-    curl_easy_setopt(easy, CURLOPT_XFERINFODATA, transfer);
+    curl_easy_setopt(easy.get(), CURLOPT_ERRORBUFFER, transfer->error.data());
+    curl_easy_setopt(easy.get(), CURLOPT_PRIVATE, transfer);
+    curl_easy_setopt(easy.get(), CURLOPT_HEADERDATA, transfer);
+    curl_easy_setopt(easy.get(), CURLOPT_WRITEDATA, transfer);
+    curl_easy_setopt(easy.get(), CURLOPT_READDATA, transfer);
+    curl_easy_setopt(easy.get(), CURLOPT_SEEKDATA, transfer);
+    curl_easy_setopt(easy.get(), CURLOPT_XFERINFODATA, transfer);
     transfer->request = &request;
     transfer->done = false;
     transfer->code = CURLE_OK;
@@ -381,10 +350,10 @@ void Client::applyRequest(Transfer *transfer, const Request &request, const QByt
     transfer->paused = false;
 }
 
-void Client::drainMessages()
+void Client::drainMessages() const
 {
     int left = 0;
-    while (CURLMsg *message = curl_multi_info_read(m_multi.get(), &left)) {
+    while (const CURLMsg *message = curl_multi_info_read(m_multi.get(), &left)) {
         if (message->msg != CURLMSG_DONE)
             continue;
         Transfer *transfer = nullptr;
@@ -413,10 +382,10 @@ Result Client::run(const Transfer *transfer, Until until)
     }
 }
 
-void Client::detach(Transfer *transfer)
+void Client::detach(Transfer *transfer) const
 {
     if (transfer->attached) {
-        curl_multi_remove_handle(m_multi.get(), transfer->easy);
+        curl_multi_remove_handle(m_multi.get(), transfer->easy->get());
         transfer->attached = false;
     }
 }
@@ -424,8 +393,8 @@ void Client::detach(Transfer *transfer)
 Result Client::outcome(const Transfer *transfer) const
 {
     if (transfer->sinkStopped && transfer->request && transfer->request->sink) {
-        const Result stop = transfer->request->sink->stopResult();
-        if (!stop.ok() || transfer->code == CURLE_WRITE_ERROR)
+        if (const Result stop = transfer->request->sink->stopResult();
+                !stop.ok() || transfer->code == CURLE_WRITE_ERROR)
             return stop;
     }
     if (transfer->sourceFailed && transfer->request && transfer->request->body) {
@@ -445,7 +414,7 @@ Result Client::once(const Request &request, const QByteArray &url, Response *res
         return Result(Error::Canceled, QStringLiteral("Canceled"));
     Transfer transfer;
     transfer.client = this;
-    transfer.easy = m_easy.get();
+    transfer.easy = &m_easy;
     transfer.response = response;
     applyRequest(&transfer, request, url);
     curl_multi_add_handle(m_multi.get(), m_easy.get());
@@ -503,12 +472,11 @@ Result Client::probeIdentity(CurlTls::ChainCheck check, ServerIdentity *identity
     CurlTls::IdentityProbe probe(QString::fromLatin1(m_origin.host), trustStore(), check);
     Transfer transfer;
     transfer.client = this;
-    transfer.easy = easy.get();
+    transfer.easy = &easy;
     const QByteArray url = m_origin.toUrl() + '/';
     curl_easy_setopt(easy.get(), CURLOPT_URL, url.constData());
     curl_easy_setopt(easy.get(), CURLOPT_NOSIGNAL, 1L);
     setProtocols(easy, false);
-    curl_easy_setopt(easy.get(), CURLOPT_SSLVERSION, MinTlsVersion);
     curl_easy_setopt(easy.get(), CURLOPT_PROXY, "");
     curl_easy_setopt(easy.get(), CURLOPT_CONNECT_ONLY, 1L);
     curl_easy_setopt(easy.get(), CURLOPT_CONNECTTIMEOUT_MS, long(m_connectTimeoutMs));
@@ -596,7 +564,6 @@ Client::Stream::Stream(Client *client, const Request &request)
     : m_client(client)
     , m_source(std::make_unique<Source>(request.body ? request.body->size() : -1))
     , m_request(request)
-    , m_transfer(std::make_unique<Transfer>())
 {
     m_request.body = m_source.get();
     m_request.sink = nullptr;
@@ -618,19 +585,18 @@ Result Client::openStream(const Request &request, std::unique_ptr<Stream> *out)
     Transfer *transfer = stream->m_transfer.get();
     transfer->client = this;
     transfer->owned = newEasy();
-    transfer->easy = transfer->owned.get();
-    if (!transfer->easy)
+    transfer->easy = &transfer->owned;
+    if (!transfer->owned)
         return Result(Error::Internal, QStringLiteral("libcurl could not be initialised"));
     transfer->response = &stream->m_response;
     applyRequest(transfer, stream->m_request, request.url);
     stream->m_response.url = request.url;
-    curl_multi_add_handle(m_multi.get(), transfer->easy);
+    curl_multi_add_handle(m_multi.get(), transfer->owned.get());
     transfer->attached = true;
     m_streams.insert(stream.get());
     // Sends the request head; returns once libcurl asks for body bytes or
     // the server already answered (412 for CreateNew, 401, ...).
-    const Result r = run(transfer, [](const Transfer *t) { return t->paused; });
-    if (!r.ok())
+    if (const Result r = run(transfer, [](const Transfer *t) { return t->paused; }); !r.ok())
         return r;     // `stream` aborts itself
     *out = std::move(stream);
     return Result::success();
@@ -656,7 +622,7 @@ Result Client::Stream::write(const char *data, qint64 size)
         return Result::success();
     m_source->offer(data, size);
     m_transfer->paused = false;
-    curl_easy_pause(m_transfer->easy, CURLPAUSE_CONT);
+    curl_easy_pause(m_transfer->easy->get(), CURLPAUSE_CONT);
     const Result r = m_client->run(m_transfer.get(), [](const Transfer *t) { return t->paused; });
     const bool consumed = m_source->drained();
     m_source->forget();
@@ -679,13 +645,13 @@ Result Client::Stream::finish(Response *response)
     Result r;
     if (!m_transfer->done) {
         m_transfer->paused = false;
-        curl_easy_pause(m_transfer->easy, CURLPAUSE_CONT);
+        curl_easy_pause(m_transfer->easy->get(), CURLPAUSE_CONT);
         r = m_client->run(m_transfer.get(), RunToEnd());
     }
     if (r.ok())
         r = m_client->outcome(m_transfer.get());
     long status = 0;
-    curl_easy_getinfo(m_transfer->easy, CURLINFO_RESPONSE_CODE, &status);
+    curl_easy_getinfo(m_transfer->easy->get(), CURLINFO_RESPONSE_CODE, &status);
     if (status > 0)
         m_response.status = int(status);
     *response = m_response;
@@ -698,7 +664,7 @@ void Client::Stream::abort()
     if (m_dead)
         return;
     m_dead = true;
-    if (m_transfer->easy) {
+    if (m_transfer->owned) {
         m_client->detach(m_transfer.get());
         m_transfer->owned.reset();
         m_transfer->easy = nullptr;
@@ -787,7 +753,7 @@ bool NetVfsDavTransfer::cancelRequested() const
 
 extern "C" {
 
-size_t netvfs_dav_on_header(NetVfsDavTransfer *transfer, const char *line, size_t length)
+size_t netvfs_dav_on_header(const NetVfsDavTransfer *transfer, const char *line, size_t length)
 {
     return transfer->receiveHeader(line, length);
 }
@@ -802,7 +768,7 @@ size_t netvfs_dav_on_read(NetVfsDavTransfer *transfer, char *buffer, size_t capa
     return transfer->supplyBody(buffer, capacity);
 }
 
-int netvfs_dav_on_seek(NetVfsDavTransfer *transfer, curl_off_t offset, int origin)
+int netvfs_dav_on_seek(const NetVfsDavTransfer *transfer, curl_off_t offset, int origin)
 {
     if (offset != 0 || origin != SEEK_SET)
         return CURL_SEEKFUNC_CANTSEEK;

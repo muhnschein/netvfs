@@ -188,7 +188,7 @@ Result WebDavBackend::urlFor(const QString &path, bool collection, QByteArray *u
     return Result::success();
 }
 
-Result WebDavBackend::send(Request &request, Response *response)
+Result WebDavBackend::send(const Request &request, Response *response)
 {
     qCDebug(lcNetVfsWebdav) << methodName(request.method).constData() << request.url;
     const Result r = m_client.perform(request, response);
@@ -545,8 +545,7 @@ Result WebDavBackend::makeDir(const QString &path, bool exclusive)
     if (r.error() != Error::AlreadyExists || exclusive)
         return r;
     // XC-8: an existing folder is fine without `exclusive`.
-    Entry entry;
-    if (stat(path, &entry).ok() && entry.isDir())
+    if (Entry entry; stat(path, &entry).ok() && entry.isDir())
         return Result::success();
     return r;
 }

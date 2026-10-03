@@ -108,8 +108,8 @@ public:
     }
     // Wakes a paused transfer (a pump() call does this as well).
     void resume();
-    bool started() const { return m_started; }
-    bool finished() const { return !m_started; }
+    bool started() const { return m_flags.started; }
+    bool finished() const { return !m_flags.started; }
     void stop();
 
     // Replies of the last request, oldest first.
@@ -124,10 +124,10 @@ public:
     QByteArray entryPath() const;
     // True when the last request had to open a new control connection
     // although the previous one was expected to be open (XC-20).
-    bool unexpectedReconnect() const { return m_unexpectedReconnect; }
+    bool unexpectedReconnect() const { return m_flags.unexpectedReconnect; }
     // True while the next request may find the control connection closed
     // (before the first request, after an error or an early end).
-    bool mayReconnect() const { return m_expectReconnect; }
+    bool mayReconnect() const { return m_flags.expectReconnect; }
 
     void close();
 
@@ -141,7 +141,7 @@ private:
     // between two rounds.
     bool beginPump(Result *result);
     bool pumpRound(Result *result, const QString &context);
-    void waitForData();
+    void waitForData() const;
 
     Result applyBase(const QByteArray &url);
     Result applyRequest(const Request &request);
@@ -174,11 +174,14 @@ private:
     QVector<SentCommand> m_sent;
     QList<QByteArray> m_quoted;         // the request's quoted commands, without '*'
     int m_replyBase = 0;                // number of replies before m_replies.first()
-    bool m_started = false;
-    bool m_paused = false;
-    bool m_expectReconnect = true;      // the first request connects
-    bool m_closesConnection = false;    // the running request ends the connection
-    bool m_unexpectedReconnect = false;
+    struct Flags {
+        bool started = false;
+        bool paused = false;
+        bool expectReconnect = true;      // the first request connects
+        bool closesConnection = false;    // the running request ends the connection
+        bool unexpectedReconnect = false;
+    };
+    Flags m_flags;
 };
 
 } // namespace NetVfs::Ftp

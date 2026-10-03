@@ -45,45 +45,53 @@ long seconds(int milliseconds)
     return std::max(1L, long((milliseconds + MillisecondsPerSecond - 1) / MillisecondsPerSecond));
 }
 
+// The first failure of a series of option settings.
+CURLcode firstFailure(CURLcode earlier, CURLcode next)
+{
+    return earlier != CURLE_OK ? earlier : next;
+}
+
 // Options shared by the probe and the control connection (XSEC-4, XSEC-2,
 // C-14, F-1).
 CURLcode applyCommon(const Curl::EasyHandle &easy, const QByteArray &url, const Settings &settings,
                      const ConnectionParams &params, long useSsl)
 {
     const long timeout = seconds(params.requestTimeoutMs);
-    Curl::OptionChain chain(easy);
-    chain.set(CURLOPT_URL, url.constData())
-        .set(CURLOPT_PROTOCOLS_STR, Protocols)
-        .set(CURLOPT_NETRC, long(CURL_NETRC_IGNORED))
-        // An empty proxy disables the proxy environment variables (XSEC-4).
-        .set(CURLOPT_PROXY, "")
-        .set(CURLOPT_NOSIGNAL, 1L)
-        .set(CURLOPT_TCP_KEEPALIVE, 1L)
-        .set(CURLOPT_CONNECTTIMEOUT_MS, long(params.connectTimeoutMs))
-        .set(CURLOPT_SERVER_RESPONSE_TIMEOUT, timeout)
-        .set(CURLOPT_LOW_SPEED_LIMIT, LowSpeedLimit)
-        .set(CURLOPT_LOW_SPEED_TIME, timeout)
-        .set(CURLOPT_USE_SSL, settings.tlsMode == TlsMode::None ? long(CURLUSESSL_NONE) : useSsl)
-        .set(CURLOPT_FTPSSLAUTH, long(CURLFTPAUTH_TLS))
-        // TLS 1.2 exactly. With TLS 1.3 the server sends session tickets
-        // after the handshake of every data connection; an upload never
-        // reads them, so closing the data connection resets it (RST over
-        // unread data) and the server may lose the end of the file ("426
-        // Failure reading network stream"); and servers that require session
-        // reuse for data connections (vsftpd's default require_ssl_reuse)
-        // issue single-use TLS 1.3 tickets that an upload cannot renew (522
-        // on the next transfer). A fixed policy, never a fallback (XSEC-2).
-        .set(CURLOPT_SSLVERSION, long(CURL_SSLVERSION_TLSv1_2 | CURL_SSLVERSION_MAX_TLSv1_2))
-        // Passive only (F-1): EPSV, then PASV; the address in a PASV reply is
-        // ignored in favour of the control connection's (no bounce).
-        .set(CURLOPT_FTP_USE_EPSV, 1L)
-        .set(CURLOPT_FTP_USE_EPRT, 0L)
-        .set(CURLOPT_FTPPORT, static_cast<const char *>(nullptr))
-        .set(CURLOPT_FTP_SKIP_PASV_IP, 1L)
-        .set(CURLOPT_FTP_FILEMETHOD, long(CURLFTPMETHOD_NOCWD))
-        .set(CURLOPT_FTP_CREATE_MISSING_DIRS, long(CURLFTP_CREATE_DIR_NONE))
-        .set(CURLOPT_TRANSFERTEXT, 0L);
-    return chain.code();
+    CURLcode code = curl_easy_setopt(easy.get(), CURLOPT_URL, url.constData());
+    code = firstFailure(code, curl_easy_setopt(easy.get(), CURLOPT_PROTOCOLS_STR, Protocols));
+    code = firstFailure(code, curl_easy_setopt(easy.get(), CURLOPT_NETRC, long(CURL_NETRC_IGNORED)));
+    // An empty proxy disables the proxy environment variables (XSEC-4).
+    code = firstFailure(code, curl_easy_setopt(easy.get(), CURLOPT_PROXY, ""));
+    code = firstFailure(code, curl_easy_setopt(easy.get(), CURLOPT_NOSIGNAL, 1L));
+    code = firstFailure(code, curl_easy_setopt(easy.get(), CURLOPT_TCP_KEEPALIVE, 1L));
+    code = firstFailure(code, curl_easy_setopt(easy.get(), CURLOPT_CONNECTTIMEOUT_MS, long(params.connectTimeoutMs)));
+    code = firstFailure(code, curl_easy_setopt(easy.get(), CURLOPT_SERVER_RESPONSE_TIMEOUT, timeout));
+    code = firstFailure(code, curl_easy_setopt(easy.get(), CURLOPT_LOW_SPEED_LIMIT, LowSpeedLimit));
+    code = firstFailure(code, curl_easy_setopt(easy.get(), CURLOPT_LOW_SPEED_TIME, timeout));
+    code = firstFailure(code, curl_easy_setopt(
+            easy.get(), CURLOPT_USE_SSL, settings.tlsMode == TlsMode::None ? long(CURLUSESSL_NONE) : useSsl));
+    code = firstFailure(code, curl_easy_setopt(easy.get(), CURLOPT_FTPSSLAUTH, long(CURLFTPAUTH_TLS)));
+    // TLS 1.2 exactly. With TLS 1.3 the server sends session tickets
+    // after the handshake of every data connection; an upload never
+    // reads them, so closing the data connection resets it (RST over
+    // unread data) and the server may lose the end of the file ("426
+    // Failure reading network stream"); and servers that require session
+    // reuse for data connections (vsftpd's default require_ssl_reuse)
+    // issue single-use TLS 1.3 tickets that an upload cannot renew (522
+    // on the next transfer). A fixed policy, never a fallback (XSEC-2).
+    code = firstFailure(code, curl_easy_setopt(
+            easy.get(), CURLOPT_SSLVERSION, long(CURL_SSLVERSION_TLSv1_2 | CURL_SSLVERSION_MAX_TLSv1_2)));
+    // Passive only (F-1): EPSV, then PASV; the address in a PASV reply is
+    // ignored in favour of the control connection's (no bounce).
+    code = firstFailure(code, curl_easy_setopt(easy.get(), CURLOPT_FTP_USE_EPSV, 1L));
+    code = firstFailure(code, curl_easy_setopt(easy.get(), CURLOPT_FTP_USE_EPRT, 0L));
+    code = firstFailure(code, curl_easy_setopt(easy.get(), CURLOPT_FTPPORT, static_cast<const char *>(nullptr)));
+    code = firstFailure(code, curl_easy_setopt(easy.get(), CURLOPT_FTP_SKIP_PASV_IP, 1L));
+    code = firstFailure(code, curl_easy_setopt(easy.get(), CURLOPT_FTP_FILEMETHOD, long(CURLFTPMETHOD_NOCWD)));
+    code = firstFailure(code, curl_easy_setopt(
+            easy.get(), CURLOPT_FTP_CREATE_MISSING_DIRS, long(CURLFTP_CREATE_DIR_NONE)));
+    code = firstFailure(code, curl_easy_setopt(easy.get(), CURLOPT_TRANSFERTEXT, 0L));
+    return code;
 }
 
 // Runs `easy` in `multi` until it is done or canceled. Returns false on
@@ -99,7 +107,7 @@ bool drive(const Curl::MultiHandle &multi, const Curl::EasyHandle &easy, const s
             break;
         }
         int left = 0;
-        while (CURLMsg *message = curl_multi_info_read(multi.get(), &left)) {
+        while (const CURLMsg *message = curl_multi_info_read(multi.get(), &left)) {
             if (message->msg == CURLMSG_DONE && message->easy_handle == easy.get()) {
                 *result = message->data.result;
                 done = true;
@@ -175,14 +183,14 @@ Result Connection::probe(const Settings &settings, const ConnectionParams &param
     CurlTls::IdentityProbe identity(settings.host, CurlTls::trustStore(easy, settings.testCaFile));
     CURLcode code = applyCommon(easy, baseUrl(settings), settings, params, long(CURLUSESSL_ALL));
     if (code == CURLE_OK) {
-        code = Curl::OptionChain(easy)
-                   .set(CURLOPT_NOBODY, 1L)
-                   .set(CURLOPT_HEADERFUNCTION, netvfs_ftp_probe_header_callback)
-                   .set(CURLOPT_HEADERDATA, &state)
-                   .set(CURLOPT_NOPROGRESS, 0L)
-                   .set(CURLOPT_XFERINFOFUNCTION, netvfs_ftp_probe_progress_callback)
-                   .set(CURLOPT_XFERINFODATA, &state)
-                   .code();
+        code = curl_easy_setopt(easy.get(), CURLOPT_NOBODY, 1L);
+        code = firstFailure(code, curl_easy_setopt(
+                easy.get(), CURLOPT_HEADERFUNCTION, netvfs_ftp_probe_header_callback));
+        code = firstFailure(code, curl_easy_setopt(easy.get(), CURLOPT_HEADERDATA, &state));
+        code = firstFailure(code, curl_easy_setopt(easy.get(), CURLOPT_NOPROGRESS, 0L));
+        code = firstFailure(code, curl_easy_setopt(
+                easy.get(), CURLOPT_XFERINFOFUNCTION, netvfs_ftp_probe_progress_callback));
+        code = firstFailure(code, curl_easy_setopt(easy.get(), CURLOPT_XFERINFODATA, &state));
     }
     // The probe must never get past the handshake: refuse to run without the
     // OpenSSL hook rather than risk a USER command (C-7).
@@ -225,7 +233,7 @@ Result Connection::configure(const Settings &settings, const ConnectionParams &p
     m_userName = userName.toUtf8();
     m_secret = QByteArray(secret.constData(), secret.size());
     m_seen = seen;
-    m_expectReconnect = true;
+    m_flags.expectReconnect = true;
     return applyBase(baseUrl(settings));
 }
 
@@ -237,24 +245,23 @@ Result Connection::applyBase(const QByteArray &url)
     const long useSsl = m_settings.tlsMode == TlsMode::Explicit ? explicitUseSsl() : long(CURLUSESSL_ALL);
     CURLcode code = applyCommon(m_easy, url, m_settings, m_params, useSsl);
     if (code == CURLE_OK) {
-        code = Curl::OptionChain(m_easy)
-                   .set(CURLOPT_USERNAME, m_userName.constData())
-                   .set(CURLOPT_PASSWORD, m_secret.constData())
-                   .set(CURLOPT_HEADERFUNCTION, netvfs_ftp_header_callback)
-                   .set(CURLOPT_HEADERDATA, &m_hooks)
-                   .set(CURLOPT_WRITEFUNCTION, netvfs_ftp_write_callback)
-                   .set(CURLOPT_WRITEDATA, &m_hooks)
-                   .set(CURLOPT_READFUNCTION, netvfs_ftp_read_callback)
-                   .set(CURLOPT_READDATA, &m_hooks)
-                   .set(CURLOPT_NOPROGRESS, 0L)
-                   .set(CURLOPT_XFERINFOFUNCTION, netvfs_ftp_progress_callback)
-                   .set(CURLOPT_XFERINFODATA, &m_hooks)
-                   // Only to see the commands libcurl sends (debug); with a
-                   // debug function set, verbose mode prints nothing.
-                   .set(CURLOPT_DEBUGFUNCTION, netvfs_ftp_debug_callback)
-                   .set(CURLOPT_DEBUGDATA, &m_hooks)
-                   .set(CURLOPT_VERBOSE, 1L)
-                   .code();
+        code = curl_easy_setopt(m_easy.get(), CURLOPT_USERNAME, m_userName.constData());
+        code = firstFailure(code, curl_easy_setopt(m_easy.get(), CURLOPT_PASSWORD, m_secret.constData()));
+        code = firstFailure(code, curl_easy_setopt(m_easy.get(), CURLOPT_HEADERFUNCTION, netvfs_ftp_header_callback));
+        code = firstFailure(code, curl_easy_setopt(m_easy.get(), CURLOPT_HEADERDATA, &m_hooks));
+        code = firstFailure(code, curl_easy_setopt(m_easy.get(), CURLOPT_WRITEFUNCTION, netvfs_ftp_write_callback));
+        code = firstFailure(code, curl_easy_setopt(m_easy.get(), CURLOPT_WRITEDATA, &m_hooks));
+        code = firstFailure(code, curl_easy_setopt(m_easy.get(), CURLOPT_READFUNCTION, netvfs_ftp_read_callback));
+        code = firstFailure(code, curl_easy_setopt(m_easy.get(), CURLOPT_READDATA, &m_hooks));
+        code = firstFailure(code, curl_easy_setopt(m_easy.get(), CURLOPT_NOPROGRESS, 0L));
+        code = firstFailure(code, curl_easy_setopt(
+                m_easy.get(), CURLOPT_XFERINFOFUNCTION, netvfs_ftp_progress_callback));
+        code = firstFailure(code, curl_easy_setopt(m_easy.get(), CURLOPT_XFERINFODATA, &m_hooks));
+        // Only to see the commands libcurl sends (debug); with a
+        // debug function set, verbose mode prints nothing.
+        code = firstFailure(code, curl_easy_setopt(m_easy.get(), CURLOPT_DEBUGFUNCTION, netvfs_ftp_debug_callback));
+        code = firstFailure(code, curl_easy_setopt(m_easy.get(), CURLOPT_DEBUGDATA, &m_hooks));
+        code = firstFailure(code, curl_easy_setopt(m_easy.get(), CURLOPT_VERBOSE, 1L));
     }
     if (code == CURLE_OK && m_settings.tlsMode != TlsMode::None)
         code = CurlTls::applyTestCaFile(m_easy, m_settings.testCaFile);
@@ -347,26 +354,26 @@ Result Connection::start(const Request &request, TransferSink *sink)
     if (const Result r = applyRequest(request); !r.ok())
         return r;
     m_sink = sink;
-    m_paused = false;
+    m_flags.paused = false;
     if (curl_multi_add_handle(m_multi.get(), m_easy.get()) != CURLM_OK)
         return Result(Error::Internal, QStringLiteral("libcurl could not start the request"));
-    m_started = true;
+    m_flags.started = true;
     // A partial download makes libcurl close the control connection.
-    m_closesConnection = request.kind == Request::Kind::Download && request.length >= 0;
+    m_flags.closesConnection = request.kind == Request::Kind::Download && request.length >= 0;
     return Result::success();
 }
 
 void Connection::resume()
 {
-    if (m_started && m_paused) {
-        m_paused = false;
+    if (m_flags.started && m_flags.paused) {
+        m_flags.paused = false;
         curl_easy_pause(m_easy.get(), CURLPAUSE_CONT);
     }
 }
 
 bool Connection::beginPump(Result *result)
 {
-    if (!m_started) {
+    if (!m_flags.started) {
         *result = Result(Error::Internal, QStringLiteral("No transfer in progress"));
         return false;
     }
@@ -383,11 +390,11 @@ bool Connection::pumpRound(Result *result, const QString &context)
         return true;
     }
     int left = 0;
-    while (CURLMsg *message = curl_multi_info_read(m_multi.get(), &left)) {
+    while (const CURLMsg *message = curl_multi_info_read(m_multi.get(), &left)) {
         if (message->msg == CURLMSG_DONE && message->easy_handle == m_easy.get()) {
             const CURLcode code = message->data.result;
             curl_multi_remove_handle(m_multi.get(), m_easy.get());
-            m_started = false;
+            m_flags.started = false;
             m_sink = nullptr;
             *result = complete(code, context);
             return true;
@@ -398,14 +405,14 @@ bool Connection::pumpRound(Result *result, const QString &context)
         *result = Result(Error::Canceled);
         return true;
     }
-    if (m_paused) {
+    if (m_flags.paused) {
         *result = Result::success();
         return true;
     }
     return false;
 }
 
-void Connection::waitForData()
+void Connection::waitForData() const
 {
     curl_multi_poll(m_multi.get(), nullptr, 0, PollIntervalMs, nullptr);
 }
@@ -414,11 +421,11 @@ Result Connection::complete(CURLcode code, const QString &context)
 {
     long connects = 0;
     curl_easy_getinfo(m_easy.get(), CURLINFO_NUM_CONNECTS, &connects);
-    m_unexpectedReconnect = connects > 0 && !m_expectReconnect;
+    m_flags.unexpectedReconnect = connects > 0 && !m_flags.expectReconnect;
     m_replies = m_reader.replies();
     m_replyBase = m_reader.count() - m_replies.size();
     // libcurl may have closed the connection after an error.
-    m_expectReconnect = code != CURLE_OK || m_closesConnection;
+    m_flags.expectReconnect = code != CURLE_OK || m_flags.closesConnection;
     if (!m_guardFailure.ok())
         return m_guardFailure;
     if (code == CURLE_OK)
@@ -428,15 +435,15 @@ Result Connection::complete(CURLcode code, const QString &context)
 
 void Connection::stop()
 {
-    if (!m_started)
+    if (!m_flags.started)
         return;
     // Premature end: libcurl closes the control connection (a later request
     // connects and signs in again).
     curl_multi_remove_handle(m_multi.get(), m_easy.get());
-    m_started = false;
-    m_paused = false;
+    m_flags.started = false;
+    m_flags.paused = false;
     m_sink = nullptr;
-    m_expectReconnect = true;
+    m_flags.expectReconnect = true;
 }
 
 QVector<Reply> Connection::lastReplies(int count) const
@@ -533,7 +540,7 @@ size_t NetVfsFtpHooks::write(const char *data, size_t length) const
         return 0;
     const size_t result = connection->m_sink->received(data, length);
     if (result == CURL_WRITEFUNC_PAUSE)
-        connection->m_paused = true;
+        connection->m_flags.paused = true;
     return result;
 }
 
@@ -543,7 +550,7 @@ size_t NetVfsFtpHooks::read(char *buffer, size_t capacity) const
         return CURL_READFUNC_ABORT;
     const size_t result = connection->m_sink->send(buffer, capacity);
     if (result == CURL_READFUNC_PAUSE)
-        connection->m_paused = true;
+        connection->m_flags.paused = true;
     return result;
 }
 
@@ -587,27 +594,27 @@ size_t NetVfsFtpProbeState::header(const char *data, size_t length)
 
 extern "C" {
 
-size_t netvfs_ftp_on_write(NetVfsFtpHooks *hooks, const char *data, size_t length)
+size_t netvfs_ftp_on_write(const NetVfsFtpHooks *hooks, const char *data, size_t length)
 {
     return hooks->write(data, length);
 }
 
-size_t netvfs_ftp_on_read(NetVfsFtpHooks *hooks, char *buffer, size_t capacity)
+size_t netvfs_ftp_on_read(const NetVfsFtpHooks *hooks, char *buffer, size_t capacity)
 {
     return hooks->read(buffer, capacity);
 }
 
-size_t netvfs_ftp_on_header(NetVfsFtpHooks *hooks, const char *data, size_t length)
+size_t netvfs_ftp_on_header(const NetVfsFtpHooks *hooks, const char *data, size_t length)
 {
     return hooks->header(data, length);
 }
 
-void netvfs_ftp_on_debug(NetVfsFtpHooks *hooks, curl_infotype type, const char *data, size_t length)
+void netvfs_ftp_on_debug(const NetVfsFtpHooks *hooks, curl_infotype type, const char *data, size_t length)
 {
     hooks->debug(type, data, length);
 }
 
-int netvfs_ftp_on_progress(NetVfsFtpHooks *hooks, curl_off_t downloadTotal, curl_off_t downloaded,
+int netvfs_ftp_on_progress(const NetVfsFtpHooks *hooks, curl_off_t downloadTotal, curl_off_t downloaded,
                            curl_off_t uploadTotal, curl_off_t uploaded)
 {
     return hooks->progress(downloadTotal, downloaded, uploadTotal, uploaded) ? 1 : 0;

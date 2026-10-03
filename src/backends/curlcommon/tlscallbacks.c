@@ -53,12 +53,11 @@ static int collect_error(int ok, X509_STORE_CTX *ctx)
 {
     struct ErrorCollector *collector = (struct ErrorCollector *)X509_STORE_CTX_get_ex_data(ctx, 0);
     int code;
-    int i;
 
     if (ok || !collector)
         return 1;
     code = X509_STORE_CTX_get_error(ctx);
-    for (i = 0; i < collector->count; ++i) {
+    for (int i = 0; i < collector->count; ++i) {
         if (collector->codes[i] == code)
             return 1;
     }

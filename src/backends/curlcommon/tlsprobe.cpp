@@ -31,8 +31,7 @@ CURLcode applyTestCaFile(const Curl::EasyHandle &easy, const QByteArray &testCaF
 {
     if (testCaFile.isEmpty())
         return CURLE_OK;
-    const CURLcode code = curl_easy_setopt(easy.get(), CURLOPT_CAINFO, testCaFile.constData());
-    if (code != CURLE_OK)
+    if (const CURLcode code = curl_easy_setopt(easy.get(), CURLOPT_CAINFO, testCaFile.constData()); code != CURLE_OK)
         return code;
     return curl_easy_setopt(easy.get(), CURLOPT_CAPATH, static_cast<const char *>(nullptr));
 }

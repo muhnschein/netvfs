@@ -191,8 +191,8 @@
   {
     "name": "F-2 no new sign-in after a busy (421) greeting",
     "file": "src/backends/ftp/ftpbackend.cpp",
-    "search": "        if (r.ok() || seen.size() != 1 || seen.first().code != 421)",
-    "replace": "        if (r.ok() || seen.size() != 1 || true)",
+    "search": "                r.ok() || seen.size() != 1 || seen.first().code != 421)",
+    "replace": "                r.ok() || seen.size() != 1 || true)",
     "test": "sh tests/interop/ftp/run.sh build busyGreeting"
   },
   {

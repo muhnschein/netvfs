@@ -282,7 +282,7 @@
   {
     "name": "XC-4 foreign surrogates encodable",
     "file": "src/core/names.cpp",
-    "search": "        if (QChar::isSurrogate(u) && !isEscape(u))\n            return false;",
+    "search": "        if (const char16_t u = name.at(i).unicode(); QChar::isSurrogate(u) && !isEscape(u))\n            return false;",
     "replace": "",
     "test": "build/tests/unit/core/tst_core"
   },

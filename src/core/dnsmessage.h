@@ -10,8 +10,6 @@
 #include <QtCore/QVector>
 #include <QtNetwork/QHostAddress>
 
-#include <utility>
-
 // SPEC-v2 XD-1: the DNS wire format as far as multicast DNS service discovery
 // (RFC 6762, RFC 6763) needs it: questions and the record types A, AAAA, PTR,
 // SRV and TXT. No sockets, no clock: a pure encoder and decoder so that it can
@@ -79,34 +77,15 @@ struct NETVFS_EXPORT Record {
     QHostAddress address;
     QByteArray rdata;
 
+    // Qt 5's QHostAddress has no move constructor, so a move copies its data.
+    // Qt reports allocation failure by aborting, never by throwing, which
+    // makes the moves noexcept in effect; containers rely on it.
     Record() = default;
     Record(const Record &other) = default;
     Record &operator=(const Record &other) = default;
+    Record(Record &&other) noexcept = default;
+    Record &operator=(Record &&other) noexcept = default;
     ~Record() = default;
-    // QHostAddress has no move constructor in Qt 5: swapping it cannot fail.
-    Record(Record &&other) noexcept
-        : name(std::move(other.name)), type(other.type), cls(other.cls), cacheFlush(other.cacheFlush),
-          ttl(other.ttl), target(std::move(other.target)), priority(other.priority), weight(other.weight),
-          port(other.port), txt(std::move(other.txt)), rdata(std::move(other.rdata))
-    {
-        address.swap(other.address);
-    }
-    Record &operator=(Record &&other) noexcept
-    {
-        name = std::move(other.name);
-        type = other.type;
-        cls = other.cls;
-        cacheFlush = other.cacheFlush;
-        ttl = other.ttl;
-        target = std::move(other.target);
-        priority = other.priority;
-        weight = other.weight;
-        port = other.port;
-        txt = std::move(other.txt);
-        address.swap(other.address);
-        rdata = std::move(other.rdata);
-        return *this;
-    }
 };
 
 struct NETVFS_EXPORT Message {

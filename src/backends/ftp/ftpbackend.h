@@ -51,7 +51,7 @@ public:
 // server refuses it, the documented F-4 exception), EfficientRanges and
 // WriteResume with "REST STREAM", SetModified with MFMT. No SpaceInfo
 // (F-6), no atomic rename or put, no links.
-class FtpBackend : public Backend
+class FtpBackend final : public Backend
 {
 public:
     class Lookup;   // stat and listing, and what a failure of a request means (below)
@@ -92,7 +92,7 @@ public:
     // Makes `owner` the user of the connection, ending another owner's
     // transfer first. Fails when not connected or canceled.
     Result claim(StreamOwner *owner);
-    void release(StreamOwner *owner);
+    void release(const StreamOwner *owner);
     void registerHandle(StreamOwner *handle);
     void unregisterHandle(StreamOwner *handle);
     Connection *connection() const { return m_connection.get(); }

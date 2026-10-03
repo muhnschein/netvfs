@@ -3,6 +3,7 @@
 #define NETVFS_DAVCLIENT_H
 
 #include "curlhandles.h"
+#include "davtransfer.h"
 #include "davstatus.h"
 #include "davurl.h"
 #include "tlsidentity.h"
@@ -22,9 +23,6 @@ namespace NetVfs {
 class Progress;
 }
 
-// The state of one transfer (davclient.cpp); the user data of libcurl's
-// callbacks (davcallbacks.h).
-struct NetVfsDavTransfer;
 
 namespace NetVfs::WebDav {
 
@@ -147,15 +145,15 @@ public:
     bool canceled() const { return m_cancel; }
 
 private:
-    Curl::EasyHandle newEasy();
+    Curl::EasyHandle newEasy() const;
     void applyRequest(Transfer *transfer, const Request &request, const QByteArray &url) const;
     void applyAuth(const Curl::EasyHandle &easy) const;
     Result once(const Request &request, const QByteArray &url, Response *response);
     // Runs the multi handle until `transfer` is done or `until(transfer)` holds.
     template<typename Until>
     Result run(const Transfer *transfer, Until until);
-    void drainMessages();
-    void detach(Transfer *transfer);
+    void drainMessages() const;
+    void detach(Transfer *transfer) const;
     Result outcome(const Transfer *transfer) const;
 
     Origin m_origin;
@@ -201,7 +199,7 @@ private:
     Client *m_client;
     std::unique_ptr<Source> m_source;
     Request m_request;
-    std::unique_ptr<Transfer> m_transfer;
+    std::unique_ptr<Transfer> m_transfer = std::make_unique<Transfer>();
     Response m_response;
     bool m_dead = false;
 };

@@ -43,6 +43,7 @@ PUBLIC_HEADERS = \
 
 HEADERS = $$PUBLIC_HEADERS \
     addressclass.h \
+    statemutex.h \
     discoverycache.h
 
 SOURCES = \

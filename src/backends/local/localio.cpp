@@ -190,9 +190,9 @@ Result copyInto(int source, const QByteArray &target, const NativeStat &st, int 
     Result r = copyData(source, output.get(), waiter);
     if (r.ok()) {
         // Server-side copies keep the modification time (as cp -p, XS-9).
-        const std::array<struct timespec, 2> times = { toTimespec(fromMsecs(st.accessedMs)),
-                                                       toTimespec(fromMsecs(st.modifiedMs)) };
-        if (::futimens(output.get(), times.data()) != 0)
+        if (const std::array<struct timespec, 2> times = { toTimespec(fromMsecs(st.accessedMs)),
+                                                           toTimespec(fromMsecs(st.modifiedMs)) };
+                ::futimens(output.get(), times.data()) != 0)
             qCDebug(lcNetVfsLocal) << "Cannot keep the modification time of a copy";
         if (const int e = output.close(); e != 0)
             r = errnoResult(e, display(target));

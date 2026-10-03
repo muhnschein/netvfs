@@ -78,18 +78,15 @@ private:
         QHostAddress address;
         Lifetime life;
 
+        // Qt 5's QHostAddress has no move constructor, so a move copies its
+        // data. Qt reports allocation failure by aborting, never by throwing,
+        // which makes the moves noexcept in effect; containers rely on it.
         AddressEntry() = default;
         AddressEntry(const AddressEntry &other) = default;
         AddressEntry &operator=(const AddressEntry &other) = default;
+        AddressEntry(AddressEntry &&other) noexcept = default;
+        AddressEntry &operator=(AddressEntry &&other) noexcept = default;
         ~AddressEntry() = default;
-        // QHostAddress has no move constructor in Qt 5: swapping it cannot fail.
-        AddressEntry(AddressEntry &&other) noexcept : life(other.life) { address.swap(other.address); }
-        AddressEntry &operator=(AddressEntry &&other) noexcept
-        {
-            address.swap(other.address);
-            life = other.life;
-            return *this;
-        }
     };
 
     struct Instance {
