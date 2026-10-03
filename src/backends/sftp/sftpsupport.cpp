@@ -366,25 +366,23 @@ bool isPasswordPrompt(const QString &text)
     return text.contains(QLatin1String("password"), Qt::CaseInsensitive);
 }
 
-PromptOutcome promptRound(AuthPrompter *prompter, const QString &name, const QString &instruction,
-                          const QVector<AuthPrompt> &prompts, QVector<QByteArray> *answers,
-                          const std::function<bool(int, const QByteArray &)> &setAnswer)
+PromptOutcome askPrompter(AuthPrompter *prompter, const QString &name, const QString &instruction,
+                          const QVector<AuthPrompt> &prompts, QVector<QByteArray> *answers)
 {
     answers->clear();
-    PromptOutcome outcome = PromptOutcome::Answered;
     if (!prompter->answer(name, instruction, prompts, answers))
-        outcome = PromptOutcome::Declined;
-    else if (answers->size() != prompts.size())
-        outcome = PromptOutcome::BadAnswers;
-    for (int i = 0; outcome == PromptOutcome::Answered && i < answers->size(); ++i) {
-        if (!setAnswer(i, answers->at(i)))
-            outcome = PromptOutcome::Rejected;
-    }
+        return PromptOutcome::Declined;
+    if (answers->size() != prompts.size())
+        return PromptOutcome::BadAnswers;
+    return PromptOutcome::Answered;
+}
+
+void wipeAnswers(QVector<QByteArray> *answers)
+{
     // Overwritten in place: the bytes live on in the caller's vector until it
     // goes, so the stores cannot be dropped as dead.
     for (QByteArray &answer : *answers)
         answer.fill('\0');
-    return outcome;
 }
 
 Result channelOpenFailure(const QString &sshMessage)
@@ -392,10 +390,10 @@ Result channelOpenFailure(const QString &sshMessage)
     // OpenSSH: "open failed" with reason 2 (connect failed) when
     // MaxSessions is reached; other servers say "administratively
     // prohibited" (1) or "resource shortage" (4).
-    const bool refused = sshMessage.contains(QLatin1String(ProhibitedReason))
-        || sshMessage.contains(QLatin1String(ShortageReason))
-        || (sshMessage.contains(QLatin1String(ConnectFailedReason)) && sshMessage.endsWith(QLatin1String(OpenFailed)));
-    if (sshMessage.contains(QLatin1String("Channel opening failure")) && refused)
+    if (const bool refused = sshMessage.contains(QLatin1String(ProhibitedReason))
+            || sshMessage.contains(QLatin1String(ShortageReason))
+            || (sshMessage.contains(QLatin1String(ConnectFailedReason)) && sshMessage.endsWith(QLatin1String(OpenFailed)));
+        sshMessage.contains(QLatin1String("Channel opening failure")) && refused)
         return Result(Error::TooManyConnections,
                       QStringLiteral("The server allows no further session on this connection"), sshMessage);
     return Result(Error::ProtocolError, QStringLiteral("The server refused a session: %1").arg(sshMessage));

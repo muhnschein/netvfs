@@ -53,7 +53,7 @@ private:
     void detectCapabilities();
     void detectOwnership();
     void detectShell();
-    static int interrupted(sftp_interrupt_struct *interrupt);
+    static int interrupted(const sftp_interrupt_struct *interrupt);
 
     SftpBackend &m_b;
 };

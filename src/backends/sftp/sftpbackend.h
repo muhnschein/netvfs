@@ -108,6 +108,21 @@ private:
         qint64 done = 0;
         qint64 limit = -1;            // bytes wanted; -1: to the end of the file
     };
+    // What the server announced at sign-in; reset with the connection.
+    struct ServerFeatures {
+        bool fsync = false;
+        bool statvfs = false;
+        bool posixRename = false;
+        bool hardlink = false;
+        bool usersGroups = false;       // XS-2, and it answered at sign-in
+        bool nativeNoReplace = false;   // XS-6: OpenSSH fails SSH_FXP_RENAME on an existing target
+        bool lstatFollows = false;      // lstatFollowsLinks(): READLINK tells links apart
+    };
+    // S-21: the request sizes the server's limits allow.
+    struct Chunks {
+        size_t write = 0;
+        size_t read = 0;
+    };
     class Connection;    // connect, sign-in setup, capabilities, teardown
     class Requests;      // paths, error mapping and the requests the API calls share
     class Login;         // sign-in methods
@@ -123,20 +138,15 @@ private:
     ConnectionParams m_params;
     QByteArray m_home;                // S-19 start directory
     bool m_identityMismatch = false;  // SEC-1 guard, see Connection::openTransport()
-    bool m_hasFsync = false;
-    bool m_hasStatvfs = false;
-    bool m_hasPosixRename = false;
-    bool m_hasHardlink = false;
-    bool m_hasUsersGroups = false;    // XS-2, and it answered at sign-in
-    bool m_nativeNoReplace = false;   // XS-6: OpenSSH fails SSH_FXP_RENAME on an existing target
+    ServerFeatures m_features;
     SymlinkOrder m_symlinkOrder = SymlinkOrder::Unverified;   // XS-4
-    bool m_lstatFollows = false;      // lstatFollowsLinks(): READLINK tells links apart
     bool m_shell = false;             // XS-9: allowed and the probe passed
     ShellTools m_shellTools;
-    size_t m_writeChunk = 0;
-    size_t m_readChunk = 0;
+    Chunks m_chunks;
     Capabilities m_capabilities;
-    // XS-2: names by id, per connection.
+    // XS-2: names by id, per connection; the maps are reached from const
+    // calls, so their mutex is mutable too.
+    mutable std::mutex m_namesMutex;
     mutable QHash<quint32, QString> m_userNames;
     mutable QHash<quint32, QString> m_groupNames;
     QSet<Reader *> m_readers;         // open handles, closed with the connection

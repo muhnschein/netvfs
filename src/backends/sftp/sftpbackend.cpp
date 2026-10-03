@@ -265,8 +265,8 @@ Result SftpBackend::makeSymlink(const QString &target, const QString &linkPath)
     // wants OpenSSH's order without saying OpenSSH gets them swapped.
     const bool swapped = m_symlinkOrder == SymlinkOrder::Swapped;
     const QByteArray &first = swapped ? link : destination;
-    const QByteArray &second = swapped ? destination : link;
-    if (sftp_symlink(m_sftp, first.constData(), second.constData()) == 0)
+    if (const QByteArray &second = swapped ? destination : link;
+        sftp_symlink(m_sftp, first.constData(), second.constData()) == 0)
         return Result::success();
     return q.existsAs(link, q.sftpFailure(display(link)));
 }
@@ -277,7 +277,7 @@ Result SftpBackend::makeHardlink(const QString &existing, const QString &newPath
     QByteArray source;
     QByteArray target;
     Result r = q.checkReady();
-    if (r.ok() && !m_hasHardlink)
+    if (r.ok() && !m_features.hardlink)
         return Result(Error::Unsupported, QStringLiteral("The server cannot create hard links"));
     if (r.ok())
         r = q.resolve(existing, &source);
@@ -299,7 +299,7 @@ Result SftpBackend::spaceInfo(const QString &dir, SpaceInfo *out)
 {
     const Requests q(*this);
     Result r = q.checkReady();
-    if (r.ok() && !m_hasStatvfs)
+    if (r.ok() && !m_features.statvfs)
         return Result(Error::Unsupported, QStringLiteral("The server cannot report free space"));
     QByteArray remote;
     if (r.ok())

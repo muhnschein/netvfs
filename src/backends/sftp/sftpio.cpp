@@ -115,7 +115,7 @@ class SftpBackend::Reader : public ReadHandle
 public:
     Reader(SftpBackend *backend, sftp_file file, qint64 size, const QByteArray &remote)
         : m_b(backend), m_file(file), m_size(size), m_remote(remote),
-          m_window(std::max<size_t>(1, std::min<size_t>(RequestWindow, MaxReadAheadBytes / backend->m_readChunk)))
+          m_window(std::max<size_t>(1, std::min<size_t>(RequestWindow, MaxReadAheadBytes / backend->m_chunks.read)))
     {
     }
     Reader(const Reader &) = delete;
@@ -296,7 +296,7 @@ Result SftpBackend::Io::writeChunks(sftp_file file, QIODevice *source, const QBy
                                     Progress *progress, qint64 base) const
 {
     PendingQueue queue;
-    QByteArray buffer(static_cast<int>(m_b.m_writeChunk), Qt::Uninitialized);
+    QByteArray buffer(static_cast<int>(m_b.m_chunks.write), Qt::Uninitialized);
     const qint64 total = base + source->size();
     qint64 done = base;
     bool eof = false;
@@ -320,7 +320,7 @@ Result SftpBackend::Io::refillReadWindow(sftp_file file, PendingQueue *queue, qu
 {
     while (!queue->full() && *offset < end) {
         Pending pending;
-        const auto wanted = static_cast<size_t>(std::min<quint64>(m_b.m_readChunk, end - *offset));
+        const auto wanted = static_cast<size_t>(std::min<quint64>(m_b.m_chunks.read, end - *offset));
         if (const Result r = beginRead(file, wanted, *offset, &pending); !r.ok())
             return r;
         queue->push(pending);
@@ -362,7 +362,7 @@ Result SftpBackend::Io::readStep(sftp_file file, PendingQueue *queue, QByteArray
 Result SftpBackend::Io::readChunks(sftp_file file, Sink *sink, quint64 start) const
 {
     PendingQueue queue;
-    QByteArray buffer(static_cast<int>(m_b.m_readChunk), Qt::Uninitialized);
+    QByteArray buffer(static_cast<int>(m_b.m_chunks.read), Qt::Uninitialized);
     quint64 offset = start;
     const quint64 end = sink->limit < 0 ? std::numeric_limits<quint64>::max()
                                         : start + static_cast<quint64>(sink->limit);
@@ -413,7 +413,7 @@ Result SftpBackend::Io::openForUpload(const QByteArray &remote, const WriteOptio
         return Result::success();
     // XC-13: the remote size must be the offset the caller continues at.
     Result r;
-    if (sftp_attributes attributes = sftp_fstat(*file)) {
+    if (auto attributes = sftp_fstat(*file)) {
         const qint64 size = static_cast<qint64>(std::min<uint64_t>(attributes->size, std::numeric_limits<qint64>::max()));
         sftp_attributes_free(attributes);
         r = checkResumeOffset(size, options.resumeOffset);
@@ -443,10 +443,9 @@ Result SftpBackend::upload(QIODevice *source, const QString &path, const UploadO
     sftp_file_set_nonblocking(file);
     const qint64 base = options.write.disposition == WriteOptions::Disposition::Resume ? options.write.resumeOffset : 0;
     r = io.writeChunks(file, source, remote, progress, base);
-    if (r.ok() && m_hasFsync && sftp_fsync(file) != 0)   // C-12: flush to stable storage
+    if (r.ok() && m_features.fsync && sftp_fsync(file) != 0)   // C-12: flush to stable storage
         r = q.writeFailure(remote, 1);
-    const int closed = q.closeFile(file, r.ok());
-    if (r.ok() && closed != 0)
+    if (const int closed = q.closeFile(file, r.ok()); r.ok() && closed != 0)
         r = q.writeFailure(remote, 1);
     // XC-14: SetModifiedOnUpload.
     if (r.ok() && options.write.modified.isValid())
@@ -463,7 +462,7 @@ Result SftpBackend::Io::openForDownload(const QByteArray &remote, const Download
     if (!*file)
         return m_q.sftpFailure(display(remote));
     Result r;
-    if (sftp_attributes attributes = sftp_fstat(*file)) {
+    if (auto attributes = sftp_fstat(*file)) {
         const Entry entry = entryFrom(*attributes, QString());
         sftp_attributes_free(attributes);
         if (entry.type == EntryType::Directory)
@@ -582,7 +581,7 @@ Result SftpBackend::Reader::issue(quint64 until)
         return Requests(*m_b).sftpFailure(display(m_remote));
     while (!m_pending.full(m_window) && m_next < until) {
         Pending pending;
-        const auto wanted = static_cast<size_t>(std::min<quint64>(m_b->m_readChunk, until - m_next));
+        const auto wanted = static_cast<size_t>(std::min<quint64>(m_b->m_chunks.read, until - m_next));
         if (const Result r = Io(*m_b).beginRead(m_file, wanted, m_next, &pending); !r.ok())
             return r;
         m_pending.push(pending);
@@ -641,9 +640,9 @@ void SftpBackend::Reader::plan(quint64 offset, quint64 end)
 {
     // Sequential reads grow the automatic read-ahead up to the cap; a jump
     // ends it (archives and previews read here and there).
-    const quint64 cap = m_window * m_b->m_readChunk;
+    const quint64 cap = m_window * m_b->m_chunks.read;
     if (offset == m_lastEnd && offset > 0)
-        m_aheadBytes = std::min(cap, std::max<quint64>(m_aheadBytes * 2, m_b->m_readChunk));
+        m_aheadBytes = std::min(cap, std::max<quint64>(m_aheadBytes * 2, m_b->m_chunks.read));
     else
         m_aheadBytes = 0;
     m_lastEnd = end;
@@ -676,7 +675,7 @@ Result SftpBackend::Reader::read(qint64 offset, qint64 maxBytes, QByteArray *out
             return canceled();   // C-9
         const bool hinted = m_hintStart <= end && m_hintEnd > position;
         const quint64 wanted = std::max(end + m_aheadBytes, hinted ? m_hintEnd : end);
-        Result r = issue(std::min(wanted, end + m_window * m_b->m_readChunk));
+        Result r = issue(std::min(wanted, end + m_window * m_b->m_chunks.read));
         if (r.ok())
             r = receive(&position, end, &data, &eof);
         if (!r.ok())
@@ -774,7 +773,7 @@ Result SftpBackend::Writer::write(const char *data, qint64 length)
             continue;
         }
         Pending pending;
-        const auto chunk = static_cast<size_t>(std::min<qint64>(length, static_cast<qint64>(m_b->m_writeChunk)));
+        const auto chunk = static_cast<size_t>(std::min<qint64>(length, static_cast<qint64>(m_b->m_chunks.write)));
         const ssize_t rc = sftp_aio_begin_write(m_file, data, chunk, &pending.aio);
         if (rc <= 0) {
             m_failure = Requests(*m_b).writeFailure(m_remote, static_cast<qint64>(chunk));
@@ -798,7 +797,7 @@ Result SftpBackend::Writer::finish()
         Pending oldest = m_pending.take();
         r = io.waitWrite(&oldest, m_remote);
     }
-    if (r.ok() && m_b->m_hasFsync && sftp_fsync(m_file) != 0)
+    if (r.ok() && m_b->m_features.fsync && sftp_fsync(m_file) != 0)
         r = Requests(*m_b).writeFailure(m_remote, 1);
     return r;
 }

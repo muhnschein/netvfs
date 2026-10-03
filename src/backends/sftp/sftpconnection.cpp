@@ -141,18 +141,15 @@ void SftpBackend::Connection::close()
     }
     m_b.m_home.clear();
     m_b.m_identityMismatch = false;
-    m_b.m_hasFsync = false;
-    m_b.m_hasStatvfs = false;
-    m_b.m_hasPosixRename = false;
-    m_b.m_hasHardlink = false;
-    m_b.m_hasUsersGroups = false;
-    m_b.m_nativeNoReplace = false;
+    m_b.m_features = ServerFeatures();
     m_b.m_symlinkOrder = SymlinkOrder::Unverified;
-    m_b.m_lstatFollows = false;
     m_b.m_shell = false;
     m_b.m_shellTools = ShellTools();
-    m_b.m_userNames.clear();
-    m_b.m_groupNames.clear();
+    {
+        const std::scoped_lock lock(m_b.m_namesMutex);
+        m_b.m_userNames.clear();
+        m_b.m_groupNames.clear();
+    }
     m_b.m_capabilities = Capabilities();
 }
 
@@ -162,7 +159,7 @@ void SftpBackend::Connection::setPrompter(AuthPrompter *prompter)
     m_b.m_prompter = prompter;
 }
 
-int SftpBackend::Connection::interrupted(sftp_interrupt_struct *interrupt)
+int SftpBackend::Connection::interrupted(const sftp_interrupt_struct *interrupt)
 {
     // libssh asks this every 100 ms while a blocking sftp call waits for its
     // response (vendor/patches/libssh/0002): cancel() ends the wait (C-9).
@@ -187,10 +184,10 @@ Result SftpBackend::Connection::openSftp()
     }
     sftp_set_interrupt_callback(m_b.m_sftp, &Connection::interrupted, &m_b.m_interrupt);
 
-    m_b.m_hasFsync = supported(m_b.m_sftp, "fsync@openssh.com", "1");
-    m_b.m_hasStatvfs = supported(m_b.m_sftp, "statvfs@openssh.com", "2");
-    m_b.m_hasPosixRename = supported(m_b.m_sftp, "posix-rename@openssh.com", "1");
-    m_b.m_hasHardlink = supported(m_b.m_sftp, "hardlink@openssh.com", "1");
+    m_b.m_features.fsync = supported(m_b.m_sftp, "fsync@openssh.com", "1");
+    m_b.m_features.statvfs = supported(m_b.m_sftp, "statvfs@openssh.com", "2");
+    m_b.m_features.posixRename = supported(m_b.m_sftp, "posix-rename@openssh.com", "1");
+    m_b.m_features.hardlink = supported(m_b.m_sftp, "hardlink@openssh.com", "1");
     const bool hasLimits = supported(m_b.m_sftp, "limits@openssh.com", "1");
     uint64_t writeLimit = 0;
     uint64_t readLimit = 0;
@@ -199,8 +196,8 @@ Result SftpBackend::Connection::openSftp()
         readLimit = limits->max_read_length;
         sftp_limits_free(limits);
     }
-    m_b.m_writeChunk = chunkSize(hasLimits, writeLimit);   // S-21
-    m_b.m_readChunk = chunkSize(hasLimits, readLimit);
+    m_b.m_chunks.write = chunkSize(hasLimits, writeLimit);   // S-21
+    m_b.m_chunks.read = chunkSize(hasLimits, readLimit);
 
     // S-19: relative paths are relative to the start directory, resolved once.
     char *home = sftp_canonicalize_path(m_b.m_sftp, ".");
@@ -210,10 +207,10 @@ Result SftpBackend::Connection::openSftp()
     detectShell();
     detectCapabilities();
 
-    qCDebug(lcNetVfsSftp) << "SFTP version" << sftp_server_version(m_b.m_sftp) << "fsync" << m_b.m_hasFsync
-                          << "statvfs" << m_b.m_hasStatvfs << "posix-rename" << m_b.m_hasPosixRename
-                          << "hardlink" << m_b.m_hasHardlink << "users-groups" << m_b.m_hasUsersGroups
-                          << "shell" << m_b.m_shell << "chunk" << m_b.m_writeChunk << m_b.m_readChunk
+    qCDebug(lcNetVfsSftp) << "SFTP version" << sftp_server_version(m_b.m_sftp) << "fsync" << m_b.m_features.fsync
+                          << "statvfs" << m_b.m_features.statvfs << "posix-rename" << m_b.m_features.posixRename
+                          << "hardlink" << m_b.m_features.hardlink << "users-groups" << m_b.m_features.usersGroups
+                          << "shell" << m_b.m_shell << "chunk" << m_b.m_chunks.write << m_b.m_chunks.read
                           << "start" << m_b.m_home;
     return Result::success();
 }
@@ -222,7 +219,7 @@ void SftpBackend::Connection::detectOwnership()
 {
     // XS-2: Ownership only when users-groups-by-id@openssh.com answers; the
     // start directory's owner is the first name in the cache.
-    m_b.m_hasUsersGroups = false;
+    m_b.m_features.usersGroups = false;
     if (!supported(m_b.m_sftp, UsersGroupsExtension, "1"))
         return;
     sftp_attributes attributes = sftp_stat(m_b.m_sftp, m_b.m_home.isEmpty() ? "." : m_b.m_home.constData());
@@ -231,8 +228,9 @@ void SftpBackend::Connection::detectOwnership()
     sftp_name_id_map users = single(attributes->uid);
     sftp_name_id_map groups = single(attributes->gid);
     sftp_attributes_free(attributes);
-    m_b.m_hasUsersGroups = users && groups && sftp_get_users_groups_by_id(m_b.m_sftp, users, groups) == 0;
-    if (m_b.m_hasUsersGroups) {
+    m_b.m_features.usersGroups = users && groups && sftp_get_users_groups_by_id(m_b.m_sftp, users, groups) == 0;
+    if (m_b.m_features.usersGroups) {
+        const std::scoped_lock lock(m_b.m_namesMutex);
         m_b.m_userNames.insert(users->ids[0], text(users->names[0]));
         m_b.m_groupNames.insert(groups->ids[0], text(groups->names[0]));
     }
@@ -244,10 +242,10 @@ void SftpBackend::Connection::detectCapabilities()
 {
     // XC-5: only what this backend implements and the interop suite tests.
     const bool openSsh = ssh_get_openssh_version(m_b.m_session) > 0;
-    m_b.m_nativeNoReplace = openSsh;   // XS-6, by banner
+    m_b.m_features.nativeNoReplace = openSsh;   // XS-6, by banner
     const QString banner = text(ssh_get_serverbanner(m_b.m_session));
     m_b.m_symlinkOrder = symlinkOrderFor(banner, openSsh);   // XS-4
-    m_b.m_lstatFollows = lstatFollowsLinks(banner);
+    m_b.m_features.lstatFollows = lstatFollowsLinks(banner);
     Capabilities &caps = m_b.m_capabilities;
     caps = Capabilities();
     // XS-5, XS-7
@@ -255,15 +253,15 @@ void SftpBackend::Connection::detectCapabilities()
                << Capability::PosixModes << Capability::SetModified << Capability::SetModifiedOnUpload;
     if (m_b.m_symlinkOrder != SymlinkOrder::Unverified)
         caps.flags << Capability::Symlinks;
-    if (m_b.m_hasHardlink)
+    if (m_b.m_features.hardlink)
         caps.flags << Capability::Hardlinks;
-    if (m_b.m_hasUsersGroups)
+    if (m_b.m_features.usersGroups)
         caps.flags << Capability::Ownership;
-    if (m_b.m_hasStatvfs)
+    if (m_b.m_features.statvfs)
         caps.flags << Capability::SpaceInfo;
-    if (m_b.m_hasPosixRename)
+    if (m_b.m_features.posixRename)
         caps.flags << Capability::AtomicReplace;
-    if (m_b.m_nativeNoReplace)
+    if (m_b.m_features.nativeNoReplace)
         caps.flags << Capability::NativeNoReplace;
     // XS-9. XS-10: OpenSSH's copy-data extension would serve ServerCopy
     // without a shell, but libssh 0.12.2 does not expose it; switch to it
@@ -278,8 +276,8 @@ void SftpBackend::Connection::detectCapabilities()
             caps.checksumAlgorithms << QStringLiteral("sha256");
         }
     }
-    caps.maxReadChunk = static_cast<qint64>(m_b.m_readChunk);
-    caps.maxWriteChunk = static_cast<qint64>(m_b.m_writeChunk);
+    caps.maxReadChunk = static_cast<qint64>(m_b.m_chunks.read);
+    caps.maxWriteChunk = static_cast<qint64>(m_b.m_chunks.write);
 }
 
 } // namespace NetVfs::Sftp
