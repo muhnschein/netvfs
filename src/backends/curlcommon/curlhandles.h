@@ -7,36 +7,16 @@
 #include <utility>
 
 // Owners for libcurl's handles. libcurl declares all of them as void, so the
-// owner type is what gives each kind its own type; the traits name the
-// handle through libcurl's own typedef (CURL, CURLM, CURLSH) and say how it
-// is made and released.
+// owner type is what gives each kind its own type.
 namespace NetVfs::Curl {
 
-struct EasyTraits {
-    using Pointer = CURL *;
-    static Pointer init() { return curl_easy_init(); }
-    static void cleanup(Pointer pointer) { curl_easy_cleanup(pointer); }
-};
-
-struct MultiTraits {
-    using Pointer = CURLM *;
-    static Pointer init() { return curl_multi_init(); }
-    static void cleanup(Pointer pointer) { curl_multi_cleanup(pointer); }
-};
-
-struct ShareTraits {
-    using Pointer = CURLSH *;
-    static Pointer init() { return curl_share_init(); }
-    static void cleanup(Pointer pointer) { curl_share_cleanup(pointer); }
-};
-
-// Owns what `Traits::init` returned and releases it with `Traits::cleanup`.
-// Movable, not copyable; empty by default.
-template<typename Traits>
+// Owns what `Init` returned and releases it with `Cleanup`. Movable, not
+// copyable; empty by default.
+template<auto Init, auto Cleanup>
 class Handle
 {
 public:
-    using Pointer = typename Traits::Pointer;
+    using Pointer = decltype(Init());
 
     Handle() = default;
     explicit Handle(Pointer pointer) : m_pointer(pointer) {}
@@ -53,7 +33,7 @@ public:
         return *this;
     }
 
-    static Handle create() { return Handle(Traits::init()); }
+    static Handle create() { return Handle(Init()); }
 
     explicit operator bool() const { return m_pointer != nullptr; }
     Pointer get() const { return m_pointer; }
@@ -63,16 +43,16 @@ private:
     void release()
     {
         if (m_pointer)
-            Traits::cleanup(m_pointer);
+            Cleanup(m_pointer);
         m_pointer = nullptr;
     }
 
     Pointer m_pointer = nullptr;
 };
 
-using EasyHandle = Handle<EasyTraits>;
-using MultiHandle = Handle<MultiTraits>;
-using ShareHandle = Handle<ShareTraits>;
+using EasyHandle = Handle<&curl_easy_init, &curl_easy_cleanup>;
+using MultiHandle = Handle<&curl_multi_init, &curl_multi_cleanup>;
+using ShareHandle = Handle<&curl_share_init, &curl_share_cleanup>;
 
 // XSEC-2: every easy handle starts with TLS 1.2 as its floor, whatever
 // libcurl's default is; the ceiling stays libcurl's default. Backends that
@@ -81,8 +61,7 @@ inline EasyHandle newEasyHandle()
 {
     EasyHandle easy(curl_easy_init());
     if (easy)
-        curl_easy_setopt(easy.get(), CURLOPT_SSLVERSION,
-                         static_cast<long>(CURL_SSLVERSION_TLSv1_2));
+        curl_easy_setopt(easy.get(), CURLOPT_SSLVERSION, static_cast<long>(CURL_SSLVERSION_TLSv1_2));
     return easy;
 }
 
