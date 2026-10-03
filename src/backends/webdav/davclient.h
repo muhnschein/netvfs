@@ -151,7 +151,7 @@ private:
     Result once(const Request &request, const QByteArray &url, Response *response);
     // Runs the multi handle until `transfer` is done or `until(transfer)` holds.
     template<typename Until>
-    Result run(const Transfer *transfer, Until until);
+    Result run(const Transfer *transfer, Until until) const;
     void drainMessages() const;
     void detach(Transfer *transfer) const;
     Result outcome(const Transfer *transfer) const;

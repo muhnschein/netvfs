@@ -55,6 +55,8 @@ private:
     // close() without virtual dispatch, for the destructor.
     void shut() noexcept;
     Result usable() const;
+    // read() for a caller that holds the gate.
+    Result readInGate(qint64 offset, qint64 maxBytes, QByteArray *out);
     quint64 queueEnd() const;
     qint64 queued() const;
     Result issue(quint64 offset, quint32 count);
@@ -97,6 +99,8 @@ private:
     // abort() without virtual dispatch, for the destructor.
     void shut() noexcept;
     Result usable() const;
+    // commit() for a caller that holds the gate.
+    Result commitInGate();
     Result send();
     Result retireOldest();
     Result writeRest(const QByteArray &data, quint32 from, quint64 offset);

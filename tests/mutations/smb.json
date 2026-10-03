@@ -548,14 +548,14 @@
   {
     "name": "XM-6 queue not discarded on a jump",
     "file": "src/backends/smb/smbfiles.cpp",
-    "search": "        if (!m_queue.empty() && m_queue.front().offset + m_queue.front().used != position)\n            discard();      // not where the queue continues: a new position",
+    "search": "    if (!m_queue.empty() && m_queue.front().offset + m_queue.front().used != position)\n        discard();      // not where the queue continues: a new position",
     "replace": "",
     "test": "sh tests/interop/smb/run.sh build v2Transfers"
   },
   {
     "name": "C-9 cached reads ignore cancel",
     "file": "src/backends/smb/smbfiles.cpp",
-    "search": "        if (m_session->canceled())\n            return Result(Error::Canceled);",
+    "search": "    if (m_session->canceled())\n        return Result(Error::Canceled);",
     "replace": "",
     "test": "sh tests/interop/smb/run.sh build downloadCancelFromProgress"
   },
@@ -576,7 +576,7 @@
   {
     "name": "XC-14 WriteOptions::modified ignored",
     "file": "src/backends/smb/smbfiles.cpp",
-    "search": "        if (r.ok() && m_modified.isValid())\n            r = setTimes(*m_session, m_path, m_modified, QDateTime());",
+    "search": "    if (r.ok() && m_modified.isValid())\n        r = setTimes(*m_session, m_path, m_modified, QDateTime());",
     "replace": "",
     "test": "sh tests/interop/smb/run.sh build attributes"
   },

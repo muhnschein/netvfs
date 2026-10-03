@@ -50,7 +50,7 @@ public:
     // Reads the file on every call, so changes by other processes are seen.
     Consent consent(const QString &id) const;
     // Unknown removes the entry.
-    void setConsent(const QString &id, Consent consent);
+    void setConsent(const QString &id, Consent consent) const;
 
     // Registered consumers, sorted by id; invalid files are skipped with a warning.
     static QString consumersDir();

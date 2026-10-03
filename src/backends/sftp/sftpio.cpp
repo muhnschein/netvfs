@@ -414,7 +414,7 @@ Result SftpBackend::Io::openForUpload(const QByteArray &remote, const WriteOptio
     // XC-13: the remote size must be the offset the caller continues at.
     Result r;
     if (auto attributes = sftp_fstat(*file)) {
-        const qint64 size = static_cast<qint64>(std::min<uint64_t>(attributes->size, std::numeric_limits<qint64>::max()));
+        const auto size = static_cast<qint64>(std::min<uint64_t>(attributes->size, std::numeric_limits<qint64>::max()));
         sftp_attributes_free(attributes);
         r = checkResumeOffset(size, options.resumeOffset);
     } else {

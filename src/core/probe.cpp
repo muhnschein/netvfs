@@ -72,8 +72,7 @@ Result verifyBrowseAccess(Backend *backend, const QString &root, qint64 *freeByt
     if (!entry.isDir())
         return Result(Error::NotADirectory, QStringLiteral("The start folder is not a folder"));
 
-    qint64 available = -1;
-    if (backend->freeSpace(target, &available).ok() && freeBytes)
+    if (qint64 available = -1; backend->freeSpace(target, &available).ok() && freeBytes)
         *freeBytes = available;
     return Result::success();
 }

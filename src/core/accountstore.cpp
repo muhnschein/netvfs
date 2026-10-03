@@ -44,7 +44,7 @@ Result notFound(int accountId)
 
 // The value of `key` in the provider's `service`; empty when the service is
 // not installed. Leaves the global service selected.
-QString serviceValue(Accounts::Manager *manager, Accounts::Account *account, Service service, const char *key,
+QString serviceValue(const Accounts::Manager *manager, Accounts::Account *account, Service service, const char *key,
                      bool *enabled)
 {
     QString value;

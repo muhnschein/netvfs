@@ -366,7 +366,7 @@ void Client::drainMessages() const
 }
 
 template<typename Until>
-Result Client::run(const Transfer *transfer, Until until)
+Result Client::run(const Transfer *transfer, Until until) const
 {
     for (;;) {
         int running = 0;

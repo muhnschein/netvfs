@@ -119,7 +119,7 @@ Consent ConsentStore::consent(const QString &id) const
     return consentFromString(settings.value(QLatin1String(ConsentGroup) + QLatin1Char('/') + id).toString());
 }
 
-void ConsentStore::setConsent(const QString &id, Consent consent)
+void ConsentStore::setConsent(const QString &id, Consent consent) const
 {
     if (!ConsumerInfo::isValidId(id))
         return;
@@ -198,8 +198,7 @@ Result ConsentStore::parseConsumerFile(const QString &path, ConsumerInfo *out)
         else if (key == QLatin1String("DataDir"))
             info.dataDir = value;
     }
-    const QString stem = QFileInfo(path).completeBaseName();
-    if (!ConsumerInfo::isValidId(info.id) || info.id != stem)
+    if (const QString stem = QFileInfo(path).completeBaseName(); !ConsumerInfo::isValidId(info.id) || info.id != stem)
         return invalid(path, QStringLiteral("Id must match [a-z0-9-]+ and the file name"));
     if (info.displayName.isEmpty())
         return invalid(path, QStringLiteral("DisplayName is empty"));

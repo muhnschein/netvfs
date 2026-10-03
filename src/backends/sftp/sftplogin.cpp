@@ -115,8 +115,7 @@ Result SftpBackend::Login::run()
     while (!step.stopped()) {
         if (step.rc == SSH_AUTH_SUCCESS)
             return Result::success();
-        const bool another = steps < MaxAuthSteps && m_prompter;
-        if (step.rc == SSH_AUTH_PARTIAL && another) {
+        if (const bool another = steps < MaxAuthSteps && m_prompter; step.rc == SSH_AUTH_PARTIAL && another) {
             step = afterPartial();   // XS-11
         } else if (step.rc == SSH_AUTH_PARTIAL) {
             return authPartial();    // S-13

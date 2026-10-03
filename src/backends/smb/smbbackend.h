@@ -71,6 +71,8 @@ private:
         QByteArray path;
         QString share;
     };
+    // authenticate() for a caller that holds the gate.
+    Result authenticateInGate(const Credentials &credentials);
     Result checkSignedIn() const;
     Result locate(const QString &path, Location *out);
     Result sessionFor(const QString &share, Session **out);
@@ -81,7 +83,7 @@ private:
     bool shareLevel(const QString &path) const;
     bool enumerationEnabled() const;
     Result enumerateShares(QStringList *names, QVariantMap *remarks) const;
-    Result listRoot(ListSink *sink, const ListOptions &options);
+    Result listRoot(ListSink *sink, const ListOptions &options) const;
     // disconnect() without virtual dispatch; also used by the destructor.
     void shutdown() noexcept;
 

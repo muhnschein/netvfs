@@ -54,7 +54,7 @@ SmbBackend::~SmbBackend()
 Result SmbBackend::connect(const ConnectionParams &params, ServerIdentity *seen)
 {
     // M-13
-    return GateHold::run(&m_gate, [this, &params, seen]() -> Result {
+    return GateHold::run(&m_gate, [this, &params, seen]() {
         disconnect();
         // SMB has no server identity (SPEC-smb 3); signing keyed by the password
         // authenticates the server instead. XT-5 is vacuous here: nothing is
@@ -76,36 +76,40 @@ Result SmbBackend::authenticate(const Credentials &credentials, AuthPrompter *pr
 {
     Q_UNUSED(prompter)   // NTLMSSP has no interactive step
     // M-13
-    return GateHold::run(&m_gate, [this, &credentials]() -> Result {
-        if (!m_probed || m_main)
-            return Result(Error::Internal, QStringLiteral("authenticate() needs a successful connect()"));
-        // XM-1: the backend enforces the profile it is given; which profile a
-        // service may use is AccountSession's decision (XA-4). XSEC-2: a
-        // failure is never retried with a weaker one.
-        if (Result r = profileFromOptions(m_params.options, &m_profile); !r.ok())
-            return r;
-        const bool guest = settingsFor(m_profile).guest;
-        const QString share = m_params.option(QStringLiteral("share")).trimmed();
-        m_serverMode = share.isEmpty();
-        m_user = credentials.userName.isEmpty() ? m_params.username : credentials.userName;
-        m_domain = m_params.option(QStringLiteral("domain"));
-        if (!guest && (m_user.isEmpty() || credentials.secret.isEmpty()))
-            return Result(Error::AuthFailed, QStringLiteral("A user name and a password are required"));
-        if (guest)
-            m_user.clear();
+    return GateHold::run(&m_gate, [this, &credentials]() { return authenticateInGate(credentials); });
+}
 
-        auto session = std::make_unique<Session>(m_serverMode ? QLatin1String(IpcShare) : share, m_cancel,
-                                                 m_params.requestTimeoutMs, &m_gate);
-        const Result r = session->signIn(serverString(m_address, m_params.port), m_profile, m_user, m_domain,
-                                         credentials.secret);
-        if (!r.ok())
-            return r;
-        m_main = std::move(session);
-        // Server mode opens shares later with the same credentials (XM-2).
-        if (m_serverMode && !guest)
-            m_secret = credentials.secret;
+// authenticate() inside the gate.
+Result SmbBackend::authenticateInGate(const Credentials &credentials)
+{
+    if (!m_probed || m_main)
+        return Result(Error::Internal, QStringLiteral("authenticate() needs a successful connect()"));
+    // XM-1: the backend enforces the profile it is given; which profile a
+    // service may use is AccountSession's decision (XA-4). XSEC-2: a
+    // failure is never retried with a weaker one.
+    if (Result r = profileFromOptions(m_params.options, &m_profile); !r.ok())
         return r;
-    });
+    const bool guest = settingsFor(m_profile).guest;
+    const QString share = m_params.option(QStringLiteral("share")).trimmed();
+    m_serverMode = share.isEmpty();
+    m_user = credentials.userName.isEmpty() ? m_params.username : credentials.userName;
+    m_domain = m_params.option(QStringLiteral("domain"));
+    if (!guest && (m_user.isEmpty() || credentials.secret.isEmpty()))
+        return Result(Error::AuthFailed, QStringLiteral("A user name and a password are required"));
+    if (guest)
+        m_user.clear();
+
+    auto session = std::make_unique<Session>(m_serverMode ? QLatin1String(IpcShare) : share, m_cancel,
+                                             m_params.requestTimeoutMs, &m_gate);
+    const Result r = session->signIn(serverString(m_address, m_params.port), m_profile, m_user, m_domain,
+                                     credentials.secret);
+    if (!r.ok())
+        return r;
+    m_main = std::move(session);
+    // Server mode opens shares later with the same credentials (XM-2).
+    if (m_serverMode && !guest)
+        m_secret = credentials.secret;
+    return r;
 }
 
 Result SmbBackend::checkSignedIn() const
@@ -250,7 +254,7 @@ Result SmbBackend::enumerateShares(QStringList *names, QVariantMap *remarks) con
     return r;
 }
 
-Result SmbBackend::listRoot(ListSink *sink, const ListOptions &options)
+Result SmbBackend::listRoot(ListSink *sink, const ListOptions &options) const
 {
     // XM-3: the shares the user saved, then what enumeration finds.
     QStringList names = configuredShares(m_params.options);
@@ -288,7 +292,7 @@ Result SmbBackend::listRoot(ListSink *sink, const ListOptions &options)
 Result SmbBackend::stat(const QString &path, Entry *out)
 {
     // M-13
-    return GateHold::run(&m_gate, [this, &path, out]() -> Result {
+    return GateHold::run(&m_gate, [this, &path, out]() {
         Location at;
         if (Result r = locate(path, &at); !r.ok())
             return r;
@@ -310,7 +314,7 @@ Result SmbBackend::stat(const QString &path, Entry *out)
 Result SmbBackend::list(const QString &dir, ListSink *sink, const ListOptions &options)
 {
     // M-13
-    return GateHold::run(&m_gate, [this, &dir, sink, &options]() -> Result {
+    return GateHold::run(&m_gate, [this, &dir, sink, &options]() {
         Location at;
         if (Result r = locate(dir, &at); !r.ok())
             return r;
@@ -323,7 +327,7 @@ Result SmbBackend::list(const QString &dir, ListSink *sink, const ListOptions &o
 Result SmbBackend::makeDir(const QString &path, bool exclusive)
 {
     // M-13
-    return GateHold::run(&m_gate, [this, &path, exclusive]() -> Result {
+    return GateHold::run(&m_gate, [this, &path, exclusive]() {
         Location at;
         const Result r = locate(path, &at);
         // XM-2: a share that does not exist cannot be made.
@@ -343,7 +347,7 @@ Result SmbBackend::makeDir(const QString &path, bool exclusive)
 Result SmbBackend::removeFile(const QString &path)
 {
     // M-13
-    return GateHold::run(&m_gate, [this, &path]() -> Result {
+    return GateHold::run(&m_gate, [this, &path]() {
         Location at;
         if (Result r = locate(path, &at); !r.ok())
             return r;
@@ -356,7 +360,7 @@ Result SmbBackend::removeFile(const QString &path)
 Result SmbBackend::removeDir(const QString &path)
 {
     // M-13
-    return GateHold::run(&m_gate, [this, &path]() -> Result {
+    return GateHold::run(&m_gate, [this, &path]() {
         Location at;
         if (Result r = locate(path, &at); !r.ok())
             return r;
@@ -371,7 +375,7 @@ Result SmbBackend::removeDir(const QString &path)
 Result SmbBackend::rename(const QString &from, const QString &to, RenameMode mode)
 {
     // M-13
-    return GateHold::run(&m_gate, [this, &from, &to, mode]() -> Result {
+    return GateHold::run(&m_gate, [this, &from, &to, mode]() {
         // XM-2: the root and the shares themselves are refused before any
         // share is opened.
         if (shareLevel(from) || shareLevel(to))
@@ -397,7 +401,7 @@ Result SmbBackend::rename(const QString &from, const QString &to, RenameMode mod
 Result SmbBackend::setAttributes(const QString &path, const AttributeChanges &changes)
 {
     // M-13
-    return GateHold::run(&m_gate, [this, &path, &changes]() -> Result {
+    return GateHold::run(&m_gate, [this, &path, &changes]() {
         // XC-11: every field is checked before anything changes.
         if (changes.mode >= 0)
             return Result(Error::Unsupported, QStringLiteral("SMB has no permission bits"));
@@ -417,7 +421,7 @@ Result SmbBackend::setAttributes(const QString &path, const AttributeChanges &ch
 Result SmbBackend::spaceInfo(const QString &dir, SpaceInfo *out)
 {
     // M-13
-    return GateHold::run(&m_gate, [this, &dir, out]() -> Result {
+    return GateHold::run(&m_gate, [this, &dir, out]() {
         Location at;
         if (Result r = locate(dir, &at); !r.ok())
             return r;
@@ -430,7 +434,7 @@ Result SmbBackend::spaceInfo(const QString &dir, SpaceInfo *out)
 Result SmbBackend::keepAlive()
 {
     // M-13
-    return GateHold::run(&m_gate, [this]() -> Result {
+    return GateHold::run(&m_gate, [this]() {
         // XM-8: SMB2 ECHO, on IPC$ in server mode.
         if (Result r = checkSignedIn(); !r.ok())
             return r;
@@ -460,7 +464,7 @@ Result SmbBackend::openWriter(const QString &path, const WriteOptions &options, 
 Result SmbBackend::openWrite(const QString &path, const WriteOptions &options, WriteHandle **out)
 {
     // M-13
-    return GateHold::run(&m_gate, [this, &path, &options, out]() -> Result {
+    return GateHold::run(&m_gate, [this, &path, &options, out]() {
         std::unique_ptr<WriteHandle> writer;
         const Result r = openWriter(path, options, &writer);
         *out = writer.release();    // XC-13: the caller owns the handle
@@ -471,7 +475,7 @@ Result SmbBackend::openWrite(const QString &path, const WriteOptions &options, W
 Result SmbBackend::upload(QIODevice *source, const QString &path, const UploadOptions &options, Progress *progress)
 {
     // M-13
-    return GateHold::run(&m_gate, [this, source, &path, &options, progress]() -> Result {
+    return GateHold::run(&m_gate, [this, source, &path, &options, progress]() {
         std::unique_ptr<WriteHandle> writer;
         if (Result r = openWriter(path, options.write, &writer); !r.ok())
             return r;
@@ -487,7 +491,7 @@ Result SmbBackend::upload(QIODevice *source, const QString &path, const UploadOp
 Result SmbBackend::openRead(const QString &path, ReadHandle **out)
 {
     // M-13
-    return GateHold::run(&m_gate, [this, &path, out]() -> Result {
+    return GateHold::run(&m_gate, [this, &path, out]() {
         *out = nullptr;
         Location at;
         if (Result r = locate(path, &at); !r.ok())
@@ -508,7 +512,7 @@ Result SmbBackend::openRead(const QString &path, ReadHandle **out)
 Result SmbBackend::download(const QString &path, QIODevice *sink, const DownloadOptions &options, Progress *progress)
 {
     // M-13
-    return GateHold::run(&m_gate, [this, &path, sink, &options, progress]() -> Result {
+    return GateHold::run(&m_gate, [this, &path, sink, &options, progress]() {
         if (options.offset < 0 || options.length < -1)
             return invalidRange();
         Location at;
