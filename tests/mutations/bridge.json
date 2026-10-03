@@ -282,8 +282,8 @@
   {
     "name": "XB-3 generator accepts invalid ids",
     "file": "src/bridge/generator/netvfs-bridge-generator.c",
-    "search": "    if (!netvfs_valid_id(c->id) || strcmp(c->id, stem) != 0)",
-    "replace": "    if (strcmp(c->id, stem) != 0)",
+    "search": "        if (netvfs_valid_id(stem))\n            memcpy",
+    "replace": "        if (stem[0] != '\\0')\n            memcpy",
     "test": "build/tests/bridge/generator/tst_generator"
   },
   {
@@ -332,14 +332,21 @@
     "name": "XB-3 generator takes any folder override",
     "file": "src/bridge/generator/netvfs-bridge-generator.c",
     "search": "    if (overridden && overridden[0] == '/' && strlen(overridden) <= MAX_PATH_LENGTH / 2 && clean_folder(overridden))",
-    "replace": "    if (overridden && overridden[0] != '\\0')",
+    "replace": "    if (overridden && overridden[0] != '\\0' && (clean_folder(overridden) || 1))",
     "test": "build/tests/bridge/generator/tst_generator"
   },
   {
     "name": "XB-3 generator logs file names raw",
     "file": "src/bridge/generator/netvfs-bridge-generator.c",
-    "search": "            printable(path, shown, sizeof(shown));",
-    "replace": "            snprintf(shown, sizeof(shown), \"%s\", path);",
+    "search": "    escaped(name, shown, sizeof(shown));",
+    "replace": "    snprintf(shown, sizeof(shown), \"%s\", name);\n    (void)escaped;",
+    "test": "build/tests/bridge/generator/tst_generator"
+  },
+  {
+    "name": "XB-3 generator follows links out of the folder",
+    "file": "src/bridge/generator/netvfs-bridge-generator.c",
+    "search": "    return strncmp(resolved, base, n) == 0 && resolved[n] == '/';",
+    "replace": "    return n > 0;",
     "test": "build/tests/bridge/generator/tst_generator"
   }
 ]

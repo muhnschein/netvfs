@@ -84,8 +84,7 @@ Result openOnWorker(const OpenJob &job, Backend *backend, Worker *worker, quint3
 {
     ReadHandle *raw = nullptr;
     const Result r = backend->openRead(job.path, &raw);
-    std::unique_ptr<ReadHandle> opened(raw);
-    if (r.ok() && opened) {
+    if (std::unique_ptr<ReadHandle> opened(raw); r.ok() && opened) {
         *size = opened->size();
         *handle = worker->addHandle(std::move(opened));
     }

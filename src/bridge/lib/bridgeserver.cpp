@@ -207,7 +207,7 @@ void BridgeServer::onPromptAnswered(bool allow)
 
 // ------------------------------------------------------------------ work
 
-void BridgeServer::kickAll()
+void BridgeServer::kickAll() const
 {
     m_locations->kick();
     m_copyJobs->kick();

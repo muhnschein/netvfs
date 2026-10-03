@@ -84,6 +84,7 @@ private Q_SLOTS:
     void skipsInvalidConsumers();
     void messagesHideControlCharacters();
     void ignoresUnsafeFolderOverrides();
+    void ignoresLinksLeadingOut();
     void sameRulesAsLibrary_data();
     void sameRulesAsLibrary();
     void usageAndMissingFolder();
@@ -140,6 +141,7 @@ void tst_Generator::skipsInvalidConsumers()
                               "specifier.conf" })
         QVERIFY2(run.stderrText.contains(QLatin1String(name)), name);
     QVERIFY(!run.stderrText.contains(QLatin1String("lautta.conf")));
+    QVERIFY(run.stderrText.contains(QLatin1String("Upper.conf: Id must match")));   // refused by its name
     for (const QString &entry : tree(out.path()))
         QVERIFY2(entry.contains(QLatin1String("lautta")) || entry.contains(QLatin1String("photos"))
                      || entry.endsWith(QLatin1String(".wants")), qPrintable(entry));
@@ -153,7 +155,7 @@ void tst_Generator::messagesHideControlCharacters()
     QVERIFY(QFile(dir.path() + QStringLiteral("/a\nb.conf")).open(QIODevice::WriteOnly));
     const Run run = generate(dir.path(), { out.path() });
     QCOMPARE(run.exitCode, 0);
-    QVERIFY(run.stderrText.contains(QLatin1String("a?b.conf")));
+    QVERIFY(run.stderrText.contains(QLatin1String("a\\x0ab.conf")));
     QVERIFY(!run.stderrText.contains(QLatin1String("a\nb.conf")));
 }
 
@@ -171,6 +173,18 @@ void tst_Generator::ignoresUnsafeFolderOverrides()
     QTemporaryDir out;
     QCOMPARE(generate(folder, { out.path() }).exitCode, 0);
     QVERIFY(QFile::exists(out.path() + QStringLiteral("/netvfs-bridge@probe.socket")));
+}
+
+// A consumer file that is a link to a file outside the folder is not read.
+void tst_Generator::ignoresLinksLeadingOut()
+{
+    QTemporaryDir elsewhere;
+    QTemporaryDir folder;
+    QTemporaryDir out;
+    const QString real = writeConsumer(elsewhere, QStringLiteral("probe"), QStringLiteral("x"));
+    QVERIFY(QFile::link(real + QStringLiteral("/probe.conf"), folder.path() + QStringLiteral("/probe.conf")));
+    QCOMPARE(generate(folder.path(), { out.path() }).exitCode, 0);
+    QVERIFY(!QFile::exists(out.path() + QStringLiteral("/netvfs-bridge@probe.socket")));
 }
 
 void tst_Generator::sameRulesAsLibrary_data()

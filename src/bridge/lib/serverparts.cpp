@@ -72,9 +72,9 @@ Result tooManyConnections()
 }
 
 // The thread of one copy job: both connections, the copy, the disconnects.
+template <typename Body>
 Result runCopy(CopyJobs::Job *job, Connector *connector, const LocationSpec &source,
-               const LocationSpec &destination, const TaskContext &task, const CopyJobs::Body &body,
-               QVariantMap *extra)
+               const LocationSpec &destination, const TaskContext &task, const Body &body, QVariantMap *extra)
 {
     std::unique_ptr<Backend> src(BackendLoader::create(source.provider));
     std::unique_ptr<Backend> dst(BackendLoader::create(destination.provider));

@@ -1,8 +1,6 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 #include "dbusloop.h"
 
-#include <unistd.h>
-
 static dbus_bool_t add_watch(DBusWatch *watch, void *data)
 {
     return netvfs_loop_watch_added(watch, (struct NetVfsLoopOwner *)data);
@@ -40,27 +38,23 @@ static void toggle_timeout(DBusTimeout *timeout, void *data)
 
 static DBusHandlerResult filter(DBusConnection *connection, DBusMessage *message, void *data)
 {
-    (void)connection;
-    return netvfs_loop_message((struct NetVfsLoopOwner *)data, message);
+    return netvfs_loop_message((struct NetVfsLoopOwner *)data, connection, message);
 }
 
 static void dispatch_status(DBusConnection *connection, DBusDispatchStatus status, void *data)
 {
-    (void)connection;
-    netvfs_loop_dispatch_status((struct NetVfsLoopOwner *)data, status);
+    netvfs_loop_dispatch_status((struct NetVfsLoopOwner *)data, connection, status);
 }
 
 static void new_connection(DBusServer *server, DBusConnection *connection, void *data)
 {
-    (void)server;
-    netvfs_loop_new_connection((struct NetVfsLoopOwner *)data, connection);
+    netvfs_loop_new_connection((struct NetVfsLoopOwner *)data, server, connection);
 }
 
 static dbus_bool_t own_uid_only(DBusConnection *connection, unsigned long uid, void *data)
 {
-    (void)connection;
     (void)data;
-    return uid == (unsigned long)geteuid() ? TRUE : FALSE;
+    return netvfs_loop_uid_allowed(connection, uid);
 }
 
 const DBusAddWatchFunction netvfs_loop_add_watch = add_watch;

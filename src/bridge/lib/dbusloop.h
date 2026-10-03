@@ -24,9 +24,11 @@ void netvfs_loop_watch_toggled(DBusWatch *watch);
 dbus_bool_t netvfs_loop_timeout_added(DBusTimeout *timeout);
 void netvfs_loop_timeout_removed(DBusTimeout *timeout);
 void netvfs_loop_timeout_toggled(DBusTimeout *timeout);
-DBusHandlerResult netvfs_loop_message(struct NetVfsLoopOwner *owner, DBusMessage *message);
-void netvfs_loop_dispatch_status(struct NetVfsLoopOwner *owner, DBusDispatchStatus status);
-void netvfs_loop_new_connection(struct NetVfsLoopOwner *owner, DBusConnection *connection);
+DBusHandlerResult netvfs_loop_message(struct NetVfsLoopOwner *owner, DBusConnection *connection, DBusMessage *message);
+void netvfs_loop_dispatch_status(struct NetVfsLoopOwner *owner, DBusConnection *connection,
+                                 DBusDispatchStatus status);
+void netvfs_loop_new_connection(struct NetVfsLoopOwner *owner, DBusServer *server, DBusConnection *connection);
+dbus_bool_t netvfs_loop_uid_allowed(DBusConnection *connection, unsigned long uid);
 
 /* The callbacks for libdbus (dbusloop.c). Their user data is the NetVfsLoopOwner. */
 extern const DBusAddWatchFunction netvfs_loop_add_watch;
