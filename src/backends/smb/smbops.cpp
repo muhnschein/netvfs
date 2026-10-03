@@ -66,8 +66,7 @@ Result listPath(Session &session, const QByteArray &path, ListSink *sink, const 
     }, QStringLiteral("list"));
     if (!r.ok()) {
         // Samba answers a file with "not found" for some paths; say what it is.
-        Entry entry;
-        if (r.error() != Error::ConnectionLost && statPath(session, path, &entry).ok() && !entry.isDir())
+        if (Entry entry; r.error() != Error::ConnectionLost && statPath(session, path, &entry).ok() && !entry.isDir())
             return Result(Error::NotADirectory, QStringLiteral("list: not a folder"));
         return r;
     }
@@ -77,8 +76,7 @@ Result listPath(Session &session, const QByteArray &path, ListSink *sink, const 
     smb2_context *ctx = session.context();
     QVector<Entry> batch;
     for (const smb2dirent *ent = smb2_readdir(ctx, call->dir); ent && r.ok(); ent = smb2_readdir(ctx, call->dir)) {
-        const QByteArray name(ent->name);
-        if (name != "." && name != "..")
+        if (const QByteArray name(ent->name); name != "." && name != "..")
             batch.append(entryFrom(decodeName(ent->name), ent->st));
         r = deliver(session, sink, &batch, batchSize, false);
     }
@@ -204,8 +202,7 @@ Result openForWrite(Session &session, const QByteArray &path, const WriteOptions
         flags = O_RDWR;     // Resume: the size check needs FILE_READ_ATTRIBUTES
     Result r = openFile(session, path, flags, fh);
     if (!r.ok()) {
-        Entry entry;
-        if (r.error() != Error::ConnectionLost && statPath(session, path, &entry).ok() && entry.isDir())
+        if (Entry entry; r.error() != Error::ConnectionLost && statPath(session, path, &entry).ok() && entry.isDir())
             return Result(Error::IsADirectory, QStringLiteral("open: a folder"));
         return r;
     }

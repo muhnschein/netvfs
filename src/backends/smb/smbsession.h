@@ -66,6 +66,13 @@ public:
     // The call may go on; otherwise it returns busy().
     bool entered() const { return m_entered; }
     static Result busy();
+    // Runs `body` (which returns a Result) inside the gate, or answers busy().
+    template <typename Body>
+    static Result run(ThreadGate *gate, Body body)
+    {
+        const GateHold hold(gate);
+        return hold.entered() ? body() : busy();
+    }
 
 private:
     ThreadGate *m_gate;
@@ -158,7 +165,9 @@ public:
     // Graceful: tree disconnect within DrainMs, then the context goes.
     void close() noexcept;
 
-    quint64 lastUse = 0;            // LRU among share sessions (XM-2)
+    // LRU among share sessions (XM-2).
+    quint64 lastUse() const { return m_lastUse; }
+    void touch(quint64 clock) { m_lastUse = clock; }
 
 private:
     Result prepare(Wait wait);
@@ -175,6 +184,7 @@ private:
     bool m_broken = false;
     std::vector<std::unique_ptr<Call>> m_orphans;
     QSet<SessionFile *> m_files;
+    quint64 m_lastUse = 0;
 };
 
 } // namespace NetVfs::Smb

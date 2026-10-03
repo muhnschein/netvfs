@@ -241,64 +241,67 @@ Result Reader::read(qint64 offset, qint64 maxBytes, QByteArray *out)
 {
     if (out)
         out->clear();
-    const GateHold hold(m_gate);       // M-13
-    if (!hold.entered())
-        return GateHold::busy();
-    if (Result r = usable(); !r.ok())
-        return r;
-    // C-9: also when what is asked for has arrived already.
-    if (m_session->canceled())
-        return Result(Error::Canceled);
-    if (offset < 0 || maxBytes < 0 || maxBytes > std::numeric_limits<int>::max())
-        return invalidRange();
-    auto position = static_cast<quint64>(offset);
-    const quint64 end = position + static_cast<quint64>(maxBytes);
-    if (!m_queue.empty() && m_queue.front().offset + m_queue.front().used != position)
-        discard();      // not where the queue continues: a new position
-    QByteArray data;
-    data.reserve(static_cast<int>(std::min<qint64>(maxBytes, MaxInFlight)));
-    bool eof = false;
-    while (position < end && !eof) {
-        Result r = fill(position, end);
-        if (r.ok())
-            r = consume(&position, end, &data, &eof);
-        if (!r.ok()) {
-            discard();
+    // M-13
+    return GateHold::run(m_gate, [this, offset, maxBytes, out]() -> Result {
+        if (Result r = usable(); !r.ok())
             return r;
+        // C-9: also when what is asked for has arrived already.
+        if (m_session->canceled())
+            return Result(Error::Canceled);
+        if (offset < 0 || maxBytes < 0 || maxBytes > std::numeric_limits<int>::max())
+            return invalidRange();
+        auto position = static_cast<quint64>(offset);
+        const quint64 end = position + static_cast<quint64>(maxBytes);
+        if (!m_queue.empty() && m_queue.front().offset + m_queue.front().used != position)
+            discard();      // not where the queue continues: a new position
+        QByteArray data;
+        data.reserve(static_cast<int>(std::min<qint64>(maxBytes, MaxInFlight)));
+        bool eof = false;
+        while (position < end && !eof) {
+            Result r = fill(position, end);
+            if (r.ok())
+                r = consume(&position, end, &data, &eof);
+            if (!r.ok()) {
+                discard();
+                return r;
+            }
         }
-    }
-    if (out)
-        *out = data;
-    return Result::success();
+        if (out)
+            *out = data;
+        return Result::success();
+    });
 }
 
 void Reader::readAhead(qint64 offset, qint64 bytes)
 {
-    const GateHold hold(m_gate);       // M-13
-    if (!hold.entered() || !usable().ok() || offset < 0 || bytes <= 0)
-        return;
-    const auto from = static_cast<quint64>(offset);
-    if (!m_queue.empty() && (from < m_queue.front().offset + m_queue.front().used || from > queueEnd()))
-        discard();
-    quint64 to = from + static_cast<quint64>(std::min<qint64>(bytes, MaxInFlight));
-    if (m_size >= 0)
-        to = std::min(to, std::max(from, static_cast<quint64>(m_size)));
-    // A hint: a request that cannot start now is simply not made.
-    fill(from, to);
+    // M-13
+    GateHold::run(m_gate, [this, offset, bytes]() -> Result {
+        if (!usable().ok() || offset < 0 || bytes <= 0)
+            return Result();
+        const auto from = static_cast<quint64>(offset);
+        if (!m_queue.empty() && (from < m_queue.front().offset + m_queue.front().used || from > queueEnd()))
+            discard();
+        quint64 to = from + static_cast<quint64>(std::min<qint64>(bytes, MaxInFlight));
+        if (m_size >= 0)
+            to = std::min(to, std::max(from, static_cast<quint64>(m_size)));
+        // A hint: a request that cannot start now is simply not made.
+        fill(from, to);
+        return Result();
+    });
 }
 
 Result Reader::closeWith(const Result &outcome)
 {
     if (!m_fh)
         return m_lost ? lostFile() : outcome;
-    const GateHold hold(m_gate);       // M-13
-    if (!hold.entered())
-        return GateHold::busy();
-    discard();
-    smb2fh *fh = m_fh;
-    m_fh = nullptr;
-    m_session->detach(this);
-    return closeFile(*m_session, fh, outcome);
+    // M-13
+    return GateHold::run(m_gate, [this, &outcome]() -> Result {
+        discard();
+        smb2fh *fh = m_fh;
+        m_fh = nullptr;
+        m_session->detach(this);
+        return closeFile(*m_session, fh, outcome);
+    });
 }
 
 Result Reader::close()
@@ -352,25 +355,25 @@ Result Writer::fail(const Result &r)
 
 Result Writer::write(const char *data, qint64 length)
 {
-    const GateHold hold(m_gate);       // M-13
-    if (!hold.entered())
-        return GateHold::busy();
-    if (Result r = usable(); !r.ok())
-        return r;
-    if (length < 0)
-        return invalidRange();
-    qint64 done = 0;
-    while (done < length) {
-        const qint64 take = std::min<qint64>(m_chunk - static_cast<quint32>(m_buffer.size()), length - done);
-        m_buffer.append(data + done, static_cast<int>(take));
-        done += take;
-        if (static_cast<quint32>(m_buffer.size()) < m_chunk)
-            continue;
-        if (Result r = send(); !r.ok())
-            return fail(r);
-    }
-    m_position += length;
-    return Result::success();
+    // M-13
+    return GateHold::run(m_gate, [this, data, length]() -> Result {
+        if (Result r = usable(); !r.ok())
+            return r;
+        if (length < 0)
+            return invalidRange();
+        qint64 done = 0;
+        while (done < length) {
+            const qint64 take = std::min<qint64>(m_chunk - static_cast<quint32>(m_buffer.size()), length - done);
+            m_buffer.append(data + done, static_cast<int>(take));
+            done += take;
+            if (static_cast<quint32>(m_buffer.size()) < m_chunk)
+                continue;
+            if (Result r = send(); !r.ok())
+                return fail(r);
+        }
+        m_position += length;
+        return Result::success();
+    });
 }
 
 Result Writer::send()
@@ -428,10 +431,10 @@ Result Writer::writeRest(const QByteArray &data, quint32 from, quint64 offset)
         const auto count = static_cast<quint32>(data.size()) - done;
         const quint64 at = offset + (done - from);
         smb2fh *fh = m_fh;
-        const Result r = m_session->request(call, [fh, bytes, count, at](smb2_context *ctx, Call *c) {
-            return smb2_pwrite_async(ctx, fh, bytes, count, at, netvfs_smb_complete_plain, c->completion());
-        }, QStringLiteral("write"));
-        if (!r.ok())
+        if (const Result r = m_session->request(call, [fh, bytes, count, at](smb2_context *ctx, Call *c) {
+                return smb2_pwrite_async(ctx, fh, bytes, count, at, netvfs_smb_complete_plain, c->completion());
+            }, QStringLiteral("write"));
+            !r.ok())
             return r;
         if (call->status == 0)
             return Result(Error::ProtocolError, QStringLiteral("write: the server accepted no data"));
@@ -451,34 +454,34 @@ void Writer::drop()
 
 Result Writer::commit()
 {
-    const GateHold hold(m_gate);       // M-13
-    if (!hold.entered())
-        return GateHold::busy();
-    Result r = usable();
-    if (!m_fh)
-        return r;
-    if (r.ok() && !m_buffer.isEmpty())
-        r = send();
-    while (r.ok() && !m_inFlight.empty())
-        r = retireOldest();
-    if (r.ok()) {
-        // C-12: flush to stable storage before the size check and rename.
-        auto call = std::make_unique<Call>();
+    // M-13
+    return GateHold::run(m_gate, [this]() -> Result {
+        Result r = usable();
+        if (!m_fh)
+            return r;
+        if (r.ok() && !m_buffer.isEmpty())
+            r = send();
+        while (r.ok() && !m_inFlight.empty())
+            r = retireOldest();
+        if (r.ok()) {
+            // C-12: flush to stable storage before the size check and rename.
+            auto call = std::make_unique<Call>();
+            smb2fh *fh = m_fh;
+            r = m_session->request(call, [fh](smb2_context *ctx, Call *c) {
+                return smb2_fsync_async(ctx, fh, netvfs_smb_complete_plain, c->completion());
+            }, QStringLiteral("flush"));
+        }
+        drop();
         smb2fh *fh = m_fh;
-        r = m_session->request(call, [fh](smb2_context *ctx, Call *c) {
-            return smb2_fsync_async(ctx, fh, netvfs_smb_complete_plain, c->completion());
-        }, QStringLiteral("flush"));
-    }
-    drop();
-    smb2fh *fh = m_fh;
-    m_fh = nullptr;
-    m_session->detach(this);
-    r = closeFile(*m_session, fh, r);
-    // XC-14: the time is set after the close, so that no later write of
-    // this handle can move it again.
-    if (r.ok() && m_modified.isValid())
-        r = setTimes(*m_session, m_path, m_modified, QDateTime());
-    return r;
+        m_fh = nullptr;
+        m_session->detach(this);
+        r = closeFile(*m_session, fh, r);
+        // XC-14: the time is set after the close, so that no later write of
+        // this handle can move it again.
+        if (r.ok() && m_modified.isValid())
+            r = setTimes(*m_session, m_path, m_modified, QDateTime());
+        return r;
+    });
 }
 
 void Writer::abort()
@@ -490,14 +493,15 @@ void Writer::shut() noexcept
 {
     if (!m_fh)
         return;
-    const GateHold hold(m_gate);       // M-13
-    if (!hold.entered())
-        return;
-    drop();
-    smb2fh *fh = m_fh;
-    m_fh = nullptr;
-    m_session->detach(this);
-    closeFile(*m_session, fh, Result(Error::Canceled));
+    // M-13
+    GateHold::run(m_gate, [this]() -> Result {
+        drop();
+        smb2fh *fh = m_fh;
+        m_fh = nullptr;
+        m_session->detach(this);
+        closeFile(*m_session, fh, Result(Error::Canceled));
+        return Result();
+    });
 }
 
 void Writer::invalidate()

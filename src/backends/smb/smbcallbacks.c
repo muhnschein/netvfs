@@ -73,25 +73,20 @@ const smb2_command_cb netvfs_smb_complete_opendir = complete_opendir;
 struct set_basic_data {
     struct NetVfsSmbCompletion *completion;
     uint32_t status;            /* first failing NT status of the compound */
+    int pending;                /* callbacks still to come: CREATE, SET_INFO, CLOSE */
 };
 
 static void set_basic_step(struct smb2_context *smb2, int status, void *command_data, void *private_data)
 {
     struct set_basic_data *data = (struct set_basic_data *)private_data;
-
-    (void)smb2;
-    (void)command_data;
-    if (data->status == SMB2_STATUS_SUCCESS)
-        data->status = (uint32_t)status;
-}
-
-static void set_basic_done(struct smb2_context *smb2, int status, void *command_data, void *private_data)
-{
-    struct set_basic_data *data = (struct set_basic_data *)private_data;
     struct NetVfsSmbCompletion *completion = data->completion;
     uint32_t nt;
 
-    set_basic_step(smb2, status, command_data, private_data);
+    (void)command_data;
+    if (data->status == SMB2_STATUS_SUCCESS)
+        data->status = (uint32_t)status;
+    if (--data->pending > 0)
+        return;
     nt = data->status;
     free(data);
     finish(smb2, completion, nt == SMB2_STATUS_SUCCESS ? 0 : -nterror_to_errno(nt));
@@ -113,6 +108,7 @@ int netvfs_smb_set_basic_info_async(struct smb2_context *smb2, const char *path,
     if (!data)
         return -ENOMEM;
     data->completion = completion;
+    data->pending = 3;
 
     memset(&create, 0, sizeof(create));
     create.requested_oplock_level = SMB2_OPLOCK_LEVEL_NONE;
@@ -142,7 +138,7 @@ int netvfs_smb_set_basic_info_async(struct smb2_context *smb2, const char *path,
 
     memset(&closing, 0, sizeof(closing));
     memcpy(closing.file_id, compound_file_id, SMB2_FD_SIZE);
-    next = smb2_cmd_close_async(smb2, &closing, set_basic_done, data);
+    next = smb2_cmd_close_async(smb2, &closing, set_basic_step, data);
     if (!next) {
         smb2_free_pdu(smb2, pdu);
         free(data);

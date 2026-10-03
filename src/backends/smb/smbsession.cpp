@@ -27,13 +27,13 @@ std::mutex &contextListMutex()
 
 smb2_context *createContext()
 {
-    const std::lock_guard<std::mutex> lock(contextListMutex());
+    const std::scoped_lock lock(contextListMutex());
     return smb2_init_context();
 }
 
 void destroyContext(smb2_context *ctx)
 {
-    const std::lock_guard<std::mutex> lock(contextListMutex());
+    const std::scoped_lock lock(contextListMutex());
     smb2_destroy_context(ctx);
 }
 
