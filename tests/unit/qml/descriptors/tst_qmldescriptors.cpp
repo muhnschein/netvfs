@@ -493,26 +493,26 @@ private slots:
         QCOMPARE(model.count(), 2);
         QCOMPARE(model.rowCount(model.index(0)), 0);
         const QHash<int, QByteArray> roles = model.roleNames();
-        QCOMPARE(roles.value(NetVfsUi::ConsentModel::ConsumerIdRole), QByteArray("consumerId"));
-        QCOMPARE(roles.value(NetVfsUi::ConsentModel::DisplayNameRole), QByteArray("displayName"));
-        QCOMPARE(roles.value(NetVfsUi::ConsentModel::ConsentRole), QByteArray("consent"));
-        QCOMPARE(model.data(model.index(1), NetVfsUi::ConsentModel::ConsumerIdRole).toString(), QStringLiteral("lautta"));
+        QCOMPARE(roles.value(NetVfsUi::ConsentModel::roleId(NetVfsUi::ConsentModel::Role::ConsumerId)), QByteArray("consumerId"));
+        QCOMPARE(roles.value(NetVfsUi::ConsentModel::roleId(NetVfsUi::ConsentModel::Role::DisplayName)), QByteArray("displayName"));
+        QCOMPARE(roles.value(NetVfsUi::ConsentModel::roleId(NetVfsUi::ConsentModel::Role::Consent)), QByteArray("consent"));
+        QCOMPARE(model.data(model.index(1), NetVfsUi::ConsentModel::roleId(NetVfsUi::ConsentModel::Role::ConsumerId)).toString(), QStringLiteral("lautta"));
         QCOMPARE(model.data(model.index(1), Qt::DisplayRole).toString(), QStringLiteral("Lautta"));
-        QCOMPARE(model.data(model.index(0), NetVfsUi::ConsentModel::DisplayNameRole).toString(), QStringLiteral("Aaa"));
-        QCOMPARE(model.data(model.index(1), NetVfsUi::ConsentModel::ConsentRole).toString(), QStringLiteral("unknown"));
-        QCOMPARE(model.data(model.index(0), NetVfsUi::ConsentModel::ConsentRole).toString(), QStringLiteral("denied"));
-        QVERIFY(!model.data(model.index(5), NetVfsUi::ConsentModel::ConsentRole).isValid());
+        QCOMPARE(model.data(model.index(0), NetVfsUi::ConsentModel::roleId(NetVfsUi::ConsentModel::Role::DisplayName)).toString(), QStringLiteral("Aaa"));
+        QCOMPARE(model.data(model.index(1), NetVfsUi::ConsentModel::roleId(NetVfsUi::ConsentModel::Role::Consent)).toString(), QStringLiteral("unknown"));
+        QCOMPARE(model.data(model.index(0), NetVfsUi::ConsentModel::roleId(NetVfsUi::ConsentModel::Role::Consent)).toString(), QStringLiteral("denied"));
+        QVERIFY(!model.data(model.index(5), NetVfsUi::ConsentModel::roleId(NetVfsUi::ConsentModel::Role::Consent)).isValid());
         QVERIFY(!model.data(model.index(0), Qt::DecorationRole).isValid());
 
         QSignalSpy changed(&model, &QAbstractItemModel::dataChanged);
         QVERIFY(model.grant(QStringLiteral("lautta")));
         QCOMPARE(changed.count(), 1);
-        QCOMPARE(model.data(model.index(1), NetVfsUi::ConsentModel::ConsentRole).toString(), QStringLiteral("granted"));
+        QCOMPARE(model.data(model.index(1), NetVfsUi::ConsentModel::roleId(NetVfsUi::ConsentModel::Role::Consent)).toString(), QStringLiteral("granted"));
         QCOMPARE(ConsentStore(path).consent(QStringLiteral("lautta")), Consent::Granted);   // the bridge's view
         QCOMPARE(model.consent(QStringLiteral("lautta")), QStringLiteral("granted"));
         QVERIFY(model.revoke(QStringLiteral("lautta")));
         QCOMPARE(ConsentStore(path).consent(QStringLiteral("lautta")), Consent::Denied);
-        QCOMPARE(model.data(model.index(1), NetVfsUi::ConsentModel::ConsentRole).toString(), QStringLiteral("denied"));
+        QCOMPARE(model.data(model.index(1), NetVfsUi::ConsentModel::roleId(NetVfsUi::ConsentModel::Role::Consent)).toString(), QStringLiteral("denied"));
         // Only registered consumers.
         QVERIFY(!model.grant(QStringLiteral("stranger")));
         QCOMPARE(ConsentStore(path).consent(QStringLiteral("stranger")), Consent::Unknown);
@@ -521,7 +521,7 @@ private slots:
         // Changes made elsewhere (the bridge's notification) show after reload().
         ConsentStore(path).setConsent(QStringLiteral("aaa"), Consent::Granted);
         model.reload();
-        QCOMPARE(model.data(model.index(0), NetVfsUi::ConsentModel::ConsentRole).toString(), QStringLiteral("granted"));
+        QCOMPARE(model.data(model.index(0), NetVfsUi::ConsentModel::roleId(NetVfsUi::ConsentModel::Role::Consent)).toString(), QStringLiteral("granted"));
         QSignalSpy countChanged(&model, &NetVfsUi::ConsentModel::countChanged);
         QFile::remove(consumersDir.filePath(QStringLiteral("aaa.conf")));
         model.reload();
@@ -534,7 +534,7 @@ private slots:
         writeFile(dirAsFile, "x");
         model.setStorePath(dirAsFile + QStringLiteral("/bridge.conf"));
         QVERIFY(!model.grant(QStringLiteral("lautta")));
-        QCOMPARE(model.data(model.index(0), NetVfsUi::ConsentModel::ConsentRole).toString(), QStringLiteral("unknown"));
+        QCOMPARE(model.data(model.index(0), NetVfsUi::ConsentModel::roleId(NetVfsUi::ConsentModel::Role::Consent)).toString(), QStringLiteral("unknown"));
     }
 };
 

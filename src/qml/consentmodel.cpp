@@ -31,12 +31,12 @@ QVariant ConsentModel::data(const QModelIndex &index, int role) const
         return QVariant();
     const ConsumerInfo &consumer = m_consumers.at(index.row());
     switch (role) {
-    case ConsumerIdRole:
+    case roleId(Role::ConsumerId):
         return consumer.id;
-    case DisplayNameRole:
+    case roleId(Role::DisplayName):
     case Qt::DisplayRole:
         return consumer.displayName;
-    case ConsentRole:
+    case roleId(Role::Consent):
         return consentToString(m_consents.at(index.row()));
     default:
         return QVariant();
@@ -46,9 +46,9 @@ QVariant ConsentModel::data(const QModelIndex &index, int role) const
 QHash<int, QByteArray> ConsentModel::roleNames() const
 {
     QHash<int, QByteArray> names;
-    names.insert(ConsumerIdRole, "consumerId");
-    names.insert(DisplayNameRole, "displayName");
-    names.insert(ConsentRole, "consent");
+    names.insert(roleId(Role::ConsumerId), "consumerId");
+    names.insert(roleId(Role::DisplayName), "displayName");
+    names.insert(roleId(Role::Consent), "consent");
     return names;
 }
 
@@ -92,7 +92,7 @@ bool ConsentModel::store(const QString &consumerId, Consent consent)
             return false;
         m_consents[row] = consent;
         const QModelIndex changed = index(row);
-        emit dataChanged(changed, changed, { ConsentRole });
+        emit dataChanged(changed, changed, { roleId(Role::Consent) });
         return true;
     }
     return false;   // only registered consumers

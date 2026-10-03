@@ -331,8 +331,8 @@
   {
     "name": "XA-5 service settings shown without their service",
     "file": "src/qml/providerdescriptors.cpp",
-    "search": "    if (!service.isEmpty() && !services.contains(service))",
-    "replace": "    if (!service.isEmpty() && services.isEmpty() && service.isNull())",
+    "search": "        !service.isEmpty() && !services.contains(service))",
+    "replace": "        !service.isEmpty() && services.isEmpty() && service.isNull())",
     "test": "build/tests/unit/qml/descriptors/tst_qmldescriptors"
   },
   {
@@ -352,15 +352,15 @@
   {
     "name": "XA-7 guest still asked for a secret",
     "file": "src/qml/providerdescriptors.cpp",
-    "search": "    if (!noSecret.isEmpty() && conditionHolds(noSecret, values))",
-    "replace": "    if (false)",
+    "search": "        !noSecret.isEmpty() && conditionHolds(noSecret, values))",
+    "replace": "        !noSecret.isEmpty() && false)",
     "test": "build/tests/unit/qml/descriptors/tst_qmldescriptors"
   },
   {
     "name": "XA-5 hidden fields stored",
     "file": "src/qml/providerdescriptors.cpp",
-    "search": "        if (stored && isVisible(field, values, QStringList()))",
-    "replace": "        if (stored)",
+    "search": "            stored && isVisible(field, values, QStringList()))",
+    "replace": "            stored)",
     "test": "build/tests/unit/qml/descriptors/tst_qmldescriptors"
   },
   {

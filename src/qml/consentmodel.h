@@ -22,7 +22,8 @@ class ConsentModel : public QAbstractListModel
     Q_PROPERTY(int count READ count NOTIFY countChanged)
 
 public:
-    enum Role { ConsumerIdRole = Qt::UserRole + 1, DisplayNameRole, ConsentRole };
+    enum class Role { ConsumerId = Qt::UserRole + 1, DisplayName, Consent };
+    static constexpr int roleId(Role role) { return static_cast<int>(role); }
 
     explicit ConsentModel(QObject *parent = nullptr);
 

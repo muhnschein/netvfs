@@ -96,7 +96,7 @@ public:
     Q_INVOKABLE QVariantMap makeParams(const QString &provider, const QVariantMap &values,
                                        const QVariantMap &extraOptions);
     // Cleaned value of a service setting (backups_path, files_root).
-    Q_INVOKABLE QString serviceValue(const QString &provider, const QVariantMap &values, const QString &key);
+    Q_INVOKABLE QString serviceValue(const QString &provider, const QVariantMap &values, const QString &key) const;
     // Read-only view of stored parameters for the settings page:
     // [{ label, value }] for the visible, non-service fields with a value.
     Q_INVOKABLE QVariantList details(const QString &provider, const QVariantMap &params);
