@@ -259,8 +259,15 @@ from the command line, for tests and diagnostics.
 %install
 %qmake5_install
 
-%post core -p /sbin/ldconfig
-%postun core -p /sbin/ldconfig
+# Script bodies, not "-p /sbin/ldconfig": rpm passes the count of
+# installed instances to a -p program as an argument, and ldconfig takes
+# "1" for a folder and fails (0.1.0 did this; its removal script fails
+# on update).
+%post core
+/sbin/ldconfig
+
+%postun core
+/sbin/ldconfig
 
 # SPEC P-6: msyncd picks up new or removed plugins and profiles.
 %post backup-sftp

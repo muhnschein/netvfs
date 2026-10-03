@@ -65,6 +65,7 @@ packages() {
 }
 
 old_rpms=$(packages "$old_dir")
+old_version=$(rpm -qp --qf '%{VERSION}' "$(packages "$old_dir" | grep '/netvfs-core-[0-9]')")
 new_version=$(rpm -qp --qf '%{VERSION}' "$(packages "$new_dir" | grep '/netvfs-core-[0-9]')")
 echo "old: $(for r in $old_rpms; do basename "$r"; done | tr '\n' ' ')"
 
@@ -85,14 +86,29 @@ zypper_target ar -G "file://$repo" netvfs-new
 zypper_target ref netvfs-new
 
 case $scenario in
-    up)
-        zypper_target up -r netvfs-new ;;
-    packages)
-        # shellcheck disable=SC2086 # one word per package
-        zypper_target in $installed_old ;;
+    up) update="up -r netvfs-new" ;;
+    packages) update="in $installed_old" ;;
     *)
         echo "unknown scenario $scenario"
         exit 2 ;;
+esac
+# Exit code 107: an RPM scriptlet failed. Netvfs 0.1.0 ran
+# "%postun -p /sbin/ldconfig", which fails when rpm passes it the instance
+# count; that scriptlet ships in the installed old package and cannot be
+# fixed by the update. Any other failed scriptlet fails the check.
+log=$repo.log
+code=0
+# shellcheck disable=SC2086 # one word per argument
+sb2 -t "$TARGET" -m sdk-install -R zypper --non-interactive $update >"$log" 2>&1 || code=$?
+cat "$log"
+case $code in
+    0|106) ;;
+    107)
+        others=$(grep 'scriptlet failed' "$log" | grep -v "^warning: %postun(netvfs-core-$old_version-[^)]*) scriptlet failed" || true)
+        [ -z "$others" ] || fail "scriptlets failed: $others" ;;
+    *)
+        echo "FAIL: zypper exited with $code"
+        exit 1 ;;
 esac
 
 echo "installed after the update:"
@@ -116,5 +132,5 @@ for file in $keep; do
     esac
 done
 echo "checked $(echo "$keep" | wc -w) files of: $accounts_old"
-rm -rf "$repo"
+rm -rf "$repo" "$log"
 exit $status
