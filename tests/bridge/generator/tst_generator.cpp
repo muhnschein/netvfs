@@ -112,8 +112,7 @@ void tst_Generator::goldenUnits()
         }
         if (golden.isDir())
             continue;
-        QByteArray expected = readFile(golden.filePath());
-        expected.replace("@CONSUMERS@", Inputs.toUtf8());
+        const QByteArray expected = readFile(golden.filePath());
         QCOMPARE(QString::fromUtf8(readFile(actual.filePath())), QString::fromUtf8(expected));
     }
     // The folders of the links are for the user manager only.

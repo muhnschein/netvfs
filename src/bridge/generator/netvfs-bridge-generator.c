@@ -403,8 +403,10 @@ static void report(const char *name, const char *problem)
 static size_t collect_ids(DIR *dir, char ids[][MAX_ID + 2], size_t capacity)
 {
     size_t count = 0;
-    const struct dirent *entry;
-    while (count < capacity && (entry = readdir(dir)) != NULL) {
+    while (count < capacity) {
+        const struct dirent *entry = readdir(dir);
+        if (entry == NULL)
+            break;
         char stem[MAX_ID + 2];
         if (entry->d_name[0] == '.' || !has_conf_suffix(entry->d_name, stem, sizeof(stem)))
             continue;
@@ -417,11 +419,11 @@ static size_t collect_ids(DIR *dir, char ids[][MAX_ID + 2], size_t capacity)
 }
 
 /* One consumer: read, validate, emit. Returns 0 unless the output folder is unusable. */
-static int generate_one(const char *out, const char *base, const char *dir_name, const char *id)
+/* The units name their source by file name only: the folder may come from the environment. */
+static int generate_one(const char *out, const char *base, const char *id)
 {
     char resolved[MAX_PATH_LENGTH];
     char name[MAX_ID + 8];
-    char source[MAX_PATH_LENGTH];
     struct consumer c;
     snprintf(name, sizeof(name), "%.*s.conf", MAX_ID + 1, id);
     const char *problem = NULL;
@@ -435,9 +437,7 @@ static int generate_one(const char *out, const char *base, const char *dir_name,
         report(name, problem);
         return 0;
     }
-    if (snprintf(source, sizeof(source), "%s/%s", dir_name, name) >= (int)sizeof(source))
-        return 0;
-    return emit(out, &c, source) != 0;
+    return emit(out, &c, name) != 0;
 }
 
 int main(int argc, char **argv)
@@ -462,7 +462,7 @@ int main(int argc, char **argv)
 
     int status = 0;
     for (size_t i = 0; i < count; ++i) {
-        if (generate_one(out, base, dir_name, ids[i]))
+        if (generate_one(out, base, ids[i]))
             status = 1;
     }
     return status;
