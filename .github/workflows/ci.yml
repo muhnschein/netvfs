@@ -26,6 +26,8 @@ jobs:
         run: make -j"$(nproc)"
       - name: Packaging checks (file lists, no share enumeration in the SMB plugin)
         run: make check-packaging
+      - name: Every mutation list is in the mutation matrix
+        run: ./tools/ci/check-mutation-matrix.py
       - name: Unit tests
         run: make check-unit
       - name: Interop tests
@@ -47,8 +49,14 @@ jobs:
         run: make SANITIZE=1 check
 
   mutation:
-    name: Tests bite (mutation check)
+    # One job per mutation list: the interop-level lists run whole container
+    # suites per mutation and would not fit one job's time limit together.
+    name: Tests bite (${{ matrix.list }})
     runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        list: [accounts, bridge, buteo, cli, core, discovery, ftp, local, ops, packaging, qml, sftp, smb, url, webdav]
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
@@ -58,7 +66,7 @@ jobs:
       - name: Build
         run: make -j"$(nproc)"
       - name: Mutation check
-        run: ./tools/mutation-check.py --build build
+        run: ./tools/mutation-check.py --build build tests/mutations/${{ matrix.list }}.json
 
   fuzz:
     name: Fuzzing (fixed budget)
