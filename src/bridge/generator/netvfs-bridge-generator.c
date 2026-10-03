@@ -191,7 +191,7 @@ static const char *parse_consumer(const char *path, struct consumer *c)
 
 static const char *validate(const struct consumer *c, const char *stem)
 {
-    if (!netvfs_valid_id(c->id) || strcmp(c->id, stem) != 0)
+    if (strcmp(c->id, stem) != 0)
         return "Id must match [a-z0-9-]+ and the file name";
     if (!valid_display_name(c->display_name))
         return "DisplayName is empty or has control characters";

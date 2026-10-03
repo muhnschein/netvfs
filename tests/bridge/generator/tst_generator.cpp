@@ -141,6 +141,7 @@ void tst_Generator::skipsInvalidConsumers()
                               "specifier.conf" })
         QVERIFY2(run.stderrText.contains(QLatin1String(name)), name);
     QVERIFY(!run.stderrText.contains(QLatin1String("lautta.conf")));
+    QVERIFY(run.stderrText.contains(QLatin1String("Upper.conf: Id must match")));   // refused by its name
     for (const QString &entry : tree(out.path()))
         QVERIFY2(entry.contains(QLatin1String("lautta")) || entry.contains(QLatin1String("photos"))
                      || entry.endsWith(QLatin1String(".wants")), qPrintable(entry));
