@@ -14,6 +14,7 @@ import sys
 import urllib.request
 
 HOST = "https://sonarcloud.io"
+PAGE_SIZE = 500
 
 
 def project_key():
@@ -34,18 +35,32 @@ def location(item):
     return "%s:%s" % (item["component"].split(":", 1)[-1], item.get("line", "-"))
 
 
+def fetch_all(path, list_name):
+    """Pages through a search endpoint; returns (items, total). The issues API
+    stops at 10 000 results, which is far beyond what is useful in a log."""
+    items = []
+    page = 1
+    while True:
+        data = fetch("%s&ps=%d&p=%d" % (path, PAGE_SIZE, page))
+        items.extend(data.get(list_name, []))
+        paging = data.get("paging", {})
+        total = paging.get("total", data.get("total", len(items)))
+        if page * PAGE_SIZE >= total or not data.get(list_name):
+            return items, total
+        page += 1
+
+
 def main():
     key = project_key()
     scope = os.environ["SONAR_SCOPE"]
-    issues = fetch("issues/search?componentKeys=%s&%s&resolved=false&ps=500" % (key, scope))
-    hotspots = fetch("hotspots/search?projectKey=%s&%s&status=TO_REVIEW&ps=500" % (key, scope))
-    for i in issues.get("issues", []):
+    issues, issue_count = fetch_all("issues/search?componentKeys=%s&%s&resolved=false" % (key, scope), "issues")
+    hotspots, hotspot_count = fetch_all("hotspots/search?projectKey=%s&%s&status=TO_REVIEW" % (key, scope),
+                                        "hotspots")
+    for i in issues:
         print("ISSUE   %-8s %-18s %s  %s" % (i.get("severity", ""), i["rule"], location(i), i["message"]))
-    for h in hotspots.get("hotspots", []):
+    for h in hotspots:
         print("HOTSPOT %-8s %-18s %s  %s" % (h.get("vulnerabilityProbability", ""), h.get("ruleKey", ""),
-                                            location(h), h["message"]))
-    issue_count = issues.get("total", 0)
-    hotspot_count = hotspots.get("paging", {}).get("total", 0)
+                                             location(h), h["message"]))
     print("%d open issues, %d hotspots to review" % (issue_count, hotspot_count))
     return 1 if issue_count or hotspot_count else 0
 
