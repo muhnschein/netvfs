@@ -373,7 +373,7 @@ Open types from `Sailfish.Accounts 1.0` **[src]**: `Account`, `AccountManager`, 
 | `SshKeyTool` | SFTP only, see SPEC-sftp |
 | shared pages | `ServerIdentityDialog`, `ProbeBusyPage`, `RemoteFsSettingsPage` |
 
-`RemoteFsProbe.verify()` performs: authenticate, `makePath(backupsPath)`, write and delete a probe file `.remotefs-probe-<random>`, query free space.
+`RemoteFsProbe.verify()` performs: authenticate, `makePath(backupsPath)`, write and delete a probe file `.remotefs-probe-<random>`, query free space. The free-space query is advisory: when it fails, the verification succeeds with unknown free space (C-13 treats an unknown value the same way); only a cancel stops it.
 
 ### 7.3 Creation flow (`<p>.qml`)
 

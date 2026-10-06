@@ -3,6 +3,7 @@
 // size, the TCP probe of connect(), and the plugin's behaviour against local
 // TCP peers that accept and then close or never answer.
 #include "backendloader.h"
+#include "smbcallbacks.h"
 #include "smbhelper.h"
 #include "smbshares.h"
 #include "smbutil.h"
@@ -406,6 +407,19 @@ private slots:
         QCOMPARE(errorForSocket(ECANCELED, QString()).error(), Error::Canceled);
         QCOMPARE(errorForSocket(ETIMEDOUT, QString()).error(), Error::Timeout);
         QCOMPARE(errorForSocket(ECONNREFUSED, QString()).error(), Error::NetworkUnreachable);
+    }
+
+    // M-7: the library's request timeout (vendor/libsmb2 lib/pdu.c) hands the
+    // raw NT status to the completion callback instead of
+    // -nterror_to_errno(status); the completion normalises it, so the
+    // classifier sees SMB2_STATUS_IO_TIMEOUT and answers Timeout.
+    void completionTimeoutIsNtStatus()
+    {
+        NetVfsSmbCompletion completion {};
+        netvfs_smb_complete_plain(nullptr, static_cast<int>(SMB2_STATUS_IO_TIMEOUT), nullptr, &completion);
+        QCOMPARE(completion.done, 1);
+        QCOMPARE(completion.ntStatus, quint32(SMB2_STATUS_IO_TIMEOUT));
+        QCOMPARE(completion.status, -ETIMEDOUT);
     }
 
     // M-3, XM-1: the v1 option maps to strict or signed.

@@ -513,8 +513,19 @@ private slots:
         server->failOps.insert(QStringLiteral("removeFile"), Result(Error::PermissionDenied));
         QCOMPARE(verifyAccess(&backend, QStringLiteral("x")).error(), Error::PermissionDenied);
         server->freeBytes = 10;
+        server->failOps.clear();
+        // Free space is advisory: a stalled or dropped query leaves it unknown
+        // and does not fail a verification whose write test succeeded.
         server->failOps.insert(QStringLiteral("spaceInfo"), Result(Error::Timeout));
-        QCOMPARE(verifyAccess(&backend, QStringLiteral("x")).error(), Error::Timeout);
+        qint64 unknown = 0;
+        QVERIFY(verifyAccess(&backend, QStringLiteral("x"), &unknown).ok());
+        QCOMPARE(unknown, qint64(-1));
+        server->failOps.insert(QStringLiteral("spaceInfo"), Result(Error::ConnectionLost));
+        QVERIFY(verifyAccess(&backend, QStringLiteral("x")).ok());
+        server->failOps.insert(QStringLiteral("spaceInfo"), Result(Error::PermissionDenied));
+        QVERIFY(verifyAccess(&backend, QStringLiteral("x")).ok());
+        server->failOps.insert(QStringLiteral("spaceInfo"), Result(Error::Canceled));
+        QCOMPARE(verifyAccess(&backend, QStringLiteral("x")).error(), Error::Canceled);
     }
 
     void loader()

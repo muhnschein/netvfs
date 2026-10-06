@@ -35,8 +35,18 @@ static void finish(struct smb2_context *smb2, struct NetVfsSmbCompletion *comple
     if (completion->orphaned && completion->dir)
         smb2_closedir(smb2, completion->dir);
     completion->done = 1;
+    /* Replies hand over -nterror_to_errno(status) as `status` and leave the
+     * raw NT status in smb2_get_nterror() (SPEC-smb 5). The library's request
+     * timeout (M-7, lib/pdu.c) instead passes the raw NT status as `status`.
+     * A raw NT status has a high bit set, an errno does not, so the two cases
+     * are told apart by size and the timeout is normalised into the shape the
+     * classifier expects (SMB2_STATUS_IO_TIMEOUT -> ETIMEDOUT). */
+    if (status <= -0x01000000) {
+        completion->ntStatus = (uint32_t)status;
+        completion->status = -nterror_to_errno((uint32_t)status);
+        return;
+    }
     completion->status = status;
-    /* SPEC-smb 5: the NT status is the only input to classification. */
     completion->ntStatus = (uint32_t)smb2_get_nterror(smb2);
 }
 

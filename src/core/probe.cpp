@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 #include "probe.h"
+#include "logging.h"
 #include "paths.h"
 
 #include <QtCore/QBuffer>
@@ -48,12 +49,19 @@ Result verifyAccess(Backend *backend, const QString &dir, qint64 *freeBytes)
         return r;
 
     qint64 available = -1;
-    r = backend->freeSpace(target, &available);
-    if (r.ok() && freeBytes)
-        *freeBytes = available;
-    if (r.error() == Error::Unsupported)
-        r = Result::success();
-    return r;
+    const Result space = backend->freeSpace(target, &available);
+    // Free space is advisory: transfer.cpp treats it as unknown too (C-13),
+    // so a server that stalls on or drops the query does not fail a
+    // verification whose write test just succeeded.
+    if (space.ok()) {
+        if (freeBytes)
+            *freeBytes = available;
+    } else if (space.error() == Error::Canceled) {
+        return space;
+    } else if (space.error() != Error::Unsupported) {
+        qCDebug(lcNetVfsCore) << "Free space unknown:" << space.toString();
+    }
+    return Result::success();
 }
 
 Result verifyBrowseAccess(Backend *backend, const QString &root, qint64 *freeBytes)

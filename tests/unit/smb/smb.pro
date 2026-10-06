@@ -4,10 +4,12 @@ include($$NETVFS_ROOT/src/backends/smb/smbhelper.pri)
 TARGET = tst_smb
 INCLUDEPATH += $$NETVFS_ROOT/src/backends/smb $$VENDOR_PREFIX/include
 HEADERS = \
+    $$NETVFS_ROOT/src/backends/smb/smbcallbacks.h \
     $$NETVFS_ROOT/src/backends/smb/smbhelper.h \
     $$NETVFS_ROOT/src/backends/smb/smbshares.h \
     $$NETVFS_ROOT/src/backends/smb/smbutil.h
 SOURCES = tst_smb.cpp \
+    $$NETVFS_ROOT/src/backends/smb/smbcallbacks.c \
     $$NETVFS_ROOT/src/backends/smb/smbhelper.cpp \
     $$NETVFS_ROOT/src/backends/smb/smbshares.cpp \
     $$NETVFS_ROOT/src/backends/smb/smbutil.cpp \

@@ -52,7 +52,7 @@ The secret stored in signond is the password, unchanged.
 - **M-4 Authentication.** NTLMv2 through NTLMSSP only: `smb2_set_authentication(smb2, SMB2_SEC_NTLMSSP)`, with user, password and optional domain set explicitly. Guest and anonymous sessions are not offered.
 - **M-5** The password is always set with `smb2_set_password()`. libsmb2 can also read passwords from a file named by the `NTLM_USER_FILE` environment variable **[src: `lib/init.c`]**; code review of the pinned commit MUST confirm that an explicit password takes precedence.
 - **M-6** Kerberos and DCE/RPC (share enumeration) are compiled out (SPEC.md P-3).
-- **M-7** `smb2_set_timeout()` is set to the request timeout of SPEC.md C-14.
+- **M-7** `smb2_set_timeout()` is set to the request timeout of SPEC.md C-14. The library reports a request that hits this timeout by passing the raw `SMB2_STATUS_IO_TIMEOUT` to the completion callback (`lib/pdu.c`) instead of the `-nterror_to_errno(status)` a reply carries; the backend normalises that case and classifies it as `Timeout` like any other reply status (§5). A timed-out request is abandoned, and the connection is treated as broken afterwards (a late response would not match a request any more).
 
 ### Server identity
 
