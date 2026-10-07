@@ -12,6 +12,7 @@
 #include <QtDBus/QDBusConnection>
 #include <QtDBus/QDBusMessage>
 
+#include <algorithm>
 #include <memory>
 
 namespace NetVfs::Bridge {
@@ -38,14 +39,34 @@ Result helperFailed(const QProcess &process)
     return Result::success();
 }
 
-QProcess *newProcess(const QString &program, const QStringList &arguments, QObject *parent)
+std::unique_ptr<QProcess> newProcess(const QString &program, const QStringList &arguments)
 {
-    auto *process = new QProcess(parent);
+    auto process = std::make_unique<QProcess>();
     // The helper's warnings go to the bridge's journal.
     process->setProcessChannelMode(QProcess::ForwardedErrorChannel);
     process->setProgram(program);
     process->setArguments(arguments);
     return process;
+}
+
+// signond, from the bridge itself (SPEC C-2, A-6, XA-7).
+void fetchSecret(QObject *owner, const FilesAccess &access, const AccountDirectory::Fetched &done)
+{
+    auto *secrets = new SignonSecretSource(owner);
+    secrets->setSecretOptional(access.secretOptional);
+    QObject::connect(secrets, &SecretSource::fetched, owner, [secrets, access, done](const Credentials &fetched) {
+        Credentials credentials = fetched;
+        if (credentials.userName.isEmpty())
+            credentials.userName = access.params.username;
+        secrets->deleteLater();
+        done(Result::success(), access.params, credentials);
+        credentials.wipe();   // SEC-5: the connection keeps no copy beyond establish
+    });
+    QObject::connect(secrets, &SecretSource::failed, owner, [secrets, done](const Result &result) {
+        secrets->deleteLater();
+        done(result, ConnectionParams(), Credentials());
+    });
+    secrets->fetch(access.credentialsId);
 }
 
 } // namespace
@@ -66,7 +87,13 @@ HelperAccountsDirectory::HelperAccountsDirectory(const QString &program, QObject
         qCWarning(lcNetVfsBridge) << "No session bus: account changes are seen only after a restart";
 }
 
-HelperAccountsDirectory::~HelperAccountsDirectory() = default;
+HelperAccountsDirectory::~HelperAccountsDirectory()
+{
+    // A helper still running is killed with its QProcess; nobody waits for
+    // its answer any more.
+    for (const std::unique_ptr<QProcess> &process : m_running)
+        process->disconnect(this);
+}
 
 void HelperAccountsDirectory::onAccountChanged(const QDBusMessage &)
 {
@@ -77,7 +104,7 @@ void HelperAccountsDirectory::onAccountChanged(const QDBusMessage &)
 QVector<AccountLocation> HelperAccountsDirectory::filesAccounts()
 {
     // Synchronous, like the listing it replaces: at start and after a change.
-    const std::unique_ptr<QProcess> process(newProcess(m_program, { QStringLiteral("list") }, nullptr));
+    const std::unique_ptr<QProcess> process = newProcess(m_program, { QStringLiteral("list") });
     process->start(QIODevice::ReadOnly);
     Result r;
     if (!process->waitForFinished(HelperTimeoutMs)) {
@@ -99,27 +126,33 @@ QVector<AccountLocation> HelperAccountsDirectory::filesAccounts()
 
 void HelperAccountsDirectory::start(const QStringList &arguments, const Finished &finished)
 {
-    QProcess *process = newProcess(m_program, arguments, this);
-    auto done = std::make_shared<bool>(false);
-    auto finish = [process, finished, done](const Result &r) {
-        if (*done)
-            return;
-        *done = true;
-        const QByteArray answer = r.ok() ? process->read(MaxAnswerBytes) : QByteArray();
-        process->deleteLater();
-        finished(r, answer);
-    };
-    connect(process, &QProcess::errorOccurred, this, [process, finish](QProcess::ProcessError error) {
+    m_running.push_back(newProcess(m_program, arguments));
+    QProcess *process = m_running.back().get();
+    connect(process, &QProcess::errorOccurred, this, [this, process, finished](QProcess::ProcessError error) {
         if (error == QProcess::FailedToStart)
-            finish(helperFailed(*process));
+            finish(process, helperFailed(*process), finished);
     });
     connect(process, static_cast<void (QProcess::*)(int, QProcess::ExitStatus)>(&QProcess::finished), this,
-            [process, finish]() { finish(helperFailed(*process)); });
-    QTimer::singleShot(HelperTimeoutMs, process, [this, process, finish]() {
+            [this, process, finished]() { finish(process, helperFailed(*process), finished); });
+    QTimer::singleShot(HelperTimeoutMs, process, [this, process, finished]() {
         process->kill();
-        finish(Result(Error::Timeout, QStringLiteral("%1 did not answer in time").arg(m_program)));
+        finish(process, Result(Error::Timeout, QStringLiteral("%1 did not answer in time").arg(m_program)),
+               finished);
     });
     process->start(QIODevice::ReadOnly);
+}
+
+void HelperAccountsDirectory::finish(QProcess *process, const Result &result, const Finished &finished)
+{
+    const auto running = std::find_if(m_running.begin(), m_running.end(),
+                                      [process](const std::unique_ptr<QProcess> &p) { return p.get() == process; });
+    if (running == m_running.end())
+        return;   // already finished: a timeout, an error and the exit can all report
+    const QByteArray answer = result.ok() ? process->read(MaxAnswerBytes) : QByteArray();
+    // Not deleted here: this runs from one of the process's own signals.
+    running->release()->deleteLater();
+    m_running.erase(running);
+    finished(result, answer);
 }
 
 void HelperAccountsDirectory::fetch(int accountId, const Fetched &done)
@@ -128,28 +161,13 @@ void HelperAccountsDirectory::fetch(int accountId, const Fetched &done)
     start({ QStringLiteral("files"), QString::number(accountId) },
           [self, accountId, done](const Result &started, const QByteArray &answer) {
               FilesAccess access;
-              Result r = started.ok() ? AccountsHelper::decodeFiles(answer, &access) : started;
-              if (!r.ok() || !self) {
+              if (const Result r = started.ok() ? AccountsHelper::decodeFiles(answer, &access) : started;
+                      !r.ok() || !self) {
                   qCDebug(lcNetVfsBridge) << "Account" << accountId << "for Files:" << r.toString();
                   done(r.ok() ? Result(Error::Canceled) : r, ConnectionParams(), Credentials());
                   return;
               }
-              // signond, from the bridge itself (SPEC C-2, A-6, XA-7).
-              auto *secrets = new SignonSecretSource(self);
-              secrets->setSecretOptional(access.secretOptional);
-              connect(secrets, &SecretSource::fetched, self, [secrets, access, done](const Credentials &fetched) {
-                  Credentials credentials = fetched;
-                  if (credentials.userName.isEmpty())
-                      credentials.userName = access.params.username;
-                  secrets->deleteLater();
-                  done(Result::success(), access.params, credentials);
-                  credentials.wipe();   // SEC-5: the connection keeps no copy beyond establish
-              });
-              connect(secrets, &SecretSource::failed, self, [secrets, done](const Result &result) {
-                  secrets->deleteLater();
-                  done(result, ConnectionParams(), Credentials());
-              });
-              secrets->fetch(access.credentialsId);
+              fetchSecret(self, access, done);
           });
 }
 

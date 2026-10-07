@@ -18,22 +18,21 @@ const char AnswerMagic[] = "netvfs-accounts/1";
 constexpr QDataStream::Version StreamVersion = QDataStream::Qt_5_6;
 constexpr int MaxAccounts = 10000;
 
-QDataStream &operator<<(QDataStream &s, const ConnectionParams &p)
+void writeParams(QDataStream &s, const ConnectionParams &p)
 {
-    return s << p.provider << p.host << qint32(p.port) << p.username << p.options << qint32(p.connectTimeoutMs)
-             << qint32(p.requestTimeoutMs);
+    s << p.provider << p.host << qint32(p.port) << p.username << p.options << qint32(p.connectTimeoutMs)
+      << qint32(p.requestTimeoutMs);
 }
 
-QDataStream &operator>>(QDataStream &s, ConnectionParams &p)
+void readParams(QDataStream &s, ConnectionParams *p)
 {
     qint32 port = 0;
     qint32 connectTimeout = 0;
     qint32 requestTimeout = 0;
-    s >> p.provider >> p.host >> port >> p.username >> p.options >> connectTimeout >> requestTimeout;
-    p.port = port;
-    p.connectTimeoutMs = connectTimeout;
-    p.requestTimeoutMs = requestTimeout;
-    return s;
+    s >> p->provider >> p->host >> port >> p->username >> p->options >> connectTimeout >> requestTimeout;
+    p->port = port;
+    p->connectTimeoutMs = connectTimeout;
+    p->requestTimeoutMs = requestTimeout;
 }
 
 class Answer
@@ -76,7 +75,7 @@ Result readHeader(QDataStream &stream)
     return Result(Error(error), message);
 }
 
-Result databaseUsable(Accounts::Manager *manager)
+Result databaseUsable(const Accounts::Manager *manager)
 {
     // libaccounts reports an unreadable database only through lastError()
     // and then lists nothing. On Sailfish OS only the group `privileged` can
@@ -120,9 +119,11 @@ QByteArray serveList(const AccountStore &store)
     }
     Answer answer(Result::success());
     answer.stream() << qint32(result.size());
-    for (const AccountLocation &a : result)
-        answer.stream() << qint32(a.accountId) << a.provider << a.displayName << a.params << a.filesRoot
-                        << qint32(a.attention);
+    for (const AccountLocation &a : result) {
+        answer.stream() << qint32(a.accountId) << a.provider << a.displayName;
+        writeParams(answer.stream(), a.params);
+        answer.stream() << a.filesRoot << qint32(a.attention);
+    }
     return answer.bytes();
 }
 
@@ -136,7 +137,8 @@ QByteArray serveFiles(const AccountStore &store, const QString &id)
         return failure(r);
     const ConnectionParams params = paramsForService(config.params, Service::Files);
     Answer answer(Result::success());
-    answer.stream() << params << quint32(config.credentialsId) << secretOptional(params);
+    writeParams(answer.stream(), params);
+    answer.stream() << quint32(config.credentialsId) << secretOptional(params);
     return answer.bytes();
 }
 
@@ -193,7 +195,9 @@ Result decodeList(const QByteArray &answer, QVector<AccountLocation> *accounts)
         AccountLocation a;
         qint32 id = 0;
         qint32 attention = 0;
-        stream >> id >> a.provider >> a.displayName >> a.params >> a.filesRoot >> attention;
+        stream >> id >> a.provider >> a.displayName;
+        readParams(stream, &a.params);
+        stream >> a.filesRoot >> attention;
         if (attention < qint32(Attention::None) || attention > qint32(Attention::ServerIdentityChanged))
             return malformed();
         a.accountId = id;
@@ -212,7 +216,8 @@ Result decodeFiles(const QByteArray &answer, FilesAccess *access)
     if (const Result r = readHeader(stream); !r.ok())
         return r;
     FilesAccess result;
-    stream >> result.params >> result.credentialsId >> result.secretOptional;
+    readParams(stream, &result.params);
+    stream >> result.credentialsId >> result.secretOptional;
     if (stream.status() != QDataStream::Ok || !stream.atEnd())
         return malformed();
     *access = result;

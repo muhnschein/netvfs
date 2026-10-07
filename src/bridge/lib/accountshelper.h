@@ -8,12 +8,15 @@
 #include <QtCore/QStringList>
 
 #include <functional>
+#include <memory>
+#include <vector>
 
 namespace Accounts {
 class Manager;
 }
 
 class QDBusMessage;
+class QProcess;
 class QTimer;
 
 // SPEC-v2 XB-2a: on Sailfish OS only the group `privileged` can read the
@@ -80,9 +83,13 @@ private:
     using Finished = std::function<void(const Result &started, const QByteArray &answer)>;
     // Runs the helper without blocking; `finished` runs exactly once.
     void start(const QStringList &arguments, const Finished &finished);
+    // Hands `process`'s answer to `finished` once, whichever of its signals
+    // comes first.
+    void finish(QProcess *process, const Result &result, const Finished &finished);
 
     QString m_program;
     QTimer *m_changed;
+    std::vector<std::unique_ptr<QProcess>> m_running;
 };
 
 } // namespace Bridge
