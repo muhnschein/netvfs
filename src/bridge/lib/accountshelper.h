@@ -30,7 +30,8 @@ class QTimer;
 //
 // and reads its answer from stdout. Secrets stay with signond: the bridge
 // looks them up itself with the credentials id the helper reports.
-namespace NetVfs::Bridge {
+namespace NetVfs {
+namespace Bridge {
 
 // What `files <id>` answers, ready for the secret lookup.
 struct FilesAccess {
@@ -84,6 +85,7 @@ private:
     QTimer *m_changed;
 };
 
-} // namespace NetVfs::Bridge
+} // namespace Bridge
+} // namespace NetVfs
 
 #endif
