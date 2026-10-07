@@ -3,6 +3,11 @@
 
 #include <QtCore/QFile>
 
+#include <cerrno>
+#include <cstring>
+#include <vector>
+
+#include <fcntl.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
@@ -18,6 +23,7 @@ namespace {
 
 constexpr int StartTimeField = 22;          // proc(5): starttime, clock ticks since boot
 constexpr qint64 MaxProcFileBytes = 4096;
+constexpr size_t CompareChunkBytes = 64 * 1024;
 
 Result refused(const QString &why)
 {
@@ -67,6 +73,38 @@ public:
 private:
     int m_fd;
 };
+
+// Reads up to `size` bytes; fewer only at the end of the file. -1 on error.
+ssize_t readFully(int fd, char *buffer, size_t size)
+{
+    size_t done = 0;
+    while (done < size) {
+        const ssize_t n = ::read(fd, buffer + done, size - done);
+        if (n < 0 && errno == EINTR)
+            continue;
+        if (n < 0)
+            return -1;
+        if (n == 0)
+            break;
+        done += static_cast<size_t>(n);
+    }
+    return static_cast<ssize_t>(done);
+}
+
+// Byte for byte, in chunks (bounded memory), from the current offsets.
+bool sameContent(int a, int b)
+{
+    std::vector<char> left(CompareChunkBytes);
+    std::vector<char> right(CompareChunkBytes);
+    for (;;) {
+        const ssize_t n = readFully(a, left.data(), left.size());
+        if (n < 0 || readFully(b, right.data(), right.size()) != n
+                || std::memcmp(left.data(), right.data(), static_cast<size_t>(n)) != 0)
+            return false;
+        if (n == 0)
+            return true;
+    }
+}
 
 } // namespace
 
@@ -166,9 +204,13 @@ Result PeerChecker::checkProcess(pid_t pid, int pidfd) const
     if (const qint64 now = m_env.bootTicksNow(); now >= 0 && before > now)
         return refused(QStringLiteral("peer pid %1 was reused").arg(pid));
 
-    struct stat exe {};
+    // Opened, not only stat()ed, inside the start time window: the open file
+    // stays the one this process runs, and its content is compared from it.
     const QByteArray exePath = QFile::encodeName(procPath(pid, "exe"));
-    const bool haveExe = ::stat(exePath.constData(), &exe) == 0;
+    const int exeFd = ::open(exePath.constData(), O_RDONLY | O_CLOEXEC);
+    const FdCloser exeCloser(exeFd);
+    struct stat exe {};
+    const bool haveExe = exeFd >= 0 && ::fstat(exeFd, &exe) == 0;
     if (m_env.afterExeRead)
         m_env.afterExeRead();
 
@@ -179,11 +221,17 @@ Result PeerChecker::checkProcess(pid_t pid, int pidfd) const
     if (!haveExe)
         return refused(QStringLiteral("cannot read the executable of peer %1").arg(pid));
 
+    const QByteArray expectedPath = QFile::encodeName(m_executable);
+    const int expectedFd = ::open(expectedPath.constData(), O_RDONLY | O_CLOEXEC);
+    const FdCloser expectedCloser(expectedFd);
     struct stat expected {};
-    if (const QByteArray expectedPath = QFile::encodeName(m_executable);
-        ::stat(expectedPath.constData(), &expected) != 0)
-        return refused(QStringLiteral("the registered executable does not exist"));
-    if (exe.st_dev != expected.st_dev || exe.st_ino != expected.st_ino)
+    if (expectedFd < 0 || ::fstat(expectedFd, &expected) != 0)
+        return refused(QStringLiteral("the registered executable cannot be read"));
+    if (exe.st_dev == expected.st_dev && exe.st_ino == expected.st_ino)
+        return Result::success();
+    // Sailjail's firejail --private-bin runs a copy of the executable from a
+    // tmpfs: another file, so the same bytes are required instead.
+    if (exe.st_size != expected.st_size || !sameContent(exeFd, expectedFd))
         return refused(QStringLiteral("peer %1 runs another executable").arg(pid));
     return Result::success();
 }

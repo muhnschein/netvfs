@@ -784,7 +784,13 @@ permission, links nothing from netvfs, and never sees secrets or pins.
 - XB-5: Peer check on every connection: `SO_PEERCRED` uid equals the bridge's uid, and the
   peer's executable (`/proc/<pid>/exe`, read through a pidfd to avoid pid reuse races where
   the kernel supports it) equals the registered `Executable`. Anything else is closed
-  without a reply and logged at warning level.
+  without a reply and logged at warning level. "Equals" means the same file (device and
+  inode) or, failing that, a file of the same size with byte-identical content: Sailjail
+  starts apps with `firejail --private-bin=<binary>`, which copies the binary into a tmpfs
+  and bind-mounts that over `/usr/bin`, so a sandboxed peer always runs a copy at another
+  inode. The bridge opens `/proc/<pid>/exe` (the link opens the file the peer runs, across
+  mount namespaces) between the two start time reads that detect pid reuse, and compares
+  from that descriptor in bounded chunks.
 
 ### 8a.2 Consent and scope
 

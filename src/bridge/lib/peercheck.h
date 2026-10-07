@@ -13,10 +13,14 @@
 // SPEC-v2 XB-5: who is on the other end of the socket.
 //
 // 1. SO_PEERCRED of the connected socket: the uid must be the bridge's own.
-// 2. The peer's executable must be the registered one. It is compared by
-//    identity (device and inode of the file /proc/<pid>/exe resolves to,
-//    against stat(Executable)), so a different mount namespace of a sandboxed
-//    peer cannot fake it with a path, and a replaced binary fails.
+// 2. The peer's executable must be the registered one. /proc/<pid>/exe is
+//    opened (the magic link opens the file the peer runs, across mount
+//    namespaces, so a path cannot fake it) and compared with Executable by
+//    identity (device and inode). Sailjail starts apps with firejail
+//    --private-bin, which runs a copy of the binary from a tmpfs bind-mounted
+//    over /usr/bin: another inode. A different file is therefore accepted
+//    when it has the same size and the same bytes, read
+//    from the descriptor opened in step 3's window (chunked, bounded memory).
 // 3. Pid reuse: the pid in SO_PEERCRED belongs to the process that connected.
 //    If that process exited and its pid was reused before the check, the
 //    check must not succeed. Where the kernel has pidfds (SO_PEERPIDFD,
@@ -25,7 +29,7 @@
 //    and verifies afterwards that the pidfd's process is still alive with that
 //    pid (Pid: line of /proc/self/fdinfo/<pidfd>). In every case the process
 //    start time (/proc/<pid>/stat field 22) must be the same before and after
-//    reading exe and must not be later than the moment the connection was
+//    opening exe and must not be later than the moment the connection was
 //    accepted, so a process started after the connection cannot pass for it.
 //
 // /proc, the credentials and the clock are injectable for tests.
@@ -50,8 +54,8 @@ public:
         // Clock ticks since boot "now" (to compare with the start time);
         // default: /proc/uptime * sysconf(_SC_CLK_TCK).
         std::function<qint64()> bootTicksNow;
-        // Called between the first and the second start time read (tests
-        // simulate pid reuse there).
+        // Called after exe was opened, between the first and the second
+        // start time read (tests simulate pid reuse there).
         std::function<void()> afterExeRead;
     };
 

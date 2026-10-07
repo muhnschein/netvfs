@@ -127,6 +127,8 @@ private Q_SLOTS:
     void fdDeviceOffsets();
     void peerUid();
     void peerExecutable();
+    void peerExecutableCopy();
+    void peerCopyPidReuse();
     void peerPidReuse();
     void peerPidfd();
     void peerRealProcess();
@@ -547,6 +549,66 @@ void tst_BridgeUnits::peerExecutable()
     QCOMPARE(PeerChecker(registered, fakeEnvironment(proc, 4242, 555)).check(3).error(), Error::PermissionDenied);
 }
 
+void tst_BridgeUnits::peerExecutableCopy()
+{
+    // XB-5: Sailjail (firejail --private-bin) runs a copy of the registered
+    // executable from a tmpfs. Larger than one comparison chunk.
+    FakeProc proc;
+    QTemporaryDir dir;
+    QByteArray content(200 * 1024, 'x');
+    content.prepend("\x7f" "ELF");
+    const QString registered = dir.path() + QStringLiteral("/usr/bin/harbour-app");
+    const QString copy = dir.path() + QStringLiteral("/run/firejail/bin/harbour-app");
+    writeFile(registered, content);
+    writeFile(copy, content);
+    QByteArray lastByte = content;
+    lastByte[lastByte.size() - 1] = 'y';
+    writeFile(dir.path() + QStringLiteral("/same-size"), lastByte);
+    writeFile(dir.path() + QStringLiteral("/shorter"), content.left(content.size() - 1));
+    writeFile(dir.path() + QStringLiteral("/longer"), content + 'x');
+    QDir().mkpath(dir.path() + QStringLiteral("/folder"));
+    proc.addProcess(100, copy, 50);
+    proc.addProcess(101, dir.path() + QStringLiteral("/same-size"), 50);
+    proc.addProcess(102, dir.path() + QStringLiteral("/shorter"), 50);
+    proc.addProcess(103, dir.path() + QStringLiteral("/longer"), 50);
+    proc.addProcess(104, dir.path() + QStringLiteral("/folder"), 50);
+
+    struct stat a {};
+    struct stat b {};
+    QCOMPARE(::stat(QFile::encodeName(registered).constData(), &a), 0);
+    QCOMPARE(::stat(QFile::encodeName(copy).constData(), &b), 0);
+    QVERIFY(a.st_ino != b.st_ino);
+    QVERIFY(PeerChecker(registered, fakeEnvironment(proc, 4242, 100)).check(3).ok());
+    for (const int pid : { 101, 102, 103, 104 })
+        QCOMPARE(PeerChecker(registered, fakeEnvironment(proc, 4242, pid)).check(3).error(), Error::PermissionDenied);
+}
+
+void tst_BridgeUnits::peerCopyPidReuse()
+{
+    FakeProc proc;
+    QTemporaryDir dir;
+    const QString registered = dir.path() + QStringLiteral("/harbour-app");
+    const QString copy = dir.path() + QStringLiteral("/copy/harbour-app");
+    const QString other = dir.path() + QStringLiteral("/other-app");
+    writeFile(registered, "the app");
+    writeFile(copy, "the app");
+    writeFile(other, "another");
+    proc.addProcess(100, other, 50);
+    PeerChecker::Environment env = fakeEnvironment(proc, 4242, 100);
+    // The pid was reused by a process running a copy while exe was open.
+    env.afterExeRead = [&proc, &copy]() { proc.addProcess(100, copy, 51); };
+    QCOMPARE(PeerChecker(registered, env).check(3).error(), Error::PermissionDenied);
+    // The content comes from the file opened inside the start time window,
+    // not from a second look at /proc/<pid>/exe.
+    proc.addProcess(100, other, 50);
+    env.afterExeRead = [&proc, &copy]() { proc.addProcess(100, copy, 50); };
+    QCOMPARE(PeerChecker(registered, env).check(3).error(), Error::PermissionDenied);
+    // And the other way round: the copy that was open is accepted.
+    proc.addProcess(100, copy, 50);
+    env.afterExeRead = [&proc, &other]() { proc.addProcess(100, other, 50); };
+    QVERIFY(PeerChecker(registered, env).check(3).ok());
+}
+
 void tst_BridgeUnits::peerPidReuse()
 {
     FakeProc proc;
@@ -588,6 +650,12 @@ void tst_BridgeUnits::peerRealProcess()
     QCOMPARE(::socketpair(AF_UNIX, SOCK_STREAM, 0, sv.data()), 0);
     QVERIFY(PeerChecker(QCoreApplication::applicationFilePath()).check(sv[0]).ok());
     QCOMPARE(PeerChecker(QStringLiteral("/bin/sh")).check(sv[0]).error(), Error::PermissionDenied);
+    // A copy at another inode (Sailjail's private-bin), through the real
+    // /proc/self/exe.
+    QTemporaryDir dir;
+    const QString copy = dir.path() + QStringLiteral("/copy");
+    QVERIFY(QFile::copy(QCoreApplication::applicationFilePath(), copy));
+    QVERIFY(PeerChecker(copy).check(sv[0]).ok());
     ::close(sv[0]);
     ::close(sv[1]);
 }
