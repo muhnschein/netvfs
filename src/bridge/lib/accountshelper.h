@@ -33,7 +33,10 @@ class QTimer;
 //
 // and reads its answer from stdout. Secrets stay with signond: the bridge
 // looks them up itself with the credentials id the helper reports.
-namespace NetVfs {
+//
+// Two definitions, not NetVfs::Bridge: the moc of Qt 5.6 (Sailfish OS) cannot
+// parse a nested namespace definition.
+namespace NetVfs { // NOSONAR(cpp:S5812)
 namespace Bridge {
 
 // What `files <id>` answers, ready for the secret lookup.
