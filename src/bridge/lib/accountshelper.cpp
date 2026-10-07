@@ -159,7 +159,7 @@ namespace AccountsHelper {
 QString path()
 {
     if (qEnvironmentVariableIsSet(HelperVariable))
-        return qEnvironmentVariable(HelperVariable);
+        return QString::fromLocal8Bit(qgetenv(HelperVariable));
     return QLatin1String(InstalledHelper);
 }
 

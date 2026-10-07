@@ -113,7 +113,7 @@ void HelperAccountsDirectory::start(const QStringList &arguments, const Finished
         if (error == QProcess::FailedToStart)
             finish(helperFailed(*process));
     });
-    connect(process, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), this,
+    connect(process, static_cast<void (QProcess::*)(int, QProcess::ExitStatus)>(&QProcess::finished), this,
             [process, finish]() { finish(helperFailed(*process)); });
     QTimer::singleShot(HelperTimeoutMs, process, [this, process, finish]() {
         process->kill();

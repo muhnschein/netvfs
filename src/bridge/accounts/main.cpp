@@ -19,14 +19,14 @@ namespace {
 
 bool writeAll(const QByteArray &bytes)
 {
-    qsizetype done = 0;
+    int done = 0;
     while (done < bytes.size()) {
         const ssize_t n = ::write(STDOUT_FILENO, bytes.constData() + done, static_cast<size_t>(bytes.size() - done));
         if (n < 0 && errno == EINTR)
             continue;
         if (n <= 0)
             return false;
-        done += n;
+        done += int(n);
     }
     return true;
 }
