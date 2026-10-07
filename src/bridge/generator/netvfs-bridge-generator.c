@@ -9,7 +9,9 @@
  *
  *   netvfs-bridge@<id>.socket             ListenStream=%h/<DataDir>/netvfs/bridge.sock,
  *                                         SocketMode=0600, DirectoryMode=0700, Accept=no
- *   netvfs-bridge@<id>.service            ExecStart=/usr/libexec/netvfs/netvfs-bridge <id>
+ *   netvfs-bridge@<id>.service            ExecStart=/usr/libexec/netvfs/netvfs-bridge <id>;
+ *                                         no NoNewPrivileges=: the bridge starts the
+ *                                         setgid accounts helper (XB-2a)
  *   netvfs-bridge@<id>.path               PathChanged=%h/<DataDir>: the consumer's folder
  *                                         appeared or disappeared (data cleared, app
  *                                         reinstalled), or changed
@@ -280,8 +282,7 @@ static int emit(const char *dir, const struct consumer *c, const char *source)
              "\n"
              "[Service]\n"
              "Type=simple\n"
-             "ExecStart=" BRIDGE_BINARY " %s\n"
-             "NoNewPrivileges=yes\n",
+             "ExecStart=" BRIDGE_BINARY " %s\n",
              source, display, id, id, id, id);
     snprintf(name, sizeof(name), "netvfs-bridge@%s.service", id);
     rc |= write_file(dir, name, text);

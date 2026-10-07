@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 #include "serverparts.h"
 
+#include "accountshelper.h"
 #include "backendloader.h"
 
 namespace NetVfs::Bridge {
@@ -33,12 +34,12 @@ bool sameConnection(const ConnectionParams &a, const ConnectionParams &b)
 }
 
 // The injected directory belongs to the book; without one the accounts
-// database is read.
+// database is read through netvfs-accounts (XB-2a).
 std::unique_ptr<AccountDirectory> directoryFor(AccountDirectory *injected)
 {
     if (injected)
         return std::unique_ptr<AccountDirectory>(injected);
-    return std::make_unique<LibAccountsDirectory>();
+    return std::make_unique<HelperAccountsDirectory>();
 }
 
 QString knownHostsFileOf(const BridgeConfig &config)

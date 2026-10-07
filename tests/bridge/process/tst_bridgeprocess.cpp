@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 // The netvfs-bridge binary under socket activation (SPEC-v2 XB-2, XB-4):
 // the test plays systemd (a listening socket on fd 3, LISTEN_FDS and
-// LISTEN_PID), talks to the bridge through it and expects the idle exit.
+// LISTEN_PID), talks to the bridge through it and expects the idle exit. The
+// bridge lists its accounts through the built netvfs-accounts (XB-2a).
+#include "accountsfixture.h"
 #include "bridgetest.h"
 
 #include <QtCore/QDir>
@@ -24,6 +26,7 @@ using namespace NetVfs::BridgeTest;
 namespace {
 
 const QByteArray BridgeBinary = NETVFS_TEST_BIN_DIR "/netvfs-bridge";
+const QByteArray AccountsHelper = NETVFS_TEST_LIBEXEC_DIR "/netvfs-accounts";
 
 void writeFile(const QString &path, const QByteArray &content)
 {
@@ -116,7 +119,13 @@ void tst_BridgeProcess::socketActivation()
               + "\nDataDir=.local/share/proc-test\n");
     writeFile(dir.path() + QStringLiteral("/config/netvfs/bridge.conf"), "[Consent]\nproc-test=granted\n");
     QDir().mkpath(dir.path() + QStringLiteral("/home"));
-    QDir().mkpath(dir.path() + QStringLiteral("/accounts"));
+    // XB-2a: one Files account in a private database, which the bridge reads
+    // through the accounts helper (ACCOUNTS and AG_* are in the environment).
+    NetVfs::Test::AccountsFixture accounts({ QStringLiteral("fake") });
+    const int accountId = accounts.createAccount(
+        QStringLiteral("fake"), { { QStringLiteral("netvfs/host"), QStringLiteral("files.example") } });
+    QVERIFY(accountId > 0);
+    QVERIFY(accounts.setService(accountId, QStringLiteral("fake-files"), true));
     QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
     env.insert(QStringLiteral("HOME"), dir.path() + QStringLiteral("/home"));
     env.insert(QStringLiteral("XDG_CONFIG_HOME"), dir.path() + QStringLiteral("/config"));
@@ -124,9 +133,7 @@ void tst_BridgeProcess::socketActivation()
     env.insert(QStringLiteral("NETVFS_CONSUMERS_DIR"), dir.path() + QStringLiteral("/consumers"));
     env.insert(QStringLiteral("NETVFS_BACKEND_PATH"), QStringLiteral(NETVFS_TEST_FAKE_BACKEND_DIR));
     env.insert(QStringLiteral("NETVFS_BRIDGE_IDLE_EXIT_MS"), QStringLiteral("500"));
-    env.insert(QStringLiteral("ACCOUNTS"), dir.path() + QStringLiteral("/accounts"));
-    env.insert(QStringLiteral("AG_PROVIDERS"), dir.path() + QStringLiteral("/accounts"));
-    env.insert(QStringLiteral("AG_SERVICES"), dir.path() + QStringLiteral("/accounts"));
+    env.insert(QStringLiteral("NETVFS_ACCOUNTS_HELPER"), QString::fromLocal8Bit(AccountsHelper));
     env.remove(QStringLiteral("LISTEN_PID"));
     env.remove(QStringLiteral("LISTEN_FDS"));
 
@@ -142,7 +149,11 @@ void tst_BridgeProcess::socketActivation()
         const TestClient::Message hello = client.hello();
         QVERIFY2(hello.valid && !hello.isError, qPrintable(hello.name));
         QCOMPARE(client.call("GetConsent").args.value(0).toString(), QStringLiteral("granted"));
-        QCOMPARE(client.call("ListLocations").args.value(0).toList().size(), 0);
+        const QVariantList locations = client.call("ListLocations").args.value(0).toList();
+        QCOMPARE(locations.size(), 1);
+        const QVariantList location = locations.at(0).toList();   // (id, provider, name, info)
+        QCOMPARE(location.value(0).toString(), QStringLiteral("account:%1").arg(accountId));
+        QCOMPARE(location.value(3).toMap().value(QStringLiteral("host")).toString(), QStringLiteral("files.example"));
         client.close();
     }
     // XB-2: gone after the idle time with no client and no job.

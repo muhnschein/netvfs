@@ -763,6 +763,43 @@ permission, links nothing from netvfs, and never sees secrets or pins.
 - XB-2: `/usr/libexec/netvfs/netvfs-bridge` (C++/Qt, links libnetvfs), one process per
   consumer, started by systemd user socket activation (`Accept=no`). It exits 30 s after
   its last client disconnected and no job runs.
+  It runs with the user's own groups: everything that parses server data (the backends,
+  libssh, libsmb2, libcurl) stays outside the group `privileged`.
+- XB-2a: The Sailfish OS accounts database (`~/.local/share/system/privileged/Accounts/`)
+  is readable by the group `privileged` only. The bridge reads it through
+  `/usr/libexec/netvfs/netvfs-accounts`, installed setgid `privileged`
+  (`%attr(2755,root,privileged)`, `Requires(pre): sailfish-setup` for the group, as
+  mapplauncherd's boosters), started once per request with `QProcess`:
+  - `list`: the accounts of XA-1 (enabled, Files service enabled) with what `ListLocations`
+    shows; `files <id>`: the connection parameters of a listed account for the Files
+    service, after XA-4, with its credentials id and whether its secret is optional
+    (XA-7); `attention <id> <state> [pin]`: records `auth-failed` or
+    `server-identity-changed` (XB-14) on a listed account. Nothing else: it never reads or
+    returns a secret (the bridge asks signond itself, XA-6), never clears attention (the
+    update flow does), never touches an account the bridge would not list, and links no
+    backend. Its answer is a versioned `QDataStream` on stdout; a malformed one is
+    `ProtocolError`.
+  - Any process can start it, so it trusts nothing of its caller's environment: first
+    thing in `main()` it keeps only `LANG`, `LANGUAGE`, `LC_*`, `TZ`, `XDG_RUNTIME_DIR` and
+    `DBUS_SESSION_BUS_ADDRESS`, and sets `HOME` from the password database of its real uid.
+    A missing `XDG_RUNTIME_DIR` becomes `/run/user/<uid>` when that is the uid's folder:
+    libaccounts opens no database without the session bus, and GLib looks for it there
+    when it ignores `DBUS_SESSION_BUS_ADDRESS` in a set-id process.
+    Anything else could point libaccounts at another database (`HOME`, `XDG_*_HOME`,
+    `ACCOUNTS`, `AG_*`) or load code chosen by the caller (`QT_*`, `GIO_*`). These
+    variables (and `NETVFS_ACCOUNTS_HELPER` in the bridge, which names the build tree's
+    helper) apply to tests only, where the helper is not set-id. glibc itself drops `LD_*`
+    and similar. Its soft core limit is 0, so that a crash writes no user-readable core.
+  - The generated bridge service has no `NoNewPrivileges=` (it would ignore the helper's
+    setgid bit). invoker and its `privileges.d` files cannot be used instead, because they
+    do not pass on the socket-activated descriptor.
+  - Changes: libaccounts' writers announce every change with the `AccountChanged` signal
+    of `com.google.code.AccountsSSO.Accounts` on the session bus (one object path per
+    service type). The bridge subscribes to it on any path and lists again 200 ms after
+    the last one. After its own attention write it lists again without waiting for the
+    signal, which the set-id helper may not be able to send.
+  - When the helper cannot open the database, or fails, the bridge logs a warning with
+    the reason and lists no account.
 - XB-3: Consumers are registered by files in `/usr/share/netvfs/consumers/<id>.conf`,
   shipped by netvfs packages (never by the consumer, which in Harbour cannot install
   outside its own paths):
@@ -907,7 +944,7 @@ permission, links nothing from netvfs, and never sees secrets or pins.
   | `netvfs-account-<p>` | provider file, account UI QML, icon | ui, backend-<p> |
   | `netvfs-backup-<p>` | `<p>-backup` service, Buteo plugins and profiles | account-<p>, buteo, jolla-vault |
   | `netvfs-files-services` | `<p>-files` services for installed providers | core |
-  | `netvfs-bridge` | `netvfs-bridge`, systemd generator and template units, `consumers/lautta.conf`, consent page for `netvfs-ui` | core, ui, files-services, systemd |
+  | `netvfs-bridge` | `netvfs-bridge`, `netvfs-accounts` (setgid `privileged`, XB-2a), systemd generator and template units, `consumers/lautta.conf`, consent page for `netvfs-ui` | core, ui, files-services, systemd, sailfish-setup (pre) |
   | `netvfs-cli` | `netvfs-cli` | core |
   | `netvfs-core-devel` | headers, pkg-config | core |
 

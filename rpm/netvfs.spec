@@ -234,6 +234,9 @@ Requires:   %{name}-core = %{version}-%{release}
 Requires:   %{name}-ui = %{version}-%{release}
 Requires:   %{name}-files-services = %{version}-%{release}
 Requires:   systemd
+# SPEC-v2 XB-2a: the group `privileged` of the setgid accounts helper (as
+# mapplauncherd's boosters).
+Requires(pre): sailfish-setup
 
 %description bridge
 netvfs-bridge (SPEC-v2 8a): serves netvfs locations to registered sandboxed
@@ -394,6 +397,8 @@ systemctl-user daemon-reload || :
 
 %files bridge
 %{_prefix}/libexec/netvfs/netvfs-bridge
+# SPEC-v2 XB-2a: only the group `privileged` can read the accounts database.
+%attr(2755,root,privileged) %{_prefix}/libexec/netvfs/netvfs-accounts
 %{_prefix}/lib/systemd/user-generators/netvfs-bridge-generator
 %dir %{_datadir}/netvfs/consumers
 %{_datadir}/netvfs/consumers/lautta.conf

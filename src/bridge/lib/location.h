@@ -48,9 +48,8 @@ struct AccountLocation {
 };
 
 // Access to the accounts database, behind an interface so that tests run
-// without libaccounts and so that the AccountSession signature change of the
-// accounts work (XA-4, AccountSession::open(id, Service::Files, parent)) stays
-// a one-line change in accountdirectory.cpp.
+// without libaccounts. The bridge's is HelperAccountsDirectory
+// (accountshelper.h, XB-2a).
 class AccountDirectory : public QObject
 {
     Q_OBJECT
@@ -69,23 +68,6 @@ public:
 
 Q_SIGNALS:
     void changed();
-};
-
-// libaccounts-qt5 + signond implementation.
-class LibAccountsDirectory : public AccountDirectory
-{
-    Q_OBJECT
-public:
-    explicit LibAccountsDirectory(QObject *parent = nullptr);
-    ~LibAccountsDirectory() override;
-
-    QVector<AccountLocation> filesAccounts() override;
-    void fetch(int accountId, const Fetched &done) override;
-    void setAttention(int accountId, Attention attention, const QString &seenPin) override;
-
-private:
-    class Private;
-    std::unique_ptr<Private> d;
 };
 
 } // namespace Bridge

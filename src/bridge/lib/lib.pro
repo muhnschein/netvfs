@@ -15,6 +15,7 @@ DEFINES += NETVFS_BRIDGE_VERSION=\\\"0.2.0\\\"
 RESOURCES = bridge.qrc
 
 HEADERS = \
+    accountshelper.h \
     args.h \
     bridgelog.h \
     bridgeserver.h \
@@ -27,6 +28,7 @@ HEADERS = \
     location.h \
     peercheck.h \
     pool.h \
+    privileges.h \
     protocol.h \
     questions.h \
     runtime.h \
@@ -39,6 +41,7 @@ HEADERS = \
     worker.h
 
 SOURCES = \
+    accountshelper.cpp \
     args.cpp \
     bridgeserver.cpp \
     connector.cpp \
@@ -46,11 +49,13 @@ SOURCES = \
     consentprompt.cpp \
     fdcheck.cpp \
     handoff.cpp \
+    helperdirectory.cpp \
     knownhosts.cpp \
     location.cpp \
     locationbook.cpp \
     peercheck.cpp \
     pool.cpp \
+    privileges.cpp \
     protocol.cpp \
     questions.cpp \
     runtime.cpp \
