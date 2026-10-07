@@ -59,6 +59,27 @@ void endRun(QProcess *process, const Result &result, const Callback &finished)
     finished(result, answer);
 }
 
+// Runs the helper as a child of `owner` without blocking; `finished(result,
+// answer)` runs exactly once.
+template <typename Callback>
+void startHelper(QObject *owner, const QString &program, const QStringList &arguments, const Callback &finished)
+{
+    auto *process = new QProcess(owner);
+    configure(*process, program, arguments);
+    QObject::connect(process, &QProcess::errorOccurred, owner, [process, finished](QProcess::ProcessError error) {
+        if (error == QProcess::FailedToStart)
+            endRun(process, helperFailed(*process), finished);
+    });
+    QObject::connect(process, static_cast<void (QProcess::*)(int, QProcess::ExitStatus)>(&QProcess::finished),
+                     owner, [process, finished]() { endRun(process, helperFailed(*process), finished); });
+    QTimer::singleShot(HelperTimeoutMs, process, [process, finished]() {
+        process->kill();
+        endRun(process, Result(Error::Timeout, QStringLiteral("%1 did not answer in time").arg(process->program())),
+               finished);
+    });
+    process->start(QIODevice::ReadOnly);
+}
+
 // signond, from the bridge itself (SPEC C-2, A-6, XA-7).
 void fetchSecret(QObject *owner, const FilesAccess &access, const AccountDirectory::Fetched &done)
 {
@@ -129,38 +150,20 @@ QVector<AccountLocation> HelperAccountsDirectory::filesAccounts()
     return accounts;
 }
 
-void HelperAccountsDirectory::start(const QStringList &arguments, const Finished &finished)
-{
-    auto *process = new QProcess(this);
-    configure(*process, m_program, arguments);
-    connect(process, &QProcess::errorOccurred, this, [process, finished](QProcess::ProcessError error) {
-        if (error == QProcess::FailedToStart)
-            endRun(process, helperFailed(*process), finished);
-    });
-    connect(process, static_cast<void (QProcess::*)(int, QProcess::ExitStatus)>(&QProcess::finished), this,
-            [process, finished]() { endRun(process, helperFailed(*process), finished); });
-    QTimer::singleShot(HelperTimeoutMs, process, [process, finished]() {
-        process->kill();
-        endRun(process, Result(Error::Timeout, QStringLiteral("%1 did not answer in time").arg(process->program())),
-               finished);
-    });
-    process->start(QIODevice::ReadOnly);
-}
-
 void HelperAccountsDirectory::fetch(int accountId, const Fetched &done)
 {
     QPointer<HelperAccountsDirectory> self(this);
-    start({ QStringLiteral("files"), QString::number(accountId) },
-          [self, accountId, done](const Result &started, const QByteArray &answer) {
-              FilesAccess access;
-              if (const Result r = started.ok() ? AccountsHelper::decodeFiles(answer, &access) : started;
-                      !r.ok() || !self) {
-                  qCDebug(lcNetVfsBridge) << "Account" << accountId << "for Files:" << r.toString();
-                  done(r.ok() ? Result(Error::Canceled) : r, ConnectionParams(), Credentials());
-                  return;
-              }
-              fetchSecret(self, access, done);
-          });
+    startHelper(this, m_program, { QStringLiteral("files"), QString::number(accountId) },
+                [self, accountId, done](const Result &started, const QByteArray &answer) {
+                    FilesAccess access;
+                    if (const Result r = started.ok() ? AccountsHelper::decodeFiles(answer, &access) : started;
+                            !r.ok() || !self) {
+                        qCDebug(lcNetVfsBridge) << "Account" << accountId << "for Files:" << r.toString();
+                        done(r.ok() ? Result(Error::Canceled) : r, ConnectionParams(), Credentials());
+                        return;
+                    }
+                    fetchSecret(self, access, done);
+                });
 }
 
 void HelperAccountsDirectory::setAttention(int accountId, Attention attention, const QString &seenPin)
@@ -169,7 +172,7 @@ void HelperAccountsDirectory::setAttention(int accountId, Attention attention, c
     if (!seenPin.isEmpty())
         arguments << seenPin;
     QPointer<HelperAccountsDirectory> self(this);
-    start(arguments, [self](const Result &started, const QByteArray &answer) {
+    startHelper(this, m_program, arguments, [self](const Result &started, const QByteArray &answer) {
         if (const Result r = started.ok() ? AccountsHelper::decodeStatus(answer) : started; !r.ok()) {
             qCWarning(lcNetVfsBridge) << "Cannot record the attention state:" << r.toString();
             return;

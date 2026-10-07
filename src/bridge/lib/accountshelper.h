@@ -7,7 +7,6 @@
 #include <QtCore/QByteArray>
 #include <QtCore/QStringList>
 
-#include <functional>
 
 namespace Accounts {
 class Manager;
@@ -80,10 +79,6 @@ private Q_SLOTS:
     void onAccountChanged(const QDBusMessage &message);
 
 private:
-    using Finished = std::function<void(const Result &started, const QByteArray &answer)>;
-    // Runs the helper without blocking; `finished` runs exactly once.
-    void start(const QStringList &arguments, const Finished &finished);
-
     QString m_program;
     QTimer *m_changed;
 };
