@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 #include "probe.h"
+#include "logging.h"
 #include "paths.h"
 
 #include <QtCore/QBuffer>
@@ -47,13 +48,18 @@ Result verifyAccess(Backend *backend, const QString &dir, qint64 *freeBytes)
     if (!r.ok())
         return r;
 
+    // Best effort, as in verifyBrowseAccess(): the probe file already proved
+    // write access. Some servers drop the connection on this query (Samba
+    // with quotas on ZFS); free space is then unknown, not a failed verify.
     qint64 available = -1;
     r = backend->freeSpace(target, &available);
+    if (r.error() == Error::Canceled)
+        return r;
     if (r.ok() && freeBytes)
         *freeBytes = available;
-    if (r.error() == Error::Unsupported)
-        r = Result::success();
-    return r;
+    if (!r.ok() && r.error() != Error::Unsupported)
+        qCDebug(lcNetVfsCore) << "Free space unknown:" << r.toString();
+    return Result::success();
 }
 
 Result verifyBrowseAccess(Backend *backend, const QString &root, qint64 *freeBytes)

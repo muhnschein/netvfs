@@ -7,8 +7,8 @@
 namespace NetVfs {
 
 // SPEC 7.2 verify() after authentication: makePath(dir), write and delete
-// ".netvfs-probe-<random>", query free space. `*freeBytes` is -1 when the
-// server cannot report it.
+// ".netvfs-probe-<random>", query free space best effort. `*freeBytes` is -1
+// when the server cannot report it or the query fails (only Canceled stops).
 NETVFS_EXPORT Result verifyAccess(Backend *backend, const QString &dir, qint64 *freeBytes = nullptr);
 
 NETVFS_EXPORT extern const char ProbeFilePrefix[];   // ".netvfs-probe-"
