@@ -763,6 +763,36 @@ permission, links nothing from netvfs, and never sees secrets or pins.
 - XB-2: `/usr/libexec/netvfs/netvfs-bridge` (C++/Qt, links libnetvfs), one process per
   consumer, started by systemd user socket activation (`Accept=no`). It exits 30 s after
   its last client disconnected and no job runs.
+  The binary is installed setgid `privileged` (`%attr(2755,root,privileged)`, `Requires(pre):
+  sailfish-setup` for the group, as mapplauncherd's boosters): the Sailfish OS accounts
+  database (`~/.local/share/system/privileged/Accounts/`) is readable by that group only,
+  and without it libaccounts lists no account. The generated service therefore has no
+  `NoNewPrivileges=` (it would ignore the setgid bit); invoker and its `privileges.d` files
+  cannot be used, because they do not pass on the socket-activated descriptor. The kernel
+  starts the bridge `AT_SECURE`, which it handles as follows:
+  - first thing in `main()`, it keeps only `HOME`, `USER`, `LOGNAME`, `LANG`, `LANGUAGE`,
+    `LC_*`, `TZ`, `XDG_RUNTIME_DIR`, `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_CACHE_HOME`,
+    `DBUS_SESSION_BUS_ADDRESS`, `LISTEN_PID`, `LISTEN_FDS`, `LISTEN_FDNAMES`, `NOTIFY_SOCKET`,
+    `JOURNAL_STREAM`, `INVOCATION_ID` and `QT_LOGGING_RULES` from its environment. Anything
+    else could make the privileged process load or run code chosen by any process of the
+    user (`NETVFS_BACKEND_PATH`, `NETVFS_SMB_SHARES_HELPER`, `QT_PLUGIN_PATH`,
+    `GIO_EXTRA_MODULES`, ...); the `NETVFS_*` test overrides apply only to a bridge that is
+    not set-id. glibc itself drops `LD_*`, `TMPDIR` and similar; the bridge uses none of
+    them. A missing `XDG_RUNTIME_DIR` is set to `/run/user/<uid>`, where GLib (libaccounts'
+    change notifications) then finds the session bus;
+  - it makes itself dumpable again (`PR_SET_DUMPABLE`), so that it can read its own
+    `/proc/self/fdinfo` (pidfds, XB-5) on kernels before 5.14. Other processes of the user
+    still cannot ptrace it or open its `/proc` files: that needs their gids to match its
+    effective gid `privileged`;
+  - it reads the peer's `/proc` entries (XB-5) with its real gid as fsgid: the kernel lets a
+    process open another one's `/proc/<pid>/exe` only when its fsgid matches the other's
+    gids;
+  - upstream libdbus ignores `DBUS_SESSION_BUS_ADDRESS` and `XDG_RUNTIME_DIR` in such a
+    process (Sailfish OS patches that check out of its libdbus). When
+    `QDBusConnection::sessionBus()` is not connected, the bridge connects to
+    `/run/user/<uid>/bus` itself if that is a socket owned by its uid (notifications, XB-6;
+    settings handoff, XB-15);
+  - an accounts database it cannot open is logged at warning level, naming the setgid bit.
 - XB-3: Consumers are registered by files in `/usr/share/netvfs/consumers/<id>.conf`,
   shipped by netvfs packages (never by the consumer, which in Harbour cannot install
   outside its own paths):
@@ -907,7 +937,7 @@ permission, links nothing from netvfs, and never sees secrets or pins.
   | `netvfs-account-<p>` | provider file, account UI QML, icon | ui, backend-<p> |
   | `netvfs-backup-<p>` | `<p>-backup` service, Buteo plugins and profiles | account-<p>, buteo, jolla-vault |
   | `netvfs-files-services` | `<p>-files` services for installed providers | core |
-  | `netvfs-bridge` | `netvfs-bridge`, systemd generator and template units, `consumers/lautta.conf`, consent page for `netvfs-ui` | core, ui, files-services, systemd |
+  | `netvfs-bridge` | `netvfs-bridge` (setgid `privileged`, XB-2), systemd generator and template units, `consumers/lautta.conf`, consent page for `netvfs-ui` | core, ui, files-services, systemd, sailfish-setup (pre) |
   | `netvfs-cli` | `netvfs-cli` | core |
   | `netvfs-core-devel` | headers, pkg-config | core |
 

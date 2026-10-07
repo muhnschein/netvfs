@@ -4,7 +4,7 @@
 #   - the package dependencies of SPEC-v2 XP-1: every package requires
 #     netvfs-core of the same build (XC-1a), libnetvfs requires QtNetwork
 #     (discovery, XD-1), only netvfs-backup-* depend on Buteo (XP-4), the
-#     bridge requires no backend (XP-5);
+#     bridge requires no backend (XP-5) and is setgid privileged (XB-2);
 #   - libnetvfs-smb.so contains no share enumeration code (XP-3, SPEC 10.2
 #     G-SMB item 4; tools/ci/check-noshareenum.sh), and the check finds that
 #     code in the share helper when it is built;
@@ -72,6 +72,15 @@ for r in $rpms; do
         fail "netvfs-bridge requires a backend"
     fi
 done
+
+# SPEC-v2 XB-2: the bridge reads the accounts database as group privileged.
+if bridge_rpm=$(rpm_of netvfs-bridge); then
+    bridge_mode=$(rpm -qp --qf '[%{FILEMODES:perms} %{FILEUSERNAME}:%{FILEGROUPNAME} %{FILENAMES}\n]' "$bridge_rpm" \
+        | grep ' /usr/libexec/netvfs/netvfs-bridge$' || true)
+    if [ "${bridge_mode%% *}" != "-rwxr-sr-x" ] || ! echo "$bridge_mode" | grep -q ' root:privileged '; then
+        fail "netvfs-bridge is not setgid privileged: $bridge_mode"
+    fi
+fi
 
 # SPEC-v2 XD-1: libnetvfs links QtNetwork, so netvfs-core requires it.
 if ! rpm -qp --requires "$core_rpm" | grep -q '^libQt5Network\.so\.5'; then

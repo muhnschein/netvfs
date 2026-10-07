@@ -234,6 +234,8 @@ Requires:   %{name}-core = %{version}-%{release}
 Requires:   %{name}-ui = %{version}-%{release}
 Requires:   %{name}-files-services = %{version}-%{release}
 Requires:   systemd
+# SPEC-v2 XB-2: the group `privileged` of the setgid bridge (as mapplauncherd).
+Requires(pre): sailfish-setup
 
 %description bridge
 netvfs-bridge (SPEC-v2 8a): serves netvfs locations to registered sandboxed
@@ -393,7 +395,8 @@ systemctl-user daemon-reload || :
 %config %{_sysconfdir}/buteo/profiles/sync/smb.BackupRestore.xml
 
 %files bridge
-%{_prefix}/libexec/netvfs/netvfs-bridge
+# SPEC-v2 XB-2: only the group `privileged` can read the accounts database.
+%attr(2755,root,privileged) %{_prefix}/libexec/netvfs/netvfs-bridge
 %{_prefix}/lib/systemd/user-generators/netvfs-bridge-generator
 %dir %{_datadir}/netvfs/consumers
 %{_datadir}/netvfs/consumers/lautta.conf

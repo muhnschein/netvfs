@@ -6,9 +6,13 @@
 // "systemd:" address (sd_listen_fds protocol, LISTEN_PID/LISTEN_FDS), so the
 // rendezvous stays exactly the socket systemd created in the consumer's
 // folder (XB-4). --listen ADDRESS replaces it for development and tests.
+//
+// Installed setgid `privileged` for the accounts database (XB-2); see
+// privileges.h for what that changes in the process.
 #include "bridgelog.h"
 #include "bridgeserver.h"
 #include "consentstore.h"
+#include "privileges.h"
 
 #include <QtCore/QCoreApplication>
 #include <QtCore/QStringList>
@@ -27,8 +31,14 @@ int usage()
 
 int main(int argc, char **argv)
 {
+    // Before anything reads the environment, Qt included.
+    const QList<QByteArray> ignored =
+        NetVfs::Bridge::runningSetId() ? NetVfs::Bridge::prepareSetIdProcess() : QList<QByteArray>();
+
     QCoreApplication app(argc, argv);
     QCoreApplication::setApplicationName(QStringLiteral("netvfs-bridge"));
+    if (!ignored.isEmpty())
+        qCDebug(lcNetVfsBridge) << "Set-id process, environment variables ignored:" << ignored;
     QStringList args = QCoreApplication::arguments().mid(1);
 
     NetVfs::Bridge::BridgeConfig config;

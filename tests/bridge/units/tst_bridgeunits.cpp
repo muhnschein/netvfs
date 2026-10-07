@@ -8,8 +8,10 @@
 #include "fdcheck.h"
 #include "handoff.h"
 #include "knownhosts.h"
+#include "location.h"
 #include "names.h"
 #include "peercheck.h"
+#include "privileges.h"
 #include "protocol.h"
 #include "questions.h"
 #include "wire.h"
@@ -26,6 +28,7 @@
 #include <fcntl.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/un.h>
 #include <unistd.h>
 
 using namespace NetVfs;
@@ -132,6 +135,9 @@ private Q_SLOTS:
     void peerPidReuse();
     void peerPidfd();
     void peerRealProcess();
+    void setIdEnvironment();
+    void userBusAddress();
+    void accountsUnavailable();
     void consumers();
     void consent();
     void knownHosts();
@@ -658,6 +664,92 @@ void tst_BridgeUnits::peerRealProcess()
     QVERIFY(PeerChecker(copy).check(sv[0]).ok());
     ::close(sv[0]);
     ::close(sv[1]);
+}
+
+void tst_BridgeUnits::setIdEnvironment()
+{
+    // XB-2: what a setgid bridge keeps from its environment.
+    for (const char *name : { "HOME", "LANG", "LC_ALL", "XDG_RUNTIME_DIR", "XDG_CONFIG_HOME", "XDG_DATA_HOME",
+                              "DBUS_SESSION_BUS_ADDRESS", "LISTEN_PID", "LISTEN_FDS", "QT_LOGGING_RULES" })
+        QVERIFY2(keptInSetIdProcess(name), name);
+    for (const char *name : { "NETVFS_BACKEND_PATH", "NETVFS_SMB_SHARES_HELPER", "NETVFS_CONSUMERS_DIR",
+                              "NETVFS_BRIDGE_IDLE_EXIT_MS", "QT_PLUGIN_PATH", "LD_PRELOAD", "GIO_EXTRA_MODULES",
+                              "ACCOUNTS", "AG_PROVIDERS", "PATH", "HOMEX", "XHOME", "" })
+        QVERIFY2(!keptInSetIdProcess(name), name);
+
+    QList<QPair<QByteArray, QByteArray>> saved;
+    for (char **entry = environ; *entry; ++entry) {
+        const QByteArray variable(*entry);
+        const int eq = variable.indexOf('=');
+        saved.append({ variable.left(eq), variable.mid(eq + 1) });
+    }
+    const bool runtimeDirSet = qEnvironmentVariableIsSet("XDG_RUNTIME_DIR");
+    qputenv("NETVFS_BACKEND_PATH", "/tmp/plugins");
+    qputenv("QT_PLUGIN_PATH", "/tmp/plugins");
+    qputenv("LISTEN_FDS", "1");
+    const QList<QByteArray> removed = prepareSetIdProcess();
+    const bool backendPathKept = qEnvironmentVariableIsSet("NETVFS_BACKEND_PATH");
+    const bool pluginPathKept = qEnvironmentVariableIsSet("QT_PLUGIN_PATH");
+    const QByteArray listenFds = qgetenv("LISTEN_FDS");
+    for (const auto &[name, value] : saved)
+        qputenv(name.constData(), value);
+    qunsetenv("NETVFS_BACKEND_PATH");
+    qunsetenv("QT_PLUGIN_PATH");
+    qunsetenv("LISTEN_FDS");
+    if (!runtimeDirSet)
+        qunsetenv("XDG_RUNTIME_DIR");   // set to /run/user/<uid> when that exists
+    QVERIFY(!backendPathKept);
+    QVERIFY(!pluginPathKept);
+    QCOMPARE(listenFds, QByteArray("1"));
+    QVERIFY(removed.contains("NETVFS_BACKEND_PATH"));
+    QVERIFY(!removed.contains("LISTEN_FDS"));
+}
+
+void tst_BridgeUnits::userBusAddress()
+{
+    // XB-2: the session bus of a setgid bridge when libdbus ignores the
+    // environment.
+    QTemporaryDir root;
+    const uid_t uid = ::getuid();
+    const QString folder = root.path() + QLatin1Char('/') + QString::number(uid);
+    QDir().mkpath(folder);
+    QCOMPARE(NetVfs::Bridge::userBusAddress(root.path(), uid), QString());
+    writeFile(folder + QStringLiteral("/bus"), "not a socket");
+    QCOMPARE(NetVfs::Bridge::userBusAddress(root.path(), uid), QString());
+    QFile::remove(folder + QStringLiteral("/bus"));
+
+    const int fd = ::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+    struct sockaddr_un addr {};
+    addr.sun_family = AF_UNIX;
+    const QByteArray path = QFile::encodeName(folder + QStringLiteral("/bus"));
+    QVERIFY(fd >= 0 && path.size() < int(sizeof(addr.sun_path)));
+    std::copy(path.constBegin(), path.constEnd(), addr.sun_path);
+    QCOMPARE(::bind(fd, reinterpret_cast<struct sockaddr *>(&addr), sizeof(addr)), 0);
+    QCOMPARE(NetVfs::Bridge::userBusAddress(root.path(), uid), QStringLiteral("unix:path=") + QString::fromLocal8Bit(path));
+    // Someone else's bus, or another uid's folder.
+    QCOMPARE(NetVfs::Bridge::userBusAddress(root.path(), uid + 1), QString());
+    QVERIFY(QFile::link(folder, root.path() + QLatin1Char('/') + QString::number(uid + 1)));
+    QCOMPARE(NetVfs::Bridge::userBusAddress(root.path(), uid + 1), QString());
+    ::close(fd);
+}
+
+void tst_BridgeUnits::accountsUnavailable()
+{
+    // An accounts database the bridge cannot open (on Sailfish OS: not setgid
+    // privileged) is reported, not just an empty list.
+    QTemporaryDir dir;
+    writeFile(dir.path() + QStringLiteral("/file"), "x");
+    const QByteArray saved = qgetenv("ACCOUNTS");
+    qputenv("ACCOUNTS", QFile::encodeName(dir.path() + QStringLiteral("/file/accounts")));
+    QTest::ignoreMessage(QtWarningMsg, QRegularExpression(QStringLiteral("^Cannot open the accounts database")));
+    {
+        LibAccountsDirectory accounts;
+        QVERIFY(accounts.filesAccounts().isEmpty());
+    }
+    if (saved.isNull())
+        qunsetenv("ACCOUNTS");
+    else
+        qputenv("ACCOUNTS", saved);
 }
 
 void tst_BridgeUnits::consumers()

@@ -47,12 +47,24 @@ class LibAccountsDirectory::Private
 {
 public:
     Accounts::Manager manager;
+    bool usable = true;
 };
 
 LibAccountsDirectory::LibAccountsDirectory(QObject *parent)
     : AccountDirectory(parent)
     , d(std::make_unique<Private>())
 {
+    // libaccounts reports an unreadable database only through lastError()
+    // and then lists nothing. On Sailfish OS only the group `privileged` can
+    // read it, which the bridge gets from its setgid bit (XB-2).
+    if (const Accounts::Error error = d->manager.lastError(); error.type() != Accounts::Error::NoError) {
+        d->usable = false;
+        qCWarning(lcNetVfsBridge).noquote()
+            << QStringLiteral("Cannot open the accounts database (libaccounts error %1 %2), no account is listed. "
+                              "Is netvfs-bridge installed setgid privileged?")
+                   .arg(int(error.type()))
+                   .arg(error.message());
+    }
     const Accounts::Manager *m = &d->manager;
     connect(m, &Accounts::Manager::accountCreated, this, &AccountDirectory::changed);
     connect(m, &Accounts::Manager::accountRemoved, this, &AccountDirectory::changed);
@@ -66,6 +78,8 @@ QVector<AccountLocation> LibAccountsDirectory::filesAccounts()
 {
     // XA-1: enabled accounts whose Files service is enabled.
     QVector<AccountLocation> result;
+    if (!d->usable)
+        return result;
     const AccountStore store(&d->manager);
     for (const int id : store.filesAccounts()) {
         AccountConfig config;

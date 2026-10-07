@@ -1,5 +1,47 @@
 [
   {
+    "name": "XB-2 set-id process keeps its whole environment",
+    "file": "src/bridge/lib/privileges.cpp",
+    "search": "        if (!keptInSetIdProcess(name))\n            removed << name;",
+    "replace": "        if (false)\n            removed << name;",
+    "test": "build/tests/bridge/units/tst_bridgeunits"
+  },
+  {
+    "name": "XB-2 set-id process keeps variables by prefix",
+    "file": "src/bridge/lib/privileges.cpp",
+    "search": "        if (name == kept)",
+    "replace": "        if (name.startsWith(kept))",
+    "test": "build/tests/bridge/units/tst_bridgeunits"
+  },
+  {
+    "name": "XB-2 another uid's session bus used",
+    "file": "src/bridge/lib/privileges.cpp",
+    "search": "    return ::lstat(path.constData(), &st) == 0 && st.st_uid == uid && (st.st_mode & S_IFMT) == type;",
+    "replace": "    return ::lstat(path.constData(), &st) == 0 && (st.st_mode & S_IFMT) == type;",
+    "test": "build/tests/bridge/units/tst_bridgeunits"
+  },
+  {
+    "name": "XB-2 session bus that is not a socket used",
+    "file": "src/bridge/lib/privileges.cpp",
+    "search": "    return ::lstat(path.constData(), &st) == 0 && st.st_uid == uid && (st.st_mode & S_IFMT) == type;",
+    "replace": "    return ::lstat(path.constData(), &st) == 0 && st.st_uid == uid;",
+    "test": "build/tests/bridge/units/tst_bridgeunits"
+  },
+  {
+    "name": "XB-2 unreadable accounts database not reported",
+    "file": "src/bridge/lib/location.cpp",
+    "search": "        qCWarning(lcNetVfsBridge).noquote()\n            << QStringLiteral(\"Cannot open the accounts database",
+    "replace": "        qCDebug(lcNetVfsBridge).noquote()\n            << QStringLiteral(\"Cannot open the accounts database",
+    "test": "build/tests/bridge/units/tst_bridgeunits"
+  },
+  {
+    "name": "XB-2 bridge unit blocks the setgid bit",
+    "file": "src/bridge/generator/netvfs-bridge-generator.c",
+    "search": "             \"ExecStart=\" BRIDGE_BINARY \" %s\\n\",",
+    "replace": "             \"ExecStart=\" BRIDGE_BINARY \" %s\\n\" \"NoNewPrivileges=yes\\n\",",
+    "test": "build/tests/bridge/generator/tst_generator"
+  },
+  {
     "name": "XB-5 peer uid not checked",
     "file": "src/bridge/lib/peercheck.cpp",
     "search": "    if (credentials.uid != m_env.ownUid)",

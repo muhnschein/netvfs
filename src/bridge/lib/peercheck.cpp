@@ -8,6 +8,7 @@
 #include <vector>
 
 #include <fcntl.h>
+#include <sys/fsuid.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
@@ -72,6 +73,22 @@ public:
 
 private:
     int m_fd;
+};
+
+// SPEC-v2 XB-2: the bridge is setgid `privileged`. The kernel lets a process
+// read another one's /proc/<pid>/exe only when its fsgid equals the other's
+// gids (ptrace access mode), so the peer's entries are read with the real
+// gid, which is the user's own. Per thread, like the fsgid itself.
+class RealGidScope
+{
+public:
+    RealGidScope() : m_previous(static_cast<gid_t>(::setfsgid(::getgid()))) {}
+    ~RealGidScope() { ::setfsgid(m_previous); }
+    RealGidScope(const RealGidScope &) = delete;
+    RealGidScope &operator=(const RealGidScope &) = delete;
+
+private:
+    gid_t m_previous;
 };
 
 // Reads up to `size` bytes; fewer only at the end of the file. -1 on error.
@@ -198,6 +215,7 @@ bool PeerChecker::pidfdAlive(int pidfd, pid_t pid) const
 
 Result PeerChecker::checkProcess(pid_t pid, int pidfd) const
 {
+    const RealGidScope realGid;
     qint64 before = 0;
     if (!startTime(pid, &before))
         return refused(QStringLiteral("peer process %1 is gone").arg(pid));

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 #include "handoff.h"
 
+#include "privileges.h"
+
 #include <QtCore/QFileInfo>
 #include <QtCore/QSettings>
 #include <QtDBus/QDBusConnection>
@@ -55,7 +57,7 @@ Result sessionBusLauncher(const HandoffCall &call)
 {
     QDBusMessage message = QDBusMessage::createMethodCall(call.service, call.path, call.interface, call.method);
     message.setArguments(call.arguments);
-    if (!QDBusConnection::sessionBus().send(message))
+    if (!sessionBus().send(message))
         return Result(Error::Unsupported, QStringLiteral("Settings cannot be opened"));
     return Result::success();
 }

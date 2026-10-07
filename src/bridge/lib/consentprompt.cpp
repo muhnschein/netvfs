@@ -2,6 +2,7 @@
 #include "consentprompt.h"
 
 #include "bridgelog.h"
+#include "privileges.h"
 
 #include <QtCore/QCoreApplication>
 #include <QtDBus/QDBusConnection>
@@ -33,7 +34,7 @@ NotificationConsentPrompt::~NotificationConsentPrompt()
 
 void NotificationConsentPrompt::show(const QString &displayName)
 {
-    QDBusConnection bus = QDBusConnection::sessionBus();
+    QDBusConnection bus = sessionBus();
     if (!m_connected) {
         bus.connect(QLatin1String(NotificationsService), QLatin1String(NotificationsPath),
                     QLatin1String(NotificationsInterface), QStringLiteral("ActionInvoked"), this,
@@ -74,7 +75,7 @@ void NotificationConsentPrompt::withdraw()
                                                       QLatin1String(NotificationsInterface),
                                                       QStringLiteral("CloseNotification"));
     call << m_id;
-    QDBusConnection::sessionBus().send(call);
+    sessionBus().send(call);
     m_id = 0;
 }
 

@@ -31,6 +31,9 @@
 //    start time (/proc/<pid>/stat field 22) must be the same before and after
 //    opening exe and must not be later than the moment the connection was
 //    accepted, so a process started after the connection cannot pass for it.
+// The peer's /proc entries are read with the real gid as fsgid: the bridge
+// is setgid `privileged` (XB-2), and the kernel lets only a process with the
+// peer's gid open its exe.
 //
 // /proc, the credentials and the clock are injectable for tests.
 namespace NetVfs::Bridge {

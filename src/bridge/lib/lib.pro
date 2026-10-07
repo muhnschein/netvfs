@@ -27,6 +27,7 @@ HEADERS = \
     location.h \
     peercheck.h \
     pool.h \
+    privileges.h \
     protocol.h \
     questions.h \
     runtime.h \
@@ -51,6 +52,7 @@ SOURCES = \
     locationbook.cpp \
     peercheck.cpp \
     pool.cpp \
+    privileges.cpp \
     protocol.cpp \
     questions.cpp \
     runtime.cpp \
