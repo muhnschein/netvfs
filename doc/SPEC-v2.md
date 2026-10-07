@@ -792,6 +792,8 @@ permission, links nothing from netvfs, and never sees secrets or pins.
     `QDBusConnection::sessionBus()` is not connected, the bridge connects to
     `/run/user/<uid>/bus` itself if that is a socket owned by its uid (notifications, XB-6;
     settings handoff, XB-15);
+  - the SMB share helper (XM-7) is spawned with `POSIX_SPAWN_RESETIDS`, so the one
+    separate parser of server data (XSEC-3) does not run with the group;
   - an accounts database it cannot open is logged at warning level, naming the setgid bit.
 - XB-3: Consumers are registered by files in `/usr/share/netvfs/consumers/<id>.conf`,
   shipped by netvfs packages (never by the consumer, which in Harbour cannot install

@@ -188,9 +188,15 @@ Result spawnHelper(const QString &program, Pipe *input, Pipe *output, pid_t *pid
     posix_spawn_file_actions_adddup2(&actions, input->read.get(), STDIN_FILENO);
     posix_spawn_file_actions_adddup2(&actions, output->write.get(), STDOUT_FILENO);
     posix_spawn_file_actions_addopen(&actions, STDERR_FILENO, "/dev/null", O_WRONLY, 0);
+    // XSEC-3: the helper parses server data, so it runs without a group the
+    // caller got from a setgid bit (netvfs-bridge is setgid privileged, XB-2).
+    posix_spawnattr_t attributes;
+    posix_spawnattr_init(&attributes);
+    posix_spawnattr_setflags(&attributes, POSIX_SPAWN_RESETIDS);
     QByteArray path = program.toLocal8Bit();
     std::array<char *, 2> argv = { path.data(), nullptr };
-    const int rc = ::posix_spawn(pid, path.constData(), &actions, nullptr, argv.data(), environ);
+    const int rc = ::posix_spawn(pid, path.constData(), &actions, &attributes, argv.data(), environ);
+    posix_spawnattr_destroy(&attributes);
     posix_spawn_file_actions_destroy(&actions);
     input->read.reset();
     output->write.reset();
