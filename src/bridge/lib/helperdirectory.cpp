@@ -12,9 +12,6 @@
 #include <QtDBus/QDBusConnection>
 #include <QtDBus/QDBusMessage>
 
-#include <algorithm>
-#include <memory>
-
 namespace NetVfs::Bridge {
 
 namespace {
@@ -28,6 +25,7 @@ constexpr int ChangedDelayMs = 200;
 // session bus, on one object path per service type.
 const char AccountsInterface[] = "com.google.code.AccountsSSO.Accounts";
 const char AccountChangedSignal[] = "AccountChanged";
+const char EndedProperty[] = "netvfsEnded";
 
 Result helperFailed(const QProcess &process)
 {
@@ -39,14 +37,26 @@ Result helperFailed(const QProcess &process)
     return Result::success();
 }
 
-std::unique_ptr<QProcess> newProcess(const QString &program, const QStringList &arguments)
+void configure(QProcess &process, const QString &program, const QStringList &arguments)
 {
-    auto process = std::make_unique<QProcess>();
     // The helper's warnings go to the bridge's journal.
-    process->setProcessChannelMode(QProcess::ForwardedErrorChannel);
-    process->setProgram(program);
-    process->setArguments(arguments);
-    return process;
+    process.setProcessChannelMode(QProcess::ForwardedErrorChannel);
+    process.setProgram(program);
+    process.setArguments(arguments);
+}
+
+// Ends a run of the helper started by start(): hands `finished` the result
+// once, whichever of the process's signals comes first, and deletes the
+// process from the event loop (this runs from one of its own signals).
+template <typename Callback>
+void endRun(QProcess *process, const Result &result, const Callback &finished)
+{
+    if (process->property(EndedProperty).toBool())
+        return;
+    process->setProperty(EndedProperty, true);
+    const QByteArray answer = result.ok() ? process->read(MaxAnswerBytes) : QByteArray();
+    process->deleteLater();
+    finished(result, answer);
 }
 
 // signond, from the bridge itself (SPEC C-2, A-6, XA-7).
@@ -87,13 +97,7 @@ HelperAccountsDirectory::HelperAccountsDirectory(const QString &program, QObject
         qCWarning(lcNetVfsBridge) << "No session bus: account changes are seen only after a restart";
 }
 
-HelperAccountsDirectory::~HelperAccountsDirectory()
-{
-    // A helper still running is killed with its QProcess; nobody waits for
-    // its answer any more.
-    for (const std::unique_ptr<QProcess> &process : m_running)
-        process->disconnect(this);
-}
+HelperAccountsDirectory::~HelperAccountsDirectory() = default;
 
 void HelperAccountsDirectory::onAccountChanged(const QDBusMessage &)
 {
@@ -104,21 +108,22 @@ void HelperAccountsDirectory::onAccountChanged(const QDBusMessage &)
 QVector<AccountLocation> HelperAccountsDirectory::filesAccounts()
 {
     // Synchronous, like the listing it replaces: at start and after a change.
-    const std::unique_ptr<QProcess> process = newProcess(m_program, { QStringLiteral("list") });
-    process->start(QIODevice::ReadOnly);
+    QProcess process;
+    configure(process, m_program, { QStringLiteral("list") });
+    process.start(QIODevice::ReadOnly);
     Result r;
-    if (!process->waitForFinished(HelperTimeoutMs)) {
-        r = process->error() == QProcess::FailedToStart
-            ? helperFailed(*process)
+    if (!process.waitForFinished(HelperTimeoutMs)) {
+        r = process.error() == QProcess::FailedToStart
+            ? helperFailed(process)
             : Result(Error::Timeout, QStringLiteral("%1 did not answer in time").arg(m_program));
-        process->kill();
-        process->waitForFinished();
+        process.kill();
+        process.waitForFinished();
     } else {
-        r = helperFailed(*process);
+        r = helperFailed(process);
     }
     QVector<AccountLocation> accounts;
     if (r.ok())
-        r = AccountsHelper::decodeList(process->read(MaxAnswerBytes), &accounts);
+        r = AccountsHelper::decodeList(process.read(MaxAnswerBytes), &accounts);
     if (!r.ok())
         qCWarning(lcNetVfsBridge).noquote() << "Cannot list the accounts, none is listed:" << r.toString();
     return accounts;
@@ -126,33 +131,20 @@ QVector<AccountLocation> HelperAccountsDirectory::filesAccounts()
 
 void HelperAccountsDirectory::start(const QStringList &arguments, const Finished &finished)
 {
-    m_running.push_back(newProcess(m_program, arguments));
-    QProcess *process = m_running.back().get();
-    connect(process, &QProcess::errorOccurred, this, [this, process, finished](QProcess::ProcessError error) {
+    auto *process = new QProcess(this);
+    configure(*process, m_program, arguments);
+    connect(process, &QProcess::errorOccurred, this, [process, finished](QProcess::ProcessError error) {
         if (error == QProcess::FailedToStart)
-            finish(process, helperFailed(*process), finished);
+            endRun(process, helperFailed(*process), finished);
     });
     connect(process, static_cast<void (QProcess::*)(int, QProcess::ExitStatus)>(&QProcess::finished), this,
-            [this, process, finished]() { finish(process, helperFailed(*process), finished); });
-    QTimer::singleShot(HelperTimeoutMs, process, [this, process, finished]() {
+            [process, finished]() { endRun(process, helperFailed(*process), finished); });
+    QTimer::singleShot(HelperTimeoutMs, process, [process, finished]() {
         process->kill();
-        finish(process, Result(Error::Timeout, QStringLiteral("%1 did not answer in time").arg(m_program)),
+        endRun(process, Result(Error::Timeout, QStringLiteral("%1 did not answer in time").arg(process->program())),
                finished);
     });
     process->start(QIODevice::ReadOnly);
-}
-
-void HelperAccountsDirectory::finish(QProcess *process, const Result &result, const Finished &finished)
-{
-    const auto running = std::find_if(m_running.begin(), m_running.end(),
-                                      [process](const std::unique_ptr<QProcess> &p) { return p.get() == process; });
-    if (running == m_running.end())
-        return;   // already finished: a timeout, an error and the exit can all report
-    const QByteArray answer = result.ok() ? process->read(MaxAnswerBytes) : QByteArray();
-    // Not deleted here: this runs from one of the process's own signals.
-    running->release()->deleteLater();
-    m_running.erase(running);
-    finished(result, answer);
 }
 
 void HelperAccountsDirectory::fetch(int accountId, const Fetched &done)
