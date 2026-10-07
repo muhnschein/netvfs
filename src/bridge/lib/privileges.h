@@ -31,7 +31,8 @@ bool keptInSetIdProcess(const QByteArray &name);
 // missing, and makes the process dumpable again so that it can read its own
 // /proc/self/fdinfo (pidfds, XB-5) on kernels before 5.14. Dumpable does not
 // let other processes of the user in: ptrace access also needs their gids to
-// match the bridge's `privileged` effective gid.
+// match the bridge's `privileged` effective gid. The soft core limit becomes
+// 0, so that a crash leaves no user-readable core with privileged memory.
 QList<QByteArray> prepareSetIdProcess();
 
 // "unix:path=<runtimeRoot>/<uid>/bus" when that is a socket owned by `uid`,

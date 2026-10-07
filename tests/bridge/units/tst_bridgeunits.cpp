@@ -29,6 +29,7 @@
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/un.h>
+#include <sys/resource.h>
 #include <unistd.h>
 
 using namespace NetVfs;
@@ -687,7 +688,16 @@ void tst_BridgeUnits::setIdEnvironment()
     qputenv("NETVFS_BACKEND_PATH", "/tmp/plugins");
     qputenv("QT_PLUGIN_PATH", "/tmp/plugins");
     qputenv("LISTEN_FDS", "1");
+    struct rlimit coreBefore {};
+    ::getrlimit(RLIMIT_CORE, &coreBefore);
+    // A core limit of its own to drop (the soft limit may start at 0).
+    const struct rlimit coreOpen { coreBefore.rlim_max, coreBefore.rlim_max };
+    QVERIFY(coreOpen.rlim_cur != 0);
+    ::setrlimit(RLIMIT_CORE, &coreOpen);
     const QList<QByteArray> removed = prepareSetIdProcess();
+    struct rlimit coreAfter {};
+    ::getrlimit(RLIMIT_CORE, &coreAfter);
+    ::setrlimit(RLIMIT_CORE, &coreBefore);
     const bool backendPathKept = qEnvironmentVariableIsSet("NETVFS_BACKEND_PATH");
     const bool pluginPathKept = qEnvironmentVariableIsSet("QT_PLUGIN_PATH");
     const QByteArray listenFds = qgetenv("LISTEN_FDS");
@@ -703,6 +713,8 @@ void tst_BridgeUnits::setIdEnvironment()
     QCOMPARE(listenFds, QByteArray("1"));
     QVERIFY(removed.contains("NETVFS_BACKEND_PATH"));
     QVERIFY(!removed.contains("LISTEN_FDS"));
+    QCOMPARE(coreAfter.rlim_cur, rlim_t(0));
+    QCOMPARE(coreAfter.rlim_max, coreBefore.rlim_max);
 }
 
 void tst_BridgeUnits::userBusAddress()

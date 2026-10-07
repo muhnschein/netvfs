@@ -783,7 +783,8 @@ permission, links nothing from netvfs, and never sees secrets or pins.
   - it makes itself dumpable again (`PR_SET_DUMPABLE`), so that it can read its own
     `/proc/self/fdinfo` (pidfds, XB-5) on kernels before 5.14. Other processes of the user
     still cannot ptrace it or open its `/proc` files: that needs their gids to match its
-    effective gid `privileged`;
+    effective gid `privileged`. Its soft core limit is 0, so that a crash writes no core
+    file, which would be the user's and hold memory of the `privileged` group;
   - it reads the peer's `/proc` entries (XB-5) with its real gid as fsgid: the kernel lets a
     process open another one's `/proc/<pid>/exe` only when its fsgid matches the other's
     gids;

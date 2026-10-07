@@ -10,6 +10,7 @@
 
 #include <sys/auxv.h>
 #include <sys/prctl.h>
+#include <sys/resource.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -68,6 +69,13 @@ QList<QByteArray> prepareSetIdProcess()
         !qEnvironmentVariableIsSet("XDG_RUNTIME_DIR") && ownedBy(runtimeDir, ::getuid(), S_IFDIR))
         ::setenv("XDG_RUNTIME_DIR", runtimeDir.constData(), 1);
 
+    // Dumpable again, but no core file: one would be written as the user and
+    // carry memory the `privileged` group protects (account settings).
+    struct rlimit core {};
+    if (::getrlimit(RLIMIT_CORE, &core) == 0) {
+        core.rlim_cur = 0;
+        ::setrlimit(RLIMIT_CORE, &core);
+    }
     ::prctl(PR_SET_DUMPABLE, 1);
     return removed;
 }
