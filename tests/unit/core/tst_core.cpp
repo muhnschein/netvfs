@@ -513,8 +513,14 @@ private slots:
         server->failOps.insert(QStringLiteral("removeFile"), Result(Error::PermissionDenied));
         QCOMPARE(verifyAccess(&backend, QStringLiteral("x")).error(), Error::PermissionDenied);
         server->freeBytes = 10;
-        server->failOps.insert(QStringLiteral("spaceInfo"), Result(Error::Timeout));
-        QCOMPARE(verifyAccess(&backend, QStringLiteral("x")).error(), Error::Timeout);
+        // Free space is best effort: a failed query leaves it unknown
+        // (Samba with quotas on ZFS drops the connection here).
+        server->failOps.insert(QStringLiteral("spaceInfo"), Result(Error::ConnectionLost));
+        freeBytes = 0;
+        QVERIFY(verifyAccess(&backend, QStringLiteral("x"), &freeBytes).ok());
+        QCOMPARE(freeBytes, qint64(-1));
+        server->failOps.insert(QStringLiteral("spaceInfo"), Result(Error::Canceled));
+        QCOMPARE(verifyAccess(&backend, QStringLiteral("x")).error(), Error::Canceled);
     }
 
     void loader()
