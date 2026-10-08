@@ -56,18 +56,16 @@ qint64 defaultBootTicksNow()
     const QByteArray uptime = readSmallFile(QStringLiteral("/proc/uptime"));
     const QByteArray field = uptime.left(uptime.indexOf(' '));
     const int dot = field.indexOf('.');
-    const QByteArray fraction = dot < 0 ? QByteArray() : field.mid(dot + 1);
+    // The fraction as nanoseconds: padded or cut to nine digits.
+    const QByteArray fraction = (dot < 0 ? QByteArray() : field.mid(dot + 1)).leftJustified(9, '0', true);
     bool secondsOk = false;
-    bool fractionOk = fraction.isEmpty();
-    const qint64 seconds = field.left(dot).toLongLong(&secondsOk);
-    const qint64 parts = fraction.isEmpty() ? 0 : fraction.toLongLong(&fractionOk);
-    if (!secondsOk || !fractionOk || seconds < 0 || parts < 0 || fraction.size() > 9)
+    bool fractionOk = false;
+    const qint64 seconds = (dot < 0 ? field : field.left(dot)).toLongLong(&secondsOk);
+    const qint64 nanoseconds = fraction.toLongLong(&fractionOk);
+    if (!secondsOk || !fractionOk || seconds < 0 || nanoseconds < 0)
         return -1;
-    qint64 scale = 1;
-    for (int i = 0; i < fraction.size(); ++i)
-        scale *= 10;
     const qint64 hz = ::sysconf(_SC_CLK_TCK);
-    return seconds * hz + parts * hz / scale;
+    return seconds * hz + nanoseconds * hz / 1000000000;
 }
 
 class FdCloser
