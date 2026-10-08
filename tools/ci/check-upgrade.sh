@@ -1,12 +1,15 @@
 #!/bin/sh
 # SPDX-License-Identifier: LGPL-2.1-or-later
-# SPEC-v2 XP-2: an update from a release before the package split keeps the
-# backups. In a fresh SDK target per scenario: installs the old release's
+# SPEC-v2 XP-2, XP-6: an update from an earlier release (0.1 before the
+# package split, 0.2 with its per-protocol packages) keeps the accounts and
+# the backups. In a fresh SDK target per scenario: installs the old release's
 # RPMs, serves the new RPMs from a local repository, updates and checks that
-# every file the old netvfs-account-* packages installed (backup plugins and
-# profiles, backup service, provider, account UI, backend) is still there
-# and belongs to a package of the new release, and that the netvfs-backup-*
-# packages were installed.
+# every file the old packages other than netvfs-core installed (backup
+# plugins and profiles, backup service, provider, account UI, backends,
+# bridge) is still there and belongs to a package of the new release, that
+# the packages replacing the old ones (netvfs, netvfs-backup for the old
+# account and backup packages, netvfs-bridge, netvfs-devel) are installed,
+# and that every installed netvfs package is of the new release.
 #
 # Usage: tools/ci/check-upgrade.sh OLD_RPMS_DIR NEW_RPMS_DIR [SCENARIO...]
 #   Both folders are inside the source tree. Scenarios:
@@ -66,15 +69,25 @@ packages() {
 
 old_rpms=$(packages "$old_dir")
 old_version=$(rpm -qp --qf '%{VERSION}' "$(packages "$old_dir" | grep '/netvfs-core-[0-9]')")
-new_version=$(rpm -qp --qf '%{VERSION}' "$(packages "$new_dir" | grep '/netvfs-core-[0-9]')")
+new_version=$(rpm -qp --qf '%{VERSION}' "$(packages "$new_dir" | grep '/netvfs-[0-9]')")
 echo "old: $(for r in $old_rpms; do basename "$r"; done | tr '\n' ' ')"
 
 # shellcheck disable=SC2086 # one word per file
 zypper_target in --allow-unsigned-rpm $old_rpms
 installed_old=$(sb2 -t "$TARGET" rpm -qa --qf '%{NAME}\n' 'netvfs*' | sort)
-accounts_old=$(echo "$installed_old" | grep '^netvfs-account-')
+# netvfs-core changed its soname and moved its QML module between 0.1 and
+# 0.2; everything else keeps its path.
+kept_old=$(echo "$installed_old" | grep -v '^netvfs-core')
 # shellcheck disable=SC2086 # one word per package
-keep=$(sb2 -t "$TARGET" rpm -ql $accounts_old)
+keep=$(sb2 -t "$TARGET" rpm -ql $kept_old)
+expected=$(for package in $installed_old; do
+    case $package in
+        netvfs-core-devel) echo netvfs-devel ;;
+        netvfs-bridge) echo netvfs-bridge ;;
+        netvfs-backup-*|netvfs-account-sftp|netvfs-account-smb) echo netvfs netvfs-backup ;;
+        *) echo netvfs ;;
+    esac
+done | tr ' ' '\n' | sort -u)
 
 repo=$PWD/build-upgrade-repo-$$
 rm -rf "$repo"
@@ -113,13 +126,14 @@ esac
 
 echo "installed after the update:"
 sb2 -t "$TARGET" rpm -qa 'netvfs*' | sort | sed 's/^/  /'
-for account in $accounts_old; do
-    backup=$(echo "$account" | sed 's/^netvfs-account-/netvfs-backup-/')
-    for package in "$account" "$backup"; do
-        version=$(sb2 -t "$TARGET" rpm -q --qf '%{VERSION}' "$package" 2>/dev/null || true)
-        [ "$version" = "$new_version" ] || fail "$package $new_version is not installed (found: $version)"
-    done
+for package in $expected; do
+    version=$(sb2 -t "$TARGET" rpm -q --qf '%{VERSION}' "$package" 2>/dev/null || true)
+    [ "$version" = "$new_version" ] || fail "$package $new_version is not installed (found: $version)"
 done
+sb2 -t "$TARGET" rpm -qa --qf '%{NAME} %{VERSION}\n' 'netvfs*' | while read -r name version; do
+    [ "$version" = "$new_version" ] || echo "$name $version"
+done >"$log.stale"
+[ ! -s "$log.stale" ] || fail "packages of the old release are still installed: $(tr '\n' ' ' <"$log.stale")"
 for file in $keep; do
     if [ ! -e "$target_root$file" ]; then
         fail "$file is gone"
@@ -131,6 +145,6 @@ for file in $keep; do
         *) fail "$file belongs to '$owner', not to a netvfs $new_version package" ;;
     esac
 done
-echo "checked $(echo "$keep" | wc -w) files of: $accounts_old"
-rm -rf "$repo" "$log"
+echo "checked $(echo "$keep" | wc -w) files of: $(echo "$kept_old" | tr '\n' ' ')"
+rm -rf "$repo" "$log" "$log.stale"
 exit $status

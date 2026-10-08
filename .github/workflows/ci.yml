@@ -128,9 +128,12 @@ jobs:
     env:
       SDK_IMAGE: mirror.gcr.io/coderus/sailfishos-platform-sdk-aarch64:5.2.0.15@sha256:e5f7596d14502746b308c3dde36f65fc25d7f76c45a01acaed56a1f55b76f592
       TARGET: SailfishOS-5.2.0.15-aarch64
-      # netvfs 0.1.0 (main after PR #1), the last release before the package
-      # split: the SPEC-v2 XP-2 update check starts from its RPMs.
-      UPGRADE_BASE: 599828d1ab59a981f3cbf26b310c0d25962b5b24
+      # The SPEC-v2 XP-2/XP-6 update checks start from the RPMs of netvfs
+      # 0.1.0 (main after PR #1), the last release before the package split,
+      # and of 0.2.0 (main after PR #6), the last one with per-protocol
+      # packages.
+      UPGRADE_BASE_0_1: 599828d1ab59a981f3cbf26b310c0d25962b5b24
+      UPGRADE_BASE_0_2: 860dbecb378a97180997ab470ff02311dbee38a1
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
@@ -141,27 +144,48 @@ jobs:
         run: ./tools/ci/build-rpm.sh
       - name: Check dependencies and installability on the target
         run: ./tools/ci/check-rpm.sh
-      - name: Cache the ${{ env.UPGRADE_BASE }} RPMs
-        id: base-rpms
+      - name: Cache the 0.1.0 RPMs
+        id: base-rpms-0-1
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
-          path: build-upgrade/base-rpms
-          key: netvfs-rpms-${{ env.UPGRADE_BASE }}-${{ env.TARGET }}
-      - name: Check out ${{ env.UPGRADE_BASE }}
-        if: steps.base-rpms.outputs.cache-hit != 'true'
+          path: build-upgrade/base-rpms-0.1
+          key: netvfs-rpms-${{ env.UPGRADE_BASE_0_1 }}-${{ env.TARGET }}
+      - name: Check out 0.1.0
+        if: steps.base-rpms-0-1.outputs.cache-hit != 'true'
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
-          ref: ${{ env.UPGRADE_BASE }}
-          path: build-upgrade/base
+          ref: ${{ env.UPGRADE_BASE_0_1 }}
+          path: build-upgrade/base-0.1
           submodules: recursive
-      - name: Build the ${{ env.UPGRADE_BASE }} RPMs
-        if: steps.base-rpms.outputs.cache-hit != 'true'
+      - name: Build the 0.1.0 RPMs
+        if: steps.base-rpms-0-1.outputs.cache-hit != 'true'
         run: |
-          ./build-upgrade/base/tools/ci/build-rpm.sh
-          mkdir -p build-upgrade/base-rpms
-          cp build-upgrade/base/RPMS/*.rpm build-upgrade/base-rpms/
-      - name: Update from 0.1.0 keeps the backups (XP-2)
-        run: ./tools/ci/check-upgrade.sh build-upgrade/base-rpms RPMS
+          ./build-upgrade/base-0.1/tools/ci/build-rpm.sh
+          mkdir -p build-upgrade/base-rpms-0.1
+          cp build-upgrade/base-0.1/RPMS/*.rpm build-upgrade/base-rpms-0.1/
+      - name: Cache the 0.2.0 RPMs
+        id: base-rpms-0-2
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: build-upgrade/base-rpms-0.2
+          key: netvfs-rpms-${{ env.UPGRADE_BASE_0_2 }}-${{ env.TARGET }}
+      - name: Check out 0.2.0
+        if: steps.base-rpms-0-2.outputs.cache-hit != 'true'
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: ${{ env.UPGRADE_BASE_0_2 }}
+          path: build-upgrade/base-0.2
+          submodules: recursive
+      - name: Build the 0.2.0 RPMs
+        if: steps.base-rpms-0-2.outputs.cache-hit != 'true'
+        run: |
+          ./build-upgrade/base-0.2/tools/ci/build-rpm.sh
+          mkdir -p build-upgrade/base-rpms-0.2
+          cp build-upgrade/base-0.2/RPMS/*.rpm build-upgrade/base-rpms-0.2/
+      - name: Update from 0.1.0 keeps the accounts and backups (XP-2)
+        run: ./tools/ci/check-upgrade.sh build-upgrade/base-rpms-0.1 RPMS
+      - name: Update from 0.2.0 replaces the per-protocol packages (XP-6)
+        run: ./tools/ci/check-upgrade.sh build-upgrade/base-rpms-0.2 RPMS
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: netvfs-rpms-aarch64

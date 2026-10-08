@@ -34,7 +34,7 @@ Q_SIGNALS:
 // "allow" (Allow) and "deny" (Don't allow), answered through ActionInvoked.
 // Whether lipstick on Sailfish OS 5.2 shows freedesktop actions and emits
 // ActionInvoked to a process that does not own a bus name is unverified on a
-// device; Settings (netvfs-ui) can always grant or revoke.
+// device; Settings (the org.netvfs.accounts pages) can always grant or revoke.
 class NotificationConsentPrompt final : public ConsentPrompt
 {
     Q_OBJECT

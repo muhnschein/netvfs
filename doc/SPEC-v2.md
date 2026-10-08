@@ -83,8 +83,9 @@ SonarCloud with zero open issues).
   `org.netvfs.BackendFactory/2.0`; `SshKeyTools` stays `1.0` (unchanged). The loader
   refuses plugins with other IIDs with a log line naming the expected IID.
 - XC-1a: Library version `1.0.0` (qmake derives soname `libnetvfs.so.1`); package
-  version `0.2.0`. All netvfs subpackages require the exact same `%{version}-%{release}`
-  of `netvfs-core` (already the rule) so mixed installs cannot happen.
+  version `0.2.0` (`0.3.0` since the package consolidation, XP-6). All netvfs
+  subpackages require the exact same `%{version}-%{release}` of the main package
+  (`netvfs-core` up to 0.2, `netvfs` since 0.3) so mixed installs cannot happen.
 - XC-1b: Buteo plugins, CLI, QML module and tests are migrated in the same change set as
   each API step. No compatibility shims for v1 beyond what §4 lists.
 - XC-1c: Qt 5.6 and C++17 remain the baseline. No exceptions cross the API; `Result` is
@@ -541,8 +542,8 @@ public:
   spawns it with `posix_spawn`, enforces the connect/request timeouts, kills it on
   cancel, accepts only `STYPE_DISKTREE` shares, and hides `$`-suffixed admin shares
   unless `show_admin_shares=true`. Any helper crash or malformed output is
-  `ProtocolError` and leaves the backend usable. Packaged separately (XP-3), so
-  `ShareEnumeration` is reported only when the helper is installed.
+  `ProtocolError` and leaves the backend usable. Shipped with the backend in `netvfs`
+  (XP-3); `ShareEnumeration` is still reported only when the helper is present.
 - XM-8: `keepAlive` sends SMB2 ECHO. `spaceInfo` from FileFsFullSizeInformation.
 - XM-9: DFS referrals and Kerberos stay out of scope; DFS paths return `Unsupported`
   with detail "DFS referral".
@@ -712,7 +713,7 @@ in-process consumers, but it is no longer on the file browser's critical path.
 
 - XA-1: A second service per provider, `<provider>-files`, of type `netvfs-files`
   (distinct from `storage` so Backup does not list it), name "Files", shipped by the
-  `netvfs-files-services` package (XP-1). Consumers list accounts whose files service is
+  `netvfs` package (XP-1). Consumers list accounts whose files service is
   enabled.
 - XA-2: New providers `webdav` and `ftp` (ids chosen not to collide with Jolla's
   `nextcloud`/`onedrive`/`dropbox` providers). A `webdav-backup` service may follow; the
@@ -835,7 +836,7 @@ permission, links nothing from netvfs, and never sees secrets or pins.
   `~/.config/netvfs/bridge.conf`. On the first `Hello` with `unknown`, the bridge posts a
   notification "*Lautta* wants to use your network locations" with *Allow* and *Don't
   allow* actions, handled by the bridge. Until `granted`, `ListLocations` returns nothing
-  and every location call fails with `PermissionDenied`. `netvfs-ui` gains a page *Apps
+  and every location call fails with `PermissionDenied`. The account UI module gains a page *Apps
   using network locations* (Settings → Accounts → netvfs) to revoke or grant; revocation
   closes open connections of that consumer immediately.
 - XB-7: Scope: accounts whose *Files* service is enabled (XA-1); ad-hoc locations created
@@ -929,34 +930,34 @@ permission, links nothing from netvfs, and never sees secrets or pins.
 
 ## 10. Packaging (amends P-*)
 
-- XP-1: Packages:
+- XP-1: Packages (since 0.3, XP-6):
 
   | Package | Contents | Requires |
   |---|---|---|
-  | `netvfs-core` | `libnetvfs.so.1`, backend dir, translations | Qt5Core, Qt5DBus, accounts-qt5, libsignon-qt5 |
-  | `netvfs-ui` | QML module `org.netvfs.accounts`, provider descriptors | core, Silica, jolla-settings-accounts |
-  | `netvfs-backend-sftp` | `libnetvfs-sftp.so` | core |
-  | `netvfs-backend-smb` | `libnetvfs-smb.so` | core |
-  | `netvfs-backend-smb-shares` | `netvfs-smb-shares` helper | backend-smb |
-  | `netvfs-backend-webdav` | `libnetvfs-webdav.so` | core, libcurl |
-  | `netvfs-backend-ftp` | `libnetvfs-ftp.so` | core, libcurl |
-  | `netvfs-backend-local` | `libnetvfs-local.so` | core |
-  | `netvfs-account-<p>` | provider file, account UI QML, icon | ui, backend-<p> |
-  | `netvfs-backup-<p>` | `<p>-backup` service, Buteo plugins and profiles | account-<p>, buteo, jolla-vault |
-  | `netvfs-files-services` | `<p>-files` services for installed providers | core |
-  | `netvfs-bridge` | `netvfs-bridge`, `netvfs-accounts` (setgid `privileged`, XB-2a), systemd generator and template units, `consumers/lautta.conf`, consent page for `netvfs-ui` | core, ui, files-services, systemd, sailfish-setup (pre) |
-  | `netvfs-cli` | `netvfs-cli` | core |
-  | `netvfs-core-devel` | headers, pkg-config | core |
+  | `netvfs` | `libnetvfs.so.1`, backend dir, the `sftp`, `smb`, `webdav`, `ftp` and `local` backends, `netvfs-smb-shares` helper, QML module `org.netvfs.accounts`, provider descriptors, account providers with their UI QML and icons, `<p>-files` services and their service type, `netvfs-cli`, translations | Qt5Core, Qt5DBus, Qt5Network, accounts-qt5, libsignon-qt5, libcurl >= 7.85, Silica, jolla-settings-accounts; Recommends `netvfs-backup` |
+  | `netvfs-backup` | `sftp-backup` and `smb-backup` services, Buteo plugins and profiles | netvfs, buteo, jolla-vault |
+  | `netvfs-bridge` | `netvfs-bridge`, `netvfs-accounts` (setgid `privileged`, XB-2a), systemd generator and template units, `consumers/lautta.conf` | netvfs, systemd, sailfish-setup (pre) |
+  | `netvfs-devel` | headers, pkg-config | netvfs |
 
-- XP-2: Upgrade path: `netvfs-backup-<p>` `Obsoletes: netvfs-account-<p> < 0.2` and
-  `Requires` the new account package, so existing backup users keep everything on update.
-- XP-3: `netvfs-smb-shares` and `netvfs-backend-smb-shares` are optional; `rpmlint`-style
-  check in `tools/ci/check-rpm.sh` asserts that `libnetvfs-smb.so` still contains no share
-  enumeration code (the existing link-time guard stays).
-- XP-4: The RPM check script also asserts that no backend package depends on buteo.
-- XP-5: The bridge package does not require any particular backend; it serves whichever
-  backend packages are installed and reports missing providers as `Unsupported` for
-  accounts that need them.
+- XP-2: Upgrade path: updates keep the backups. 0.2 moved the backup plugins out of
+  `netvfs-account-<p>` into `netvfs-backup-<p>`; since 0.3 `netvfs-backup` obsoletes
+  `netvfs-backup-<p>`, and the `Recommends` of `netvfs`, new to every earlier install,
+  brings it along on update. A user who had removed the backups of 0.2 gets them back
+  once with that update.
+- XP-3: The SMB share helper runs out of process (XM-7) but ships with the backend.
+  `tools/ci/check-rpm.sh` asserts that `libnetvfs-smb.so` still contains no share
+  enumeration code (the existing link-time guard stays) and that the helper does.
+- XP-4: The RPM check script also asserts that only `netvfs-backup` depends on Buteo.
+- XP-5: `netvfs-bridge` stays a package of its own and no package requires it, so only
+  devices with a sandboxed consumer carry the setgid accounts helper. The bridge still
+  reports providers whose backend it cannot load as `Unsupported`.
+- XP-6: Consolidation (0.3): parts nobody installs on their own share one package;
+  separate packages stay only for what pulls in something the rest does not need
+  (Buteo and jolla-vault for backups, a setgid binary for the bridge) or is only for
+  development. `netvfs` provides and obsoletes every 0.2 package it absorbs
+  (`netvfs-core`, `-ui`, `-backend-<p>`, `-backend-smb-shares`, `-account-<p>`,
+  `-files-services`, `-cli`), `netvfs-devel` does the same for `netvfs-core-devel`.
+  `tools/ci/check-upgrade.sh` updates from 0.1 and from 0.2.
 
 ## 11. CLI
 

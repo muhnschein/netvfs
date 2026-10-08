@@ -11,8 +11,8 @@ import org.netvfs.accounts 1.0
 //
 // One switch per service the provider offers (SPEC-v2 XA-1, amends 7.4 "only
 // one service"): backups (<p>-backup, where the provider offers it and the
-// settings allow it, XA-4) and browsing files (<p>-files, when the
-// netvfs-files-services package is installed). The account is enabled
+// settings allow it, XA-4) and browsing files (<p>-files, when its service
+// file is installed). The account is enabled
 // while any of its services is.
 //
 // "Test connection" runs NetVfsProbe.identify() on the stored settings and
@@ -49,7 +49,7 @@ Page {
 
     readonly property string _backupService: NetVfsHelpers.backupServiceName(provider)
     readonly property string _filesService: NetVfsHelpers.filesServiceName(provider)
-    // SPEC-v2 XP-1: the backup service comes with netvfs-backup-<provider>.
+    // SPEC-v2 XP-1: the backup services come with netvfs-backup.
     readonly property bool _offersBackup: NetVfsProviders.offersService(provider, "backup")
                                           && NetVfsHelpers.isServiceInstalled(_backupService)
     readonly property bool _offersFiles: NetVfsProviders.offersService(provider, "files")
