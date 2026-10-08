@@ -14,8 +14,11 @@
 # Usage: tools/ci/check-upgrade.sh OLD_RPMS_DIR NEW_RPMS_DIR [SCENARIO...]
 #   Both folders are inside the source tree. Scenarios:
 #     up        zypper up from the new repository (the whole system update)
-#     packages  zypper in of the installed netvfs packages by name (how
-#               PackageKit and the store apps update single packages)
+#     packages  zypper in of the packages that replace the installed ones,
+#               by name (how PackageKit and the store apps update single
+#               packages; zypper in of the old names finds nothing to do
+#               since 0.3 renamed them). The Recommends must still bring
+#               netvfs-backup along.
 #   Default: both.
 # Env: SDK_IMAGE (container image), TARGET (sb2 target name).
 set -eu
@@ -80,14 +83,20 @@ installed_old=$(sb2 -t "$TARGET" rpm -qa --qf '%{NAME}\n' 'netvfs*' | sort)
 kept_old=$(echo "$installed_old" | grep -v '^netvfs-core')
 # shellcheck disable=SC2086 # one word per package
 keep=$(sb2 -t "$TARGET" rpm -ql $kept_old)
-expected=$(for package in $installed_old; do
+replacements=$(for package in $installed_old; do
     case $package in
         netvfs-core-devel) echo netvfs-devel ;;
         netvfs-bridge) echo netvfs-bridge ;;
-        netvfs-backup-*|netvfs-account-sftp|netvfs-account-smb) echo netvfs netvfs-backup ;;
+        netvfs-backup-*) echo netvfs-backup ;;
         *) echo netvfs ;;
     esac
-done | tr ' ' '\n' | sort -u)
+done | sort -u)
+# The old account packages of SFTP and SMB brought backups (0.1: in the
+# package, 0.2: as a weak dependency), so netvfs-backup must follow.
+expected=$replacements
+if echo "$installed_old" | grep -qE '^netvfs-(backup-|account-sftp$|account-smb$)'; then
+    expected=$(printf '%s\nnetvfs-backup\n' "$replacements" | sort -u)
+fi
 
 repo=$PWD/build-upgrade-repo-$$
 rm -rf "$repo"
@@ -100,7 +109,7 @@ zypper_target ref netvfs-new
 
 case $scenario in
     up) update="up -r netvfs-new" ;;
-    packages) update="in $installed_old" ;;
+    packages) update="in $(echo "$replacements" | tr '\n' ' ')" ;;
     *)
         echo "unknown scenario $scenario"
         exit 2 ;;
@@ -141,7 +150,7 @@ for file in $keep; do
     fi
     owner=$(sb2 -t "$TARGET" rpm -qf --qf '%{NAME} %{VERSION}\n' "$file" 2>/dev/null | head -n 1 || true)
     case $owner in
-        "netvfs-"*" $new_version") ;;
+        "netvfs $new_version"|"netvfs-"*" $new_version") ;;
         *) fail "$file belongs to '$owner', not to a netvfs $new_version package" ;;
     esac
 done
