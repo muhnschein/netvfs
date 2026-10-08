@@ -50,12 +50,22 @@ int defaultOpenPidfd(pid_t pid)
 
 qint64 defaultBootTicksNow()
 {
+    // "<seconds>.<centiseconds> ...", parsed as integers: as a double, 0.29 *
+    // 100 truncates to 28, a tick before the start time of a peer that
+    // started in that tick, which was then refused as a reused pid.
     const QByteArray uptime = readSmallFile(QStringLiteral("/proc/uptime"));
-    bool ok = false;
-    const double seconds = uptime.left(uptime.indexOf(' ')).toDouble(&ok);
-    if (!ok)
+    const QByteArray field = uptime.left(uptime.indexOf(' '));
+    const int dot = field.indexOf('.');
+    // The fraction as nanoseconds: padded or cut to nine digits.
+    const QByteArray fraction = (dot < 0 ? QByteArray() : field.mid(dot + 1)).leftJustified(9, '0', true);
+    bool secondsOk = false;
+    bool fractionOk = false;
+    const qint64 seconds = (dot < 0 ? field : field.left(dot)).toLongLong(&secondsOk);
+    const qint64 nanoseconds = fraction.toLongLong(&fractionOk);
+    if (!secondsOk || !fractionOk || seconds < 0 || nanoseconds < 0)
         return -1;
-    return static_cast<qint64>(seconds * static_cast<double>(::sysconf(_SC_CLK_TCK)));
+    const qint64 hz = ::sysconf(_SC_CLK_TCK);
+    return seconds * hz + nanoseconds * hz / 1000000000;
 }
 
 class FdCloser

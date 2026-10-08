@@ -1,19 +1,20 @@
 # SPDX-License-Identifier: LGPL-2.1-or-later
 #
-# Package split of SPEC-v2 XP-1 (amends SPEC 4.1, P-4, P-6):
+# Packages of SPEC-v2 XP-1 (amends SPEC 4.1, P-4, P-6):
 #
-#   netvfs-core              libnetvfs, backend folder, translations
-#   netvfs-core-devel        headers, pkg-config
-#   netvfs-ui                QML module org.netvfs.accounts, provider descriptors
-#   netvfs-backend-<p>       one protocol plugin each (sftp, smb, webdav, ftp, local)
-#   netvfs-backend-smb-shares  share enumeration helper of the SMB server mode
-#   netvfs-account-<p>       provider file, account UI, icon (sftp, smb, webdav, ftp)
-#   netvfs-backup-<p>        <p>-backup service, Buteo plugins and profiles (sftp, smb)
-#   netvfs-files-services    <p>-files services and their service type
-#   netvfs-bridge            netvfs-bridge for sandboxed consumers
-#   netvfs-cli               netvfs-cli
+#   netvfs          libnetvfs, all protocol backends and the SMB share helper,
+#                   the account UI module, the account providers, the Files
+#                   services, netvfs-cli, translations
+#   netvfs-backup   SFTP and SMB backups: services, Buteo plugins and profiles
+#   netvfs-bridge   netvfs-bridge and its setgid accounts helper, for
+#                   sandboxed consumers
+#   netvfs-devel    headers, pkg-config
 #
-# XC-1a: every package requires netvfs-core of the same build. Library
+# Since 0.3 the parts nobody installs on their own are one package; what
+# stays separate pulls in something the rest does not need (Buteo, a setgid
+# binary) or is only for development (XP-6).
+#
+# XC-1a: every package requires netvfs of the same build. Library
 # dependencies (Qt, libaccounts-qt5, libsignon-qt5, libcurl, libdbus,
 # libbuteosyncfw5) are added by rpm's automatic soname dependencies;
 # tools/ci/check-rpm.sh checks the ones the split relies on.
@@ -21,9 +22,9 @@
 # one package.
 
 Name:       netvfs
-Version:    0.2.0
+Version:    0.3.0
 Release:    1
-Summary:    Remote file access and backup accounts for Sailfish OS
+Summary:    Remote file access accounts for Sailfish OS
 License:    LGPL-2.1-or-later
 URL:        https://github.com/muhnschein/netvfs
 Source0:    %{name}-%{version}.tar.bz2
@@ -51,31 +52,7 @@ BuildRequires: pkgconfig(libcurl)
 # SPEC-v2 XB-8: netvfs-bridge speaks peer-to-peer D-Bus through libdbus.
 BuildRequires: pkgconfig(dbus-1)
 
-%description
-Remote file access over SFTP, SMB, WebDAV and FTP for Sailfish OS: account
-providers in Settings > Accounts, SFTP and SMB storage targets in
-Settings > Backup, and network locations for sandboxed apps.
-
-%package core
-Summary:    Remote file access library
 Requires:   sailfish-version >= 5.2.0
-
-%description core
-libnetvfs: accounts, credentials, sessions and errors over pluggable protocol
-backends (installed separately as netvfs-backend-*). Since 0.2 libnetvfs also
-links QtNetwork, for the DNS-SD discovery of servers on the local network
-(SPEC-v2 XD-1).
-
-%package core-devel
-Summary:    Development files for libnetvfs
-Requires:   %{name}-core = %{version}-%{release}
-
-%description core-devel
-Headers and pkg-config file for building applications on libnetvfs.
-
-%package ui
-Summary:    Account UI components for netvfs accounts
-Requires:   %{name}-core = %{version}-%{release}
 Requires:   sailfishsilica-qt5
 Requires:   jolla-settings-accounts
 Requires:   sailfish-components-accounts-qt5
@@ -83,156 +60,87 @@ Requires:   sailfish-components-accounts-qt5
 # picker (SPEC-sftp; the page is part of the module, so every account UI
 # loads it).
 Requires:   sailfish-components-pickers-qt5
-
-%description ui
-The org.netvfs.accounts QML module shared by the account UIs (connection
-and server identity dialogs, settings pages, the page listing the apps that
-use network locations) and the provider descriptors (SPEC-v2 XA-5).
-
-%package backend-sftp
-Summary:    SFTP backend for libnetvfs
-Requires:   %{name}-core = %{version}-%{release}
-
-%description backend-sftp
-libnetvfs-sftp.so: SFTP over a statically linked libssh.
-
-%package backend-smb
-Summary:    SMB backend for libnetvfs
-Requires:   %{name}-core = %{version}-%{release}
-
-%description backend-smb
-libnetvfs-smb.so: SMB 2/3 over a statically linked libsmb2, without share
-enumeration (SPEC 10.2 gate G-SMB item 4, SPEC-v2 XP-3).
-
-%package backend-smb-shares
-Summary:    Share enumeration helper for the SMB backend
-Requires:   %{name}-core = %{version}-%{release}
-Requires:   %{name}-backend-smb = %{version}-%{release}
-
-%description backend-smb-shares
-netvfs-smb-shares (SPEC-v2 XM-7): lists the shares of an SMB server in a
-process of its own, so that the DCE/RPC parser never runs inside the
-backend. Optional (XP-3): without it, shares are entered by name.
-
-%package backend-webdav
-Summary:    WebDAV backend for libnetvfs
-Requires:   %{name}-core = %{version}-%{release}
-# SPEC-v2 XSEC-4: CURLOPT_PROTOCOLS_STR
+# SPEC-v2 XSEC-4: CURLOPT_PROTOCOLS_STR (WebDAV and FTP backends)
 Requires:   libcurl >= 7.85.0
+# SPEC-v2 XP-2: updates keep the backups (see netvfs-backup).
+Recommends: %{name}-backup = %{version}-%{release}
+# SPEC-v2 XP-6: the packages of 0.2 that this one replaces.
+Provides:   %{name}-core = %{version}-%{release}
+Obsoletes:  %{name}-core < 0.3.0
+Provides:   %{name}-ui = %{version}-%{release}
+Obsoletes:  %{name}-ui < 0.3.0
+Provides:   %{name}-backend-sftp = %{version}-%{release}
+Obsoletes:  %{name}-backend-sftp < 0.3.0
+Provides:   %{name}-backend-smb = %{version}-%{release}
+Obsoletes:  %{name}-backend-smb < 0.3.0
+Provides:   %{name}-backend-smb-shares = %{version}-%{release}
+Obsoletes:  %{name}-backend-smb-shares < 0.3.0
+Provides:   %{name}-backend-webdav = %{version}-%{release}
+Obsoletes:  %{name}-backend-webdav < 0.3.0
+Provides:   %{name}-backend-ftp = %{version}-%{release}
+Obsoletes:  %{name}-backend-ftp < 0.3.0
+Provides:   %{name}-backend-local = %{version}-%{release}
+Obsoletes:  %{name}-backend-local < 0.3.0
+Provides:   %{name}-files-services = %{version}-%{release}
+Obsoletes:  %{name}-files-services < 0.3.0
+Provides:   %{name}-account-sftp = %{version}-%{release}
+Obsoletes:  %{name}-account-sftp < 0.3.0
+Provides:   %{name}-account-smb = %{version}-%{release}
+Obsoletes:  %{name}-account-smb < 0.3.0
+Provides:   %{name}-account-webdav = %{version}-%{release}
+Obsoletes:  %{name}-account-webdav < 0.3.0
+Provides:   %{name}-account-ftp = %{version}-%{release}
+Obsoletes:  %{name}-account-ftp < 0.3.0
+Provides:   %{name}-cli = %{version}-%{release}
+Obsoletes:  %{name}-cli < 0.3.0
 
-%description backend-webdav
-libnetvfs-webdav.so: WebDAV (SPEC-v2 6.3) over the system libcurl.
+%description
+Remote file access over SFTP, SMB, WebDAV and FTP for Sailfish OS: account
+providers in Settings > Accounts, network locations for apps, and the
+command line tool netvfs-cli.
 
-%package backend-ftp
-Summary:    FTP and FTPS backend for libnetvfs
-Requires:   %{name}-core = %{version}-%{release}
-# SPEC-v2 XSEC-4: CURLOPT_PROTOCOLS_STR
-Requires:   libcurl >= 7.85.0
+libnetvfs (accounts, credentials, sessions and errors over pluggable protocol
+backends) with its SFTP, SMB, WebDAV, FTP and local file system backends. SMB
+share enumeration runs in a helper process of its own (SPEC-v2 XM-7), so the
+DCE/RPC parser never runs inside the SMB backend. Since 0.2 libnetvfs also
+links QtNetwork, for the DNS-SD discovery of servers on the local network
+(SPEC-v2 XD-1).
 
-%description backend-ftp
-libnetvfs-ftp.so: FTP and FTPS (SPEC-v2 6.4) over the system libcurl.
+%package devel
+Summary:    Development files for libnetvfs
+Requires:   %{name} = %{version}-%{release}
+Provides:   %{name}-core-devel = %{version}-%{release}
+Obsoletes:  %{name}-core-devel < 0.3.0
 
-%package backend-local
-Summary:    Local file system backend for libnetvfs
-Requires:   %{name}-core = %{version}-%{release}
+%description devel
+Headers and pkg-config file for building applications on libnetvfs.
 
-%description backend-local
-libnetvfs-local.so: the local file system as a netvfs location (SPEC-v2
-6.5), for the command line tool and in-process consumers.
-
-%package files-services
-Summary:    Files services of the netvfs accounts
-Requires:   %{name}-core = %{version}-%{release}
-
-%description files-services
-The "<provider>-files" services of type netvfs-files (SPEC-v2 XA-1) for all
-netvfs providers. A service only takes effect for accounts of its provider,
-so the services of providers whose netvfs-account package is not installed
-stay unused.
-
-%package account-sftp
-Summary:    SFTP account
-Requires:   %{name}-core = %{version}-%{release}
-Requires:   %{name}-ui = %{version}-%{release}
-Requires:   %{name}-backend-sftp = %{version}-%{release}
-# The account UI sets up the "Files" service, the only one without backups.
-Requires:   %{name}-files-services = %{version}-%{release}
-# SPEC-v2 XP-2: updates from 0.1 keep the backups (see netvfs-backup-sftp).
-Recommends: %{name}-backup-sftp = %{version}-%{release}
-
-%description account-sftp
-"SFTP" account provider in Settings > Accounts.
-
-%package account-smb
-Summary:    SMB account
-Requires:   %{name}-core = %{version}-%{release}
-Requires:   %{name}-ui = %{version}-%{release}
-Requires:   %{name}-backend-smb = %{version}-%{release}
-Requires:   %{name}-files-services = %{version}-%{release}
-# SPEC-v2 XP-2: updates from 0.1 keep the backups (see netvfs-backup-smb).
-Recommends: %{name}-backup-smb = %{version}-%{release}
-
-%description account-smb
-"SMB" account provider in Settings > Accounts.
-
-%package account-webdav
-Summary:    WebDAV account
-Requires:   %{name}-core = %{version}-%{release}
-Requires:   %{name}-ui = %{version}-%{release}
-Requires:   %{name}-backend-webdav = %{version}-%{release}
-Requires:   %{name}-files-services = %{version}-%{release}
-
-%description account-webdav
-"WebDAV" account provider in Settings > Accounts.
-
-%package account-ftp
-Summary:    FTP account
-Requires:   %{name}-core = %{version}-%{release}
-Requires:   %{name}-ui = %{version}-%{release}
-Requires:   %{name}-backend-ftp = %{version}-%{release}
-Requires:   %{name}-files-services = %{version}-%{release}
-
-%description account-ftp
-"FTP" account provider in Settings > Accounts.
-
-%package backup-sftp
-# SPEC-v2 XP-2: up to 0.1 netvfs-account-<p> contained the backup plugins.
-# The Obsoletes states that this package takes them over; it does not make
-# zypper or PackageKit install it on update, because the same-named
-# netvfs-account-<p> 0.2 is always the preferred update of the old package.
-# The Recommends of netvfs-account-<p> does: a weak dependency that is new in
+%package backup
+# SPEC-v2 XP-2: up to 0.1 netvfs-account-<p> contained the backup plugins,
+# in 0.2 netvfs-backup-<p>. The Obsoletes state that this package takes them
+# over; on update from 0.1 or 0.2 zypper and PackageKit install it because
+# the Recommends of netvfs is new to them: a weak dependency that is new in
 # an update is installed with it (tools/ci/check-upgrade.sh checks this).
-Summary:    SFTP backups
-Requires:   %{name}-core = %{version}-%{release}
-Requires:   %{name}-account-sftp = %{version}-%{release}
+Summary:    SFTP and SMB backups
+Requires:   %{name} = %{version}-%{release}
 Requires:   buteo-syncfw-qt5-msyncd
 Requires:   jolla-vault
 Requires:   systemd
-Obsoletes:  %{name}-account-sftp < 0.2.0
+Provides:   %{name}-backup-sftp = %{version}-%{release}
+Provides:   %{name}-backup-smb = %{version}-%{release}
+Obsoletes:  %{name}-backup-sftp < 0.3.0
+Obsoletes:  %{name}-backup-smb < 0.3.0
 
-%description backup-sftp
-SFTP accounts as storage targets in Settings > Backup: the sftp-backup
-service and the Buteo backup plugins and profiles.
-
-%package backup-smb
-Summary:    SMB backups
-Requires:   %{name}-core = %{version}-%{release}
-Requires:   %{name}-account-smb = %{version}-%{release}
-Requires:   buteo-syncfw-qt5-msyncd
-Requires:   jolla-vault
-Requires:   systemd
-Obsoletes:  %{name}-account-smb < 0.2.0
-
-%description backup-smb
-SMB accounts as storage targets in Settings > Backup: the smb-backup service
-and the Buteo backup plugins and profiles.
+%description backup
+SFTP and SMB accounts as storage targets in Settings > Backup: the
+sftp-backup and smb-backup services and their Buteo backup plugins and
+profiles. Without this package the accounts only provide files.
 
 %package bridge
-# SPEC-v2 XP-5: no backend; accounts whose backend is missing are Unsupported.
+# SPEC-v2 XP-5: separate, so that only devices with a sandboxed consumer get
+# the setgid accounts helper; nothing requires it.
 Summary:    Network locations for sandboxed apps
-Requires:   %{name}-core = %{version}-%{release}
-Requires:   %{name}-ui = %{version}-%{release}
-Requires:   %{name}-files-services = %{version}-%{release}
+Requires:   %{name} = %{version}-%{release}
 Requires:   systemd
 # SPEC-v2 XB-2a: the group `privileged` of the setgid accounts helper (as
 # mapplauncherd's boosters).
@@ -241,14 +149,6 @@ Requires(pre): sailfish-setup
 %description bridge
 netvfs-bridge (SPEC-v2 8a): serves netvfs locations to registered sandboxed
 consumers over a socket in their data folder, without handing out secrets.
-
-%package cli
-Summary:    Command line tool for netvfs locations
-Requires:   %{name}-core = %{version}-%{release}
-
-%description cli
-netvfs-cli (SPEC-v2 11): lists, reads and writes files on netvfs locations
-from the command line, for tests and diagnostics.
 
 %prep
 %setup -q -n %{name}-%{version}
@@ -266,23 +166,17 @@ from the command line, for tests and diagnostics.
 # installed instances to a -p program as an argument, and ldconfig takes
 # "1" for a folder and fails (0.1.0 did this; its removal script fails
 # on update).
-%post core
+%post
 /sbin/ldconfig
 
-%postun core
+%postun
 /sbin/ldconfig
 
 # SPEC P-6: msyncd picks up new or removed plugins and profiles.
-%post backup-sftp
+%post backup
 systemctl-user try-restart msyncd.service || :
 
-%postun backup-sftp
-systemctl-user try-restart msyncd.service || :
-
-%post backup-smb
-systemctl-user try-restart msyncd.service || :
-
-%postun backup-smb
+%postun backup
 systemctl-user try-restart msyncd.service || :
 
 # XB-3: the generator turns the consumer files into units on daemon-reload;
@@ -299,79 +193,56 @@ fi
 %postun bridge
 systemctl-user daemon-reload || :
 
-%files core
+%files
 %license LICENSE
 %{_libdir}/libnetvfs.so.*
 %dir %{_libdir}/netvfs
 %dir %{_libdir}/netvfs/backends
+%{_libdir}/netvfs/backends/libnetvfs-sftp.so
+%{_libdir}/netvfs/backends/libnetvfs-smb.so
+%{_libdir}/netvfs/backends/libnetvfs-webdav.so
+%{_libdir}/netvfs/backends/libnetvfs-ftp.so
+%{_libdir}/netvfs/backends/libnetvfs-local.so
 %dir %{_prefix}/libexec/netvfs
+%{_prefix}/libexec/netvfs/netvfs-smb-shares
 %dir %{_datadir}/netvfs
-%{_datadir}/translations/netvfs*.qm
-
-%files core-devel
-%{_includedir}/netvfs
-%{_libdir}/libnetvfs.so
-%{_libdir}/pkgconfig/netvfs.pc
-
-%files ui
+%{_datadir}/netvfs/providers
 %dir %{_libdir}/qt5/qml/org/netvfs
 %{_libdir}/qt5/qml/org/netvfs/accounts
-%{_datadir}/netvfs/providers
-
-%files backend-sftp
-%{_libdir}/netvfs/backends/libnetvfs-sftp.so
-
-%files backend-smb
-%{_libdir}/netvfs/backends/libnetvfs-smb.so
-
-%files backend-smb-shares
-%{_prefix}/libexec/netvfs/netvfs-smb-shares
-
-%files backend-webdav
-%{_libdir}/netvfs/backends/libnetvfs-webdav.so
-
-%files backend-ftp
-%{_libdir}/netvfs/backends/libnetvfs-ftp.so
-
-%files backend-local
-%{_libdir}/netvfs/backends/libnetvfs-local.so
-
-%files files-services
 %{_datadir}/accounts/service_types/netvfs-files.service-type
 %{_datadir}/accounts/services/sftp-files.service
 %{_datadir}/accounts/services/smb-files.service
 %{_datadir}/accounts/services/webdav-files.service
 %{_datadir}/accounts/services/ftp-files.service
-
-%files account-sftp
 %{_datadir}/accounts/providers/sftp.provider
+%{_datadir}/accounts/providers/smb.provider
+%{_datadir}/accounts/providers/webdav.provider
+%{_datadir}/accounts/providers/ftp.provider
 %{_datadir}/accounts/ui/sftp.qml
 %{_datadir}/accounts/ui/sftp-settings.qml
 %{_datadir}/accounts/ui/sftp-update.qml
-%{_datadir}/themes/sailfish-default/silica/*/icons/graphic-service-sftp.png
-
-%files account-smb
-%{_datadir}/accounts/providers/smb.provider
 %{_datadir}/accounts/ui/smb.qml
 %{_datadir}/accounts/ui/smb-settings.qml
 %{_datadir}/accounts/ui/smb-update.qml
-%{_datadir}/themes/sailfish-default/silica/*/icons/graphic-service-smb.png
-
-%files account-webdav
-%{_datadir}/accounts/providers/webdav.provider
 %{_datadir}/accounts/ui/webdav.qml
 %{_datadir}/accounts/ui/webdav-settings.qml
 %{_datadir}/accounts/ui/webdav-update.qml
-%{_datadir}/themes/sailfish-default/silica/*/icons/graphic-service-webdav.png
-
-%files account-ftp
-%{_datadir}/accounts/providers/ftp.provider
 %{_datadir}/accounts/ui/ftp.qml
 %{_datadir}/accounts/ui/ftp-settings.qml
 %{_datadir}/accounts/ui/ftp-update.qml
+%{_datadir}/themes/sailfish-default/silica/*/icons/graphic-service-sftp.png
+%{_datadir}/themes/sailfish-default/silica/*/icons/graphic-service-smb.png
+%{_datadir}/themes/sailfish-default/silica/*/icons/graphic-service-webdav.png
 %{_datadir}/themes/sailfish-default/silica/*/icons/graphic-service-ftp.png
+%{_datadir}/translations/netvfs*.qm
+%{_bindir}/netvfs-cli
 
-%files backup-sftp
+%files devel
+%{_includedir}/netvfs
+%{_libdir}/libnetvfs.so
+%{_libdir}/pkgconfig/netvfs.pc
+
+%files backup
 %{_datadir}/accounts/services/sftp-backup.service
 %{_libdir}/buteo-plugins-qt5/oopp/libsftp-backup-client.so
 %{_libdir}/buteo-plugins-qt5/oopp/libsftp-backupquery-client.so
@@ -382,8 +253,6 @@ systemctl-user daemon-reload || :
 %config %{_sysconfdir}/buteo/profiles/sync/sftp.Backup.xml
 %config %{_sysconfdir}/buteo/profiles/sync/sftp.BackupQuery.xml
 %config %{_sysconfdir}/buteo/profiles/sync/sftp.BackupRestore.xml
-
-%files backup-smb
 %{_datadir}/accounts/services/smb-backup.service
 %{_libdir}/buteo-plugins-qt5/oopp/libsmb-backup-client.so
 %{_libdir}/buteo-plugins-qt5/oopp/libsmb-backupquery-client.so
@@ -405,5 +274,3 @@ systemctl-user daemon-reload || :
 %dir %{_datadir}/netvfs/bridge
 %config %{_datadir}/netvfs/bridge/handoff.conf
 
-%files cli
-%{_bindir}/netvfs-cli

@@ -2,9 +2,9 @@
 # SPDX-License-Identifier: LGPL-2.1-or-later
 # Checks the built RPMs (RPMS/*.rpm) in the Sailfish OS Platform SDK:
 #   - the package dependencies of SPEC-v2 XP-1: every package requires
-#     netvfs-core of the same build (XC-1a), libnetvfs requires QtNetwork
-#     (discovery, XD-1), only netvfs-backup-* depend on Buteo (XP-4), the
-#     bridge requires no backend (XP-5) and only its accounts helper is
+#     netvfs of the same build (XC-1a), libnetvfs requires QtNetwork
+#     (discovery, XD-1), only netvfs-backup depends on Buteo (XP-4), no
+#     package requires the bridge (XP-5) and only its accounts helper is
 #     setgid privileged (XB-2a);
 #   - libnetvfs-smb.so contains no share enumeration code (XP-3, SPEC 10.2
 #     G-SMB item 4; tools/ci/check-noshareenum.sh), and the check finds that
@@ -49,8 +49,8 @@ rpm_of() {
     return 1
 }
 
-core_rpm=$(rpm_of netvfs-core) || { echo "no netvfs-core RPM"; exit 1; }
-core_dependency="netvfs-core = $(rpm -qp --qf '%{VERSION}-%{RELEASE}' "$core_rpm")"
+main_rpm=$(rpm_of netvfs) || { echo "no netvfs RPM"; exit 1; }
+main_dependency="netvfs = $(rpm -qp --qf '%{VERSION}-%{RELEASE}' "$main_rpm")"
 
 for r in $rpms; do
     name=$(rpm -qp --qf '%{NAME}' "$r")
@@ -60,17 +60,16 @@ for r in $rpms; do
     rpm -qp --recommends "$r" | sed 's/^/  recommends: /'
     rpm -qp --obsoletes "$r" | sed 's/^/  obsoletes: /'
     # XC-1a
-    if [ "$name" != netvfs-core ] && ! echo "$requires" | grep -qxF "$core_dependency"; then
-        fail "$name does not require $core_dependency"
+    if [ "$name" != netvfs ] && ! echo "$requires" | grep -qxF "$main_dependency"; then
+        fail "$name does not require $main_dependency"
     fi
-    # XP-4: Buteo only for the backup packages.
-    case $name in
-        netvfs-backup-*) ;;
-        *) if echo "$requires" | grep -qi buteo; then fail "$name depends on Buteo"; fi ;;
-    esac
-    # XP-5
-    if [ "$name" = netvfs-bridge ] && echo "$requires" | grep -q 'netvfs-backend'; then
-        fail "netvfs-bridge requires a backend"
+    # XP-4: Buteo only for the backup package.
+    if [ "$name" != netvfs-backup ] && echo "$requires" | grep -qi buteo; then
+        fail "$name depends on Buteo"
+    fi
+    # XP-5: the setgid helper only where it is asked for.
+    if echo "$requires" | grep -q '^netvfs-bridge'; then
+        fail "$name requires netvfs-bridge"
     fi
 done
 
@@ -88,9 +87,9 @@ if bridge_rpm=$(rpm_of netvfs-bridge); then
     fi
 fi
 
-# SPEC-v2 XD-1: libnetvfs links QtNetwork, so netvfs-core requires it.
-if ! rpm -qp --requires "$core_rpm" | grep -q '^libQt5Network\.so\.5'; then
-    fail "netvfs-core does not require libQt5Network.so.5"
+# SPEC-v2 XD-1: libnetvfs links QtNetwork, so netvfs requires it.
+if ! rpm -qp --requires "$main_rpm" | grep -q '^libQt5Network\.so\.5'; then
+    fail "netvfs does not require libQt5Network.so.5"
 fi
 
 # XP-3 on the packaged plugin, and on its debug file (full symbol table).
@@ -100,21 +99,20 @@ extract() {
     mkdir -p "$destination"
     (cd "$destination" && rpm2cpio "$OLDPWD/$package_file" | cpio -idm --quiet)
 }
-smb_rpm=$(rpm_of netvfs-backend-smb) || { echo "no netvfs-backend-smb RPM"; exit 1; }
-extract "$smb_rpm" "$work/smb"
-smb_files=$(find "$work/smb" -name 'libnetvfs-smb.so')
+extract "$main_rpm" "$work/main"
+smb_files=$(find "$work/main" -name 'libnetvfs-smb.so')
 for debuginfo in $(ls RPMS/*.rpm | grep -e '-debuginfo-'); do
     extract "$debuginfo" "$work/debuginfo"
 done
-smb_files="$smb_files $(find "$work/smb" "$work/debuginfo" -name 'libnetvfs-smb.so*.debug' 2>/dev/null || true)"
+smb_files="$smb_files $(find "$work/main" "$work/debuginfo" -name 'libnetvfs-smb.so*.debug' 2>/dev/null || true)"
 # shellcheck disable=SC2086 # one word per file
 sh tools/ci/check-noshareenum.sh $smb_files || fail "libnetvfs-smb.so contains share enumeration code"
 # The positive control: the helper links libsmb2 with DCE/RPC (XM-7).
-if shares_rpm=$(rpm_of netvfs-backend-smb-shares); then
-    extract "$shares_rpm" "$work/shares"
-    if sh tools/ci/check-noshareenum.sh "$(find "$work/shares" -name netvfs-smb-shares)" >/dev/null; then
-        fail "check-noshareenum.sh finds no share enumeration code in netvfs-smb-shares"
-    fi
+shares_helper=$(find "$work/main" -name netvfs-smb-shares)
+if [ -z "$shares_helper" ]; then
+    fail "netvfs contains no netvfs-smb-shares"
+elif sh tools/ci/check-noshareenum.sh "$shares_helper" >/dev/null; then
+    fail "check-noshareenum.sh finds no share enumeration code in netvfs-smb-shares"
 fi
 
 # shellcheck disable=SC2086 # one word per file

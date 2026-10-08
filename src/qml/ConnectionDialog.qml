@@ -24,7 +24,7 @@ Dialog {
     readonly property var descriptor: NetVfsProviders.descriptor(provider)
     readonly property var fields: descriptor["fields"] || []
     readonly property var authModes: descriptor["authModes"] || []
-    // SPEC-v2 XP-1: the backup service comes with netvfs-backup-<provider>.
+    // SPEC-v2 XP-1: the backup services come with netvfs-backup.
     readonly property bool offersBackup: NetVfsProviders.offersService(provider, "backup")
                                          && NetVfsHelpers.isServiceInstalled(NetVfsHelpers.backupServiceName(provider))
     readonly property bool offersFiles: NetVfsProviders.offersService(provider, "files")
