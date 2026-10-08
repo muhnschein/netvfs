@@ -156,6 +156,8 @@ private Q_SLOTS:
     void sandboxProcessState();
     void sandboxSyscalls();
     void sandboxFilesystem();
+    void sandboxLandlockLevels();
+    void sandboxAccountsDirectories();
     void sandboxGroup();
     void helperWithClosedDescriptors();
     void directoryLists();
@@ -522,7 +524,8 @@ void tst_BridgeAccounts::sandboxFilesystem()
     const QByteArray created = allowedDir + "/accounts.db-wal";
     const QByteArray outside = QFile::encodeName(denied.filePath(QStringLiteral("planted")));
     const int status = inChild([&] {
-        const FilesystemRestriction restriction = restrictFilesystem({ allowedDir }, false);
+        // A database folder that does not exist yet needs no rule.
+        const FilesystemRestriction restriction = restrictFilesystem({ allowedDir, "/nonexistent/accounts" }, false);
         if (restriction.abi == 0)
             return NoLandlock;
         Checks check;
@@ -554,6 +557,54 @@ void tst_BridgeAccounts::sandboxFilesystem()
     if (status == NoLandlock)
         QSKIP("no Landlock on this kernel");
     QCOMPARE(status, 0);
+}
+
+void tst_BridgeAccounts::sandboxLandlockLevels()
+{
+    // Each Landlock ABI adds its rights; a newer kernel than this code knows
+    // gets what the newest known one handles.
+    const auto same = [](const LandlockAccess &a, const LandlockAccess &b) {
+        return a.fs == b.fs && a.net == b.net && a.scoped == b.scoped;
+    };
+    const auto widens = [](std::uint64_t smaller, std::uint64_t larger) {
+        return smaller != larger && (smaller & larger) == smaller;
+    };
+    QVector<LandlockAccess> levels;
+    for (int abi = 0; abi <= LandlockNewestAbi + 2; ++abi)
+        levels << landlockAccess(abi, false);
+    QVERIFY(same(levels.at(0), LandlockAccess()));
+    QVERIFY(levels.at(1).fs != 0 && levels.at(1).net == 0 && levels.at(1).scoped == 0);
+    QVERIFY(widens(levels.at(1).fs, levels.at(2).fs));   // renames and links
+    QVERIFY(widens(levels.at(2).fs, levels.at(3).fs));   // truncation
+    QCOMPARE(levels.at(4).fs, levels.at(3).fs);          // TCP
+    QVERIFY(levels.at(3).net == 0 && levels.at(4).net != 0);
+    QVERIFY(widens(levels.at(4).fs, levels.at(5).fs));   // device ioctls
+    QVERIFY(levels.at(5).scoped == 0 && levels.at(6).scoped != 0);   // signals, abstract sockets
+    for (int abi = 7; abi < levels.size(); ++abi)
+        QVERIFY2(same(levels.at(abi), levels.at(6)), qPrintable(QString::number(abi)));
+    // An abstract session bus keeps its socket, not the signals.
+    const LandlockAccess abstractBus = landlockAccess(LandlockNewestAbi, true);
+    QVERIFY(widens(abstractBus.scoped, levels.at(6).scoped) && abstractBus.scoped != 0);
+    QVERIFY(same(landlockAccess(5, true), levels.at(5)));
+}
+
+void tst_BridgeAccounts::sandboxAccountsDirectories()
+{
+    // ACCOUNTS (a test's database) wins; else the Sailfish OS folder and the
+    // upstream one, below the XDG folders or HOME.
+    const SavedEnvironment saved;
+    qputenv("ACCOUNTS", "/tmp/fixture");
+    QCOMPARE(accountsDirectories(), QList<QByteArray>({ "/tmp/fixture" }));
+    qunsetenv("ACCOUNTS");
+    qputenv("HOME", "/home/someone");
+    qunsetenv("XDG_DATA_HOME");
+    qputenv("XDG_CONFIG_HOME", "relative");   // not a folder XDG allows
+    QCOMPARE(accountsDirectories(), QList<QByteArray>({ "/home/someone/.local/share/system/privileged/Accounts",
+                                                         "/home/someone/.config/libaccounts-glib" }));
+    qputenv("XDG_DATA_HOME", "/data");
+    qputenv("XDG_CONFIG_HOME", "/config");
+    QCOMPARE(accountsDirectories(),
+             QList<QByteArray>({ "/data/system/privileged/Accounts", "/config/libaccounts-glib" }));
 }
 
 void tst_BridgeAccounts::sandboxGroup()

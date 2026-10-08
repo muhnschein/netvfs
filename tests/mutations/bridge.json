@@ -478,7 +478,7 @@
   {
     "name": "XB-2a helper keeps its caller's umask",
     "file": "src/bridge/lib/sandbox.cpp",
-    "search": "    ::umask(077);\n",
+    "search": "    ::umask(077);   // NOSONAR(cpp:S5849)\n",
     "replace": "",
     "test": "dbus-run-session -- build/tests/bridge/accounts/tst_bridgeaccounts"
   },
@@ -520,8 +520,8 @@
   {
     "name": "XB-2a Landlock never enforced",
     "file": "src/bridge/lib/sandbox.cpp",
-    "search": "    else if (::syscall(SYS_landlock_restrict_self, ruleset, 0U) != 0)",
-    "replace": "    else if (true)",
+    "search": "        && ::syscall(SYS_landlock_restrict_self, ruleset, 0U) == 0;",
+    "replace": "        && false;",
     "test": "dbus-run-session -- build/tests/bridge/accounts/tst_bridgeaccounts"
   },
   {
@@ -529,6 +529,13 @@
     "file": "src/bridge/lib/sandbox.cpp",
     "search": "        allowBeneath(ruleset, handled, dir, Landlock::ReadWrite);",
     "replace": "        allowBeneath(ruleset, handled, dir, Landlock::ReadOnly);",
+    "test": "dbus-run-session -- build/tests/bridge/accounts/tst_bridgeaccounts"
+  },
+  {
+    "name": "XB-2a Landlock ABI 4 leaves TCP alone",
+    "file": "src/bridge/lib/sandbox.cpp",
+    "search": "        { 4, { 0, Landlock::NetBindTcp | Landlock::NetConnectTcp, 0 } },",
+    "replace": "        { 4, { 0, 0, 0 } },",
     "test": "dbus-run-session -- build/tests/bridge/accounts/tst_bridgeaccounts"
   }
 ]

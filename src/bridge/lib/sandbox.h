@@ -5,6 +5,8 @@
 #include <QtCore/QByteArray>
 #include <QtCore/QList>
 
+#include <cstdint>
+
 // SPEC-v2 XB-2a: the confinement of netvfs-accounts, which any process of the
 // user can start with the group `privileged`. In main(), before Qt or
 // libaccounts start a thread: sanitizeDescriptors(), resetProcessState(),
@@ -36,6 +38,15 @@ QList<QByteArray> accountsDirectories();
 // 5 device ioctls, 6 abstract unix sockets and signals beyond the sandbox,
 // 7 audit logging of denials (on by default, nothing to set).
 constexpr int LandlockNewestAbi = 7;
+
+// What a ruleset handles (restricts) with a kernel of Landlock ABI `abi`:
+// each version's rights up to that one, newer ones being unknown to it.
+struct LandlockAccess {
+    std::uint64_t fs = 0;
+    std::uint64_t net = 0;      // ABI 4
+    std::uint64_t scoped = 0;   // ABI 6
+};
+LandlockAccess landlockAccess(int abi, bool allowAbstractSockets);
 
 struct FilesystemRestriction {
     int abi = 0;          // the kernel's Landlock ABI, 0 without Landlock

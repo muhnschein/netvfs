@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 #include "sandbox.h"
 
-#include <algorithm>
+#include <array>
 #include <cerrno>
 #include <csignal>
 #include <cstddef>
@@ -28,9 +28,6 @@
 // added since Linux 5.1 have one number on every architecture.
 #ifndef SYS_clone3
 #define SYS_clone3 435
-#endif
-#ifndef SYS_close_range
-#define SYS_close_range 436
 #endif
 #ifndef SYS_openat2
 #define SYS_openat2 437
@@ -122,24 +119,19 @@ QByteArray environmentOr(const char *name, const QByteArray &fallback)
     return value.startsWith('/') ? value : fallback;
 }
 
+// What /proc lists, so also before close_range() (Linux 5.9, newer than
+// some Sailfish OS devices' kernels).
 void closeFrom(int lowest)
 {
-    if (::syscall(SYS_close_range, static_cast<unsigned>(lowest), ~0U, 0U) == 0)
-        return;
-    // Before Linux 5.9: whatever /proc lists, else every possible number.
     std::vector<int> open;
-    if (DIR *dir = ::opendir("/proc/self/fd")) {
-        while (const struct dirent *entry = ::readdir(dir)) {
-            const int fd = std::atoi(entry->d_name);
-            if (fd >= lowest && fd != ::dirfd(dir))
-                open.push_back(fd);
-        }
-        ::closedir(dir);
-    } else {
-        const long max = std::min(::sysconf(_SC_OPEN_MAX), 65536L);
-        for (int fd = lowest; fd < max; ++fd)
+    DIR *dir = ::opendir("/proc/self/fd");
+    if (!dir)
+        return;
+    while (const struct dirent *entry = ::readdir(dir)) {
+        if (const int fd = std::atoi(entry->d_name); fd >= lowest && fd != ::dirfd(dir))
             open.push_back(fd);
     }
+    ::closedir(dir);
     for (const int fd : open)
         ::close(fd);
 }
@@ -151,12 +143,10 @@ void allowBeneath(int ruleset, std::uint64_t handled, const QByteArray &path, st
     const int fd = ::open(path.constData(), O_PATH | O_CLOEXEC);
     if (fd < 0)
         return;
-    struct stat st {};
-    if (::fstat(fd, &st) == 0 && !S_ISDIR(st.st_mode))
+    if (struct stat st {}; ::fstat(fd, &st) == 0 && !S_ISDIR(st.st_mode))
         access &= Landlock::FileRights;
-    Landlock::PathBeneathAttr rule { access & handled, fd };
-    if (rule.allowedAccess != 0
-            && ::syscall(SYS_landlock_add_rule, ruleset, Landlock::RulePathBeneath, &rule, 0U) != 0)
+    if (Landlock::PathBeneathAttr rule { access & handled, fd };
+            ::syscall(SYS_landlock_add_rule, ruleset, Landlock::RulePathBeneath, &rule, 0U) != 0)
         std::fprintf(stderr, "netvfs-accounts: Landlock rule for %s: %s\n", path.constData(), std::strerror(errno));
     ::close(fd);
 }
@@ -246,7 +236,7 @@ constexpr std::uint32_t NativeArch = AUDIT_ARCH_ARM;
 
 // Syscalls the helper never needs and that would widen what code run inside
 // it could do with the group.
-const long DeniedSyscalls[] = {
+const std::array DeniedSyscalls {
     SYS_execve, SYS_execveat,
 #ifndef NETVFS_ASAN
     SYS_ptrace,
@@ -296,12 +286,8 @@ bool sanitizeDescriptors()
         if (::fcntl(fd, F_GETFD) != -1 || errno != EBADF)
             continue;
         // The lowest free number, which is `fd`.
-        const int opened = ::open("/dev/null", fd == STDIN_FILENO ? O_RDONLY : O_WRONLY);
-        if (opened != fd) {
-            if (opened >= 0)
-                ::close(opened);
+        if (::open("/dev/null", fd == STDIN_FILENO ? O_RDONLY : O_WRONLY) != fd)
             return false;
-        }
     }
     closeFrom(STDERR_FILENO + 1);
     return true;
@@ -309,7 +295,8 @@ bool sanitizeDescriptors()
 
 void resetProcessState()
 {
-    ::umask(077);
+    // The tightest mask: nothing the helper creates is readable by others.
+    ::umask(077);   // NOSONAR(cpp:S5849)
     // A caller's handlers do not survive exec, but ignored signals and the
     // mask do.
     for (int sig = 1; sig < NSIG; ++sig) {
@@ -319,7 +306,7 @@ void resetProcessState()
     sigset_t none;
     sigemptyset(&none);
     ::sigprocmask(SIG_SETMASK, &none, nullptr);
-    if (struct rlimit size {}; ::getrlimit(RLIMIT_FSIZE, &size) == 0 && size.rlim_cur != size.rlim_max) {
+    if (struct rlimit size {}; ::getrlimit(RLIMIT_FSIZE, &size) == 0) {
         size.rlim_cur = size.rlim_max;
         ::setrlimit(RLIMIT_FSIZE, &size);
     }
@@ -334,6 +321,35 @@ QList<QByteArray> accountsDirectories()
              environmentOr("XDG_CONFIG_HOME", home + "/.config") + "/libaccounts-glib" };
 }
 
+LandlockAccess landlockAccess(int abi, bool allowAbstractSockets)
+{
+    // What each ABI version adds; ABI 7 only logs denials to the audit log,
+    // which it does by default.
+    struct Level {
+        int abi;
+        LandlockAccess adds;
+    };
+    constexpr std::array<Level, 6> Levels { {
+        { 1, { Landlock::Abi1Fs, 0, 0 } },
+        { 2, { Landlock::Refer, 0, 0 } },
+        { 3, { Landlock::Truncate, 0, 0 } },
+        { 4, { 0, Landlock::NetBindTcp | Landlock::NetConnectTcp, 0 } },
+        { 5, { Landlock::IoctlDev, 0, 0 } },
+        { 6, { 0, 0, Landlock::ScopeSignal | Landlock::ScopeAbstractUnixSocket } },
+    } };
+    LandlockAccess access;
+    for (const Level &level : Levels) {
+        if (level.abi > abi)
+            break;
+        access.fs |= level.adds.fs;
+        access.net |= level.adds.net;
+        access.scoped |= level.adds.scoped;
+    }
+    if (allowAbstractSockets)
+        access.scoped &= ~Landlock::ScopeAbstractUnixSocket;
+    return access;
+}
+
 FilesystemRestriction restrictFilesystem(const QList<QByteArray> &writable, bool allowAbstractSockets)
 {
     FilesystemRestriction result;
@@ -341,24 +357,11 @@ FilesystemRestriction restrictFilesystem(const QList<QByteArray> &writable, bool
     if (abi <= 0)
         return result;   // ENOSYS: not built; EOPNOTSUPP: not enabled at boot
     result.abi = int(abi);
-    const int used = std::min(result.abi, LandlockNewestAbi);
-
-    Landlock::RulesetAttr attr { Landlock::Abi1Fs, 0, 0 };
-    if (used >= 2)
-        attr.handledAccessFs |= Landlock::Refer;
-    if (used >= 3)
-        attr.handledAccessFs |= Landlock::Truncate;
-    if (used >= 4)
-        attr.handledAccessNet = Landlock::NetBindTcp | Landlock::NetConnectTcp;
-    if (used >= 5)
-        attr.handledAccessFs |= Landlock::IoctlDev;
-    if (used >= 6)
-        attr.scoped = Landlock::ScopeSignal | (allowAbstractSockets ? 0 : Landlock::ScopeAbstractUnixSocket);
-    // ABI 7 logs denials to the audit log by default, which is what we want.
-
+    const LandlockAccess handledAccess = landlockAccess(result.abi, allowAbstractSockets);
     // An older kernel takes the larger struct as long as its unknown fields
     // are zero.
-    const int ruleset = int(::syscall(SYS_landlock_create_ruleset, &attr, sizeof attr, 0U));
+    Landlock::RulesetAttr attr { handledAccess.fs, handledAccess.net, handledAccess.scoped };
+    const auto ruleset = static_cast<int>(::syscall(SYS_landlock_create_ruleset, &attr, sizeof attr, 0U));
     if (ruleset < 0) {
         warn("Landlock ruleset");
         return result;
@@ -386,12 +389,10 @@ FilesystemRestriction restrictFilesystem(const QList<QByteArray> &writable, bool
     allowBeneath(ruleset, handled, NETVFS_COVERAGE_DIR, Landlock::ReadWrite);
 #endif
 
-    if (::prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0)
-        warn("no_new_privs");
-    else if (::syscall(SYS_landlock_restrict_self, ruleset, 0U) != 0)
+    result.enforced = ::prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) == 0
+        && ::syscall(SYS_landlock_restrict_self, ruleset, 0U) == 0;
+    if (!result.enforced)
         warn("Landlock");
-    else
-        result.enforced = true;
     ::close(ruleset);
     return result;
 }
@@ -441,13 +442,8 @@ bool restrictSyscalls()
 #endif
     filter.ret(Filter::Allow);
 
-    if (::prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0) {
-        warn("no_new_privs");
-        return false;
-    }
-    if (!filter.install()) {
-        if (errno != EINVAL)   // EINVAL: a kernel without seccomp filters
-            warn("seccomp");
+    if (::prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0 || !filter.install()) {
+        warn("seccomp");
         return false;
     }
     return true;
@@ -457,12 +453,11 @@ bool restrictSyscalls()
 bool dropSetIdGroup()
 {
     const gid_t real = ::getgid();
-    if (::setresgid(real, real, real) != 0)
-        return false;
     gid_t r = 0;
     gid_t e = 0;
     gid_t s = 0;
-    return ::getresgid(&r, &e, &s) == 0 && r == real && e == real && s == real;
+    return ::setresgid(real, real, real) == 0 && ::getresgid(&r, &e, &s) == 0 && r == real && e == real
+        && s == real;
 }
 
 } // namespace NetVfs::Bridge
