@@ -460,5 +460,82 @@
     "search": "    if (process.exitStatus() != QProcess::NormalExit || process.exitCode() != 0)",
     "replace": "    if (false)",
     "test": "dbus-run-session -- build/tests/bridge/accounts/tst_bridgeaccounts"
+  },
+  {
+    "name": "XB-2a helper leaves a closed stdio descriptor closed",
+    "file": "src/bridge/lib/sandbox.cpp",
+    "search": "        if (::fcntl(fd, F_GETFD) != -1 || errno != EBADF)\n            continue;",
+    "replace": "        continue;",
+    "test": "dbus-run-session -- build/tests/bridge/accounts/tst_bridgeaccounts"
+  },
+  {
+    "name": "XB-2a helper keeps inherited descriptors",
+    "file": "src/bridge/lib/sandbox.cpp",
+    "search": "    closeFrom(STDERR_FILENO + 1);\n",
+    "replace": "",
+    "test": "dbus-run-session -- build/tests/bridge/accounts/tst_bridgeaccounts"
+  },
+  {
+    "name": "XB-2a helper keeps its caller's umask",
+    "file": "src/bridge/lib/sandbox.cpp",
+    "search": "    ::umask(077);   // NOSONAR(cpp:S5849)\n",
+    "replace": "",
+    "test": "dbus-run-session -- build/tests/bridge/accounts/tst_bridgeaccounts"
+  },
+  {
+    "name": "XB-2a helper keeps its caller's file size limit",
+    "file": "src/bridge/lib/sandbox.cpp",
+    "search": "        size.rlim_cur = size.rlim_max;\n",
+    "replace": "",
+    "test": "dbus-run-session -- build/tests/bridge/accounts/tst_bridgeaccounts"
+  },
+  {
+    "name": "XB-2a confined helper may exec",
+    "file": "src/bridge/lib/sandbox.cpp",
+    "search": "    SYS_execve, SYS_execveat,\n",
+    "replace": "",
+    "test": "dbus-run-session -- build/tests/bridge/accounts/tst_bridgeaccounts"
+  },
+  {
+    "name": "XB-2a confined helper opens internet sockets",
+    "file": "src/bridge/lib/sandbox.cpp",
+    "search": "    filter.denyArgumentOtherThan(SYS_socket, 0, AF_UNIX);\n",
+    "replace": "",
+    "test": "dbus-run-session -- build/tests/bridge/accounts/tst_bridgeaccounts"
+  },
+  {
+    "name": "XB-2a confined helper sets a setgid bit with fchmod",
+    "file": "src/bridge/lib/sandbox.cpp",
+    "search": "    filter.denyArgumentBits(SYS_fchmod, 1, SetIdBits);\n",
+    "replace": "",
+    "test": "dbus-run-session -- build/tests/bridge/accounts/tst_bridgeaccounts"
+  },
+  {
+    "name": "XB-2a confined helper creates a setgid file",
+    "file": "src/bridge/lib/sandbox.cpp",
+    "search": "    filter.denyCreatedModeBits(SYS_openat, 2, 3, SetIdBits);\n",
+    "replace": "",
+    "test": "dbus-run-session -- build/tests/bridge/accounts/tst_bridgeaccounts"
+  },
+  {
+    "name": "XB-2a Landlock never enforced",
+    "file": "src/bridge/lib/sandbox.cpp",
+    "search": "        && ::syscall(SYS_landlock_restrict_self, ruleset, 0U) == 0;",
+    "replace": "        && false;",
+    "test": "dbus-run-session -- build/tests/bridge/accounts/tst_bridgeaccounts"
+  },
+  {
+    "name": "XB-2a Landlock makes the database folder read-only",
+    "file": "src/bridge/lib/sandbox.cpp",
+    "search": "        allowBeneath(ruleset, handled, dir, Landlock::ReadWrite);",
+    "replace": "        allowBeneath(ruleset, handled, dir, Landlock::ReadOnly);",
+    "test": "dbus-run-session -- build/tests/bridge/accounts/tst_bridgeaccounts"
+  },
+  {
+    "name": "XB-2a Landlock ABI 4 leaves TCP alone",
+    "file": "src/bridge/lib/sandbox.cpp",
+    "search": "        { 4, { 0, Landlock::NetBindTcp | Landlock::NetConnectTcp, 0 } },",
+    "replace": "        { 4, { 0, 0, 0 } },",
+    "test": "dbus-run-session -- build/tests/bridge/accounts/tst_bridgeaccounts"
   }
 ]

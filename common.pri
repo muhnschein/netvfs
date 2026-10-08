@@ -19,12 +19,16 @@ equals(NETVFS_SANITIZE, 1) {
     QMAKE_CXXFLAGS += -fsanitize=address,undefined -fno-sanitize-recover=undefined -fno-omit-frame-pointer
     QMAKE_CFLAGS += -fsanitize=address,undefined -fno-sanitize-recover=undefined -fno-omit-frame-pointer
     QMAKE_LFLAGS += -fsanitize=address,undefined
+    # netvfs-accounts' Landlock rules let LeakSanitizer read its suppressions.
+    DEFINES += NETVFS_SANITIZER_DIR=\\\"$$NETVFS_ROOT/tools/sanitizer\\\"
 }
 
 equals(NETVFS_COVERAGE, 1) {
     QMAKE_CXXFLAGS += --coverage -O0
     QMAKE_CFLAGS += --coverage -O0
     QMAKE_LFLAGS += --coverage
+    # netvfs-accounts' Landlock rules let gcov write its counters here.
+    DEFINES += NETVFS_COVERAGE_DIR=\\\"$$NETVFS_BUILD\\\"
 }
 
 NETVFS_LIB_OUT = $$NETVFS_BUILD/lib

@@ -791,6 +791,19 @@ permission, links nothing from netvfs, and never sees secrets or pins.
     variables (and `NETVFS_ACCOUNTS_HELPER` in the bridge, which names the build tree's
     helper) apply to tests only, where the helper is not set-id. glibc itself drops `LD_*`
     and similar. Its soft core limit is 0, so that a crash writes no user-readable core.
+  - It confines itself (`src/bridge/lib/sandbox.h`), set-id or not, before Qt or GLib
+    start a thread: fds 0 to 2 open (else `/dev/null`) and no other inherited fd, umask
+    077, default signal handlers and an empty mask, the file size soft limit at the hard
+    one. Then, best-effort, Landlock (ABI 1 to 7, whatever the kernel offers): read-only
+    system folders, the uid's `/run/user/<uid>` and provider folders, read-write only the
+    database folder (`ACCOUNTS`, else `$XDG_DATA_HOME/system/privileged/Accounts` and
+    `$XDG_CONFIG_HOME/libaccounts-glib`), no exec, no TCP (ABI 4), no device ioctls
+    (ABI 5), no signals or abstract sockets beyond itself (ABI 6). Then `no_new_privs`
+    and a seccomp filter failing with EPERM: exec, ptrace, non-`AF_UNIX` sockets, new
+    namespaces, mounts, modules, BPF, io_uring, userfaultfd, keyrings, and any chmod,
+    open, mkdir or mknod with a setuid or setgid bit. After the database work it gives up
+    the group for good (`setresgid` to the real gid) before writing its answer. The Jolla
+    Phone 2026 kernel (6.12) has seccomp but no Landlock.
   - The generated bridge service has no `NoNewPrivileges=` (it would ignore the helper's
     setgid bit). invoker and its `privileges.d` files cannot be used instead, because they
     do not pass on the socket-activated descriptor.
