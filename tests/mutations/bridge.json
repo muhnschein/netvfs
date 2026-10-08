@@ -9,8 +9,36 @@
   {
     "name": "XB-5 peer executable not checked",
     "file": "src/bridge/lib/peercheck.cpp",
-    "search": "    if (exe.st_dev != expected.st_dev || exe.st_ino != expected.st_ino)",
+    "search": "    if (exe.st_size != expected.st_size || !sameContent(exeFd, expectedFd))",
     "replace": "    if (false)",
+    "test": "build/tests/bridge/units/tst_bridgeunits"
+  },
+  {
+    "name": "XB-5 copy of the executable refused (Sailjail private-bin)",
+    "file": "src/bridge/lib/peercheck.cpp",
+    "search": "    if (exe.st_dev == expected.st_dev && exe.st_ino == expected.st_ino)\n        return Result::success();",
+    "replace": "    if (exe.st_dev != expected.st_dev || exe.st_ino != expected.st_ino)\n        return refused(QString());",
+    "test": "build/tests/bridge/units/tst_bridgeunits"
+  },
+  {
+    "name": "XB-5 same-size executable with other bytes accepted",
+    "file": "src/bridge/lib/peercheck.cpp",
+    "search": "        if (n < 0 || readFully(b, right.data(), right.size()) != n\n                || std::memcmp(left.data(), right.data(), static_cast<size_t>(n)) != 0)",
+    "replace": "        if (n < 0 || readFully(b, right.data(), right.size()) != n)",
+    "test": "build/tests/bridge/units/tst_bridgeunits"
+  },
+  {
+    "name": "XB-5 only the first chunk of the executable compared",
+    "file": "src/bridge/lib/peercheck.cpp",
+    "search": "        if (n == 0)\n            return true;",
+    "replace": "        if (n >= 0)\n            return true;",
+    "test": "build/tests/bridge/units/tst_bridgeunits"
+  },
+  {
+    "name": "XB-5 executable content read outside the start time window",
+    "file": "src/bridge/lib/peercheck.cpp",
+    "search": "    if (exe.st_size != expected.st_size || !sameContent(exeFd, expectedFd))",
+    "replace": "    if (const int again = ::open(exePath.constData(), O_RDONLY | O_CLOEXEC); exe.st_size != expected.st_size || !sameContent(again, expectedFd) || ::close(again) != 0)",
     "test": "build/tests/bridge/units/tst_bridgeunits"
   },
   {
@@ -348,5 +376,89 @@
     "search": "    return strncmp(resolved, base, n) == 0 && resolved[n] == '/';",
     "replace": "    return n > 0;",
     "test": "build/tests/bridge/generator/tst_generator"
+  },
+  {
+    "name": "XB-2a helper hands out an account the bridge does not list",
+    "file": "src/bridge/lib/accountshelper.cpp",
+    "search": "    if (!valid || accountId <= 0 || !store.filesAccounts().contains(accountId))",
+    "replace": "    if (!valid || accountId <= 0)",
+    "test": "dbus-run-session -- build/tests/bridge/accounts/tst_bridgeaccounts"
+  },
+  {
+    "name": "XB-2a helper clears attention",
+    "file": "src/bridge/lib/accountshelper.cpp",
+    "search": "    if (attention == Attention::None)\n        return failure(Result(Error::Unsupported, QStringLiteral(\"Unknown attention state\")));",
+    "replace": "",
+    "test": "dbus-run-session -- build/tests/bridge/accounts/tst_bridgeaccounts"
+  },
+  {
+    "name": "XB-2a helper skips the Files policy (XA-4)",
+    "file": "src/bridge/lib/accountshelper.cpp",
+    "search": "    if (const Result r = checkServicePolicy(config.params, Service::Files); !r.ok())\n        return failure(r);",
+    "replace": "",
+    "test": "dbus-run-session -- build/tests/bridge/accounts/tst_bridgeaccounts"
+  },
+  {
+    "name": "XB-2a helper reports an unusable database as an empty list",
+    "file": "src/bridge/lib/accountshelper.cpp",
+    "search": "    if (const Result r = databaseUsable(manager); !r.ok())\n        return failure(r);",
+    "replace": "",
+    "test": "dbus-run-session -- build/tests/bridge/accounts/tst_bridgeaccounts"
+  },
+  {
+    "name": "XB-2a trailing bytes of an answer accepted",
+    "file": "src/bridge/lib/accountshelper.cpp",
+    "search": "    if (stream.status() != QDataStream::Ok || !stream.atEnd())\n        return malformed();\n    *accounts = result;",
+    "replace": "    if (stream.status() != QDataStream::Ok)\n        return malformed();\n    *accounts = result;",
+    "test": "dbus-run-session -- build/tests/bridge/accounts/tst_bridgeaccounts"
+  },
+  {
+    "name": "XB-2a set-id helper keeps its caller's variables",
+    "file": "src/bridge/lib/privileges.cpp",
+    "search": "        ::unsetenv(name.constData());",
+    "replace": "        (void)name;",
+    "test": "dbus-run-session -- build/tests/bridge/accounts/tst_bridgeaccounts"
+  },
+  {
+    "name": "XB-2a set-id helper keeps its caller's HOME",
+    "file": "src/bridge/lib/privileges.cpp",
+    "search": "    return ::setenv(\"HOME\", user->pw_dir, 1) == 0;",
+    "replace": "    return true;",
+    "test": "dbus-run-session -- build/tests/bridge/accounts/tst_bridgeaccounts"
+  },
+  {
+    "name": "XB-2a set-id helper may write a core file",
+    "file": "src/bridge/lib/privileges.cpp",
+    "search": "        core.rlim_cur = 0;",
+    "replace": "",
+    "test": "dbus-run-session -- build/tests/bridge/accounts/tst_bridgeaccounts"
+  },
+  {
+    "name": "XB-2a account changes on the session bus ignored",
+    "file": "src/bridge/lib/helperdirectory.cpp",
+    "search": "const char AccountChangedSignal[] = \"AccountChanged\";",
+    "replace": "const char AccountChangedSignal[] = \"AccountsChanged\";",
+    "test": "dbus-run-session -- build/tests/bridge/accounts/tst_bridgeaccounts"
+  },
+  {
+    "name": "XB-2a one refresh per change signal instead of per burst",
+    "file": "src/bridge/lib/helperdirectory.cpp",
+    "search": "    if (!m_changed->isActive())\n        m_changed->start();",
+    "replace": "    emit changed();",
+    "test": "dbus-run-session -- build/tests/bridge/accounts/tst_bridgeaccounts"
+  },
+  {
+    "name": "XB-2a no refresh after the bridge's own attention write",
+    "file": "src/bridge/lib/helperdirectory.cpp",
+    "search": "        if (self)\n            emit self->changed();",
+    "replace": "",
+    "test": "dbus-run-session -- build/tests/bridge/accounts/tst_bridgeaccounts"
+  },
+  {
+    "name": "XB-2a failing helper's output still decoded",
+    "file": "src/bridge/lib/helperdirectory.cpp",
+    "search": "    if (process.exitStatus() != QProcess::NormalExit || process.exitCode() != 0)",
+    "replace": "    if (false)",
+    "test": "dbus-run-session -- build/tests/bridge/accounts/tst_bridgeaccounts"
   }
 ]

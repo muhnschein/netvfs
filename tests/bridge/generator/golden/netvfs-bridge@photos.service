@@ -8,4 +8,3 @@ PartOf=netvfs-bridge@photos.socket
 [Service]
 Type=simple
 ExecStart=/usr/libexec/netvfs/netvfs-bridge photos
-NoNewPrivileges=yes

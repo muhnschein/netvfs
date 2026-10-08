@@ -9,5 +9,6 @@ INCLUDEPATH += $$NETVFS_ROOT/src/bridge/lib $$PWD/common
 LIBS = -L$$NETVFS_LIB_OUT -lnetvfsbridge $$LIBS
 PRE_TARGETDEPS += $$NETVFS_LIB_OUT/libnetvfsbridge.a
 DEFINES += NETVFS_TEST_BIN_DIR=\\\"$$NETVFS_BUILD/bin\\\"
+DEFINES += NETVFS_TEST_LIBEXEC_DIR=\\\"$$NETVFS_BUILD/libexec/netvfs\\\"
 HEADERS += $$PWD/common/bridgetest.h
 SOURCES += $$PWD/common/bridgetest.cpp
