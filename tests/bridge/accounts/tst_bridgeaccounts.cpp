@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 // netvfs-accounts (SPEC-v2 XB-2a): the setgid helper that is the bridge's
 // only access to the accounts database, its answers, its environment when
-// set-id, and the bridge's side that runs it.
+// set-id, its confinement (sandbox.h), and the bridge's side that runs it.
 #include "accountsfixture.h"
 #include "accountshelper.h"
 #include "privileges.h"
+#include "sandbox.h"
 
 #include <Accounts/Manager>
 
@@ -15,10 +16,24 @@
 #include <QtDBus/QDBusMessage>
 #include <QtTest/QtTest>
 
+#include <algorithm>
+#include <cerrno>
+#include <csignal>
+#include <cstdio>
 #include <memory>
+#include <thread>
 
+#include <arpa/inet.h>
+#include <fcntl.h>
+#include <netinet/in.h>
 #include <pwd.h>
+#include <sched.h>
+#include <sys/ptrace.h>
 #include <sys/resource.h>
+#include <sys/socket.h>
+#include <sys/stat.h>
+#include <sys/syscall.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 using namespace NetVfs;
@@ -79,6 +94,45 @@ private:
     QList<QPair<QByteArray, QByteArray>> m_saved;
 };
 
+// The exit status of a child that runs `body`, which may confine it for good.
+template<typename Body>
+int inChild(Body body)
+{
+    std::fflush(nullptr);
+    const pid_t pid = ::fork();
+    if (pid == 0)
+        ::_exit(body());
+    int status = 0;
+    while (::waitpid(pid, &status, 0) < 0 && errno == EINTR) {
+    }
+    return WIFEXITED(status) ? WEXITSTATUS(status) : 128 + WTERMSIG(status);
+}
+
+// In a child: the number of the first check that failed, 0 if none did.
+class Checks
+{
+public:
+    void operator()(bool ok)
+    {
+        ++m_count;
+        if (!ok && m_failed == 0)
+            m_failed = m_count;
+    }
+    int failed() const { return m_failed; }
+
+private:
+    int m_count = 0;
+    int m_failed = 0;
+};
+
+// A child status meaning that the kernel has no Landlock.
+constexpr int NoLandlock = 77;
+
+bool failsWith(int result, int error)
+{
+    return result == -1 && errno == error;
+}
+
 } // namespace
 
 class tst_BridgeAccounts : public QObject
@@ -98,6 +152,12 @@ private Q_SLOTS:
     void databaseUnusable();
     void malformedAnswers();
     void setIdEnvironment();
+    void sandboxDescriptors();
+    void sandboxProcessState();
+    void sandboxSyscalls();
+    void sandboxFilesystem();
+    void sandboxGroup();
+    void helperWithClosedDescriptors();
     void directoryLists();
     void directoryFailures();
     void directoryFetch();
@@ -349,6 +409,177 @@ void tst_BridgeAccounts::setIdEnvironment()
     QCOMPARE(coreAfter.rlim_cur, rlim_t(0));
     QCOMPARE(coreAfter.rlim_max, coreBefore.rlim_max);
     QCOMPARE(qgetenv("ACCOUNTS"), QFile::encodeName(fixture->path()));   // restored
+}
+
+void tst_BridgeAccounts::sandboxDescriptors()
+{
+    // XB-2a: a caller's closed stdio becomes /dev/null, so that no file the
+    // helper opens receives its answer; other inherited descriptors close.
+    struct stat devNull {};
+    QCOMPARE(::stat("/dev/null", &devNull), 0);
+    const int status = inChild([&devNull] {
+        const int inherited = ::open("/dev/null", O_RDONLY);
+        ::close(STDIN_FILENO);
+        ::close(STDERR_FILENO);
+        Checks check;
+        check(inherited > STDERR_FILENO);
+        check(sanitizeDescriptors());
+        for (const int fd : { STDIN_FILENO, STDERR_FILENO }) {
+            struct stat st {};
+            check(::fstat(fd, &st) == 0 && S_ISCHR(st.st_mode) && st.st_rdev == devNull.st_rdev);
+        }
+        check(failsWith(::fcntl(inherited, F_GETFD), EBADF));
+        return check.failed();
+    });
+    QCOMPARE(status, 0);
+}
+
+void tst_BridgeAccounts::sandboxProcessState()
+{
+    const int status = inChild([] {
+        ::umask(0);
+        ::signal(SIGTERM, SIG_IGN);
+        sigset_t blocked;
+        sigemptyset(&blocked);
+        sigaddset(&blocked, SIGUSR1);
+        ::sigprocmask(SIG_BLOCK, &blocked, nullptr);
+        struct rlimit size {};
+        ::getrlimit(RLIMIT_FSIZE, &size);
+        size.rlim_cur = std::min<rlim_t>(size.rlim_max, 4096);
+        ::setrlimit(RLIMIT_FSIZE, &size);
+
+        resetProcessState();
+        Checks check;
+        check(::umask(022) == 077);
+        struct sigaction action {};
+        check(::sigaction(SIGTERM, nullptr, &action) == 0 && action.sa_handler == SIG_DFL);
+        sigset_t now;
+        check(::sigprocmask(SIG_BLOCK, nullptr, &now) == 0 && sigismember(&now, SIGUSR1) == 0);
+        check(::getrlimit(RLIMIT_FSIZE, &size) == 0 && size.rlim_cur == size.rlim_max);
+        return check.failed();
+    });
+    QCOMPARE(status, 0);
+}
+
+void tst_BridgeAccounts::sandboxSyscalls()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QByteArray file = QFile::encodeName(dir.filePath(QStringLiteral("file")));
+    const QByteArray other = QFile::encodeName(dir.filePath(QStringLiteral("other")));
+    const QByteArray folder = QFile::encodeName(dir.filePath(QStringLiteral("folder")));
+    const int status = inChild([&] {
+        if (!restrictSyscalls())
+            return 99;
+        Checks check;
+        check(failsWith(::execl("/bin/false", "false", nullptr), EPERM));
+        check(failsWith(::socket(AF_INET, SOCK_STREAM, 0), EPERM));
+        check(failsWith(::socket(AF_INET6, SOCK_DGRAM, 0), EPERM));
+        check(failsWith(::socket(AF_NETLINK, SOCK_RAW, 0), EPERM));
+        check(::socket(AF_UNIX, SOCK_STREAM, 0) >= 0);
+        int pair[2];
+        check(::socketpair(AF_UNIX, SOCK_STREAM, 0, pair) == 0);
+        check(failsWith(::unshare(CLONE_NEWUSER), EPERM));
+        check(failsWith(::syscall(SYS_bpf, 0, nullptr, 0), EPERM));
+        // No file with a setuid or setgid bit, however it is made.
+        const int fd = ::open(file.constData(), O_CREAT | O_WRONLY, 0600);
+        check(fd >= 0);
+        check(failsWith(::fchmod(fd, 02755), EPERM));
+        check(failsWith(::chmod(file.constData(), 04755), EPERM));
+        check(failsWith(::fchmodat(AT_FDCWD, file.constData(), 02700, 0), EPERM));
+        check(::chmod(file.constData(), 0640) == 0);
+        check(failsWith(::open(other.constData(), O_CREAT | O_WRONLY, 02755), EPERM));
+        // Without O_CREAT the mode is unused, whatever a raw syscall passes.
+        check(::syscall(SYS_openat, AT_FDCWD, file.constData(), O_RDONLY, 06755) >= 0);
+        check(failsWith(::mkdir(folder.constData(), 02755), EPERM));
+        check(::mkdir(folder.constData(), 0700) == 0);
+        check(failsWith(::open(folder.constData(), O_TMPFILE | O_WRONLY, 02755), EPERM));
+#if !defined(__SANITIZE_ADDRESS__)
+        check(failsWith(::ptrace(PTRACE_TRACEME, 0, nullptr, nullptr), EPERM));
+#endif
+        // Threads still start: clone3 fails with ENOSYS and glibc uses clone.
+        bool ran = false;
+        std::thread thread([&ran] { ran = true; });
+        thread.join();
+        check(ran);
+        return check.failed();
+    });
+    if (status == 99)
+        QSKIP("no seccomp filters on this kernel or architecture");
+    QCOMPARE(status, 0);
+}
+
+void tst_BridgeAccounts::sandboxFilesystem()
+{
+    QTemporaryDir allowed;
+    QTemporaryDir denied;
+    QVERIFY(allowed.isValid() && denied.isValid());
+    const QByteArray secret = QFile::encodeName(denied.filePath(QStringLiteral("secret")));
+    QFile secretFile(QFile::decodeName(secret));
+    QVERIFY(secretFile.open(QIODevice::WriteOnly));
+    secretFile.close();
+    const QByteArray allowedDir = QFile::encodeName(allowed.path());
+    const QByteArray created = allowedDir + "/accounts.db-wal";
+    const QByteArray outside = QFile::encodeName(denied.filePath(QStringLiteral("planted")));
+    const int status = inChild([&] {
+        const FilesystemRestriction restriction = restrictFilesystem({ allowedDir }, false);
+        if (restriction.abi == 0)
+            return NoLandlock;
+        Checks check;
+        check(restriction.enforced);
+        // The database folder: create, write, truncate, remove.
+        const int fd = ::open(created.constData(), O_CREAT | O_RDWR, 0600);
+        check(fd >= 0);
+        check(::write(fd, "x", 1) == 1);
+        check(::ftruncate(fd, 0) == 0);
+        check(::unlink(created.constData()) == 0);
+        // Anything else: read-only system folders, nothing beyond them.
+        check(::open("/etc/passwd", O_RDONLY | O_CLOEXEC) >= 0);
+        check(::open("/dev/null", O_WRONLY | O_CLOEXEC) >= 0);
+        check(failsWith(::open(secret.constData(), O_RDONLY), EACCES));
+        check(failsWith(::open(outside.constData(), O_CREAT | O_WRONLY, 0600), EACCES));
+        check(failsWith(::execl("/bin/false", "false", nullptr), EACCES));
+        if (restriction.abi >= 4) {
+            const int tcp = ::socket(AF_INET, SOCK_STREAM, 0);
+            struct sockaddr_in local {};
+            local.sin_family = AF_INET;
+            local.sin_port = htons(1);
+            local.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+            check(failsWith(::connect(tcp, reinterpret_cast<const sockaddr *>(&local), sizeof local), EACCES));
+        }
+        if (restriction.abi >= 6)
+            check(failsWith(::kill(::getppid(), 0), EPERM));
+        return check.failed();
+    });
+    if (status == NoLandlock)
+        QSKIP("no Landlock on this kernel");
+    QCOMPARE(status, 0);
+}
+
+void tst_BridgeAccounts::sandboxGroup()
+{
+    // Not set-id here: real, effective and saved gid stay the real one. The
+    // set-id case is the device's (tools/ci cannot install setgid files).
+    QVERIFY(dropSetIdGroup());
+    gid_t r = 0;
+    gid_t e = 0;
+    gid_t s = 0;
+    QCOMPARE(::getresgid(&r, &e, &s), 0);
+    QCOMPARE(e, ::getgid());
+    QCOMPARE(s, ::getgid());
+}
+
+void tst_BridgeAccounts::helperWithClosedDescriptors()
+{
+    // The built helper, confined, started with stdin and stderr closed.
+    QProcess helper;
+    helper.start(QStringLiteral("/bin/sh"), { QStringLiteral("-c"), QStringLiteral("exec \"$0\" list 0<&- 2>&-"),
+                                             Helper });
+    QVERIFY(helper.waitForFinished(10000));
+    QCOMPARE(helper.exitCode(), 0);
+    QVector<AccountLocation> accounts;
+    QVERIFY(AccountsHelper::decodeList(helper.readAllStandardOutput(), &accounts).ok());
+    QCOMPARE(accounts.size(), 1);
 }
 
 void tst_BridgeAccounts::directoryLists()
