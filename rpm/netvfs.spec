@@ -160,20 +160,26 @@ consumers over a socket in their data folder, without handing out secrets.
 %prep
 %setup -q -n %{name}-%{version}
 
+# SPEC-v2 XB-2a: cargo builds netvfs-accounts offline from rust/vendor
+# (tools/ci/build-rpm.sh vendors the crates), against the system SQLite.
+# qmake's install target asks cargo again, so %install needs the same
+# environment (and finds the build up to date).
+%define netvfs_cargo_env \
+export CARGO_HOME="$PWD/rust/.cargo-home" \
+export CARGO_INCREMENTAL=0 \
+export LIBSQLITE3_SYS_USE_PKG_CONFIG=1 \
+export RUSTFLAGS="-C link-arg=-Wl,--as-needed -C link-arg=-Wl,-z,relro,-z,now"
+
 %build
 # SPEC P-1..P-3: vendored libraries first, static and position-independent.
 ./vendor/build-vendor.sh "$PWD/build-vendor"
-# SPEC-v2 XB-2a: cargo builds netvfs-accounts offline from rust/vendor
-# (tools/ci/build-rpm.sh vendors the crates), against the system SQLite.
-export CARGO_HOME="$PWD/rust/.cargo-home"
-export CARGO_INCREMENTAL=0
-export LIBSQLITE3_SYS_USE_PKG_CONFIG=1
-export RUSTFLAGS="-C link-arg=-Wl,--as-needed -C link-arg=-Wl,-z,relro,-z,now"
+%{netvfs_cargo_env}
 %qmake5 -r VENDOR_PREFIX="$PWD/build-vendor" NETVFS_BUILD_TESTS=0 "VERSION=%{version}" \
     NETVFS_RUST_TARGET=aarch64-unknown-linux-gnu NETVFS_CARGO_FLAGS=--frozen
 %make_build
 
 %install
+%{netvfs_cargo_env}
 %qmake5_install
 
 # Script bodies, not "-p /sbin/ldconfig": rpm passes the count of

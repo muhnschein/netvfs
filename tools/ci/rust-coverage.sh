@@ -33,7 +33,7 @@ profiles=$(find "$build/rust-coverage" -name '*.profraw')
 "$tools/llvm-profdata" merge -sparse $profiles -o "$build/rust-coverage.profdata"
 first=${objects%% *}
 rest=$(for o in ${objects#* }; do printf -- '-object %s ' "$o"; done)
-ignore='/\.cargo/|/rustc/|/vendor/|/tests/'
+ignore='/\.cargo/|/rustc/|/vendor/|/tests/|/build/[^/]*/out/'
 # shellcheck disable=SC2086 # one word per argument
 "$tools/llvm-cov" export -format=lcov -instr-profile="$build/rust-coverage.profdata" \
     -ignore-filename-regex="$ignore" "$first" $rest > "$build/rust-lcov.info"
