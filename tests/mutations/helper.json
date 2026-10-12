@@ -1,0 +1,352 @@
+[
+  {
+    "name": "XB-2a helper hands out an account the bridge does not list",
+    "file": "rust/netvfs-accounts/src/serve.rs",
+    "search": "    if !listed.contains(&account_id) {\n        return Err(not_found());\n    }\n",
+    "replace": "",
+    "test": "dbus-run-session -- build/tests/bridge/accounts/tst_bridgeaccounts"
+  },
+  {
+    "name": "XB-2a helper clears attention",
+    "file": "rust/netvfs-accounts/src/serve.rs",
+    "search": "    if attention == Attention::None {\n        return Served::failure(&Outcome::failure(Error::Unsupported, \"Unknown attention state\"));\n    }\n",
+    "replace": "",
+    "test": "dbus-run-session -- build/tests/bridge/accounts/tst_bridgeaccounts"
+  },
+  {
+    "name": "XB-2a helper skips the Files policy (XA-4)",
+    "file": "rust/netvfs-accounts/src/serve.rs",
+    "search": "    if !policy.ok() {\n        return Served::failure(&policy);\n    }\n",
+    "replace": "",
+    "test": "dbus-run-session -- build/tests/bridge/accounts/tst_bridgeaccounts"
+  },
+  {
+    "name": "XB-2a helper reports an unusable database as an empty list",
+    "file": "rust/netvfs-accounts/src/serve.rs",
+    "search": "        Err(e) => Served::failure(&unusable_outcome(&e)),",
+    "replace": "        Err(_) => serve_with(&command, Store::new(Database::empty())),",
+    "test": "dbus-run-session -- build/tests/bridge/accounts/tst_bridgeaccounts"
+  },
+  {
+    "name": "XB-2a helper says no secret is optional (XA-7)",
+    "file": "rust/netvfs-accounts/src/serve.rs",
+    "search": "    s.bool(secret_optional(&config.params));",
+    "replace": "    s.bool(false);",
+    "test": "dbus-run-session -- build/tests/bridge/accounts/tst_bridgeaccounts"
+  },
+  {
+    "name": "XB-2a helper lists the Files root as stored",
+    "file": "rust/netvfs-accounts/src/serve.rs",
+    "search": "        s.string(normalize(a.files_root.as_deref()).flatten().as_deref());",
+    "replace": "        s.string(a.files_root.as_deref());",
+    "test": "dbus-run-session -- build/tests/bridge/accounts/tst_bridgeaccounts"
+  },
+  {
+    "name": "XB-2a helper lists disabled accounts",
+    "file": "rust/netvfs-accounts/src/store.rs",
+    "search": "            if !account.enabled {\n                continue;\n            }\n",
+    "replace": "",
+    "test": "dbus-run-session -- build/tests/bridge/accounts/tst_bridgeaccounts"
+  },
+  {
+    "name": "XB-2a helper takes any value of the Files flag",
+    "file": "rust/netvfs-accounts/src/store.rs",
+    "search": "        let enabled = matches!(value_of(&settings, keys::ENABLED), Some(Value::Bool(true)));",
+    "replace": "        let enabled = value_of(&settings, keys::ENABLED).is_some();",
+    "test": "dbus-run-session -- build/tests/bridge/accounts/tst_bridgeaccounts"
+  },
+  {
+    "name": "XB-2a helper takes options of another provider",
+    "file": "rust/netvfs-accounts/src/store.rs",
+    "search": "    let prefix = format!(\"netvfs/{}/\", account.provider.as_deref().unwrap_or_default());",
+    "replace": "    let prefix = format!(\"netvfs/{}\", account.provider.as_deref().unwrap_or_default());",
+    "test": "dbus-run-session -- build/tests/bridge/accounts/tst_bridgeaccounts"
+  },
+  {
+    "name": "XB-2a helper hands out an account with an empty server",
+    "file": "rust/netvfs-accounts/src/store.rs",
+    "search": "        if params.host.as_deref().map_or(true, str::is_empty) {",
+    "replace": "        if params.host.is_none() {",
+    "test": "dbus-run-session -- build/tests/bridge/accounts/tst_bridgeaccounts"
+  },
+  {
+    "name": "XB-2a helper loses the top bit of a credentials id",
+    "file": "rust/netvfs-accounts/src/store.rs",
+    "search": "            .map_or(0, |v| u32::from_ne_bytes(v.to_ne_bytes()));",
+    "replace": "            .map_or(0, |v| u32::from_ne_bytes(v.to_ne_bytes()) & 0x7fff_ffff);",
+    "test": "dbus-run-session -- build/tests/bridge/accounts/tst_bridgeaccounts"
+  },
+  {
+    "name": "XB-2a helper keeps blanks around the Files root",
+    "file": "rust/netvfs-accounts/src/store.rs",
+    "search": "            files_root: trimmed(&string_of(&files, keys::FILES_ROOT)),",
+    "replace": "            files_root: string_of(&files, keys::FILES_ROOT),",
+    "test": "dbus-run-session -- build/tests/bridge/accounts/tst_bridgeaccounts"
+  },
+  {
+    "name": "XB-2a helper lets a Files root have a dot segment",
+    "file": "rust/netvfs-accounts/src/store.rs",
+    "search": "    if parts.iter().any(|p| *p == \".\" || *p == \"..\") {",
+    "replace": "    if parts.iter().any(|p| *p == \"..\") {",
+    "test": "dbus-run-session -- build/tests/bridge/accounts/tst_bridgeaccounts"
+  },
+  {
+    "name": "XB-2a helper lists an empty Files root as empty, not null",
+    "file": "rust/netvfs-accounts/src/store.rs",
+    "search": "    } else if joined.is_empty() {\n        None\n    } else {",
+    "replace": "    } else if joined.is_empty() {\n        Some(String::new())\n    } else {",
+    "test": "dbus-run-session -- build/tests/bridge/accounts/tst_bridgeaccounts"
+  },
+  {
+    "name": "XB-14 attention write leaves CredentialsNeedUpdate",
+    "file": "rust/netvfs-accounts/src/store.rs",
+    "search": "            NewSetting {\n                key: to_latin1(keys::CREDENTIALS_NEED_UPDATE),\n                type_string: \"b\",\n                text: gvariant::print_bool(true).to_owned(),\n            },\n",
+    "replace": "",
+    "test": "dbus-run-session -- build/tests/bridge/accounts/tst_bridgeaccounts"
+  },
+  {
+    "name": "XB-14 attention write records an empty pin",
+    "file": "rust/netvfs-accounts/src/store.rs",
+    "search": "        if let Some(pin) = pin.filter(|p| !p.is_empty()) {",
+    "replace": "        if let Some(pin) = pin {",
+    "test": "dbus-run-session -- build/tests/bridge/accounts/tst_bridgeaccounts"
+  },
+  {
+    "name": "XB-2a stored strings are all taken raw",
+    "file": "rust/netvfs-accounts/src/gvariant.rs",
+    "search": "    if type_string == b\"s\" && !text.starts_with(['\\'', '\"']) {",
+    "replace": "    if type_string == b\"s\" {",
+    "test": "dbus-run-session -- build/tests/bridge/accounts/tst_bridgeaccounts"
+  },
+  {
+    "name": "XB-2a stored strings keep their escapes",
+    "file": "rust/netvfs-accounts/src/gvariant.rs",
+    "search": "                b'n' => b'\\n',",
+    "replace": "                b'n' => b'n',",
+    "test": "dbus-run-session -- build/tests/bridge/accounts/tst_bridgeaccounts"
+  },
+  {
+    "name": "XB-2a stored hex numbers read as decimal",
+    "file": "rust/netvfs-accounts/src/gvariant.rs",
+    "search": "        (16, hex)",
+    "replace": "        (10, hex)",
+    "test": "dbus-run-session -- build/tests/bridge/accounts/tst_bridgeaccounts"
+  },
+  {
+    "name": "XB-2a stored int32 out of range accepted",
+    "file": "rust/netvfs-accounts/src/gvariant.rs",
+    "search": "            Kind::Int32 if fits_signed(i32::MAX as u64) => {",
+    "replace": "            Kind::Int32 => {",
+    "test": "dbus-run-session -- build/tests/bridge/accounts/tst_bridgeaccounts"
+  },
+  {
+    "name": "XB-2a stored values of other types read as strings",
+    "file": "rust/netvfs-accounts/src/gvariant.rs",
+    "search": "    let Some(expected) = Kind::from_type_string(type_string) else { return Value::Invalid };",
+    "replace": "    let Some(expected) = Kind::from_type_string(type_string) else { return Value::String(text.to_owned()) };",
+    "test": "dbus-run-session -- build/tests/bridge/accounts/tst_bridgeaccounts"
+  },
+  {
+    "name": "XB-2a answer maps run from the first key",
+    "file": "rust/netvfs-accounts/src/wire.rs",
+    "search": "        for (key, value) in sorted.into_iter().rev() {",
+    "replace": "        for (key, value) in sorted.into_iter() {",
+    "test": "dbus-run-session -- build/tests/bridge/accounts/tst_bridgeaccounts"
+  },
+  {
+    "name": "XB-2a answer null strings written empty",
+    "file": "rust/netvfs-accounts/src/wire.rs",
+    "search": "        let Some(text) = value else {\n            self.u32(u32::MAX);",
+    "replace": "        let Some(text) = value else {\n            self.u32(0);",
+    "test": "dbus-run-session -- build/tests/bridge/accounts/tst_bridgeaccounts"
+  },
+  {
+    "name": "XB-2a answer variants never null",
+    "file": "rust/netvfs-accounts/src/wire.rs",
+    "search": "        self.i8(i8::from(matches!(value, Value::Invalid)));",
+    "replace": "        self.i8(0);",
+    "test": "dbus-run-session -- build/tests/bridge/accounts/tst_bridgeaccounts"
+  },
+  {
+    "name": "XB-14 AccountChanged on another path",
+    "file": "rust/netvfs-accounts/src/dbus.rs",
+    "search": "pub const GLOBAL_PATH: &str = \"/ServiceType/global\";",
+    "replace": "pub const GLOBAL_PATH: &str = \"/ServiceType/other\";",
+    "test": "dbus-run-session -- build/tests/bridge/accounts/tst_bridgeaccounts"
+  },
+  {
+    "name": "XB-14 AccountChanged without a bus name of its own",
+    "file": "rust/netvfs-accounts/src/dbus.rs",
+    "search": "    out.extend(bus_call(2, \"RequestName\", \"su\", &name.bytes));\n",
+    "replace": "    let _ = name;\n",
+    "test": "dbus-run-session -- build/tests/bridge/accounts/tst_bridgeaccounts"
+  },
+  {
+    "name": "XB-14 AccountChanged sends booleans as strings",
+    "file": "rust/netvfs-accounts/src/dbus.rs",
+    "search": "        Value::Bool(b) => {\n            w.signature(\"b\");\n            w.bool(b);\n        }\n",
+    "replace": "",
+    "test": "dbus-run-session -- build/tests/bridge/accounts/tst_bridgeaccounts"
+  },
+  {
+    "name": "XB-14 AccountChanged for another account",
+    "file": "rust/netvfs-accounts/src/dbus.rs",
+    "search": "    w.u32(change.account_id);",
+    "replace": "    w.u32(change.account_id + 1);",
+    "test": "dbus-run-session -- build/tests/bridge/accounts/tst_bridgeaccounts"
+  },
+  {
+    "name": "XB-2a Sailfish OS redirect ignored",
+    "file": "rust/netvfs-accounts/src/db.rs",
+    "search": "        let folder = match fs::read(folder.join(REDIRECT_FILE)) {",
+    "replace": "        let folder = match fs::read(folder.join(\"none\")) {",
+    "test": "cd rust && cargo test --locked --features probe -q"
+  },
+  {
+    "name": "XB-2a privileged folder open to others accepted",
+    "file": "rust/netvfs-accounts/src/db.rs",
+    "search": "    if meta.mode() & 0o007 != 0 {",
+    "replace": "    if meta.mode() & 0o002 != 0 {",
+    "test": "cd rust && cargo test --locked --features probe -q"
+  },
+  {
+    "name": "XB-2a privileged folder of another owner accepted",
+    "file": "rust/netvfs-accounts/src/db.rs",
+    "search": "    if meta.uid() != uid || meta.gid() != gid {",
+    "replace": "    if meta.uid() != uid {",
+    "test": "cd rust && cargo test --locked --features probe -q"
+  },
+  {
+    "name": "XB-2a set-id helper keeps its caller's variables",
+    "file": "rust/netvfs-accounts/src/sandbox.rs",
+    "search": "        std::env::remove_var(name);",
+    "replace": "        let _ = name;",
+    "test": "cd rust && cargo test --locked --features probe -q"
+  },
+  {
+    "name": "XB-2a set-id helper keeps its caller's HOME",
+    "file": "rust/netvfs-accounts/src/sandbox.rs",
+    "search": "    std::env::set_var(\"HOME\", home);",
+    "replace": "    let _ = home;",
+    "test": "cd rust && cargo test --locked --features probe -q"
+  },
+  {
+    "name": "XB-2a set-id helper may write a core file",
+    "file": "rust/netvfs-accounts/src/sandbox.rs",
+    "search": "            core.rlim_cur = 0;\n",
+    "replace": "",
+    "test": "cd rust && cargo test --locked --features probe -q"
+  },
+  {
+    "name": "XB-2a set-id helper keeps the group",
+    "file": "rust/netvfs-accounts/src/sandbox.rs",
+    "search": "        libc::setresgid(real, real, real) == 0\n",
+    "replace": "        libc::setresgid(real, libc::getegid(), libc::getegid()) == 0\n",
+    "test": "cd rust && cargo test --locked --features probe -q"
+  },
+  {
+    "name": "XB-2a helper keeps inherited descriptors",
+    "file": "rust/netvfs-accounts/src/sandbox.rs",
+    "search": "    close_from(3);\n",
+    "replace": "",
+    "test": "cd rust && cargo test --locked --features probe -q"
+  },
+  {
+    "name": "XB-2a helper keeps its caller's umask",
+    "file": "rust/netvfs-accounts/src/sandbox.rs",
+    "search": "        libc::umask(0o077);\n",
+    "replace": "",
+    "test": "cd rust && cargo test --locked --features probe -q"
+  },
+  {
+    "name": "XB-2a helper keeps its caller's file size limit",
+    "file": "rust/netvfs-accounts/src/sandbox.rs",
+    "search": "            size.rlim_cur = size.rlim_max;\n",
+    "replace": "",
+    "test": "cd rust && cargo test --locked --features probe -q"
+  },
+  {
+    "name": "XB-2a helper keeps its caller's signal mask",
+    "file": "rust/netvfs-accounts/src/sandbox.rs",
+    "search": "        libc::sigprocmask(libc::SIG_SETMASK, &none, std::ptr::null_mut());\n",
+    "replace": "",
+    "test": "cd rust && cargo test --locked --features probe -q"
+  },
+  {
+    "name": "XB-2a confined helper may exec",
+    "file": "rust/netvfs-accounts/src/sandbox.rs",
+    "search": "        libc::SYS_execve,\n        libc::SYS_execveat,\n",
+    "replace": "",
+    "test": "cd rust && cargo test --locked --features probe -q"
+  },
+  {
+    "name": "XB-2a confined helper opens internet sockets",
+    "file": "rust/netvfs-accounts/src/sandbox.rs",
+    "search": "    f.deny_argument_other_than(libc::SYS_socket, 0, libc::AF_UNIX as u32);\n",
+    "replace": "",
+    "test": "cd rust && cargo test --locked --features probe -q"
+  },
+  {
+    "name": "XB-2a confined helper sets a setgid bit with fchmod",
+    "file": "rust/netvfs-accounts/src/sandbox.rs",
+    "search": "    f.deny_argument_bits(libc::SYS_fchmod, 1, SET_ID_BITS);\n",
+    "replace": "",
+    "test": "cd rust && cargo test --locked --features probe -q"
+  },
+  {
+    "name": "XB-2a confined helper creates a setgid file",
+    "file": "rust/netvfs-accounts/src/sandbox.rs",
+    "search": "    f.deny_created_mode_bits(libc::SYS_openat, 2, 3, SET_ID_BITS);\n",
+    "replace": "",
+    "test": "cd rust && cargo test --locked --features probe -q"
+  },
+  {
+    "name": "XB-2a confined helper makes a setgid folder",
+    "file": "rust/netvfs-accounts/src/sandbox.rs",
+    "search": "    f.deny_argument_bits(libc::SYS_mkdirat, 2, SET_ID_BITS);\n",
+    "replace": "",
+    "test": "cd rust && cargo test --locked --features probe -q"
+  },
+  {
+    "name": "XB-2a confined helper sets a setgid bit with fchmodat2",
+    "file": "rust/netvfs-accounts/src/sandbox.rs",
+    "search": "    f.deny_argument_bits(nr::FCHMODAT2, 2, SET_ID_BITS);\n",
+    "replace": "",
+    "test": "cd rust && cargo test --locked --features probe -q"
+  },
+  {
+    "name": "XB-2a confined helper makes a setuid node",
+    "file": "rust/netvfs-accounts/src/sandbox.rs",
+    "search": "    f.deny_argument_bits(libc::SYS_mknodat, 2, SET_ID_BITS);\n",
+    "replace": "",
+    "test": "cd rust && cargo test --locked --features probe -q"
+  },
+  {
+    "name": "XB-2a Landlock never enforced",
+    "file": "rust/netvfs-accounts/src/sandbox.rs",
+    "search": "            && libc::syscall(nr::LANDLOCK_RESTRICT_SELF, ruleset, 0u32) == 0",
+    "replace": "            && false",
+    "test": "cd rust && cargo test --locked --features probe -q"
+  },
+  {
+    "name": "XB-2a Landlock makes the database folder read-only",
+    "file": "rust/netvfs-accounts/src/sandbox.rs",
+    "search": "        allow_beneath(ruleset, fs, dir, landlock::READ_WRITE);",
+    "replace": "        allow_beneath(ruleset, fs, dir, landlock::READ_ONLY);",
+    "test": "cd rust && cargo test --locked --features probe -q"
+  },
+  {
+    "name": "XB-2a Landlock ABI 4 leaves TCP alone",
+    "file": "rust/netvfs-accounts/src/sandbox.rs",
+    "search": "        (4, LandlockAccess { fs: 0, net: l::NET_BIND_TCP | l::NET_CONNECT_TCP, scoped: 0 }),",
+    "replace": "        (4, LandlockAccess { fs: 0, net: 0, scoped: 0 }),",
+    "test": "cd rust && cargo test --locked --features probe -q"
+  },
+  {
+    "name": "XB-2a Landlock lets the helper signal others",
+    "file": "rust/netvfs-accounts/src/sandbox.rs",
+    "search": "        (6, LandlockAccess { fs: 0, net: 0, scoped: l::SCOPE_SIGNAL | l::SCOPE_ABSTRACT_UNIX_SOCKET }),",
+    "replace": "        (6, LandlockAccess { fs: 0, net: 0, scoped: l::SCOPE_ABSTRACT_UNIX_SOCKET }),",
+    "test": "cd rust && cargo test --locked --features probe -q"
+  }
+]

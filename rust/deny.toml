@@ -1,0 +1,30 @@
+# SPDX-License-Identifier: LGPL-2.1-or-later
+# cargo-deny for the crates the helper links (CI job "Rust supply chain"):
+# known vulnerabilities, yanked versions, licences, sources.
+
+[graph]
+all-features = true
+
+[advisories]
+version = 2
+yanked = "deny"
+
+[licenses]
+version = 2
+# netvfs is LGPL-2.1-or-later and links these statically into a setgid
+# binary: permissive licences only, so no GPL-only crate. The list holds
+# what the locked crates use; another licence is a decision to review.
+allow = ["Apache-2.0", "BSD-2-Clause", "MIT"]
+confidence-threshold = 0.9
+
+# The workspace's own crates (publish = false) are netvfs.
+[licenses.private]
+ignore = true
+
+[bans]
+multiple-versions = "deny"
+wildcards = "deny"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"

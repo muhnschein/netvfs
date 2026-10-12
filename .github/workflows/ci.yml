@@ -28,6 +28,8 @@ jobs:
         run: make check-packaging
       - name: Every mutation list is in the mutation matrix
         run: ./tools/ci/check-mutation-matrix.py
+      - name: Rust helper (format, lint, tests, lockfile, Rust 1.75)
+        run: make check-rust
       - name: Unit tests
         run: make check-unit
       - name: Interop tests
@@ -56,7 +58,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        list: [accounts, bridge, buteo, cli, core, discovery, ftp, local, ops, packaging, qml, sftp, smb, url, webdav]
+        list: [accounts, bridge, buteo, cli, core, discovery, ftp, helper, local, ops, packaging, qml, sftp, smb, url, webdav]
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
@@ -77,15 +79,30 @@ jobs:
         run: |
           sudo apt-get update -q
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends \
-              clang libclang-rt-dev qtbase5-dev pkg-config
+              clang libclang-rt-dev qtbase5-dev pkg-config libsqlite3-dev
       - name: Fuzz harnesses (60 s each, ASan + UBSan)
         run: ./tests/fuzz/run.sh build-fuzz 60
+      - name: Rust fuzz targets (60 s each, nightly, ASan)
+        run: ./tools/ci/rust-fuzz.sh 60
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: failure()
         with:
           name: fuzz-reproducers
-          path: build-fuzz/fuzz/artifacts
+          path: |
+            build-fuzz/fuzz/artifacts
+            rust/fuzz/artifacts
           if-no-files-found: ignore
+
+  rust-supply-chain:
+    name: Rust supply chain (cargo-deny)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - name: Install cargo-deny
+        run: cargo +stable install --locked cargo-deny@0.20.2
+      - name: Advisories, yanked crates, licences, sources
+        working-directory: rust
+        run: cargo +stable deny --locked check
 
   ftp-curl820:
     name: FTP against libcurl 8.20

@@ -20,11 +20,13 @@ jobs:
         run: ./tools/ci/install-host-deps.sh
       - name: Build with coverage, run unit and interop tests
         # bear records compile_commands.json for the C/C++ analysis;
-        # gcovr writes build-coverage/coverage.xml (generic coverage format).
+        # gcovr writes build-coverage/coverage.xml (generic coverage format),
+        # llvm-cov build-coverage/rust-lcov.info (the Rust helper).
         run: |
           make COVERAGE=1 vendor
           bear --output build-coverage/compile_commands.json -- make COVERAGE=1 -j"$(nproc)"
           make coverage
+          make COVERAGE=1 clippy-report
       - name: Cache SonarQube packages
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:

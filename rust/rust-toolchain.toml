@@ -1,0 +1,6 @@
+# The Sailfish OS 5.2 SDK target ships rustc 1.75; host builds, lints and
+# tests use the same release, so the floor in Cargo.toml is what CI runs.
+[toolchain]
+channel = "1.75.0"
+components = ["clippy", "rustfmt", "llvm-tools-preview"]
+profile = "minimal"

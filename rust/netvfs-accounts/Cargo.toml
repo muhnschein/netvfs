@@ -1,0 +1,33 @@
+[package]
+name = "netvfs-accounts"
+description = "The setgid accounts helper of netvfs-bridge (SPEC-v2 XB-2a)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[lib]
+name = "netvfs_accounts"
+path = "src/lib.rs"
+
+[[bin]]
+name = "netvfs-accounts"
+path = "src/main.rs"
+
+# Tests only: applies the confinement in a fresh process and checks what it
+# allows (tests/sandbox.rs). Never built for the package.
+[[bin]]
+name = "netvfs-accounts-probe"
+path = "src/bin/probe.rs"
+required-features = ["probe"]
+
+[features]
+probe = []
+
+[dependencies]
+libc = "0.2"
+rusqlite = { version = "0.31", default-features = false }
