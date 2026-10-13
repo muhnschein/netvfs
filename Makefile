@@ -95,11 +95,15 @@ check-rust:
 # test binary only says it is skipped, since the variables are not set. Under
 # SANITIZE=1 the library is instrumented with gcc's ASan, whose runtime must
 # be loaded first: the test binary is not instrumented, so it is preloaded.
+# Into the test binary only, as cargo's target runner: preloaded into cargo
+# and rustc as well, the runtime deadlocks rustc before anything is built.
 FFI_TEST_ENV = NETVFS_BRIDGE_FFI=$(BUILD_DIR)/lib/netvfs/libnetvfs-bridge-ffi.so \
     NETVFS_BRIDGE_FFI_FAKE=$(BUILD_DIR)/lib/libnetvfs-bridge-ffi-fake.so \
     NETVFS_BACKEND_PATH=$(BUILD_DIR)/lib/netvfs/test-backends
 ifeq ($(SANITIZE),1)
-FFI_TEST_ENV += LD_PRELOAD="$$($(CXX) -print-file-name=libasan.so) $$($(CXX) -print-file-name=libubsan.so)"
+RUST_HOST := $(shell rustc -vV | sed -n 's/^host: //p' | tr a-z- A-Z_)
+FFI_TEST_ENV += CARGO_TARGET_$(RUST_HOST)_RUNNER="env \
+    LD_PRELOAD=$$($(CXX) -print-file-name=libasan.so):$$($(CXX) -print-file-name=libubsan.so)"
 endif
 check-rust-ffi: all
 	cd rust && $(TEST_ENV) $(FFI_TEST_ENV) $(RUST_ENV) $(CARGO) nextest run --locked --workspace $(RUST_FEATURES) \
