@@ -9,44 +9,25 @@
 
 #include <dbus/dbus.h>
 
-#include <array>
 #include <memory>
-#include <unistd.h>
 
-namespace NetVfs::Bridge {
-
-namespace {
-
-// XB-17 sizes: no inbound call needs more than a few KiB (the largest is
-// ConnectAdHoc); Upload and Download carry exactly one fd.
-constexpr long MaxInboundMessageBytes = 1 << 20;
-constexpr long MaxInboundQueuedBytes = 8 << 20;
-constexpr long MaxInboundMessageFds = 2;
-constexpr long MaxInboundQueuedFds = 8;
-
-} // namespace
-} // namespace NetVfs::Bridge
-
-// What libdbus calls back into: a connection (dispatches its queue, handles
-// its messages) or a server (accepts connections). The libdbus callbacks are
-// in dbusloop.c.
+// What libdbus calls back into: the connection (dispatches its queue, handles
+// its messages). The libdbus callbacks are in dbusloop.c.
 struct NetVfsLoopOwner {
     NetVfsLoopOwner() = default;
     NetVfsLoopOwner(const NetVfsLoopOwner &) = delete;
     NetVfsLoopOwner &operator=(const NetVfsLoopOwner &) = delete;
     virtual ~NetVfsLoopOwner() = default;
 
-    // After every watch activation (a connection schedules a dispatch).
+    // After every watch activation (the connection schedules a dispatch).
     virtual void afterWatch() = 0;
-    // Connections only: a message arrived.
+    // A message arrived.
     virtual DBusHandlerResult message(DBusMessage *message) = 0;
-    // Connections only: the dispatch queue changed.
+    // The dispatch queue changed.
     virtual void dispatchStatus(DBusDispatchStatus status) = 0;
-    // Servers only: a client connected.
-    virtual void accepted(DBusConnection *connection) = 0;
 };
 
-namespace NetVfs::Bridge {
+namespace NetVfs::BridgeTest {
 
 namespace {
 
@@ -157,10 +138,6 @@ struct WireConnection::Integration final : NetVfsLoopOwner {
         if (status == DBUS_DISPATCH_DATA_REMAINS)
             owner->scheduleDispatch();
     }
-    void accepted(DBusConnection *) override
-    {
-        // a connection does not accept clients
-    }
 
     WireConnection *owner;
 };
@@ -227,19 +204,6 @@ bool WireConnection::canPassUnixFds() const
     return dbus_connection_can_send_type(m_connection, DBUS_TYPE_UNIX_FD);
 }
 
-int WireConnection::socketFd() const
-{
-    int fd = -1;
-    if (!dbus_connection_get_socket(m_connection, &fd))
-        return -1;
-    return fd;
-}
-
-qint64 WireConnection::outgoingBytes() const
-{
-    return dbus_connection_get_outgoing_size(m_connection);
-}
-
 quint32 WireConnection::send(MessagePtr message)
 {
     if (!message || !isConnected())
@@ -304,134 +268,48 @@ void WireConnection::noteDisconnected()
     emit disconnected();
 }
 
-// ------------------------------------------------------------------ server
-
-struct WireServer::Integration final : NetVfsLoopOwner {
-    explicit Integration(WireServer *server) : owner(server) {}
-
-    void afterWatch() override
-    {
-        // a server has no dispatch queue
-    }
-    DBusHandlerResult message(DBusMessage *) override { return DBUS_HANDLER_RESULT_NOT_YET_HANDLED; }
-    void dispatchStatus(DBusDispatchStatus) override
-    {
-        // a server has no dispatch queue
-    }
-    void accepted(DBusConnection *connection) override
-    {
-        dbus_connection_set_unix_user_function(connection, netvfs_loop_own_uid_only, nullptr, nullptr);
-        dbus_connection_set_allow_anonymous(connection, FALSE);
-        dbus_connection_set_max_message_size(connection, MaxInboundMessageBytes);
-        dbus_connection_set_max_received_size(connection, MaxInboundQueuedBytes);
-        dbus_connection_set_max_message_unix_fds(connection, MaxInboundMessageFds);
-        dbus_connection_set_max_received_unix_fds(connection, MaxInboundQueuedFds);
-        auto wire = std::make_unique<WireConnection>(connection);
-        emit owner->newConnection(wire.release());   // the receiver owns it
-    }
-
-    WireServer *owner;
-};
-
-WireServer::WireServer(QObject *parent)
-    : QObject(parent)
-{
-}
-
-WireServer::~WireServer()
-{
-    stop();
-}
-
-Result WireServer::listen(const QString &address)
-{
-    stop();
-    DBusError error;
-    dbus_error_init(&error);
-    DBusServer *server = dbus_server_listen(address.toUtf8().constData(), &error);
-    if (!server) {
-        const Result r(Error::NetworkUnreachable,
-                       QStringLiteral("Cannot listen on %1: %2").arg(address, QString::fromUtf8(error.message)));
-        dbus_error_free(&error);
-        return r;
-    }
-    std::array<const char *, 2> mechanisms = { { "EXTERNAL", nullptr } };
-    dbus_server_set_auth_mechanisms(server, mechanisms.data());
-    m_integration = std::make_unique<Integration>(this);
-    NetVfsLoopOwner *owner = m_integration.get();
-    dbus_server_set_watch_functions(server, netvfs_loop_add_watch, netvfs_loop_remove_watch, netvfs_loop_toggle_watch,
-                                    owner, nullptr);
-    dbus_server_set_timeout_functions(server, netvfs_loop_add_timeout, netvfs_loop_remove_timeout,
-                                      netvfs_loop_toggle_timeout, nullptr, nullptr);
-    dbus_server_set_new_connection_function(server, netvfs_loop_new, owner, nullptr);
-    m_server = server;
-    return Result::success();
-}
-
-QString WireServer::address() const
-{
-    if (!m_server)
-        return QString();
-    char *address = dbus_server_get_address(m_server);
-    const QString result = QString::fromUtf8(address);
-    dbus_free(address);
-    return result;
-}
-
-void WireServer::stop()
-{
-    if (!m_server)
-        return;
-    dbus_server_set_new_connection_function(m_server, nullptr, nullptr, nullptr);
-    dbus_server_set_watch_functions(m_server, nullptr, nullptr, nullptr, nullptr, nullptr);
-    dbus_server_set_timeout_functions(m_server, nullptr, nullptr, nullptr, nullptr, nullptr);
-    dbus_server_disconnect(m_server);
-    dbus_server_unref(m_server);
-    m_server = nullptr;
-}
-
-} // namespace NetVfs::Bridge
+} // namespace NetVfs::BridgeTest
 
 // The typed side of the libdbus callbacks (dbusloop.c).
 
 dbus_bool_t netvfs_loop_watch_added(DBusWatch *watch, NetVfsLoopOwner *owner)
 {
     // Owned through the watch data until the watch is removed.
-    auto notifier = std::make_unique<NetVfs::Bridge::WatchNotifier>(watch, owner);
+    auto notifier = std::make_unique<NetVfs::BridgeTest::WatchNotifier>(watch, owner);
     dbus_watch_set_data(watch, notifier.release(), nullptr);
     return TRUE;
 }
 
 void netvfs_loop_watch_removed(DBusWatch *watch)
 {
-    if (auto *notifier = static_cast<NetVfs::Bridge::WatchNotifier *>(dbus_watch_get_data(watch)))
+    if (auto *notifier = static_cast<NetVfs::BridgeTest::WatchNotifier *>(dbus_watch_get_data(watch)))
         notifier->detach();
     dbus_watch_set_data(watch, nullptr, nullptr);
 }
 
 void netvfs_loop_watch_toggled(DBusWatch *watch)
 {
-    if (auto *notifier = static_cast<NetVfs::Bridge::WatchNotifier *>(dbus_watch_get_data(watch)))
+    if (auto *notifier = static_cast<NetVfs::BridgeTest::WatchNotifier *>(dbus_watch_get_data(watch)))
         notifier->toggle();
 }
 
 dbus_bool_t netvfs_loop_timeout_added(DBusTimeout *timeout)
 {
-    auto timer = std::make_unique<NetVfs::Bridge::TimeoutTimer>(timeout);
+    auto timer = std::make_unique<NetVfs::BridgeTest::TimeoutTimer>(timeout);
     dbus_timeout_set_data(timeout, timer.release(), nullptr);
     return TRUE;
 }
 
 void netvfs_loop_timeout_removed(DBusTimeout *timeout)
 {
-    if (auto *timer = static_cast<NetVfs::Bridge::TimeoutTimer *>(dbus_timeout_get_data(timeout)))
+    if (auto *timer = static_cast<NetVfs::BridgeTest::TimeoutTimer *>(dbus_timeout_get_data(timeout)))
         timer->detach();
     dbus_timeout_set_data(timeout, nullptr, nullptr);
 }
 
 void netvfs_loop_timeout_toggled(DBusTimeout *timeout)
 {
-    if (auto *timer = static_cast<NetVfs::Bridge::TimeoutTimer *>(dbus_timeout_get_data(timeout)))
+    if (auto *timer = static_cast<NetVfs::BridgeTest::TimeoutTimer *>(dbus_timeout_get_data(timeout)))
         timer->toggle();
 }
 
@@ -443,16 +321,4 @@ DBusHandlerResult netvfs_loop_message(NetVfsLoopOwner *owner, DBusConnection *, 
 void netvfs_loop_dispatch_status(NetVfsLoopOwner *owner, DBusConnection *, DBusDispatchStatus status)
 {
     owner->dispatchStatus(status);
-}
-
-void netvfs_loop_new_connection(NetVfsLoopOwner *owner, DBusServer *, DBusConnection *connection)
-{
-    owner->accepted(connection);
-}
-
-// XB-5 first line: only the bridge's own uid authenticates (libdbus would
-// otherwise also accept root).
-dbus_bool_t netvfs_loop_uid_allowed(DBusConnection *, unsigned long uid)
-{
-    return uid == static_cast<unsigned long>(::geteuid()) ? TRUE : FALSE;
 }

@@ -1,16 +1,14 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-// The bridge's side of the netvfs-accounts protocol (XB-2a); the helper is
-// rust/netvfs-accounts.
-#include "accountshelper.h"
+// The C++ bridge's side of the netvfs-accounts protocol (XB-2a), as netvfs
+// 0.4 had it: the reference decoder of the golden tests.
+#include "referencedecoder.h"
 
 #include <QtCore/QDataStream>
 
-namespace NetVfs::Bridge {
+namespace NetVfs::Test {
 
 namespace {
 
-const char HelperVariable[] = "NETVFS_ACCOUNTS_HELPER";
-const char InstalledHelper[] = "/usr/libexec/netvfs/netvfs-accounts";
 const char AnswerMagic[] = "netvfs-accounts/1";
 constexpr QDataStream::Version StreamVersion = QDataStream::Qt_5_6;
 constexpr int MaxAccounts = 10000;
@@ -46,15 +44,6 @@ Result readHeader(QDataStream &stream)
 }
 
 } // namespace
-
-namespace AccountsHelper {
-
-QString path()
-{
-    if (qEnvironmentVariableIsSet(HelperVariable))
-        return QString::fromLocal8Bit(qgetenv(HelperVariable));
-    return QLatin1String(InstalledHelper);
-}
 
 Result decodeList(const QByteArray &answer, QVector<AccountLocation> *accounts)
 {
@@ -108,6 +97,4 @@ Result decodeStatus(const QByteArray &answer)
     return r;
 }
 
-} // namespace AccountsHelper
-
-} // namespace NetVfs::Bridge
+} // namespace NetVfs::Test

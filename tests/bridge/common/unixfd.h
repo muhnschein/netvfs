@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-#ifndef NETVFS_BRIDGE_UNIXFD_H
-#define NETVFS_BRIDGE_UNIXFD_H
+#ifndef NETVFS_TEST_UNIXFD_H
+#define NETVFS_TEST_UNIXFD_H
 
 #include <QtCore/QMetaType>
 
 #include <memory>
 
-namespace NetVfs::Bridge {
+namespace NetVfs::BridgeTest {
 
 // A file descriptor received in a message (D-Bus "h"). The descriptor is
 // owned and closed when the last copy goes away, unless take() moved it out.
@@ -25,8 +25,8 @@ private:
     std::shared_ptr<Owner> m_owner;
 };
 
-} // namespace NetVfs::Bridge
+} // namespace NetVfs::BridgeTest
 
-Q_DECLARE_METATYPE(NetVfs::Bridge::UnixFd)
+Q_DECLARE_METATYPE(NetVfs::BridgeTest::UnixFd)
 
 #endif

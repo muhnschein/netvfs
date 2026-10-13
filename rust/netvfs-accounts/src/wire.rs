@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! The answer on stdout, as the bridge reads it with a `QDataStream` of
-//! version `Qt_5_6` (src/bridge/lib/accountshelper.cpp): big-endian, strings
-//! as UTF-16 with a byte length, a null string as length `0xffffffff`.
+//! The answer on stdout in the format of a `QDataStream` of version
+//! `Qt_5_6`, which the C++ bridge of netvfs 0.4 read and netvfs-bridge's
+//! `accounts::qds` reads: big-endian, strings as UTF-16 with a byte length,
+//! a null string as length `0xffffffff`.
 
 use crate::qvariant::{QString, Value};
 

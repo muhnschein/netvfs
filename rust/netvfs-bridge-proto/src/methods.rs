@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 //! Names, the method table and the signals of `org.netvfs.Bridge1`
 //! (SPEC-v2 XB-8..XB-10). The table is in the order of the C++ bridge's
-//! `src/bridge/lib/args.cpp`, which is also the order of the introspection
+//! `args.cpp` (netvfs 0.4), which is also the order of the introspection
 //! XML; `tests/contract.rs` checks both against the XML.
 
 /// Object path of the bridge (XB-8).
@@ -17,8 +17,8 @@ pub const FEATURES: [&str; 1] = ["error-details"];
 /// Signature of the `Entry` struct (XB-9).
 pub const ENTRY_SIGNATURE: &str = "(ayyyxxxxixxssqays)";
 /// The introspection data the bridge serves, byte for byte (design §3.5). A
-/// copy of `src/bridge/lib/org.netvfs.Bridge1.xml` and of the contract copy
-/// in `tests/bridge/contract`; `tests/contract.rs` keeps the three equal.
+/// copy of the contract's `tests/bridge/contract/org.netvfs.Bridge1.xml`;
+/// `tests/contract.rs` keeps the two equal.
 pub const INTROSPECTION_XML: &str = include_str!("../org.netvfs.Bridge1.xml");
 
 /// The connection pool a call runs in (XB-12). A call may hint a lane; an
@@ -160,7 +160,7 @@ pub fn find_signal(name: &str) -> Option<&'static str> {
 mod tests {
     use super::*;
 
-    // tst_bridgeunits methodTable: every method of XB-10 exactly once.
+    // netvfs 0.4's tst_bridgeunits methodTable: every method of XB-10 exactly once.
     #[test]
     fn method_table_order_and_consent() {
         let expected = [

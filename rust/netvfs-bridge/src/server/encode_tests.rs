@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-// tst_bridgeunits wireRoundTrip (entries, maps, NUL in strings) and
+// netvfs 0.4's C++ tst_bridgeunits wireRoundTrip (entries, maps, NUL in strings) and
 // errorReplies; the reply and signal signatures against the method table.
 // Restriction lints that only add noise to tests (doc/RUST.md "Lints").
 #![allow(clippy::assertions_on_result_states, clippy::arithmetic_side_effects)]

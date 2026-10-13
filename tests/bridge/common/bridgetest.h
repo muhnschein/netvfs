@@ -2,25 +2,29 @@
 #ifndef NETVFS_TEST_BRIDGETEST_H
 #define NETVFS_TEST_BRIDGETEST_H
 
-#include "bridgeserver.h"
 #include "wireconnection.h"
 
+#include <QtCore/QHash>
 #include <QtCore/QJsonValue>
 #include <QtCore/QList>
 #include <QtCore/QObject>
+#include <QtCore/QProcess>
 #include <QtCore/QTemporaryDir>
 
 #include <functional>
 #include <memory>
 
-// Test doubles and a libdbus client for the bridge tests (SPEC-v2 XT-7).
+// The black-box tests of the netvfs-bridge binary (SPEC-v2 XT-7, design
+// §4.3): a libdbus client, the bridge as a process of its own, and the JSON
+// mapping of the contract's golden sequences.
 namespace NetVfs {
 namespace BridgeTest {
 
-using Bridge::WireWriter;
+extern const char ObjectPath[];   // XB-8: /org/netvfs/Bridge
+extern const char Interface[];    // org.netvfs.Bridge1
 
 // A consumer client over the peer-to-peer socket, driven by the event loop of
-// the test thread (the bridge runs in the same thread).
+// the test thread.
 class TestClient : public QObject
 {
     Q_OBJECT
@@ -38,8 +42,10 @@ public:
     ~TestClient() override;
 
     bool isConnected() const;
+    bool canPassUnixFds() const;
     // Sends a call; returns its serial (0 on failure).
-    quint32 send(const char *member, const Args &args = Args(), const char *interface = nullptr);
+    quint32 send(const char *member, const Args &args = Args(), const char *interface = nullptr,
+                 const char *path = nullptr);
     Message waitReply(quint32 serial, int timeoutMs = 5000);
     Message call(const char *member, const Args &args = Args(), int timeoutMs = 5000);
     // Next unconsumed signal `member` matching `accept`.
@@ -54,70 +60,52 @@ public:
 private:
     void onMessage(DBusMessage *message);
 
-    Bridge::WireConnection *m_connection = nullptr;
+    WireConnection *m_connection = nullptr;
     QHash<quint32, Message> m_replies;
     QList<Message> m_signals;
 };
 
-// Accounts with a Files service, without libaccounts.
-class FakeAccounts : public Bridge::AccountDirectory
-{
-    Q_OBJECT
-public:
-    QVector<Bridge::AccountLocation> accounts;
-    Result fetchResult;
-    QList<QPair<int, Attention>> attention;
-    int fetches = 0;
+// The build tree's netvfs-bridge (rust/netvfs-bridge) and how it runs there:
+// its C ABI (libnetvfs-bridge-ffi.so) and the fake backend plugin of the
+// build, and under SANITIZE=1 gcc's sanitizer runtimes loaded first.
+QString bridgeBinary();
+QProcessEnvironment bridgeEnvironment();
 
-    QVector<Bridge::AccountLocation> filesAccounts() override { return accounts; }
-    void fetch(int accountId, const Fetched &done) override;
-    void setAttention(int accountId, Attention value, const QString &seenPin) override;
-    void notifyChanged() { emit changed(); }
-
-    // One account "account:1" on the in-memory FakeServer (provider "fake").
-    static Bridge::AccountLocation fakeAccount(int id = 1);
-};
-
-class FakePrompt : public Bridge::ConsentPrompt
-{
-    Q_OBJECT
-public:
-    int shown = 0;
-    bool visible = false;
-    void show(const QString &) override
-    {
-        ++shown;
-        visible = true;
-    }
-    void withdraw() override { visible = false; }
-    bool isShown() const override { return visible; }
-    void answer(bool allow)
-    {
-        visible = false;
-        emit answered(allow);
-    }
-};
-
-// A BridgeServer on a socket in a temporary folder, with fake accounts, a
-// fake consent prompt and the fake backend plugin.
-class Fixture
+// The bridge serving consumer "test", whose executable is this test, on
+// `--listen unix:path=<folder>/bridge.sock`, with everything else in that
+// temporary folder too: the consumer file, home, bridge.conf with `consent`
+// ("granted", "denied", or "unknown" for none), and as accounts helper a
+// script that answers with bytes this class wrote in the helper's format
+// (XB-2a): one account, "account:1" (provider "fake", "Fake 1", host
+// fake.example, user "user", no stored secret, which may be missing). The
+// FakeServer behind it gets the files of addFile() and that user with an
+// empty secret through NETVFS_FAKE_SEED (design §4.1). The bridge ends with
+// its idle exit once no client is left (NETVFS_BRIDGE_IDLE_EXIT_MS).
+class BridgeProcess
 {
 public:
-    explicit Fixture(Consent consent = Consent::Granted, bool start = true);
-    ~Fixture();
+    explicit BridgeProcess(const QString &consent = QStringLiteral("granted"));
+    ~BridgeProcess();
+    BridgeProcess(const BridgeProcess &) = delete;
+    BridgeProcess &operator=(const BridgeProcess &) = delete;
 
-    QTemporaryDir dir;
-    Bridge::BridgeConfig config;
-    FakeAccounts *accounts = nullptr;     // owned by the server
-    FakePrompt *prompt = nullptr;         // owned by the server
-    std::unique_ptr<Bridge::BridgeServer> server;
-    QString address;
+    void addFile(const QByteArray &path, const QByteArray &content);   // before start()
+    // Starts the bridge and waits for its socket; false when it did not come.
+    bool start();
+    QString address() const;
+    std::unique_ptr<TestClient> client() const;
+    // Waits for the bridge to exit (after the clients have gone, the idle
+    // exit); its exit code, or -1 when it had to be killed.
+    int waitExit(int timeoutMs = 10000);
 
-    void setConsent(Consent consent);     // writes bridge.conf like netvfs-ui would
-    void startServer();
-    std::unique_ptr<TestClient> client();
-    // Connected client after Hello.
-    std::unique_ptr<TestClient> helloClient();
+private:
+    bool writeFiles() const;
+    bool writeAccountsHelper() const;
+
+    QTemporaryDir m_dir;
+    QString m_consent;
+    QByteArray m_seed;
+    QProcess m_process;
 };
 
 // ------------------------------------------------- JSON <-> D-Bus (contract)

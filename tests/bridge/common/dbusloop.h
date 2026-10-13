@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
-#ifndef NETVFS_BRIDGE_DBUSLOOP_H
-#define NETVFS_BRIDGE_DBUSLOOP_H
+#ifndef NETVFS_TEST_DBUSLOOP_H
+#define NETVFS_TEST_DBUSLOOP_H
 
 /*
  * Glue between libdbus and the Qt event loop. libdbus dictates the signatures
@@ -14,7 +14,7 @@
 extern "C" {
 #endif
 
-/* The WireConnection or WireServer whose libdbus object is being driven. */
+/* The WireConnection whose libdbus object is being driven. */
 struct NetVfsLoopOwner;
 
 /* Implemented in C++ (wireconnection.cpp). */
@@ -27,8 +27,6 @@ void netvfs_loop_timeout_toggled(DBusTimeout *timeout);
 DBusHandlerResult netvfs_loop_message(struct NetVfsLoopOwner *owner, DBusConnection *connection, DBusMessage *message);
 void netvfs_loop_dispatch_status(struct NetVfsLoopOwner *owner, DBusConnection *connection,
                                  DBusDispatchStatus status);
-void netvfs_loop_new_connection(struct NetVfsLoopOwner *owner, DBusServer *server, DBusConnection *connection);
-dbus_bool_t netvfs_loop_uid_allowed(DBusConnection *connection, unsigned long uid);
 
 /* The callbacks for libdbus (dbusloop.c). Their user data is the NetVfsLoopOwner. */
 extern const DBusAddWatchFunction netvfs_loop_add_watch;
@@ -39,10 +37,6 @@ extern const DBusRemoveTimeoutFunction netvfs_loop_remove_timeout;
 extern const DBusTimeoutToggledFunction netvfs_loop_toggle_timeout;
 extern const DBusHandleMessageFunction netvfs_loop_filter;
 extern const DBusDispatchStatusFunction netvfs_loop_status;
-extern const DBusNewConnectionFunction netvfs_loop_new;
-/* XB-5 first line: only the bridge's own uid authenticates (libdbus would
- * otherwise also accept root). */
-extern const DBusAllowUnixUserFunction netvfs_loop_own_uid_only;
 
 #ifdef __cplusplus
 }

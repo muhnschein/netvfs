@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 //! The shared contract (SPEC-v2 XT-7, C++ `tst_contract`): the crate's copy
-//! of the introspection XML equals the contract copy and the C++ bridge's,
-//! the method table and the signals match the XML, and the golden sequences
-//! replay against the fake bridge.
+//! of the introspection XML equals the contract copy, the method table and
+//! the signals match the XML, and the golden sequences replay against the
+//! fake bridge.
 // Test helpers outside #[test] functions: a failing test is the point.
 #![allow(clippy::unwrap_used, clippy::panic)]
 
@@ -75,8 +75,8 @@ fn members(xml: &str) -> (Vec<Member>, Vec<Member>) {
     (methods, signals)
 }
 
-// tst_contract contractCopyIsCurrent: the XML the bridge serves, the contract
-// copy and the C++ bridge's copy must not drift.
+// tst_contract contractCopyIsCurrent: the XML the bridge serves and the
+// contract copy must not drift.
 #[test]
 fn xml_copy_is_current() {
     let contract = read(&contract_dir().join("org.netvfs.Bridge1.xml"));
@@ -84,8 +84,6 @@ fn xml_copy_is_current() {
         INTROSPECTION_XML == contract,
         "rust/netvfs-bridge-proto/org.netvfs.Bridge1.xml differs from the contract"
     );
-    let cpp = read(&source_dir().join("src/bridge/lib/org.netvfs.Bridge1.xml"));
-    assert!(cpp == contract, "src/bridge/lib/org.netvfs.Bridge1.xml differs from the contract");
 }
 
 // tst_contract methodTableMatchesXml, and the order of args.cpp, which is the

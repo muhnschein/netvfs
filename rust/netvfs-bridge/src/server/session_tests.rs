@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-// Sessions end to end against a stub core (tst_bridgeserver): the hello
-// race, the server's own answers, errors, descriptor passing, the inbound
-// limits and flow control (C-10).
+// Sessions end to end against a stub core (netvfs 0.4's C++
+// tst_bridgeserver): the hello race, the server's own answers, errors,
+// descriptor passing, the inbound limits and flow control (C-10).
 // Restriction lints that only add noise to tests (doc/RUST.md "Lints").
 #![allow(clippy::assertions_on_result_states, clippy::arithmetic_side_effects)]
 

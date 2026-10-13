@@ -130,7 +130,7 @@ exclude_re = [
     # netvfs-bridge core/admin.rs insecure_answered: reached only through
     # insecure-consent, i.e. a webdav, ftp or smb ad-hoc URL with an
     # installed backend for it; test-backends has only the fake one
-    # (tst_bridgeserver skips this as well). needs_insecure_consent and
-    # insecure_details are unit-tested.
+    # (netvfs 0.4's tst_bridgeserver skipped this as well).
+    # needs_insecure_consent and insecure_details are unit-tested.
     'netvfs-bridge/src/core/admin\.rs:\d+:\d+: (replace Core::insecure_answered with \(\)|delete ! in Core::insecure_answered)$',
 ]

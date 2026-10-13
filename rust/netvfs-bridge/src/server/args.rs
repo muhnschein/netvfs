@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 //! Argument validation of the bridge protocol (SPEC-v2 XSEC-7, XB-10): the
-//! port of `src/bridge/lib/args.cpp`. A method call becomes a typed [`Call`]:
-//! every path is normalised ([`super::paths`]), every number range-checked,
-//! every string length- and charset-checked, unknown option keys are
-//! refused. File descriptors are checked later (they need the descriptor).
+//! port of the C++ bridge's `args.cpp` (netvfs 0.4). A method call becomes a
+//! typed [`Call`]: every path is normalised ([`super::paths`]), every number
+//! range-checked, every string length- and charset-checked, unknown option
+//! keys are refused. File descriptors are checked later (they need the
+//! descriptor).
 //!
 //! Errors: `InvalidName` for paths and link targets, `ProtocolError` for
 //! everything else (the dispatch replies

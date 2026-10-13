@@ -3,7 +3,7 @@
 
 #include <unistd.h>
 
-namespace NetVfs::Bridge {
+namespace NetVfs::BridgeTest {
 
 struct UnixFd::Owner {
     explicit Owner(int f) : fd(f) {}
@@ -37,4 +37,4 @@ int UnixFd::take()
     return fd;
 }
 
-} // namespace NetVfs::Bridge
+} // namespace NetVfs::BridgeTest

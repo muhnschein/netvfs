@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 // The netvfs-bridge binary under socket activation (SPEC-v2 XB-2, XB-4):
 // the test plays systemd (a listening socket on fd 3, LISTEN_FDS and
-// LISTEN_PID), talks to the bridge through it and expects the idle exit. The
-// bridge lists its accounts through the built netvfs-accounts (XB-2a).
+// LISTEN_PID), talks to the bridge through it from libdbus and expects the
+// idle exit. The bridge lists its accounts through the built netvfs-accounts
+// (XB-2a), as it does on the device.
 #include "accountsfixture.h"
 #include "bridgetest.h"
 
@@ -25,7 +26,6 @@ using namespace NetVfs::BridgeTest;
 
 namespace {
 
-const QByteArray BridgeBinary = NETVFS_TEST_BIN_DIR "/netvfs-bridge";
 const QByteArray AccountsHelper = NETVFS_TEST_LIBEXEC_DIR "/netvfs-accounts";
 
 void writeFile(const QString &path, const QByteArray &content)
@@ -67,7 +67,7 @@ pid_t spawnActivated(int listenFd, const QProcessEnvironment &environment, const
     QByteArray sh = "/bin/sh";
     QByteArray dashC = "-c";
     QByteArray script = "LISTEN_PID=$$; export LISTEN_PID; exec \"$0\" \"$1\"";
-    QByteArray bridge = BridgeBinary;
+    QByteArray bridge = QFile::encodeName(bridgeBinary());
     QByteArray id = consumer;
     std::vector<char *> argv { sh.data(), dashC.data(), script.data(), bridge.data(), id.data(), nullptr };
 
@@ -126,16 +126,13 @@ void tst_BridgeProcess::socketActivation()
         QStringLiteral("fake"), { { QStringLiteral("netvfs/host"), QStringLiteral("files.example") } });
     QVERIFY(accountId > 0);
     QVERIFY(accounts.setService(accountId, QStringLiteral("fake-files"), true));
-    QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+    QProcessEnvironment env = bridgeEnvironment();
     env.insert(QStringLiteral("HOME"), dir.path() + QStringLiteral("/home"));
     env.insert(QStringLiteral("XDG_CONFIG_HOME"), dir.path() + QStringLiteral("/config"));
     env.insert(QStringLiteral("XDG_DATA_HOME"), dir.path() + QStringLiteral("/data"));
     env.insert(QStringLiteral("NETVFS_CONSUMERS_DIR"), dir.path() + QStringLiteral("/consumers"));
-    env.insert(QStringLiteral("NETVFS_BACKEND_PATH"), QStringLiteral(NETVFS_TEST_FAKE_BACKEND_DIR));
     env.insert(QStringLiteral("NETVFS_BRIDGE_IDLE_EXIT_MS"), QStringLiteral("500"));
     env.insert(QStringLiteral("NETVFS_ACCOUNTS_HELPER"), QString::fromLocal8Bit(AccountsHelper));
-    env.remove(QStringLiteral("LISTEN_PID"));
-    env.remove(QStringLiteral("LISTEN_FDS"));
 
     const QString socketPath = dir.path() + QStringLiteral("/bridge.sock");
     const int listenFd = listenOn(socketPath);
@@ -166,13 +163,13 @@ void tst_BridgeProcess::unknownConsumer()
 {
     QTemporaryDir dir;
     QProcess p;
-    QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+    QProcessEnvironment env = bridgeEnvironment();
     env.insert(QStringLiteral("NETVFS_CONSUMERS_DIR"), dir.path());
     p.setProcessEnvironment(env);
-    p.start(QString::fromLocal8Bit(BridgeBinary), { QStringLiteral("nobody") });
+    p.start(bridgeBinary(), { QStringLiteral("nobody") });
     QVERIFY(p.waitForFinished(10000));
     QCOMPARE(p.exitCode(), 1);
-    p.start(QString::fromLocal8Bit(BridgeBinary), QStringList());
+    p.start(bridgeBinary(), QStringList());
     QVERIFY(p.waitForFinished(10000));
     QCOMPARE(p.exitCode(), 2);
 }

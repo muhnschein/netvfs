@@ -84,7 +84,7 @@ mod tests {
         normalize(raw).unwrap_err().name
     }
 
-    // tst_bridgeunits paths_data: the same 8 rows.
+    // netvfs 0.4's C++ tst_bridgeunits paths_data: the same 8 rows.
     #[test]
     fn normalize_table() {
         assert_eq!(ok(b"docs/a.txt"), b"docs/a.txt");

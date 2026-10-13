@@ -3,20 +3,12 @@
 
 #include <dbus/dbus.h>
 
-namespace NetVfs::Bridge {
+namespace NetVfs::BridgeTest {
 
 void MessageUnref::operator()(DBusMessage *message) const
 {
     if (message)
         dbus_message_unref(message);
-}
-
-SharedMessage shareMessage(DBusMessage *message)
-{
-    if (!message)
-        return SharedMessage();
-    dbus_message_ref(message);
-    return SharedMessage(message, MessageUnref());
 }
 
 // ----------------------------------------------------------------- decoding
@@ -456,4 +448,4 @@ WireWriter &WireWriter::close()
     return *this;
 }
 
-} // namespace NetVfs::Bridge
+} // namespace NetVfs::BridgeTest

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! SPEC-v2 XB-5: who is on the other end of the socket (port of
-//! `src/bridge/lib/peercheck.cpp`).
+//! SPEC-v2 XB-5: who is on the other end of the socket (port of the C++
+//! bridge's `peercheck.cpp`, netvfs 0.4).
 //!
 //! 1. `SO_PEERCRED` of the connected socket: the uid must be the bridge's own.
 //! 2. The peer's executable must be the registered one. `/proc/<pid>/exe` is

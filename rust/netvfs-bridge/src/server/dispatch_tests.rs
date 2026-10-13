@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-// tst_bridgeserver: the server's own answers, in the C++ order of checks.
+// netvfs 0.4's C++ tst_bridgeserver: the server's own answers, in the C++
+// order of checks.
 // Restriction lints that only add noise to tests (doc/RUST.md "Lints").
 #![allow(clippy::assertions_on_result_states, clippy::arithmetic_side_effects)]
 

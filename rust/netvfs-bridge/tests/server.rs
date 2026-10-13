@@ -2,7 +2,7 @@
 //! The bridge end to end (design §4.1, chunk E): the core with the socket
 //! front, in-process ([`Fixture`]), against the real
 //! `libnetvfs-bridge-ffi.so` and the fake backend, through the protocol
-//! crate's client. The Rust side of `tests/bridge/server/tst_bridgeserver.cpp`.
+//! crate's client. The Rust side of netvfs 0.4's C++ `tst_bridgeserver`.
 //! Without the C ABI (the variables of [`testing::VARIABLES`]) every test
 //! says it is skipped and passes.
 #![allow(

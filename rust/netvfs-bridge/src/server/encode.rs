@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 //! Replies, error replies and signals of `org.netvfs.Bridge1` (XB-8, XB-9,
-//! XC-24): the port of `src/bridge/lib/protocol.cpp`.
+//! XC-24): the port of the C++ bridge's `protocol.cpp` (netvfs 0.4).
 //!
 //! Every string the bridge sends goes through [`wire_text`]: D-Bus strings
 //! must be valid UTF-8 without NUL, so NUL becomes U+FFFD (as the C++

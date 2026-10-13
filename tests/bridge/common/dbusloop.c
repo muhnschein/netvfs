@@ -46,17 +46,6 @@ static void dispatch_status(DBusConnection *connection, DBusDispatchStatus statu
     netvfs_loop_dispatch_status((struct NetVfsLoopOwner *)data, connection, status);
 }
 
-static void new_connection(DBusServer *server, DBusConnection *connection, void *data)
-{
-    netvfs_loop_new_connection((struct NetVfsLoopOwner *)data, server, connection);
-}
-
-static dbus_bool_t own_uid_only(DBusConnection *connection, unsigned long uid, void *data)
-{
-    (void)data;
-    return netvfs_loop_uid_allowed(connection, uid);
-}
-
 const DBusAddWatchFunction netvfs_loop_add_watch = add_watch;
 const DBusRemoveWatchFunction netvfs_loop_remove_watch = remove_watch;
 const DBusWatchToggledFunction netvfs_loop_toggle_watch = toggle_watch;
@@ -65,5 +54,3 @@ const DBusRemoveTimeoutFunction netvfs_loop_remove_timeout = remove_timeout;
 const DBusTimeoutToggledFunction netvfs_loop_toggle_timeout = toggle_timeout;
 const DBusHandleMessageFunction netvfs_loop_filter = filter;
 const DBusDispatchStatusFunction netvfs_loop_status = dispatch_status;
-const DBusNewConnectionFunction netvfs_loop_new = new_connection;
-const DBusAllowUnixUserFunction netvfs_loop_own_uid_only = own_uid_only;

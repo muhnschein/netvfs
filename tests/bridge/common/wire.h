@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-#ifndef NETVFS_BRIDGE_WIRE_H
-#define NETVFS_BRIDGE_WIRE_H
+#ifndef NETVFS_TEST_WIRE_H
+#define NETVFS_TEST_WIRE_H
 
 #include "error.h"
 #include "unixfd.h"
@@ -18,25 +18,25 @@
 struct DBusMessage;
 struct DBusMessageIter;
 
-// SPEC-v2 XB-8: the bridge speaks peer-to-peer D-Bus through libdbus directly.
-// QtDBus is not used for the consumer socket: in Qt 5.6 (the target) a
-// peer-to-peer QDBusConnection never negotiates Unix fd passing
+// The consumer side of SPEC-v2 XB-8 for the black-box tests of the bridge
+// (design §4.3): a client that speaks peer-to-peer D-Bus through libdbus,
+// independent of the bridge's own zbus, so that the tests show the two
+// interoperate (EXTERNAL authentication, Unix fd passing, error replies with
+// their a{sv}). QtDBus cannot be that client: in Qt 5.6 a peer-to-peer
+// QDBusConnection never negotiates Unix fd passing
 // (QDBusConnectionPrivate::setPeer leaves the capabilities at 0), so the "h"
-// arguments of Upload and Download (XB-11) could be neither received nor
-// sent. libdbus negotiates fd passing itself and hands the raw message over.
+// arguments of Upload and Download (XB-11) could not be sent.
 //
-// This file holds the message codec: arguments are decoded into plain Qt
-// values (the input of the validation layer, args.h) and replies and signals
-// are written with WireWriter.
-namespace NetVfs::Bridge {
+// This file holds the message codec: arguments of replies and signals are
+// decoded into plain Qt values, calls are written with WireWriter. It is the
+// codec of the C++ bridge of netvfs 0.4, which libdbus served.
+namespace NetVfs::BridgeTest {
 
 // Owning pointer to a libdbus message.
 struct MessageUnref {
     void operator()(DBusMessage *message) const;
 };
 using MessagePtr = std::unique_ptr<DBusMessage, MessageUnref>;
-using SharedMessage = std::shared_ptr<DBusMessage>;
-SharedMessage shareMessage(DBusMessage *message);   // takes a new reference
 
 struct DecodeLimits {
     int maxDepth = 8;                 // nested containers
@@ -53,7 +53,7 @@ struct DecodeLimits {
 // strings.
 Result decodeArguments(DBusMessage *message, QVariantList *out, const DecodeLimits &limits = DecodeLimits());
 
-// Appends values to a message (method return, error or signal). Returns false
+// Appends values to a message (a method call). Returns false
 // once anything failed (out of memory, invalid value); later calls are no-ops.
 class WireWriter
 {
@@ -101,6 +101,6 @@ private:
 // D-Bus signature of a value accepted by WireWriter::variant(); empty if none.
 QByteArray variantSignature(const QVariant &v);
 
-} // namespace NetVfs::Bridge
+} // namespace NetVfs::BridgeTest
 
 #endif
