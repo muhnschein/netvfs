@@ -4,8 +4,12 @@
 // init on the main thread first (T1). Connections use the fake backend
 // (provider "fake"), steered through libnetvfs-bridge-ffi-fake.so (§4.1).
 // Run in the normal and the sanitizer build (ASan + UBSan, LSan at exit).
+// The marshalling templates (marshal.h) are also compiled in, for the cases
+// no backend produces.
 #include "netvfs_bridge_ffi.h"
 #include "nvb_fake.h"
+
+#include "marshal.h"
 
 #include "fakebackend.h"
 
@@ -310,6 +314,7 @@ private slots:
     void copyAcrossTwoConns();
     void urlParseFormat();
     void errorBlockContents();
+    void mapValuesNotCarried();
     void exceptionsBecomeInternal();
     void discoveryStartStopFree();
     void postAndQuit();
@@ -1173,6 +1178,50 @@ void tst_BridgeFfi::errorBlockContents()
         QVERIFY(insideBlock(url, url->params.options[i].value.bytes));
     }
     QCOMPARE(optionsOf(url->params).value(QStringLiteral("base_path")), QStringLiteral("/remote.php/files"));
+}
+
+void tst_BridgeFfi::mapValuesNotCarried()
+{
+    // fillMap() leaves out the values the ABI cannot carry (no backend has
+    // such options or identity details yet) and keeps the key order of the
+    // others. With none left the array is empty: never indexed, not null,
+    // and in the block (O3).
+    using namespace NetVfs::Ffi;
+    const auto packed = [](const QVariantMap &map) {
+        return Owned<nvb_params>(pack<nvb_params>([&map](auto &arena, nvb_params *out) {
+            out->options = fillMap(arena, map, &out->n_options);
+        }));
+    };
+    QVariantMap map;
+    map.insert(QStringLiteral("a"), 1.5);
+    map.insert(QStringLiteral("b"), QStringLiteral("x"));
+    map.insert(QStringLiteral("c"), QVariant::fromValue(QPoint(1, 2)));
+    map.insert(QStringLiteral("d"), 7);
+    const Owned<nvb_params> mixed = packed(map);
+    QCOMPARE(mixed->n_options, size_t(2));
+    QCOMPARE(toBytes(mixed->options[0].key), QByteArray("b"));
+    QCOMPARE(mixed->options[0].value.kind, uint32_t(NVB_VALUE_STRING));
+    QCOMPARE(toBytes(mixed->options[0].value.bytes), QByteArray("x"));
+    QCOMPARE(toBytes(mixed->options[1].key), QByteArray("d"));
+    QCOMPARE(mixed->options[1].value.kind, uint32_t(NVB_VALUE_INT));
+    QCOMPARE(mixed->options[1].value.number, int64_t(7));
+    QVERIFY(insideBlock(mixed.get(), nvb_bytes { reinterpret_cast<const uint8_t *>(mixed->options),
+                                                 mixed->n_options * sizeof(nvb_kv) }));
+    for (size_t i = 0; i < mixed->n_options; ++i)
+        QVERIFY(insideBlock(mixed.get(), mixed->options[i].key));
+
+    map.remove(QStringLiteral("b"));
+    map.remove(QStringLiteral("d"));
+    for (const QVariantMap &none : { map, QVariantMap() }) {
+        const Owned<nvb_params> empty = packed(none);
+        QCOMPARE(empty->n_options, size_t(0));
+        QVERIFY(empty->options);
+        QVERIFY(insideBlock(empty.get(), nvb_bytes { reinterpret_cast<const uint8_t *>(empty->options), 0 }));
+        HoldArena arena;
+        size_t count = 99;
+        QVERIFY(fillMap(arena, none, &count));
+        QCOMPARE(count, size_t(0));
+    }
 }
 
 void tst_BridgeFfi::exceptionsBecomeInternal()

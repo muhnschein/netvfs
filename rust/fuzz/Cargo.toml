@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: LGPL-2.1-or-later
 # cargo-fuzz targets for untrusted inputs (doc/RUST.md): of netvfs-accounts,
-# stored setting values from the accounts database and the session bus's
-# replies; of netvfs-bridge, a consumer's call arguments and byte paths.
+# stored setting values from the accounts database, the session bus's replies
+# and its arguments; of netvfs-bridge, a consumer's call arguments and byte
+# paths, and the FFI marshalling.
 # Not part of the workspace: libFuzzer needs a nightly toolchain, the helper
 # builds with the SDK's 1.75. Run: cargo +nightly fuzz run <target>.
 [package]
@@ -17,7 +18,7 @@ cargo-fuzz = true
 [dependencies]
 libfuzzer-sys = "0.4"
 netvfs-accounts = { path = "../netvfs-accounts" }
-netvfs-bridge = { path = "../netvfs-bridge" }
+netvfs-bridge = { path = "../netvfs-bridge", features = ["testing"] }
 netvfs-bridge-proto = { path = "../netvfs-bridge-proto" }
 zbus = { version = "5", default-features = false, features = ["tokio", "p2p"] }
 
@@ -54,6 +55,13 @@ bench = false
 [[bin]]
 name = "paths"
 path = "fuzz_targets/paths.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "ffi_marshal"
+path = "fuzz_targets/ffi_marshal.rs"
 test = false
 doc = false
 bench = false

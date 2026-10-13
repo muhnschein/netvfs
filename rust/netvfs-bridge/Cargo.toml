@@ -27,3 +27,13 @@ futures-lite = { version = "2", default-features = false, features = ["std"] }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["rt", "net", "sync", "time", "macros", "io-util"] }
+
+# The C ABI against the real libnetvfs-bridge-ffi.so and the fake backend
+# (make check-rust-ffi). Its own main(): `init` must run on the main thread,
+# which then serves the Qt event loop. Without the libraries (the
+# NETVFS_BRIDGE_FFI* variables unset) every test says it is skipped.
+[[test]]
+name = "ffi"
+path = "tests/ffi.rs"
+harness = false
+required-features = ["testing"]

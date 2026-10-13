@@ -13,10 +13,10 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use rusqlite::types::ValueRef;
-use rusqlite::{params, Connection, OpenFlags, OptionalExtension, TransactionBehavior};
+use rusqlite::{Connection, OpenFlags, OptionalExtension, TransactionBehavior, params};
 
 use crate::gvariant;
-use crate::qvariant::{QString, Value};
+use crate::qvariant::{QString, Value, cut_to_int};
 
 /// Where libaccounts-glib keeps the database below the data folder on
 /// Sailfish OS (its spec: `-Ddatabase-dir=system/privileged/Accounts/libaccounts-glib`).
@@ -26,6 +26,7 @@ pub const SAILFISH_DATABASE_DIR: &str = "system/privileged/Accounts/libaccounts-
 pub const SAILFISH_PRIVILEGED_DIR: &str = "system/privileged";
 /// The upstream location, below the configuration folder.
 pub const UPSTREAM_DATABASE_DIR: &str = "libaccounts-glib";
+/// The database file in its folder.
 pub const DATABASE_FILE: &str = "accounts.db";
 const REDIRECT_FILE: &str = "accounts.redirect";
 /// How long a read or write waits for another writer.
@@ -37,21 +38,32 @@ pub enum Location {
     /// A test's: `$ACCOUNTS/accounts.db` (never in a set-id process).
     Explicit(PathBuf),
     /// Sailfish OS: below `data_home`, owned by the group `privileged`.
-    Sailfish { data_home: PathBuf },
+    Sailfish {
+        /// The XDG data folder.
+        data_home: PathBuf,
+    },
     /// Upstream libaccounts-glib, below `config_home`.
-    Upstream { config_home: PathBuf },
+    Upstream {
+        /// The XDG configuration folder.
+        config_home: PathBuf,
+    },
 }
 
 /// The environment the location comes from.
 #[derive(Clone, Debug, Default)]
 pub struct Environment {
+    /// The `ACCOUNTS` variable: the database folder, for tests.
     pub accounts: Option<String>,
+    /// The `HOME` variable.
     pub home: Option<String>,
+    /// The `XDG_DATA_HOME` variable.
     pub xdg_data_home: Option<String>,
+    /// The `XDG_CONFIG_HOME` variable.
     pub xdg_config_home: Option<String>,
 }
 
 impl Environment {
+    /// The environment of this process.
     #[must_use]
     pub fn from_process() -> Self {
         let var = |name: &str| std::env::var_os(name).map(|v| v.to_string_lossy().into_owned());
@@ -71,11 +83,13 @@ impl Environment {
         }
     }
 
+    /// The XDG data folder: `XDG_DATA_HOME` when absolute, else `$HOME/.local/share`.
     #[must_use]
     pub fn data_home(&self) -> PathBuf {
         self.xdg(self.xdg_data_home.as_ref(), ".local/share")
     }
 
+    /// The XDG configuration folder: `XDG_CONFIG_HOME` when absolute, else `$HOME/.config`.
     #[must_use]
     pub fn config_home(&self) -> PathBuf {
         self.xdg(self.xdg_config_home.as_ref(), ".config")
@@ -182,24 +196,33 @@ pub struct Database {
 /// One row of `Accounts`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AccountRow {
+    /// The account's id (`Accounts.id`).
     pub id: i64,
+    /// The account's name (`Accounts.name`).
     pub display_name: QString,
+    /// The account's provider (`Accounts.provider`).
     pub provider: QString,
+    /// Whether the account is enabled.
     pub enabled: bool,
 }
 
 /// A setting as read: key bytes and value.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Setting {
+    /// The key, as stored.
     pub key: Vec<u8>,
+    /// The value, as the `QVariant` it reads as.
     pub value: Value,
 }
 
 /// A setting to write: key, `GVariant` type and printed value.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NewSetting {
+    /// The key, as stored.
     pub key: Vec<u8>,
+    /// The `GVariant` type string.
     pub type_string: &'static str,
+    /// The value, printed as `g_variant_print()` writes it.
     pub text: String,
 }
 
@@ -277,8 +300,7 @@ impl Database {
                     display_name: text(row.get_ref(0)?),
                     provider: text(row.get_ref(1)?),
                     // sqlite3_column_int, as a gboolean
-                    #[allow(clippy::cast_possible_truncation)]
-                    enabled: row.get::<_, Option<i64>>(2)?.is_some_and(|v| v as i32 != 0),
+                    enabled: row.get::<_, Option<i64>>(2)?.is_some_and(|v| cut_to_int(v) != 0),
                 })
             },
         )
@@ -386,17 +408,17 @@ mod tests {
         let ids = meta.as_ref().map(|m| (m.uid(), m.gid()));
         fs::set_permissions(&privileged, fs::Permissions::from_mode(0o770)).unwrap_or_default();
         assert_eq!(location.database(&Owner(ids)).ok(), Some(db_dir.join(DATABASE_FILE)));
-        assert!(location.database(&Owner(None)).is_err());
-        assert!(location.database(&Owner(ids.map(|(u, g)| (u + 1, g)))).is_err());
-        assert!(location.database(&Owner(ids.map(|(u, g)| (u, g + 1)))).is_err());
+        location.database(&Owner(None)).unwrap_err();
+        location.database(&Owner(ids.map(|(u, g)| (u + 1, g)))).unwrap_err();
+        location.database(&Owner(ids.map(|(u, g)| (u, g + 1)))).unwrap_err();
         fs::set_permissions(&privileged, fs::Permissions::from_mode(0o771)).unwrap_or_default();
-        assert!(location.database(&Owner(ids)).is_err());
+        location.database(&Owner(ids)).unwrap_err();
         fs::set_permissions(&privileged, fs::Permissions::from_mode(0o770)).unwrap_or_default();
         fs::write(db_dir.join(REDIRECT_FILE), " /moved \n").unwrap_or_default();
         assert_eq!(location.database(&Owner(ids)).ok(), Some(db_dir.join("moved").join(DATABASE_FILE)));
         let upstream = Location::Upstream { config_home: dir.join("cfg") };
         assert_eq!(upstream.database(&Owner(None)).ok(), Some(dir.join("cfg/libaccounts-glib/accounts.db")));
-        let _ = fs::remove_dir_all(dir);
+        fs::remove_dir_all(dir).ok();
     }
 
     fn tempdir() -> PathBuf {
@@ -405,14 +427,13 @@ mod tests {
             std::process::id(),
             std::thread::current().id()
         ));
-        let _ = fs::remove_dir_all(&dir);
+        fs::remove_dir_all(&dir).ok();
         fs::create_dir_all(&dir).unwrap_or_default();
         dir
     }
 
     fn create(path: &Path) -> Connection {
-        let c = Connection::open(path)
-            .unwrap_or_else(|_| Connection::open_in_memory().unwrap_or_else(|_| unreachable!()));
+        let c = Connection::open(path).or_else(|_| Connection::open_in_memory()).unwrap();
         c.execute_batch(
             "CREATE TABLE Accounts (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, provider TEXT, enabled INTEGER);
              CREATE TABLE Services (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE,
@@ -471,7 +492,7 @@ mod tests {
         assert!(db.store_global(1, std::slice::from_ref(&new)).is_err());
 
         let mut db = Database::open(&path, true).unwrap_or_else(|_| Database::empty());
-        assert!(db.store_global(1, &[new.clone(), new]).is_ok());
+        assert!(matches!(db.store_global(1, &[new.clone(), new]), Ok(())));
         let settings = db.settings(1, 0).unwrap_or_default();
         assert_eq!(settings.len(), 2);
         assert!(settings.contains(&Setting {
@@ -487,9 +508,9 @@ mod tests {
         // Not a database: unusable.
         let junk = dir.join("junk.db");
         fs::write(&junk, vec![b'x'; 4096]).unwrap_or_default();
-        assert!(Database::open(&junk, false).is_err());
+        Database::open(&junk, false).unwrap_err();
         // A folder that is a file: unusable.
-        assert!(Database::open(&junk.join(DATABASE_FILE), false).is_err());
-        let _ = fs::remove_dir_all(dir);
+        Database::open(&junk.join(DATABASE_FILE), false).unwrap_err();
+        fs::remove_dir_all(dir).ok();
     }
 }

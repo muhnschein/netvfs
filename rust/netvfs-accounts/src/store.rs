@@ -6,18 +6,28 @@
 use crate::db::{Database, NewSetting, Setting, Unusable};
 use crate::gvariant;
 use crate::policy::ConnectionParams;
-use crate::qvariant::{trimmed, QString, Value};
+use crate::qvariant::{QString, Value, cut_to_int, trimmed};
 use crate::wire::{Error, Outcome};
 
+/// The setting keys the helper reads and writes.
 pub mod keys {
+    /// The server host.
     pub const HOST: &str = "netvfs/host";
+    /// The server port.
     pub const PORT: &str = "netvfs/port";
+    /// The user name.
     pub const USERNAME: &str = "netvfs/username";
+    /// The attention state: `auth-failed` or `server-identity-changed`.
     pub const ATTENTION: &str = "netvfs/attention";
+    /// The root folder of the Files service.
     pub const FILES_ROOT: &str = "files_root";
+    /// The credentials id.
     pub const CREDENTIALS_ID: &str = "CredentialsId";
+    /// Whether the credentials need an update.
     pub const CREDENTIALS_NEED_UPDATE: &str = "CredentialsNeedUpdate";
+    /// The service that asked for the update.
     pub const CREDENTIALS_NEED_UPDATE_FROM: &str = "CredentialsNeedUpdateFrom";
+    /// The pinned host key, below the provider's `netvfs/<provider>/` prefix.
     pub const HOST_KEY_SEEN: &str = "host_key_seen";
     /// A service's enabled flag.
     pub const ENABLED: &str = "enabled";
@@ -29,12 +39,16 @@ pub const FILES_SERVICE_TYPE: &str = "netvfs-files";
 /// `Attention` (src/core/accountstore.h).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Attention {
+    /// No attention.
     None = 0,
+    /// Authentication failed.
     AuthFailed = 1,
+    /// The server's host key changed.
     ServerIdentityChanged = 2,
 }
 
 impl Attention {
+    /// The state `value` names; anything unknown is `None`.
     #[must_use]
     pub fn from_qstring(value: Option<&str>) -> Self {
         match value {
@@ -44,6 +58,7 @@ impl Attention {
         }
     }
 
+    /// The name the setting stores.
     #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
@@ -58,13 +73,19 @@ impl Attention {
 /// helper answers it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AccountConfig {
+    /// The account's id.
     pub account_id: i32,
+    /// The account's provider.
     pub provider: QString,
+    /// The account's name.
     pub display_name: QString,
+    /// The connection parameters.
     pub params: ConnectionParams,
     /// `files_root` of the Files service, trimmed.
     pub files_root: QString,
+    /// The credentials id, as unsigned.
     pub credentials_id: u32,
+    /// The attention state.
     pub attention: Attention,
 }
 
@@ -103,6 +124,7 @@ pub struct Store {
 }
 
 impl Store {
+    /// The store over `db`.
     #[must_use]
     pub fn new(db: Database) -> Self {
         Self { db }
@@ -132,9 +154,8 @@ impl Store {
                 continue;
             }
             if self.files_service(id, account.provider.as_deref())?.1 {
-                // AgAccountId is 32 bits.
-                #[allow(clippy::cast_possible_truncation)]
-                ids.push(id as i32);
+                // AgAccountId is 32 bits: the id as sqlite3_column_int reads it.
+                ids.push(cut_to_int(id));
             }
         }
         ids.sort_unstable();
@@ -172,7 +193,7 @@ impl Store {
             options,
             ..ConnectionParams::default()
         };
-        if params.host.as_deref().map_or(true, str::is_empty) {
+        if params.host.as_deref().is_none_or(str::is_empty) {
             return Err(Outcome::failure(Error::Internal, format!("Account {account_id} has no server")));
         }
         // Account::credentialsId(): the value as an int, as unsigned.
@@ -225,9 +246,11 @@ impl Store {
     /// `Internal` when the write fails, as `AccountStore` reports it.
     pub fn write_attention(&mut self, account_id: i32, settings: &[NewSetting]) -> Result<(), Outcome> {
         let id = i64::from(u32::from_ne_bytes(account_id.to_ne_bytes()));
-        self.db
-            .store_global(id, settings)
-            .map_err(|_| Outcome::failure(Error::Internal, "Cannot write the accounts database"))
+        // The SQLite reason stays out of the answer: the bridge shows this message as it is.
+        if self.db.store_global(id, settings).is_err() {
+            return Err(Outcome::failure(Error::Internal, "Cannot write the accounts database"));
+        }
+        Ok(())
     }
 }
 
@@ -340,5 +363,91 @@ mod tests {
         assert_eq!(with_pin.len(), 4);
         assert_eq!(with_pin[3].key, b"netvfs/sftp/host_key_seen");
         assert_eq!(with_pin[3].text, "'SHA256:x'");
+    }
+
+    /// A fresh folder for a test's database.
+    fn tempdir(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("netvfs-accounts-store-{name}-{}", std::process::id()));
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// A database as libaccounts-glib creates it (see db.rs), with accounts
+    /// listed or not for each reason `files_accounts` has.
+    fn create(path: &std::path::Path) {
+        let c = rusqlite::Connection::open(path).unwrap();
+        c.execute_batch(
+            "CREATE TABLE Accounts (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, provider TEXT, enabled INTEGER);
+             CREATE TABLE Services (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE,
+                                    display TEXT NOT NULL, provider TEXT, type TEXT);
+             CREATE TABLE Settings (account INTEGER NOT NULL, service INTEGER, key TEXT NOT NULL,
+                                    type TEXT NOT NULL, value BLOB);
+             CREATE UNIQUE INDEX idx_setting ON Settings (account, service, key);
+             PRAGMA user_version = 1;
+             INSERT INTO Services VALUES (1, 'smb-files', 'Files', 'smb', 'netvfs-files'),
+                                         (2, 'sftp-files', 'Files', 'sftp', 'netvfs-files'),
+                                         (3, 'mail-email', 'Mail', 'mail', 'e-mail');
+             -- 1, 5: listed; 2: account disabled; 3: no Files service type;
+             -- 4: service disabled; 6: no service setting; 2^32 + 2 reads as 2.
+             INSERT INTO Accounts VALUES (5, 'e', 'sftp', 1), (1, 'a', 'smb', 1), (2, 'b', 'smb', 0),
+                                         (3, 'c', 'mail', 1), (4, 'd', 'smb', 1), (6, 'f', 'smb', 1),
+                                         (4294967298, 'g', 'smb', 1);
+             INSERT INTO Settings VALUES (1, 0, 'netvfs/host', 's', '''nas'''),
+                                         (1, 1, 'enabled', 'b', 'true'), (2, 1, 'enabled', 'b', 'true'),
+                                         (3, 3, 'enabled', 'b', 'true'), (4, 1, 'enabled', 'b', 'false'),
+                                         (5, 2, 'enabled', 'b', 'true'),
+                                         (4294967298, 1, 'enabled', 'b', 'true');",
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn files_accounts_golden() {
+        let dir = tempdir("list");
+        let path = dir.join("accounts.db");
+        create(&path);
+        let store = Store::new(Database::open(&path, false).unwrap());
+        assert_eq!(store.files_accounts().unwrap(), vec![1, 2, 5]);
+        assert_eq!(Store::new(Database::empty()).files_accounts().unwrap(), Vec::<i32>::new());
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn attention_is_written() {
+        let dir = tempdir("attention");
+        let path = dir.join("accounts.db");
+        create(&path);
+        let settings = vec![
+            NewSetting { key: b"netvfs/attention".to_vec(), type_string: "s", text: "'auth-failed'".into() },
+            NewSetting { key: b"CredentialsNeedUpdate".to_vec(), type_string: "b", text: "true".into() },
+        ];
+        let failed = Outcome::failure(Error::Internal, "Cannot write the accounts database");
+        // Read-only, and no database at all: the write fails.
+        let mut read_only = Store::new(Database::open(&path, false).unwrap());
+        assert_eq!(read_only.write_attention(1, &settings).unwrap_err(), failed);
+        assert_eq!(Store::new(Database::empty()).write_attention(1, &settings).unwrap_err(), failed);
+
+        let mut store = Store::new(Database::open(&path, true).unwrap());
+        store.write_attention(1, &settings).unwrap();
+        // A negative id is the account's unsigned id.
+        store.write_attention(-2, &settings[1..]).unwrap();
+        let db = Database::open(&path, false).unwrap();
+        let mut global = db.settings(1, 0).unwrap();
+        global.sort_by(|a, b| a.key.cmp(&b.key));
+        assert_eq!(
+            global,
+            vec![
+                Setting { key: b"CredentialsNeedUpdate".to_vec(), value: Value::Bool(true) },
+                Setting { key: b"netvfs/attention".to_vec(), value: Value::String("auth-failed".into()) },
+                Setting { key: b"netvfs/host".to_vec(), value: Value::String("nas".into()) },
+            ]
+        );
+        assert_eq!(
+            db.settings(4_294_967_294, 0).unwrap(),
+            vec![Setting { key: b"CredentialsNeedUpdate".to_vec(), value: Value::Bool(true) }]
+        );
+        assert_eq!(Store::new(db).load(1).unwrap().attention, Attention::AuthFailed);
+        std::fs::remove_dir_all(dir).ok();
     }
 }

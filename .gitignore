@@ -19,3 +19,4 @@ __pycache__/
 /rust/.cargo-home/
 /build.log
 /rust/prebuilt/
+/rust/mutants.out*/

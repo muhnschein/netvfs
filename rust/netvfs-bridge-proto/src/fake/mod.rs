@@ -44,6 +44,21 @@ pub const DEFAULT_CAPS: &[&str] = &[
 #[derive(Clone)]
 pub struct FakeBridge {
     shared: Arc<Shared>,
+    _owner: Arc<Owner>,
+}
+
+/// Dropped with the last clone of a [`FakeBridge`]. A served connection's
+/// object server holds the interface, which holds the session, which holds
+/// the connection: that cycle is broken here, or every session leaks.
+struct Owner(Arc<Shared>);
+
+impl Drop for Owner {
+    fn drop(&mut self) {
+        for session in self.0.take_sessions() {
+            session.shut();
+            drop(session.take_conn());
+        }
+    }
 }
 
 impl std::fmt::Debug for FakeBridge {
@@ -62,7 +77,8 @@ impl FakeBridge {
     /// A bridge with consent granted and no locations.
     #[must_use]
     pub fn new() -> Self {
-        Self { shared: Arc::new(Shared::new(State::default())) }
+        let shared = Arc::new(Shared::new(State::default()));
+        Self { _owner: Arc::new(Owner(Arc::clone(&shared))), shared }
     }
 
     // ---- serving -------------------------------------------------------

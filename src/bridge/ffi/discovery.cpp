@@ -46,7 +46,7 @@ nvb_discovery *discoveryNew(const nvb_discovery_hooks *hooks) noexcept
             d->hooks = *hooks;
         d->discovery = std::make_unique<Discovery>();
         const nvb_discovery *self = d.get();
-        Discovery *discovery = d->discovery.get();
+        const Discovery *discovery = d->discovery.get();
         // The discovery is the context: no hook call once it is deleted.
         QObject::connect(discovery, &Discovery::found, discovery, [self]() { report(self); });
         QObject::connect(discovery, &Discovery::updated, discovery, [self]() { report(self); });

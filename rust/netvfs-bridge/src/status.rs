@@ -1,27 +1,28 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! The outcome of a failed operation: an XC-21 error name, a message, and the
-//! XC-24 details (`detail`, `retryAfterMs`). The Rust form of the C++
-//! `NetVfs::Result` with `error != None` (design §3.2 key types).
+//! [`Status`]: a failure as the bridge reports it (XC-21, XC-24), whether it
+//! came from a backend through the C ABI or from the bridge's own checks.
 
 use netvfs_bridge_proto::ErrorName;
 use std::fmt;
 
-/// A failure: what `org.netvfs.Error.<name>` replies, `ListDone` and
-/// `JobFinished` carry.
+/// A failed operation: an XC-21 name, a human message, a protocol detail
+/// for logs (XC-24) and, for `RateLimited` and `TooManyConnections`, when to
+/// try again.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Status {
     /// The XC-21 name.
     pub name: ErrorName,
-    /// The human message; may be empty (error replies then carry the name).
+    /// UTF-8, may be empty.
     pub message: String,
-    /// Protocol status for logs and a details view; empty when none.
+    /// UTF-8, may be empty.
     pub detail: String,
-    /// When to try again, in ms; -1 when none.
+    /// Milliseconds; -1: none.
     pub retry_after_ms: i64,
 }
 
 impl Status {
-    /// A status with a name and a message, without details.
+    /// A status with a name and a message, no detail and no retry time.
+    #[must_use]
     pub fn new(name: ErrorName, message: impl Into<String>) -> Self {
         Self { name, message: message.into(), detail: String::new(), retry_after_ms: -1 }
     }
@@ -42,18 +43,27 @@ impl Status {
 
     /// A malformed call (`ProtocolError`; the dispatch replies
     /// `org.freedesktop.DBus.Error.InvalidArgs` for it, XSEC-7).
+    #[must_use]
     pub fn invalid_args(message: impl Into<String>) -> Self {
         Self::new(ErrorName::ProtocolError, message)
     }
 
     /// An invalid path or name (`InvalidName`).
+    #[must_use]
     pub fn invalid_name(message: impl Into<String>) -> Self {
         Self::new(ErrorName::InvalidName, message)
     }
 
     /// The bridge refuses (`PermissionDenied`).
+    #[must_use]
     pub fn permission_denied(message: impl Into<String>) -> Self {
         Self::new(ErrorName::PermissionDenied, message)
+    }
+
+    /// An `Internal` status: a bug or an unexpected state.
+    #[must_use]
+    pub fn internal(message: impl Into<String>) -> Self {
+        Self::new(ErrorName::Internal, message)
     }
 }
 
@@ -85,5 +95,17 @@ mod tests {
         assert_eq!(Status::invalid_args("x").name, ErrorName::ProtocolError);
         assert_eq!(Status::invalid_name("x").name, ErrorName::InvalidName);
         assert_eq!(Status::permission_denied("x").name, ErrorName::PermissionDenied);
+    }
+
+    #[test]
+    fn constructors_and_display() {
+        let s = Status::new(ErrorName::NotFound, "gone");
+        assert_eq!((s.detail.as_str(), s.retry_after_ms), ("", -1));
+        assert_eq!(s.to_string(), "NotFound: gone");
+        assert_eq!(Status::new(ErrorName::Canceled, "").to_string(), "Canceled");
+        let i = Status::internal("bug");
+        assert_eq!((i.name, i.message.as_str()), (ErrorName::Internal, "bug"));
+        let e: &dyn std::error::Error = &i;
+        assert!(e.source().is_none());
     }
 }

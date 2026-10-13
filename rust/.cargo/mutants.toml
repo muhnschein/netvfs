@@ -1,8 +1,40 @@
 # SPDX-License-Identifier: LGPL-2.1-or-later
-# cargo-mutants (doc/RUST.md). Every exclusion names a mutant that changes
-# no observable behaviour, or one that only a broken kernel or exhausted
-# resources could tell apart, and why.
+# cargo-mutants (tools/ci/rust-mutants.sh). Every mutant must be caught by a
+# test; these are the few no test can tell from the original, each with why.
+# Matched against the mutant's name with its line and column (\d+:\d+).
 exclude_re = [
+    # Diagnostics only: the sole effect is a line on stderr for whoever runs
+    # it by hand; the probe's result is its exit status and check count.
+    'netvfs-accounts/src/bin/probe\.rs:.*: replace report with \(\)$',
+    # Diagnostics only: the sole effect is a line on stderr when the kernel
+    # refuses Landlock or seccomp, which no test can make it do.
+    'netvfs-accounts/src/sandbox\.rs:.*: replace warn with \(\)$',
+    # Equivalent: SECCOMP_RET_ERRNO and the 16 data bits are disjoint, so
+    # `^` is `|` for every errno.
+    'netvfs-accounts/src/sandbox\.rs:.*: replace \| with \^ in errno_action$',
+    # Equivalent: O_CREAT and __O_TMPFILE (O_TMPFILE without O_DIRECTORY)
+    # are disjoint bits, so `^` is `|`.
+    'netvfs-accounts/src/sandbox\.rs:.*: replace \| with \^ in Filter::deny_created_mode_bits$',
+    # Equivalent: a constant (no function) that combines distinct Landlock
+    # access bits, e.g. landlock::NULL_DEVICE, where `^` is `|`.
+    'netvfs-accounts/src/sandbox\.rs:\d+:\d+: replace \| with \^$',
+    # Equivalent where the tests run: only Sailfish OS has a user
+    # `privileged`; elsewhere the lookup is None anyway. The lookup itself
+    # (user_ids) is tested with root and a missing user.
+    'netvfs-accounts/src/sandbox\.rs:.*: replace privileged_ids -> Option<\(u32, u32\)> with None$',
+    # RTLD_LOCAL is 0 on Linux: `RTLD_NOW | RTLD_LOCAL` and
+    # `RTLD_NOW ^ RTLD_LOCAL` are the same flags.
+    'ffi/loader\.rs:\d+:\d+: replace \| with \^ in entry_point',
+    # A hint without a result; the fake backend's readAhead ignores it, as
+    # backends may.
+    'ffi/conn\.rs:\d+:\d+: replace Handle::read_ahead with \(\)',
+    # Whether a multicast socket opens depends on the host (sandboxes and
+    # some runners have none), so the test cannot require `true`.
+    'ffi/discovery\.rs:\d+:\d+: replace Discovery::set_running -> bool with false',
+    # The hook runs only on a report from a server on the network, which a
+    # test cannot provide; Ctx::take_panic itself is unit-tested
+    # (callback.rs).
+    'ffi/discovery\.rs:\d+:\d+: replace Discovery::take_panic -> Option<String> with None',
     # netvfs-bridge peer.rs COMPARE_CHUNK_BYTES (64 * 1024 -> 64 + 1024): the
     # chunk size of the executable comparison only bounds memory; any size
     # gives the same verdict.

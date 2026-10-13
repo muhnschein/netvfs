@@ -4,6 +4,7 @@
 #   make check         Rust checks, unit tests, then the interop suite (needs docker)
 #   make check-rust    the Rust workspace (rust/): format, lint, tests (nextest), lockfile, MSRV
 #   make check-unit    unit tests only
+#   make check-rust-ffi the Rust side of the C ABI against the built libnetvfs-bridge-ffi.so
 #   make check-interop interop suite against containerised servers
 #   make check-packaging  install tree against the RPM %files (SPEC-v2 XP-1, XP-3)
 #   make coverage      unit + interop tests instrumented, writes build-coverage/coverage.xml
@@ -44,7 +45,7 @@ TEST_ENV = QT_QPA_PLATFORM=offscreen
 CARGO ?= cargo
 # cargo nextest profile (rust/.config/nextest.toml); CI uses "ci".
 NEXTEST_PROFILE ?= default
-RUST_FEATURES = --features netvfs-accounts/probe
+RUST_FEATURES = --features netvfs-accounts/probe,netvfs-bridge/testing
 # rust-toolchain.toml would override the toolchain a job installs, so the
 # oldest supported one (rust-version) is named explicitly.
 RUST_MSRV = $(shell sed -n -e 's/^rust-version = "\([0-9]*\.[0-9]*\)"/\1.0/p' \
@@ -59,8 +60,8 @@ else
 RUST_ENV =
 endif
 
-.PHONY: all vendor host-buteo configure check check-rust check-unit check-interop check-packaging coverage \
-    clippy-report clean distclean
+.PHONY: all vendor host-buteo configure check check-rust check-rust-ffi check-unit check-interop check-packaging \
+    coverage clippy-report clean distclean
 
 all: configure
 	$(MAKE) -C $(BUILD_DIR) $(if $(findstring -j,$(MAKEFLAGS)),,-j$(JOBS))
@@ -78,7 +79,7 @@ configure: vendor host-buteo
 	mkdir -p $(BUILD_DIR)
 	cd $(BUILD_DIR) && $(QMAKE) -r $(CURDIR)/netvfs.pro VENDOR_PREFIX=$(BUILD_DIR)/vendor $(QMAKE_ARGS)
 
-check: check-rust check-unit check-interop
+check: check-rust check-unit check-rust-ffi check-interop
 
 check-rust:
 	./tools/ci/check-lockfile.sh rust/Cargo.lock
@@ -87,6 +88,22 @@ check-rust:
 	cd rust && $(RUST_ENV) $(CARGO) nextest run --locked --workspace $(RUST_FEATURES) --profile $(NEXTEST_PROFILE)
 	cd rust && $(RUST_ENV) $(CARGO) test --locked --workspace --doc $(RUST_FEATURES)
 	cd rust && $(CARGO) +$(RUST_MSRV) check --locked --workspace --all-targets $(RUST_FEATURES)
+
+# netvfs-bridge's ffi module against the C++ library this build made, with
+# the fake backend (rust/netvfs-bridge/tests/ffi.rs; doc/RUST.md). The same
+# build as check-rust's (so `make coverage` finds its counters); there the
+# test binary only says it is skipped, since the variables are not set. Under
+# SANITIZE=1 the library is instrumented with gcc's ASan, whose runtime must
+# be loaded first: the test binary is not instrumented, so it is preloaded.
+FFI_TEST_ENV = NETVFS_BRIDGE_FFI=$(BUILD_DIR)/lib/netvfs/libnetvfs-bridge-ffi.so \
+    NETVFS_BRIDGE_FFI_FAKE=$(BUILD_DIR)/lib/libnetvfs-bridge-ffi-fake.so \
+    NETVFS_BACKEND_PATH=$(BUILD_DIR)/lib/netvfs/test-backends
+ifeq ($(SANITIZE),1)
+FFI_TEST_ENV += LD_PRELOAD="$$($(CXX) -print-file-name=libasan.so) $$($(CXX) -print-file-name=libubsan.so)"
+endif
+check-rust-ffi: all
+	cd rust && $(TEST_ENV) $(FFI_TEST_ENV) $(RUST_ENV) $(CARGO) nextest run --locked --workspace $(RUST_FEATURES) \
+	    --profile $(NEXTEST_PROFILE) -E 'binary_id(netvfs-bridge::ffi)'
 
 clippy-report:
 	mkdir -p $(BUILD_DIR)

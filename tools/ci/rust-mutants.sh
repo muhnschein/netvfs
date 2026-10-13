@@ -2,11 +2,22 @@
 # SPDX-License-Identifier: LGPL-2.1-or-later
 # cargo-mutants on the Rust lines changed since <base> (CI job "Tests bite
 # (Rust, changed code)"): every mutant there must be caught by a test or be
-# unviable; a missed one or a timeout fails. Results in rust/mutants.out.
-# Usage: rust-mutants.sh <base revision>
+# unviable; a missed one fails. A timeout counts as caught: the mutant made a
+# test hang, which nextest's slow-timeout ends. Results in rust/mutants.out.
+# With a second argument, netvfs-bridge's FFI test runs against the C++
+# libraries `tools/ci/ffi-libs.sh <dir>` built there (else it is skipped and
+# catches nothing). Exclusions, each with its reason: rust/.cargo/mutants.toml.
+# Usage: rust-mutants.sh <base revision> [<ffi-libs.sh dir>]
 set -eu
 base=$1
 root=$(cd "$(dirname "$0")/../.." && pwd)
+if [ $# -ge 2 ]; then
+    lib=$(cd "$2" && pwd)/lib
+    export NETVFS_BRIDGE_FFI="$lib/netvfs/libnetvfs-bridge-ffi.so"
+    export NETVFS_BRIDGE_FFI_FAKE="$lib/libnetvfs-bridge-ffi-fake.so"
+    export NETVFS_BACKEND_PATH="$lib/netvfs/test-backends"
+    export QT_QPA_PLATFORM=offscreen
+fi
 cd "$root"
 diff=$(mktemp)
 trap 'rm -f "$diff"' EXIT
@@ -18,5 +29,22 @@ fi
 cd rust
 # --in-diff takes paths relative to the workspace root.
 sed -i -e 's|^--- a/rust/|--- a/|' -e 's|^+++ b/rust/|+++ b/|' "$diff"
-cargo mutants --in-diff "$diff" --workspace --features netvfs-accounts/probe \
-    --test-tool nextest --no-shuffle --timeout-multiplier 3
+status=0
+# All features: --in-diff selects the packages it touches, and naming a
+# feature of one it left out is an error. In place: tests read files outside
+# rust/ (the shared contract), which a copy of the workspace would not have;
+# each mutated file is restored after its test run.
+cargo mutants --in-place --in-diff "$diff" --workspace --all-features \
+    --test-tool nextest --no-shuffle --timeout-multiplier 3 || status=$?
+# Its exit status says "timeouts" also when mutants were missed, so the
+# outcome is read from the lists: 0 ok, 2 missed, 3 timeouts, anything
+# else (the baseline failed, a usage error) stands.
+case "$status" in
+    0|2|3) ;;
+    *) exit "$status" ;;
+esac
+if [ -s mutants.out/missed.txt ]; then
+    echo "missed mutants:"
+    cat mutants.out/missed.txt
+    exit 1
+fi

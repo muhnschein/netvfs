@@ -2,19 +2,25 @@
 //! The Files slice of src/core/servicepolicy.cpp (SPEC-v2 XA-4, XA-7) and
 //! `ConnectionParams` (src/core/types.h).
 
-use crate::qvariant::{trimmed, QString, Value};
+use crate::qvariant::{QString, Value, trimmed};
 use crate::wire::{Error, Outcome};
 
 /// `ConnectionParams`: what a connection to the account needs.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ConnectionParams {
+    /// The provider's name, such as `smb`.
     pub provider: QString,
+    /// The server host (`netvfs/host`).
     pub host: QString,
+    /// The server port (`netvfs/port`).
     pub port: i32,
+    /// The user name (`netvfs/username`).
     pub username: QString,
     /// `netvfs/<provider>/<key>` settings by `<key>`.
     pub options: Vec<(String, Value)>,
+    /// The connect timeout in milliseconds.
     pub connect_timeout_ms: i32,
+    /// The request timeout in milliseconds.
     pub request_timeout_ms: i32,
 }
 
@@ -62,19 +68,31 @@ impl ConnectionParams {
     }
 }
 
+/// Keys of the provider options, below `netvfs/<provider>/`.
 pub mod option_keys {
+    /// The authentication mode: `interactive` needs no stored secret.
     pub const AUTH_MODE: &str = "auth_mode";
+    /// The SMB security profile, if one is set.
     pub const SECURITY_PROFILE: &str = "security_profile";
+    /// The older SMB switch for encryption, true by default.
     pub const REQUIRE_ENCRYPTION: &str = "require_encryption";
+    /// WebDAV's TLS setting: `http` is insecure (the default is `https`).
     pub const TLS: &str = "tls";
+    /// FTP's TLS mode: `none` is insecure (the default is `explicit`).
     pub const TLS_MODE: &str = "tls_mode";
+    /// The account's consent to an insecure setting.
     pub const ALLOW_INSECURE: &str = "allow_insecure";
 }
 
+/// The SMB security profiles (`security_profile`).
 pub mod security_profiles {
+    /// SMB with encryption required: the default.
     pub const STRICT: &str = "strict";
+    /// SMB without required encryption.
     pub const SIGNED: &str = "signed";
+    /// Legacy SMB: insecure, needs `allow_insecure`.
     pub const LEGACY: &str = "legacy";
+    /// Guest SMB without credentials: insecure, needs `allow_insecure`, no secret needed.
     pub const GUEST: &str = "guest";
 }
 
@@ -228,12 +246,16 @@ mod tests {
         assert_eq!(bogus, Outcome::failure(Error::SecurityPolicy, "Unknown SMB security profile \"bogus\""));
         let http = check_files_policy(&params("webdav", &[("tls", s("http"))]));
         assert_eq!(http.error, Error::SecurityPolicy);
-        assert!(check_files_policy(&params("webdav", &[("tls", s("http")), ("allow_insecure", s("1"))])).ok());
-        assert!(check_files_policy(&params(
-            "smb",
-            &[("security_profile", s("guest")), ("allow_insecure", Value::Bool(true))]
-        ))
-        .ok());
+        assert!(
+            check_files_policy(&params("webdav", &[("tls", s("http")), ("allow_insecure", s("1"))])).ok()
+        );
+        assert!(
+            check_files_policy(&params(
+                "smb",
+                &[("security_profile", s("guest")), ("allow_insecure", Value::Bool(true))]
+            ))
+            .ok()
+        );
         assert_eq!(
             check_files_policy(&params("smb", &[("security_profile", s("legacy"))])).error,
             Error::SecurityPolicy
