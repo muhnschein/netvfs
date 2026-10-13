@@ -26,6 +26,7 @@
 #include <deque>
 #include <memory>
 #include <new>
+#include <type_traits>
 #include <vector>
 
 namespace NetVfs::Ffi {
@@ -108,12 +109,15 @@ public:
         return out;
     }
 
+    // The array object is created in the block by placement array new, whose
+    // result points to its first element (no array cookie: CWG 2382). For
+    // n == 0 the pointer is still inside (or one past) the block, not null.
     template <typename T>
     T *array(size_t n)
     {
-        T *items = reinterpret_cast<T *>(m_arrays);
-        for (size_t i = 0; i < n; ++i)
-            new (items + i) T {};
+        static_assert(std::is_trivially_destructible_v<T>, "released with free() alone");
+        static_assert(alignof(T) <= BlockAlign, "arrays start at BlockAlign");
+        auto *items = ::new (static_cast<void *>(m_arrays)) T[n] {};
         m_arrays += alignUp(n * sizeof(T));
         return items;
     }
@@ -124,10 +128,14 @@ private:
 };
 
 // One malloc'd block holding a T and everything it points to (O3). `fill`
-// is called as fill(arena, T *) twice: to measure, then to fill.
+// is called as fill(arena, T *) twice: to measure, then to fill. The caller
+// releases the block with free() and runs no destructor, so nothing in it
+// may need one.
 template <typename T, typename Fill>
 T *pack(const Fill &fill)
 {
+    static_assert(std::is_trivially_destructible_v<T>, "released with free() alone");
+    static_assert(alignof(T) <= BlockAlign, "malloc() aligns the head to max_align_t");
     SizeArena size;
     T scratch {};
     fill(size, &scratch);
@@ -135,8 +143,8 @@ T *pack(const Fill &fill)
     void *raw = std::malloc(head + size.arrayBytes() + size.dataBytes());
     if (!raw)
         throw std::bad_alloc();
-    T *out = new (raw) T {};
-    char *base = static_cast<char *>(raw);
+    auto *out = ::new (raw) T {};
+    auto *base = static_cast<char *>(raw);
     BlockArena block(base + head, base + head + size.arrayBytes());
     fill(block, out);
     return out;
@@ -193,21 +201,21 @@ void fillValue(Arena &arena, nvb_value *out, const QVariant &value)
     }
 }
 
-// The values of `map` the ABI can carry, in key order.
+// The values of `map` the ABI can carry, in key order. They are picked
+// once, so that the array has exactly one element per value written to it.
 template <typename Arena>
 const nvb_kv *fillMap(Arena &arena, const QVariantMap &map, size_t *count)
 {
-    size_t n = 0;
-    for (auto it = map.constBegin(); it != map.constEnd(); ++it)
-        n += valueKind(it.value()) != 0 ? 1 : 0;
-    nvb_kv *kv = arena.template array<nvb_kv>(n);
-    size_t i = 0;
+    std::vector<QVariantMap::const_iterator> carried;
     for (auto it = map.constBegin(); it != map.constEnd(); ++it) {
-        if (valueKind(it.value()) == 0)
-            continue;
-        kv[i].key = arena.bytes(it.key().toUtf8());
-        fillValue(arena, &kv[i].value, it.value());
-        ++i;
+        if (valueKind(it.value()) != 0)
+            carried.push_back(it);
+    }
+    const size_t n = carried.size();
+    nvb_kv *kv = arena.template array<nvb_kv>(n);
+    for (size_t i = 0; i < n; ++i) {
+        kv[i].key = arena.bytes(carried[i].key().toUtf8());
+        fillValue(arena, &kv[i].value, carried[i].value());
     }
     *count = n;
     return kv;

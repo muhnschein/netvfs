@@ -8,11 +8,12 @@
 #include <algorithm>
 #include <climits>
 #include <cstring>
+#include <functional>
 #include <stdexcept>
 
 nvb_conn::~nvb_conn()
 {
-    for (auto &[key, handle] : handles) {
+    for (const auto &[key, handle] : handles) {
         if (handle->handle)
             handle->handle->close();
     }
@@ -40,10 +41,13 @@ ReadHandle *readHandleOf(const nvb_handle *h)
 }
 
 // ListSink over the C sink: one call per backend batch (XC-6, design §1.2).
+// `sink` gets the batch and says whether to go on.
 class SinkAdapter final : public ListSink
 {
 public:
-    SinkAdapter(nvb_list_sink_fn sink, void *ctx) : m_sink(sink), m_ctx(ctx) {}
+    using Sink = std::function<bool(const nvb_entry *entries, size_t n)>;
+
+    explicit SinkAdapter(Sink sink) : m_sink(std::move(sink)) {}
 
     bool entries(const QVector<Entry> &batch) override
     {
@@ -51,12 +55,11 @@ public:
         std::vector<nvb_entry> items(static_cast<size_t>(batch.size()));
         for (int i = 0; i < batch.size(); ++i)
             fillEntry(arena, &items[static_cast<size_t>(i)], batch.at(i));
-        return m_sink(m_ctx, items.data(), items.size()) != 0;
+        return m_sink(items.data(), items.size());
     }
 
 private:
-    nvb_list_sink_fn m_sink;
-    void *m_ctx;
+    Sink m_sink;
 };
 
 } // namespace
@@ -132,7 +135,9 @@ nvb_error *connList(nvb_conn *conn, nvb_bytes dir, uint32_t batchSize, nvb_list_
         Backend *backend = backendOf(conn);
         if (!sink)
             throw std::invalid_argument("no list sink");
-        SinkAdapter adapter(sink, ctx);
+        SinkAdapter adapter([sink, ctx](const nvb_entry *entries, size_t n) {
+            return sink(ctx, entries, n) != 0;
+        });
         ListOptions options;
         options.batchSize = static_cast<int>(std::min<uint32_t>(batchSize, INT_MAX));
         return backend->list(toPath(dir), &adapter, options);

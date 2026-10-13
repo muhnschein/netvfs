@@ -88,7 +88,7 @@ enum {
 };
 
 typedef struct nvb_value {
-    uint32_t kind;             /* NVB_VALUE_* */
+    uint32_t kind;             /* an NVB_VALUE_* value */
     int64_t number;
     nvb_bytes bytes;
     const nvb_bytes *items;
@@ -167,7 +167,7 @@ enum { NVB_IDENTITY_NONE = 0, NVB_IDENTITY_SSH = 1, NVB_IDENTITY_TLS = 2 };
 
 /* The ServerIdentity seen during connect (XC-16). */
 typedef struct nvb_identity {
-    uint32_t kind;             /* NVB_IDENTITY_* */
+    uint32_t kind;             /* an NVB_IDENTITY_* value */
     nvb_bytes algorithm;
     nvb_bytes public_key;
     nvb_bytes fingerprint;     /* filled by C++ when the backend left it empty
@@ -189,7 +189,7 @@ enum {
 };
 
 typedef struct nvb_secret {
-    uint32_t source;           /* NVB_SECRET_* */
+    uint32_t source;           /* an NVB_SECRET_* value */
     nvb_bytes user;
     nvb_bytes secret;          /* NVB_SECRET_BYTES only */
     uint32_t credentials_id;   /* NVB_SECRET_SIGNON only */

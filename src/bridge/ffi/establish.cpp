@@ -117,10 +117,10 @@ public:
             items[static_cast<size_t>(i)].echo = prompts.at(i).echo ? 1 : 0;
         }
         nvb_reply reply;   // wiped when it goes
-        const int given = m_hooks->prompt(m_hooks->ctx, arena.bytes(name.toUtf8()),
-                                          arena.bytes(instruction.toUtf8()), items.data(), items.size(), &reply);
         // A count that differs from the prompts declines (design §1.2).
-        if (!given || m_canceled.load() || m_conn->canceled.load() || reply.answers.size() != prompts.size())
+        if (const int given = m_hooks->prompt(m_hooks->ctx, arena.bytes(name.toUtf8()),
+                                              arena.bytes(instruction.toUtf8()), items.data(), items.size(), &reply);
+            !given || m_canceled.load() || m_conn->canceled.load() || reply.answers.size() != prompts.size())
             return false;
         answers->swap(reply.answers);   // single owner; the backend wipes them after use (XSEC-6)
         return true;
@@ -188,16 +188,17 @@ Result awaitLookup(const nvb_conn *conn, const std::shared_ptr<SecretWait> &wait
 {
     using Clock = std::chrono::steady_clock;
     const auto deadline = Clock::now() + std::chrono::milliseconds(SecretTimeoutMs);
-    std::unique_lock lock(wait->mutex);
-    while (!wait->done && !conn->canceled.load() && Clock::now() < deadline)
-        wait->cond.wait_for(lock, std::chrono::milliseconds(WaitSliceMs));
-    if (wait->done) {
-        *out = wait->credentials;
-        wait->credentials.wipe();
-        return wait->result;
+    {
+        std::unique_lock lock(wait->mutex);
+        while (!wait->done && !conn->canceled.load() && Clock::now() < deadline)
+            wait->cond.wait_for(lock, std::chrono::milliseconds(WaitSliceMs));
+        if (wait->done) {
+            *out = wait->credentials;
+            wait->credentials.wipe();
+            return wait->result;
+        }
+        wait->abandoned = true;
     }
-    wait->abandoned = true;
-    lock.unlock();
     postToQt([wait]() {
         if (wait->source)
             wait->source->deleteLater();   // ends the session with signond
@@ -213,9 +214,9 @@ Result signonCredentials(const nvb_conn *conn, const nvb_secret &secret, Credent
     if (onQtThread())
         return Result(Error::Internal, QStringLiteral("A signond lookup cannot wait on the Qt thread"));
     auto wait = std::make_shared<SecretWait>();
-    const quint32 id = secret.credentials_id;
-    const bool optional = secret.secret_optional != 0;
-    if (!postToQt([wait, id, optional]() { startLookup(wait, id, optional); }))
+    if (!postToQt([wait, id = secret.credentials_id, optional = secret.secret_optional != 0]() {
+            startLookup(wait, id, optional);
+        }))
         return Result(Error::Internal, QStringLiteral("The Qt event loop is not running"));
     const Result r = awaitLookup(conn, wait, out);
     if (r.ok() && out->userName.isEmpty())

@@ -11,6 +11,7 @@
 #include <QtCore/QEvent>
 #include <QtCore/QThread>
 
+#include <array>
 #include <mutex>
 #include <stdexcept>
 #include <typeinfo>
@@ -54,11 +55,8 @@ protected:
     {
         if (event->type() != FunctorEvent::eventType())
             return QObject::event(event);
-        try {
-            static_cast<FunctorEvent *>(event)->run();
-        } catch (...) {
-            internalResult(std::current_exception());   // T7: never into Qt's event loop
-        }
+        const auto *functor = static_cast<const FunctorEvent *>(event);
+        guardedVoid([functor]() { functor->run(); });   // T7: never into Qt's event loop
         return true;
     }
 };
@@ -75,7 +73,7 @@ struct App {
     // Design §1.2: argc = 1, argv = { app_name } for the life of the app.
     QByteArray name;
     int argc = 1;
-    char *argv[2] = { nullptr, nullptr };
+    std::array<char *, 2> argv { nullptr, nullptr };
 };
 
 App &app()
@@ -93,7 +91,7 @@ int32_t init(nvb_bytes appName) noexcept
             return -1;
         a.name = toByteArray(appName);
         a.argv[0] = a.name.data();
-        a.app = std::make_unique<QCoreApplication>(a.argc, a.argv);
+        a.app = std::make_unique<QCoreApplication>(a.argc, a.argv.data());
         a.queue = new MainQueue(a.app.get());   // owned by the application
         a.initialized = true;
         return 0;
@@ -252,16 +250,18 @@ const nvb_ffi_v1 Table = {
 
 } // namespace
 
+// The one place that looks into what a table function caught (T7). Any type
+// can arrive: std::exception gives a message, anything else none.
 Result internalResult(const std::exception_ptr &thrown)
 {
-    QString what = QStringLiteral("unknown exception");
+    QString what = QStringLiteral("no exception");
     try {
         if (thrown)
             std::rethrow_exception(thrown);
     } catch (const std::exception &e) {
         what = QString::fromLocal8Bit(e.what());
     } catch (...) {
-        // Not a std::exception: nothing more to say than "unknown".
+        what = QStringLiteral("unknown exception");   // not a std::exception: no message
     }
     qCWarning(lcNetVfsFfi).noquote() << "Internal error:" << what;
     return Result(Error::Internal, QStringLiteral("Internal error: %1").arg(what));
