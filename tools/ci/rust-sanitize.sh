@@ -32,5 +32,13 @@ export ASAN_OPTIONS="detect_leaks=1:abort_on_error=1:detect_stack_use_after_retu
 # Third-party leaks only (Qt, libaccounts), as for the C++ sanitizer job.
 export LSAN_OPTIONS="suppressions=$root/tools/sanitizer/lsan.supp:print_suppressions=0"
 export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$PWD/target/asan}"
-cargo +"$toolchain" nextest run -Zbuild-std --target "$host" --locked --workspace --all-features \
-    --profile ci
+run() {
+    cargo +"$toolchain" nextest run -Zbuild-std --target "$host" --locked --workspace --all-features \
+        --profile ci "$@"
+}
+# The helper confined by its own seccomp filter cannot be stopped by
+# LeakSanitizer (no ptrace), so the sandbox tests run with ASan alone.
+sandbox='binary_id(netvfs-accounts::sandbox)'
+run -E "not $sandbox"
+ASAN_OPTIONS="detect_leaks=0:abort_on_error=1:detect_stack_use_after_return=1" \
+    run -E "$sandbox"
