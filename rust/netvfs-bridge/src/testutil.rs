@@ -15,14 +15,20 @@ use std::sync::atomic::{AtomicU32, Ordering};
 pub struct TempDir(PathBuf);
 
 impl TempDir {
-    /// Creates the folder.
+    /// Creates the folder: a new one, never a leftover of a test process
+    /// that was killed (and had the same process id).
     #[must_use]
     pub fn new() -> Self {
         static NEXT: AtomicU32 = AtomicU32::new(0);
-        let n = NEXT.fetch_add(1, Ordering::Relaxed);
-        let path = std::env::temp_dir().join(format!("nvb-test-{}-{n}", std::process::id()));
-        std::fs::create_dir_all(&path).expect("temporary folder");
-        Self(path)
+        loop {
+            let n = NEXT.fetch_add(1, Ordering::Relaxed);
+            let path = std::env::temp_dir().join(format!("nvb-test-{}-{n}", std::process::id()));
+            match std::fs::create_dir(&path) {
+                Ok(()) => return Self(path),
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+                Err(e) => panic!("temporary folder {}: {e}", path.display()),
+            }
+        }
     }
 
     /// The folder.
@@ -156,6 +162,25 @@ mod tests {
         let kept = dir.path().to_owned();
         drop(dir);
         assert!(!kept.exists());
+    }
+
+    #[test]
+    fn leftovers_are_skipped() {
+        // Folders a killed test process with this process id left behind.
+        let mut planted = Vec::new();
+        for n in 0..8 {
+            let path = std::env::temp_dir().join(format!("nvb-test-{}-{n}", std::process::id()));
+            if std::fs::create_dir(&path).is_ok() {
+                std::fs::write(path.join("stale"), "x").unwrap();
+                planted.push(path);
+            }
+        }
+        let dir = TempDir::new();
+        assert!(!planted.iter().any(|p| p == dir.path()));
+        assert!(std::fs::read_dir(dir.path()).unwrap().next().is_none());
+        for path in planted {
+            std::fs::remove_dir_all(path).unwrap();
+        }
     }
 
     #[test]
