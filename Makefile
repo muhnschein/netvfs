@@ -45,7 +45,7 @@ TEST_ENV = QT_QPA_PLATFORM=offscreen
 CARGO ?= cargo
 # cargo nextest profile (rust/.config/nextest.toml); CI uses "ci".
 NEXTEST_PROFILE ?= default
-RUST_FEATURES = --features netvfs-accounts/probe,netvfs-bridge/testing
+RUST_FEATURES = --features netvfs-accounts/probe,netvfs-bridge/testing,netvfs-bridge/test-bins
 # rust-toolchain.toml would override the toolchain a job installs, so the
 # oldest supported one (rust-version) is named explicitly.
 RUST_MSRV = $(shell sed -n -e 's/^rust-version = "\([0-9]*\.[0-9]*\)"/\1.0/p' \
@@ -89,14 +89,18 @@ check-rust:
 	cd rust && $(RUST_ENV) $(CARGO) test --locked --workspace --doc $(RUST_FEATURES)
 	cd rust && $(CARGO) +$(RUST_MSRV) check --locked --workspace --all-targets $(RUST_FEATURES)
 
-# netvfs-bridge's ffi module against the C++ library this build made, with
-# the fake backend (rust/netvfs-bridge/tests/ffi.rs; doc/RUST.md). The same
-# build as check-rust's (so `make coverage` finds its counters); there the
-# test binary only says it is skipped, since the variables are not set. Under
-# SANITIZE=1 the library is instrumented with gcc's ASan, whose runtime must
-# be loaded first: the test binary is not instrumented, so it is preloaded.
-# Into the test binary only, as cargo's target runner: preloaded into cargo
-# and rustc as well, the runtime deadlocks rustc before anything is built.
+# netvfs-bridge's tests that need the C ABI, against the C++ library this
+# build made, with the fake backend (rust/netvfs-bridge/tests: ffi, backend,
+# server, and through the cargo-built binary process, contract,
+# notifications and accounts; doc/RUST.md). The whole package runs, so no
+# such test is missed. The same build as check-rust's (so `make coverage`
+# finds its counters); there those tests only say they are skipped, since
+# the variables are not set. Under SANITIZE=1 the library is instrumented
+# with gcc's ASan, whose runtime must be loaded first: the test binary is not
+# instrumented, so it is preloaded (and the bridge binary it starts inherits
+# that). Into the test binary only, as cargo's target runner: preloaded into
+# cargo and rustc as well, the runtime deadlocks rustc before anything is
+# built.
 FFI_TEST_ENV = NETVFS_BRIDGE_FFI=$(BUILD_DIR)/lib/netvfs/libnetvfs-bridge-ffi.so \
     NETVFS_BRIDGE_FFI_FAKE=$(BUILD_DIR)/lib/libnetvfs-bridge-ffi-fake.so \
     NETVFS_BACKEND_PATH=$(BUILD_DIR)/lib/netvfs/test-backends
@@ -104,10 +108,13 @@ ifeq ($(SANITIZE),1)
 RUST_HOST := $(shell rustc -vV | sed -n 's/^host: //p' | tr a-z- A-Z_)
 FFI_TEST_ENV += CARGO_TARGET_$(RUST_HOST)_RUNNER="env \
     LD_PRELOAD=$$($(CXX) -print-file-name=libasan.so):$$($(CXX) -print-file-name=libubsan.so)"
+# Tests that measure the resident set skip that under ASan (its quarantine
+# keeps freed memory), as in rust-sanitize.sh.
+FFI_TEST_ENV += NETVFS_TEST_SANITIZER=address
 endif
 check-rust-ffi: all
 	cd rust && $(TEST_ENV) $(FFI_TEST_ENV) $(RUST_ENV) $(CARGO) nextest run --locked --workspace $(RUST_FEATURES) \
-	    --profile $(NEXTEST_PROFILE) -E 'binary_id(netvfs-bridge::ffi)'
+	    --profile $(NEXTEST_PROFILE) -E 'package(netvfs-bridge)'
 
 clippy-report:
 	mkdir -p $(BUILD_DIR)

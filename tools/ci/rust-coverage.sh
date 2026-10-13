@@ -21,7 +21,7 @@ tools=$(rustc --print sysroot)/lib/rustlib/$host/bin
 objects="$build/rust-target/release/netvfs-accounts $build/rust-target/release/netvfs-bridge"
 objects="$objects $(RUSTFLAGS="-C instrument-coverage" NETVFS_RUST_COVERAGE_DIR="$build/rust-coverage" \
     CARGO_TARGET_DIR="$build/rust-test-target" \
-    cargo test --locked --workspace --features netvfs-accounts/probe,netvfs-bridge/testing --no-run --message-format=json 2>/dev/null \
+    cargo test --locked --workspace --features netvfs-accounts/probe,netvfs-bridge/testing,netvfs-bridge/test-bins --no-run --message-format=json 2>/dev/null \
     | python3 -c '
 import json, sys
 for line in sys.stdin:

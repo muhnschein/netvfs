@@ -36,6 +36,23 @@ void writeFile(const QString &path, const QByteArray &content)
         f.write(content);
 }
 
+// The helper for the bridge. Under SANITIZE=1 the bridge has the sanitizer
+// runtimes preloaded (bridgeEnvironment()), and the helper would inherit
+// them; LeakSanitizer stops threads with ptrace, which the helper's seccomp
+// filter refuses, so a script in `folder` drops the preload first.
+QString accountsHelper(const QString &folder)
+{
+#ifdef NETVFS_TEST_BRIDGE_PRELOAD
+    const QString script = folder + QStringLiteral("/netvfs-accounts");
+    writeFile(script, "#!/bin/sh\nunset LD_PRELOAD\nexec '" + AccountsHelper + "' \"$@\"\n");
+    QFile::setPermissions(script, QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner);
+    return script;
+#else
+    Q_UNUSED(folder)
+    return QString::fromLocal8Bit(AccountsHelper);
+#endif
+}
+
 int listenOn(const QString &path)
 {
     const int fd = ::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
@@ -132,7 +149,7 @@ void tst_BridgeProcess::socketActivation()
     env.insert(QStringLiteral("XDG_DATA_HOME"), dir.path() + QStringLiteral("/data"));
     env.insert(QStringLiteral("NETVFS_CONSUMERS_DIR"), dir.path() + QStringLiteral("/consumers"));
     env.insert(QStringLiteral("NETVFS_BRIDGE_IDLE_EXIT_MS"), QStringLiteral("500"));
-    env.insert(QStringLiteral("NETVFS_ACCOUNTS_HELPER"), QString::fromLocal8Bit(AccountsHelper));
+    env.insert(QStringLiteral("NETVFS_ACCOUNTS_HELPER"), accountsHelper(dir.path()));
 
     const QString socketPath = dir.path() + QStringLiteral("/bridge.sock");
     const int listenFd = listenOn(socketPath);
