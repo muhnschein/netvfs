@@ -251,10 +251,10 @@ mod tests {
     fn copies_on_a_thread_and_gives_the_slots_back() {
         let (mock, mut pools, mut jobs, mut rx) = jobs(4);
         let (tx, seen) = mpsc::channel();
-        assert!(jobs.is_idle() && jobs.is_empty());
+        assert_eq!((jobs.len(), jobs.is_idle(), jobs.is_empty()), (0, true, true));
         let id = jobs.start(&mut pools, spec("a", "h"), spec("b", "i"), task(), body(&tx, Ok(()))).unwrap();
         assert_eq!(seen.recv().unwrap(), (1, 2, Some("nvb-copy".to_owned())));
-        assert_eq!((jobs.len(), jobs.is_idle()), (1, false));
+        assert_eq!((jobs.len(), jobs.is_idle(), jobs.is_empty()), (1, false, false));
         assert_eq!((pools.hosts().in_use("fake://h:0"), pools.hosts().in_use("fake://i:0")), (1, 1));
         assert_eq!(done(&mut rx), (id, Ok(())));
         assert!(format!("{jobs:?}").contains("CopyId(1)"));

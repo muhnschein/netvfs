@@ -65,4 +65,37 @@ exclude_re = [
     # sysconf(_SC_CLK_TCK) is never 0 on Linux; the guard only turns -1
     # (error) into None.
     'netvfs-bridge/src/sys/peer\.rs:\d+:\d+: replace > with >= in clock_ticks_per_second$',
+    # netvfs-bridge jobs/fdio.rs, the `n > 0` guards after write(2) to a
+    # FIFO and pwrite(2) to a regular file (-> true, -> >=): neither
+    # returns 0 for a non-empty buffer, so 0 never reaches the guard.
+    'netvfs-bridge/src/jobs/fdio\.rs:\d+:\d+: replace match guard n > 0 with true in (FdDevice<.a>::write_fifo|<impl WriteAt for FdDevice<._>>::write_at)$',
+    'netvfs-bridge/src/jobs/fdio\.rs:\d+:\d+: replace > with >= in (FdDevice<.a>::write_fifo|<impl WriteAt for FdDevice<._>>::write_at)$',
+    # netvfs-bridge jobs/fdio.rs write_at, a pwrite failing after an earlier
+    # one of the same call (written > 0 -> false): the call loops only for
+    # more than 2 GiB (MAX_CHUNK), which a test cannot write.
+    'netvfs-bridge/src/jobs/fdio\.rs:\d+:\d+: replace match guard written > 0 with false in <impl WriteAt for FdDevice<._>>::write_at$',
+    # netvfs-bridge locations/connector.rs establish_ad_hoc (declined &&
+    # Unknown -> ||): a declined identity always ends in
+    # ServerIdentityUnknown, and that failure comes only after a decline
+    # (an accepted one passes, a canceled ask ends Canceled).
+    'netvfs-bridge/src/locations/connector\.rs:\d+:\d+: replace && with \|\| in Connector::establish_ad_hoc$',
+    # netvfs-bridge locations/connector.rs Connector::reset_cancel -> ():
+    # defensive, as conn_reset_cancel after every item in C++; a worker
+    # cancels a connection only for an item whose flag is set, and such an
+    # item always drops the connection, so no canceled one is reused.
+    'netvfs-bridge/src/locations/connector\.rs:\d+:\d+: replace <impl Backend for Connector>::reset_cancel with \(\)$',
+    # netvfs-bridge locations/pool.rs retire (index < len -> <=): every
+    # caller passes the index of a connection it just found.
+    'netvfs-bridge/src/locations/pool\.rs:\d+:\d+: replace < with <= in Pool<B>::retire$',
+    # netvfs-bridge locations/pool.rs reap_pool (released > 0 -> >=):
+    # releasing 0 slots changes nothing, and resubmitting waiting work when
+    # no slot came free queues it again in the same order.
+    'netvfs-bridge/src/locations/pool\.rs:\d+:\d+: replace > with >= in PoolSet<B>::reap_pool$',
+    # netvfs-bridge sys/fd.rs, the EINTR arms of retry and poll: no test
+    # can make read/write/pread/pwrite or poll fail with EINTR (the bridge
+    # installs no signal handlers), and poll of one live pollfd has no
+    # other error a test can cause (a closed descriptor is POLLNVAL in
+    # revents, not an error).
+    'netvfs-bridge/src/sys/fd\.rs:\d+:\d+: replace match guard e\.kind\(\) == io::ErrorKind::Interrupted with (false in retry|(true|false) in poll)$',
+    'netvfs-bridge/src/sys/fd\.rs:\d+:\d+: replace == with != in poll$',
 ]

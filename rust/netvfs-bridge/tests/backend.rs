@@ -698,27 +698,25 @@ fn cancel_kicks_a_running_listing(env: &Env) {
     let id = ad_hoc(&mut rig, Some(b"secret"));
     connect(&mut rig, &id).unwrap();
     let task = TaskContext::new(SessionId(1), Arc::new(AtomicBool::new(false)));
-    let budget = Arc::new(FlowBudget::new(usize::MAX));
     let (started_tx, started) = mpsc::channel();
-    let (cancel, list_budget) = (Arc::clone(&task.cancel), Arc::clone(&budget));
+    // The sink never stops it: only the connection's cancel does.
     let rx = on_worker(
         &mut rig,
         &id,
         task.clone(),
         Box::new(move |conn, _, _| {
-            let result = batch::list(conn, b"/slow", 1, &list_budget, &cancel, |_, bytes| {
-                list_budget.release(bytes);
+            let result = conn.list(b"/slow", 1, |_| {
                 let _sent = started_tx.send(());
                 true
             });
-            ((), result)
+            (result.clone(), result)
         }),
     );
     started.recv_timeout(Duration::from_secs(10)).unwrap();
     let start = Instant::now();
     task.cancel.store(true, Ordering::Release);
     rig.book.kick();
-    get(&rx).unwrap();
+    assert_eq!(name_of(&get(&rx).unwrap()), Some(ErrorName::Canceled));
     assert!(start.elapsed() < Duration::from_secs(2), "{:?}", start.elapsed());
     // The canceled item dropped its connection.
     wait_until("the connection freed", || f.live_backends() == 0);
@@ -1060,6 +1058,7 @@ fn copy_jobs_use_two_connections(env: &Env) {
     let destination = ad_hoc(&mut rig, Some(b"secret"));
     assert!(rig.book.add_ad_hoc(&destination));
     let backend = Arc::clone(rig.book.pools().backend());
+    assert!(format!("{backend:?}").starts_with("Connector"));
     let mut jobs = CopyJobs::new(backend, rig.core.events());
     let task = TaskContext::detached();
     let spec = |id: &str| Arc::clone(rig.book.find(id).unwrap());

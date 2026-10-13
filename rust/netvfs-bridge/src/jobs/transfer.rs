@@ -106,6 +106,7 @@ mod tests {
         assert_eq!(transfer_length(&job(true, FILE, 30, -1)), 70);
         assert_eq!(transfer_length(&job(true, FILE, 130, -1)), 0);
         assert_eq!(transfer_length(&job(true, FILE, 30, 5)), 5);
+        assert_eq!(transfer_length(&job(true, FILE, 30, 0)), 0);
         assert_eq!(transfer_length(&job(true, FIFO, 30, -1)), -1);
         assert_eq!(transfer_length(&job(false, FILE, 30, -1)), -1);
         assert_eq!(transfer_length(&job(false, FILE, 30, 8)), 8);

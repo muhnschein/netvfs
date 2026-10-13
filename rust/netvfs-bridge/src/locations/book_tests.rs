@@ -5,7 +5,7 @@
 
 use super::*;
 use crate::ffi::{Params, Value};
-use crate::locations::mock::{Mock, MockHandle, Seen, recv, reporting, task};
+use crate::locations::mock::{Mock, MockHandle, Seen, blocking, recv, reporting, task};
 use crate::locations::spec::{AdHocSecret, Attention};
 use std::sync::{Mutex, mpsc};
 use zeroize::Zeroizing;
@@ -280,6 +280,23 @@ fn work_runs_on_the_locations_connections() {
         std::thread::sleep(Duration::from_millis(2));
     }
     assert!(changed, "the stopped connection was freed");
+}
+
+#[test]
+fn kick_cancels_running_work_whose_flag_is_set() {
+    let (mock, mut book) = book();
+    book.set_accounts(vec![account(1, "a")]);
+    assert!(book.ensure_pool("account:1", true, available).is_ok());
+    let (tx, rx) = mpsc::channel();
+    let (_go, wait) = mpsc::channel();
+    let flagged = task();
+    book.submit("account:1", Lane::Interactive, flagged.clone(), blocking(&tx, wait, Ok(())));
+    assert_eq!(recv(&rx), Seen::Conn(1));
+    flagged.cancel.store(true, std::sync::atomic::Ordering::Release);
+    book.kick();
+    mock.wait_for("cancel 1", 1);
+    // The item ended canceled: its connection goes.
+    mock.wait_for("free 1", 1);
 }
 
 #[test]

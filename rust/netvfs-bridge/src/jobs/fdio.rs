@@ -328,6 +328,28 @@ mod tests {
     }
 
     #[test]
+    fn a_fifo_write_that_fills_the_pipe_returns_at_once() {
+        let (mut r, w) = pipe();
+        let fill = vec![0u8; libc::PIPE_BUF];
+        while fd::poll(w.as_fd(), Ready::Write, 0).unwrap() {
+            assert_eq!(fd::write(w.as_fd(), &fill).unwrap(), libc::PIPE_BUF);
+        }
+        std::io::Read::read_exact(&mut r, &mut vec![0u8; libc::PIPE_BUF]).unwrap();
+        // Exactly the room left: done without waiting for more room.
+        let canceled = Arc::new(AtomicBool::new(false));
+        let flag = Arc::clone(&canceled);
+        let setter = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(500));
+            flag.store(true, Ordering::Release);
+        });
+        let mut device = FdDevice::new(w.as_fd(), fifo(), 0, -1, &canceled);
+        let start = Instant::now();
+        assert_eq!(device.write_at(0, &fill), Some(libc::PIPE_BUF));
+        assert!(start.elapsed() < Duration::from_millis(400), "{:?}", start.elapsed());
+        setter.join().unwrap();
+    }
+
+    #[test]
     fn fifo_write_gives_up_when_canceled_or_broken() {
         let (r, w) = pipe();
         // Fill the pipe so that the next write would block.

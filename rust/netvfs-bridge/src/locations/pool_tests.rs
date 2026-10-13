@@ -82,10 +82,16 @@ fn lanes_and_their_limits() {
     assert_eq!(seen, Seen::Conn(2));
     let (b2, seen) = busy(&mut set, "a", Lane::Bulk);
     assert_eq!(seen, Seen::Conn(3));
+    // A full lane queues on its own connection, even with less loaded
+    // ones in other lanes.
+    set.submit("a", Lane::Interactive, task(), reporting(&done_tx, Ok(())));
+    assert_eq!(loads(&set, "a"), [(Lane::Interactive, 3), (Lane::Bulk, 1), (Lane::Bulk, 1)]);
+    // The least loaded bulk connection got each; the first of equals.
     set.submit("a", Lane::Bulk, task(), reporting(&done_tx, Ok(())));
+    assert_eq!(loads(&set, "a"), [(Lane::Interactive, 3), (Lane::Bulk, 2), (Lane::Bulk, 1)]);
     set.submit("a", Lane::Bulk, task(), reporting(&done_tx, Ok(())));
-    // The least loaded bulk connection got each.
-    assert_eq!(loads(&set, "a"), [(Lane::Interactive, 2), (Lane::Bulk, 2), (Lane::Bulk, 2)]);
+    assert_eq!(loads(&set, "a"), [(Lane::Interactive, 3), (Lane::Bulk, 2), (Lane::Bulk, 2)]);
+    assert!(format!("{:?}", set.get("a").unwrap()).contains("connections: 3"));
     // Stream has one, and with it the host is full.
     let (s1, seen) = busy(&mut set, "a", Lane::Stream);
     assert_eq!(seen, Seen::Conn(4));
@@ -95,7 +101,7 @@ fn lanes_and_their_limits() {
     for go in [i1, b1, b2, s1] {
         go.send(()).unwrap();
     }
-    for _ in 0..3 {
+    for _ in 0..4 {
         assert!(matches!(recv(&done_rx), Seen::Conn(_)));
     }
     wait_until(|| set.is_idle());
@@ -151,6 +157,26 @@ fn an_idle_connection_of_another_location_makes_room() {
     assert!(set.maintain(Instant::now(), IDLE));
     assert_eq!(set.closing(), 0);
     assert_eq!(set.hosts().in_use("fake://h:0"), 1);
+}
+
+#[test]
+fn an_evicted_connection_of_a_removed_pool_frees_no_slot_twice() {
+    let (mock, mut set) = set(1);
+    set.add(spec("a", "h"));
+    set.add(spec("b", "h"));
+    let (tx, rx) = mpsc::channel();
+    set.submit("a", Lane::Bulk, task(), reporting(&tx, Ok(())));
+    assert_eq!(recv(&rx), Seen::Conn(1));
+    wait_until(|| pool_idle(&set, "a"));
+    // b evicts a's idle connection (its slot free at once), then a goes.
+    let (go, seen) = busy(&mut set, "b", Lane::Bulk);
+    assert_eq!(seen, Seen::Conn(2));
+    assert!(set.remove("a"));
+    mock.wait_for("free 1", 1);
+    wait_until(|| set.orphans.iter().all(|r| r.worker.finished()));
+    assert!(set.maintain(Instant::now(), IDLE));
+    assert_eq!((set.closing(), set.hosts().in_use("fake://h:0")), (0, 1), "b still holds its slot");
+    drop(go);
 }
 
 #[test]
