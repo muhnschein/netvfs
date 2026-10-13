@@ -164,7 +164,7 @@ impl Writer {
         body(self);
         let length = u32::try_from(self.bytes.len().saturating_sub(start)).unwrap_or(u32::MAX);
         // The placeholder written above: the body only appends, so it is still there.
-        if let Some(slot) = self.bytes.get_mut(at..).and_then(|rest| rest.first_chunk_mut::<4>()) {
+        if let Some(slot) = self.bytes.get_mut(at..).and_then(<[u8]>::first_chunk_mut::<4>) {
             *slot = length.to_le_bytes();
         }
     }
