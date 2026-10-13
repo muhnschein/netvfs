@@ -8,9 +8,10 @@ Shared with consumers (the file browser's fake bridge replays the same files).
   `tst_contract` when the running bridge serves anything else or a reply or signal has another
   signature.
 - `*.json`: golden message sequences, replayed against the `netvfs-bridge` binary by
-  `tst_contract` (a libdbus client, C++) with the in-memory FakeBackend behind one account,
-  `account:1` (provider `fake`, name `Fake 1`, host `fake.example`), and against the fake bridge
-  by the protocol crate's `tests/contract.rs`.
+  `tst_contract` (a libdbus client, C++) and by `rust/netvfs-bridge/tests/contract.rs` (zbus),
+  both with the in-memory FakeBackend behind one account, `account:1` (provider `fake`, name
+  `Fake 1`, host `fake.example`), and against the fake bridge by the protocol crate's
+  `tests/contract.rs`.
 
 ## Sequence format
 
