@@ -223,9 +223,12 @@ fn filesystem(check: &mut Checks, allowed: &Path, denied: &Path) -> i32 {
 }
 
 fn set_id_environment(check: &mut Checks) {
-    std::env::set_var("HOME", "/tmp/someone-else");
-    std::env::set_var("ACCOUNTS", "/tmp/evil");
-    std::env::set_var("LANG", "fi_FI.UTF-8");
+    // SAFETY: the probe runs one check per process and has one thread.
+    unsafe {
+        std::env::set_var("HOME", "/tmp/someone-else");
+        std::env::set_var("ACCOUNTS", "/tmp/evil");
+        std::env::set_var("LANG", "fi_FI.UTF-8");
+    }
     // SAFETY: valid rlimit structs.
     let before = unsafe {
         let mut core = libc::rlimit { rlim_cur: 0, rlim_max: 0 };

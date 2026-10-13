@@ -1,6 +1,7 @@
-# The Sailfish OS 5.2 SDK target ships rustc 1.75; host builds, lints and
-# tests use the same release, so the floor in Cargo.toml is what CI runs.
+# The compiler the Sailfish OS SDK will ship (rust-version in Cargo.toml):
+# builds, lints and tests use it, so CI checks what the target compiles.
+# scheduled.yml runs the current stable's clippy as well.
 [toolchain]
-channel = "1.75.0"
+channel = "1.95.0"
 components = ["clippy", "rustfmt", "llvm-tools-preview"]
 profile = "minimal"

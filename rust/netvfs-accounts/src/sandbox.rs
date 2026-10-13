@@ -177,7 +177,9 @@ pub fn prepare_set_id_process() -> Option<Vec<String>> {
     let removed: Vec<_> =
         std::env::vars_os().map(|(name, _)| name).filter(|n| !kept_in_set_id_process(n)).collect();
     for name in &removed {
-        std::env::remove_var(name);
+        // SAFETY: called first thing in `main()`, while the process has one
+        // thread, so nothing reads the environment concurrently.
+        unsafe { std::env::remove_var(name) };
     }
     let mut core = libc::rlimit { rlim_cur: 0, rlim_max: 0 };
     // SAFETY: valid rlimit structs.
@@ -189,10 +191,12 @@ pub fn prepare_set_id_process() -> Option<Vec<String>> {
     }
     let runtime = runtime_dir();
     if std::env::var_os("XDG_RUNTIME_DIR").is_none() && owned_directory(&runtime, uid()) {
-        std::env::set_var("XDG_RUNTIME_DIR", &runtime);
+        // SAFETY: as above, one thread.
+        unsafe { std::env::set_var("XDG_RUNTIME_DIR", &runtime) };
     }
     let home = home_of(uid())?;
-    std::env::set_var("HOME", home);
+    // SAFETY: as above, one thread.
+    unsafe { std::env::set_var("HOME", home) };
     Some(removed.iter().map(|n| n.to_string_lossy().into_owned()).collect())
 }
 

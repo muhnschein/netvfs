@@ -1,2 +1,7 @@
+# Tests may unwrap, panic and index: a failing test is the point.
 allow-unwrap-in-tests = true
 allow-expect-in-tests = true
+allow-panic-in-tests = true
+allow-indexing-slicing-in-tests = true
+allow-dbg-in-tests = false
+allow-print-in-tests = true

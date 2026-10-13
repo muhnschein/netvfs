@@ -6,7 +6,7 @@
 [package]
 name = "netvfs-accounts-fuzz"
 version = "0.0.0"
-edition = "2021"
+edition = "2024"
 license = "LGPL-2.1-or-later"
 publish = false
 

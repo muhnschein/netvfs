@@ -30,4 +30,4 @@ probe = []
 
 [dependencies]
 libc = "0.2"
-rusqlite = { version = "0.31", default-features = false }
+rusqlite = { version = "0.40", default-features = false }
