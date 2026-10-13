@@ -1,7 +1,8 @@
 name: Weekly
 # What can change without a commit: advisories against the locked crates,
 # the next stable clippy, the online workflow audit, and the Rust tests under
-# AddressSanitizer and LeakSanitizer (doc/RUST.md "CI").
+# AddressSanitizer and LeakSanitizer, netvfs-bridge's FFI test with the C++
+# side instrumented too (doc/RUST.md "Tests").
 on:
   schedule:
     - cron: "41 4 * * 1"
@@ -77,9 +78,7 @@ jobs:
           persist-credentials: false
       - name: Install dependencies
         run: |
-          sudo apt-get update -q
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends \
-              pkg-config libsqlite3-dev
+          ./tools/ci/install-host-deps.sh
           rustup toolchain install "$SANITIZER_NIGHTLY" --profile minimal --component rust-src
       - name: Cache cargo-nextest
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
@@ -88,5 +87,9 @@ jobs:
           key: cargo-nextest-${{ env.NEXTEST_VERSION }}-ubuntu-24.04
       - name: Install cargo-nextest
         run: ./tools/ci/cargo-tool.sh cargo-nextest "$NEXTEST_VERSION"
+      # The C++ side of the FFI test with clang's ASan, whose runtime the
+      # Rust test binary links (doc/RUST.md "Tests", design §6.6).
+      - name: Build the FFI's C++ libraries with ASan (clang)
+        run: ./tools/ci/ffi-libs.sh build-ffi-asan --asan
       - name: Tests under ASan + LSan
-        run: ./tools/ci/rust-sanitize.sh "$SANITIZER_NIGHTLY"
+        run: ./tools/ci/rust-sanitize.sh "$SANITIZER_NIGHTLY" build-ffi-asan
