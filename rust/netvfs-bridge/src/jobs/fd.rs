@@ -115,8 +115,11 @@ mod tests {
         let path = dir.path().join("f");
         write_file(&path, b"0123456789");
 
-        // 0 is a descriptor like any other (stdin), not a missing one.
-        assert_ne!(check_transfer_fd(0, FdAccess::Read).unwrap_err().message, "No file descriptor");
+        // 0 is a descriptor like any other (stdin), not a missing one; what
+        // it is depends on how the tests run (a terminal, /dev/null, a pipe).
+        if let Err(e) = check_transfer_fd(0, FdAccess::Read) {
+            assert_ne!(e.message, "No file descriptor");
+        }
         let rd = File::open(&path).unwrap();
         assert_eq!(
             check_transfer_fd(rd.as_raw_fd(), FdAccess::Read).unwrap(),

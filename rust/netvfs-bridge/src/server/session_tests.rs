@@ -259,7 +259,13 @@ async fn flow_control_bounded() {
     let cancel = Arc::new(AtomicBool::new(false));
     let sent = Arc::new(AtomicUsize::new(0));
     let mut finished = producer(Arc::clone(&cancel), Arc::clone(&sent));
-    // Saturated once nothing more gets through for a while.
+    // Saturated once the budget is spent and nothing more gets through for
+    // a while (a slow machine, qemu, may take long for the first batch).
+    let deadline = Instant::now() + Duration::from_secs(60);
+    while outbox.flow().in_flight() <= FLOW_LIMIT {
+        assert!(Instant::now() < deadline, "{} batches sent", sent.load(Ordering::SeqCst));
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
     let mut last = usize::MAX;
     while sent.load(Ordering::SeqCst) != last {
         last = sent.load(Ordering::SeqCst);
