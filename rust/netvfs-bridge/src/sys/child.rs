@@ -16,12 +16,11 @@ use std::process::Command;
 pub fn kill_with_parent(command: &mut Command) -> &mut Command {
     let parent = std::process::id();
     let pre_exec = move || {
-        // SAFETY: prctl and getppid are async-signal-safe and take no
-        // pointers; this runs in the child between fork and exec.
-        let (set, ppid) = unsafe { (libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL), libc::getppid()) };
-        if set == -1 {
-            return Err(io::Error::last_os_error());
-        }
+        // SAFETY: prctl is async-signal-safe and takes no pointers here;
+        // this runs in the child between fork and exec.
+        super::check(unsafe { libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL) })?;
+        // SAFETY: getppid takes nothing and cannot fail.
+        let ppid = unsafe { libc::getppid() };
         // The parent died before the call above: nobody would kill us.
         if u32::try_from(ppid).ok() != Some(parent) {
             return Err(io::Error::from_raw_os_error(libc::ESRCH));

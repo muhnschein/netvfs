@@ -14,9 +14,9 @@
     clippy::assertions_on_result_states
 )]
 
+use netvfs_bridge::accounts::watch;
 use netvfs_bridge::consent::Consent;
 use netvfs_bridge::testing::{BridgeRun, WAIT, wait_signal};
-use netvfs_bridge::accounts::watch;
 use netvfs_bridge::testutil::{TestBus, TestChild};
 use netvfs_bridge_proto::{PROTOCOL_VERSION, Signal};
 use std::io::{Read as _, Write as _};
@@ -243,7 +243,8 @@ fn account_changes_on_the_session_bus() {
                 .unwrap();
             let changed = wait_signal(&mut signals, WAIT, |s| matches!(s, Signal::LocationsChanged)).await;
             assert!(changed.is_some(), "account {id}: {}", run.log());
-            let ids: Vec<String> = c.proxy().list_locations().await.unwrap().into_iter().map(|l| l.id).collect();
+            let ids: Vec<String> =
+                c.proxy().list_locations().await.unwrap().into_iter().map(|l| l.id).collect();
             assert_eq!(ids.len(), usize::try_from(id).unwrap(), "{ids:?}");
             assert!(ids.contains(&format!("account:{id}")), "{ids:?}");
         }
