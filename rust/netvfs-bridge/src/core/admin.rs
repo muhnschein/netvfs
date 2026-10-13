@@ -210,8 +210,11 @@ impl Core {
         opts: AdHocOpts,
     ) {
         let ffi = self.ffi;
-        let parsed = ffi
-            .url_parse(url)
+        let parsed = match self.url_override.as_ref().and_then(|parse| parse(url)) {
+            Some(parsed) => Ok(parsed),
+            None => ffi.url_parse(url),
+        };
+        let parsed = parsed
             .and_then(|parsed| check_ad_hoc(&parsed, &opts, |p| ffi.provider_available(p)).map(|()| parsed));
         let ParsedUrl { mut params, path } = match parsed {
             Ok(parsed) => parsed,

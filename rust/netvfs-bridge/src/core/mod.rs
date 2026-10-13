@@ -32,7 +32,7 @@ use crate::accounts::watch::AccountChanges;
 use crate::accounts::{AccountDirectory, AccountLocation, Attention, FilesAccess};
 use crate::config::{ConsumerInfo, Env};
 use crate::consent::{Consent, ConsentStore, ConsentWatcher};
-use crate::ffi::{Conn, Ffi};
+use crate::ffi::{Conn, Ffi, ParsedUrl};
 use crate::handoff::{self, Handoff, HandoffCall, Launcher, SessionBusLauncher};
 use crate::jobs::JobOutcome;
 use crate::locations::book::LocationBook;
@@ -154,6 +154,11 @@ impl fmt::Debug for Services {
 /// exists ([`CoreLink`]).
 pub type MakeServices = Box<dyn FnOnce(CoreLink) -> LocalFuture<'static, Services> + Send>;
 
+/// Parses the `ConnectAdHoc` URLs it knows (`None`: the C ABI's
+/// `Url::parse` does): ad-hoc locations of the fake backend in tests, which
+/// has no URL scheme of its own.
+pub type UrlOverride = Arc<dyn Fn(&str) -> Option<ParsedUrl> + Send + Sync>;
+
 /// The injectable dependencies of [`serve`](crate::serve).
 pub struct Deps {
     /// The C ABI (loaded and `init`ed on the main thread).
@@ -162,11 +167,17 @@ pub struct Deps {
     pub listen: ListenAddress,
     /// The accounts, the prompt, the discovery and the handoff launcher.
     pub services: MakeServices,
+    /// URLs parsed before the C ABI sees them; `None` in the bridge.
+    pub url_override: Option<UrlOverride>,
 }
 
 impl fmt::Debug for Deps {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Deps").field("ffi", &self.ffi).field("listen", &self.listen).finish_non_exhaustive()
+        f.debug_struct("Deps")
+            .field("ffi", &self.ffi)
+            .field("listen", &self.listen)
+            .field("url_override", &self.url_override.is_some())
+            .finish_non_exhaustive()
     }
 }
 
@@ -178,7 +189,7 @@ impl Deps {
     pub fn system(ffi: Ffi, listen: ListenAddress, env: &Env) -> Self {
         let helper = env.accounts_helper();
         let services: MakeServices = Box::new(move |link| Box::pin(system_services(ffi, helper, link)));
-        Self { ffi, listen, services }
+        Self { ffi, listen, services, url_override: None }
     }
 }
 
@@ -433,6 +444,8 @@ pub(crate) struct Core {
     idle_deadline: Option<Instant>,
     /// Answers to the prompt being stored.
     consent_writes: usize,
+    /// See [`Deps::url_override`].
+    url_override: Option<UrlOverride>,
 }
 
 impl fmt::Debug for Core {
@@ -487,6 +500,7 @@ pub(crate) async fn run(config: Config, deps: Deps) -> ExitCode {
     let services = (deps.services)(CoreLink(tx.clone())).await;
     watch_consent_file(&config, &tx);
     let mut core = Core::new(config, deps.ffi, tx, services);
+    core.url_override = deps.url_override;
     let accounts = core.accounts.list().await;
     core.set_accounts(&accounts);
     core.run(&mut rx).await;
@@ -547,6 +561,7 @@ impl Core {
             sessions: BTreeMap::new(),
             idle_deadline: None,
             consent_writes: 0,
+            url_override: None,
             config,
         }
     }

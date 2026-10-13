@@ -19,8 +19,8 @@ use crate::config::ConsumerInfo;
 use crate::consent::{Consent, ConsentStore};
 use crate::core::nearby::NearbySource;
 use crate::core::{Config, CoreLink, Counters, Deps, MakeServices, Services};
-use crate::ffi::Ffi;
 use crate::ffi::fake::{self, Fake};
+use crate::ffi::{Ffi, Params, ParsedUrl};
 use crate::handoff::{HandoffCall, Launcher};
 use crate::prompt::{ConsentPrompt, PromptEvent};
 use crate::server::ListenAddress;
@@ -257,6 +257,8 @@ pub struct AccountsState {
     pub fetches: usize,
     /// `set_attention` calls.
     pub attention: Vec<(i32, Attention, String)>,
+    /// `files` never answers.
+    pub hang: bool,
 }
 
 /// An [`AccountDirectory`] in memory (`FakeAccounts` of bridgetest.cpp).
@@ -295,8 +297,15 @@ impl AccountDirectory for FakeAccounts {
     }
 
     async fn files(&self, id: i32) -> Result<FilesAccess, Status> {
-        let mut state = self.state();
-        state.fetches = state.fetches.saturating_add(1);
+        let hang = {
+            let mut state = self.state();
+            state.fetches = state.fetches.saturating_add(1);
+            state.hang
+        };
+        if hang {
+            return std::future::pending().await;
+        }
+        let state = self.state();
         if let Some(error) = &state.files_error {
             return Err(error.clone());
         }
@@ -455,41 +464,96 @@ pub struct Fixture {
     bridge: Option<JoinHandle<ExitCode>>,
 }
 
+/// How a [`Fixture`] starts.
+#[derive(Debug, Clone)]
+pub struct Setup {
+    /// The consent stored before the start.
+    pub consent: Consent,
+    /// The idle exit.
+    pub idle_exit: Duration,
+    /// The consumer's registered executable; `None`: this test binary.
+    pub executable: Option<String>,
+    /// The content of `handoff.conf`; `None`: no file.
+    pub handoff_conf: Option<String>,
+    /// `files` never answers (`HangingAccounts`).
+    pub hang_accounts: bool,
+}
+
+impl Default for Setup {
+    fn default() -> Self {
+        Self {
+            consent: Consent::Granted,
+            idle_exit: FIXTURE_IDLE_EXIT,
+            executable: None,
+            handoff_conf: None,
+            hang_accounts: false,
+        }
+    }
+}
+
+/// `fake://[user@]host[/path]`: an ad-hoc location of the fake backend
+/// (which has no URL scheme of its own); other URLs go to the C ABI.
+#[must_use]
+pub fn fake_url(url: &str) -> Option<ParsedUrl> {
+    let rest = url.strip_prefix("fake://")?;
+    let (authority, path) = rest.split_once('/').map_or((rest, ""), |(a, p)| (a, p));
+    let (user, host) = authority.split_once('@').map_or(("", authority), |(u, h)| (u, h));
+    let params = Params {
+        provider: "fake".to_owned(),
+        host: host.to_owned(),
+        username: user.to_owned(),
+        ..Params::default()
+    };
+    Some(ParsedUrl { params, path: format!("/{path}").into_bytes() })
+}
+
 impl Fixture {
     /// The bridge with `consent` stored, the fixture's idle exit.
     #[must_use]
     pub fn new(harness: &Harness, consent: Consent) -> Self {
-        Self::with_idle_exit(harness, consent, FIXTURE_IDLE_EXIT)
+        Self::start(harness, Setup { consent, ..Setup::default() })
     }
 
     /// The bridge with `consent` stored and the idle exit `idle_exit`.
     #[must_use]
     pub fn with_idle_exit(harness: &Harness, consent: Consent, idle_exit: Duration) -> Self {
+        Self::start(harness, Setup { consent, idle_exit, ..Setup::default() })
+    }
+
+    /// The bridge as `setup` says.
+    #[must_use]
+    pub fn start(harness: &Harness, setup: Setup) -> Self {
         let h = *harness;
         // XA-7: the fake server takes the account's empty optional secret.
         h.fake.set_credentials("user", b"");
         let dir = TempDir::new();
         let socket = dir.join("bridge.sock");
-        let executable = std::env::current_exe().expect("the test's executable");
+        let executable = setup.executable.unwrap_or_else(|| {
+            std::env::current_exe().expect("the test's executable").to_string_lossy().into_owned()
+        });
         let config = Config {
             consumer: ConsumerInfo {
                 id: CONSUMER.to_owned(),
                 display_name: "Test".to_owned(),
-                executable: executable.to_string_lossy().into_owned(),
+                executable,
                 data_dir: "data".to_owned(),
             },
             consent_file: dir.join("config/bridge.conf"),
             known_hosts_file: dir.join("known_hosts"),
             handoff_config: dir.join("handoff.conf"),
-            idle_exit,
+            idle_exit: setup.idle_exit,
             connection_idle: crate::locations::pool::CONNECTION_IDLE,
             question_timeout: crate::locations::connector::QUESTION_TIMEOUT,
         };
+        if let Some(conf) = &setup.handoff_conf {
+            std::fs::write(&config.handoff_config, conf).expect("handoff.conf");
+        }
         let accounts = FakeAccounts::default();
         accounts.state().accounts.push(FakeAccounts::fake_account(1));
+        accounts.state().hang = setup.hang_accounts;
         let (prompt, nearby, launcher) =
             (FakePrompt::default(), FakeNearby::default(), RecordingLauncher::default());
-        ConsentStore::new(&config.consent_file).set_consent(CONSUMER, consent).expect("bridge.conf");
+        ConsentStore::new(&config.consent_file).set_consent(CONSUMER, setup.consent).expect("bridge.conf");
         let (ready, linked) = mpsc::channel::<CoreLink>();
         let services: MakeServices = {
             let (accounts, prompt, nearby, launcher) =
@@ -506,7 +570,12 @@ impl Fixture {
                 })
             })
         };
-        let deps = Deps { ffi: h.ffi, listen: ListenAddress::Path(socket.clone()), services };
+        let deps = Deps {
+            ffi: h.ffi,
+            listen: ListenAddress::Path(socket.clone()),
+            services,
+            url_override: Some(Arc::new(fake_url)),
+        };
         let run = config.clone();
         let bridge = thread::Builder::new()
             .name("nvb-rt".to_owned())
@@ -528,6 +597,11 @@ impl Fixture {
             link,
             bridge: Some(bridge),
         }
+    }
+
+    /// The accounts changed (the helper's `AccountChanged`).
+    pub fn accounts_changed(&self) {
+        assert!(self.link.accounts_changed(), "the core has stopped");
     }
 
     /// Stores `consent` in `bridge.conf`, as netvfs-ui does.
