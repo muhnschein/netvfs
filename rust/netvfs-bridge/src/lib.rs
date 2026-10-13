@@ -13,9 +13,11 @@
 //!
 //! The backend side (design §3.3): [`locations`] holds the locations, their
 //! connection pools and the worker threads that own the backend
-//! connections.
+//! connections; [`jobs`] has the bodies those workers run for listings,
+//! walks, removals and transfers.
 
 pub mod ffi;
+pub mod jobs;
 pub mod locations;
 pub mod peer;
 pub mod server;

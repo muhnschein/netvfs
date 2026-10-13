@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 //! The calls into libc (and the one `unsafe` constructor of zbus) that the
-//! socket front needs. The only module of the crate with `unsafe` code
+//! socket front and the transfers of descriptors need. The only module of the crate with `unsafe` code
 //! besides `ffi` (design §6.12); every block has its SAFETY comment and
 //! every function a safe signature.
 #![allow(unsafe_code)]
 
+pub mod fd;
 pub mod frame;
 pub mod listen;
 pub mod peer;
