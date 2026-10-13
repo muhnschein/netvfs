@@ -21,7 +21,7 @@ const RUNTIME_ROOT: &str = "/run/user";
 const NSIG: i32 = 65;
 
 fn warn(what: &str) {
-    eprintln!("netvfs-accounts: {what}: {}", std::io::Error::last_os_error());
+    crate::report(&format!("{what}: {}", std::io::Error::last_os_error()));
 }
 
 fn c_path(path: &Path) -> Option<CString> {
@@ -47,7 +47,7 @@ pub fn runtime_dir() -> PathBuf {
 pub fn monotonic_time() -> (u64, u32) {
     let mut ts = libc::timespec { tv_sec: 0, tv_nsec: 0 };
     // SAFETY: `ts` is a valid timespec to write.
-    unsafe { libc::clock_gettime(libc::CLOCK_MONOTONIC, &mut ts) };
+    unsafe { libc::clock_gettime(libc::CLOCK_MONOTONIC, &raw mut ts) };
     (u64::try_from(ts.tv_sec).unwrap_or(0), u32::try_from(ts.tv_nsec).unwrap_or(0))
 }
 
@@ -92,12 +92,12 @@ pub fn reset_process_state() {
             }
         }
         let mut none: libc::sigset_t = std::mem::zeroed();
-        libc::sigemptyset(&mut none);
-        libc::sigprocmask(libc::SIG_SETMASK, &none, std::ptr::null_mut());
+        libc::sigemptyset(&raw mut none);
+        libc::sigprocmask(libc::SIG_SETMASK, &raw const none, std::ptr::null_mut());
         let mut size = libc::rlimit { rlim_cur: 0, rlim_max: 0 };
-        if libc::getrlimit(libc::RLIMIT_FSIZE, &mut size) == 0 {
+        if libc::getrlimit(libc::RLIMIT_FSIZE, &raw mut size) == 0 {
             size.rlim_cur = size.rlim_max;
-            libc::setrlimit(libc::RLIMIT_FSIZE, &size);
+            libc::setrlimit(libc::RLIMIT_FSIZE, &raw const size);
         }
     }
 }
@@ -131,8 +131,9 @@ fn home_of(uid: u32) -> Option<PathBuf> {
     let mut entry: libc::passwd = unsafe { std::mem::zeroed() };
     let mut result: *mut libc::passwd = std::ptr::null_mut();
     // SAFETY: the buffers outlive the call, sizes as given.
-    let status =
-        unsafe { libc::getpwuid_r(uid, &mut entry, buffer.as_mut_ptr().cast(), buffer.len(), &mut result) };
+    let status = unsafe {
+        libc::getpwuid_r(uid, &raw mut entry, buffer.as_mut_ptr().cast(), buffer.len(), &raw mut result)
+    };
     if status != 0 || result.is_null() || entry.pw_dir.is_null() {
         return None;
     }
@@ -151,11 +152,11 @@ pub fn privileged_ids() -> Option<(u32, u32)> {
     // SAFETY: as in home_of; the name is a constant C string.
     let status = unsafe {
         libc::getpwnam_r(
-            b"privileged\0".as_ptr().cast(),
-            &mut entry,
+            c"privileged".as_ptr(),
+            &raw mut entry,
             buffer.as_mut_ptr().cast(),
             buffer.len(),
-            &mut result,
+            &raw mut result,
         )
     };
     (status == 0 && !result.is_null()).then_some((entry.pw_uid, entry.pw_gid))
@@ -184,9 +185,9 @@ pub fn prepare_set_id_process() -> Option<Vec<String>> {
     let mut core = libc::rlimit { rlim_cur: 0, rlim_max: 0 };
     // SAFETY: valid rlimit structs.
     unsafe {
-        if libc::getrlimit(libc::RLIMIT_CORE, &mut core) == 0 {
+        if libc::getrlimit(libc::RLIMIT_CORE, &raw mut core) == 0 {
             core.rlim_cur = 0;
-            libc::setrlimit(libc::RLIMIT_CORE, &core);
+            libc::setrlimit(libc::RLIMIT_CORE, &raw const core);
         }
     }
     let runtime = runtime_dir();
@@ -209,7 +210,7 @@ pub fn drop_set_id_group() -> bool {
         let real = libc::getgid();
         let (mut r, mut e, mut s) = (0, 0, 0);
         libc::setresgid(real, real, real) == 0
-            && libc::getresgid(&mut r, &mut e, &mut s) == 0
+            && libc::getresgid(&raw mut r, &raw mut e, &raw mut s) == 0
             && r == real
             && e == real
             && s == real
@@ -220,29 +221,50 @@ pub fn drop_set_id_group() -> bool {
 
 /// `<linux/landlock.h>` as of ABI 7; the target's headers predate it.
 pub mod landlock {
+    /// Execute a file.
     pub const EXECUTE: u64 = 1 << 0;
+    /// Write to a file.
     pub const WRITE_FILE: u64 = 1 << 1;
+    /// Read a file.
     pub const READ_FILE: u64 = 1 << 2;
+    /// List a folder.
     pub const READ_DIR: u64 = 1 << 3;
+    /// Remove an empty folder.
     pub const REMOVE_DIR: u64 = 1 << 4;
+    /// Remove a file or a link.
     pub const REMOVE_FILE: u64 = 1 << 5;
+    /// Make a character device.
     pub const MAKE_CHAR: u64 = 1 << 6;
+    /// Make a folder.
     pub const MAKE_DIR: u64 = 1 << 7;
+    /// Make a regular file.
     pub const MAKE_REG: u64 = 1 << 8;
+    /// Make a socket file.
     pub const MAKE_SOCK: u64 = 1 << 9;
+    /// Make a named pipe.
     pub const MAKE_FIFO: u64 = 1 << 10;
+    /// Make a block device.
     pub const MAKE_BLOCK: u64 = 1 << 11;
+    /// Make a symbolic link.
     pub const MAKE_SYM: u64 = 1 << 12;
+    /// Move or link a file to another folder.
     pub const REFER: u64 = 1 << 13; // ABI 2
+    /// Truncate a file.
     pub const TRUNCATE: u64 = 1 << 14; // ABI 3
+    /// Send ioctl to a device file.
     pub const IOCTL_DEV: u64 = 1 << 15; // ABI 5
 
+    /// Bind a TCP port.
     pub const NET_BIND_TCP: u64 = 1 << 0; // ABI 4
+    /// Connect to a TCP port.
     pub const NET_CONNECT_TCP: u64 = 1 << 1; // ABI 4
 
+    /// Connect to abstract unix sockets outside the domain.
     pub const SCOPE_ABSTRACT_UNIX_SOCKET: u64 = 1 << 0; // ABI 6
+    /// Send signals to processes outside the domain.
     pub const SCOPE_SIGNAL: u64 = 1 << 1; // ABI 6
 
+    /// Every file system right of ABI 1.
     pub const ABI1_FS: u64 = EXECUTE
         | WRITE_FILE
         | READ_FILE
@@ -259,13 +281,16 @@ pub mod landlock {
     /// What a rule on a file (not a folder) may allow.
     pub const FILE_RIGHTS: u64 = EXECUTE | WRITE_FILE | READ_FILE | TRUNCATE | IOCTL_DEV;
 
+    /// Reading files and listing folders.
     pub const READ_ONLY: u64 = READ_FILE | READ_DIR;
     /// The database folder: SQLite creates, truncates and removes its -wal
     /// and -shm files there.
     pub const READ_WRITE: u64 =
         READ_FILE | READ_DIR | WRITE_FILE | TRUNCATE | MAKE_REG | REMOVE_FILE | MAKE_DIR;
 
+    /// The flag that asks for the ABI version.
     pub const CREATE_RULESET_VERSION: u32 = 1 << 0;
+    /// The rule type of a path below a folder.
     pub const RULE_PATH_BENEATH: i32 = 1;
 
     #[repr(C)]
@@ -291,8 +316,11 @@ pub const LANDLOCK_NEWEST_ABI: i32 = 7;
 /// What a ruleset handles (restricts) with a kernel of Landlock ABI `abi`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct LandlockAccess {
+    /// The file system rights.
     pub fs: u64,
+    /// The network rights (TCP ports).
     pub net: u64,
+    /// The scopes (abstract unix sockets and signals).
     pub scoped: u64,
 }
 
@@ -330,6 +358,7 @@ pub fn landlock_access(abi: i32, allow_abstract_sockets: bool) -> LandlockAccess
 pub struct FilesystemRestriction {
     /// The kernel's Landlock ABI, 0 without Landlock.
     pub abi: i32,
+    /// Whether the ruleset is in force.
     pub enforced: bool,
 }
 
@@ -365,7 +394,7 @@ fn allow_beneath(ruleset: i32, handled: u64, path: &Path, mut access: u64) {
     // SAFETY: an all-zero stat is a valid value to overwrite.
     let mut st: libc::stat = unsafe { std::mem::zeroed() };
     // SAFETY: `fd` is open, `st` is writable.
-    if unsafe { libc::fstat(fd, &mut st) } == 0 && st.st_mode & libc::S_IFMT != libc::S_IFDIR {
+    if unsafe { libc::fstat(fd, &raw mut st) } == 0 && st.st_mode & libc::S_IFMT != libc::S_IFDIR {
         access &= landlock::FILE_RIGHTS;
     }
     let rule = landlock::PathBeneathAttr { allowed_access: access & handled, parent_fd: fd };
@@ -427,7 +456,7 @@ pub fn restrict_filesystem(writable: &[PathBuf], allow_abstract_sockets: bool) -
         libc::syscall(
             nr::LANDLOCK_CREATE_RULESET,
             std::ptr::addr_of!(attr),
-            std::mem::size_of::<landlock::RulesetAttr>(),
+            size_of::<landlock::RulesetAttr>(),
             0u32,
         )
     };
@@ -466,6 +495,9 @@ pub fn restrict_filesystem(writable: &[PathBuf], allow_abstract_sockets: bool) -
 #[derive(Debug, Default)]
 pub struct Filter {
     program: Vec<libc::sock_filter>,
+    /// A syscall number that does not fit 32 bits was named: `install()`
+    /// refuses the program then.
+    broken: bool,
 }
 
 mod bpf {
@@ -485,56 +517,69 @@ const SECCOMP_RET_ALLOW: u32 = 0x7fff_0000;
 const SECCOMP_RET_ERRNO: u32 = 0x0005_0000;
 const SECCOMP_RET_DATA: u32 = 0x0000_ffff;
 
-#[allow(clippy::cast_sign_loss)]
 const fn errno_action(e: i32) -> u32 {
-    SECCOMP_RET_ERRNO | (e as u32 & SECCOMP_RET_DATA)
-}
-
-#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-const fn number(nr: i64) -> u32 {
-    nr as u32
+    SECCOMP_RET_ERRNO | (e.cast_unsigned() & SECCOMP_RET_DATA)
 }
 
 impl Filter {
+    /// The action that lets a syscall run.
     pub const ALLOW: u32 = SECCOMP_RET_ALLOW;
+    /// The action that fails a syscall with EPERM.
     pub const DENY: u32 = errno_action(libc::EPERM);
+    /// The action that fails a syscall with ENOSYS.
     pub const NO_SYS: u32 = errno_action(libc::ENOSYS);
 
     fn stmt(&mut self, code: u16, k: u32) {
         self.program.push(libc::sock_filter { code, jt: 0, jf: 0, k });
     }
 
+    /// Appends a conditional jump on `code` and `k`, skipping `jt` or `jf` instructions.
     pub fn jump(&mut self, code: u16, k: u32, jt: u8, jf: u8) {
         self.program.push(libc::sock_filter { code, jt, jf, k });
     }
 
+    /// `JEQ` on the number of syscall `nr`, with `jt` and `jf` as `jump()`.
+    /// A number that does not fit 32 bits marks the filter broken.
+    fn jump_number(&mut self, nr: i64, jt: u8, jf: u8) {
+        let Ok(k) = u32::try_from(nr) else {
+            self.broken = true;
+            return;
+        };
+        self.jump(bpf::JMP_JEQ_K, k, jt, jf);
+    }
+
+    /// Appends a load of the syscall number.
     pub fn load_number(&mut self) {
         self.stmt(bpf::LD_W_ABS, bpf::NR);
     }
 
+    /// Appends a load of the architecture.
     pub fn load_arch(&mut self) {
         self.stmt(bpf::LD_W_ABS, bpf::ARCH);
     }
 
-    /// The low 32 bits of an argument (all targets are little-endian).
+    /// The low 32 bits of an argument (all targets are little-endian). An index
+    /// past the arguments saturates to an offset the kernel refuses, so the
+    /// filter does not install.
     pub fn load_argument(&mut self, i: u32) {
-        self.stmt(bpf::LD_W_ABS, bpf::ARGS + 8 * i);
+        self.stmt(bpf::LD_W_ABS, bpf::ARGS.saturating_add(i.saturating_mul(8)));
     }
 
+    /// Appends a return of `action`.
     pub fn ret(&mut self, action: u32) {
         self.stmt(bpf::RET_K, action);
     }
 
     /// With the number loaded: `action` for syscall `nr`.
     pub fn on(&mut self, nr: i64, action: u32) {
-        self.jump(bpf::JMP_JEQ_K, number(nr), 0, 1);
+        self.jump_number(nr, 0, 1);
         self.ret(action);
     }
 
     /// With the number loaded: EPERM for `nr` when argument `i` has any of
     /// `bits`; the number is loaded again afterwards.
     pub fn deny_argument_bits(&mut self, nr: i64, i: u32, bits: u32) {
-        self.jump(bpf::JMP_JEQ_K, number(nr), 0, 4);
+        self.jump_number(nr, 0, 4);
         self.load_argument(i);
         self.jump(bpf::JMP_JSET_K, bits, 0, 1);
         self.ret(Self::DENY);
@@ -544,11 +589,15 @@ impl Filter {
     /// With the number loaded: EPERM for `nr` when it creates a file (flags
     /// in argument `flags`) whose mode (argument `mode`) has any of `bits`.
     /// Without O_CREAT or O_TMPFILE the mode is unused and may be garbage.
-    #[allow(clippy::cast_sign_loss)]
     pub fn deny_created_mode_bits(&mut self, nr: i64, flags: u32, mode: u32, bits: u32) {
-        self.jump(bpf::JMP_JEQ_K, number(nr), 0, 6);
+        self.jump_number(nr, 0, 6);
         self.load_argument(flags);
-        self.jump(bpf::JMP_JSET_K, (libc::O_CREAT | (libc::O_TMPFILE & !libc::O_DIRECTORY)) as u32, 0, 3);
+        self.jump(
+            bpf::JMP_JSET_K,
+            (libc::O_CREAT | (libc::O_TMPFILE & !libc::O_DIRECTORY)).cast_unsigned(),
+            0,
+            3,
+        );
         self.load_argument(mode);
         self.jump(bpf::JMP_JSET_K, bits, 0, 1);
         self.ret(Self::DENY);
@@ -557,19 +606,23 @@ impl Filter {
 
     /// With the number loaded: EPERM for `nr` unless argument `i` is `value`.
     pub fn deny_argument_other_than(&mut self, nr: i64, i: u32, value: u32) {
-        self.jump(bpf::JMP_JEQ_K, number(nr), 0, 4);
+        self.jump_number(nr, 0, 4);
         self.load_argument(i);
         self.jump(bpf::JMP_JEQ_K, value, 1, 0);
         self.ret(Self::DENY);
         self.load_number();
     }
 
+    /// The instructions so far.
     #[must_use]
     pub fn instructions(&self) -> &[libc::sock_filter] {
         &self.program
     }
 
     fn install(&self) -> bool {
+        if self.broken {
+            return false;
+        }
         let Ok(len) = u16::try_from(self.program.len()) else { return false };
         let program = libc::sock_fprog { len, filter: self.program.as_ptr().cast_mut() };
         // SAFETY: the program outlives the call; the kernel copies it.
@@ -659,7 +712,6 @@ const SET_ID_BITS: u32 = libc::S_ISUID | libc::S_ISGID;
 
 /// The filter `restrict_syscalls()` installs, for the native architecture.
 #[must_use]
-#[allow(clippy::cast_sign_loss)]
 pub fn syscall_filter(native_arch: u32) -> Filter {
     let mut f = Filter::default();
     f.load_arch();
@@ -676,9 +728,9 @@ pub fn syscall_filter(native_arch: u32) -> Filter {
     // Arguments behind a pointer are out of the filter's sight.
     f.on(nr::CLONE3, Filter::NO_SYS);
     f.on(nr::OPENAT2, Filter::NO_SYS);
-    f.deny_argument_bits(libc::SYS_clone, 0, NEW_NAMESPACES as u32);
-    f.deny_argument_other_than(libc::SYS_socket, 0, libc::AF_UNIX as u32);
-    f.deny_argument_other_than(libc::SYS_socketpair, 0, libc::AF_UNIX as u32);
+    f.deny_argument_bits(libc::SYS_clone, 0, NEW_NAMESPACES.cast_unsigned());
+    f.deny_argument_other_than(libc::SYS_socket, 0, libc::AF_UNIX.cast_unsigned());
+    f.deny_argument_other_than(libc::SYS_socketpair, 0, libc::AF_UNIX.cast_unsigned());
     f.deny_argument_bits(libc::SYS_fchmod, 1, SET_ID_BITS);
     f.deny_argument_bits(libc::SYS_fchmodat, 2, SET_ID_BITS);
     f.deny_argument_bits(nr::FCHMODAT2, 2, SET_ID_BITS);
@@ -780,7 +832,7 @@ mod tests {
         assert_eq!((last.code, last.k), (bpf::RET_K, Filter::ALLOW));
         assert!(program.len() < 4096);
         assert_eq!(Filter::DENY, 0x0005_0000 | 1);
-        assert_eq!(Filter::NO_SYS, 0x0005_0000 | 38);
+        assert_eq!(Filter::NO_SYS, 0x0005_0026);
     }
 
     #[test]

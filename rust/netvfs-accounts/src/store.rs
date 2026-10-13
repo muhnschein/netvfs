@@ -6,18 +6,28 @@
 use crate::db::{Database, NewSetting, Setting, Unusable};
 use crate::gvariant;
 use crate::policy::ConnectionParams;
-use crate::qvariant::{trimmed, QString, Value};
+use crate::qvariant::{QString, Value, cut_to_int, trimmed};
 use crate::wire::{Error, Outcome};
 
+/// The setting keys the helper reads and writes.
 pub mod keys {
+    /// The server host.
     pub const HOST: &str = "netvfs/host";
+    /// The server port.
     pub const PORT: &str = "netvfs/port";
+    /// The user name.
     pub const USERNAME: &str = "netvfs/username";
+    /// The attention state: `auth-failed` or `server-identity-changed`.
     pub const ATTENTION: &str = "netvfs/attention";
+    /// The root folder of the Files service.
     pub const FILES_ROOT: &str = "files_root";
+    /// The credentials id.
     pub const CREDENTIALS_ID: &str = "CredentialsId";
+    /// Whether the credentials need an update.
     pub const CREDENTIALS_NEED_UPDATE: &str = "CredentialsNeedUpdate";
+    /// The service that asked for the update.
     pub const CREDENTIALS_NEED_UPDATE_FROM: &str = "CredentialsNeedUpdateFrom";
+    /// The pinned host key, below the provider's `netvfs/<provider>/` prefix.
     pub const HOST_KEY_SEEN: &str = "host_key_seen";
     /// A service's enabled flag.
     pub const ENABLED: &str = "enabled";
@@ -29,12 +39,16 @@ pub const FILES_SERVICE_TYPE: &str = "netvfs-files";
 /// `Attention` (src/core/accountstore.h).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Attention {
+    /// No attention.
     None = 0,
+    /// Authentication failed.
     AuthFailed = 1,
+    /// The server's host key changed.
     ServerIdentityChanged = 2,
 }
 
 impl Attention {
+    /// The state `value` names; anything unknown is `None`.
     #[must_use]
     pub fn from_qstring(value: Option<&str>) -> Self {
         match value {
@@ -44,6 +58,7 @@ impl Attention {
         }
     }
 
+    /// The name the setting stores.
     #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
@@ -58,13 +73,19 @@ impl Attention {
 /// helper answers it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AccountConfig {
+    /// The account's id.
     pub account_id: i32,
+    /// The account's provider.
     pub provider: QString,
+    /// The account's name.
     pub display_name: QString,
+    /// The connection parameters.
     pub params: ConnectionParams,
     /// `files_root` of the Files service, trimmed.
     pub files_root: QString,
+    /// The credentials id, as unsigned.
     pub credentials_id: u32,
+    /// The attention state.
     pub attention: Attention,
 }
 
@@ -103,6 +124,7 @@ pub struct Store {
 }
 
 impl Store {
+    /// The store over `db`.
     #[must_use]
     pub fn new(db: Database) -> Self {
         Self { db }
@@ -132,9 +154,8 @@ impl Store {
                 continue;
             }
             if self.files_service(id, account.provider.as_deref())?.1 {
-                // AgAccountId is 32 bits.
-                #[allow(clippy::cast_possible_truncation)]
-                ids.push(id as i32);
+                // AgAccountId is 32 bits: the id as sqlite3_column_int reads it.
+                ids.push(cut_to_int(id));
             }
         }
         ids.sort_unstable();
@@ -172,7 +193,7 @@ impl Store {
             options,
             ..ConnectionParams::default()
         };
-        if params.host.as_deref().map_or(true, str::is_empty) {
+        if params.host.as_deref().is_none_or(str::is_empty) {
             return Err(Outcome::failure(Error::Internal, format!("Account {account_id} has no server")));
         }
         // Account::credentialsId(): the value as an int, as unsigned.
@@ -225,9 +246,11 @@ impl Store {
     /// `Internal` when the write fails, as `AccountStore` reports it.
     pub fn write_attention(&mut self, account_id: i32, settings: &[NewSetting]) -> Result<(), Outcome> {
         let id = i64::from(u32::from_ne_bytes(account_id.to_ne_bytes()));
-        self.db
-            .store_global(id, settings)
-            .map_err(|_| Outcome::failure(Error::Internal, "Cannot write the accounts database"))
+        // The SQLite reason stays out of the answer: the bridge shows this message as it is.
+        if self.db.store_global(id, settings).is_err() {
+            return Err(Outcome::failure(Error::Internal, "Cannot write the accounts database"));
+        }
+        Ok(())
     }
 }
 

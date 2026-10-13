@@ -14,6 +14,13 @@ const HELPER: &str = env!("CARGO_BIN_EXE_netvfs-accounts");
 const NO_LANDLOCK: i32 = 77;
 const NO_SECCOMP: i32 = 99;
 
+/// Writes to the test's stderr, which the harness shows when a test fails.
+/// The one place this file writes to stderr.
+#[allow(clippy::print_stderr)]
+fn note(text: &str) {
+    eprintln!("{text}");
+}
+
 /// A fresh folder below the temporary one, removed on drop.
 struct TempDir(PathBuf);
 
@@ -36,13 +43,13 @@ impl TempDir {
 
 impl Drop for TempDir {
     fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
+        std::fs::remove_dir_all(&self.0).ok();
     }
 }
 
 fn probe(args: &[&str]) -> i32 {
     let output = Command::new(PROBE).args(args).stdin(Stdio::null()).output().unwrap();
-    eprint!("{}", String::from_utf8_lossy(&output.stderr));
+    note(String::from_utf8_lossy(&output.stderr).trim_end());
     output.status.code().unwrap_or(-1)
 }
 
@@ -66,7 +73,7 @@ fn process_state() {
 fn syscalls() {
     let dir = TempDir::new("syscalls");
     match probe(&["syscalls", dir.path().to_str().unwrap()]) {
-        NO_SECCOMP => eprintln!("skipped: no seccomp filters on this kernel or architecture"),
+        NO_SECCOMP => note("skipped: no seccomp filters on this kernel or architecture"),
         status => assert_eq!(status, 0),
     }
 }
@@ -77,7 +84,7 @@ fn filesystem() {
     let denied = TempDir::new("denied");
     std::fs::write(denied.path().join("secret"), b"secret").unwrap();
     match probe(&["filesystem", allowed.path().to_str().unwrap(), denied.path().to_str().unwrap()]) {
-        NO_LANDLOCK => eprintln!("skipped: no Landlock on this kernel"),
+        NO_LANDLOCK => note("skipped: no Landlock on this kernel"),
         status => assert_eq!(status, 0),
     }
     assert!(!denied.path().join("planted").exists());
@@ -117,16 +124,16 @@ fn set_id_copy(binary: &str, name: &str) -> Option<PathBuf> {
     use std::os::unix::fs::PermissionsExt;
     let gid = other_group()?;
     let copy = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!("{name}-{}", std::process::id()));
-    let _ = std::fs::remove_file(&copy);
+    std::fs::remove_file(&copy).ok();
     std::fs::copy(binary, &copy).unwrap();
     let path = std::ffi::CString::new(copy.as_os_str().as_bytes()).unwrap();
     // SAFETY: a valid, NUL-terminated path and a zeroed statvfs to fill.
     let nosuid = unsafe {
         let mut fs: libc::statvfs = std::mem::zeroed();
-        libc::statvfs(path.as_ptr(), &mut fs) != 0 || fs.f_flag & libc::ST_NOSUID != 0
+        libc::statvfs(path.as_ptr(), &raw mut fs) != 0 || fs.f_flag & libc::ST_NOSUID != 0
     };
     if nosuid || std::os::unix::fs::chown(&copy, None, Some(gid)).is_err() {
-        let _ = std::fs::remove_file(&copy);
+        std::fs::remove_file(&copy).ok();
         return None;
     }
     std::fs::set_permissions(&copy, std::fs::Permissions::from_mode(0o2755)).unwrap();
@@ -151,12 +158,12 @@ fn run_copy(command: &mut Command) -> std::process::Output {
 fn set_id_group() {
     // A real set-id start: the group it brings is given up for good.
     let Some(copy) = set_id_copy(PROBE, "probe") else {
-        eprintln!("skipped: no other group, or a nosuid file system");
+        note("skipped: no other group, or a nosuid file system");
         return;
     };
     let output = run_copy(Command::new(&copy).args(["group", "set-id"]));
-    let _ = std::fs::remove_file(&copy);
-    eprint!("{}", String::from_utf8_lossy(&output.stderr));
+    std::fs::remove_file(&copy).ok();
+    note(String::from_utf8_lossy(&output.stderr).trim_end());
     assert_eq!(output.status.code(), Some(0));
 }
 
@@ -165,12 +172,12 @@ fn set_id_helper() {
     // The whole set-id start (environment, home, confinement, group) up to
     // an answer, for a request that reads no database.
     let Some(copy) = set_id_copy(HELPER, "helper") else {
-        eprintln!("skipped: no other group, or a nosuid file system");
+        note("skipped: no other group, or a nosuid file system");
         return;
     };
     let output = run_copy(Command::new(&copy).arg("bogus").stdin(Stdio::null()));
-    let _ = std::fs::remove_file(&copy);
-    eprint!("{}", String::from_utf8_lossy(&output.stderr));
+    std::fs::remove_file(&copy).ok();
+    note(String::from_utf8_lossy(&output.stderr).trim_end());
     assert_eq!(output.status.code(), Some(0));
     assert!(output.stdout.starts_with(&header(12)));
 }

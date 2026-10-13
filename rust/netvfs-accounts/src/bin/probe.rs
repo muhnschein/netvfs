@@ -27,12 +27,19 @@ struct Checks {
 
 impl Checks {
     fn check(&mut self, ok: bool) {
-        self.count += 1;
+        self.count = self.count.saturating_add(1);
         if !ok && self.failed == 0 {
             self.failed = self.count;
-            eprintln!("probe: check {} failed", self.count);
+            report(&format!("check {} failed", self.count));
         }
     }
+}
+
+/// Writes a check's failure to stderr. The exit status carries the result;
+/// the message only helps whoever runs the probe by hand.
+#[allow(clippy::print_stderr)]
+fn report(message: &str) {
+    eprintln!("probe: {message}");
 }
 
 fn errno() -> i32 {
@@ -57,7 +64,7 @@ fn descriptors(check: &mut Checks, inherited: i32) {
         // SAFETY: an all-zero stat is a valid value to overwrite.
         let mut st: libc::stat = unsafe { std::mem::zeroed() };
         // SAFETY: `st` is writable.
-        let ok = unsafe { libc::fstat(fd, &mut st) } == 0;
+        let ok = unsafe { libc::fstat(fd, &raw mut st) } == 0;
         check.check(
             ok && st.st_mode & libc::S_IFMT == libc::S_IFCHR
                 && null.as_ref().is_some_and(|n| n.rdev() == st.st_rdev),
@@ -73,13 +80,13 @@ fn process_state(check: &mut Checks) {
         libc::umask(0);
         libc::signal(libc::SIGTERM, libc::SIG_IGN);
         let mut blocked: libc::sigset_t = std::mem::zeroed();
-        libc::sigemptyset(&mut blocked);
-        libc::sigaddset(&mut blocked, libc::SIGUSR1);
-        libc::sigprocmask(libc::SIG_BLOCK, &blocked, std::ptr::null_mut());
+        libc::sigemptyset(&raw mut blocked);
+        libc::sigaddset(&raw mut blocked, libc::SIGUSR1);
+        libc::sigprocmask(libc::SIG_BLOCK, &raw const blocked, std::ptr::null_mut());
         let mut size = libc::rlimit { rlim_cur: 0, rlim_max: 0 };
-        libc::getrlimit(libc::RLIMIT_FSIZE, &mut size);
+        libc::getrlimit(libc::RLIMIT_FSIZE, &raw mut size);
         size.rlim_cur = size.rlim_max.min(4096);
-        libc::setrlimit(libc::RLIMIT_FSIZE, &size);
+        libc::setrlimit(libc::RLIMIT_FSIZE, &raw const size);
     }
     sandbox::reset_process_state();
     // SAFETY: plain process-state queries.
@@ -87,16 +94,17 @@ fn process_state(check: &mut Checks) {
         check.check(libc::umask(0o022) == 0o077);
         let mut action: libc::sigaction = std::mem::zeroed();
         check.check(
-            libc::sigaction(libc::SIGTERM, std::ptr::null(), &mut action) == 0
+            libc::sigaction(libc::SIGTERM, std::ptr::null(), &raw mut action) == 0
                 && action.sa_sigaction == libc::SIG_DFL,
         );
         let mut now: libc::sigset_t = std::mem::zeroed();
         check.check(
-            libc::sigprocmask(libc::SIG_BLOCK, std::ptr::null(), &mut now) == 0
-                && libc::sigismember(&now, libc::SIGUSR1) == 0,
+            libc::sigprocmask(libc::SIG_BLOCK, std::ptr::null(), &raw mut now) == 0
+                && libc::sigismember(&raw const now, libc::SIGUSR1) == 0,
         );
         let mut size = libc::rlimit { rlim_cur: 0, rlim_max: 0 };
-        check.check(libc::getrlimit(libc::RLIMIT_FSIZE, &mut size) == 0 && size.rlim_cur == size.rlim_max);
+        check
+            .check(libc::getrlimit(libc::RLIMIT_FSIZE, &raw mut size) == 0 && size.rlim_cur == size.rlim_max);
     }
 }
 
@@ -109,11 +117,8 @@ fn syscalls(check: &mut Checks, dir: &Path) -> i32 {
     let folder = c(&dir.join("folder"));
     // SAFETY: syscalls on valid, NUL-terminated paths and plain values.
     unsafe {
-        let argv = [b"false\0".as_ptr().cast::<libc::c_char>(), std::ptr::null()];
-        check.check(fails_with(
-            i64::from(libc::execv(b"/bin/false\0".as_ptr().cast(), argv.as_ptr())),
-            libc::EPERM,
-        ));
+        let argv = [c"false".as_ptr(), std::ptr::null()];
+        check.check(fails_with(i64::from(libc::execv(c"/bin/false".as_ptr(), argv.as_ptr())), libc::EPERM));
         check.check(fails_with(i64::from(libc::socket(libc::AF_INET, libc::SOCK_STREAM, 0)), libc::EPERM));
         check.check(fails_with(i64::from(libc::socket(libc::AF_INET6, libc::SOCK_DGRAM, 0)), libc::EPERM));
         check.check(fails_with(i64::from(libc::socket(libc::AF_NETLINK, libc::SOCK_RAW, 0)), libc::EPERM));
@@ -189,18 +194,15 @@ fn filesystem(check: &mut Checks, allowed: &Path, denied: &Path) -> i32 {
         check.check(libc::ftruncate(fd, 0) == 0);
         check.check(libc::unlink(created.as_ptr()) == 0);
         // Anything else: read-only system folders, nothing beyond them.
-        check.check(libc::open(b"/etc/passwd\0".as_ptr().cast(), libc::O_RDONLY | libc::O_CLOEXEC) >= 0);
-        check.check(libc::open(b"/dev/null\0".as_ptr().cast(), libc::O_WRONLY | libc::O_CLOEXEC) >= 0);
+        check.check(libc::open(c"/etc/passwd".as_ptr(), libc::O_RDONLY | libc::O_CLOEXEC) >= 0);
+        check.check(libc::open(c"/dev/null".as_ptr(), libc::O_WRONLY | libc::O_CLOEXEC) >= 0);
         check.check(fails_with(i64::from(libc::open(secret.as_ptr(), libc::O_RDONLY)), libc::EACCES));
         check.check(fails_with(
             i64::from(libc::open(outside.as_ptr(), libc::O_CREAT | libc::O_WRONLY, 0o600)),
             libc::EACCES,
         ));
-        let argv = [b"false\0".as_ptr().cast::<libc::c_char>(), std::ptr::null()];
-        check.check(fails_with(
-            i64::from(libc::execv(b"/bin/false\0".as_ptr().cast(), argv.as_ptr())),
-            libc::EACCES,
-        ));
+        let argv = [c"false".as_ptr(), std::ptr::null()];
+        check.check(fails_with(i64::from(libc::execv(c"/bin/false".as_ptr(), argv.as_ptr())), libc::EACCES));
         if restriction.abi >= 4 {
             let tcp = libc::socket(libc::AF_INET, libc::SOCK_STREAM, 0);
             let local = libc::sockaddr_in {
@@ -209,7 +211,7 @@ fn filesystem(check: &mut Checks, allowed: &Path, denied: &Path) -> i32 {
                 sin_addr: libc::in_addr { s_addr: u32::from(std::net::Ipv4Addr::LOCALHOST).to_be() },
                 sin_zero: [0; 8],
             };
-            let size = libc::socklen_t::try_from(std::mem::size_of::<libc::sockaddr_in>()).unwrap_or(16);
+            let size = libc::socklen_t::try_from(size_of::<libc::sockaddr_in>()).unwrap_or(16);
             check.check(fails_with(
                 i64::from(libc::connect(tcp, std::ptr::addr_of!(local).cast(), size)),
                 libc::EACCES,
@@ -232,10 +234,10 @@ fn set_id_environment(check: &mut Checks) {
     // SAFETY: valid rlimit structs.
     let before = unsafe {
         let mut core = libc::rlimit { rlim_cur: 0, rlim_max: 0 };
-        libc::getrlimit(libc::RLIMIT_CORE, &mut core);
+        libc::getrlimit(libc::RLIMIT_CORE, &raw mut core);
         // A core limit of its own to drop (the soft limit may start at 0).
         let open = libc::rlimit { rlim_cur: core.rlim_max, rlim_max: core.rlim_max };
-        libc::setrlimit(libc::RLIMIT_CORE, &open);
+        libc::setrlimit(libc::RLIMIT_CORE, &raw const open);
         core
     };
     check.check(before.rlim_max != 0);
@@ -253,7 +255,7 @@ fn set_id_environment(check: &mut Checks) {
     // SAFETY: a valid rlimit struct.
     let after = unsafe {
         let mut core = libc::rlimit { rlim_cur: 1, rlim_max: 0 };
-        libc::getrlimit(libc::RLIMIT_CORE, &mut core);
+        libc::getrlimit(libc::RLIMIT_CORE, &raw mut core);
         core
     };
     check.check(after.rlim_cur == 0 && after.rlim_max == before.rlim_max);
@@ -270,7 +272,12 @@ fn group(check: &mut Checks, set_id: bool) {
     // SAFETY: plain id calls.
     unsafe {
         let (mut r, mut e, mut s) = (1, 1, 1);
-        check.check(libc::getresgid(&mut r, &mut e, &mut s) == 0 && r == libc::getgid() && e == r && s == r);
+        check.check(
+            libc::getresgid(&raw mut r, &raw mut e, &raw mut s) == 0
+                && r == libc::getgid()
+                && e == r
+                && s == r,
+        );
     }
 }
 
