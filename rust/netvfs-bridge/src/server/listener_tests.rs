@@ -4,7 +4,10 @@
 // Restriction lints that only add noise to tests (doc/RUST.md "Lints").
 #![allow(clippy::assertions_on_result_states, clippy::arithmetic_side_effects)]
 
-use super::*;
+use super::{
+    Duration, ErrorName, ListenAddress, Listener, PathBuf, PeerChecker, SessionId, UnixStream, bind, io,
+    is_transient, systemd_socket, unescape,
+};
 use crate::test_support::{Seen, TempDir, stub_core};
 
 #[test]

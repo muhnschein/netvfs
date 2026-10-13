@@ -4,7 +4,13 @@
 // C++ fake backend in tests/backend.rs.
 #![allow(clippy::assertions_on_result_states, clippy::arithmetic_side_effects)]
 
-use super::*;
+use super::{
+    AccountAccess, AdHocIdentity, Answer, Arc, AskId, Asker, AtomicBool, Attention, Duration, ErrorName,
+    EstablishError, HashMap, IDENTITY_UNKNOWN, Identity, IdentityKind, Instant, KEYBOARD_INTERACTIVE,
+    LocationSpec, Ordering, OwnedValue, Params, Phase, PinStore, PromptRequest, QUESTION_TIMEOUT, Status,
+    TaskContext, Value, Verdict, WAIT_SLICE, Waited, WorkerEvent, WorkerEvents, Zeroizing, account_pin,
+    attention_for, identity_details, mpsc, prompt_answers, prompt_details, text, wait_for, zvariant,
+};
 use crate::ffi::Prompt;
 use crate::server::SessionId;
 use std::sync::Mutex;

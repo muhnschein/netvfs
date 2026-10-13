@@ -12,8 +12,8 @@ use std::sync::atomic::{AtomicU32, Ordering};
 /// The mode of the new file.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Mode {
-    /// The replaced file's permission bits; a new file gets `0666` less
-    /// the umask (`QSaveFile`).
+    /// The replaced file's permission bits; a new file is the owner's only
+    /// (`0600`, where `QSaveFile` gives `0666` less the umask).
     KeepOrDefault,
     /// Exactly these bits (`QFileDevice::setPermissions` after opening).
     Exactly(u32),
@@ -59,7 +59,7 @@ fn create_temporary(path: &Path, next: &AtomicU32) -> io::Result<(PathBuf, File)
         match OpenOptions::new()
             .write(true)
             .create_new(true)
-            .mode(0o666)
+            .mode(0o600)
             .custom_flags(libc::O_CLOEXEC)
             .open(&temp)
         {
@@ -91,16 +91,14 @@ mod tests {
         assert_eq!((fs::read(&path).unwrap(), mode(&path)), (b"two".to_vec(), 0o640));
         save(&path, b"three", Mode::Exactly(0o600)).unwrap();
         assert_eq!(mode(&path), 0o600);
-        // A new file: 0666 less the umask, as the temporary file was created.
+        // A new file: the owner's only, as the temporary file was created.
         let fresh = dir.join("g");
         save(&fresh, b"", Mode::KeepOrDefault).unwrap();
-        let probe = dir.join("probe");
-        OpenOptions::new().write(true).create_new(true).mode(0o666).open(&probe).unwrap();
-        assert_eq!(mode(&fresh), mode(&probe));
+        assert_eq!(mode(&fresh), 0o600);
         // Nothing else is left in the folder.
         let mut names: Vec<_> = fs::read_dir(dir.path()).unwrap().map(|e| e.unwrap().file_name()).collect();
         names.sort();
-        assert_eq!(names, ["f", "g", "probe"]);
+        assert_eq!(names, ["f", "g"]);
     }
 
     #[test]

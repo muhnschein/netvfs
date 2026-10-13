@@ -3,7 +3,7 @@
 // fake backend.
 #![allow(clippy::assertions_on_result_states, clippy::arithmetic_side_effects)]
 
-use super::*;
+use super::{Arc, Duration, ErrorName, HostRegistry, Instant, Lane, PoolSet, Turn, Work, WorkerId};
 use crate::locations::mock::{Mock, MockHandle, Seen, blocking, recv, reporting, spec, task};
 use std::sync::atomic::Ordering;
 use std::sync::mpsc;

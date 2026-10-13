@@ -2,7 +2,10 @@
 // The worker (port of worker.cpp, design §3.3) over the fake backend.
 #![allow(clippy::assertions_on_result_states, clippy::arithmetic_side_effects)]
 
-use super::*;
+use super::{
+    Arc, AtomicUsize, ErrorName, Handles, Instant, Lane, Ordering, THREAD_NAME, Turn, Work, Worker,
+    drops_connection,
+};
 use crate::locations::mock::{Mock, MockHandle, Seen, blocking, recv, reporting, spec, status, task};
 use std::sync::mpsc;
 use std::time::Duration;

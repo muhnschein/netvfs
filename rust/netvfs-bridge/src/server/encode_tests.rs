@@ -4,7 +4,11 @@
 // Restriction lints that only add noise to tests (doc/RUST.md "Lints").
 #![allow(clippy::assertions_on_result_states, clippy::arithmetic_side_effects)]
 
-use super::*;
+use super::{
+    BRIDGE_VERSION, ErrorName, HashMap, INTERFACE, INVALID_ARGS, Message, OBJECT_PATH, OutSignal, OwnedValue,
+    Reply, Status, UNKNOWN_METHOD, Value, WireCapabilities, WireEntry, WireLocation, WireNearby,
+    WireWalkItem, error_name, error_reply, status_extra, wire_entry, wire_text, wire_text_from_bytes,
+};
 use netvfs_bridge_proto::methods::{ENTRY_SIGNATURE, METHODS, SIGNALS, find_signal};
 use netvfs_bridge_proto::{
     OptsBuilder, entry_flags, entry_kind, value_bytes, value_i64, value_str, value_strings,

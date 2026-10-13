@@ -4,7 +4,10 @@
 #![allow(clippy::assertions_on_result_states, clippy::arithmetic_side_effects)]
 
 use super::flow::{Link, Outgoing};
-use super::*;
+use super::{
+    Arc, ErrorName, Event, EventSink, Message, OBJECT_PATH, Outbox, Reply, ReplyTo, SessionId, Status, flow,
+    no_reply_expected,
+};
 use netvfs_bridge_proto::errors::{INVALID_ARGS, UNKNOWN_METHOD};
 use netvfs_bridge_proto::methods::{INTERFACE, find_method};
 use std::collections::HashMap;

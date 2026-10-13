@@ -4,7 +4,9 @@
 // Restriction lints that only add noise to tests (doc/RUST.md "Lints").
 #![allow(clippy::assertions_on_result_states, clippy::arithmetic_side_effects)]
 
-use super::*;
+use super::{
+    Endian, FrameSize, LimitedRead, MAX_MESSAGE_BYTES, MAX_MESSAGE_FDS, Message, ReadHalf, frame_size, io,
+};
 use netvfs_bridge_proto::methods::{INTERFACE, OBJECT_PATH};
 use std::os::fd::AsFd as _;
 use tokio::net::UnixStream;

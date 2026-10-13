@@ -4,9 +4,14 @@
 // Restriction lints that only add noise to tests (doc/RUST.md "Lints").
 #![allow(clippy::assertions_on_result_states, clippy::arithmetic_side_effects)]
 
-use super::*;
+use super::{
+    COMPARE_CHUNK_BYTES, Environment, File, OwnedFd, Path, PathBuf, PeerChecker, PeerCredentials, Status,
+    parse_fdinfo_pid, parse_start_time, read_fully, same_content, system_boot_ticks_now, uptime_ticks,
+};
 use crate::test_support::{TempDir, write_file};
 use netvfs_bridge_proto::ErrorName;
+use std::os::fd::AsRawFd as _;
+use std::os::unix::fs::MetadataExt as _;
 use std::os::unix::net::UnixStream;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI32, Ordering};

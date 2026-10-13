@@ -3,7 +3,10 @@
 // Restriction lints that only add noise to tests (doc/RUST.md "Lints").
 #![allow(clippy::assertions_on_result_states, clippy::arithmetic_side_effects)]
 
-use super::*;
+use super::{
+    Batcher, ENTRY_FIXED_BYTES, FlowBudget, MAX_LIST_BATCH_BYTES, Ordering, Status, WireEntry, WireWalkItem,
+    drain, entry_wire_size, list_batches, walk_item_wire_size,
+};
 use crate::server::SessionId;
 use crate::server::flow::{Link, outbox};
 use netvfs_bridge_proto::ErrorName;

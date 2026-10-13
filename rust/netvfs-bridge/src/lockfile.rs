@@ -98,12 +98,14 @@ fn try_lock_at(path: &Path, depth: u32) -> io::Result<Option<LockFile>> {
     if removed { create(path) } else { Ok(None) }
 }
 
-/// Creates the lock file exclusively; `None` when it exists.
+/// Creates the lock file exclusively; `None` when it exists. Unlike Qt's
+/// `0666` less the umask, only the owner may read or write it: the account
+/// UI and the bridge run as the same user, and others need not see the pid.
 fn create(path: &Path) -> io::Result<Option<LockFile>> {
     let mut file = match OpenOptions::new()
         .write(true)
         .create_new(true)
-        .mode(0o666)
+        .mode(0o600)
         .custom_flags(libc::O_CLOEXEC)
         .open(path)
     {
@@ -202,6 +204,7 @@ fn remove_stale(path: &Path) -> bool {
 mod tests {
     use super::*;
     use crate::testutil::TempDir;
+    use std::os::unix::fs::PermissionsExt;
 
     /// The host and program names, not from the code under test.
     fn real_host() -> String {
@@ -225,6 +228,7 @@ mod tests {
         let content = fs::read_to_string(&path).unwrap();
         assert_eq!(content, format!("{}\n{}\n{}\n", std::process::id(), real_name(), real_host()));
         assert!(!real_host().is_empty());
+        assert_eq!(fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
         // Held and alive: neither taken nor stale, also when old (flock).
         assert!(LockFile::try_lock(&path).unwrap().is_none());
         set_age(&path, Duration::from_mins(1));

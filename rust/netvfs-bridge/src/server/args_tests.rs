@@ -4,7 +4,13 @@
 // Restriction lints that only add noise to tests (doc/RUST.md "Lints").
 #![allow(clippy::assertions_on_result_states, clippy::arithmetic_side_effects)]
 
-use super::*;
+use super::{
+    AdHocOpts, AttributeChanges, Call, CopyOpts, DECODE_MAX_ELEMENTS, Disposition, ErrorName, Lane,
+    MAX_ANSWER_BYTES, MAX_ANSWERS, MAX_CALL_BODY, MAX_ID, MAX_OFFSET, MAX_PATH, MAX_READ, MAX_READ_AHEAD,
+    MAX_SECRET, MAX_SHORT, MAX_TIME_MS, MAX_URL, MIN_TIME_MS, Message, SECURITY_PROFILES, Secret, Status,
+    TransferOpts, Value, WalkOpts, Zeroizing, ad_hoc_option, decode, decoder, is_valid_location_id,
+    is_valid_token, lane_hint, location_id,
+};
 use netvfs_bridge_proto::methods::{INTERFACE, METHODS, OBJECT_PATH};
 use std::collections::HashMap;
 use std::os::fd::AsFd as _;

@@ -3,7 +3,10 @@
 // Restriction lints that only add noise to tests (doc/RUST.md "Lints").
 #![allow(clippy::assertions_on_result_states, clippy::arithmetic_side_effects)]
 
-use super::*;
+use super::{
+    Arc, Duration, ErrorName, Instant, Lane, LocationBook, LocationSpec, PinStore, PoolSet, Turn, WorkerId,
+    no_backend, no_consent, no_such_location,
+};
 use crate::ffi::{Params, Value};
 use crate::locations::mock::{Mock, MockHandle, Seen, blocking, recv, reporting, task};
 use crate::locations::spec::{AdHocSecret, Attention};

@@ -3,7 +3,10 @@
 // Restriction lints that only add noise to tests (doc/RUST.md "Lints").
 #![allow(clippy::assertions_on_result_states, clippy::arithmetic_side_effects)]
 
-use super::*;
+use super::{
+    Arc, AtomicBool, Duration, FlowBudget, Link, MAX_QUEUED, Ordering, OutSignal, SessionId, UnixStream,
+    mpsc, outbox, run_writer,
+};
 use crate::test_support::{pair, raw_pair, wire_entry};
 use futures_lite::StreamExt as _;
 use std::io::Read as _;
