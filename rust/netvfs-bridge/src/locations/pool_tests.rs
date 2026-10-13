@@ -222,10 +222,12 @@ fn maintain_closes_idle_connections() {
     // Exactly the limit.
     assert!(set.maintain(since + IDLE, IDLE));
     assert_eq!(set.get("a").unwrap().connection_count(), 0);
-    assert_eq!(set.hosts().in_use("fake://h:0"), 1); // until its thread has finished
+    // The slot counts until the thread has finished, which may already
+    // be the case when maintain looks for finished ones.
+    let pending_free = set.hosts().in_use("fake://h:0") == 1;
     mock.wait_for("free 1", 1);
     wait_until(|| set.get("a").unwrap().retired.iter().all(|r| r.worker.finished()));
-    assert!(set.maintain(since + IDLE, IDLE));
+    assert_eq!(set.maintain(since + IDLE, IDLE), pending_free);
     assert_eq!(set.hosts().in_use("fake://h:0"), 0);
     assert!(!set.maintain(since + IDLE, IDLE));
     // A busy connection is never idle.
