@@ -99,6 +99,12 @@ mod tests {
         drop(owned);
         // Closed now: refused.
         assert!(take_fd(raw).is_err());
+        // Already close-on-exec (std opens so): stays so.
+        let raw = std::fs::File::open("/dev/null").unwrap().into_raw_fd();
+        let owned = take_fd(raw).unwrap();
+        // SAFETY: test only; reads the flags of a descriptor this test owns.
+        let flags = unsafe { libc::fcntl(owned.as_raw_fd(), libc::F_GETFD) };
+        assert_eq!(flags & libc::FD_CLOEXEC, libc::FD_CLOEXEC);
     }
 
     #[test]

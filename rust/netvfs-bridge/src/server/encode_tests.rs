@@ -34,7 +34,7 @@ fn entry() -> WireEntry {
         uid: 7,
         gid: -1,
         owner: "o\0".to_owned(),
-        group: "g".to_owned(),
+        group: "g\0".to_owned(),
         flags: entry_flags::HIDDEN | entry_flags::NAME_NOT_UTF8,
         etag: b"e".to_vec(),
         content_type: "text/\0plain".to_owned(),
@@ -78,7 +78,12 @@ fn entry_and_map_round_trip() {
     // NUL cannot be on the wire (it would break the peer): U+FFFD instead.
     assert_eq!(
         back,
-        WireEntry { owner: "o\u{fffd}".to_owned(), content_type: "text/\u{fffd}plain".to_owned(), ..entry() }
+        WireEntry {
+            owner: "o\u{fffd}".to_owned(),
+            group: "g\u{fffd}".to_owned(),
+            content_type: "text/\u{fffd}plain".to_owned(),
+            ..entry()
+        }
     );
     assert_eq!(wire_entry(&entry()), back);
     assert_eq!(wire_text_from_bytes(b"a\xffb\0"), "a\u{fffd}b\u{fffd}");

@@ -102,12 +102,18 @@ mod tests {
     fn pidfd_of_ourselves_and_of_nobody() {
         let own = i32::try_from(std::process::id()).unwrap();
         // Kernels before 5.3 have no pidfd_open: then nothing to check.
+        let release = std::fs::read_to_string("/proc/sys/kernel/osrelease").unwrap();
+        let mut version = release.split(['.', '-']).map(|n| n.parse::<u32>().unwrap_or(0));
+        let has_pidfd = (version.next().unwrap(), version.next().unwrap()) >= (5, 3);
+        assert_eq!(pidfd_open(own).is_some(), has_pidfd, "{release}");
         if let Some(fd) = pidfd_open(own) {
             let info = std::fs::read_to_string(format!("/proc/self/fdinfo/{}", fd.as_raw_fd())).unwrap();
             assert!(info.lines().any(|l| l.split_whitespace().eq(["Pid:".to_owned(), own.to_string()])));
         }
         assert!(pidfd_open(-1).is_none());
         assert!(owned_fd(-1).is_none());
+        let raw = std::os::fd::IntoRawFd::into_raw_fd(std::fs::File::open("/dev/null").unwrap());
+        assert_eq!(owned_fd(raw).map(|fd| fd.as_raw_fd()), Some(raw));
     }
 
     #[test]

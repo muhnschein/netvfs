@@ -1,0 +1,36 @@
+# SPDX-License-Identifier: LGPL-2.1-or-later
+# cargo-mutants (doc/RUST.md). Every exclusion names a mutant that changes
+# no observable behaviour, or one that only a broken kernel or exhausted
+# resources could tell apart, and why.
+exclude_re = [
+    # netvfs-bridge peer.rs COMPARE_CHUNK_BYTES (64 * 1024 -> 64 + 1024): the
+    # chunk size of the executable comparison only bounds memory; any size
+    # gives the same verdict.
+    'netvfs-bridge/src/peer\.rs:\d+:\d+: replace \* with \+$',
+    # netvfs-bridge peer.rs check_process, the device half of the
+    # same-inode fast path (dev == -> !=): a file that is the registered
+    # executable falls through to the content comparison, which accepts it
+    # too; only the cost differs.
+    'netvfs-bridge/src/peer\.rs:\d+:27: replace == with != in PeerChecker::check_process$',
+    # netvfs-bridge peer.rs read_fully, retry on EINTR: reads of regular
+    # files and /proc are not interrupted on Linux; the retry is defensive.
+    'netvfs-bridge/src/peer\.rs:\d+:\d+: replace match guard e\.kind\(\) == io::ErrorKind::Interrupted with false in read_fully$',
+    # netvfs-bridge listener.rs unescape (high << 4 | low -> ^): the two
+    # operands have no bit in common, so | and ^ are the same.
+    'netvfs-bridge/src/server/listener\.rs:\d+:\d+: replace \| with \^ in unescape$',
+    # netvfs-bridge listener.rs serve, the transient-error guard: telling
+    # transient from lasting accept errors needs descriptor exhaustion
+    # (EMFILE) or a listening socket that fails for good, neither of which a
+    # test can produce (shutdown(2) does not make AF_UNIX accept fail).
+    # is_transient itself is tested.
+    'netvfs-bridge/src/server/listener\.rs:\d+:\d+: replace match guard is_transient\(&e\) with (true|false) in Listener::serve$',
+    # netvfs-bridge sys/peer.rs effective_uid -> 0: the tests run as root
+    # (CI containers), where the mutant returns the right value; as any
+    # other user credentials_of_a_socketpair_are_ours and clock_and_uid
+    # catch it.
+    'netvfs-bridge/src/sys/peer\.rs:\d+:\d+: replace effective_uid -> u32 with 0$',
+    # netvfs-bridge sys/peer.rs clock_ticks_per_second (hz > 0 -> >= 0):
+    # sysconf(_SC_CLK_TCK) is never 0 on Linux; the guard only turns -1
+    # (error) into None.
+    'netvfs-bridge/src/sys/peer\.rs:\d+:\d+: replace > with >= in clock_ticks_per_second$',
+]

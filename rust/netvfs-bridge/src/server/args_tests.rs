@@ -224,7 +224,9 @@ fn attribute_options() {
     );
     assert_eq!(refuse(&[("mode", Value::from(u64::MAX))]), "Option \"mode\" must be an integer");
     assert_eq!(refuse(&[("mode", Value::from(true))]), "Option \"mode\" must be an integer");
-    assert!(validate("SetAttributes", &(LOC, p, map(&[("mode", Value::from(-1i16))]))).is_err());
+    assert_eq!(refuse(&[("mode", Value::from(-1i16))]), "Option \"mode\" is out of range");
+    let small = validate("SetAttributes", &(LOC, p, map(&[("mode", Value::from(0o644i16))]))).unwrap();
+    assert!(matches!(small, Call::SetAttributes { changes: AttributeChanges { mode: Some(0o644), .. }, .. }));
     // The first offending key in key order is reported.
     assert_eq!(refuse(&[("zzz", Value::from(1i32)), ("aaa", Value::from(1i32))]), "Unknown option \"aaa\"");
     let long_key = "k".repeat(300);
@@ -566,6 +568,8 @@ fn answers() {
         "Invalid answer"
     );
     assert!(answer(map(&[("answers", Value::from(vec![vec![1u8; MAX_ANSWER_BYTES]]))])).is_ok());
+    // The C++ Limits::MaxShortString * 4.
+    assert_eq!(MAX_ANSWER_BYTES, 1024);
     assert_eq!(message(map(&[("answers", Value::from(vec![Value::from(1i32)]))])), "Invalid answer");
     assert_eq!(message(map(&[("answers", Value::from(vec![vec![1u16]]))])), "Invalid answer");
     assert_eq!(message(map(&[("accept", Value::from("yes"))])), "Option \"accept\" must be a boolean");
@@ -637,4 +641,8 @@ fn variant_depth_and_element_limits() {
     let names: Vec<String> = (0..=DECODE_MAX_ELEMENTS).map(|i| i.to_string()).collect();
     let keys: Map<'_> = names.iter().map(|k| (k.as_str(), Value::from(1i32))).collect();
     assert_eq!(validate("SetAttributes", &(LOC, p, keys)).unwrap_err().message, "Argument too complex");
+    // Exactly the limit: counted in, then refused for the unknown key.
+    let keys: Map<'_> = names[1..].iter().map(|k| (k.as_str(), Value::from(1i32))).collect();
+    assert_eq!(keys.len(), DECODE_MAX_ELEMENTS);
+    assert!(validate("SetAttributes", &(LOC, p, keys)).unwrap_err().message.starts_with("Unknown option"));
 }

@@ -71,6 +71,17 @@ fn frame_sizes() {
     assert_eq!(frame_size(&other).unwrap_err().kind(), io::ErrorKind::InvalidData);
 }
 
+/// A read half that cannot pass descriptors (zbus's defaults).
+#[derive(Debug)]
+struct NoFds;
+
+impl ReadHalf for NoFds {}
+
+#[test]
+fn delegates_descriptor_support() {
+    assert!(!LimitedRead::new(Box::new(NoFds)).can_pass_unix_fd());
+}
+
 #[tokio::test]
 async fn delegates_to_the_stream() {
     let (mut reader, _write, _spare) = reader();

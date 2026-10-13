@@ -292,6 +292,8 @@ fn uptime_in_ticks() {
     assert_eq!(uptime_ticks("12.29 5.00\n", 100), Some(1229));
     assert_eq!(uptime_ticks("12.5 1", 100), Some(1250));
     assert_eq!(uptime_ticks("12 1", 100), Some(1200));
+    assert_eq!(uptime_ticks("0.50 1", 100), Some(50));
+    assert_eq!(uptime_ticks("0 1", 100), Some(0));
     assert_eq!(uptime_ticks("1.1234567899 1", 1_000_000_000), Some(1_123_456_789));
     assert_eq!(uptime_ticks("1.000000001 1", 1_000_000_000), Some(1_000_000_001));
     assert_eq!(uptime_ticks("x.5 1", 100), None);

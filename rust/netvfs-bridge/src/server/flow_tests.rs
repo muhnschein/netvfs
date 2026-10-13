@@ -135,12 +135,14 @@ fn outbox_queues_until_closed() {
 
     assert!(!outbox.is_closed());
     outbox.close();
-    outbox.close();
     assert!(outbox.is_closed());
     assert!(format!("{outbox:?}").contains("closed: true"));
-    // The socket was shut down: the peer sees the end.
+    // The first close shut the socket down: the peer sees the end.
+    peer.set_read_timeout(Some(Duration::from_secs(1))).unwrap();
     let mut buf = [0u8; 1];
     assert_eq!(peer.read(&mut buf).unwrap(), 0);
+    outbox.close();
+    assert!(outbox.is_closed());
     // Closed: nothing is queued and streamed bytes are given back.
     let queued = *link.queued.borrow();
     assert!(!outbox.signal(&small(4)));
