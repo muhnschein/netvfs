@@ -96,5 +96,54 @@
     "search": "        echo \"$file: not an ELF file\"\n        return 1",
     "replace": "        echo \"$file: not an ELF file\"\n        return 0",
     "test": "tests/packaging/test_packaging.py"
+  },
+  {
+    "name": "XB-2 C ABI: a second export accepted",
+    "file": "tools/ci/check-ffi-lib.sh",
+    "search": "[ \"$exports\" = nvb_ffi_get ] || fail",
+    "replace": "[ -n \"$exports\" ] || fail",
+    "test": "tests/packaging/test_packaging.py"
+  },
+  {
+    "name": "XB-2 C ABI: no libnetvfs accepted",
+    "file": "tools/ci/check-ffi-lib.sh",
+    "search": "readelf -d \"$library\" | grep -q '(NEEDED).*\\[libnetvfs\\.so\\.1\\]' || fail",
+    "replace": "true || fail",
+    "test": "tests/packaging/test_packaging.py"
+  },
+  {
+    "name": "XB-2 C ABI: newer glibc accepted",
+    "file": "tools/ci/check-ffi-lib.sh",
+    "search": "if [ -n \"$highest\" ] && [",
+    "replace": "if [ -z \"$highest\" ] && [",
+    "test": "tests/packaging/test_packaging.py"
+  },
+  {
+    "name": "XB-2 C ABI: lazy binding accepted",
+    "file": "tools/ci/check-ffi-lib.sh",
+    "search": "readelf -d \"$library\" | grep -Eq 'FLAGS.*(BIND_NOW| NOW)' || fail",
+    "replace": "true || fail",
+    "test": "tests/packaging/test_packaging.py"
+  },
+  {
+    "name": "XB-2 C ABI: no RELRO accepted",
+    "file": "tools/ci/check-ffi-lib.sh",
+    "search": "readelf -lW \"$library\" | grep -q GNU_RELRO || fail",
+    "replace": "true || fail",
+    "test": "tests/packaging/test_packaging.py"
+  },
+  {
+    "name": "XB-2 C ABI: executable stack accepted",
+    "file": "tools/ci/check-ffi-lib.sh",
+    "search": "    *RWE*) fail \"executable stack\" ;;",
+    "replace": "    *RWE*) ;;",
+    "test": "tests/packaging/test_packaging.py"
+  },
+  {
+    "name": "XB-2 C ABI: the bridge's path not compared",
+    "file": "tools/ci/check-ffi-lib.sh",
+    "search": "grep -qaF \"$installed\" \"$bridge\" || fail",
+    "replace": "grep -qaF \"$(basename \"$installed\")\" \"$bridge\" || fail",
+    "test": "tests/packaging/test_packaging.py"
   }
 ]
