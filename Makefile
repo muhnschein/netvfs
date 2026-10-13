@@ -2,7 +2,7 @@
 #
 #   make               build everything (vendored libraries first)
 #   make check         Rust checks, unit tests, then the interop suite (needs docker)
-#   make check-rust    the Rust helper (rust/): format, lint, tests, lockfile, MSRV
+#   make check-rust    the Rust workspace (rust/): format, lint, tests (nextest), lockfile, MSRV
 #   make check-unit    unit tests only
 #   make check-interop interop suite against containerised servers
 #   make check-packaging  install tree against the RPM %files (SPEC-v2 XP-1, XP-3)
@@ -42,6 +42,8 @@ TEST_ENV = QT_QPA_PLATFORM=offscreen
 # instrumented; every run writes its counters to RUST_COVERAGE_DIR, which its
 # confinement lets it write to, and the crate's own tests count there too.
 CARGO ?= cargo
+# cargo nextest profile (rust/.config/nextest.toml); CI uses "ci".
+NEXTEST_PROFILE ?= default
 RUST_FEATURES = --features netvfs-accounts/probe
 # rust-toolchain.toml would override the toolchain a job installs, so the
 # oldest supported one (rust-version) is named explicitly.
@@ -82,7 +84,8 @@ check-rust:
 	./tools/ci/check-lockfile.sh rust/Cargo.lock
 	cd rust && $(CARGO) fmt --all -- --check
 	cd rust && $(CARGO) clippy --locked --workspace --all-targets $(RUST_FEATURES) -- -D warnings
-	cd rust && $(RUST_ENV) $(CARGO) test --locked --workspace $(RUST_FEATURES)
+	cd rust && $(RUST_ENV) $(CARGO) nextest run --locked --workspace $(RUST_FEATURES) --profile $(NEXTEST_PROFILE)
+	cd rust && $(RUST_ENV) $(CARGO) test --locked --workspace --doc $(RUST_FEATURES)
 	cd rust && $(CARGO) +$(RUST_MSRV) check --locked --workspace --all-targets $(RUST_FEATURES)
 
 clippy-report:

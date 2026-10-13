@@ -18,3 +18,4 @@ __pycache__/
 /rust/vendor/
 /rust/.cargo-home/
 /build.log
+/rust/prebuilt/

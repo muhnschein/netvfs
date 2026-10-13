@@ -8,7 +8,7 @@ members = ["netvfs-accounts"]
 exclude = ["fuzz"]
 
 [workspace.package]
-version = "0.4.0"
+version = "0.4.1"
 edition = "2024"
 # The rustc that sailfishos/rust ships next (JB#64166). Until an SDK target
 # has it, CI cross-builds with host cargo against the SDK's compiler and

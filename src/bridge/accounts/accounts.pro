@@ -8,7 +8,11 @@
 #   NETVFS_CARGO        the cargo to run (default: cargo)
 #   NETVFS_RUST_TARGET  a target triple to build for (the SDK build:
 #                       aarch64-unknown-linux-gnu)
-#   NETVFS_CARGO_FLAGS  more cargo arguments (the SDK build: --frozen)
+#   NETVFS_CARGO_FLAGS  more cargo arguments
+#   NETVFS_RUST_PREBUILT a folder with a netvfs-accounts that CI cross-built
+#                       (tools/ci/cross-build.sh); installed as it is, cargo
+#                       does not run. The RPM build sets it until an SDK
+#                       target ships the rustc of rust-version (doc/RUST.md).
 include(../../../common.pri)
 
 TEMPLATE = aux
@@ -38,11 +42,16 @@ equals(NETVFS_COVERAGE, 1) {
 # cargo decides what is out of date; this always asks it.
 helper.target = $$HELPER
 helper.depends = FORCE
-helper.commands = cd $$shell_quote($$NETVFS_ROOT/rust) && $$CARGO_ENV \
-    $$NETVFS_CARGO build --release --locked -p netvfs-accounts --bin netvfs-accounts \
-        --target-dir $$shell_quote($$CARGO_TARGET_DIR) $$CARGO_ARGS $$NETVFS_CARGO_FLAGS && \
-    mkdir -p $$shell_quote($$HELPER_DIR) && \
-    cp -f $$shell_quote($$CARGO_OUT/netvfs-accounts) $$shell_quote($$HELPER)
+isEmpty(NETVFS_RUST_PREBUILT) {
+    helper.commands = cd $$shell_quote($$NETVFS_ROOT/rust) && $$CARGO_ENV \
+        $$NETVFS_CARGO build --release --locked -p netvfs-accounts --bin netvfs-accounts \
+            --target-dir $$shell_quote($$CARGO_TARGET_DIR) $$CARGO_ARGS $$NETVFS_CARGO_FLAGS && \
+        mkdir -p $$shell_quote($$HELPER_DIR) && \
+        cp -f $$shell_quote($$CARGO_OUT/netvfs-accounts) $$shell_quote($$HELPER)
+} else {
+    helper.commands = mkdir -p $$shell_quote($$HELPER_DIR) && \
+        cp -f $$shell_quote($$NETVFS_RUST_PREBUILT/netvfs-accounts) $$shell_quote($$HELPER)
+}
 first.depends = $$helper.target
 QMAKE_EXTRA_TARGETS += helper first
 

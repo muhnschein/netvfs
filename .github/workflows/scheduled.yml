@@ -1,0 +1,92 @@
+name: Weekly
+# What can change without a commit: advisories against the locked crates,
+# the next stable clippy, the online workflow audit, and the Rust tests under
+# AddressSanitizer and LeakSanitizer (doc/RUST.md "CI").
+on:
+  schedule:
+    - cron: "41 4 * * 1"
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: weekly-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  DENY_VERSION: 0.20.2
+  ZIZMOR_VERSION: 1.30.1
+  NEXTEST_VERSION: 0.9.148
+  # -Zsanitizer needs nightly; pinned so that a nightly regression does not
+  # look like a finding. Bump on purpose.
+  SANITIZER_NIGHTLY: nightly-2026-10-01
+jobs:
+  advisories:
+    name: Advisories (cargo-deny)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - name: Cache cargo-deny
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.cargo/bin/cargo-deny
+          key: cargo-deny-${{ env.DENY_VERSION }}-ubuntu-24.04
+      - name: Install cargo-deny
+        run: ./tools/ci/cargo-tool.sh cargo-deny "$DENY_VERSION"
+      - name: Advisories against the locked crates
+        working-directory: rust
+        run: cargo +stable deny --locked check advisories
+
+  next-clippy:
+    name: Clippy of the current stable
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -q
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends \
+              pkg-config libsqlite3-dev
+          rustup toolchain install stable --profile minimal --component clippy
+      - name: Clippy (stable, the workspace's lints)
+        working-directory: rust
+        run: cargo +stable clippy --locked --workspace --all-targets --all-features -- -D warnings
+
+  zizmor-online:
+    name: Workflow audit (zizmor, online)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - name: zizmor
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 -m pip install --user "zizmor==$ZIZMOR_VERSION"
+          zizmor .github/workflows
+
+  rust-sanitizers:
+    name: Rust tests under ASan + LSan
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -q
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends \
+              pkg-config libsqlite3-dev
+          rustup toolchain install "$SANITIZER_NIGHTLY" --profile minimal --component rust-src
+      - name: Cache cargo-nextest
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.cargo/bin/cargo-nextest
+          key: cargo-nextest-${{ env.NEXTEST_VERSION }}-ubuntu-24.04
+      - name: Install cargo-nextest
+        run: ./tools/ci/cargo-tool.sh cargo-nextest "$NEXTEST_VERSION"
+      - name: Tests under ASan + LSan
+        run: ./tools/ci/rust-sanitize.sh "$SANITIZER_NIGHTLY"
