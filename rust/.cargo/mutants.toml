@@ -1,0 +1,19 @@
+# SPDX-License-Identifier: LGPL-2.1-or-later
+# cargo-mutants (tools/ci/rust-mutants.sh): mutants no test can tell from
+# the original, each with its reason. Matched against the mutant's name
+# with its line and column (\d+:\d+).
+exclude_re = [
+    # RTLD_LOCAL is 0 on Linux: `RTLD_NOW | RTLD_LOCAL` and
+    # `RTLD_NOW ^ RTLD_LOCAL` are the same flags.
+    'ffi/loader\.rs:\d+:\d+: replace \| with \^ in entry_point',
+    # A hint without a result; the fake backend's readAhead ignores it, as
+    # backends may.
+    'ffi/conn\.rs:\d+:\d+: replace Handle::read_ahead with \(\)',
+    # Whether a multicast socket opens depends on the host (sandboxes and
+    # some runners have none), so the test cannot require `true`.
+    'ffi/discovery\.rs:\d+:\d+: replace Discovery::set_running -> bool with false',
+    # The hook runs only on a report from a server on the network, which a
+    # test cannot provide; Ctx::take_panic itself is unit-tested
+    # (callback.rs).
+    'ffi/discovery\.rs:\d+:\d+: replace Discovery::take_panic -> Option<String> with None',
+]

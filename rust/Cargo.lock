@@ -345,6 +345,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "netvfs-bridge"
+version = "0.4.1"
+dependencies = [
+ "libc",
+ "netvfs-bridge-proto",
+ "zeroize",
+]
+
+[[package]]
 name = "netvfs-bridge-proto"
 version = "0.4.1"
 dependencies = [
