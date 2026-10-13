@@ -1,14 +1,14 @@
 #!/bin/sh
 # Builds the aarch64 RPMs with the Sailfish OS Platform SDK container.
 # Env: SDK_IMAGE (container image), TARGET (sb2 target name).
-# The Rust binaries come prebuilt from rust/prebuilt (the CI job "Rust for
-# the target" puts them there, doc/RUST.md "Cross build"); without them this
-# script cross-builds them first, which needs the host packages of
-# lift-sdk.sh.
+# The Rust binaries come prebuilt from rust/prebuilt (the RPM job's step
+# "Cross-build the Rust binaries" puts them there, doc/RUST.md "Cross
+# build"); without them this script cross-builds them first, which needs the
+# host packages of lift-sdk.sh.
 set -eu
 : "${SDK_IMAGE:?}" "${TARGET:?}"
 root=$(cd "$(dirname "$0")/../.." && pwd)
-if [ ! -x "$root/rust/prebuilt/netvfs-accounts" ]; then
+if [ ! -x "$root/rust/prebuilt/netvfs-bridge" ] || [ ! -x "$root/rust/prebuilt/netvfs-accounts" ]; then
     sdk=$root/build-sdk-cross
     [ -x "$sdk/bin/aarch64-meego-linux-gnu-gcc" ] || "$root/tools/ci/lift-sdk.sh" "$SDK_IMAGE" "$TARGET" "$sdk"
     "$root/tools/ci/cross-build.sh" "$sdk" "$root/rust/prebuilt"

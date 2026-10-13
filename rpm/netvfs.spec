@@ -7,8 +7,10 @@
 #                   services, netvfs-cli, translations
 #   netvfs-backup   SFTP and SMB backups: services, Buteo plugins and profiles
 #   netvfs-bridge   netvfs-bridge and its setgid accounts helper, for
-#                   sandboxed consumers (the helper is Rust since 0.4:
-#                   rust/netvfs-accounts, doc/RUST.md)
+#                   sandboxed consumers, and libnetvfs-bridge-ffi.so, the
+#                   C ABI through which the bridge reaches the backends (both
+#                   binaries are Rust, the helper since 0.4 and the bridge
+#                   since 0.5: rust/, doc/RUST.md)
 #   netvfs-devel    headers, pkg-config
 #
 # Since 0.3 the parts nobody installs on their own are one package; what
@@ -16,7 +18,7 @@
 # binary) or is only for development (XP-6).
 #
 # XC-1a: every package requires netvfs of the same build. Library
-# dependencies (Qt, libaccounts-qt5, libsignon-qt5, libcurl, libdbus,
+# dependencies (Qt, libaccounts-qt5, libsignon-qt5, libcurl, libsqlite3,
 # libbuteosyncfw5) are added by rpm's automatic soname dependencies;
 # tools/ci/check-rpm.sh checks the ones the split relies on.
 # tools/ci/check-files.py checks that every installed file belongs to exactly
@@ -50,12 +52,12 @@ BuildRequires: pkgconfig(libsignon-qt5)
 BuildRequires: pkgconfig(buteosyncfw5) >= 0.10.0
 # SPEC-v2 W-1, F-1: the WebDAV and FTP backends use the system libcurl.
 BuildRequires: pkgconfig(libcurl)
-# SPEC-v2 XB-8: netvfs-bridge speaks peer-to-peer D-Bus through libdbus.
-BuildRequires: pkgconfig(dbus-1)
-# SPEC-v2 XB-2a: the accounts helper is Rust 1.95, which no SDK target ships
-# yet: CI cross-builds it with the SDK's own compiler and sysroot before this
-# build (tools/ci/cross-build.sh), and the spec installs that binary
-# (doc/RUST.md "Cross build"). rpm still derives its library dependencies.
+# SPEC-v2 XB-2, XB-2a: netvfs-bridge and its accounts helper are Rust 1.95,
+# which no SDK target ships yet: CI cross-builds them with the SDK's own
+# compiler and sysroot before this build (tools/ci/cross-build.sh), and the
+# spec installs those binaries (doc/RUST.md "Cross build"). rpm still derives
+# their library dependencies. The bridge speaks peer-to-peer D-Bus with zbus,
+# so the package build no longer needs libdbus (the tests still do).
 
 Requires:   sailfish-version >= 5.2.0
 Requires:   sailfishsilica-qt5

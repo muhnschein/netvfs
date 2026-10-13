@@ -1,14 +1,19 @@
 #!/bin/sh
 # SPDX-License-Identifier: LGPL-2.1-or-later
-# Smoke run of the cross-built netvfs-accounts under qemu-aarch64-static with
-# the target's own glibc and SQLite (doc/RUST.md "Cross build"): its answers
-# to `list` and `files` on a small accounts.db must be byte for byte those
-# of the host build. (seccomp does not install under qemu-user; the helper
-# goes on without it, as it is best-effort.)
-# Usage: cross-smoke.sh <sdk dir> <cross-built netvfs-accounts>
+# Smoke run of the cross-built Rust binaries under qemu-aarch64-static with
+# the target's own glibc and SQLite (doc/RUST.md "Cross build"):
+#   - netvfs-accounts: its answers to `list` and `files` on a small
+#     accounts.db must be byte for byte those of the host build (seccomp
+#     does not install under qemu-user; the helper goes on without it, as it
+#     is best-effort);
+#   - netvfs-bridge: a usage error exits 2, and for a registered consumer it
+#     gets as far as loading its C ABI (which needs the target's Qt, so a
+#     missing one here: exit 1).
+# Usage: cross-smoke.sh <sdk dir> <cross-built netvfs-accounts> [<cross-built netvfs-bridge>]
 set -eu
 sdk=$(cd "$1" && pwd)
 target_helper=$2
+target_bridge=${3:-}
 root=$(cd "$(dirname "$0")/../.." && pwd)
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
@@ -60,3 +65,24 @@ for request in "list" "files 1" "files 2" "files 3"; do
     [ -s "$work/host.out" ] || { echo "cross-smoke: '$request' gave no answer"; exit 1; }
     echo "cross-smoke: '$request' ok ($(wc -c < "$work/target.out") bytes)"
 done
+
+[ -n "$target_bridge" ] || exit 0
+code=0
+qemu-aarch64-static -L "$sdk/sysroot" "$target_bridge" > /dev/null 2>&1 || code=$?
+if [ "$code" -ne 2 ]; then
+    echo "cross-smoke: netvfs-bridge without arguments exited $code, not 2"
+    exit 1
+fi
+mkdir -p "$work/consumers"
+printf '[Consumer]\nId=smoke\nDisplayName=Smoke\nExecutable=/usr/bin/smoke\nDataDir=.local/share/smoke\n' \
+    > "$work/consumers/smoke.conf"
+code=0
+NETVFS_CONSUMERS_DIR=$work/consumers NETVFS_BRIDGE_FFI=$work/missing.so \
+    qemu-aarch64-static -L "$sdk/sysroot" "$target_bridge" --listen "unix:path=$work/bridge.sock" smoke \
+    > /dev/null 2> "$work/bridge.err" || code=$?
+if [ "$code" -ne 1 ] || ! grep -q 'Cannot load the backends' "$work/bridge.err"; then
+    echo "cross-smoke: netvfs-bridge did not get as far as loading its C ABI (exit $code)"
+    cat "$work/bridge.err"
+    exit 1
+fi
+echo "cross-smoke: netvfs-bridge ok"

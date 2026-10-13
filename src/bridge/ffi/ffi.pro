@@ -10,6 +10,9 @@ DESTDIR = $$NETVFS_LIB_OUT/netvfs
 QT = core network
 CONFIG += plugin hide_symbols
 QMAKE_LFLAGS += -Wl,--version-script=$$PWD/exports.map
+# Hardened as the Rust binaries are (tools/ci/check-ffi-lib.sh): the bridge
+# resolves it with RTLD_NOW anyway, and its relocations stay read-only.
+QMAKE_LFLAGS += -Wl,-z,relro -Wl,-z,now -Wl,-z,noexecstack
 LIBS += $$netvfsCoreLibs()
 # Tests load it from the build tree; the installed one finds libnetvfs
 # through the system library path (no RUNPATH in packages).

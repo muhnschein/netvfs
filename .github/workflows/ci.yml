@@ -39,7 +39,7 @@ jobs:
         run: ./tools/ci/cargo-tool.sh cargo-nextest "$NEXTEST_VERSION"
       - name: Build
         run: make -j"$(nproc)"
-      - name: Packaging checks (file lists, no share enumeration in the SMB plugin)
+      - name: Packaging checks (file lists, no share enumeration in the SMB plugin, the bridge's C ABI)
         run: make check-packaging
       - name: Every mutation list is in the mutation matrix
         run: ./tools/ci/check-mutation-matrix.py
@@ -260,8 +260,8 @@ jobs:
         run: ./tools/ci/cross-build.sh build-sdk-cross rust/prebuilt
       - name: Rust tests on the target's glibc and SQLite (qemu)
         run: ./tools/ci/cross-build.sh build-sdk-cross build-cross-test test
-      - name: Smoke run of the cross-built helper (qemu)
-        run: ./tools/ci/cross-smoke.sh build-sdk-cross rust/prebuilt/netvfs-accounts
+      - name: Smoke run of the cross-built binaries (qemu)
+        run: ./tools/ci/cross-smoke.sh build-sdk-cross rust/prebuilt/netvfs-accounts rust/prebuilt/netvfs-bridge
       - name: Free the lifted SDK
         run: rm -rf build-sdk-cross build-cross-test
       - name: QML UI and plugin on the target (Qt 5.6, real Silica)

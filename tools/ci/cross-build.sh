@@ -40,7 +40,7 @@ if [ "$mode" = test ]; then
     exit 0
 fi
 cargo build --release --locked --workspace --target "$triple" --bins
-for bin in netvfs-accounts; do
+for bin in netvfs-bridge netvfs-accounts; do
     cp -f "$CARGO_TARGET_DIR/$triple/release/$bin" "$out/$bin"
 done
 ls -l "$out"
