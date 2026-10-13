@@ -20,7 +20,6 @@ use crate::server::{OutSignal, Reply, ReplyTo, SessionId};
 use crate::status::Status;
 use netvfs_bridge_proto::{ErrorName, Lane};
 use std::collections::HashMap;
-use std::fmt;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use tokio::time::Instant;
@@ -42,15 +41,6 @@ pub(crate) struct PendingAdHoc {
     pub(crate) secret: Arc<AdHocSecret>,
 }
 
-impl fmt::Debug for PendingAdHoc {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("PendingAdHoc")
-            .field("name", &self.name)
-            .field("provider", &self.params.provider)
-            .finish_non_exhaustive()
-    }
-}
-
 /// Who waits for the answer to a question.
 pub(crate) enum Waiter {
     /// A worker (identity-unknown, keyboard-interactive).
@@ -69,17 +59,6 @@ pub(crate) enum Waiter {
         /// The answer slot of `ConnectAdHoc`.
         reply: ReplyTo,
     },
-}
-
-impl fmt::Debug for Waiter {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Worker { ask, .. } => f.debug_struct("Worker").field("ask", ask).finish_non_exhaustive(),
-            Self::Insecure { sid, pending, .. } => {
-                f.debug_struct("Insecure").field("sid", sid).field("pending", pending).finish_non_exhaustive()
-            }
-        }
-    }
 }
 
 /// The text of option `key`, as the C++ `ConnectionParams::option` gave it.
@@ -530,12 +509,5 @@ mod tests {
         assert_eq!(String::try_from(d["url"].clone()).unwrap(), "ftp://h/");
         assert_eq!(String::try_from(d["provider"].clone()).unwrap(), "ftp");
         assert_eq!(String::try_from(d["host"].clone()).unwrap(), "h");
-        let pending = PendingAdHoc {
-            name: "h".to_owned(),
-            params: params("ftp", &[]),
-            path: Vec::new(),
-            secret: AdHocSecret::new("u", zeroize::Zeroizing::new(b"pw".to_vec())),
-        };
-        assert!(!format!("{pending:?}").contains("pw"));
     }
 }

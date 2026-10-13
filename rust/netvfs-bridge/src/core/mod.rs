@@ -232,6 +232,9 @@ pub struct Counters {
     pub sessions: usize,
     /// Requests in flight (XB-17).
     pub requests: usize,
+    /// Calls, `List` requests and jobs the sessions still track (their
+    /// cancel flags and reply slots).
+    pub ops: usize,
     /// Open read handles.
     pub handles: usize,
     /// Running jobs.
@@ -448,17 +451,6 @@ pub(crate) struct Core {
     url_override: Option<UrlOverride>,
 }
 
-impl fmt::Debug for Core {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Core")
-            .field("consumer", &self.config.consumer.id)
-            .field("consent", &self.consent)
-            .field("sessions", &self.sessions.len())
-            .field("quota", &self.quota)
-            .finish_non_exhaustive()
-    }
-}
-
 /// Whether the loop goes on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Flow {
@@ -634,6 +626,7 @@ impl Core {
         Counters {
             sessions: self.sessions.len(),
             requests: self.quota.active_requests(),
+            ops: self.sessions.values().map(|s| s.ops.len()).sum(),
             handles: self.quota.open_handles(),
             jobs: self.quota.running_jobs(),
             questions: self.questions.pending(),

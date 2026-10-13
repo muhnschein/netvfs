@@ -21,18 +21,21 @@ use netvfs_bridge::consent::Consent;
 use netvfs_bridge::core::nearby::{self, NearbySource as _};
 use netvfs_bridge::handoff::HandoffArg;
 use netvfs_bridge::locations::knownhosts::KnownHosts;
+use netvfs_bridge::server::ListenAddress;
 use netvfs_bridge::testing::{
     self, ACCOUNT_LOC, FakeAccounts, Fixture, Harness, Setup, Test, WAIT, block_on, error_name,
     wait_disconnected, wait_for, wait_signal,
 };
 use netvfs_bridge::testutil::TempDir;
-use netvfs_bridge_proto::limits::{MAX_HANDLES, MAX_JOBS, MAX_LIST_BATCH, MAX_REQUESTS};
+use netvfs_bridge::{Deps, Services};
+use netvfs_bridge_proto::limits::{MAX_HANDLES, MAX_JOBS, MAX_LIST_BATCH, MAX_REQUESTS, POOL_PER_HOST};
 use netvfs_bridge_proto::zvariant::Fd;
 use netvfs_bridge_proto::{Connection, ErrorName, Opts, OptsBuilder, PROTOCOL_VERSION, Signal, SignalStream};
 use std::fs::{File, OpenOptions};
 use std::io::{Read as _, Seek as _, SeekFrom, Write as _};
 use std::os::fd::AsFd as _;
 use std::process::ExitCode;
+use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 const TESTS: &[(&str, Test)] = &[
@@ -66,6 +69,9 @@ const TESTS: &[(&str, Test)] = &[
     ("locations_changed", locations_changed),
     ("ffi_nearby_lives_on_the_qt_thread", ffi_nearby_lives_on_the_qt_thread),
     ("cancel_copy_across", cancel_copy_across),
+    ("cancel_pending_job", cancel_pending_job),
+    ("idle_exit_after_an_answer", idle_exit_after_an_answer),
+    ("debug_output", debug_output),
 ];
 
 fn main() -> ExitCode {
@@ -238,7 +244,7 @@ fn list_streams_batches(h: &Harness) {
             matches!(done, Some(Signal::ListDone { req, ref error, .. }) if req == missing && error == "NotFound")
         );
         let counters = f.probe().counters().await.unwrap();
-        assert_eq!(counters.requests, 0);
+        assert_eq!((counters.requests, counters.ops), (0, 0));
     });
 }
 
@@ -260,8 +266,8 @@ fn cancel_job(h: &Harness) {
         }
         // An id that already finished: nothing to do.
         c.proxy().cancel(job).await.unwrap();
-        let counters = f.probe().wait_until(WAIT, |n| n.jobs == 0).await.unwrap();
-        assert_eq!(counters.jobs, 0);
+        let counters = f.probe().wait_until(WAIT, |n| n.jobs == 0 && n.ops == 0).await.unwrap();
+        assert_eq!((counters.jobs, counters.ops), (0, 0));
     });
 }
 
@@ -1076,4 +1082,84 @@ fn cancel_copy_across(h: &Harness) {
         let after = probe.wait_until(WAIT, |n| n.copy_jobs == 0 && n.jobs == 0).await.unwrap();
         assert_eq!((after.copy_jobs, after.jobs), (0, 0));
     });
+}
+
+fn cancel_pending_job(h: &Harness) {
+    let f = Fixture::new(h, Consent::Granted);
+    let mut accounts = f.accounts.state();
+    accounts.accounts.push(FakeAccounts::fake_account(2));
+    accounts.accounts.push(FakeAccounts::fake_account(3));
+    drop(accounts);
+    f.accounts_changed();
+    h.fake.add_file(b"/big", &vec![b'x'; 4 << 20]);
+    h.fake.set_chunk_delay_ms(50);
+    block_on(async {
+        let c = f.hello_client().await;
+        let mut signals = c.signals();
+        let probe = f.probe();
+        let started = Instant::now();
+        while c.proxy().list_locations().await.unwrap().len() < 3 {
+            assert!(started.elapsed() < WAIT, "accounts 2 and 3 never came");
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        // The host's connections (POOL_PER_HOST), each stuck on a pipe
+        // nobody reads: two of account 1, two of account 2.
+        let mut pipes = Vec::new();
+        let mut download = async |loc: &str| {
+            let (reader, writer) = std::io::pipe().unwrap();
+            let job = c.proxy().download(loc, b"/big", Fd::from(writer.as_fd()), &no_opts()).await.unwrap();
+            pipes.push(reader);
+            job
+        };
+        for loc in [ACCOUNT_LOC, ACCOUNT_LOC, "account:2", "account:2"] {
+            download(loc).await;
+        }
+        assert_eq!(POOL_PER_HOST, 4);
+        // Account 3 has no connection and the host none to spare: it waits.
+        let pending = download("account:3").await;
+        assert_eq!(probe.wait_until(WAIT, |n| n.jobs == 5).await.unwrap().jobs, 5);
+        c.proxy().cancel(pending).await.unwrap();
+        // XB-13: waiting work ends at once, not when a connection comes free.
+        assert_eq!(finished(&mut signals, pending).await.0, "Canceled");
+        assert_eq!(probe.wait_until(WAIT, |n| n.jobs == 4).await.unwrap().jobs, 4);
+        drop(pipes);
+    });
+}
+
+fn idle_exit_after_an_answer(h: &Harness) {
+    let mut f = Fixture::with_idle_exit(h, Consent::Unknown, Duration::from_millis(300));
+    block_on(async {
+        let c = f.hello_client().await;
+        assert_eq!(f.prompt.state().shown, 1);
+        c.close().await;
+        drop(c);
+        // The answer is stored after the consumer left; then the bridge goes.
+        f.answer_prompt(false);
+        assert_eq!(f.wait_exit(Duration::from_secs(5)).await, Some(ExitCode::SUCCESS));
+        assert_eq!(f.stored_consent(), Consent::Denied);
+    });
+}
+
+fn debug_output(h: &Harness) {
+    let mut f = Fixture::new(h, Consent::Granted);
+    let link = f.link().clone();
+    assert_eq!(format!("{link:?}"), "CoreLink { closed: false }");
+    let services = Services {
+        accounts: Rc::new(f.accounts.clone()),
+        prompt: Box::new(f.prompt.clone()),
+        nearby: Box::new(f.nearby.clone()),
+        launcher: Box::new(f.launcher.clone()),
+    };
+    assert_eq!(format!("{services:?}"), "Services { prompt_shown: false, .. }");
+    let deps = Deps {
+        ffi: h.ffi,
+        listen: ListenAddress::parse("unix:path=/nowhere").unwrap(),
+        services: Box::new(|_| panic!("never served")),
+        url_override: None,
+    };
+    let text = format!("{deps:?}");
+    assert!(text.starts_with("Deps { ffi: ") && text.ends_with("url_override: false, .. }"), "{text}");
+    assert!(text.contains("/nowhere"), "{text}");
+    assert_eq!(f.stop(), Some(ExitCode::SUCCESS));
+    assert_eq!(format!("{link:?}"), "CoreLink { closed: true }");
 }
