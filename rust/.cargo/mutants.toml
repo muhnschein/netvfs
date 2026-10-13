@@ -45,4 +45,7 @@ exclude_re = [
     # test cannot provide; Ctx::take_panic itself is unit-tested
     # (callback.rs).
     'ffi/discovery\.rs:\d+:\d+: replace Discovery::take_panic -> Option<String> with None',
+    # Equivalent: an empty name is no error name, and from_bare returns None
+    # for it, so the `_` arm below gives the same Protocol error as this arm.
+    'netvfs-bridge-proto/src/errors\.rs:\d+:\d+: delete match arm "" in BridgeError::from_method_error$',
 ]

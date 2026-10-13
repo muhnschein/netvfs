@@ -7,8 +7,10 @@
 #![cfg(feature = "fake")]
 
 use futures_lite::StreamExt as _;
-use netvfs_bridge_proto::fake::{Failure, FakeBridge};
-use netvfs_bridge_proto::{BridgeError, OptsBuilder, PROTOCOL_VERSION, Signal, Zeroizing, connect};
+use netvfs_bridge_proto::fake::{Failure, FakeBridge, RecordedAnswer};
+use netvfs_bridge_proto::{
+    BridgeError, OptsBuilder, PROTOCOL_VERSION, Signal, SignalStream, Zeroizing, connect,
+};
 use std::time::Duration;
 
 /// A fresh folder below the temporary one, removed on drop.
@@ -36,6 +38,15 @@ async fn fake_with_account() -> FakeBridge {
 
 async fn hello(conn: &netvfs_bridge_proto::Connection) {
     conn.proxy().hello(PROTOCOL_VERSION, "test").await.unwrap();
+}
+
+/// The next signal; fails after five seconds instead of waiting forever.
+async fn next_signal(signals: &mut SignalStream) -> Signal {
+    tokio::time::timeout(Duration::from_secs(5), signals.next())
+        .await
+        .expect("no signal within five seconds")
+        .expect("the stream ended")
+        .unwrap()
 }
 
 #[tokio::test]
@@ -132,7 +143,7 @@ async fn listing_signals_arrive_in_order() {
     let req = conn.proxy().list("account:1", b"", "", 1).await.unwrap();
     let mut names = Vec::new();
     loop {
-        match signals.next().await.expect("the stream stays open").unwrap() {
+        match next_signal(&mut signals).await {
             Signal::ListBatch { req: r, entries } => {
                 assert_eq!(r, req);
                 assert_eq!(entries.len(), 1, "batches of one were asked for");
@@ -210,4 +221,54 @@ async fn keyboard_answers_are_wiped_after_the_call() {
     let e = conn.answer_wiping("q1", true, &mut answers).await.unwrap_err();
     assert_eq!(e.netvfs_name(), Some("NotFound"));
     assert!(answers.is_empty());
+}
+
+/// The id of the next `Question` signal; fails after five seconds.
+async fn next_question(signals: &mut SignalStream) -> String {
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if let Signal::Question { id, .. } = signals.next().await.unwrap().unwrap() {
+                return id;
+            }
+        }
+    })
+    .await
+    .expect("no Question signal")
+}
+
+#[tokio::test]
+async fn keyboard_answers_reach_the_bridge_then_are_wiped() {
+    let fake = fake_with_account().await;
+    let conn = fake.connect().await.unwrap();
+    let mut signals = conn.signals();
+    hello(&conn).await;
+    let mut answers = Zeroizing::new(vec![b"123456".to_vec(), b"second".to_vec()]);
+    let answering = async {
+        let id = next_question(&mut signals).await;
+        conn.answer_wiping(&id, true, &mut answers).await.unwrap();
+        assert!(answers.is_empty(), "wiped after the answer was sent");
+        id
+    };
+    let (asked, id) = tokio::join!(fake.ask("keyboard-interactive", Vec::new()), answering);
+    let want = RecordedAnswer { id, accept: true, answers: vec![b"123456".to_vec(), b"second".to_vec()] };
+    assert_eq!(asked, Some(want.clone()), "the bridge got the answers and the acceptance");
+    assert_eq!(fake.answers(), vec![want]);
+}
+
+#[tokio::test]
+async fn a_connection_debugs_as_its_type() {
+    let fake = fake_with_account().await;
+    let conn = fake.connect().await.unwrap();
+    assert_eq!(format!("{conn:?}"), "Connection");
+}
+
+#[tokio::test]
+async fn closing_the_connection_ends_it() {
+    let fake = fake_with_account().await;
+    let conn = fake.connect().await.unwrap();
+    hello(&conn).await;
+    assert_eq!(conn.proxy().list_locations().await.unwrap().len(), 1);
+    conn.close().await;
+    let e = BridgeError::from(conn.proxy().list_locations().await.unwrap_err());
+    assert!(matches!(e, BridgeError::Disconnected(_)), "{e:?}");
 }
