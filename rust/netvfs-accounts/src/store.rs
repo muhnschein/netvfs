@@ -364,4 +364,90 @@ mod tests {
         assert_eq!(with_pin[3].key, b"netvfs/sftp/host_key_seen");
         assert_eq!(with_pin[3].text, "'SHA256:x'");
     }
+
+    /// A fresh folder for a test's database.
+    fn tempdir(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("netvfs-accounts-store-{name}-{}", std::process::id()));
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// A database as libaccounts-glib creates it (see db.rs), with accounts
+    /// listed or not for each reason `files_accounts` has.
+    fn create(path: &std::path::Path) {
+        let c = rusqlite::Connection::open(path).unwrap();
+        c.execute_batch(
+            "CREATE TABLE Accounts (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, provider TEXT, enabled INTEGER);
+             CREATE TABLE Services (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE,
+                                    display TEXT NOT NULL, provider TEXT, type TEXT);
+             CREATE TABLE Settings (account INTEGER NOT NULL, service INTEGER, key TEXT NOT NULL,
+                                    type TEXT NOT NULL, value BLOB);
+             CREATE UNIQUE INDEX idx_setting ON Settings (account, service, key);
+             PRAGMA user_version = 1;
+             INSERT INTO Services VALUES (1, 'smb-files', 'Files', 'smb', 'netvfs-files'),
+                                         (2, 'sftp-files', 'Files', 'sftp', 'netvfs-files'),
+                                         (3, 'mail-email', 'Mail', 'mail', 'e-mail');
+             -- 1, 5: listed; 2: account disabled; 3: no Files service type;
+             -- 4: service disabled; 6: no service setting; 2^32 + 2 reads as 2.
+             INSERT INTO Accounts VALUES (5, 'e', 'sftp', 1), (1, 'a', 'smb', 1), (2, 'b', 'smb', 0),
+                                         (3, 'c', 'mail', 1), (4, 'd', 'smb', 1), (6, 'f', 'smb', 1),
+                                         (4294967298, 'g', 'smb', 1);
+             INSERT INTO Settings VALUES (1, 0, 'netvfs/host', 's', '''nas'''),
+                                         (1, 1, 'enabled', 'b', 'true'), (2, 1, 'enabled', 'b', 'true'),
+                                         (3, 3, 'enabled', 'b', 'true'), (4, 1, 'enabled', 'b', 'false'),
+                                         (5, 2, 'enabled', 'b', 'true'),
+                                         (4294967298, 1, 'enabled', 'b', 'true');",
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn files_accounts_golden() {
+        let dir = tempdir("list");
+        let path = dir.join("accounts.db");
+        create(&path);
+        let store = Store::new(Database::open(&path, false).unwrap());
+        assert_eq!(store.files_accounts().unwrap(), vec![1, 2, 5]);
+        assert_eq!(Store::new(Database::empty()).files_accounts().unwrap(), Vec::<i32>::new());
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn attention_is_written() {
+        let dir = tempdir("attention");
+        let path = dir.join("accounts.db");
+        create(&path);
+        let settings = vec![
+            NewSetting { key: b"netvfs/attention".to_vec(), type_string: "s", text: "'auth-failed'".into() },
+            NewSetting { key: b"CredentialsNeedUpdate".to_vec(), type_string: "b", text: "true".into() },
+        ];
+        let failed = Outcome::failure(Error::Internal, "Cannot write the accounts database");
+        // Read-only, and no database at all: the write fails.
+        let mut read_only = Store::new(Database::open(&path, false).unwrap());
+        assert_eq!(read_only.write_attention(1, &settings).unwrap_err(), failed);
+        assert_eq!(Store::new(Database::empty()).write_attention(1, &settings).unwrap_err(), failed);
+
+        let mut store = Store::new(Database::open(&path, true).unwrap());
+        store.write_attention(1, &settings).unwrap();
+        // A negative id is the account's unsigned id.
+        store.write_attention(-2, &settings[1..]).unwrap();
+        let db = Database::open(&path, false).unwrap();
+        let mut global = db.settings(1, 0).unwrap();
+        global.sort_by(|a, b| a.key.cmp(&b.key));
+        assert_eq!(
+            global,
+            vec![
+                Setting { key: b"CredentialsNeedUpdate".to_vec(), value: Value::Bool(true) },
+                Setting { key: b"netvfs/attention".to_vec(), value: Value::String("auth-failed".into()) },
+                Setting { key: b"netvfs/host".to_vec(), value: Value::String("nas".into()) },
+            ]
+        );
+        assert_eq!(
+            db.settings(4_294_967_294, 0).unwrap(),
+            vec![Setting { key: b"CredentialsNeedUpdate".to_vec(), value: Value::Bool(true) }]
+        );
+        assert_eq!(Store::new(db).load(1).unwrap().attention, Attention::AuthFailed);
+        std::fs::remove_dir_all(dir).ok();
+    }
 }

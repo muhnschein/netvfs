@@ -145,14 +145,19 @@ fn home_of(uid: u32) -> Option<PathBuf> {
 /// The uid and gid of the user `privileged`.
 #[must_use]
 pub fn privileged_ids() -> Option<(u32, u32)> {
+    user_ids(c"privileged")
+}
+
+/// The uid and gid of the user `name` in passwd.
+fn user_ids(name: &CStr) -> Option<(u32, u32)> {
     let mut buffer = vec![0u8; 16384];
     // SAFETY: as in home_of.
     let mut entry: libc::passwd = unsafe { std::mem::zeroed() };
     let mut result: *mut libc::passwd = std::ptr::null_mut();
-    // SAFETY: as in home_of; the name is a constant C string.
+    // SAFETY: as in home_of; the name is NUL-terminated.
     let status = unsafe {
         libc::getpwnam_r(
-            c"privileged".as_ptr(),
+            name.as_ptr(),
             &raw mut entry,
             buffer.as_mut_ptr().cast(),
             buffer.len(),
@@ -283,6 +288,8 @@ pub mod landlock {
 
     /// Reading files and listing folders.
     pub const READ_ONLY: u64 = READ_FILE | READ_DIR;
+    /// /dev/null: read and written.
+    pub const NULL_DEVICE: u64 = READ_FILE | WRITE_FILE;
     /// The database folder: SQLite creates, truncates and removes its -wal
     /// and -shm files there.
     pub const READ_WRITE: u64 =
@@ -383,8 +390,9 @@ mod nr {
 }
 
 /// One Landlock rule below `path`, for what of `access` the ruleset handles.
-/// A missing path needs no rule.
-fn allow_beneath(ruleset: i32, handled: u64, path: &Path, mut access: u64) {
+/// A missing path needs no rule. A refused rule is reported as `label`,
+/// never as the path: it may hold the uid or the home folder.
+fn allow_beneath(ruleset: i32, handled: u64, path: &Path, label: &str, mut access: u64) {
     let Some(c) = c_path(path) else { return };
     // SAFETY: a NUL-terminated path; the descriptor is closed below.
     let fd = unsafe { libc::open(c.as_ptr(), libc::O_PATH | libc::O_CLOEXEC) };
@@ -409,7 +417,7 @@ fn allow_beneath(ruleset: i32, handled: u64, path: &Path, mut access: u64) {
         )
     };
     if added != 0 {
-        warn(&format!("Landlock rule for {}", path.display()));
+        warn(&format!("Landlock rule for the {label}"));
     }
     // SAFETY: closing the descriptor opened above.
     unsafe { libc::close(fd) };
@@ -467,14 +475,17 @@ pub fn restrict_filesystem(writable: &[PathBuf], allow_abstract_sockets: bool) -
     }
     let fs = handled.fs;
     for system in ["/usr", "/etc", "/lib", "/lib64", "/proc", "/dev/urandom", "/dev/random"] {
-        allow_beneath(ruleset, fs, Path::new(system), landlock::READ_ONLY);
+        allow_beneath(ruleset, fs, Path::new(system), "system folder", landlock::READ_ONLY);
     }
-    allow_beneath(ruleset, fs, Path::new("/dev/null"), landlock::READ_FILE | landlock::WRITE_FILE);
+    allow_beneath(ruleset, fs, Path::new("/dev/null"), "null device", landlock::NULL_DEVICE);
     // The uid's own runtime folder (the session bus), never XDG_RUNTIME_DIR:
     // the caller sets that.
-    allow_beneath(ruleset, fs, &runtime_dir(), landlock::READ_ONLY);
-    for dir in writable.iter().chain(&build_folders()) {
-        allow_beneath(ruleset, fs, dir, landlock::READ_WRITE);
+    allow_beneath(ruleset, fs, &runtime_dir(), "runtime folder", landlock::READ_ONLY);
+    for dir in writable {
+        allow_beneath(ruleset, fs, dir, "database folder", landlock::READ_WRITE);
+    }
+    for dir in build_folders() {
+        allow_beneath(ruleset, fs, &dir, "coverage folder", landlock::READ_WRITE);
     }
     // SAFETY: prctl and the ruleset descriptor from above.
     result.enforced = unsafe {
@@ -845,5 +856,45 @@ mod tests {
         assert!(drop_set_id_group());
         assert!(home_of(uid()).is_some());
         assert!(home_of(u32::MAX - 7).is_none());
+    }
+
+    fn clock() -> (u64, u32) {
+        let mut ts = libc::timespec { tv_sec: 0, tv_nsec: 0 };
+        // SAFETY: `ts` is a valid timespec to write.
+        assert_eq!(unsafe { libc::clock_gettime(libc::CLOCK_MONOTONIC, &raw mut ts) }, 0);
+        (u64::try_from(ts.tv_sec).unwrap(), u32::try_from(ts.tv_nsec).unwrap())
+    }
+
+    #[test]
+    fn monotonic_time_is_the_monotonic_clock() {
+        let before = clock();
+        let now = monotonic_time();
+        let after = clock();
+        // The machine has been up for more than a second.
+        assert!(before.0 >= 1, "{before:?}");
+        assert!(before <= now && now <= after, "{before:?} {now:?} {after:?}");
+    }
+
+    /// The ids of `name` in /etc/passwd, read without libc.
+    fn passwd_ids(name: &str) -> Option<(u32, u32)> {
+        let passwd = std::fs::read_to_string("/etc/passwd").unwrap();
+        passwd.lines().find_map(|line| {
+            let fields: Vec<&str> = line.split(':').collect();
+            (fields.len() >= 4 && fields[0] == name)
+                .then(|| (fields[2].parse().unwrap(), fields[3].parse().unwrap()))
+        })
+    }
+
+    #[test]
+    fn user_ids_from_passwd() {
+        assert_eq!(user_ids(c"root"), Some((0, 0)));
+        let nobody = passwd_ids("nobody");
+        if nobody.is_some() {
+            assert_eq!(user_ids(c"nobody"), nobody);
+        }
+        assert_eq!(user_ids(c"netvfs-no-such-user"), None);
+        assert_eq!(user_ids(c""), None);
+        // Only Sailfish OS has the user.
+        assert_eq!(privileged_ids(), passwd_ids("privileged"));
     }
 }

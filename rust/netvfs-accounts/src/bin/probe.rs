@@ -3,7 +3,8 @@
 //! fresh process and checks what it still allows, as the C++ tests did in a
 //! forked child. The exit status is the number of the first check that
 //! failed, 0 if none did; 77 when the kernel has no Landlock, 99 when it has
-//! no seccomp. Usage: `netvfs-accounts-probe <part> [paths...]`.
+//! no seccomp. Stdout says how many checks ran. Usage:
+//! `netvfs-accounts-probe <part> [arguments...]`.
 #![allow(unsafe_code)]
 
 use std::ffi::CString;
@@ -17,6 +18,14 @@ const NO_LANDLOCK: i32 = 77;
 const NO_SECCOMP: i32 = 99;
 /// fchmodat2 (Linux 6.6), the same number on every architecture.
 const FCHMODAT2: libc::c_long = 452;
+/// The setresgid glibc calls.
+fn setresgid() -> i64 {
+    #[cfg(target_arch = "arm")]
+    let nr = i64::from(libc::SYS_setresgid32);
+    #[cfg(not(target_arch = "arm"))]
+    let nr = libc::SYS_setresgid;
+    nr
+}
 
 /// The number of the first check that failed, 0 if none did.
 #[derive(Default)]
@@ -40,6 +49,13 @@ impl Checks {
 #[allow(clippy::print_stderr)]
 fn report(message: &str) {
     eprintln!("probe: {message}");
+}
+
+/// Writes how many checks ran to stdout: the test compares it, so that a
+/// part that skips its checks does not pass.
+#[allow(clippy::print_stdout)]
+fn ran(checks: &Checks) {
+    println!("ran {}", checks.count);
 }
 
 fn errno() -> i32 {
@@ -93,18 +109,19 @@ fn process_state(check: &mut Checks) {
     unsafe {
         check.check(libc::umask(0o022) == 0o077);
         let mut action: libc::sigaction = std::mem::zeroed();
-        check.check(
-            libc::sigaction(libc::SIGTERM, std::ptr::null(), &raw mut action) == 0
-                && action.sa_sigaction == libc::SIG_DFL,
-        );
+        // A failed query leaves SIG_IGN, which fails the check.
+        action.sa_sigaction = libc::SIG_IGN;
+        libc::sigaction(libc::SIGTERM, std::ptr::null(), &raw mut action);
+        check.check(action.sa_sigaction == libc::SIG_DFL);
         let mut now: libc::sigset_t = std::mem::zeroed();
-        check.check(
-            libc::sigprocmask(libc::SIG_BLOCK, std::ptr::null(), &raw mut now) == 0
-                && libc::sigismember(&raw const now, libc::SIGUSR1) == 0,
-        );
-        let mut size = libc::rlimit { rlim_cur: 0, rlim_max: 0 };
-        check
-            .check(libc::getrlimit(libc::RLIMIT_FSIZE, &raw mut size) == 0 && size.rlim_cur == size.rlim_max);
+        // A failed query leaves every signal blocked.
+        libc::sigfillset(&raw mut now);
+        libc::sigprocmask(libc::SIG_BLOCK, std::ptr::null(), &raw mut now);
+        check.check(libc::sigismember(&raw const now, libc::SIGUSR1) == 0);
+        // A failed query leaves limits that differ.
+        let mut size = libc::rlimit { rlim_cur: 0, rlim_max: 1 };
+        libc::getrlimit(libc::RLIMIT_FSIZE, &raw mut size);
+        check.check(size.rlim_cur == size.rlim_max);
     }
 }
 
@@ -112,6 +129,9 @@ fn syscalls(check: &mut Checks, dir: &Path) -> i32 {
     if !sandbox::restrict_syscalls() {
         return NO_SECCOMP;
     }
+    // The filter is in force (mode 2).
+    let status = std::fs::read_to_string("/proc/self/status").unwrap_or_default();
+    check.check(status.lines().find_map(|l| l.strip_prefix("Seccomp:")).map(str::trim) == Some("2"));
     let file = c(&dir.join("file"));
     let other = c(&dir.join("other"));
     let folder = c(&dir.join("folder"));
@@ -145,6 +165,9 @@ fn syscalls(check: &mut Checks, dir: &Path) -> i32 {
         check.check(
             libc::syscall(libc::SYS_openat, libc::AT_FDCWD, file.as_ptr(), libc::O_RDONLY, 0o6755) >= 0,
         );
+        check.check(
+            libc::syscall(libc::SYS_openat, libc::AT_FDCWD, file.as_ptr(), libc::O_WRONLY, 0o6755) >= 0,
+        );
         check.check(fails_with(i64::from(libc::mkdir(folder.as_ptr(), 0o2755)), libc::EPERM));
         // The *at calls themselves (glibc uses the old ones where they exist).
         check.check(fails_with(
@@ -161,6 +184,10 @@ fn syscalls(check: &mut Checks, dir: &Path) -> i32 {
         ));
         check.check(fails_with(i64::from(libc::creat(other.as_ptr(), 0o2755)), libc::EPERM));
         check.check(libc::mkdir(folder.as_ptr(), 0o700) == 0);
+        // O_DIRECTORY is part of O_TMPFILE, but alone creates nothing.
+        check.check(
+            libc::syscall(libc::SYS_openat, libc::AT_FDCWD, folder.as_ptr(), libc::O_DIRECTORY, 0o6755) >= 0,
+        );
         check.check(fails_with(
             i64::from(libc::open(folder.as_ptr(), libc::O_TMPFILE | libc::O_WRONLY, 0o2755)),
             libc::EPERM,
@@ -194,8 +221,11 @@ fn filesystem(check: &mut Checks, allowed: &Path, denied: &Path) -> i32 {
         check.check(libc::ftruncate(fd, 0) == 0);
         check.check(libc::unlink(created.as_ptr()) == 0);
         // Anything else: read-only system folders, nothing beyond them.
-        check.check(libc::open(c"/etc/passwd".as_ptr(), libc::O_RDONLY | libc::O_CLOEXEC) >= 0);
-        check.check(libc::open(c"/dev/null".as_ptr(), libc::O_WRONLY | libc::O_CLOEXEC) >= 0);
+        check.check(libc::open(c"/etc/passwd".as_ptr(), libc::O_RDONLY) >= 0);
+        let null = libc::open(c"/dev/null".as_ptr(), libc::O_WRONLY);
+        check.check(libc::write(null, b"x".as_ptr().cast(), 1) == 1);
+        // A file, not a folder, of the system ones.
+        check.check(libc::open(c"/dev/urandom".as_ptr(), libc::O_RDONLY) >= 0);
         check.check(fails_with(i64::from(libc::open(secret.as_ptr(), libc::O_RDONLY)), libc::EACCES));
         check.check(fails_with(
             i64::from(libc::open(outside.as_ptr(), libc::O_CREAT | libc::O_WRONLY, 0o600)),
@@ -224,12 +254,15 @@ fn filesystem(check: &mut Checks, allowed: &Path, denied: &Path) -> i32 {
     0
 }
 
-fn set_id_environment(check: &mut Checks) {
+/// `runtime`: the XDG_RUNTIME_DIR expected when the caller sets none, empty
+/// for none (the test knows whether /run/user/<uid> is the uid's folder).
+fn set_id_environment(check: &mut Checks, runtime: &Path) {
     // SAFETY: the probe runs one check per process and has one thread.
     unsafe {
         std::env::set_var("HOME", "/tmp/someone-else");
         std::env::set_var("ACCOUNTS", "/tmp/evil");
         std::env::set_var("LANG", "fi_FI.UTF-8");
+        std::env::set_var("XDG_RUNTIME_DIR", "/tmp/caller-runtime");
     }
     // SAFETY: valid rlimit structs.
     let before = unsafe {
@@ -259,6 +292,13 @@ fn set_id_environment(check: &mut Checks) {
         core
     };
     check.check(after.rlim_cur == 0 && after.rlim_max == before.rlim_max);
+    // The caller's runtime folder stays; without one, /run/user/<uid> when
+    // that is the uid's.
+    check.check(std::env::var_os("XDG_RUNTIME_DIR").is_some_and(|r| r == "/tmp/caller-runtime"));
+    // SAFETY: as above.
+    unsafe { std::env::remove_var("XDG_RUNTIME_DIR") };
+    check.check(sandbox::prepare_set_id_process().is_some());
+    check.check(std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from).unwrap_or_default() == runtime);
 }
 
 /// `set_id`: started from a setgid copy of the probe, so that there is a
@@ -271,14 +311,37 @@ fn group(check: &mut Checks, set_id: bool) {
     check.check(sandbox::drop_set_id_group());
     // SAFETY: plain id calls.
     unsafe {
-        let (mut r, mut e, mut s) = (1, 1, 1);
+        // A failed query leaves an id no group has.
+        let (mut r, mut e, mut s) = (libc::gid_t::MAX, libc::gid_t::MAX, libc::gid_t::MAX);
+        libc::getresgid(&raw mut r, &raw mut e, &raw mut s);
+        check.check([r, e, s] == [libc::getgid(); 3]);
+    }
+}
+
+/// A refused setresgid is reported, also when every gid is already the
+/// real one: this process's seccomp filter fails it with EPERM.
+fn group_refused(check: &mut Checks) {
+    let mut filter = sandbox::Filter::default();
+    filter.load_number();
+    filter.on(setresgid(), sandbox::Filter::DENY);
+    filter.ret(sandbox::Filter::ALLOW);
+    let program = filter.instructions();
+    let program = libc::sock_fprog {
+        len: u16::try_from(program.len()).unwrap_or_default(),
+        filter: program.as_ptr().cast_mut(),
+    };
+    // SAFETY: prctl with plain values; the program outlives the call.
+    unsafe {
+        check.check(libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) == 0);
         check.check(
-            libc::getresgid(&raw mut r, &raw mut e, &raw mut s) == 0
-                && r == libc::getgid()
-                && e == r
-                && s == r,
+            libc::prctl(
+                libc::PR_SET_SECCOMP,
+                libc::c_ulong::from(libc::SECCOMP_MODE_FILTER),
+                std::ptr::addr_of!(program),
+            ) == 0,
         );
     }
+    check.check(!sandbox::drop_set_id_group());
 }
 
 fn main() {
@@ -298,14 +361,19 @@ fn main() {
         "syscalls" => syscalls(&mut checks, &path(1)),
         "filesystem" => filesystem(&mut checks, &path(1), &path(2)),
         "set-id-environment" => {
-            set_id_environment(&mut checks);
+            set_id_environment(&mut checks, &path(1));
             0
         }
         "group" => {
             group(&mut checks, path(1) == Path::new("set-id"));
             0
         }
+        "group-refused" => {
+            group_refused(&mut checks);
+            0
+        }
         _ => 2,
     };
+    ran(&checks);
     std::process::exit(if status != 0 { status } else { checks.failed });
 }

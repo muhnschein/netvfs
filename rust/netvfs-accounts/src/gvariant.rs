@@ -626,6 +626,10 @@ mod tests {
         }
         assert_eq!(print_string("auth-failed"), "'auth-failed'");
         assert_eq!(print_string("it's"), "\"it's\"");
+        // \u up to U+FFFF, \U beyond.
+        assert_eq!(print_string("\u{e9}\u{7f}"), r"'\u00e9\u007f'");
+        assert_eq!(print_string("\u{fffd}\u{ffff}"), r"'\ufffd\uffff'");
+        assert_eq!(print_string("\u{10000}\u{1f600}"), r"'\U00010000\U0001f600'");
         assert_eq!(parse("b", print_bool(true)), Value::Bool(true));
         assert_eq!(parse("b", print_bool(false)), Value::Bool(false));
     }
