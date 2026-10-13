@@ -667,3 +667,167 @@ impl Drop for Fixture {
         let _code = self.stop();
     }
 }
+
+// ---------------------------------------------------------- the binary
+
+/// The fake helper's table: account 1 as the [`Fixture`] has it (provider
+/// `fake`, "Fake 1" at `fake.example`, user `user`, files at `/`).
+const FAKE_ACCOUNTS: &str = "account\t1\tfake\tFake 1\tfake.example\t0\tuser\t/\t\n";
+
+/// The `netvfs-bridge` binary as a test runs it (the process, contract and
+/// notification tests): consumer `id`, registered with this test binary as
+/// its executable, and a private home, configuration, data and consumers
+/// folder below [`BridgeRun::dir`]; no accounts helper, no session bus,
+/// the idle exit after 500 ms. The `with_*` methods change that before
+/// [`BridgeRun::spawn`].
+#[derive(Debug)]
+pub struct BridgeRun {
+    /// The temporary folder: `home`, `config`, `data`, `consumers`,
+    /// `bridge.sock`.
+    pub dir: TempDir,
+    /// The consumer.
+    pub consumer: String,
+    /// Where the bridge listens.
+    pub socket: PathBuf,
+    /// The command; arguments and environment set.
+    pub command: std::process::Command,
+}
+
+impl BridgeRun {
+    /// The bridge at `bridge` with `--listen unix:path=<dir>/bridge.sock`.
+    #[must_use]
+    pub fn new(bridge: &std::path::Path, consumer: &str) -> Self {
+        let mut run = Self::bare(bridge, consumer);
+        run.command.arg("--listen").arg(format!("unix:path={}", run.socket.display())).arg(consumer);
+        run
+    }
+
+    /// The bridge at `bridge` without arguments (the test adds them) and
+    /// not socket-activated.
+    #[must_use]
+    pub fn bare(bridge: &std::path::Path, consumer: &str) -> Self {
+        let dir = TempDir::new();
+        let socket = dir.join("bridge.sock");
+        let mut command = std::process::Command::new(bridge);
+        command.env_remove("LISTEN_FDS").env_remove("LISTEN_PID");
+        Self::prepare(dir, consumer, socket, command)
+    }
+
+    /// The bridge at `bridge` socket-activated, as systemd starts it:
+    /// listening on `<dir>/bridge.sock`, bound here and passed as fd 3
+    /// ([`crate::testutil::socket_activated`]).
+    #[must_use]
+    pub fn activated(bridge: &std::path::Path, consumer: &str) -> Self {
+        let dir = TempDir::new();
+        let socket = dir.join("bridge.sock");
+        let listener = std::os::unix::net::UnixListener::bind(&socket).expect("the listening socket");
+        let mut command = crate::testutil::socket_activated(bridge, listener.into());
+        command.arg(consumer);
+        Self::prepare(dir, consumer, socket, command)
+    }
+
+    fn prepare(dir: TempDir, consumer: &str, socket: PathBuf, mut command: std::process::Command) -> Self {
+        let exe = std::env::current_exe().expect("the test's executable");
+        dir.write(
+            &format!("consumers/{consumer}.conf"),
+            format!(
+                "[Consumer]\nId={consumer}\nDisplayName=Process test\nExecutable={}\n\
+                 DataDir=.local/share/{consumer}\n",
+                exe.display()
+            ),
+        );
+        std::fs::create_dir_all(dir.join("home")).expect("home");
+        command
+            .env("HOME", dir.join("home"))
+            .env("XDG_CONFIG_HOME", dir.join("config"))
+            .env("XDG_DATA_HOME", dir.join("data"))
+            .env("NETVFS_CONSUMERS_DIR", dir.join("consumers"))
+            .env("NETVFS_ACCOUNTS_HELPER", dir.join("no-helper"))
+            .env("NETVFS_BRIDGE_IDLE_EXIT_MS", "500")
+            .env_remove("DBUS_SESSION_BUS_ADDRESS")
+            .env_remove("NETVFS_FAKE_SEED")
+            .stdin(std::process::Stdio::null());
+        Self { dir, consumer: consumer.to_owned(), socket, command }
+    }
+
+    /// `bridge.conf` with `consent` for the consumer, as netvfs-ui writes it.
+    pub fn with_consent(&mut self, consent: Consent) -> &mut Self {
+        ConsentStore::new(self.consent_file()).set_consent(&self.consumer, consent).expect("bridge.conf");
+        self
+    }
+
+    /// `bridge.conf`.
+    #[must_use]
+    pub fn consent_file(&self) -> PathBuf {
+        self.dir.join("config/netvfs/bridge.conf")
+    }
+
+    /// The fake accounts helper `helper` (`netvfs-accounts-fake`) with
+    /// account 1, and the fake backend's server set up for its empty
+    /// secret.
+    pub fn with_fake_accounts(&mut self, helper: &std::path::Path) -> &mut Self {
+        let table = self.dir.write("accounts", FAKE_ACCOUNTS);
+        self.command.env("NETVFS_ACCOUNTS_HELPER", helper).env("NETVFS_FAKE_ACCOUNTS", table);
+        self.with_files(&[])
+    }
+
+    /// The files of the fake backend's server (`NETVFS_FAKE_SEED`, design
+    /// §4.1), (path, content). Also the server's credentials: user `user`
+    /// with the empty secret of the fake helper's accounts (credentials id
+    /// 0, secret optional). The seed format has no empty hex word; `-` is
+    /// one that decodes to nothing (`QByteArray::fromHex` skips what is not
+    /// a hex digit).
+    pub fn with_files(&mut self, files: &[(&[u8], &[u8])]) -> &mut Self {
+        let mut seed = String::from("credentials user -\n");
+        for (path, content) in files {
+            for word in ["file ", &hex(path), " ", &hex(content), "\n"] {
+                seed.push_str(word);
+            }
+        }
+        let seed = self.dir.write("seed", seed);
+        self.command.env("NETVFS_FAKE_SEED", seed);
+        self
+    }
+
+    /// The session bus at `address`.
+    pub fn with_session_bus(&mut self, address: &str) -> &mut Self {
+        self.command.env("DBUS_SESSION_BUS_ADDRESS", address);
+        self
+    }
+
+    /// Starts the bridge, its stderr into [`BridgeRun::log`], and waits
+    /// until its socket exists.
+    #[must_use]
+    pub fn spawn(&mut self) -> crate::testutil::TestChild {
+        let log = std::fs::File::create(self.dir.join("bridge.log")).expect("bridge.log");
+        let mut child =
+            crate::testutil::TestChild::spawn(self.command.stdout(std::process::Stdio::null()).stderr(log))
+                .expect("netvfs-bridge starts");
+        let end = Instant::now().checked_add(WAIT).expect("a deadline");
+        while !self.socket.exists() {
+            if let Some(status) = child.child().try_wait().expect("try_wait") {
+                panic!("netvfs-bridge ended with {status} before it listened");
+            }
+            assert!(Instant::now() < end, "no socket at {}", self.socket.display());
+            thread::sleep(Duration::from_millis(10));
+        }
+        child
+    }
+
+    /// A connected client that has not said Hello.
+    pub async fn client(&self) -> Connection {
+        netvfs_bridge_proto::connect(&self.socket).await.expect("connected")
+    }
+
+    /// What the bridge wrote to stderr so far.
+    #[must_use]
+    pub fn log(&self) -> String {
+        std::fs::read(self.dir.join("bridge.log"))
+            .map(|b| String::from_utf8_lossy(&b).into_owned())
+            .unwrap_or_default()
+    }
+}
+
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().flat_map(|b| [b >> 4, b & 15]).filter_map(|d| char::from_digit(d.into(), 16)).collect()
+}

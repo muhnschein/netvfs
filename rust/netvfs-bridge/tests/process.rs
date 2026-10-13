@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! The `netvfs-bridge` binary (SPEC-v2 XB-2): its command line and exit
-//! codes, and with the C ABI (the variables of `tests/ffi.rs`) a run that
-//! serves a client on `--listen unix:path=…` and ends with the idle exit.
+//! The `netvfs-bridge` binary (SPEC-v2 XB-2; C++ `tst_bridgeprocess`): its
+//! command line and exit codes, and with the C ABI (the variables of
+//! `tests/ffi.rs`) runs that serve a client on `--listen unix:path=…` and
+//! on a socket passed as systemd does, and end with the idle exit. Every
+//! bridge started here dies with its test ([`TestChild`]).
 #![allow(
     missing_docs,
     clippy::unwrap_used,
@@ -12,125 +14,110 @@
     clippy::assertions_on_result_states
 )]
 
-use netvfs_bridge::testutil::TempDir;
-use netvfs_bridge_proto::PROTOCOL_VERSION;
+use netvfs_bridge::consent::Consent;
+use netvfs_bridge::testing::{BridgeRun, WAIT, wait_signal};
+use netvfs_bridge::testutil::TestChild;
+use netvfs_bridge_proto::{PROTOCOL_VERSION, Signal};
+use std::io::Read as _;
 use std::path::Path;
-use std::process::{Command, Output, Stdio};
+use std::process::Stdio;
 use std::time::{Duration, Instant};
 
 const BRIDGE: &str = env!("CARGO_BIN_EXE_netvfs-bridge");
+const HELPER: &str = env!("CARGO_BIN_EXE_netvfs-accounts-fake");
 const FFI_VARIABLES: [&str; 2] = ["NETVFS_BRIDGE_FFI", "NETVFS_BACKEND_PATH"];
+/// How long a bridge may take to end.
+const EXIT_WAIT: Duration = Duration::from_secs(10);
 
-/// The bridge with a private home and consumers folder in `dir`.
-fn bridge(dir: &TempDir, args: &[&str]) -> Command {
-    let mut command = Command::new(BRIDGE);
-    command
-        .args(args)
-        .env("HOME", dir.join("home"))
-        .env("XDG_CONFIG_HOME", dir.join("config"))
-        .env("XDG_DATA_HOME", dir.join("data"))
-        .env("NETVFS_CONSUMERS_DIR", dir.join("consumers"))
-        .env("NETVFS_ACCOUNTS_HELPER", dir.join("no-helper"))
-        .env_remove("DBUS_SESSION_BUS_ADDRESS")
-        .env_remove("LISTEN_FDS")
-        .env_remove("LISTEN_PID")
-        .stdin(Stdio::null());
-    command
+/// Whether the C ABI is there; says the test is skipped when not.
+fn have_ffi() -> bool {
+    let missing = FFI_VARIABLES.iter().any(|v| std::env::var_os(v).is_none());
+    if missing {
+        println!("skipped: {} not set (make check-rust-ffi sets them)", FFI_VARIABLES.join(", "));
+    }
+    !missing
 }
 
-fn run(dir: &TempDir, args: &[&str]) -> Output {
-    bridge(dir, args).output().expect("netvfs-bridge runs")
-}
-
-/// Registers consumer `id` with this test binary as its executable.
-fn register(dir: &TempDir, id: &str) {
-    let exe = std::env::current_exe().unwrap();
-    let conf = format!(
-        "[Consumer]\nId={id}\nDisplayName=Process test\nExecutable={}\nDataDir=.local/share/{id}\n",
-        exe.display()
-    );
-    dir.write(&format!("consumers/{id}.conf"), conf);
-    std::fs::create_dir_all(dir.join("home")).unwrap();
-}
-
-fn stderr(output: &Output) -> String {
-    String::from_utf8_lossy(&output.stderr).into_owned()
+/// Runs `args` for consumer `proc-test` (registered) until it ends: exit
+/// code and stderr.
+fn run(args: &[&str], ffi: Option<&Path>) -> (Option<i32>, String) {
+    let mut run = BridgeRun::bare(Path::new(BRIDGE), "proc-test");
+    run.command.args(args).stdout(Stdio::null()).stderr(Stdio::piped());
+    if let Some(ffi) = ffi {
+        run.command.env("NETVFS_BRIDGE_FFI", ffi);
+    }
+    let mut child = TestChild::spawn(&mut run.command).unwrap();
+    let status = child.wait_timeout(EXIT_WAIT).expect("netvfs-bridge ends");
+    let mut stderr = String::new();
+    child.child().stderr.take().unwrap().read_to_string(&mut stderr).unwrap();
+    (status.code(), stderr)
 }
 
 #[test]
 fn usage_errors_exit_with_2() {
-    let dir = TempDir::new();
     for args in
         [&[][..], &["a", "b"], &["--listen", "x"], &["--other", "x", "a"], &["--listen", "x", "a", "b"]]
     {
-        let output = run(&dir, args);
-        assert_eq!(output.status.code(), Some(2), "{args:?}");
-        assert_eq!(stderr(&output), "usage: netvfs-bridge [--listen DBUS-ADDRESS] <consumer-id>\n");
+        let (code, stderr) = run(args, None);
+        assert_eq!(code, Some(2), "{args:?}");
+        assert_eq!(stderr, "usage: netvfs-bridge [--listen DBUS-ADDRESS] <consumer-id>\n");
     }
 }
 
 #[test]
 fn an_unknown_consumer_fails() {
-    let dir = TempDir::new();
-    std::fs::create_dir_all(dir.join("consumers")).unwrap();
-    let output = run(&dir, &["nobody"]);
-    assert_eq!(output.status.code(), Some(1));
-    assert!(stderr(&output).contains("nobody"), "{}", stderr(&output));
-    let output = run(&dir, &["Not/Valid"]);
-    assert_eq!(output.status.code(), Some(1));
+    let (code, stderr) = run(&["nobody"], None);
+    assert_eq!(code, Some(1));
+    assert!(stderr.contains("nobody"), "{stderr}");
+    let (code, _) = run(&["Not/Valid"], None);
+    assert_eq!(code, Some(1));
 }
 
 #[test]
 fn a_bad_listen_address_fails() {
-    let dir = TempDir::new();
-    register(&dir, "proc-test");
-    let output = run(&dir, &["--listen", "tcp:host=x", "proc-test"]);
-    assert_eq!(output.status.code(), Some(1));
-    assert!(stderr(&output).contains("Cannot listen on tcp:host=x"), "{}", stderr(&output));
+    let (code, stderr) = run(&["--listen", "tcp:host=x", "proc-test"], None);
+    assert_eq!(code, Some(1));
+    assert!(stderr.contains("Cannot listen on tcp:host=x"), "{stderr}");
 }
 
 #[test]
 fn a_missing_c_abi_fails() {
-    let dir = TempDir::new();
-    register(&dir, "proc-test");
+    let dir = netvfs_bridge::testutil::TempDir::new();
     let socket = format!("unix:path={}", dir.join("bridge.sock").display());
-    let output = bridge(&dir, &["--listen", &socket, "proc-test"])
-        .env("NETVFS_BRIDGE_FFI", dir.join("missing.so"))
-        .output()
-        .unwrap();
-    assert_eq!(output.status.code(), Some(1));
-    assert!(stderr(&output).contains("Cannot load the backends"), "{}", stderr(&output));
+    let (code, stderr) = run(&["--listen", &socket, "proc-test"], Some(&dir.join("missing.so")));
+    assert_eq!(code, Some(1));
+    assert!(stderr.contains("Cannot load the backends"), "{stderr}");
 }
 
-fn wait_for_socket(path: &Path) {
-    let end = Instant::now() + Duration::from_secs(10);
-    while !path.exists() {
-        assert!(Instant::now() < end, "no socket at {}", path.display());
-        std::thread::sleep(Duration::from_millis(10));
+#[test]
+fn not_activated_fails() {
+    // `systemd:` (no --listen) without LISTEN_PID and LISTEN_FDS.
+    if !have_ffi() {
+        return;
     }
+    let (code, stderr) = run(&["proc-test"], None);
+    assert_eq!(code, Some(1));
+    assert!(stderr.contains("not socket-activated"), "{stderr}");
+}
+
+/// Waits for the bridge to end by itself: its exit code, and how long
+/// that took from `since`.
+fn idle_exit(child: &mut TestChild, since: Instant) -> (Option<i32>, Duration) {
+    let status = child.wait_timeout(EXIT_WAIT).expect("no idle exit");
+    (status.code(), since.elapsed())
 }
 
 #[test]
 fn serves_and_exits_when_idle() {
-    if FFI_VARIABLES.iter().any(|v| std::env::var_os(v).is_none()) {
-        println!("skipped: {} not set (make check-rust-ffi sets them)", FFI_VARIABLES.join(", "));
+    if !have_ffi() {
         return;
     }
-    let dir = TempDir::new();
-    register(&dir, "proc-test");
-    dir.write("config/netvfs/bridge.conf", "[Consent]\nproc-test=granted\n");
-    let socket = dir.join("bridge.sock");
-    let listen = format!("unix:path={}", socket.display());
-    let mut child = bridge(&dir, &["--listen", &listen, "proc-test"])
-        .env("NETVFS_BRIDGE_IDLE_EXIT_MS", "500")
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap();
-    wait_for_socket(&socket);
+    let mut run = BridgeRun::new(Path::new(BRIDGE), "proc-test");
+    run.with_consent(Consent::Granted);
+    let mut child = run.spawn();
     let started = Instant::now();
     tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap().block_on(async {
-        let c = netvfs_bridge_proto::connect(&socket).await.unwrap();
+        let c = run.client().await;
         c.proxy().hello(PROTOCOL_VERSION, "process").await.unwrap();
         assert_eq!(c.proxy().get_consent().await.unwrap(), "granted");
         // No helper: no accounts.
@@ -140,14 +127,86 @@ fn serves_and_exits_when_idle() {
         assert_eq!(c.proxy().get_consent().await.unwrap(), "granted");
         c.close().await;
     });
-    let end = Instant::now() + Duration::from_secs(10);
-    let status = loop {
-        if let Some(status) = child.try_wait().unwrap() {
-            break status;
-        }
-        assert!(Instant::now() < end, "no idle exit");
-        std::thread::sleep(Duration::from_millis(20));
-    };
-    assert_eq!(status.code(), Some(0));
-    assert!(started.elapsed() >= Duration::from_millis(1200), "{:?}", started.elapsed());
+    let (code, took) = idle_exit(&mut child, started);
+    assert_eq!(code, Some(0), "{}", run.log());
+    assert!(took >= Duration::from_millis(1200), "{took:?}");
+}
+
+#[test]
+fn exits_when_idle_without_a_client() {
+    if !have_ffi() {
+        return;
+    }
+    let mut run = BridgeRun::new(Path::new(BRIDGE), "proc-test");
+    let started = Instant::now();
+    let mut child = run.spawn();
+    let (code, took) = idle_exit(&mut child, started);
+    assert_eq!(code, Some(0), "{}", run.log());
+    assert!(took >= Duration::from_millis(500), "{took:?}");
+}
+
+#[test]
+fn exits_when_idle_after_a_client_vanished() {
+    // A client that ends without a word (killed): the bridge sees the
+    // connection close and still leaves after the idle time, also with a
+    // listing in flight.
+    if !have_ffi() {
+        return;
+    }
+    let mut run = BridgeRun::new(Path::new(BRIDGE), "proc-test");
+    run.with_consent(Consent::Granted).with_fake_accounts(Path::new(HELPER));
+    let files: Vec<(Vec<u8>, &[u8])> =
+        (0..200).map(|i| (format!("/many/f{i:03}").into_bytes(), &b"x"[..])).collect();
+    let files: Vec<(&[u8], &[u8])> = files.iter().map(|(p, c)| (p.as_slice(), *c)).collect();
+    run.with_files(&files);
+    let mut child = run.spawn();
+    // The client goes with its runtime, without closing the connection and
+    // while the bridge streams a listing to it.
+    tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap().block_on(async {
+        let c = run.client().await;
+        c.proxy().hello(PROTOCOL_VERSION, "process").await.unwrap();
+        let mut signals = c.signals();
+        let req = c.proxy().list("account:1", b"/many", "", 1).await.unwrap();
+        let batch =
+            wait_signal(&mut signals, WAIT, |s| matches!(s, Signal::ListBatch { req: r, .. } if *r == req));
+        assert!(batch.await.is_some(), "{}", run.log());
+    });
+    let (code, _) = idle_exit(&mut child, Instant::now());
+    assert_eq!(code, Some(0), "{}", run.log());
+}
+
+// tst_bridgeprocess socketActivation: started as systemd starts it.
+#[test]
+fn socket_activation() {
+    if !have_ffi() {
+        return;
+    }
+    let mut run = BridgeRun::activated(Path::new(BRIDGE), "proc-test");
+    run.with_consent(Consent::Granted).with_fake_accounts(Path::new(HELPER));
+    run.with_files(&[(b"/hello.txt", b"hello")]);
+    let mut child = run.spawn();
+    let started = Instant::now();
+    tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap().block_on(async {
+        let c = run.client().await;
+        let (protocol, _, _) = c.proxy().hello(PROTOCOL_VERSION, "process").await.unwrap();
+        assert_eq!(protocol, PROTOCOL_VERSION);
+        assert_eq!(c.proxy().get_consent().await.unwrap(), "granted");
+        let locations = c.proxy().list_locations().await.unwrap();
+        assert_eq!(locations.len(), 1, "{locations:?}");
+        let l = &locations[0];
+        assert_eq!((l.id.as_str(), l.provider.as_str(), l.name.as_str()), ("account:1", "fake", "Fake 1"));
+        assert_eq!(String::try_from(l.info["host"].try_clone().unwrap()).unwrap(), "fake.example");
+        // The account's files, through the helper's access data and the
+        // seeded fake server.
+        let entry = c.proxy().stat("account:1", b"/hello.txt", true, "").await.unwrap();
+        assert_eq!((entry.name.as_slice(), entry.size), (&b"hello.txt"[..], 5));
+        c.close().await;
+    });
+    // XB-2: gone after the idle time with no client and no job.
+    let (code, took) = idle_exit(&mut child, started);
+    assert_eq!(code, Some(0), "{}", run.log());
+    assert!(took >= Duration::from_millis(500), "{took:?}");
+    // XB-4: the bridge wrote nothing into the consumer's folder.
+    assert!(!run.dir.join("home/.local/share/proc-test").exists());
+    assert!(std::fs::read_dir(run.dir.join("home")).unwrap().next().is_none());
 }
