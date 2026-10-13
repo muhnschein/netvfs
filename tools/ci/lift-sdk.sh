@@ -20,8 +20,17 @@ mkdir -p "$dir/hostlib" "$dir/bin" "$dir/linklib"
 dir=$(cd "$dir" && pwd)
 cid=$(docker create "$image" /bin/true)
 trap 'docker rm "$cid" > /dev/null' EXIT
-docker cp "$cid:/opt/cross" "$dir/cross"
-docker cp "$cid:/srv/mer/targets/$target" "$dir/sysroot"
+# Through tar, so that an unprivileged user can unpack it: no device nodes,
+# no ownership, and every file readable and removable afterwards.
+lift() {
+    from=$1
+    to=$2
+    mkdir -p "$to"
+    docker cp "$cid:$from/." - | tar -x -C "$to" --no-same-owner --exclude='./dev/*'
+    chmod -R u+rwX "$to"
+}
+lift /opt/cross "$dir/cross"
+lift "/srv/mer/targets/$target" "$dir/sysroot"
 for lib in libmpc.so.3 libmpfr.so.6 libgmp.so.10 libz.so.1 libzstd.so.1; do
     docker cp -L "$cid:/usr/lib/$lib" "$dir/hostlib/$lib"
 done
