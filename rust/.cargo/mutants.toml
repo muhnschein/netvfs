@@ -122,11 +122,6 @@ exclude_re = [
     # post refuses: only a log line, and post refuses only once the Qt
     # application quits, which ends the test harness's loop as well.
     'netvfs-bridge/src/core/nearby\.rs:\d+:\d+: delete ! in <impl NearbySource for FfiNearby>::set_running$',
-    # netvfs-bridge core/mod.rs, the services of the installed bridge
-    # (Deps::system): they need a session bus that sends AccountsChanged,
-    # which the tests do not have (the process test runs without one, as
-    # session_bus -> None does); the fixture injects its own services.
-    'netvfs-bridge/src/core/mod\.rs:\d+:\d+: (replace session_bus -> Option<zbus::Connection> with None|delete ! in system_services)$',
     # netvfs-bridge core/admin.rs insecure_answered: reached only through
     # insecure-consent, i.e. a webdav, ftp or smb ad-hoc URL with an
     # installed backend for it; test-backends has only the fake one

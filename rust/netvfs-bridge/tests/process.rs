@@ -16,9 +16,10 @@
 
 use netvfs_bridge::consent::Consent;
 use netvfs_bridge::testing::{BridgeRun, WAIT, wait_signal};
-use netvfs_bridge::testutil::TestChild;
+use netvfs_bridge::accounts::watch;
+use netvfs_bridge::testutil::{TestBus, TestChild};
 use netvfs_bridge_proto::{PROTOCOL_VERSION, Signal};
-use std::io::Read as _;
+use std::io::{Read as _, Write as _};
 use std::path::Path;
 use std::process::Stdio;
 use std::time::{Duration, Instant};
@@ -209,4 +210,42 @@ fn socket_activation() {
     // XB-4: the bridge wrote nothing into the consumer's folder.
     assert!(!run.dir.join("home/.local/share/proc-test").exists());
     assert!(std::fs::read_dir(run.dir.join("home")).unwrap().next().is_none());
+}
+
+// The installed bridge's services on a session bus (Deps::system): an
+// account change that libaccounts announces there reaches the consumer,
+// every time.
+#[test]
+fn account_changes_on_the_session_bus() {
+    if !have_ffi() {
+        return;
+    }
+    let Some(bus) = TestBus::start() else {
+        println!("skipped: no dbus-daemon");
+        return;
+    };
+    let mut run = BridgeRun::new(Path::new(BRIDGE), "proc-test");
+    run.with_consent(Consent::Granted).with_fake_accounts(Path::new(HELPER)).with_session_bus(bus.address());
+    let _child = run.spawn();
+    tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap().block_on(async {
+        let writer = bus.connect().await;
+        let c = run.client().await;
+        c.proxy().hello(PROTOCOL_VERSION, "process").await.unwrap();
+        let mut signals = c.signals();
+        assert_eq!(c.proxy().list_locations().await.unwrap().len(), 1);
+        for id in [2, 3] {
+            let mut table = std::fs::OpenOptions::new().append(true).open(run.dir.join("accounts")).unwrap();
+            writeln!(table, "account\t{id}\tfake\tFake {id}\tfake.example\t0\tuser\t/\t").unwrap();
+            drop(table);
+            writer
+                .emit_signal(None::<&str>, "/ServiceType/files", watch::INTERFACE, watch::MEMBER, &())
+                .await
+                .unwrap();
+            let changed = wait_signal(&mut signals, WAIT, |s| matches!(s, Signal::LocationsChanged)).await;
+            assert!(changed.is_some(), "account {id}: {}", run.log());
+            let ids: Vec<String> = c.proxy().list_locations().await.unwrap().into_iter().map(|l| l.id).collect();
+            assert_eq!(ids.len(), usize::try_from(id).unwrap(), "{ids:?}");
+            assert!(ids.contains(&format!("account:{id}")), "{ids:?}");
+        }
+    });
 }
