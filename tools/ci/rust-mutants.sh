@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: LGPL-2.1-or-later
 # cargo-mutants on the Rust lines changed since <base> (CI job "Tests bite
 # (Rust, changed code)"): every mutant there must be caught by a test or be
-# unviable; a missed one or a timeout fails. Results in rust/mutants.out.
+# unviable; a missed one fails. A timeout counts as caught: the mutant made a
+# test hang, which nextest's slow-timeout ends. Results in rust/mutants.out.
 # With a second argument, netvfs-bridge's FFI test runs against the C++
 # libraries `tools/ci/ffi-libs.sh <dir>` built there (else it is skipped and
 # catches nothing). Exclusions, each with its reason: rust/.cargo/mutants.toml.
@@ -28,5 +29,18 @@ fi
 cd rust
 # --in-diff takes paths relative to the workspace root.
 sed -i -e 's|^--- a/rust/|--- a/|' -e 's|^+++ b/rust/|+++ b/|' "$diff"
+status=0
 cargo mutants --in-diff "$diff" --workspace --features netvfs-accounts/probe,netvfs-bridge/testing \
-    --test-tool nextest --no-shuffle --timeout-multiplier 3
+    --test-tool nextest --no-shuffle --timeout-multiplier 3 || status=$?
+# Its exit status says "timeouts" also when mutants were missed, so the
+# outcome is read from the lists: 0 ok, 2 missed, 3 timeouts, anything
+# else (the baseline failed, a usage error) stands.
+case "$status" in
+    0|2|3) ;;
+    *) exit "$status" ;;
+esac
+if [ -s mutants.out/missed.txt ]; then
+    echo "missed mutants:"
+    cat mutants.out/missed.txt
+    exit 1
+fi

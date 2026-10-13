@@ -65,7 +65,7 @@
   {
     "name": "XB-2a helper hands out an account with an empty server",
     "file": "rust/netvfs-accounts/src/store.rs",
-    "search": "        if params.host.as_deref().map_or(true, str::is_empty) {",
+    "search": "        if params.host.as_deref().is_none_or(str::is_empty) {",
     "replace": "        if params.host.is_none() {",
     "test": "dbus-run-session -- build/tests/bridge/accounts/tst_bridgeaccounts"
   },
@@ -135,8 +135,8 @@
   {
     "name": "XB-2a stored int32 out of range accepted",
     "file": "rust/netvfs-accounts/src/gvariant.rs",
-    "search": "            Kind::Int32 if fits_signed(i32::MAX as u64) => {",
-    "replace": "            Kind::Int32 => {",
+    "search": "            Kind::Int32 => Value::Int(within(signed)?),",
+    "replace": "            Kind::Int32 => Value::Int(signed as i32),",
     "test": "dbus-run-session -- build/tests/bridge/accounts/tst_bridgeaccounts"
   },
   {
@@ -219,14 +219,14 @@
   {
     "name": "XB-2a set-id helper keeps its caller's variables",
     "file": "rust/netvfs-accounts/src/sandbox.rs",
-    "search": "        std::env::remove_var(name);",
+    "search": "        unsafe { std::env::remove_var(name) };",
     "replace": "        let _ = name;",
     "test": "cd rust && cargo test --locked --features probe -q"
   },
   {
     "name": "XB-2a set-id helper keeps its caller's HOME",
     "file": "rust/netvfs-accounts/src/sandbox.rs",
-    "search": "    std::env::set_var(\"HOME\", home);",
+    "search": "    unsafe { std::env::set_var(\"HOME\", home) };",
     "replace": "    let _ = home;",
     "test": "cd rust && cargo test --locked --features probe -q"
   },
@@ -268,7 +268,7 @@
   {
     "name": "XB-2a helper keeps its caller's signal mask",
     "file": "rust/netvfs-accounts/src/sandbox.rs",
-    "search": "        libc::sigprocmask(libc::SIG_SETMASK, &none, std::ptr::null_mut());\n",
+    "search": "        libc::sigprocmask(libc::SIG_SETMASK, &raw const none, std::ptr::null_mut());\n",
     "replace": "",
     "test": "cd rust && cargo test --locked --features probe -q"
   },
@@ -282,7 +282,7 @@
   {
     "name": "XB-2a confined helper opens internet sockets",
     "file": "rust/netvfs-accounts/src/sandbox.rs",
-    "search": "    f.deny_argument_other_than(libc::SYS_socket, 0, libc::AF_UNIX as u32);\n",
+    "search": "    f.deny_argument_other_than(libc::SYS_socket, 0, libc::AF_UNIX.cast_unsigned());\n",
     "replace": "",
     "test": "cd rust && cargo test --locked --features probe -q"
   },
@@ -331,8 +331,8 @@
   {
     "name": "XB-2a Landlock makes the database folder read-only",
     "file": "rust/netvfs-accounts/src/sandbox.rs",
-    "search": "        allow_beneath(ruleset, fs, dir, landlock::READ_WRITE);",
-    "replace": "        allow_beneath(ruleset, fs, dir, landlock::READ_ONLY);",
+    "search": "        allow_beneath(ruleset, fs, dir, \"database folder\", landlock::READ_WRITE);",
+    "replace": "        allow_beneath(ruleset, fs, dir, \"database folder\", landlock::READ_ONLY);",
     "test": "cd rust && cargo test --locked --features probe -q"
   },
   {

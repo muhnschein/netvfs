@@ -19,7 +19,9 @@ use crate::db::NewSetting;
 use crate::qvariant::Value;
 use crate::serve::Change;
 
+/// The interface of the signal.
 pub const INTERFACE: &str = "com.google.code.AccountsSSO.Accounts";
+/// The name of the signal.
 pub const MEMBER: &str = "AccountChanged";
 /// Changes of the account's global settings, whose service type is "global".
 pub const GLOBAL_PATH: &str = "/ServiceType/global";
@@ -32,6 +34,7 @@ const MAX_MESSAGE: usize = 64 * 1024;
 /// Where the session bus listens.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Address {
+    /// A unix socket at this path.
     Path(PathBuf),
     /// A Linux abstract socket name (without the leading NUL).
     Abstract(Vec<u8>),
@@ -53,17 +56,17 @@ pub fn session_bus(set_id: bool, runtime_dir: &std::path::Path) -> Option<Addres
 }
 
 fn unescape(value: &str) -> Option<Vec<u8>> {
-    let bytes = value.as_bytes();
-    let mut out = Vec::with_capacity(bytes.len());
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] == b'%' {
-            let hex = std::str::from_utf8(bytes.get(i + 1..i + 3)?).ok()?;
+    let mut out = Vec::with_capacity(value.len());
+    let mut rest = value.as_bytes();
+    while let Some((&first, after)) = rest.split_first() {
+        if first == b'%' {
+            let (hex, tail) = after.split_at_checked(2)?;
+            let hex = std::str::from_utf8(hex).ok()?;
             out.push(u8::from_str_radix(hex, 16).ok()?);
-            i += 3;
+            rest = tail;
         } else {
-            out.push(bytes[i]);
-            i += 1;
+            out.push(first);
+            rest = after;
         }
     }
     Some(out)
@@ -114,7 +117,7 @@ struct Writer {
 
 impl Writer {
     fn align(&mut self, n: usize) {
-        while self.bytes.len() % n != 0 {
+        while !self.bytes.len().is_multiple_of(n) {
             self.bytes.push(0);
         }
     }
@@ -159,8 +162,11 @@ impl Writer {
         self.align(element_alignment);
         let start = self.bytes.len();
         body(self);
-        let length = u32::try_from(self.bytes.len() - start).unwrap_or(u32::MAX);
-        self.bytes[at..at + 4].copy_from_slice(&length.to_le_bytes());
+        let length = u32::try_from(self.bytes.len().saturating_sub(start)).unwrap_or(u32::MAX);
+        // The placeholder written above: the body only appends, so it is still there.
+        if let Some(slot) = self.bytes.get_mut(at..).and_then(<[u8]>::first_chunk_mut::<4>) {
+            *slot = length.to_le_bytes();
+        }
     }
 }
 
@@ -299,14 +305,16 @@ const LAST_SERIAL: u32 = 4;
 /// A received message's type and reply serial.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Received {
+    /// The message type: 1 call, 2 return, 3 error, 4 signal.
     pub kind: u8,
+    /// The `REPLY_SERIAL` header field, if the message has one.
     pub reply_serial: Option<u32>,
 }
 
 /// Reads the fixed part of a message header: its total length.
 fn total_length(fixed: &[u8; 16]) -> Option<usize> {
     let read = |at: usize| -> Option<u32> {
-        let b: [u8; 4] = fixed.get(at..at + 4)?.try_into().ok()?;
+        let b: [u8; 4] = *fixed.get(at..)?.first_chunk::<4>()?;
         Some(match fixed[0] {
             b'l' => u32::from_le_bytes(b),
             b'B' => u32::from_be_bytes(b),
@@ -315,7 +323,8 @@ fn total_length(fixed: &[u8; 16]) -> Option<usize> {
     };
     let body = usize::try_from(read(4)?).ok()?;
     let fields = usize::try_from(read(12)?).ok()?;
-    let header = 16usize.checked_add(fields)?.checked_add(7)? & !7;
+    // The header, padded to 8 bytes.
+    let header = 16usize.checked_add(fields)?.checked_next_multiple_of(8)?;
     let total = header.checked_add(body)?;
     (total <= MAX_MESSAGE).then_some(total)
 }
@@ -329,35 +338,37 @@ pub fn parse_received(message: &[u8]) -> Option<Received> {
     }
     let little = fixed[0] == b'l';
     let u32_at = |at: usize| -> Option<u32> {
-        let b: [u8; 4] = message.get(at..at + 4)?.try_into().ok()?;
+        let b: [u8; 4] = *message.get(at..)?.first_chunk::<4>()?;
         Some(if little { u32::from_le_bytes(b) } else { u32::from_be_bytes(b) })
     };
-    let end = 16 + usize::try_from(u32_at(12)?).ok()?;
+    let end = 16usize.checked_add(usize::try_from(u32_at(12)?).ok()?)?;
     let mut at = 16;
     let mut reply_serial = None;
     while at < end {
-        at = (at + 7) & !7;
-        let code = *message.get(at)?;
-        let sig_len = usize::from(*message.get(at + 1)?);
-        let sig = message.get(at + 2..at + 2 + sig_len)?;
-        at += 2 + sig_len + 1;
+        at = at.checked_next_multiple_of(8)?;
+        // A header field: its code, then its signature (length, text, NUL).
+        let field = message.get(at..)?;
+        let code = *field.first()?;
+        let sig_len = usize::from(*field.get(1)?);
+        let sig = field.get(2..)?.get(..sig_len)?;
+        at = at.checked_add(3)?.checked_add(sig_len)?;
         match sig {
             b"u" => {
-                at = (at + 3) & !3;
+                at = at.checked_next_multiple_of(4)?;
                 let v = u32_at(at)?;
                 if code == field::REPLY_SERIAL {
                     reply_serial = Some(v);
                 }
-                at += 4;
+                at = at.checked_add(4)?;
             }
             b"s" | b"o" => {
-                at = (at + 3) & !3;
+                at = at.checked_next_multiple_of(4)?;
                 let len = usize::try_from(u32_at(at)?).ok()?;
-                at = at.checked_add(4 + len + 1)?;
+                at = at.checked_add(4)?.checked_add(len)?.checked_add(1)?;
             }
             b"g" => {
                 let len = usize::from(*message.get(at)?);
-                at += 1 + len + 1;
+                at = at.checked_add(2)?.checked_add(len)?;
             }
             _ => return None,
         }
@@ -376,7 +387,7 @@ fn read_message(reader: &mut impl Read, budget: &mut usize) -> io::Result<Receiv
     *budget = budget.checked_sub(total).ok_or_else(invalid)?;
     let mut whole = fixed.to_vec();
     whole.resize(total, 0);
-    reader.read_exact(&mut whole[16..])?;
+    reader.read_exact(whole.get_mut(16..).ok_or_else(invalid)?)?;
     parse_received(&whole).ok_or_else(invalid)
 }
 
@@ -408,11 +419,11 @@ pub fn exchange(stream: &mut (impl Read + Write), uid: u32, payload: &[u8]) -> i
             return if received.kind == kind::METHOD_RETURN {
                 Ok(())
             } else {
-                Err(io::Error::new(io::ErrorKind::Other, "the bus answered with an error"))
+                Err(io::Error::other("the bus answered with an error"))
             };
         }
         if received.kind == kind::ERROR && received.reply_serial.is_some() {
-            return Err(io::Error::new(io::ErrorKind::Other, "the bus refused a request"));
+            return Err(io::Error::other("the bus refused a request"));
         }
     }
 }
@@ -420,8 +431,9 @@ pub fn exchange(stream: &mut (impl Read + Write), uid: u32, payload: &[u8]) -> i
 /// Lower-case hex digits of `bytes`.
 fn hex(bytes: &[u8]) -> String {
     use std::fmt::Write as _;
-    bytes.iter().fold(String::with_capacity(bytes.len() * 2), |mut out, b| {
-        let _ = write!(out, "{b:02x}");
+    bytes.iter().fold(String::with_capacity(bytes.len().saturating_mul(2)), |mut out, b| {
+        // Writing to a String cannot fail.
+        write!(out, "{b:02x}").ok();
         out
     })
 }
@@ -431,9 +443,12 @@ fn guid() -> String {
     let mut random = [0u8; 16];
     if std::fs::File::open("/dev/urandom").and_then(|mut f| f.read_exact(&mut random)).is_err() {
         let (sec, nsec) = crate::sandbox::monotonic_time();
-        random[..8].copy_from_slice(&sec.to_le_bytes());
-        random[8..12].copy_from_slice(&nsec.to_le_bytes());
-        random[12..].copy_from_slice(&std::process::id().to_le_bytes());
+        // The seconds (8 bytes), the nanoseconds and the process id (4 each).
+        let fallback =
+            sec.to_le_bytes().into_iter().chain(nsec.to_le_bytes()).chain(std::process::id().to_le_bytes());
+        for (byte, value) in random.iter_mut().zip(fallback) {
+            *byte = value;
+        }
     }
     hex(&random)
 }
@@ -457,6 +472,7 @@ pub fn announce(change: &Change, address: &Address) -> io::Result<()> {
 }
 
 #[cfg(test)]
+#[allow(clippy::arithmetic_side_effects)]
 mod tests {
     use super::*;
 
@@ -621,7 +637,7 @@ mod tests {
         ok.extend(reply(kind::METHOD_RETURN, 1, 1, b'l'));
         ok.extend(reply(kind::METHOD_RETURN, 2, 4, b'l'));
         let (result, written) = run(ok);
-        assert!(result.is_ok());
+        assert!(matches!(result, Ok(())));
         assert_eq!(written, b"\0AUTH EXTERNAL 31303030\r\nBEGIN\r\nPAYLOAD");
 
         assert!(run(b"REJECTED EXTERNAL\r\n".to_vec()).0.is_err());
