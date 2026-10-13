@@ -37,3 +37,9 @@ name = "ffi"
 path = "tests/ffi.rs"
 harness = false
 required-features = ["testing"]
+
+[[test]]
+name = "backend"
+path = "tests/backend.rs"
+harness = false
+required-features = ["testing"]
