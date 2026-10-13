@@ -7,18 +7,14 @@
 #include <QtCore/QByteArray>
 #include <QtCore/QStringList>
 
-
-namespace Accounts {
-class Manager;
-}
-
 class QDBusMessage;
 class QTimer;
 
 // SPEC-v2 XB-2a: on Sailfish OS only the group `privileged` can read the
 // accounts database. The bridge itself runs without it; the one program that
-// has it is /usr/libexec/netvfs/netvfs-accounts (setgid privileged), which
-// links no backend and talks to no server. The bridge starts it once per
+// has it is /usr/libexec/netvfs/netvfs-accounts (setgid privileged, written
+// in Rust: rust/netvfs-accounts), which links no backend, no Qt and no
+// libaccounts, and talks to no server. The bridge starts it once per
 // request:
 //
 //   netvfs-accounts list                          the Files accounts (XA-1)
@@ -49,12 +45,15 @@ namespace AccountsHelper {
 // bridge anyway; the helper itself ignores such variables when set-id.
 QString path();
 
-// The helper's side: answers `arguments` (without the program name) from
-// `manager`. Always writes an answer, also for an error.
-QByteArray serve(Accounts::Manager *manager, const QStringList &arguments);
-
 // The bridge's side. A malformed answer is ProtocolError; otherwise the
-// helper's own result.
+// helper's own result. The helper (rust/netvfs-accounts) writes the answers;
+// the format is that of a QDataStream of version Qt_5_6: the QByteArray
+// "netvfs-accounts/1", the qint32 error and the QString message, then for
+//   list   qint32 count, per account: qint32 id, QString provider and
+//          display name, the parameters, QString files root, qint32 attention
+//   files  the parameters, quint32 credentials id, bool secret optional
+// where the parameters are QString provider, QString host, qint32 port,
+// QString username, QVariantMap options, qint32 connect and request timeout.
 Result decodeList(const QByteArray &answer, QVector<AccountLocation> *accounts);
 Result decodeFiles(const QByteArray &answer, FilesAccess *access);
 Result decodeStatus(const QByteArray &answer);

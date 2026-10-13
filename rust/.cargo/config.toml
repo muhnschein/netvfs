@@ -1,0 +1,3 @@
+# Dependencies are resolved for rustc 1.75 (the SDK target's compiler).
+[resolver]
+incompatible-rust-versions = "fallback"

@@ -1,0 +1,41 @@
+# SPDX-License-Identifier: LGPL-2.1-or-later
+# cargo-fuzz targets for the inputs of netvfs-accounts (doc/RUST.md): stored
+# setting values from the accounts database and the session bus's replies.
+# Not part of the workspace: libFuzzer needs a nightly toolchain, the helper
+# builds with the SDK's 1.75. Run: cargo +nightly fuzz run <target>.
+[package]
+name = "netvfs-accounts-fuzz"
+version = "0.0.0"
+edition = "2021"
+license = "LGPL-2.1-or-later"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+netvfs-accounts = { path = "../netvfs-accounts" }
+
+[workspace]
+
+[[bin]]
+name = "stored_value"
+path = "fuzz_targets/stored_value.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "bus_reply"
+path = "fuzz_targets/bus_reply.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "arguments"
+path = "fuzz_targets/arguments.rs"
+test = false
+doc = false
+bench = false

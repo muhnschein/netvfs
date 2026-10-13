@@ -378,59 +378,10 @@
     "test": "build/tests/bridge/generator/tst_generator"
   },
   {
-    "name": "XB-2a helper hands out an account the bridge does not list",
-    "file": "src/bridge/lib/accountshelper.cpp",
-    "search": "    if (!valid || accountId <= 0 || !store.filesAccounts().contains(accountId))",
-    "replace": "    if (!valid || accountId <= 0)",
-    "test": "dbus-run-session -- build/tests/bridge/accounts/tst_bridgeaccounts"
-  },
-  {
-    "name": "XB-2a helper clears attention",
-    "file": "src/bridge/lib/accountshelper.cpp",
-    "search": "    if (attention == Attention::None)\n        return failure(Result(Error::Unsupported, QStringLiteral(\"Unknown attention state\")));",
-    "replace": "",
-    "test": "dbus-run-session -- build/tests/bridge/accounts/tst_bridgeaccounts"
-  },
-  {
-    "name": "XB-2a helper skips the Files policy (XA-4)",
-    "file": "src/bridge/lib/accountshelper.cpp",
-    "search": "    if (const Result r = checkServicePolicy(config.params, Service::Files); !r.ok())\n        return failure(r);",
-    "replace": "",
-    "test": "dbus-run-session -- build/tests/bridge/accounts/tst_bridgeaccounts"
-  },
-  {
-    "name": "XB-2a helper reports an unusable database as an empty list",
-    "file": "src/bridge/lib/accountshelper.cpp",
-    "search": "    if (const Result r = databaseUsable(manager); !r.ok())\n        return failure(r);",
-    "replace": "",
-    "test": "dbus-run-session -- build/tests/bridge/accounts/tst_bridgeaccounts"
-  },
-  {
     "name": "XB-2a trailing bytes of an answer accepted",
     "file": "src/bridge/lib/accountshelper.cpp",
     "search": "    if (stream.status() != QDataStream::Ok || !stream.atEnd())\n        return malformed();\n    *accounts = result;",
     "replace": "    if (stream.status() != QDataStream::Ok)\n        return malformed();\n    *accounts = result;",
-    "test": "dbus-run-session -- build/tests/bridge/accounts/tst_bridgeaccounts"
-  },
-  {
-    "name": "XB-2a set-id helper keeps its caller's variables",
-    "file": "src/bridge/lib/privileges.cpp",
-    "search": "        ::unsetenv(name.constData());",
-    "replace": "        (void)name;",
-    "test": "dbus-run-session -- build/tests/bridge/accounts/tst_bridgeaccounts"
-  },
-  {
-    "name": "XB-2a set-id helper keeps its caller's HOME",
-    "file": "src/bridge/lib/privileges.cpp",
-    "search": "    return ::setenv(\"HOME\", user->pw_dir, 1) == 0;",
-    "replace": "    return true;",
-    "test": "dbus-run-session -- build/tests/bridge/accounts/tst_bridgeaccounts"
-  },
-  {
-    "name": "XB-2a set-id helper may write a core file",
-    "file": "src/bridge/lib/privileges.cpp",
-    "search": "        core.rlim_cur = 0;",
-    "replace": "",
     "test": "dbus-run-session -- build/tests/bridge/accounts/tst_bridgeaccounts"
   },
   {
@@ -459,83 +410,6 @@
     "file": "src/bridge/lib/helperdirectory.cpp",
     "search": "    if (process.exitStatus() != QProcess::NormalExit || process.exitCode() != 0)",
     "replace": "    if (false)",
-    "test": "dbus-run-session -- build/tests/bridge/accounts/tst_bridgeaccounts"
-  },
-  {
-    "name": "XB-2a helper leaves a closed stdio descriptor closed",
-    "file": "src/bridge/lib/sandbox.cpp",
-    "search": "        if (::fcntl(fd, F_GETFD) != -1 || errno != EBADF)\n            continue;",
-    "replace": "        continue;",
-    "test": "dbus-run-session -- build/tests/bridge/accounts/tst_bridgeaccounts"
-  },
-  {
-    "name": "XB-2a helper keeps inherited descriptors",
-    "file": "src/bridge/lib/sandbox.cpp",
-    "search": "    closeFrom(STDERR_FILENO + 1);\n",
-    "replace": "",
-    "test": "dbus-run-session -- build/tests/bridge/accounts/tst_bridgeaccounts"
-  },
-  {
-    "name": "XB-2a helper keeps its caller's umask",
-    "file": "src/bridge/lib/sandbox.cpp",
-    "search": "    ::umask(077);   // NOSONAR(cpp:S5849)\n",
-    "replace": "",
-    "test": "dbus-run-session -- build/tests/bridge/accounts/tst_bridgeaccounts"
-  },
-  {
-    "name": "XB-2a helper keeps its caller's file size limit",
-    "file": "src/bridge/lib/sandbox.cpp",
-    "search": "        size.rlim_cur = size.rlim_max;\n",
-    "replace": "",
-    "test": "dbus-run-session -- build/tests/bridge/accounts/tst_bridgeaccounts"
-  },
-  {
-    "name": "XB-2a confined helper may exec",
-    "file": "src/bridge/lib/sandbox.cpp",
-    "search": "    SYS_execve, SYS_execveat,\n",
-    "replace": "",
-    "test": "dbus-run-session -- build/tests/bridge/accounts/tst_bridgeaccounts"
-  },
-  {
-    "name": "XB-2a confined helper opens internet sockets",
-    "file": "src/bridge/lib/sandbox.cpp",
-    "search": "    filter.denyArgumentOtherThan(SYS_socket, 0, AF_UNIX);\n",
-    "replace": "",
-    "test": "dbus-run-session -- build/tests/bridge/accounts/tst_bridgeaccounts"
-  },
-  {
-    "name": "XB-2a confined helper sets a setgid bit with fchmod",
-    "file": "src/bridge/lib/sandbox.cpp",
-    "search": "    filter.denyArgumentBits(SYS_fchmod, 1, SetIdBits);\n",
-    "replace": "",
-    "test": "dbus-run-session -- build/tests/bridge/accounts/tst_bridgeaccounts"
-  },
-  {
-    "name": "XB-2a confined helper creates a setgid file",
-    "file": "src/bridge/lib/sandbox.cpp",
-    "search": "    filter.denyCreatedModeBits(SYS_openat, 2, 3, SetIdBits);\n",
-    "replace": "",
-    "test": "dbus-run-session -- build/tests/bridge/accounts/tst_bridgeaccounts"
-  },
-  {
-    "name": "XB-2a Landlock never enforced",
-    "file": "src/bridge/lib/sandbox.cpp",
-    "search": "        && ::syscall(SYS_landlock_restrict_self, ruleset, 0U) == 0;",
-    "replace": "        && false;",
-    "test": "dbus-run-session -- build/tests/bridge/accounts/tst_bridgeaccounts"
-  },
-  {
-    "name": "XB-2a Landlock makes the database folder read-only",
-    "file": "src/bridge/lib/sandbox.cpp",
-    "search": "        allowBeneath(ruleset, handled, dir, Landlock::ReadWrite);",
-    "replace": "        allowBeneath(ruleset, handled, dir, Landlock::ReadOnly);",
-    "test": "dbus-run-session -- build/tests/bridge/accounts/tst_bridgeaccounts"
-  },
-  {
-    "name": "XB-2a Landlock ABI 4 leaves TCP alone",
-    "file": "src/bridge/lib/sandbox.cpp",
-    "search": "        { 4, { 0, Landlock::NetBindTcp | Landlock::NetConnectTcp, 0 } },",
-    "replace": "        { 4, { 0, 0, 0 } },",
     "test": "dbus-run-session -- build/tests/bridge/accounts/tst_bridgeaccounts"
   }
 ]

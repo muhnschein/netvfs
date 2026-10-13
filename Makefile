@@ -1,11 +1,14 @@
 # SPDX-License-Identifier: LGPL-2.1-or-later
 #
 #   make               build everything (vendored libraries first)
-#   make check         unit tests, then the interop suite (needs docker)
+#   make check         Rust checks, unit tests, then the interop suite (needs docker)
+#   make check-rust    the Rust helper (rust/): format, lint, tests, lockfile, MSRV
 #   make check-unit    unit tests only
 #   make check-interop interop suite against containerised servers
 #   make check-packaging  install tree against the RPM %files (SPEC-v2 XP-1, XP-3)
 #   make coverage      unit + interop tests instrumented, writes build-coverage/coverage.xml
+#                      (C++, gcovr) and build-coverage/rust-lcov.info (Rust, llvm-cov)
+#   make clippy-report clippy findings as JSON for SonarQube, build-coverage/clippy.json
 #   make SANITIZE=1 check   the same under ASan + UBSan (vendored libraries included)
 #   make HOST_BUTEO=0  use the system buteosyncfw5 (pkg-config) instead of
 #                      building the pinned vendor/host/buteo-syncfw
@@ -35,7 +38,27 @@ QMAKE_ARGS += NETVFS_HOST_BUTEO=$(BUILD_DIR)/host-buteo
 endif
 TEST_ENV = QT_QPA_PLATFORM=offscreen
 
-.PHONY: all vendor host-buteo configure check check-unit check-interop check-packaging coverage clean distclean
+# The Rust helper (rust/, doc/RUST.md). Under COVERAGE=1 qmake builds it
+# instrumented; every run writes its counters to RUST_COVERAGE_DIR, which its
+# confinement lets it write to, and the crate's own tests count there too.
+CARGO ?= cargo
+RUST_FEATURES = --features netvfs-accounts/probe
+# rust-toolchain.toml would override the toolchain a job installs, so the
+# oldest supported one (rust-version) is named explicitly.
+RUST_MSRV = $(shell sed -n -e 's/^rust-version = "\([0-9]*\.[0-9]*\)"/\1.0/p' \
+    -e 's/^rust-version = "\([0-9]*\.[0-9]*\.[0-9]*\)"/\1/p' rust/Cargo.toml)
+ifeq ($(COVERAGE),1)
+RUST_COVERAGE_DIR := $(BUILD_DIR)/rust-coverage
+RUST_PROFILE_FILE := LLVM_PROFILE_FILE=$(RUST_COVERAGE_DIR)/%p-%m.profraw
+TEST_ENV += $(RUST_PROFILE_FILE)
+RUST_ENV = RUSTFLAGS="-C instrument-coverage" NETVFS_RUST_COVERAGE_DIR=$(RUST_COVERAGE_DIR) \
+    CARGO_TARGET_DIR=$(BUILD_DIR)/rust-test-target $(RUST_PROFILE_FILE)
+else
+RUST_ENV =
+endif
+
+.PHONY: all vendor host-buteo configure check check-rust check-unit check-interop check-packaging coverage \
+    clippy-report clean distclean
 
 all: configure
 	$(MAKE) -C $(BUILD_DIR) $(if $(findstring -j,$(MAKEFLAGS)),,-j$(JOBS))
@@ -53,7 +76,19 @@ configure: vendor host-buteo
 	mkdir -p $(BUILD_DIR)
 	cd $(BUILD_DIR) && $(QMAKE) -r $(CURDIR)/netvfs.pro VENDOR_PREFIX=$(BUILD_DIR)/vendor $(QMAKE_ARGS)
 
-check: check-unit check-interop
+check: check-rust check-unit check-interop
+
+check-rust:
+	./tools/ci/check-lockfile.sh rust/Cargo.lock
+	cd rust && $(CARGO) fmt --all -- --check
+	cd rust && $(CARGO) clippy --locked --workspace --all-targets $(RUST_FEATURES) -- -D warnings
+	cd rust && $(RUST_ENV) $(CARGO) test --locked --workspace $(RUST_FEATURES)
+	cd rust && $(CARGO) +$(RUST_MSRV) check --locked --workspace --all-targets $(RUST_FEATURES)
+
+clippy-report:
+	mkdir -p $(BUILD_DIR)
+	cd rust && $(CARGO) clippy --locked --workspace --all-targets $(RUST_FEATURES) --message-format=json \
+	    > $(BUILD_DIR)/clippy.json
 
 check-unit: all
 	$(TEST_ENV) dbus-run-session -- $(MAKE) -C $(BUILD_DIR)/tests check
@@ -77,7 +112,9 @@ check-packaging: all
 	./tests/packaging/test_packaging.py
 
 coverage:
+	rm -rf $(abspath build-coverage)/rust-coverage
 	$(MAKE) COVERAGE=1 check
+	./tools/ci/rust-coverage.sh $(abspath build-coverage)
 	gcovr --root $(CURDIR) --object-directory $(abspath build-coverage) \
 	    --filter '$(CURDIR)/src/' --exclude '.*/moc_.*' \
 	    --gcov-ignore-parse-errors=negative_hits.warn_once_per_file --gcov-ignore-errors=no_working_dir_found \

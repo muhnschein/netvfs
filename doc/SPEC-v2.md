@@ -83,9 +83,10 @@ SonarCloud with zero open issues).
   `org.netvfs.BackendFactory/2.0`; `SshKeyTools` stays `1.0` (unchanged). The loader
   refuses plugins with other IIDs with a log line naming the expected IID.
 - XC-1a: Library version `1.0.0` (qmake derives soname `libnetvfs.so.1`); package
-  version `0.2.0` (`0.3.0` since the package consolidation, XP-6). All netvfs
-  subpackages require the exact same `%{version}-%{release}` of the main package
-  (`netvfs-core` up to 0.2, `netvfs` since 0.3) so mixed installs cannot happen.
+  version `0.2.0` (`0.3.0` since the package consolidation, XP-6, `0.4.0` since the Rust
+  accounts helper, XB-2a). All netvfs subpackages require the exact same
+  `%{version}-%{release}` of the main package (`netvfs-core` up to 0.2, `netvfs` since
+  0.3) so mixed installs cannot happen.
 - XC-1b: Buteo plugins, CLI, QML module and tests are migrated in the same change set as
   each API step. No compatibility shims for v1 beyond what §4 lists.
 - XC-1c: Qt 5.6 and C++17 remain the baseline. No exceptions cross the API; `Result` is
@@ -770,7 +771,10 @@ permission, links nothing from netvfs, and never sees secrets or pins.
   is readable by the group `privileged` only. The bridge reads it through
   `/usr/libexec/netvfs/netvfs-accounts`, installed setgid `privileged`
   (`%attr(2755,root,privileged)`, `Requires(pre): sailfish-setup` for the group, as
-  mapplauncherd's boosters), started once per request with `QProcess`:
+  mapplauncherd's boosters), started once per request with `QProcess`. Since 0.4.0 it is
+  written in Rust (`rust/netvfs-accounts`, doc/RUST.md) and links no Qt, GLib or
+  libaccounts: it reads the database with SQLite as libaccounts-glib stores it and sends
+  libaccounts' change signal itself, with the same requests and answers as before:
   - `list`: the accounts of XA-1 (enabled, Files service enabled) with what `ListLocations`
     shows; `files <id>`: the connection parameters of a listed account for the Files
     service, after XA-4, with its credentials id and whether its secret is optional
@@ -783,25 +787,29 @@ permission, links nothing from netvfs, and never sees secrets or pins.
   - Any process can start it, so it trusts nothing of its caller's environment: first
     thing in `main()` it keeps only `LANG`, `LANGUAGE`, `LC_*`, `TZ`, `XDG_RUNTIME_DIR` and
     `DBUS_SESSION_BUS_ADDRESS`, and sets `HOME` from the password database of its real uid.
-    A missing `XDG_RUNTIME_DIR` becomes `/run/user/<uid>` when that is the uid's folder:
-    libaccounts opens no database without the session bus, and GLib looks for it there
-    when it ignores `DBUS_SESSION_BUS_ADDRESS` in a set-id process.
-    Anything else could point libaccounts at another database (`HOME`, `XDG_*_HOME`,
-    `ACCOUNTS`, `AG_*`) or load code chosen by the caller (`QT_*`, `GIO_*`). These
+    A missing `XDG_RUNTIME_DIR` becomes `/run/user/<uid>` when that is the uid's folder.
+    A set-id helper sends its signal on the bus of `/run/user/<uid>` only, as GLib does,
+    never to the caller's `DBUS_SESSION_BUS_ADDRESS`.
+    Anything else could point it at another database (`HOME`, `XDG_*_HOME`, `ACCOUNTS`)
+    or change what SQLite does (`SQLITE_TMPDIR`, `TMPDIR`). These
     variables (and `NETVFS_ACCOUNTS_HELPER` in the bridge, which names the build tree's
     helper) apply to tests only, where the helper is not set-id. glibc itself drops `LD_*`
     and similar. Its soft core limit is 0, so that a crash writes no user-readable core.
-  - It confines itself (`src/bridge/lib/sandbox.h`), set-id or not, before Qt or GLib
-    start a thread: fds 0 to 2 open (else `/dev/null`) and no other inherited fd, umask
-    077, default signal handlers and an empty mask, the file size soft limit at the hard
-    one. Then, best-effort, Landlock (ABI 1 to 7, whatever the kernel offers): read-only
-    system folders, the uid's `/run/user/<uid>` and provider folders, read-write only the
-    database folder (`ACCOUNTS`, else `$XDG_DATA_HOME/system/privileged/Accounts` and
+  - It confines itself (`rust/netvfs-accounts/src/sandbox.rs`), set-id or not, first
+    thing in `main()`, while it has one thread: fds 0 to 2 open (Rust's runtime opens
+    `/dev/null` on a closed one before `main()`) and no other inherited fd, umask 077,
+    default signal handlers and an empty mask, the file size soft limit at the hard one.
+    Then, best-effort, Landlock (ABI 1 to 7, whatever the kernel offers): read-only
+    system folders (`/usr`, `/etc`, `/lib*`, `/proc`, `/dev/random`, `/dev/urandom`) and
+    the uid's `/run/user/<uid>`, read-write only `/dev/null` and the database folder
+    (`ACCOUNTS`, else `$XDG_DATA_HOME/system/privileged/Accounts` and
     `$XDG_CONFIG_HOME/libaccounts-glib`), no exec, no TCP (ABI 4), no device ioctls
     (ABI 5), no signals or abstract sockets beyond itself (ABI 6). Then `no_new_privs`
     and a seccomp filter failing with EPERM: exec, ptrace, non-`AF_UNIX` sockets, new
-    namespaces, mounts, modules, BPF, io_uring, userfaultfd, keyrings, and any chmod,
-    open, mkdir or mknod with a setuid or setgid bit. After the database work it gives up
+    namespaces, mounts, modules, kexec, BPF, io_uring, userfaultfd, perf, keyrings, file
+    handles, and any chmod, open, mkdir or mknod with a setuid or setgid bit (`clone3` and
+    `openat2`, whose arguments the filter cannot see, fail with ENOSYS so that glibc falls
+    back). After the database work it gives up
     the group for good (`setresgid` to the real gid) before writing its answer. The Jolla
     Phone 2026 kernel (6.12) has seccomp but no Landlock.
   - The generated bridge service has no `NoNewPrivileges=` (it would ignore the helper's

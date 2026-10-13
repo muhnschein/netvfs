@@ -1,0 +1,44 @@
+# SPDX-License-Identifier: LGPL-2.1-or-later
+# The Rust parts of netvfs. Today one crate: netvfs-accounts, the setgid
+# accounts helper (SPEC-v2 XB-2a). See doc/RUST.md.
+[workspace]
+resolver = "2"
+members = ["netvfs-accounts"]
+# The fuzz targets build with a nightly toolchain of their own (doc/RUST.md).
+exclude = ["fuzz"]
+
+[workspace.package]
+version = "0.4.0"
+edition = "2021"
+# The Sailfish OS 5.2 SDK target's rustc; the RPM builds with it in mb2.
+rust-version = "1.75"
+license = "LGPL-2.1-or-later"
+publish = false
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+missing_debug_implementations = "warn"
+
+[workspace.lints.clippy]
+all = { level = "deny", priority = -1 }
+pedantic = { level = "deny", priority = -1 }
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+module_name_repetitions = "allow"
+doc_markdown = "allow"
+similar_names = "allow"
+
+[profile.release]
+panic = "abort"
+lto = true
+codegen-units = 1
+opt-level = "s"
+debug = false
+strip = "symbols"
+
+# Tests start the helper many times; a fast build matters more than size.
+[profile.dev]
+panic = "abort"
+debug = "line-tables-only"
+incremental = false

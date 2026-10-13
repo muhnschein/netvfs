@@ -1,40 +1,30 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 // netvfs-accounts (SPEC-v2 XB-2a): the setgid helper that is the bridge's
-// only access to the accounts database, its answers, its environment when
-// set-id, its confinement (sandbox.h), and the bridge's side that runs it.
+// only access to the accounts database, and the bridge's side that runs it.
+// The helper is rust/netvfs-accounts, whose own tests cover its confinement
+// and set-id environment. These run the built helper: its answers must be
+// the bytes the C++ helper it replaced gave (referencehelper.h), its writes
+// what libaccounts would store, and its change signal one libaccounts reads.
 #include "accountsfixture.h"
 #include "accountshelper.h"
-#include "privileges.h"
-#include "sandbox.h"
+#include "referencehelper.h"
 
+#include <Accounts/Account>
 #include <Accounts/Manager>
 
 #include <QtCore/QDir>
 #include <QtCore/QFile>
+#include <QtCore/QProcess>
+#include <QtCore/QRegularExpression>
 #include <QtCore/QTemporaryDir>
 #include <QtDBus/QDBusConnection>
 #include <QtDBus/QDBusMessage>
 #include <QtTest/QtTest>
 
 #include <algorithm>
-#include <cerrno>
-#include <csignal>
-#include <cstdio>
 #include <memory>
-#include <thread>
 
-#include <arpa/inet.h>
-#include <fcntl.h>
-#include <netinet/in.h>
-#include <pwd.h>
-#include <sched.h>
-#include <sys/ptrace.h>
-#include <sys/resource.h>
-#include <sys/socket.h>
-#include <sys/stat.h>
-#include <sys/syscall.h>
-#include <sys/wait.h>
-#include <unistd.h>
+#include <sqlite3.h>
 
 using namespace NetVfs;
 using namespace NetVfs::Bridge;
@@ -52,6 +42,8 @@ namespace {
 
 const QString Helper = QStringLiteral(NETVFS_TEST_LIBEXEC_DIR "/netvfs-accounts");
 
+using Environment = QMap<QString, QString>;
+
 QVariantMap globals(const QString &host, const QVariantMap &extra = QVariantMap())
 {
     QVariantMap map { { QStringLiteral("netvfs/host"), host },
@@ -62,75 +54,98 @@ QVariantMap globals(const QString &host, const QVariantMap &extra = QVariantMap(
     return map;
 }
 
-QByteArray serve(AccountsFixture *fixture, const QStringList &arguments)
+// The built helper's answer to `arguments`, run with this process's
+// environment and `extra`.
+QByteArray runHelper(const QStringList &arguments, const Environment &extra = Environment(),
+                     int *exitCode = nullptr, QByteArray *errors = nullptr)
 {
-    return AccountsHelper::serve(fixture->manager(), arguments);
+    QProcess helper;
+    QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
+    for (auto it = extra.constBegin(); it != extra.constEnd(); ++it)
+        environment.insert(it.key(), it.value());
+    helper.setProcessEnvironment(environment);
+    helper.start(Helper, arguments);
+    if (!helper.waitForFinished(10000)) {
+        helper.kill();
+        helper.waitForFinished();
+    }
+    if (exitCode)
+        *exitCode = helper.exitStatus() == QProcess::NormalExit ? helper.exitCode() : -1;
+    if (errors)
+        *errors = helper.readAllStandardError();
+    return helper.readAllStandardOutput();
 }
 
-// Restores the environment after prepareSetIdProcess().
-class SavedEnvironment
+QByteArray serve(AccountsFixture *, const QStringList &arguments)
 {
-public:
-    SavedEnvironment()
+    return runHelper(arguments);
+}
+
+// The C++ helper's answer, from the database ACCOUNTS names now.
+QByteArray reference(const QStringList &arguments)
+{
+    Accounts::Manager manager;
+    return Test::referenceServe(&manager, arguments);
+}
+
+bool sql(const QString &database, const QString &statement)
+{
+    sqlite3 *db = nullptr;
+    bool ok = sqlite3_open_v2(QFile::encodeName(database).constData(), &db, SQLITE_OPEN_READWRITE, nullptr)
+            == SQLITE_OK;
+    if (ok) {
+        sqlite3_busy_timeout(db, 5000);
+        char *error = nullptr;
+        ok = sqlite3_exec(db, statement.toUtf8().constData(), nullptr, nullptr, &error) == SQLITE_OK;
+        if (!ok)
+            qWarning("%s: %s", qPrintable(statement), error);
+        sqlite3_free(error);
+    }
+    sqlite3_close(db);
+    return ok;
+}
+
+// A consistent copy of the database at `from` (in WAL mode) at `to`.
+bool copyDatabase(const QString &from, const QString &to)
+{
+    sqlite3 *source = nullptr;
+    sqlite3 *target = nullptr;
+    bool ok = sqlite3_open_v2(QFile::encodeName(from).constData(), &source, SQLITE_OPEN_READONLY, nullptr)
+                    == SQLITE_OK
+            && sqlite3_open(QFile::encodeName(to).constData(), &target) == SQLITE_OK;
+    if (ok) {
+        sqlite3_backup *backup = sqlite3_backup_init(target, "main", source, "main");
+        ok = backup && sqlite3_backup_step(backup, -1) == SQLITE_DONE;
+        ok = sqlite3_backup_finish(backup) == SQLITE_OK && ok;
+    }
+    sqlite3_close(source);
+    sqlite3_close(target);
+    return ok;
+}
+
+QByteArray describe(const QStringList &arguments, const QByteArray &rust, const QByteArray &cpp)
+{
+    return "netvfs-accounts " + arguments.join(QLatin1Char(' ')).toUtf8() + "\n   rust: " + rust.toHex()
+            + "\n    c++: " + cpp.toHex();
+}
+
+// The global settings of `accountId` in the database at `accounts`, as
+// libaccounts reads them.
+QVariantMap globalSettings(const QString &accounts, int accountId)
+{
+    const QByteArray saved = qgetenv("ACCOUNTS");
+    qputenv("ACCOUNTS", QFile::encodeName(accounts));
+    QVariantMap settings;
     {
-        for (char **entry = environ; *entry; ++entry) {
-            const QByteArray variable(*entry);
-            const int eq = variable.indexOf('=');
-            m_saved.append({ variable.left(eq), variable.mid(eq + 1) });
+        Accounts::Manager manager;
+        if (Accounts::Account *account = manager.account(static_cast<Accounts::AccountId>(accountId))) {
+            account->selectService(Accounts::Service());
+            for (const QString &key : account->allKeys())
+                settings.insert(key, account->value(key));
         }
     }
-    ~SavedEnvironment()
-    {
-        QList<QByteArray> names;
-        for (char **entry = environ; *entry; ++entry)
-            names << QByteArray(*entry).left(QByteArray(*entry).indexOf('='));
-        for (const QByteArray &name : names)
-            qunsetenv(name.constData());
-        for (const auto &[name, value] : m_saved)
-            qputenv(name.constData(), value);
-    }
-
-private:
-    QList<QPair<QByteArray, QByteArray>> m_saved;
-};
-
-// The exit status of a child that runs `body`, which may confine it for good.
-template<typename Body>
-int inChild(Body body)
-{
-    std::fflush(nullptr);
-    const pid_t pid = ::fork();
-    if (pid == 0)
-        ::_exit(body());
-    int status = 0;
-    while (::waitpid(pid, &status, 0) < 0 && errno == EINTR) {
-    }
-    return WIFEXITED(status) ? WEXITSTATUS(status) : 128 + WTERMSIG(status);
-}
-
-// In a child: the number of the first check that failed, 0 if none did.
-class Checks
-{
-public:
-    void operator()(bool ok)
-    {
-        ++m_count;
-        if (!ok && m_failed == 0)
-            m_failed = m_count;
-    }
-    int failed() const { return m_failed; }
-
-private:
-    int m_count = 0;
-    int m_failed = 0;
-};
-
-// A child status meaning that the kernel has no Landlock.
-constexpr int NoLandlock = 77;
-
-bool failsWith(int result, int error)
-{
-    return result == -1 && errno == error;
+    qputenv("ACCOUNTS", saved);
+    return settings;
 }
 
 } // namespace
@@ -138,6 +153,9 @@ bool failsWith(int result, int error)
 class tst_BridgeAccounts : public QObject
 {
     Q_OBJECT
+
+public Q_SLOTS:
+    void onNameOwnerChanged(const QString &name, const QString &oldOwner, const QString &newOwner);
 
 private Q_SLOTS:
     void initTestCase();
@@ -151,14 +169,12 @@ private Q_SLOTS:
     void usage();
     void databaseUnusable();
     void malformedAnswers();
-    void setIdEnvironment();
-    void sandboxDescriptors();
-    void sandboxProcessState();
-    void sandboxSyscalls();
-    void sandboxFilesystem();
-    void sandboxLandlockLevels();
-    void sandboxAccountsDirectories();
-    void sandboxGroup();
+    void goldenAnswers();
+    void goldenStoredValues();
+    void goldenAttention();
+    void attentionSignal();
+    void attentionWithoutBus();
+    void helperLinks();
     void helperWithClosedDescriptors();
     void directoryLists();
     void directoryFailures();
@@ -167,13 +183,25 @@ private Q_SLOTS:
     void directoryChangeSignal();
 
 private:
+    QString database() const { return fixture->path() + QStringLiteral("/accounts.db"); }
+    int listedAccount(const QString &provider, const QVariantMap &globals, const QVariantMap &files = QVariantMap(),
+                      quint32 credentialsId = 0);
+    void compareAnswers(const QList<QStringList> &requests);
+
     // A session bus of this test's own: other tests that write accounts at
     // the same time would announce their changes here too.
     QProcess busDaemon;
+    QStringList ownedNames;
     std::unique_ptr<AccountsFixture> fixture;
     int listed = 0;      // fake, Files enabled
     int unlisted = 0;    // fake, Files service disabled
 };
+
+void tst_BridgeAccounts::onNameOwnerChanged(const QString &name, const QString &, const QString &newOwner)
+{
+    if (!newOwner.isEmpty())
+        ownedNames << name;
+}
 
 void tst_BridgeAccounts::initTestCase()
 {
@@ -186,6 +214,10 @@ void tst_BridgeAccounts::initTestCase()
     // Before the first use of the session bus in this process; the helpers
     // and libaccounts inherit it.
     qputenv("DBUS_SESSION_BUS_ADDRESS", address);
+    QVERIFY(QDBusConnection::sessionBus().connect(
+        QStringLiteral("org.freedesktop.DBus"), QStringLiteral("/org/freedesktop/DBus"),
+        QStringLiteral("org.freedesktop.DBus"), QStringLiteral("NameOwnerChanged"), this,
+        SLOT(onNameOwnerChanged(QString, QString, QString))));
 }
 
 void tst_BridgeAccounts::cleanupTestCase()
@@ -209,6 +241,15 @@ void tst_BridgeAccounts::init()
 void tst_BridgeAccounts::cleanup()
 {
     fixture.reset();
+}
+
+int tst_BridgeAccounts::listedAccount(const QString &provider, const QVariantMap &globals, const QVariantMap &files,
+                                      quint32 credentialsId)
+{
+    const int id = fixture->createAccount(provider, globals, QString(), credentialsId);
+    if (id <= 0 || !fixture->setService(id, provider + QStringLiteral("-files"), true, files))
+        return 0;
+    return id;
 }
 
 void tst_BridgeAccounts::list()
@@ -324,27 +365,42 @@ void tst_BridgeAccounts::usage()
 void tst_BridgeAccounts::databaseUnusable()
 {
     // What a helper without the group sees on Sailfish OS: an error naming
-    // the setgid bit, not an empty list.
-    fixture.reset();
+    // the setgid bit, not an empty list; also before the request is read.
     QTemporaryDir dir;
     QFile file(dir.path() + QStringLiteral("/file"));
     QVERIFY(file.open(QIODevice::WriteOnly));
     file.close();
-    const QByteArray saved = qgetenv("ACCOUNTS");
-    qputenv("ACCOUNTS", QFile::encodeName(dir.path() + QStringLiteral("/file/accounts")));
-    QByteArray answer;
-    {
-        Accounts::Manager manager;
-        answer = AccountsHelper::serve(&manager, { QStringLiteral("list") });
+    const Environment notAFolder { { QStringLiteral("ACCOUNTS"), dir.path() + QStringLiteral("/file/accounts") } };
+    for (const QStringList &arguments : QList<QStringList> { { QStringLiteral("list") },
+                                                             { QStringLiteral("files"), QString::number(listed) },
+                                                             { QStringLiteral("bogus") } }) {
+        const Result r = AccountsHelper::decodeStatus(runHelper(arguments, notAFolder));
+        QCOMPARE(r.error(), Error::PermissionDenied);
+        QVERIFY2(r.message().contains(QLatin1String("setgid privileged")), qPrintable(r.message()));
     }
-    if (saved.isNull())
-        qunsetenv("ACCOUNTS");
-    else
-        qputenv("ACCOUNTS", saved);
-    QVector<AccountLocation> accounts;
-    const Result r = AccountsHelper::decodeList(answer, &accounts);
+
+    // Not a database.
+    QVERIFY(QDir(dir.path()).mkdir(QStringLiteral("junk")));
+    QFile junk(dir.path() + QStringLiteral("/junk/accounts.db"));
+    QVERIFY(junk.open(QIODevice::WriteOnly));
+    junk.write(QByteArray(4096, 'x'));
+    junk.close();
+    const Result r = AccountsHelper::decodeStatus(
+        runHelper({ QStringLiteral("list") }, { { QStringLiteral("ACCOUNTS"), dir.path() + QStringLiteral("/junk") } }));
     QCOMPARE(r.error(), Error::PermissionDenied);
-    QVERIFY2(r.message().contains(QLatin1String("setgid privileged")), qPrintable(r.message()));
+
+    // No database yet is no account, and the helper creates none.
+    const QString missing = dir.path() + QStringLiteral("/missing");
+    QVector<AccountLocation> accounts { AccountLocation() };
+    QVERIFY(AccountsHelper::decodeList(runHelper({ QStringLiteral("list") }, { { QStringLiteral("ACCOUNTS"), missing } }),
+                                       &accounts).ok());
+    QVERIFY(accounts.isEmpty());
+    QCOMPARE(AccountsHelper::decodeStatus(runHelper({ QStringLiteral("attention"), QStringLiteral("1"),
+                                                      QStringLiteral("auth-failed") },
+                                                    { { QStringLiteral("ACCOUNTS"), missing } }))
+                 .error(),
+             Error::NotFound);
+    QVERIFY(!QFileInfo::exists(missing));
 }
 
 void tst_BridgeAccounts::malformedAnswers()
@@ -365,259 +421,289 @@ void tst_BridgeAccounts::malformedAnswers()
     QCOMPARE(AccountsHelper::decodeList(files, &accounts).error(), Error::ProtocolError);
 }
 
-void tst_BridgeAccounts::setIdEnvironment()
+void tst_BridgeAccounts::compareAnswers(const QList<QStringList> &requests)
 {
-    // XB-2a: what a setgid helper keeps from its caller's environment.
-    for (const char *name : { "LANG", "LANGUAGE", "LC_ALL", "LC_TIME", "TZ", "XDG_RUNTIME_DIR",
-                              "DBUS_SESSION_BUS_ADDRESS" })
-        QVERIFY2(keptInSetIdProcess(name), name);
-    for (const char *name : { "HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "ACCOUNTS", "AG_PROVIDERS", "AG_SERVICES",
-                              "AG_APPLICATIONS", "NETVFS_ACCOUNTS_HELPER", "QT_PLUGIN_PATH", "QT_LOGGING_RULES",
-                              "LD_PRELOAD", "GIO_EXTRA_MODULES", "PATH", "LANGX", "XLANG", "" })
-        QVERIFY2(!keptInSetIdProcess(name), name);
-
-    QList<QByteArray> removed;
-    bool prepared = false;
-    QByteArray home;
-    QByteArray accounts;
-    QByteArray lang;
-    struct rlimit coreBefore {};
-    struct rlimit coreAfter {};
-    ::getrlimit(RLIMIT_CORE, &coreBefore);
-    {
-        const SavedEnvironment saved;
-        qputenv("HOME", "/tmp/someone-else");
-        qputenv("ACCOUNTS", "/tmp/evil");
-        qputenv("LANG", "fi_FI.UTF-8");
-        // A core limit of its own to drop (the soft limit may start at 0).
-        const struct rlimit coreOpen { coreBefore.rlim_max, coreBefore.rlim_max };
-        QVERIFY(coreOpen.rlim_cur != 0);
-        ::setrlimit(RLIMIT_CORE, &coreOpen);
-        prepared = prepareSetIdProcess(&removed);
-        ::getrlimit(RLIMIT_CORE, &coreAfter);
-        ::setrlimit(RLIMIT_CORE, &coreBefore);
-        home = qgetenv("HOME");
-        accounts = qgetenv("ACCOUNTS");
-        lang = qgetenv("LANG");
+    for (const QStringList &arguments : requests) {
+        int exitCode = -1;
+        const QByteArray rust = runHelper(arguments, Environment(), &exitCode);
+        QCOMPARE(exitCode, 0);
+        const QByteArray cpp = reference(arguments);
+        QVERIFY2(rust == cpp, describe(arguments, rust, cpp).constData());
     }
-    const struct passwd *user = ::getpwuid(::getuid());
-    QVERIFY(user && user->pw_dir);
-    QVERIFY(prepared);
-    QCOMPARE(home, QByteArray(user->pw_dir));   // the real uid's, not the caller's
-    QVERIFY(accounts.isNull());
-    QCOMPARE(lang, QByteArray("fi_FI.UTF-8"));
-    QVERIFY(removed.contains("ACCOUNTS"));
-    QVERIFY(!removed.contains("LANG"));
-    QCOMPARE(coreAfter.rlim_cur, rlim_t(0));
-    QCOMPARE(coreAfter.rlim_max, coreBefore.rlim_max);
-    QCOMPARE(qgetenv("ACCOUNTS"), QFile::encodeName(fixture->path()));   // restored
 }
 
-void tst_BridgeAccounts::sandboxDescriptors()
+void tst_BridgeAccounts::goldenAnswers()
 {
-    // XB-2a: a caller's closed stdio becomes /dev/null, so that no file the
-    // helper opens receives its answer; other inherited descriptors close.
-    struct stat devNull {};
-    QCOMPARE(::stat("/dev/null", &devNull), 0);
-    const int status = inChild([&devNull] {
-        const int inherited = ::open("/dev/null", O_RDONLY);
-        ::close(STDIN_FILENO);
-        ::close(STDERR_FILENO);
-        Checks check;
-        check(inherited > STDERR_FILENO);
-        check(sanitizeDescriptors());
-        for (const int fd : { STDIN_FILENO, STDERR_FILENO }) {
-            struct stat st {};
-            check(::fstat(fd, &st) == 0 && S_ISCHR(st.st_mode) && st.st_rdev == devNull.st_rdev);
-        }
-        check(failsWith(::fcntl(inherited, F_GETFD), EBADF));
-        return check.failed();
+    // The answers of the C++ helper, byte for byte, for what the accounts
+    // UI writes and for what other writers of the database could.
+    for (const char *provider : { "sftp", "webdav", "ftp" })
+        fixture->installProvider(QLatin1String(provider));
+    QVariantMap typed = globals(QStringLiteral("types.example"), {
+        { QStringLiteral("netvfs/fake/string"), QStringLiteral("ünïcødé \U0001F600 \"'\\\n\t") },
+        { QStringLiteral("netvfs/fake/empty"), QLatin1String("") },
+        { QStringLiteral("netvfs/fake/int"), -5 },
+        { QStringLiteral("netvfs/fake/uint"), 7u },
+        { QStringLiteral("netvfs/fake/int64"), qint64(1) << 40 },
+        { QStringLiteral("netvfs/fake/uint64"), quint64(1) << 63 },
+        { QStringLiteral("netvfs/fake/true"), true },
+        { QStringLiteral("netvfs/fake/false"), false },
+        { QStringLiteral("netvfs/fake/list0"), QStringList() },
+        { QStringLiteral("netvfs/fake/list1"), QStringList { QStringLiteral("one") } },
+        { QStringLiteral("netvfs/fake/list2"), QStringList { QStringLiteral("a"), QStringLiteral("b") } },
+        { QStringLiteral("netvfs/fake/ä"), QStringLiteral("a Latin-1 key") },
+        { QStringLiteral("netvfs/fake/"), QStringLiteral("an empty option name") },
+        { QStringLiteral("netvfs/fake"), QStringLiteral("no option") },
+        { QStringLiteral("netvfs/fakeX/y"), QStringLiteral("another provider's") },
+        { QStringLiteral("netvfs/smb/share"), QStringLiteral("another provider's") },
+        { QStringLiteral("netvfs/port"), QStringLiteral(" 7 ") },
+        { QStringLiteral("netvfs/attention"), QStringLiteral("auth-failed") },
     });
-    QCOMPARE(status, 0);
+    typed.remove(QStringLiteral("netvfs/username"));
+    const int types = listedAccount(QStringLiteral("fake"), typed,
+                                    { { QStringLiteral("files_root"), QStringLiteral("/") } }, 4294967295u);
+    QVERIFY(types > 0);
+    const int guest = listedAccount(
+        QStringLiteral("smb"),
+        globals(QStringLiteral("guest.example"), { { QStringLiteral("netvfs/smb/security_profile"), QStringLiteral(" guest ") },
+                                                   { QStringLiteral("netvfs/smb/allow_insecure"), true },
+                                                   { QStringLiteral("netvfs/attention"),
+                                                     QStringLiteral("server-identity-changed") } }),
+        { { QStringLiteral("files_root"), QStringLiteral("   ") } });
+    QVERIFY(guest > 0);
+    const int bogus = listedAccount(
+        QStringLiteral("smb"),
+        globals(QStringLiteral("bogus.example"), { { QStringLiteral("netvfs/smb/security_profile"), QStringLiteral("x") },
+                                                   { QStringLiteral("netvfs/port"), QStringLiteral("99999999999") } }),
+        { { QStringLiteral("files_root"), QStringLiteral("../escape") } });
+    QVERIFY(bogus > 0);
+    const int signedSmb = listedAccount(
+        QStringLiteral("smb"),
+        globals(QStringLiteral("signed.example"), { { QStringLiteral("netvfs/smb/require_encryption"), QStringLiteral("false") },
+                                                    { QStringLiteral("netvfs/port"), 70000u } }));
+    QVERIFY(signedSmb > 0);
+    const int http = listedAccount(
+        QStringLiteral("webdav"), globals(QStringLiteral("dav.example"), { { QStringLiteral("netvfs/webdav/tls"), QStringLiteral("http") } }),
+        { { QStringLiteral("files_root"), QStringLiteral("a/./b") } });
+    QVERIFY(http > 0);
+    const int ftp = listedAccount(
+        QStringLiteral("ftp"), globals(QStringLiteral("ftp.example"), { { QStringLiteral("netvfs/ftp/tls_mode"), QStringLiteral("none") },
+                                                                     { QStringLiteral("netvfs/ftp/allow_insecure"), QStringLiteral("1") } }),
+        { { QStringLiteral("files_root"), QStringLiteral("//srv//ftp//") } });
+    QVERIFY(ftp > 0);
+    const int sftp = listedAccount(
+        QStringLiteral("sftp"), globals(QStringLiteral("ssh.example"), { { QStringLiteral("netvfs/sftp/auth_mode"), QStringLiteral("interactive") },
+                                                                      { QStringLiteral("netvfs/sftp/allow_shell"), true },
+                                                                      { QStringLiteral("netvfs/port"), qint64(22) } }),
+        QVariantMap(), 12);
+    QVERIFY(sftp > 0);
+    QVariantMap withoutHost = globals(QString());
+    withoutHost.remove(QStringLiteral("netvfs/host"));
+    const int noHost = listedAccount(QStringLiteral("fake"), withoutHost);
+    QVERIFY(noHost > 0);
+    const int emptyHost = listedAccount(QStringLiteral("fake"), globals(QString()));
+    QVERIFY(emptyHost > 0);
+    const int off = listedAccount(QStringLiteral("fake"), globals(QStringLiteral("off.example")));
+    QVERIFY(off > 0);
+    QVERIFY(fixture->setService(off, QString(), false));
+
+    // What only other writers store.
+    const QString t = QString::number(types);
+    QVERIFY(sql(database(), QStringLiteral(
+        "INSERT OR REPLACE INTO Settings (account, service, key, type, value) VALUES "
+        "(%1, 0, 'netvfs/fake/double', 'd', '1.5'),"
+        "(%1, 0, 'netvfs/fake/byte', 'y', '7'),"
+        "(%1, 0, 'netvfs/fake/path', 'o', '''/x'''),"
+        "(%1, 0, 'netvfs/fake/badlist', 'as', '[''a'''),"
+        "(%1, 0, 'netvfs/fake/raw', 's', 'raw ''text'''),"
+        "(%1, 0, 'netvfs/fake/escapes', 's', '''a\\nb\\u00e9\\U0001F600\\x41'''),"
+        "(%1, 0, 'netvfs/fake/hex', 'i', '0x10'),"
+        "(%1, 0, 'netvfs/fake/annotated', 'x', 'int64 5'),"
+        "(%1, 0, 'netvfs/fake/badbool', 'b', 'yes'),"
+        "(%1, 0, 'netvfs/fake/null', 's', NULL),"
+        "(%1, 0, 'netvfs/fake/dict', 'a{sv}', '{''k'': <''v''>, ''n'': <int32 3>, ''l'': <[''x'']>}'),"
+        "(%1, 0, 'netvfs/fake/tuple', '(ss)', '(''a'', ''b'')'),"
+        "(%1, 0, 'netvfs/fake/variant', 'v', '<''x''>');"
+        "UPDATE Accounts SET name = NULL WHERE id = %2;").arg(t, QString::number(guest))));
+
+    QList<QStringList> requests { { QStringLiteral("list") } };
+    for (const int id : { listed, unlisted, types, guest, bogus, signedSmb, http, ftp, sftp, noHost, emptyHost, off })
+        requests << QStringList { QStringLiteral("files"), QString::number(id) };
+    for (const QString &id : { QStringLiteral("999"), QStringLiteral("0"), QStringLiteral("-1"), QStringLiteral("x"),
+                               QString(), QStringLiteral(" ") + t, QStringLiteral("+") + t, QStringLiteral("0") + t,
+                               t + QStringLiteral("x"), t + QStringLiteral(" "), QStringLiteral("4294967296"),
+                               QStringLiteral("0x1") }) {
+        requests << QStringList { QStringLiteral("files"), id };
+    }
+    for (const QString &state : { QStringLiteral("none"), QString(), QStringLiteral("Auth-failed") })
+        requests << QStringList { QStringLiteral("attention"), QString::number(listed), state };
+    for (const int id : { unlisted, noHost, off, 999 }) {
+        requests << QStringList { QStringLiteral("attention"), QString::number(id), QStringLiteral("auth-failed"),
+                                  QStringLiteral("pin") };
+    }
+    requests << QStringList() << QStringList { QStringLiteral("list"), QString() }
+             << QStringList { QStringLiteral("files") } << QStringList { QStringLiteral("LIST") };
+    compareAnswers(requests);
 }
 
-void tst_BridgeAccounts::sandboxProcessState()
+void tst_BridgeAccounts::goldenStoredValues()
 {
-    const int status = inChild([] {
-        ::umask(0);
-        ::signal(SIGTERM, SIG_IGN);
-        sigset_t blocked;
-        sigemptyset(&blocked);
-        sigaddset(&blocked, SIGUSR1);
-        ::sigprocmask(SIG_BLOCK, &blocked, nullptr);
-        struct rlimit size {};
-        ::getrlimit(RLIMIT_FSIZE, &size);
-        size.rlim_cur = std::min<rlim_t>(size.rlim_max, 4096);
-        ::setrlimit(RLIMIT_FSIZE, &size);
-
-        resetProcessState();
-        Checks check;
-        check(::umask(022) == 077);
-        struct sigaction action {};
-        check(::sigaction(SIGTERM, nullptr, &action) == 0 && action.sa_handler == SIG_DFL);
-        sigset_t now;
-        check(::sigprocmask(SIG_BLOCK, nullptr, &now) == 0 && sigismember(&now, SIGUSR1) == 0);
-        check(::getrlimit(RLIMIT_FSIZE, &size) == 0 && size.rlim_cur == size.rlim_max);
-        return check.failed();
-    });
-    QCOMPARE(status, 0);
-}
-
-void tst_BridgeAccounts::sandboxSyscalls()
-{
-    QTemporaryDir dir;
-    QVERIFY(dir.isValid());
-    const QByteArray file = QFile::encodeName(dir.filePath(QStringLiteral("file")));
-    const QByteArray other = QFile::encodeName(dir.filePath(QStringLiteral("other")));
-    const QByteArray folder = QFile::encodeName(dir.filePath(QStringLiteral("folder")));
-    const int status = inChild([&] {
-        if (!restrictSyscalls())
-            return 99;
-        Checks check;
-        check(failsWith(::execl("/bin/false", "false", nullptr), EPERM));
-        check(failsWith(::socket(AF_INET, SOCK_STREAM, 0), EPERM));
-        check(failsWith(::socket(AF_INET6, SOCK_DGRAM, 0), EPERM));
-        check(failsWith(::socket(AF_NETLINK, SOCK_RAW, 0), EPERM));
-        check(::socket(AF_UNIX, SOCK_STREAM, 0) >= 0);
-        int pair[2];
-        check(::socketpair(AF_UNIX, SOCK_STREAM, 0, pair) == 0);
-        check(failsWith(::unshare(CLONE_NEWUSER), EPERM));
-        check(failsWith(::syscall(SYS_bpf, 0, nullptr, 0), EPERM));
-        // No file with a setuid or setgid bit, however it is made.
-        const int fd = ::open(file.constData(), O_CREAT | O_WRONLY, 0600);
-        check(fd >= 0);
-        check(failsWith(::fchmod(fd, 02755), EPERM));
-        check(failsWith(::chmod(file.constData(), 04755), EPERM));
-        check(failsWith(::fchmodat(AT_FDCWD, file.constData(), 02700, 0), EPERM));
-        check(::chmod(file.constData(), 0640) == 0);
-        check(failsWith(::open(other.constData(), O_CREAT | O_WRONLY, 02755), EPERM));
-        // Without O_CREAT the mode is unused, whatever a raw syscall passes.
-        check(::syscall(SYS_openat, AT_FDCWD, file.constData(), O_RDONLY, 06755) >= 0);
-        check(failsWith(::mkdir(folder.constData(), 02755), EPERM));
-        check(::mkdir(folder.constData(), 0700) == 0);
-        check(failsWith(::open(folder.constData(), O_TMPFILE | O_WRONLY, 02755), EPERM));
-#if !defined(__SANITIZE_ADDRESS__)
-        check(failsWith(::ptrace(PTRACE_TRACEME, 0, nullptr, nullptr), EPERM));
-#endif
-        // Threads still start: clone3 fails with ENOSYS and glibc uses clone.
-        bool ran = false;
-        std::thread thread([&ran] { ran = true; });
-        thread.join();
-        check(ran);
-        return check.failed();
-    });
-    if (status == 99)
-        QSKIP("no seccomp filters on this kernel or architecture");
-    QCOMPARE(status, 0);
-}
-
-void tst_BridgeAccounts::sandboxFilesystem()
-{
-    QTemporaryDir allowed;
-    QTemporaryDir denied;
-    QVERIFY(allowed.isValid() && denied.isValid());
-    const QByteArray secret = QFile::encodeName(denied.filePath(QStringLiteral("secret")));
-    QFile secretFile(QFile::decodeName(secret));
-    QVERIFY(secretFile.open(QIODevice::WriteOnly));
-    secretFile.close();
-    const QByteArray allowedDir = QFile::encodeName(allowed.path());
-    const QByteArray created = allowedDir + "/accounts.db-wal";
-    const QByteArray outside = QFile::encodeName(denied.filePath(QStringLiteral("planted")));
-    const int status = inChild([&] {
-        // A database folder that does not exist yet needs no rule.
-        const FilesystemRestriction restriction = restrictFilesystem({ allowedDir, "/nonexistent/accounts" }, false);
-        if (restriction.abi == 0)
-            return NoLandlock;
-        Checks check;
-        check(restriction.enforced);
-        // The database folder: create, write, truncate, remove.
-        const int fd = ::open(created.constData(), O_CREAT | O_RDWR, 0600);
-        check(fd >= 0);
-        check(::write(fd, "x", 1) == 1);
-        check(::ftruncate(fd, 0) == 0);
-        check(::unlink(created.constData()) == 0);
-        // Anything else: read-only system folders, nothing beyond them.
-        check(::open("/etc/passwd", O_RDONLY | O_CLOEXEC) >= 0);
-        check(::open("/dev/null", O_WRONLY | O_CLOEXEC) >= 0);
-        check(failsWith(::open(secret.constData(), O_RDONLY), EACCES));
-        check(failsWith(::open(outside.constData(), O_CREAT | O_WRONLY, 0600), EACCES));
-        check(failsWith(::execl("/bin/false", "false", nullptr), EACCES));
-        if (restriction.abi >= 4) {
-            const int tcp = ::socket(AF_INET, SOCK_STREAM, 0);
-            struct sockaddr_in local {};
-            local.sin_family = AF_INET;
-            local.sin_port = htons(1);
-            local.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-            check(failsWith(::connect(tcp, reinterpret_cast<const sockaddr *>(&local), sizeof local), EACCES));
-        }
-        if (restriction.abi >= 6)
-            check(failsWith(::kill(::getppid(), 0), EPERM));
-        return check.failed();
-    });
-    if (status == NoLandlock)
-        QSKIP("no Landlock on this kernel");
-    QCOMPARE(status, 0);
-}
-
-void tst_BridgeAccounts::sandboxLandlockLevels()
-{
-    // Each Landlock ABI adds its rights; a newer kernel than this code knows
-    // gets what the newest known one handles.
-    const auto same = [](const LandlockAccess &a, const LandlockAccess &b) {
-        return a.fs == b.fs && a.net == b.net && a.scoped == b.scoped;
+    // Each value as libaccounts-glib could find it in the database, as an
+    // option, the port, the credentials, the attention state, the Files
+    // root and the Files service's enabled flag.
+    const QList<QPair<QString, QString>> values {
+        { "s", "'x'" }, { "s", "\"it's\"" }, { "s", "' 7 '" }, { "s", "'-7'" }, { "s", "'+7'" }, { "s", "'7x'" },
+        { "s", "'0x10'" }, { "s", "'010'" }, { "s", "'2147483648'" }, { "s", "'-2147483649'" },
+        { "s", "'4294967295'" }, { "s", "'-1'" }, { "s", "'1e3'" }, { "s", "'7.0'" }, { "s", "''" },
+        { "s", "'\\u3000 7\\u00a0'" }, { "s", "'\\u0663'" }, { "s", "'auth-failed'" },
+        { "s", "'server-identity-changed'" }, { "s", "'true'" }, { "s", "'1'" }, { "s", "'/'" }, { "s", "' /a//b/ '" },
+        { "s", "'a/../b'" }, { "s", "raw" }, { "s", "  'x'  " }, { "s", "@s 'x'" }, { "s", "string 'x'" },
+        { "s", "'\\u00e4\\U0001F600'" }, { "s", "'\\u0000'" }, { "s", "'x" }, { "s", "''x''" },
+        { "i", "7" }, { "i", "-2147483648" }, { "i", "2147483648" }, { "i", "0x7fffffff" }, { "i", "010" },
+        { "i", "int32 7" }, { "i", "@i 7" }, { "i", " 7 " }, { "i", "+7" }, { "i", "x" }, { "i", "'7'" }, { "i", "1" },
+        { "i", "0" }, { "u", "4294967295" }, { "u", "4294967296" }, { "u", "-1" }, { "u", "uint32 7" },
+        { "x", "-9223372036854775808" }, { "x", "9223372036854775807" }, { "x", "4294967303" }, { "x", "int64 -1" },
+        { "t", "18446744073709551615" }, { "t", "18446744073709551616" }, { "t", "uint64 7" },
+        { "b", "true" }, { "b", "false" }, { "b", "True" }, { "b", "1" }, { "b", "boolean true" }, { "b", "'true'" },
+        { "as", "['a']" }, { "as", "[]" }, { "as", "@as []" }, { "as", "['a', 'b']" }, { "as", "['7']" },
+        { "as", "[' 7 ']" }, { "as", "['true']" }, { "as", "['1']" }, { "as", "['auth-failed']" }, { "as", "['/x/']" },
+        { "a{sv}", "{'k': <'v'>}" }, { "a{sv}", "@a{sv} {}" }, { "a{sv}", "{'n': <int32 3>, 'l': <['x']>}" },
+        { "y", "7" }, { "n", "7" }, { "q", "7" }, { "d", "7.5" }, { "o", "'/x'" }, { "g", "'s'" }, { "v", "<'x'>" },
+        { "(ss)", "('a', 'b')" }, { "ai", "[1]" }, { "ms", "just 'x'" }, { "h", "1" },
     };
-    const auto widens = [](std::uint64_t smaller, std::uint64_t larger) {
-        return smaller != larger && (smaller & larger) == smaller;
+    const QString global = QStringLiteral("0");
+    const QString files = QStringLiteral("(SELECT id FROM Services WHERE name = 'fake-files')");
+    QList<int> ids;
+    for (const auto &[type, text] : values) {
+        // One account with the value as its settings, one with it as the
+        // Files service's flag.
+        const int id = listedAccount(QStringLiteral("fake"), globals(QStringLiteral("values.example")));
+        const int flag = listedAccount(QStringLiteral("fake"), globals(QStringLiteral("flag.example")));
+        QVERIFY(id > 0 && flag > 0);
+        ids << id;
+        QString quoted = text;
+        quoted.replace(QLatin1Char('\''), QStringLiteral("''"));
+        const QString row = QStringLiteral("(%1, %2, '%3', '%4', '%5')");
+        QStringList rows;
+        for (const char *key : { "netvfs/fake/v", "netvfs/port", "CredentialsId", "netvfs/attention" })
+            rows << row.arg(QString::number(id), global, QLatin1String(key), type, quoted);
+        rows << row.arg(QString::number(id), files, QStringLiteral("files_root"), type, quoted);
+        rows << row.arg(QString::number(flag), files, QStringLiteral("enabled"), type, quoted);
+        QVERIFY(sql(database(),
+                    QStringLiteral("INSERT OR REPLACE INTO Settings (account, service, key, type, value) VALUES %1;")
+                        .arg(rows.join(QLatin1Char(',')))));
+    }
+    QList<QStringList> requests { { QStringLiteral("list") } };
+    for (const int id : ids)
+        requests << QStringList { QStringLiteral("files"), QString::number(id) };
+    compareAnswers(requests);
+}
+
+void tst_BridgeAccounts::goldenAttention()
+{
+    // The same request on two copies of the database: the same answer, and
+    // the same settings afterwards, as libaccounts reads them.
+    QVERIFY(fixture->setService(unlisted, QStringLiteral("fake-files"), false));
+    const int other = listedAccount(QStringLiteral("smb"), globals(QStringLiteral("nas.example")));
+    QVERIFY(other > 0);
+    QTemporaryDir copy;
+    QVERIFY(copyDatabase(database(), copy.path() + QStringLiteral("/accounts.db")));
+    const Environment rustDatabase { { QStringLiteral("ACCOUNTS"), copy.path() } };
+
+    const QString id = QString::number(listed);
+    const QList<QStringList> requests {
+        { QStringLiteral("attention"), id, QStringLiteral("auth-failed") },
+        { QStringLiteral("attention"), id, QStringLiteral("server-identity-changed"), QStringLiteral("SHA256:a'b\"c") },
+        { QStringLiteral("attention"), id, QStringLiteral("auth-failed"), QString() },
+        { QStringLiteral("attention"), id, QStringLiteral("server-identity-changed"),
+          QStringLiteral("é\U0001F600\\\n") },
+        { QStringLiteral("attention"), QString::number(other), QStringLiteral("server-identity-changed"),
+          QStringLiteral("SHA256:smb") },
+        { QStringLiteral("attention"), QString::number(unlisted), QStringLiteral("auth-failed") },
+        { QStringLiteral("attention"), id, QStringLiteral("none") },
     };
-    QVector<LandlockAccess> levels;
-    for (int abi = 0; abi <= LandlockNewestAbi + 2; ++abi)
-        levels << landlockAccess(abi, false);
-    QVERIFY(same(levels.at(0), LandlockAccess()));
-    QVERIFY(levels.at(1).fs != 0 && levels.at(1).net == 0 && levels.at(1).scoped == 0);
-    QVERIFY(widens(levels.at(1).fs, levels.at(2).fs));   // renames and links
-    QVERIFY(widens(levels.at(2).fs, levels.at(3).fs));   // truncation
-    QCOMPARE(levels.at(4).fs, levels.at(3).fs);          // TCP
-    QVERIFY(levels.at(3).net == 0 && levels.at(4).net != 0);
-    QVERIFY(widens(levels.at(4).fs, levels.at(5).fs));   // device ioctls
-    QVERIFY(levels.at(5).scoped == 0 && levels.at(6).scoped != 0);   // signals, abstract sockets
-    for (int abi = 7; abi < levels.size(); ++abi)
-        QVERIFY2(same(levels.at(abi), levels.at(6)), qPrintable(QString::number(abi)));
-    // An abstract session bus keeps its socket, not the signals.
-    const LandlockAccess abstractBus = landlockAccess(LandlockNewestAbi, true);
-    QVERIFY(widens(abstractBus.scoped, levels.at(6).scoped) && abstractBus.scoped != 0);
-    QVERIFY(same(landlockAccess(5, true), levels.at(5)));
+    for (const QStringList &arguments : requests) {
+        int exitCode = -1;
+        const QByteArray rust = runHelper(arguments, rustDatabase, &exitCode);
+        QCOMPARE(exitCode, 0);
+        const QByteArray cpp = reference(arguments);
+        QVERIFY2(rust == cpp, describe(arguments, rust, cpp).constData());
+        for (const int account : { listed, unlisted, other })
+            QCOMPARE(globalSettings(copy.path(), account), globalSettings(fixture->path(), account));
+    }
+
+    // A write the database refuses.
+    const QString refuse = QStringLiteral(
+        "CREATE TRIGGER refuse BEFORE INSERT ON Settings BEGIN SELECT RAISE(ABORT, 'refused'); END;");
+    QVERIFY(sql(database(), refuse));
+    QVERIFY(sql(copy.path() + QStringLiteral("/accounts.db"), refuse));
+    const QStringList arguments { QStringLiteral("attention"), id, QStringLiteral("auth-failed") };
+    const QByteArray rust = runHelper(arguments, rustDatabase);
+    QCOMPARE(AccountsHelper::decodeStatus(rust).error(), Error::Internal);
+    const QByteArray cpp = reference(arguments);
+    QVERIFY2(rust == cpp, describe(arguments, rust, cpp).constData());
 }
 
-void tst_BridgeAccounts::sandboxAccountsDirectories()
+void tst_BridgeAccounts::attentionSignal()
 {
-    // ACCOUNTS (a test's database) wins; else the Sailfish OS folder and the
-    // upstream one, below the XDG folders or HOME.
-    const SavedEnvironment saved;
-    qputenv("ACCOUNTS", "/tmp/fixture");
-    QCOMPARE(accountsDirectories(), QList<QByteArray>({ "/tmp/fixture" }));
-    qunsetenv("ACCOUNTS");
-    qputenv("HOME", "/home/someone");
-    qunsetenv("XDG_DATA_HOME");
-    qputenv("XDG_CONFIG_HOME", "relative");   // not a folder XDG allows
-    QCOMPARE(accountsDirectories(), QList<QByteArray>({ "/home/someone/.local/share/system/privileged/Accounts",
-                                                         "/home/someone/.config/libaccounts-glib" }));
-    qputenv("XDG_DATA_HOME", "/data");
-    qputenv("XDG_CONFIG_HOME", "/config");
-    QCOMPARE(accountsDirectories(),
-             QList<QByteArray>({ "/data/system/privileged/Accounts", "/config/libaccounts-glib" }));
+    // libaccounts' writers announce a change on the session bus, from a
+    // name of their own; a process that has the account loaded reads the
+    // new settings from the signal (on the path of the global service, the
+    // one such a manager of Files accounts listens to).
+    Accounts::Manager watcher(QStringLiteral("netvfs-files"));
+    Accounts::Account *account = watcher.account(static_cast<Accounts::AccountId>(listed));
+    QVERIFY(account);
+    account->selectService(Accounts::Service());
+    QVERIFY(account->value(QStringLiteral("netvfs/attention")).toString().isEmpty());
+    ownedNames.clear();
+    QVERIFY(AccountsHelper::decodeStatus(runHelper({ QStringLiteral("attention"), QString::number(listed),
+                                                     QStringLiteral("server-identity-changed"),
+                                                     QStringLiteral("SHA256:it's") }))
+                .ok());
+    QTRY_COMPARE_WITH_TIMEOUT(account->value(QStringLiteral("netvfs/attention")).toString(),
+                              QStringLiteral("server-identity-changed"), 10000);
+    QCOMPARE(account->value(QStringLiteral("netvfs/fake/host_key_seen")).toString(), QStringLiteral("SHA256:it's"));
+    // A boolean, not the string "true" (QVariant's == would convert it).
+    const QVariant needsUpdate = account->value(QStringLiteral("CredentialsNeedUpdate"));
+    QCOMPARE(needsUpdate.userType(), int(QMetaType::Bool));
+    QVERIFY(needsUpdate.toBool());
+    QCOMPARE(account->value(QStringLiteral("CredentialsNeedUpdateFrom")).toString(), QStringLiteral("fake-files"));
+    // Sailfish OS's libaccounts-glib owns such a name to send from.
+    const QRegularExpression name(QStringLiteral("^com\\.google\\.code\\.AccountsSSO\\.Accounts\\.uuid_[0-9a-f]{32}$"));
+    QTRY_VERIFY_WITH_TIMEOUT(std::any_of(ownedNames.cbegin(), ownedNames.cend(),
+                                         [&](const QString &n) { return name.match(n).hasMatch(); }),
+                             5000);
 }
 
-void tst_BridgeAccounts::sandboxGroup()
+void tst_BridgeAccounts::attentionWithoutBus()
 {
-    // Not set-id here: real, effective and saved gid stay the real one. The
-    // set-id case is the device's (tools/ci cannot install setgid files).
-    QVERIFY(dropSetIdGroup());
-    gid_t r = 0;
-    gid_t e = 0;
-    gid_t s = 0;
-    QCOMPARE(::getresgid(&r, &e, &s), 0);
-    QCOMPARE(e, ::getgid());
-    QCOMPARE(s, ::getgid());
+    // The write stands when nobody can be told.
+    int exitCode = -1;
+    QByteArray errors;
+    const QByteArray answer = runHelper({ QStringLiteral("attention"), QString::number(listed),
+                                          QStringLiteral("auth-failed") },
+                                        { { QStringLiteral("DBUS_SESSION_BUS_ADDRESS"),
+                                            QStringLiteral("unix:path=/nonexistent/bus") } },
+                                        &exitCode, &errors);
+    QCOMPARE(exitCode, 0);
+    QVERIFY(AccountsHelper::decodeStatus(answer).ok());
+    QVERIFY2(errors.contains("cannot announce the change"), errors.constData());
+    QCOMPARE(fixture->value(listed, QStringLiteral("netvfs/attention")).toString(), QStringLiteral("auth-failed"));
+}
+
+void tst_BridgeAccounts::helperLinks()
+{
+    // XB-2a: no Qt, GLib or libaccounts in the setgid helper.
+    QProcess readelf;
+    readelf.start(QStringLiteral("readelf"), { QStringLiteral("-d"), Helper });
+    QVERIFY2(readelf.waitForFinished(10000), "readelf is needed");
+    QCOMPARE(readelf.exitCode(), 0);
+    QStringList needed;
+    const QRegularExpression library(QStringLiteral("\\(NEEDED\\)\\s+Shared library: \\[([^]]+)\\]"));
+    for (auto it = library.globalMatch(QString::fromLatin1(readelf.readAllStandardOutput())); it.hasNext();)
+        needed << it.next().captured(1);
+    needed.sort();
+    QCOMPARE(needed, QStringList({ QStringLiteral("libc.so.6"), QStringLiteral("libgcc_s.so.1"),
+                                   QStringLiteral("libsqlite3.so.0") }));
 }
 
 void tst_BridgeAccounts::helperWithClosedDescriptors()
