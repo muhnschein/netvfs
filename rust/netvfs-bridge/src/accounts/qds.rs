@@ -43,6 +43,9 @@ mod type_id {
 
 /// A null `QString` or `QByteArray`.
 const NULL_LENGTH: u32 = u32::MAX;
+/// The longest length that is not null.
+#[cfg(any(test, feature = "test-bins"))]
+const LONGEST_LENGTH: u32 = 0xffff_fffe;
 
 fn malformed() -> Status {
     Status::new(ErrorName::ProtocolError, "netvfs-accounts gave a malformed answer")
@@ -311,7 +314,8 @@ impl Writer {
     }
 
     fn length(&mut self, n: usize) {
-        self.u32(u32::try_from(n).unwrap_or(NULL_LENGTH - 1));
+        // As the helper: a length past 4 GiB is cut to the longest one.
+        self.u32(u32::try_from(n).unwrap_or(LONGEST_LENGTH));
     }
 
     /// `QByteArray`.

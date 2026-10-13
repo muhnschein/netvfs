@@ -178,7 +178,8 @@ impl IniFile {
         let mut data = std::mem::take(&mut self.data);
         if let Some(at) = end {
             let mut insert = Vec::new();
-            if at > 0 && !matches!(data.get(at.saturating_sub(1)), Some(b'\n' | b'\r')) {
+            // `at` ends a header or key line, so it is past the start.
+            if !matches!(data.get(at.saturating_sub(1)), Some(b'\n' | b'\r')) {
                 insert.push(b'\n');
             }
             insert.extend_from_slice(&line);
@@ -315,7 +316,9 @@ struct RawLine {
 }
 
 /// `readIniLine`: the next logical line from `pos`, and where the next one
-/// starts; `None` at the end.
+/// starts; `None` at the end. Qt's case of a line end at the line's start
+/// cannot happen here (nor in Qt): the white space skipped before a line
+/// and after a comment includes line ends.
 fn read_ini_line(data: &[u8], pos: usize) -> Option<(RawLine, usize)> {
     let skipped = data.get(pos..).unwrap_or_default().iter().take_while(|b| is_space(**b)).count();
     let start = pos.saturating_add(skipped);
@@ -358,10 +361,6 @@ impl LineScan<'_> {
                 if !self.in_quotes && self.equals.is_none() {
                     self.equals = Some(self.i.saturating_sub(1));
                 }
-                false
-            }
-            b'\n' | b'\r' if first => {
-                self.line_start = self.line_start.saturating_add(1);
                 false
             }
             b'\\' => {
@@ -482,10 +481,6 @@ pub(crate) fn unescape_key(key: &[u8], out: &mut Vec<u16>) {
 fn percent_escape(text: &[u8]) -> (u16, usize) {
     let lone = (u16::from(b'%'), 1);
     let (digits_at, count): (usize, usize) = if text.get(1) == Some(&b'U') { (2, 4) } else { (1, 2) };
-    // Qt checks "%" at the key's end first: no escape.
-    if text.len() < 2 {
-        return lone;
-    }
     let end = digits_at.saturating_add(count);
     match text.get(digits_at..end).and_then(qt_hex) {
         Some(unit) => (unit, end),
@@ -506,7 +501,7 @@ fn qt_hex(digits: &[u8]) -> Option<u16> {
     if text.is_empty() || !text.iter().all(u8::is_ascii_hexdigit) {
         return None;
     }
-    let value = text.iter().fold(0u16, |v, d| v.wrapping_shl(4) | hex_digit(*d));
+    let value = text.iter().fold(0u16, |v, d| v.wrapping_shl(4).wrapping_add(hex_digit(*d)));
     Some(if negative { value.wrapping_neg() } else { value })
 }
 
@@ -822,7 +817,7 @@ impl<'a> ValueScan<'a> {
     /// `StHexEscape` (4 bits per digit) and `StOctEscape` (3 bits).
     fn number(&mut self, mut value: u16, bits: u32) -> Next {
         while let Some(digit) = self.peek().and_then(|d| char::from(d).to_digit(1 << bits)) {
-            value = value.wrapping_shl(bits) | u16::try_from(digit).unwrap_or(0);
+            value = value.wrapping_shl(bits).wrapping_add(u16::try_from(digit).unwrap_or(0));
             self.bump();
         }
         self.result.push(value);
@@ -930,6 +925,17 @@ pub(crate) mod tests {
         for (data, expected) in [(EDGE, EDGE_DUMP), (BRIDGE_QT, BRIDGE_QT_DUMP), (HANDOFF, HANDOFF_DUMP)] {
             assert_eq!(dump(&IniFile::parse(data.to_vec())), qt_dump(expected));
         }
+    }
+
+    #[test]
+    fn escaped_line_ends_and_comments() {
+        // Qt's dump of the same file (qsettings-golden dump).
+        let text = b"k=a\\\r\nb\nl=c\\\n\rd\nm=e\\\nf\n; n=x\n  ;o=y\np=q;r\n";
+        let expected = "k|QString|ab|1|ab\nl|QString|cd|1|cd\nm|QString|ef|1|ef\np|QString|q|1|q\n";
+        let file = IniFile::parse(text.to_vec());
+        assert_eq!(dump(&file), expected);
+        assert_eq!(file.clone().into_bytes(), file.as_bytes());
+        assert_eq!(file.into_bytes(), text);
     }
 
     #[test]

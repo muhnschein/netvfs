@@ -89,9 +89,13 @@ impl TestBus {
     /// caller skips its test).
     #[must_use]
     pub fn start() -> Option<Self> {
+        Self::start_program(Path::new("dbus-daemon"))
+    }
+
+    fn start_program(program: &Path) -> Option<Self> {
         let dir = TempDir::new();
         let config = dir.write("bus.conf", BUS_CONFIG.replace("@DIR@", &dir.path().to_string_lossy()));
-        let spawned = Command::new("dbus-daemon")
+        let spawned = Command::new(program)
             .arg(format!("--config-file={}", config.display()))
             .args(["--nofork", "--print-address=1"])
             .stdin(Stdio::null())
@@ -137,5 +141,36 @@ impl Drop for TestBus {
     fn drop(&mut self) {
         self.child.kill().ok();
         self.child.wait().ok();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn folders_are_removed() {
+        let dir = TempDir::default();
+        let path = dir.write("a/b", "x");
+        assert_eq!(std::fs::read(&path).unwrap(), b"x");
+        let kept = dir.path().to_owned();
+        drop(dir);
+        assert!(!kept.exists());
+    }
+
+    #[test]
+    fn bus_or_skip() {
+        // Installed (as where these tests run): a bus, not a skipped test.
+        let installed = std::env::var_os("PATH")
+            .is_some_and(|path| std::env::split_paths(&path).any(|d| d.join("dbus-daemon").is_file()));
+        assert_eq!(TestBus::start().is_some(), installed);
+        assert!(TestBus::start_program(Path::new("/nonexistent/dbus-daemon")).is_none());
+    }
+
+    #[test]
+    #[should_panic(expected = "dbus-daemon: ")]
+    fn other_failures_fail() {
+        // Not a program: a broken set-up, not a missing daemon.
+        let _ = TestBus::start_program(Path::new("/"));
     }
 }

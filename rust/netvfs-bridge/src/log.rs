@@ -123,7 +123,39 @@ pub fn enabled(level: Level) -> bool {
 
 /// Logs `message` at `level` on stderr.
 pub fn log(level: Level, message: fmt::Arguments<'_>) {
+    #[cfg(test)]
+    if capture::record(level, message) {
+        return;
+    }
     logger().write_to(&mut std::io::stderr().lock(), level, message);
+}
+
+/// Unit tests read what the code under test logs on their thread, at every
+/// level, as `QTest::ignoreMessage` checks the C++ warnings.
+#[cfg(test)]
+pub(crate) mod capture {
+    use super::Level;
+    use std::cell::RefCell;
+    use std::fmt;
+
+    thread_local! {
+        static LINES: RefCell<Option<Vec<(Level, String)>>> = const { RefCell::new(None) };
+    }
+
+    /// Records instead of writing while capturing.
+    pub(super) fn record(level: Level, message: fmt::Arguments<'_>) -> bool {
+        LINES.with_borrow_mut(|lines| lines.as_mut().map(|l| l.push((level, message.to_string()))).is_some())
+    }
+
+    /// Starts capturing on this thread, dropping what was captured.
+    pub(crate) fn start() {
+        LINES.set(Some(Vec::new()));
+    }
+
+    /// What was logged since `start`; capturing goes on.
+    pub(crate) fn take() -> Vec<(Level, String)> {
+        LINES.with_borrow_mut(|lines| lines.as_mut().map(std::mem::take).unwrap_or_default())
+    }
 }
 
 /// `qCDebug`.
@@ -301,6 +333,9 @@ mod tests {
         }
         assert_eq!(levels("[Other]\n[ rules ]\nnetvfs.bridge.debug=true"), [true, false, true, true]);
         assert_eq!(levels("[]"), [false, false, true, true]);
+        // A section needs both brackets.
+        assert_eq!(levels("a]\nnetvfs.bridge.debug=true"), [true, false, true, true]);
+        assert_eq!(levels("[Other\nnetvfs.bridge.debug=true"), [true, false, true, true]);
         // ';' separates rules like a line end.
         assert_eq!(levels("; netvfs.bridge.debug=true"), [true, false, true, true]);
     }
@@ -338,17 +373,30 @@ mod tests {
 
     #[test]
     fn process_logger() {
-        // The default until init; init takes once.
-        assert!(!enabled(Level::Debug) || logger().enabled(Level::Debug));
+        // init takes once (each test runs in a process of its own under
+        // nextest; cargo test may have set the logger already).
+        let fresh = LOGGER.get().is_none();
         let first = init(Logger::new(Some("t"), None));
+        assert_eq!(first, fresh);
         assert!(!init(Logger::default()));
         if first {
             assert_eq!(logger().tag, "[t] ");
         }
-        warning(format_args!("process logger test"));
-        critical(format_args!("process logger test"));
-        info(format_args!("not shown"));
-        debug(format_args!("not shown"));
-        assert!(enabled(Level::Warning));
+        assert!(enabled(Level::Warning) && !enabled(Level::Debug));
+        capture::start();
+        warning(format_args!("w {}", 1));
+        critical(format_args!("c"));
+        info(format_args!("i"));
+        debug(format_args!("d"));
+        log(Level::Info, format_args!("l"));
+        let expected = [
+            (Level::Warning, "w 1"),
+            (Level::Critical, "c"),
+            (Level::Info, "i"),
+            (Level::Debug, "d"),
+            (Level::Info, "l"),
+        ];
+        assert_eq!(capture::take(), expected.map(|(l, m)| (l, m.to_owned())));
+        assert_eq!(capture::take(), []);
     }
 }

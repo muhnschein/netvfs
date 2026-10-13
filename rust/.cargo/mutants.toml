@@ -1,0 +1,9 @@
+# cargo-mutants settings (doc/RUST.md). Every exclusion names why the
+# mutants it skips cannot change behaviour.
+exclude_re = [
+    # netvfs-bridge consent.rs: the inotify masks are ORs of distinct
+    # single-bit flags, where `|` and `^` give the same value.
+    'netvfs-bridge/src/consent\.rs:\d+:\d+: replace \| with \^',
+    # netvfs-bridge sys/lock.rs: LOCK_EX | LOCK_NB, distinct bits as well.
+    'netvfs-bridge/src/sys/lock\.rs:\d+:\d+: replace \| with \^',
+]

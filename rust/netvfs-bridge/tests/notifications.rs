@@ -179,14 +179,20 @@ async fn closed_and_stale_signals() {
     emit(&s.fake.conn, None, "ActionInvoked", &7_u32).await;
     emit(&s.fake.conn, None, "NotificationClosed", &(7_u32, "x")).await;
     emit(&s.fake.conn, None, "ActionInvoked2", &(7_u32, "allow")).await;
-    s.fake.closed(7).await;
-    assert_eq!(next_event(&mut s.events).await, PromptEvent::Dismissed);
-    assert!(!s.prompt.is_shown());
-    // Answered already: a late action is ignored.
+    // None of them was taken: the answer is the first event.
     s.fake.action(7, "allow").await;
+    assert_eq!(next_event(&mut s.events).await, PromptEvent::Answered(true));
     s.prompt.show("A");
     s.fake.notify().await;
-    s.fake.action(8, "deny").await;
+    s.fake.closed(7).await;
+    s.fake.closed(8).await;
+    assert_eq!(next_event(&mut s.events).await, PromptEvent::Dismissed);
+    assert!(!s.prompt.is_shown());
+    // Closed already: a late action is ignored.
+    s.fake.action(8, "allow").await;
+    s.prompt.show("A");
+    s.fake.notify().await;
+    s.fake.action(9, "deny").await;
     assert_eq!(next_event(&mut s.events).await, PromptEvent::Answered(false));
     assert_eq!(s.events.try_recv(), Err(mpsc::error::TryRecvError::Empty));
 }

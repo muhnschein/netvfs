@@ -25,7 +25,8 @@ pub enum Mode {
 /// When the folder is not writable or the disk is full; `path` is then
 /// unchanged and no temporary file is left.
 pub fn save(path: &Path, contents: &[u8], mode: Mode) -> io::Result<()> {
-    let (temp, mut file) = create_temporary(path)?;
+    static NEXT: AtomicU32 = AtomicU32::new(0);
+    let (temp, mut file) = create_temporary(path, &NEXT)?;
     let written = write_synced(&mut file, path, contents, mode).and_then(|()| fs::rename(&temp, path));
     if written.is_err() {
         fs::remove_file(&temp).ok();
@@ -45,13 +46,13 @@ fn write_synced(file: &mut File, path: &Path, contents: &[u8], mode: Mode) -> io
     file.sync_all()
 }
 
-/// `<name>.<suffix>` next to `path`, created exclusively.
-fn create_temporary(path: &Path) -> io::Result<(PathBuf, File)> {
-    static NEXT: AtomicU32 = AtomicU32::new(0);
+/// `<name>.<pid>-<n>` next to `path`, created exclusively; `next` counts
+/// the names tried. A name left by an earlier process is skipped.
+fn create_temporary(path: &Path, next: &AtomicU32) -> io::Result<(PathBuf, File)> {
     let name = path.file_name().ok_or_else(|| io::Error::from(io::ErrorKind::InvalidInput))?;
     let mut last = io::Error::from(io::ErrorKind::AlreadyExists);
     for _ in 0..16 {
-        let n = NEXT.fetch_add(1, Ordering::Relaxed);
+        let n = next.fetch_add(1, Ordering::Relaxed);
         let mut temp_name = name.to_os_string();
         temp_name.push(format!(".{}-{n}", std::process::id()));
         let temp = path.with_file_name(temp_name);
@@ -121,9 +122,25 @@ mod tests {
     fn temporary_names_do_not_collide() {
         let dir = TempDir::new();
         let path = dir.join("f");
-        let (a, _) = create_temporary(&path).unwrap();
-        let (b, _) = create_temporary(&path).unwrap();
-        assert_ne!(a, b);
-        assert!(a.file_name().unwrap().to_str().unwrap().starts_with("f."));
+        let next = AtomicU32::new(0);
+        let (a, _) = create_temporary(&path, &next).unwrap();
+        let (b, _) = create_temporary(&path, &next).unwrap();
+        assert_eq!(a, dir.join(&format!("f.{}-0", std::process::id())));
+        assert_eq!(b, dir.join(&format!("f.{}-1", std::process::id())));
+        // Names in use are skipped; up to 16 are tried.
+        for n in 2..4 {
+            dir.write(&format!("f.{}-{n}", std::process::id()), "");
+        }
+        let (c, _) = create_temporary(&path, &next).unwrap();
+        assert_eq!(c, dir.join(&format!("f.{}-4", std::process::id())));
+        for n in 5..21 {
+            dir.write(&format!("f.{}-{n}", std::process::id()), "");
+        }
+        assert_eq!(create_temporary(&path, &next).unwrap_err().kind(), io::ErrorKind::AlreadyExists);
+        assert_eq!(next.load(Ordering::Relaxed), 21);
+        // Other failures are not retried.
+        let missing = dir.join("missing/f");
+        assert_eq!(create_temporary(&missing, &next).unwrap_err().kind(), io::ErrorKind::NotFound);
+        assert_eq!(next.load(Ordering::Relaxed), 22);
     }
 }

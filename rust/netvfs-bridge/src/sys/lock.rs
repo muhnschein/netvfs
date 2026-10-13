@@ -27,7 +27,10 @@ pub fn process_exists(pid: i32) -> bool {
     // SAFETY: signal 0 sends nothing; kill only checks that the target
     // exists and may be signalled.
     let rc = unsafe { libc::kill(pid, 0) };
-    rc == 0 || io::Error::last_os_error().raw_os_error() != Some(libc::ESRCH)
+    if rc == 0 {
+        return true;
+    }
+    io::Error::last_os_error().raw_os_error() != Some(libc::ESRCH)
 }
 
 #[cfg(test)]

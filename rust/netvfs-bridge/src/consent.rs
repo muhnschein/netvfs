@@ -129,13 +129,13 @@ impl ConsentStore {
     }
 }
 
-/// What the watcher reacts to in the folder.
+/// What the watcher reacts to in the folder. A removed folder needs no
+/// flag: its watch ends with `IN_IGNORED` whatever the mask.
 const FOLDER_EVENTS: u32 = libc::IN_CLOSE_WRITE
     | libc::IN_MOVED_TO
     | libc::IN_MOVED_FROM
     | libc::IN_CREATE
     | libc::IN_DELETE
-    | libc::IN_DELETE_SELF
     | libc::IN_MOVE_SELF
     | libc::IN_ONLYDIR;
 
@@ -290,6 +290,17 @@ mod tests {
     }
 
     #[test]
+    fn unreadable_files_are_kept() {
+        // A file that cannot be read is not replaced by a fresh one.
+        let dir = TempDir::new();
+        let path = dir.join("bridge.conf");
+        std::os::unix::fs::symlink("bridge.conf", &path).unwrap();
+        let store = ConsentStore::new(&path);
+        assert_eq!(store.set_consent("x", Consent::Granted).unwrap_err().raw_os_error(), Some(libc::ELOOP));
+        assert!(std::fs::symlink_metadata(&path).unwrap().file_type().is_symlink());
+    }
+
+    #[test]
     fn failures() {
         let dir = TempDir::new();
         // The folder is a file.
@@ -324,6 +335,36 @@ mod tests {
         assert!(dir.join("netvfs").is_dir());
         store.set_consent("lautta", Consent::Granted).unwrap();
         expect_change(&mut watcher).await;
+    }
+
+    #[tokio::test]
+    async fn every_kind_of_change_is_seen() {
+        let dir = TempDir::new();
+        let file = dir.join("f/bridge.conf");
+        dir.write("f/bridge.conf", "[Consent]\n");
+        let mut watcher = ConsentWatcher::new(&file).unwrap();
+        // Written in place (IN_CLOSE_WRITE).
+        std::fs::OpenOptions::new().write(true).truncate(true).open(&file).unwrap();
+        expect_change(&mut watcher).await;
+        // Renamed away (IN_MOVED_FROM) and back (IN_MOVED_TO).
+        std::fs::rename(&file, dir.join("f/away")).unwrap();
+        expect_change(&mut watcher).await;
+        std::fs::rename(dir.join("f/away"), &file).unwrap();
+        expect_change(&mut watcher).await;
+        // Removed (IN_DELETE), created as a link (IN_CREATE alone).
+        std::fs::remove_file(&file).unwrap();
+        expect_change(&mut watcher).await;
+        std::os::unix::fs::symlink("elsewhere", &file).unwrap();
+        expect_change(&mut watcher).await;
+        // The folder moved away (IN_MOVE_SELF): watched again where it was.
+        std::fs::rename(dir.join("f"), dir.join("g")).unwrap();
+        expect_change(&mut watcher).await;
+        assert!(dir.join("f").is_dir());
+        std::fs::write(&file, b"").unwrap();
+        expect_change(&mut watcher).await;
+        // The moved folder is not watched any more.
+        std::fs::remove_file(dir.join("g/bridge.conf")).unwrap();
+        expect_quiet(&mut watcher).await;
     }
 
     async fn expect_change(watcher: &mut ConsentWatcher) {

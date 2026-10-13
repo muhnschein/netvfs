@@ -98,8 +98,8 @@ pub fn is_valid_data_dir(dir: &str) -> bool {
 /// `ConsumerInfo::isValidExecutable`.
 #[must_use]
 pub fn is_valid_executable(executable: &str) -> bool {
-    executable.len() > 1
-        && executable.len() <= MAX_VALUE
+    // The C++ also asks for more than "/": an empty component covers it.
+    executable.len() <= MAX_VALUE
         && executable.bytes().all(is_path_char)
         && executable.strip_prefix('/').is_some_and(has_clean_components)
 }
@@ -312,14 +312,13 @@ fn parse_consumer(content: &[u8], stem: &str) -> Result<ConsumerInfo, &'static s
     for raw in content.split(|b| *b == b'\n') {
         let decoded = String::from_utf8_lossy(raw);
         let line = decoded.trim();
-        if line.is_empty() || line.starts_with('#') || line.starts_with(';') {
-            continue;
-        }
+        // Comments need no rule of their own: their keys would start with
+        // '#' or ';', which no field has.
         if line.starts_with('[') {
             in_group = line == "[Consumer]";
             continue;
         }
-        let Some((key, value)) = line.split_once('=').filter(|(key, _)| in_group && !key.is_empty()) else {
+        let Some((key, value)) = line.split_once('=').filter(|_| in_group) else {
             continue;
         };
         let slot = match key.trim() {
@@ -355,14 +354,12 @@ fn check_as_generator(content: &[u8], stem: &str) -> Result<(), &'static str> {
     for chunk in fgets_lines(content) {
         let line = chunk.split(|b| *b == 0).next().unwrap_or_default();
         let s = trim_generator(line);
-        if s.is_empty() || matches!(s.first(), Some(b'#' | b';')) {
-            continue;
-        }
+        // Comments and empty keys match no field, as in parse_consumer.
         if s.first() == Some(&b'[') {
             in_group = s == b"[Consumer]";
             continue;
         }
-        let Some(eq) = s.iter().position(|b| *b == b'=').filter(|eq| in_group && *eq > 0) else { continue };
+        let Some(eq) = s.iter().position(|b| *b == b'=').filter(|_| in_group) else { continue };
         let key = trim_generator(s.get(..eq).unwrap_or_default());
         let value = trim_generator(s.get(eq.saturating_add(1)..).unwrap_or_default());
         let (slot, limit) = match key {
@@ -458,6 +455,52 @@ mod tests {
         assert!(!is_valid_data_dir("a//b"));
         assert!(is_valid_executable("/usr/bin/harbour-lautta"));
         assert!(!is_valid_executable("/usr/../bin/sh"));
+        assert!(!is_valid_executable("/"));
+        assert!(is_valid_executable("/a"));
+    }
+
+    #[test]
+    fn readers_keep_to_their_group() {
+        let other = format!("{LAUTTA}[Other]\nId=other\nDisplayName=Other\nExecutable=x\nDataDir=/x\n");
+        let info = parse_consumer(other.as_bytes(), "lautta").unwrap();
+        assert_eq!((info.id.as_str(), info.display_name.as_str()), ("lautta", "Lautta, the browser"));
+        check_as_generator(other.as_bytes(), "lautta").unwrap();
+        // Comments and keys that are not fields change nothing.
+        let commented = format!("#Id=x\n;DisplayName=\n=y\n{LAUTTA}# Id=x\n");
+        assert_eq!(parse_consumer(commented.as_bytes(), "lautta").unwrap(), info);
+        check_as_generator(commented.as_bytes(), "lautta").unwrap();
+        // Each reader checks the id against the file name.
+        assert_eq!(
+            parse_consumer(LAUTTA.as_bytes(), "other").unwrap_err(),
+            "Id must match [a-z0-9-]+ and the file name"
+        );
+        check_as_generator(LAUTTA.as_bytes(), "other").unwrap_err();
+        // The generator's buffers hold 1024 bytes of every path.
+        for (key, long) in [("Executable", format!("/{}", "a".repeat(1024))), ("DataDir", "a".repeat(1025))] {
+            let text = format!("{LAUTTA}{key}={long}\n");
+            assert_eq!(
+                check_as_generator(text.as_bytes(), "lautta"),
+                Err("has a value that is too long"),
+                "{key}"
+            );
+        }
+    }
+
+    #[test]
+    fn listing_skips_other_files() {
+        let dir = TempDir::new();
+        dir.write("lautta.conf", LAUTTA);
+        dir.write("lautta.bak", LAUTTA);
+        std::fs::create_dir(dir.join("folder.conf")).unwrap();
+        let ids: Vec<String> = consumers(&env_for(&dir)).into_iter().map(|c| c.id).collect();
+        assert_eq!(ids, ["lautta"]);
+        // A file of exactly the size limit is read.
+        let padded = format!("{LAUTTA}{}", "#".repeat(16 * 1024 - LAUTTA.len() - 1)) + "\n";
+        assert_eq!(padded.len(), 16 * 1024);
+        dir.write("lautta.conf", &padded);
+        load_consumer(&env_for(&dir), "lautta").unwrap();
+        dir.write("lautta.conf", padded + "\n");
+        assert_eq!(load_consumer(&env_for(&dir), "lautta").unwrap_err().name, ErrorName::InvalidName);
     }
 
     /// The generator's test consumers (tests/bridge/generator/consumers):
@@ -582,6 +625,8 @@ mod tests {
         assert_eq!(dir("/tmp/..x/a.."), Path::new("/tmp/..x/a.."));
         assert_eq!(dir("/tmp/\u{1}"), Path::new(CONSUMERS_DIR));
         assert_eq!(dir("/tmp/\u{7f}"), Path::new(CONSUMERS_DIR));
+        assert_eq!(dir("/tmp/a b"), Path::new("/tmp/a b"));
+        assert_eq!(dir("/tmp/\u{1f}"), Path::new(CONSUMERS_DIR));
         assert_eq!(dir(&format!("/{}", "a".repeat(2047))).as_os_str().len(), 2048);
         assert_eq!(dir(&format!("/{}", "a".repeat(2048))), Path::new(CONSUMERS_DIR));
         assert_eq!(Env::default().consumers_dir(), Path::new(CONSUMERS_DIR));
@@ -623,6 +668,10 @@ mod tests {
             assert_eq!(idle(bad), 30_000, "{bad:?}");
         }
         assert_eq!(qt_env_int(b"-0x10"), Some(-16));
+        assert_eq!(qt_env_int(b"0"), Some(0));
+        // Qt's buffer takes 13 bytes.
+        assert_eq!(qt_env_int(b"   0000000500"), Some(320));
+        assert_eq!(qt_env_int(b"    0000000500"), None);
         assert_eq!(qt_env_int(b"2147483647"), Some(i32::MAX));
         assert_eq!(qt_env_int(b"-2147483648"), Some(i32::MIN));
     }

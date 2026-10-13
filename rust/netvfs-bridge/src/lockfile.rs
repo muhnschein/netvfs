@@ -24,6 +24,9 @@ pub const STALE_AFTER: Duration = Duration::from_secs(30);
 /// `QLockFile::lock`'s first pause; it doubles up to 5 s.
 const FIRST_PAUSE: Duration = Duration::from_millis(100);
 const MAX_PAUSE: Duration = Duration::from_secs(5);
+/// How many stale `.rmlock` levels are cleared (Qt goes on as long as each
+/// level is stale).
+const RMLOCK_LEVELS: u32 = 4;
 
 /// A held lock; released (removed) on drop.
 #[derive(Debug)]
@@ -63,7 +66,7 @@ impl LockFile {
     /// When the lock file cannot be created for another reason than that
     /// it exists.
     pub fn try_lock(path: &Path) -> io::Result<Option<Self>> {
-        try_lock_at(path, 1)
+        try_lock_at(path, RMLOCK_LEVELS)
     }
 }
 
@@ -80,13 +83,15 @@ fn try_lock_at(path: &Path, depth: u32) -> io::Result<Option<LockFile>> {
     if let Some(lock) = create(path)? {
         return Ok(Some(lock));
     }
-    if depth == 0 || !is_stale(path) {
+    if !is_stale(path) {
         return Ok(None);
     }
+    let Some(depth) = depth.checked_sub(1) else { return Ok(None) };
     let mut rmlock = path.as_os_str().to_os_string();
     rmlock.push(".rmlock");
-    // Only one process removes it; the check is repeated under the rmlock.
-    let removed = match try_lock_at(Path::new(&rmlock), depth.saturating_sub(1))? {
+    // Only one process removes it; the check is repeated under the rmlock,
+    // which is itself a lock file that a crashed remover may have left.
+    let removed = match try_lock_at(Path::new(&rmlock), depth)? {
         Some(_guard) => is_stale(path) && remove_stale(path),
         None => false,
     };
@@ -166,11 +171,13 @@ fn is_stale(path: &Path) -> bool {
     {
         return true;
     }
-    let age = fs::metadata(path).and_then(|m| m.modified()).ok().map(|modified| {
-        let now = SystemTime::now();
-        now.duration_since(modified).unwrap_or_else(|e| e.duration())
-    });
-    age.is_some_and(|age| age > STALE_AFTER)
+    fs::metadata(path).and_then(|m| m.modified()).is_ok_and(|modified| is_old(modified, SystemTime::now()))
+}
+
+/// Whether a lock modified at `modified` is older than [`STALE_AFTER`] at
+/// `now` (also when its time is that far in the future, as in Qt).
+fn is_old(modified: SystemTime, now: SystemTime) -> bool {
+    now.duration_since(modified).unwrap_or_else(|e| e.duration()) > STALE_AFTER
 }
 
 /// Whether the holder's process still runs the program it named.
@@ -196,6 +203,15 @@ mod tests {
     use super::*;
     use crate::testutil::TempDir;
 
+    /// The host and program names, not from the code under test.
+    fn real_host() -> String {
+        fs::read_to_string("/proc/sys/kernel/hostname").unwrap().trim_end().to_owned()
+    }
+
+    fn real_name() -> String {
+        std::env::current_exe().unwrap().file_name().unwrap().to_string_lossy().into_owned()
+    }
+
     fn set_age(path: &Path, age: Duration) {
         let file = File::options().write(true).open(path).unwrap();
         file.set_modified(SystemTime::now().checked_sub(age).unwrap()).unwrap();
@@ -207,9 +223,8 @@ mod tests {
         let path = dir.join("bridge.conf.lock");
         let lock = LockFile::try_lock(&path).unwrap().unwrap();
         let content = fs::read_to_string(&path).unwrap();
-        let me = process_name(None).unwrap();
-        assert_eq!(content, format!("{}\n{me}\n{}\n", std::process::id(), host_name()));
-        assert!(!host_name().is_empty());
+        assert_eq!(content, format!("{}\n{}\n{}\n", std::process::id(), real_name(), real_host()));
+        assert!(!real_host().is_empty());
         // Held and alive: neither taken nor stale, also when old (flock).
         assert!(LockFile::try_lock(&path).unwrap().is_none());
         set_age(&path, Duration::from_mins(1));
@@ -247,7 +262,7 @@ mod tests {
         let dir = TempDir::new();
         let path = dir.join("l");
         // A crashed holder on this host (no process with that pid).
-        fs::write(&path, format!("{}\nqsg\n{}\n", i32::MAX, host_name())).unwrap();
+        fs::write(&path, format!("{}\nqsg\n{}\n", i32::MAX, real_host())).unwrap();
         assert!(is_stale(&path));
         let lock = LockFile::try_lock(&path).unwrap().unwrap();
         assert!(fs::read_to_string(&path).unwrap().starts_with(&format!("{}\n", std::process::id())));
@@ -257,8 +272,8 @@ mod tests {
         fs::write(&path, format!("{}\nnot-this-program\n\n", std::process::id())).unwrap();
         assert!(is_stale(&path));
         // Ours, named with a path as Qt 5.6's applicationName may be.
-        let me = process_name(None).unwrap();
-        fs::write(&path, format!("{}\n/some/where/{me}\n{}\n", std::process::id(), host_name())).unwrap();
+        let me = real_name();
+        fs::write(&path, format!("{}\n/some/where/{me}\n{}\n", std::process::id(), real_host())).unwrap();
         assert!(!is_stale(&path));
         // Another host: only its age counts.
         fs::write(&path, format!("{}\nqsg\nelsewhere\n", i32::MAX)).unwrap();
@@ -280,7 +295,7 @@ mod tests {
     fn stale_but_flocked_is_kept() {
         let dir = TempDir::new();
         let path = dir.join("l");
-        fs::write(&path, format!("{}\nqsg\n{}\n", i32::MAX, host_name())).unwrap();
+        fs::write(&path, format!("{}\nqsg\n{}\n", i32::MAX, real_host())).unwrap();
         let holder = File::open(&path).unwrap();
         lock_exclusive_nonblocking(holder.as_fd()).unwrap();
         assert!(LockFile::try_lock(&path).unwrap().is_none());
@@ -291,6 +306,45 @@ mod tests {
         assert!(LockFile::try_lock(&path).unwrap().is_none());
         drop(rmlock);
         assert!(LockFile::try_lock(&path).unwrap().is_some());
+    }
+
+    #[test]
+    fn stale_rmlocks_are_cleared() {
+        let dir = TempDir::new();
+        let path = dir.join("l");
+        let crashed = format!("{}\nqsg\n{}\n", i32::MAX, real_host());
+        // A remover crashed under the rmlock, and before it another one.
+        for name in ["l", "l.rmlock", "l.rmlock.rmlock"] {
+            fs::write(dir.join(name), &crashed).unwrap();
+        }
+        let lock = LockFile::try_lock(&path).unwrap().unwrap();
+        assert!(!dir.join("l.rmlock").exists() && !dir.join("l.rmlock.rmlock").exists());
+        drop(lock);
+        // A live rmlock: the stale lock stays until it is released.
+        fs::write(&path, &crashed).unwrap();
+        let remover = LockFile::try_lock(&dir.join("l.rmlock")).unwrap().unwrap();
+        assert!(LockFile::try_lock(&path).unwrap().is_none());
+        drop(remover);
+        // Levels beyond the limit are left alone.
+        let mut name = String::from("m");
+        for _ in 0..=RMLOCK_LEVELS {
+            fs::write(dir.join(&name), &crashed).unwrap();
+            name.push_str(".rmlock");
+        }
+        assert!(LockFile::try_lock(&dir.join("m")).unwrap().is_none());
+        fs::remove_file(dir.join(name.strip_suffix(".rmlock").unwrap())).unwrap();
+        assert!(LockFile::try_lock(&dir.join("m")).unwrap().is_some());
+    }
+
+    #[test]
+    fn age_limit() {
+        let now = SystemTime::now();
+        let at = |d: Duration| now.checked_sub(d).unwrap();
+        assert!(!is_old(at(STALE_AFTER), now));
+        assert!(is_old(at(STALE_AFTER + Duration::from_nanos(1)), now));
+        assert!(!is_old(now, now));
+        assert!(is_old(now + Duration::from_secs(31), now));
+        assert!(!is_old(now + Duration::from_secs(29), now));
     }
 
     #[test]
@@ -340,8 +394,7 @@ mod tests {
         assert!(!qt_try());
         drop(lock);
         // Ours, left by a crash: Qt takes it as stale.
-        fs::write(&path, format!("{}\n{}\n{}\n", i32::MAX, process_name(None).unwrap(), host_name()))
-            .unwrap();
+        fs::write(&path, format!("{}\n{}\n{}\n", i32::MAX, real_name(), real_host())).unwrap();
         assert!(qt_try());
     }
 

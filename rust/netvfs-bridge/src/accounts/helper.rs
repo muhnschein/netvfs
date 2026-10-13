@@ -185,6 +185,7 @@ fn read_capped(mut output: impl Read) -> Vec<u8> {
 mod tests {
     use super::*;
     use crate::accounts::qds::Writer;
+    use crate::log::{Level, capture};
     use crate::testutil::TempDir;
     use std::os::unix::fs::PermissionsExt;
     use std::sync::atomic::{AtomicU32, Ordering};
@@ -238,7 +239,10 @@ mod tests {
         assert!(missing.list().await.is_empty());
         let failing = HelperDirectory::new("/bin/false");
         assert_eq!(failing.try_list().await.unwrap_err().to_string(), "ProtocolError: /bin/false failed");
+        capture::start();
         assert!(failing.list().await.is_empty());
+        let warning = "Cannot list the accounts, none is listed: ProtocolError: /bin/false failed";
+        assert_eq!(capture::take(), [(Level::Warning, warning.to_owned())]);
         let silent = HelperDirectory::new("/bin/true");
         assert_eq!(
             silent.try_list().await.unwrap_err().to_string(),
@@ -331,7 +335,10 @@ mod tests {
         assert_eq!((access.credentials_id, access.secret_optional, access.params.port), (42, true, 2222));
         assert_eq!(args(&dir), "files 3\n");
         dir.write("answer", golden("not-found.bin"));
+        capture::start();
         assert_eq!(directory.files(-4).await.unwrap_err().name, ErrorName::NotFound);
+        let debug = "Account -4 for Files: NotFound: No such account";
+        assert_eq!(capture::take(), [(Level::Debug, debug.to_owned())]);
         assert_eq!(args(&dir), "files 3\nfiles -4\n");
         let missing = HelperDirectory::new("/nonexistent/netvfs-accounts");
         assert_eq!(missing.files(3).await.unwrap_err().name, ErrorName::Unsupported);
@@ -354,7 +361,10 @@ mod tests {
         assert_eq!(args(&dir), "attention 3 auth-failed\nattention 3 server-identity-changed SHA256:abc\n");
         // A refused write changes nothing.
         dir.write("answer", golden("not-found.bin"));
+        capture::start();
         directory.set_attention(9, Attention::AuthFailed, "").await;
+        let warning = "Cannot record the attention state: NotFound: No such account";
+        assert_eq!(capture::take(), [(Level::Warning, warning.to_owned())]);
         let status = directory.try_set_attention(9, Attention::AuthFailed, "").await.unwrap_err();
         assert_eq!(status.to_string(), "NotFound: No such account");
         dir.write("answer", golden("list.bin"));

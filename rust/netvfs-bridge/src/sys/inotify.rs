@@ -58,7 +58,8 @@ impl Inotify {
         // SAFETY: the descriptor is open for the life of `self`, and `c_path`
         // is a NUL-terminated string that outlives the call.
         let wd = unsafe { libc::inotify_add_watch(self.file.as_raw_fd(), c_path.as_ptr(), mask) };
-        if wd < 0 {
+        // Watch descriptors start at 1; -1 is the failure.
+        if wd == -1 {
             return Err(io::Error::last_os_error());
         }
         Ok(wd)

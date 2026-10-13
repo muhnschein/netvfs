@@ -2,7 +2,7 @@
 //! The account directory against netvfs-accounts-fake, a real process that
 //! answers in the helper's format (the tst_BridgeAccounts directory cases).
 
-#![allow(clippy::unwrap_used, clippy::indexing_slicing)]
+#![allow(clippy::unwrap_used, clippy::unwrap_in_result, clippy::indexing_slicing)]
 
 use netvfs_bridge::accounts::helper::HelperDirectory;
 use netvfs_bridge::accounts::{AccountDirectory, Attention, Value};
@@ -15,8 +15,10 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 const FAKE: &str = env!("CARGO_BIN_EXE_netvfs-accounts-fake");
 
-const TABLE: &str = "account\t1\tsftp\tFiles at home\tfiles.example\t2222\talice\t/srv/a\t\n\
+const TABLE: &str = "# The fake's table\n\n\
+                     account\t1\tsftp\tFiles at home\tfiles.example\t2222\talice\t/srv/a\t\n\
                      option\t1\tcompress\tb\ttrue\n\
+                     option\t1\tdepth\ti\t-3\n\
                      option\t1\tkey-file\ts\t/k\n\
                      option\t1\tretries\ti\t-3\n\
                      option\t1\tretries\tu\t3\n\
@@ -61,11 +63,13 @@ async fn directory_lists() {
         ("files.example", 2222, "alice")
     );
     assert_eq!(home.files_root, b"/srv/a");
+    assert_eq!(home.params.provider, "sftp");
     assert_eq!(home.attention, Attention::None);
     assert_eq!(
         home.params.options,
         [
             ("compress".into(), Value::Bool(true)),
+            ("depth".into(), Value::Int(-3)),
             ("key-file".into(), Value::String("/k".into())),
             ("retries".into(), Value::UInt(3)),
         ]
@@ -120,4 +124,42 @@ async fn directory_attention() {
     assert_eq!(count.load(Ordering::SeqCst), 1);
     assert_eq!(std::fs::read_to_string(&fixture.table).unwrap(), table);
     assert!(fixture.dir.path().exists());
+}
+
+/// The fake's own answer to `arguments`, decoded as a status (`Err`: its
+/// text).
+fn fake_status(table: &std::path::Path, arguments: &[&str]) -> Result<(), String> {
+    let output =
+        std::process::Command::new(FAKE).args(arguments).env("NETVFS_FAKE_ACCOUNTS", table).output().unwrap();
+    assert!(output.status.success());
+    netvfs_bridge::accounts::qds::decode_status(&output.stdout).map_err(|s| s.to_string())
+}
+
+#[test]
+fn fake_commands() {
+    let fixture = Fixture::new(&format!("{TABLE}account\t0\tsftp\tZero\th\t0\tu\t/\t\n"));
+    let usage = Err(
+        "Unsupported: Usage: netvfs-accounts list | files <id> | attention <id> <state> [pin]".to_owned()
+    );
+    for arguments in [
+        &[][..],
+        &["bogus"],
+        &["list", "x"],
+        &["bogus", "1"],
+        &["bogus", "1", "auth-failed"],
+        &["bogus", "1", "auth-failed", "pin"],
+        &["attention", "1", "auth-failed", "pin", "x"],
+    ] {
+        assert_eq!(fake_status(&fixture.table, arguments), usage, "{arguments:?}");
+    }
+    assert_eq!(fake_status(&fixture.table, &["attention", "1", "auth-failed"]), Ok(()));
+    assert_eq!(fake_status(&fixture.table, &["attention", "1", "server-identity-changed", "p"]), Ok(()));
+    assert_eq!(
+        fake_status(&fixture.table, &["attention", "1", "bogus"]),
+        Err("Unsupported: Unknown attention state".into())
+    );
+    assert_eq!(
+        fake_status(&fixture.table, &["attention", "0", "auth-failed"]),
+        Err("NotFound: No such account".into())
+    );
 }
