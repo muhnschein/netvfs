@@ -1,0 +1,11 @@
+AddAccount/Arguments|QString||1|
+AddAccount/Interface|QString|com.jolla.settings.ui|1|com.jolla.settings.ui
+AddAccount/Method|QString|showAccounts|1|showAccounts
+AddAccount/Path|QString|/com/jolla/settings/ui|1|/com/jolla/settings/ui
+AddAccount/Service|QString|com.jolla.settings|1|com.jolla.settings
+OpenAccountSettings/Arguments|QString||1|
+OpenAccountSettings/Interface|QString|com.jolla.settings.ui|1|com.jolla.settings.ui
+OpenAccountSettings/Method|QString|showAccounts|1|showAccounts
+OpenAccountSettings/Path|QString|/com/jolla/settings/ui|1|/com/jolla/settings/ui
+OpenAccountSettings/Service|QString|com.jolla.settings|1|com.jolla.settings
+status|2

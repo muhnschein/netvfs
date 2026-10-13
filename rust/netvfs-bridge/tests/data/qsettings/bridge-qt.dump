@@ -1,0 +1,13 @@
+Consent%/x|QString|y|1|y
+Consent/lautta|QString|granted|1|granted
+Consent/photos|QString|denied|1|denied
+Ui/lastPage|QString|consent|1|consent
+Ui/odd key|QString|with, comma; and = signs|1|with, comma; and = signs
+Weird\u00e4/k\u4e00|QString|v|1|v
+bytes|QByteArray|\u0001\ufffd|0
+list|QStringList||3|a|b, c| d
+num|QString|42|1|42
+size|QSize||0
+top|QString|@at start|1|@at start
+unicode|QString|\u00e4\u20ac\u0001x|1|\u00e4\u20ac\u0001x
+status|0
