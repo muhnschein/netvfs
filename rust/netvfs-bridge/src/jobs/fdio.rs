@@ -94,6 +94,27 @@ impl<'a> FdDevice<'a> {
         }
     }
 
+    /// Writes all of `data` to the FIFO, at most `PIPE_BUF` per poll so
+    /// that a write never blocks beyond the slice. The backends take a
+    /// short write as a failure (`write(n) != n`), so this goes on until
+    /// everything is written; FdDevice wrote one piece per call, which
+    /// failed downloads of more than `PIPE_BUF` per chunk into a pipe. A
+    /// cancel or an error after some bytes reports those.
+    fn write_fifo(&mut self, data: &[u8]) -> Option<usize> {
+        let mut written = 0;
+        while written < data.len() {
+            if !self.wait_for(Ready::Write) {
+                break;
+            }
+            let end = written.saturating_add(libc::PIPE_BUF).min(data.len());
+            match fd::write(self.fd, data.get(written..end)?) {
+                Ok(n) if n > 0 => written = written.saturating_add(self.moved(n)),
+                _ => break,
+            }
+        }
+        (written > 0 || data.is_empty()).then_some(written)
+    }
+
     /// Counts `n` bytes moved.
     fn moved(&mut self, n: usize) -> usize {
         let bytes = i64::try_from(n).unwrap_or(i64::MAX);
@@ -139,12 +160,7 @@ impl WriteAt for FdDevice<'_> {
             return None;
         }
         if self.info.fifo {
-            // At most PIPE_BUF per poll, so a write never blocks beyond the slice.
-            if !self.wait_for(Ready::Write) {
-                return None;
-            }
-            let chunk = data.get(..data.len().min(libc::PIPE_BUF))?;
-            return fd::write(self.fd, chunk).ok().map(|n| self.moved(n));
+            return self.write_fifo(data);
         }
         let mut written = 0;
         while written < data.len() {
@@ -279,14 +295,36 @@ mod tests {
         let canceled = AtomicBool::new(false);
         let mut device = FdDevice::new(w.as_fd(), fifo(), 5, -1, &canceled);
         let data = vec![7u8; libc::PIPE_BUF * 2 + 1];
-        assert_eq!(device.write_at(0, &data), Some(libc::PIPE_BUF));
+        assert_eq!(device.write_at(0, &data), Some(data.len()));
         assert_eq!(device.write_at(0, b"xy"), Some(2));
-        assert_eq!(device.transferred(), i64::try_from(libc::PIPE_BUF + 2).unwrap());
+        assert_eq!(device.write_at(0, b""), Some(0));
+        assert_eq!(device.transferred(), i64::try_from(data.len() + 2).unwrap());
         drop(w);
         let mut got = Vec::new();
         std::io::Read::read_to_end(&mut r, &mut got).unwrap();
-        assert_eq!(got.len(), libc::PIPE_BUF + 2);
-        assert_eq!(&got[libc::PIPE_BUF..], b"xy");
+        assert_eq!(got.len(), data.len() + 2);
+        assert_eq!(&got[data.len()..], b"xy");
+    }
+
+    #[test]
+    fn fifo_write_reports_what_went_before_a_cancel() {
+        let (mut r, w) = pipe();
+        // Fill the pipe, then free one page: one PIPE_BUF piece fits.
+        let fill = vec![0u8; libc::PIPE_BUF];
+        while fd::poll(w.as_fd(), Ready::Write, 0).unwrap() {
+            assert_eq!(fd::write(w.as_fd(), &fill).unwrap(), libc::PIPE_BUF);
+        }
+        std::io::Read::read_exact(&mut r, &mut vec![0u8; libc::PIPE_BUF]).unwrap();
+        let canceled = Arc::new(AtomicBool::new(false));
+        let flag = Arc::clone(&canceled);
+        let setter = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(100));
+            flag.store(true, Ordering::Release);
+        });
+        let mut device = FdDevice::new(w.as_fd(), fifo(), 0, -1, &canceled);
+        assert_eq!(device.write_at(0, &vec![1u8; libc::PIPE_BUF * 2]), Some(libc::PIPE_BUF));
+        assert_eq!(device.transferred(), i64::try_from(libc::PIPE_BUF).unwrap());
+        setter.join().unwrap();
     }
 
     #[test]
