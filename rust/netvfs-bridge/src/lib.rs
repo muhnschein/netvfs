@@ -10,8 +10,13 @@
 //! flow control (C-10). The core (consent, locations, jobs) receives
 //! [`server::Event`]s and answers through [`server::ReplyTo`] and
 //! [`server::Outbox`]; see [`server`] for that contract.
+//!
+//! The backend side (design §3.3): [`locations`] holds the locations, their
+//! connection pools and the worker threads that own the backend
+//! connections.
 
 pub mod ffi;
+pub mod locations;
 pub mod peer;
 pub mod server;
 pub mod status;
