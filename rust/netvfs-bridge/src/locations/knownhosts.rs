@@ -114,6 +114,21 @@ fn load(path: &Path) -> HashMap<String, String> {
         .collect()
 }
 
+/// The connector reads and writes ad-hoc pins through this file.
+impl super::connector::PinStore for KnownHosts {
+    fn pin(&self, key: &str) -> String {
+        Self::pin(self, key)
+    }
+
+    fn set_pin(&self, key: &str, pin: &str) -> bool {
+        Self::set_pin(self, key, pin)
+    }
+
+    fn remove(&self, key: &str) -> bool {
+        Self::remove(self, key)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -137,6 +152,23 @@ mod tests {
         assert!(reread.remove("sftp://h:0"));
         assert!(KnownHosts::new(&path).pin("sftp://h:0").is_empty());
         assert_eq!(reread.path(), path);
+    }
+
+    #[test]
+    fn known_hosts_are_a_pin_store() {
+        use crate::locations::connector::PinStore;
+        let dir = TempDir::new();
+        let store: &dyn PinStore = &KnownHosts::new(dir.join("known_hosts"));
+        assert!(store.pin("fake://h:0").is_empty());
+        assert!(store.set_pin("fake://h:0", "ssh-ed25519 AAAA"));
+        assert!(!store.set_pin("bad key", "x"));
+        assert_eq!(store.pin("fake://h:0"), "ssh-ed25519 AAAA");
+        assert!(store.remove("fake://h:0"));
+        assert!(store.pin("fake://h:0").is_empty());
+        std::fs::remove_file(dir.join("known_hosts")).unwrap();
+        std::fs::create_dir(dir.join("known_hosts")).unwrap();
+        let blocked: &dyn PinStore = &KnownHosts::new(dir.join("known_hosts"));
+        assert!(!blocked.set_pin("fake://h:0", "x"));
     }
 
     #[test]

@@ -78,6 +78,19 @@ pub struct AccountAccess {
     pub secret_optional: bool,
 }
 
+impl From<crate::accounts::FilesAccess> for AccountAccess {
+    /// The helper's `files` answer for a connection (options the C ABI
+    /// cannot carry are left out, see
+    /// [`ConnectionParams::to_ffi`](crate::accounts::ConnectionParams::to_ffi)).
+    fn from(access: crate::accounts::FilesAccess) -> Self {
+        Self {
+            params: access.params.to_ffi(),
+            credentials_id: access.credentials_id,
+            secret_optional: access.secret_optional,
+        }
+    }
+}
+
 /// How a wait for the core ended.
 #[derive(Debug, PartialEq, Eq)]
 enum Waited<T> {

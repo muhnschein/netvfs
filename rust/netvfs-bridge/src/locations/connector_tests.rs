@@ -382,3 +382,21 @@ fn ad_hoc_identity_verdicts() {
     assert!(matches!(rx.blocking_recv(), Some(WorkerEvent::CancelQuestion(_))));
     assert!(PinStore::remove(&pins, "sftp://srv:2222"));
 }
+
+#[test]
+fn files_answers_become_account_access() {
+    use crate::accounts::{ConnectionParams, FilesAccess, Value as Helper};
+    let access = AccountAccess::from(FilesAccess {
+        params: ConnectionParams {
+            provider: "sftp".into(),
+            host: "h".into(),
+            options: vec![("host_key".into(), Helper::String("pin".into()))],
+            ..ConnectionParams::default()
+        },
+        credentials_id: 9,
+        secret_optional: true,
+    });
+    assert_eq!((access.credentials_id, access.secret_optional), (9, true));
+    assert_eq!((access.params.provider.as_str(), access.params.host.as_str()), ("sftp", "h"));
+    assert_eq!(account_pin(&access.params), "pin");
+}

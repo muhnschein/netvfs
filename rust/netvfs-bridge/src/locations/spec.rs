@@ -4,51 +4,15 @@
 //! `location.cpp`), and [`Attention`] (XB-14).
 
 use crate::ffi::Params;
-use netvfs_bridge_proto::{ErrorName, WireLocation};
+use netvfs_bridge_proto::WireLocation;
 use std::collections::HashMap;
 use std::fmt;
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 use zbus::zvariant::{OwnedValue, Str, Value};
 use zeroize::Zeroizing;
 
-/// Why an account needs the user (XB-14), as Buteo records it. The same
-/// as `accounts::Attention` of the platform part (chunk E1); one of the two
-/// becomes a re-export of the other when they meet.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum Attention {
-    /// Nothing to do.
-    #[default]
-    None,
-    /// The credentials were refused: `auth-failed`.
-    AuthFailed,
-    /// The server's identity changed: `server-identity-changed`.
-    ServerIdentityChanged,
-}
-
-impl Attention {
-    /// `attentionToString`: the stored value, empty for `None`.
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::None => "",
-            Self::AuthFailed => "auth-failed",
-            Self::ServerIdentityChanged => "server-identity-changed",
-        }
-    }
-
-    /// `attentionForError`: the state a failed connection leaves (an
-    /// unknown identity counts as changed: the account had a pin).
-    #[must_use]
-    pub const fn for_error(name: ErrorName) -> Self {
-        match name {
-            ErrorName::AuthFailed => Self::AuthFailed,
-            ErrorName::ServerIdentityChanged | ErrorName::ServerIdentityUnknown => {
-                Self::ServerIdentityChanged
-            }
-            _ => Self::None,
-        }
-    }
-}
+/// Why an account needs the user (XB-14): the platform part's type.
+pub use crate::accounts::Attention;
 
 /// Which kind of location.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -269,6 +233,7 @@ fn text(s: &str) -> OwnedValue {
 mod tests {
     use super::*;
     use crate::ffi::Value as Opt;
+    use netvfs_bridge_proto::ErrorName;
     use std::cell::Cell;
 
     fn params(host: &str, port: i32) -> Params {
