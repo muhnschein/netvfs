@@ -31,6 +31,8 @@ ignore = true
 [bans]
 multiple-versions = "deny"
 wildcards = "deny"
+# Path dependencies between the workspace's own unpublished crates.
+allow-wildcard-paths = true
 # Duplicates allowed by name, each with the reason.
 skip = [
     # Proc-macro (build-time) only: enumflags2_derive (zvariant) and
