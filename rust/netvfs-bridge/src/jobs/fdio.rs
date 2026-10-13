@@ -13,6 +13,7 @@
 use super::fd::FdInfo;
 use crate::ffi::{ReadAt, WriteAt};
 use crate::sys::fd::{self, Ready};
+use std::io;
 use std::os::fd::BorrowedFd;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -162,19 +163,33 @@ impl WriteAt for FdDevice<'_> {
         if self.info.fifo {
             return self.write_fifo(data);
         }
-        let mut written = 0;
-        while written < data.len() {
-            let end = written.saturating_add(MAX_CHUNK).min(data.len());
-            let at = self.offset.saturating_add(pos).saturating_add(i64::try_from(written).ok()?);
-            match fd::pwrite(self.fd, data.get(written..end)?, at) {
-                Ok(n) if n > 0 => written = written.saturating_add(n),
-                _ if written > 0 => break,
-                _ => return None,
-            }
-        }
+        let fd = self.fd;
+        let written =
+            write_chunks(data, self.offset.saturating_add(pos), |chunk, at| fd::pwrite(fd, chunk, at))?;
         self.transferred = self.transferred.saturating_add(i64::try_from(written).ok()?);
         Some(written)
     }
+}
+
+/// Writes `data` from `start` on through `put(chunk, at)`, which may write
+/// less than it is given (a disk filling up). What went before a failure is
+/// the result; a failure before anything went is `None`.
+fn write_chunks(
+    data: &[u8],
+    start: i64,
+    mut put: impl FnMut(&[u8], i64) -> io::Result<usize>,
+) -> Option<usize> {
+    let mut written = 0;
+    while written < data.len() {
+        let end = written.saturating_add(MAX_CHUNK).min(data.len());
+        let at = start.saturating_add(i64::try_from(written).ok()?);
+        match put(data.get(written..end)?, at) {
+            Ok(n) if n > 0 => written = written.saturating_add(n),
+            _ if written > 0 => break,
+            _ => return None,
+        }
+    }
+    Some(written)
 }
 
 #[cfg(test)]
@@ -191,12 +206,27 @@ mod tests {
     use std::time::{Duration, Instant};
 
     fn pipe() -> (File, File) {
-        let (r, w) = std::io::pipe().unwrap();
+        let (r, w) = io::pipe().unwrap();
         (File::from(OwnedFd::from(r)), File::from(OwnedFd::from(w)))
     }
 
     fn fifo() -> FdInfo {
         FdInfo { fifo: true, size: -1 }
+    }
+
+    #[test]
+    fn a_write_cut_short_reports_what_went() {
+        let mut calls = Vec::new();
+        let written = write_chunks(b"abcdef", 10, |chunk, at| {
+            calls.push((chunk.to_vec(), at));
+            if calls.len() == 1 { Ok(4) } else { Err(io::Error::from_raw_os_error(libc::ENOSPC)) }
+        });
+        assert_eq!(written, Some(4));
+        assert_eq!(calls, [(b"abcdef".to_vec(), 10), (b"ef".to_vec(), 14)]);
+        // Nothing went: a failure, also when the write only made no progress.
+        assert_eq!(write_chunks(b"ab", 0, |_, _| Ok(0)), None);
+        assert_eq!(write_chunks(b"ab", 0, |_, _| Err(io::Error::from_raw_os_error(libc::EIO))), None);
+        assert_eq!(write_chunks(b"", 0, |_, _| Err(io::Error::from_raw_os_error(libc::EIO))), Some(0));
     }
 
     /// The port of `tst_BridgeUnits::fdDeviceOffsets`.
@@ -301,7 +331,7 @@ mod tests {
         assert_eq!(device.transferred(), i64::try_from(data.len() + 2).unwrap());
         drop(w);
         let mut got = Vec::new();
-        std::io::Read::read_to_end(&mut r, &mut got).unwrap();
+        io::Read::read_to_end(&mut r, &mut got).unwrap();
         assert_eq!(got.len(), data.len() + 2);
         assert_eq!(&got[data.len()..], b"xy");
     }
@@ -314,7 +344,7 @@ mod tests {
         while fd::poll(w.as_fd(), Ready::Write, 0).unwrap() {
             assert_eq!(fd::write(w.as_fd(), &fill).unwrap(), libc::PIPE_BUF);
         }
-        std::io::Read::read_exact(&mut r, &mut vec![0u8; libc::PIPE_BUF]).unwrap();
+        io::Read::read_exact(&mut r, &mut vec![0u8; libc::PIPE_BUF]).unwrap();
         let canceled = Arc::new(AtomicBool::new(false));
         let flag = Arc::clone(&canceled);
         let setter = thread::spawn(move || {
@@ -334,7 +364,7 @@ mod tests {
         while fd::poll(w.as_fd(), Ready::Write, 0).unwrap() {
             assert_eq!(fd::write(w.as_fd(), &fill).unwrap(), libc::PIPE_BUF);
         }
-        std::io::Read::read_exact(&mut r, &mut vec![0u8; libc::PIPE_BUF]).unwrap();
+        io::Read::read_exact(&mut r, &mut vec![0u8; libc::PIPE_BUF]).unwrap();
         // Exactly the room left: done without waiting for more room.
         let canceled = Arc::new(AtomicBool::new(false));
         let flag = Arc::clone(&canceled);

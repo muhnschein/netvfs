@@ -1516,6 +1516,31 @@ private slots:
         QVERIFY(backend->removeFile(QStringLiteral("cancel-me.bin")).ok());
     }
 
+    // C-9: a cancel also ends a read that the data has arrived for. Unlike
+    // downloadCancelFromProgress this does not depend on the server's timing:
+    // the last byte is in a reply that is already in.
+    void readCancelAfterArrival()
+    {
+        const auto backend = newBackend();
+        QVERIFY(signIn(backend.get(), params(QStringLiteral("strict")), credentials()).ok());
+        const QByteArray data(64 * 1024, 'a');
+        QVERIFY(put(backend.get(), QStringLiteral("arrived.bin"), data));
+        ReadHandle *raw = nullptr;
+        QVERIFY(backend->openRead(QStringLiteral("arrived.bin"), &raw).ok());
+        std::unique_ptr<ReadHandle> handle(raw);
+        // One request for the whole file; all of it but the last byte is read.
+        handle->readAhead(0, data.size());
+        QByteArray part;
+        QVERIFY(handle->read(0, data.size() - 1, &part).ok());
+        QCOMPARE(part.size(), data.size() - 1);
+        backend->cancel();
+        QCOMPARE(handle->read(data.size() - 1, 1, &part).error(), Error::Canceled);
+        QCOMPARE(handle->close().error(), Error::Canceled);
+        handle.reset();
+        backend->resetCancel();
+        QVERIFY(backend->removeFile(QStringLiteral("arrived.bin")).ok());
+    }
+
     // XM-9: a DFS link is Unsupported with the detail "DFS referral".
     void dfsReferral()
     {

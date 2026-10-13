@@ -557,7 +557,7 @@
     "file": "src/backends/smb/smbfiles.cpp",
     "search": "    if (m_session->canceled())\n        return Result(Error::Canceled);",
     "replace": "",
-    "test": "sh tests/interop/smb/run.sh build downloadCancelFromProgress"
+    "test": "sh tests/interop/smb/run.sh build downloadCancelFromProgress readCancelAfterArrival"
   },
   {
     "name": "XC-11 mode changes accepted",
