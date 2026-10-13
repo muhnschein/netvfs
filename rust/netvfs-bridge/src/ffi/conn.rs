@@ -222,8 +222,10 @@ pub enum UploadOptions {
         /// Modification time to set, ms since the epoch.
         mtime_ms: Option<i64>,
     },
-    /// Replaces the file's content.
+    /// Replaces the file's content (creating the file if it is missing).
     Truncate {
+        /// Mode of the file if it is created, `None`: the backend's default.
+        mode: Option<i32>,
         /// Bytes expected, if known.
         expected_size: Option<i64>,
         /// Modification time to set.
@@ -246,8 +248,8 @@ impl UploadOptions {
             Self::CreateNew { mode, expected_size, mtime_ms } => {
                 (NVB_DISPOSITION_CREATE_NEW, mode, 0, expected_size, mtime_ms)
             }
-            Self::Truncate { expected_size, mtime_ms } => {
-                (NVB_DISPOSITION_TRUNCATE, None, 0, expected_size, mtime_ms)
+            Self::Truncate { mode, expected_size, mtime_ms } => {
+                (NVB_DISPOSITION_TRUNCATE, mode, 0, expected_size, mtime_ms)
             }
             Self::Resume { offset, expected_size, mtime_ms } => {
                 (NVB_DISPOSITION_RESUME, None, offset, expected_size, mtime_ms)
@@ -935,8 +937,10 @@ mod tests {
         assert_eq!((o.expected_size, o.has_mtime, o.mtime_ms), (10, 1, 5));
         let o = UploadOptions::CreateNew { mode: None, expected_size: None, mtime_ms: None }.raw();
         assert_eq!((o.create_mode, o.expected_size, o.has_mtime), (-1, -1, 0));
-        let o = UploadOptions::Truncate { expected_size: Some(3), mtime_ms: None }.raw();
+        let o = UploadOptions::Truncate { mode: None, expected_size: Some(3), mtime_ms: None }.raw();
         assert_eq!((o.disposition, o.create_mode, o.expected_size), (NVB_DISPOSITION_TRUNCATE, -1, 3));
+        let o = UploadOptions::Truncate { mode: Some(0o600), expected_size: None, mtime_ms: None }.raw();
+        assert_eq!(o.create_mode, 0o600);
         let o = UploadOptions::Resume { offset: 9, expected_size: None, mtime_ms: Some(1) }.raw();
         assert_eq!(
             (o.disposition, o.resume_offset, o.has_mtime, o.mtime_ms),

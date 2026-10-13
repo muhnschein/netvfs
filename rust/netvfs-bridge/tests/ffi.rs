@@ -753,7 +753,7 @@ fn upload_download_via_io(env: &Env) {
     // canceled() stops the transfer.
     let mut source = Memory { data, ..Memory::default() };
     let mut stopping = Ticks { cancel_after: Some(1), ..Ticks::default() };
-    let truncate = UploadOptions::Truncate { expected_size: None, mtime_ms: None };
+    let truncate = UploadOptions::Truncate { mode: None, expected_size: None, mtime_ms: None };
     let stopped = conn.upload(b"/up", &truncate, &mut source, (false, size), Some(&mut stopping));
     assert_eq!(name_of(&stopped), Some(ErrorName::Canceled));
 
@@ -955,7 +955,7 @@ fn callback_panics_do_not_unwind(env: &Env) {
     panicked(&r, "progress broke");
     // nvb_io read: -1.
     let mut source = Memory { data: b"data".to_vec(), panic_on_read: true, ..Memory::default() };
-    let options = UploadOptions::Truncate { expected_size: None, mtime_ms: None };
+    let options = UploadOptions::Truncate { mode: None, expected_size: None, mtime_ms: None };
     let r = conn.upload(b"/p/up", &options, &mut source, (false, 4), None);
     panicked(&r, "read broke");
     // The connection still works.
