@@ -1,0 +1,29 @@
+[package]
+name = "netvfs-bridge-proto"
+description = "The org.netvfs.Bridge1 protocol: wire types, method table, error names, limits, client proxy, and a fake bridge for tests"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+# In-process fake bridge and the golden-sequence replayer (SPEC-v2 XT-7).
+# Test-only: never enabled by a shipped binary (design §6.11).
+fake = ["dep:sha2", "dep:serde_json"]
+
+[dependencies]
+zbus = { version = "5", default-features = false, features = ["tokio", "p2p"] }
+# Already in the tree through zbus; named for Stream and StreamExt.
+futures-lite = { version = "2", default-features = false, features = ["std"] }
+serde = { version = "1", features = ["derive"] }
+tokio = { version = "1", features = ["rt", "net", "sync", "time"] }
+zeroize = "1"
+serde_json = { version = "1", optional = true }
+sha2 = { version = "0.10", optional = true }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "test-util"] }

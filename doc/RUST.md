@@ -24,10 +24,17 @@ every `unsafe` call is in one module (`sandbox.rs`).
 | `rust/netvfs-accounts/src/dbus.rs` | the `AccountChanged` signal after an attention write |
 | `rust/netvfs-accounts/src/sandbox.rs` | descriptors, process state, set-id, Landlock, seccomp |
 | `rust/netvfs-accounts/src/bin/probe.rs` | tests only: applies one part of the confinement and checks it |
+| `rust/netvfs-bridge-proto/src/methods.rs` | `org.netvfs.Bridge1`: names, the method table (args.cpp order, lane, consent), signals, the served XML |
+| `rust/netvfs-bridge-proto/src/errors.rs`, `limits.rs` | the 24 XC-21 error names; the XB-17, XB-12 and C-10 limits |
+| `rust/netvfs-bridge-proto/src/wire.rs`, `proxy.rs`, `connect.rs`, `signals.rs` | wire types and the client (from lautta) |
+| `rust/netvfs-bridge-proto/src/fake/` | tests only (feature `fake`): lautta's fake bridge, the golden-sequence replayer |
+| `rust/netvfs-bridge-proto/org.netvfs.Bridge1.xml` | copy of the contract XML; `tests/contract.rs` keeps it equal |
 | `rust/fuzz/` | cargo-fuzz targets (nightly, not in the workspace) |
 
 Dependencies: `libc` and `rusqlite` (without the bundled SQLite: the system
-libsqlite3 through pkg-config).
+libsqlite3 through pkg-config). The protocol crate: `zbus` 5 (`tokio`, `p2p`),
+`tokio`, `serde`, `zeroize` and `futures-lite` (already in zbus's tree);
+`serde_json` and `sha2` only behind its test-only `fake` feature.
 
 ## Toolchain
 
