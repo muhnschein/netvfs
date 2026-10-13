@@ -31,8 +31,10 @@ cd rust
 sed -i -e 's|^--- a/rust/|--- a/|' -e 's|^+++ b/rust/|+++ b/|' "$diff"
 status=0
 # All features: --in-diff selects the packages it touches, and naming a
-# feature of one it left out is an error.
-cargo mutants --in-diff "$diff" --workspace --all-features \
+# feature of one it left out is an error. In place: tests read files outside
+# rust/ (the shared contract), which a copy of the workspace would not have;
+# each mutated file is restored after its test run.
+cargo mutants --in-place --in-diff "$diff" --workspace --all-features \
     --test-tool nextest --no-shuffle --timeout-multiplier 3 || status=$?
 # Its exit status says "timeouts" also when mutants were missed, so the
 # outcome is read from the lists: 0 ok, 2 missed, 3 timeouts, anything
