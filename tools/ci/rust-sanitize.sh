@@ -2,21 +2,41 @@
 # SPDX-License-Identifier: LGPL-2.1-or-later
 # The Rust workspace's tests under AddressSanitizer with LeakSanitizer
 # (weekly, scheduled.yml): std rebuilt instrumented (-Zbuild-std), so the
-# sanitizer sees every allocation. With a second argument, netvfs-bridge's
-# FFI test (rust/netvfs-bridge/tests/ffi.rs) runs against the C++
-# libraries that `tools/ci/ffi-libs.sh <dir> --asan` built there with
-# clang's ASan, so the boundary is checked from both sides; without it,
-# that test says it is skipped.
+# sanitizer sees every allocation. With a second argument, the tests of
+# netvfs-bridge that need the C ABI (rust/netvfs-bridge/tests: ffi, backend,
+# server, and through the instrumented netvfs-bridge binary process,
+# contract and notifications) run against the C++ libraries that
+# `tools/ci/ffi-libs.sh <dir> --asan` built there with clang's ASan, so the
+# boundary is checked from both sides; without it, those tests say they are
+# skipped.
+# The libraries must come from a clang of rustc's LLVM major version
+# (design §6.6): their __asan_* references bind to the runtime rustc links
+# into the Rust executables, and an older clang's instrumentation against a
+# newer runtime is not a combination LLVM supports. A mismatch fails here.
 # Usage: rust-sanitize.sh <nightly toolchain> [<ffi-libs.sh --asan dir>]
 set -eu
 toolchain=$1
 root=$(cd "$(dirname "$0")/../.." && pwd)
+llvm=$(rustc +"$toolchain" -vV | sed -n 's/^LLVM version: \([0-9]*\).*/\1/p')
 if [ $# -ge 2 ]; then
     lib=$(cd "$2" && pwd)/lib
     export NETVFS_BRIDGE_FFI="$lib/netvfs/libnetvfs-bridge-ffi.so"
     export NETVFS_BRIDGE_FFI_FAKE="$lib/libnetvfs-bridge-ffi-fake.so"
     export NETVFS_BACKEND_PATH="$lib/netvfs/test-backends"
     export QT_QPA_PLATFORM=offscreen
+    for so in "$NETVFS_BRIDGE_FFI" "$NETVFS_BRIDGE_FFI_FAKE" "$NETVFS_BACKEND_PATH/libnetvfs-fake.so" \
+        "$lib/libnetvfs.so" "$lib/libnetvfstest.so"; do
+        if ! nm -D --undefined-only "$so" | grep -q ' __asan_init$'; then
+            echo "$so is not instrumented with ASan (ffi-libs.sh --asan)" >&2
+            exit 1
+        fi
+        clang=$(readelf -p .comment "$so" | sed -n 's/.*clang version \([0-9]*\).*/\1/p' | head -n 1)
+        if [ "$clang" != "$llvm" ]; then
+            echo "$so: built by clang ${clang:-(none)}, rustc +$toolchain has LLVM $llvm;" \
+                "build it with clang $llvm (design §6.6)" >&2
+            exit 1
+        fi
+    done
 fi
 cd "$root/rust"
 host=$(rustc +"$toolchain" -vV | sed -n 's/^host: //p')
@@ -29,6 +49,8 @@ export RUSTDOCFLAGS="$RUSTFLAGS"
 # not have the panic strategy abort"); tests unwind anyway.
 export CARGO_PROFILE_DEV_PANIC=unwind
 export ASAN_OPTIONS="detect_leaks=1:abort_on_error=1:detect_stack_use_after_return=1"
+# Tests that measure the resident set skip that under ASan (quarantine).
+export NETVFS_TEST_SANITIZER=address
 # Third-party leaks only (Qt, libaccounts), as for the C++ sanitizer job.
 export LSAN_OPTIONS="suppressions=$root/tools/sanitizer/lsan.supp:print_suppressions=0"
 export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$PWD/target/asan}"

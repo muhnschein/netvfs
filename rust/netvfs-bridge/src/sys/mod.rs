@@ -5,6 +5,8 @@
 //! SAFETY comment.
 #![allow(unsafe_code)]
 
+#[cfg(any(test, feature = "testing"))]
+pub mod child;
 pub mod fd;
 pub mod frame;
 pub mod inotify;

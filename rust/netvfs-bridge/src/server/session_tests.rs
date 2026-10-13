@@ -268,8 +268,13 @@ async fn flow_control_bounded() {
     assert!(last * bytes > FLOW_LIMIT, "{last} batches of {bytes} bytes");
     let in_flight = outbox.flow().in_flight();
     assert!(in_flight > FLOW_LIMIT && in_flight <= FLOW_LIMIT + bytes, "{in_flight}");
-    let growth = resident_bytes().saturating_sub(before);
-    assert!(growth < 16 << 20, "resident set grew by {growth} bytes");
+    // Under AddressSanitizer freed memory stays resident in its quarantine,
+    // so the resident set says nothing there (rust-sanitize.sh sets the
+    // variable); the budget above bounds what is queued all the same.
+    if std::env::var_os("NETVFS_TEST_SANITIZER").is_none() {
+        let growth = resident_bytes().saturating_sub(before);
+        assert!(growth < 16 << 20, "resident set grew by {growth} bytes");
+    }
     assert!(finished.try_recv().is_err());
 
     let canceled = Instant::now();

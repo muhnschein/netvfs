@@ -45,6 +45,7 @@ const TESTS: &[(&str, Test)] = &[
     ("consent_denied", consent_denied),
     ("revocation_mid_job", revocation_mid_job),
     ("list_streams_batches", list_streams_batches),
+    ("zbus_send_ordering", zbus_send_ordering),
     ("cancel_job", cancel_job),
     ("disconnect_cancels_jobs", disconnect_cancels_jobs),
     ("idle_exit", idle_exit),
@@ -245,6 +246,83 @@ fn list_streams_batches(h: &Harness) {
         );
         let counters = f.probe().counters().await.unwrap();
         assert_eq!((counters.requests, counters.ops), (0, 0));
+    });
+}
+
+/// What one `List` brought, in arrival order.
+#[derive(Debug, PartialEq, Eq)]
+enum Arrived {
+    Reply(u32),
+    Batch(u32),
+    Done(u32),
+}
+
+/// The next message on `stream` that belongs to the `List` call `serial`
+/// or to a listing: its reply, a `ListBatch`, a `ListDone`.
+async fn next_arrival(stream: &mut zbus::MessageStream, serial: std::num::NonZeroU32) -> Arrived {
+    use futures_lite::StreamExt as _;
+    loop {
+        let message = tokio::time::timeout(WAIT, stream.next()).await.expect("a message").unwrap().unwrap();
+        let header = message.header();
+        match message.message_type() {
+            zbus::message::Type::MethodReturn if header.reply_serial() == Some(serial) => {
+                return Arrived::Reply(message.body().deserialize().unwrap());
+            }
+            zbus::message::Type::Error if header.reply_serial() == Some(serial) => {
+                panic!("List failed: {message:?}");
+            }
+            zbus::message::Type::Signal => match header.member().map(zbus::names::MemberName::as_str) {
+                Some("ListBatch") => {
+                    let (req, _): (u32, Vec<netvfs_bridge_proto::WireEntry>) =
+                        message.body().deserialize().unwrap();
+                    return Arrived::Batch(req);
+                }
+                Some("ListDone") => {
+                    let (req, _, _): (u32, String, String) = message.body().deserialize().unwrap();
+                    return Arrived::Done(req);
+                }
+                _ => {}
+            },
+            _ => {}
+        }
+    }
+}
+
+// Design §3.4, §4.2: one writer per session keeps the reply to List ahead
+// of its ListBatch signals and those ahead of ListDone, every time.
+fn zbus_send_ordering(h: &Harness) {
+    let f = Fixture::new(h, Consent::Granted);
+    for i in 0..3 {
+        h.fake.add_file(format!("/o/f{i}").as_bytes(), b"x");
+    }
+    block_on(async {
+        let c = f.hello_client().await;
+        let z = c.zbus();
+        let mut stream = zbus::MessageStream::from(z);
+        for round in 0..1000 {
+            let call = zbus::Message::method_call(netvfs_bridge_proto::OBJECT_PATH, "List")
+                .unwrap()
+                .interface(netvfs_bridge_proto::INTERFACE)
+                .unwrap()
+                .build(&(ACCOUNT_LOC, b"/o".to_vec(), "", 1_u32))
+                .unwrap();
+            let serial = call.primary_header().serial_num();
+            z.send(&call).await.unwrap();
+            let Arrived::Reply(req) = next_arrival(&mut stream, serial).await else {
+                panic!("round {round}: a signal before the reply");
+            };
+            let mut got = Vec::new();
+            loop {
+                let arrived = next_arrival(&mut stream, serial).await;
+                let done = arrived == Arrived::Done(req);
+                got.push(arrived);
+                if done {
+                    break;
+                }
+            }
+            let want = [Arrived::Batch(req), Arrived::Batch(req), Arrived::Batch(req), Arrived::Done(req)];
+            assert_eq!(got, want, "round {round}");
+        }
     });
 }
 

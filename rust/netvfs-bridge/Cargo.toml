@@ -31,6 +31,8 @@ tokio = { version = "1", features = ["rt", "net", "sync", "time", "signal", "mac
 futures-lite = { version = "2", default-features = false, features = ["std"] }
 
 [dev-dependencies]
+# The contract's replay machinery (test-only, design §6.11).
+netvfs-bridge-proto = { path = "../netvfs-bridge-proto", features = ["fake"] }
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "net", "sync", "time", "macros", "io-util", "test-util"] }
 
 # The C ABI against the real libnetvfs-bridge-ffi.so and the fake backend
@@ -68,10 +70,17 @@ path = "src/bin/accounts_fake.rs"
 required-features = ["test-bins"]
 test = false
 
-# The netvfs-bridge binary: command line, exit codes, a run with the C ABI.
+# The netvfs-bridge binary: command line, exit codes, runs with the C ABI
+# (with the fake accounts helper).
 [[test]]
 name = "process"
-required-features = ["testing"]
+required-features = ["testing", "test-bins"]
+
+# The shared contract (tests/bridge/contract) against the binary: the
+# introspection it serves and the golden sequences.
+[[test]]
+name = "contract"
+required-features = ["testing", "test-bins"]
 
 [[test]]
 name = "notifications"

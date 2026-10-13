@@ -1,13 +1,19 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 //! The consent notification against a fake `org.freedesktop.Notifications`
-//! on a private bus (skipped without `dbus-daemon`).
+//! on a private bus (skipped without `dbus-daemon`): the prompt itself, and
+//! the binary end to end, from `RequestConsent` to the answer in
+//! `bridge.conf` (also skipped without the C ABI).
 
-#![allow(clippy::unwrap_used, clippy::arithmetic_side_effects, clippy::indexing_slicing)]
+#![allow(clippy::unwrap_used, clippy::arithmetic_side_effects, clippy::indexing_slicing, clippy::panic)]
 
 use futures_lite::StreamExt;
+use netvfs_bridge::consent::{Consent, ConsentStore};
 use netvfs_bridge::prompt::{ConsentPrompt, NotificationPrompt, PromptEvent};
-use netvfs_bridge::testutil::TestBus;
+use netvfs_bridge::testing::{BridgeRun, WAIT, wait_signal};
+use netvfs_bridge::testutil::{TestBus, TestChild};
+use netvfs_bridge_proto::{PROTOCOL_VERSION, Signal, SignalStream};
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::sync::mpsc;
@@ -19,7 +25,6 @@ use zbus::{Connection, Message, MessageStream};
 const SERVICE: &str = "org.freedesktop.Notifications";
 const PATH: &str = "/org/freedesktop/Notifications";
 const INTERFACE: &str = "org.freedesktop.Notifications";
-const WAIT: Duration = Duration::from_secs(10);
 
 type NotifyArgs = (String, u32, String, String, String, Vec<String>, HashMap<String, OwnedValue>, i32);
 
@@ -316,4 +321,101 @@ async fn no_bus() {
     prompt.show("A");
     assert_eq!(next_event(&mut events).await, PromptEvent::Dismissed);
     assert_eq!(events.try_recv(), Err(mpsc::error::TryRecvError::Empty));
+}
+
+// ------------------------------------------------- end to end, the binary
+
+const BRIDGE: &str = env!("CARGO_BIN_EXE_netvfs-bridge");
+
+/// The bridge binary on the private bus with the fake service, consent
+/// unknown, and a client after Hello; `None` without the C ABI (the
+/// variables of `tests/ffi.rs`) or `dbus-daemon`.
+async fn bridge_on_bus() -> Option<(TestBus, Fake, BridgeRun, TestChild, netvfs_bridge_proto::Connection)> {
+    if ["NETVFS_BRIDGE_FFI", "NETVFS_BACKEND_PATH"].iter().any(|v| std::env::var_os(v).is_none()) {
+        return None;
+    }
+    let bus = TestBus::start()?;
+    let fake = Fake::start(&bus).await;
+    let mut run = BridgeRun::new(Path::new(BRIDGE), "notified");
+    run.with_session_bus(bus.address());
+    let child = run.spawn();
+    let client = run.client().await;
+    client.proxy().hello(PROTOCOL_VERSION, "notifications").await.unwrap();
+    assert_eq!(client.proxy().get_consent().await.unwrap(), "unknown");
+    Some((bus, fake, run, child, client))
+}
+
+/// The consent the bridge stored for its consumer.
+fn stored(run: &BridgeRun) -> Consent {
+    ConsentStore::new(run.consent_file()).consent(&run.consumer)
+}
+
+/// The next `ConsentChanged`.
+async fn consent_changed(signals: &mut SignalStream) -> String {
+    match wait_signal(signals, WAIT, |s| matches!(s, Signal::ConsentChanged(_))).await {
+        Some(Signal::ConsentChanged(consent)) => consent,
+        other => panic!("{other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn an_allowed_notification_grants_consent() {
+    let Some((_bus, mut fake, run, _child, client)) = bridge_on_bus().await else { return };
+    let mut signals = client.signals();
+    client.proxy().request_consent().await.unwrap();
+    let (app, _, _, summary, _, actions, _, _) = fake.notify().await;
+    assert_eq!(
+        (app.as_str(), summary.as_str()),
+        ("netvfs", "Process test wants to use your network locations")
+    );
+    assert_eq!(actions, ["allow", "Allow", "deny", "Don't allow"]);
+    assert_eq!(stored(&run), Consent::Unknown);
+    fake.action(7, "allow").await;
+    assert_eq!(consent_changed(&mut signals).await, "granted");
+    assert_eq!(stored(&run), Consent::Granted);
+    let conf = std::fs::read_to_string(run.consent_file()).unwrap();
+    assert!(conf.contains("[Consent]") && conf.contains("notified=granted"), "{conf}");
+    assert_eq!(client.proxy().get_consent().await.unwrap(), "granted");
+    // Answered: no second question.
+    client.proxy().request_consent().await.unwrap();
+    tokio::time::timeout(Duration::from_millis(300), fake.calls.recv()).await.unwrap_err();
+}
+
+#[tokio::test]
+async fn a_denied_notification_denies_consent() {
+    let Some((_bus, mut fake, run, _child, client)) = bridge_on_bus().await else { return };
+    let mut signals = client.signals();
+    client.proxy().request_consent().await.unwrap();
+    fake.notify().await;
+    fake.action(7, "deny").await;
+    assert_eq!(consent_changed(&mut signals).await, "denied");
+    assert_eq!(stored(&run), Consent::Denied);
+    assert_eq!(client.proxy().get_consent().await.unwrap(), "denied");
+}
+
+#[tokio::test]
+async fn a_closed_notification_leaves_consent_unknown() {
+    let Some((_bus, mut fake, run, _child, client)) = bridge_on_bus().await else { return };
+    let mut signals = client.signals();
+    client.proxy().request_consent().await.unwrap();
+    fake.notify().await;
+    fake.closed(7).await;
+    // Dismissed: nothing stored, and the consumer may ask again.
+    let mut asked_again = None;
+    for _ in 0..50 {
+        client.proxy().request_consent().await.unwrap();
+        if let Ok(Some(call)) = tokio::time::timeout(Duration::from_millis(100), fake.calls.recv()).await {
+            asked_again = Some(call);
+            break;
+        }
+    }
+    let call = asked_again.expect("no second question after the dismissal");
+    assert_eq!(call.header().member().unwrap().as_str(), "Notify");
+    let (_, replaces, ..): NotifyArgs = call.body().deserialize().unwrap();
+    assert_eq!(replaces, 0);
+    assert_eq!(stored(&run), Consent::Unknown);
+    assert_eq!(client.proxy().get_consent().await.unwrap(), "unknown");
+    fake.action(8, "allow").await;
+    assert_eq!(consent_changed(&mut signals).await, "granted");
+    assert_eq!(stored(&run), Consent::Granted);
 }

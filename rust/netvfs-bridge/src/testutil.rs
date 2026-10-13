@@ -1,14 +1,17 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 //! Test support shared by the unit and the integration tests (feature
-//! `testing`): temporary folders and a private session bus.
+//! `testing`): temporary folders, child processes that do not outlive
+//! their test, and a private session bus.
 //!
 //! A failing set-up is a failing test, so these helpers panic.
 #![allow(clippy::expect_used, clippy::panic, clippy::missing_panics_doc)]
 
 use std::io::{BufRead, BufReader};
+use std::os::fd::OwnedFd;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::time::{Duration, Instant};
 
 /// A fresh folder below the system's temporary folder, removed on drop.
 #[derive(Debug)]
@@ -66,6 +69,69 @@ impl Drop for TempDir {
     }
 }
 
+/// A child process of a test. It is killed (SIGKILL) and reaped when
+/// dropped, and the kernel kills it when the thread that started it ends
+/// (`PR_SET_PDEATHSIG`): a test that panics, times out or is killed leaves
+/// no process behind. Start it from the test's own thread.
+#[derive(Debug)]
+pub struct TestChild(Child);
+
+impl TestChild {
+    /// Spawns `command`'s program.
+    ///
+    /// # Errors
+    /// As [`Command::spawn`].
+    pub fn spawn(command: &mut Command) -> std::io::Result<Self> {
+        crate::sys::child::kill_with_parent(command).spawn().map(Self)
+    }
+
+    /// The process.
+    pub const fn child(&mut self) -> &mut Child {
+        &mut self.0
+    }
+
+    /// Waits at most `timeout` for the process to end: how it ended.
+    pub fn wait_timeout(&mut self, timeout: Duration) -> Option<ExitStatus> {
+        let end = deadline(timeout);
+        loop {
+            match self.0.try_wait() {
+                Ok(Some(status)) => return Some(status),
+                Ok(None) if Instant::now() >= end => return None,
+                Ok(None) => std::thread::sleep(Duration::from_millis(10)),
+                Err(e) => panic!("try_wait: {e}"),
+            }
+        }
+    }
+}
+
+/// `timeout` from now.
+fn deadline(timeout: Duration) -> Instant {
+    Instant::now().checked_add(timeout).expect("a deadline")
+}
+
+impl Drop for TestChild {
+    fn drop(&mut self) {
+        self.0.kill().ok();
+        self.0.wait().ok();
+    }
+}
+
+/// A command that runs `program` as systemd's socket activation would
+/// (`sd_listen_fds`): `listener` at fd 3, `LISTEN_FDS=1`, and `LISTEN_PID`
+/// the process's own pid, which a shell sets before it execs `program` (the
+/// pid is unknown before the fork). Arguments and environment are the
+/// caller's, except that it must not remove the two variables.
+#[must_use]
+pub fn socket_activated(program: &Path, listener: OwnedFd) -> Command {
+    let mut command = Command::new("/bin/sh");
+    command
+        .args(["-c", "LISTEN_PID=$$; export LISTEN_PID; exec \"$0\" \"$@\""])
+        .arg(program)
+        .env("LISTEN_FDS", "1");
+    crate::sys::child::place_listener(&mut command, listener);
+    command
+}
+
 /// The configuration of the private bus: anyone may own any name and send
 /// anything.
 const BUS_CONFIG: &str = r#"<!DOCTYPE busconfig PUBLIC "-//freedesktop//DTD D-Bus Bus Configuration 1.0//EN"
@@ -82,10 +148,11 @@ const BUS_CONFIG: &str = r#"<!DOCTYPE busconfig PUBLIC "-//freedesktop//DTD D-Bu
 </busconfig>
 "#;
 
-/// A private `dbus-daemon`, stopped on drop.
+/// A private `dbus-daemon`, stopped on drop (or with the thread that
+/// started it, see [`TestChild`]).
 #[derive(Debug)]
 pub struct TestBus {
-    child: Child,
+    _child: TestChild,
     address: String,
     _dir: TempDir,
 }
@@ -101,21 +168,22 @@ impl TestBus {
     fn start_program(program: &Path) -> Option<Self> {
         let dir = TempDir::new();
         let config = dir.write("bus.conf", BUS_CONFIG.replace("@DIR@", &dir.path().to_string_lossy()));
-        let spawned = Command::new(program)
-            .arg(format!("--config-file={}", config.display()))
-            .args(["--nofork", "--print-address=1"])
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            // It complains when it cannot raise its fd limit.
-            .stderr(Stdio::null())
-            .spawn();
+        let spawned = TestChild::spawn(
+            Command::new(program)
+                .arg(format!("--config-file={}", config.display()))
+                .args(["--nofork", "--print-address=1"])
+                .stdin(Stdio::null())
+                .stdout(Stdio::piped())
+                // It complains when it cannot raise its fd limit.
+                .stderr(Stdio::null()),
+        );
         let mut child = match spawned {
             Ok(child) => child,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return None,
             Err(e) => panic!("dbus-daemon: {e}"),
         };
-        let address = read_address(&mut child);
-        Some(Self { child, address, _dir: dir })
+        let address = read_address(child.child());
+        Some(Self { _child: child, address, _dir: dir })
     }
 
     /// The bus address, as `DBUS_SESSION_BUS_ADDRESS` would carry it.
@@ -141,13 +209,6 @@ fn read_address(child: &mut Child) -> String {
     let address = address.trim_end().to_owned();
     assert!(!address.is_empty(), "dbus-daemon printed no address");
     address
-}
-
-impl Drop for TestBus {
-    fn drop(&mut self) {
-        self.child.kill().ok();
-        self.child.wait().ok();
-    }
 }
 
 #[cfg(test)]
@@ -181,6 +242,34 @@ mod tests {
         for path in planted {
             std::fs::remove_dir_all(path).unwrap();
         }
+    }
+
+    #[test]
+    fn children_are_killed_when_dropped() {
+        let mut child = TestChild::spawn(Command::new("sleep").arg("60")).unwrap();
+        assert_eq!(child.wait_timeout(Duration::from_millis(50)), None);
+        let pid = i32::try_from(child.child().id()).unwrap();
+        drop(child);
+        // Reaped as well: the pid names no process (nor a zombie) any more.
+        assert!(!crate::sys::lock::process_exists(pid));
+        let mut child = TestChild::spawn(Command::new("sh").args(["-c", "exit 3"])).unwrap();
+        assert_eq!(child.wait_timeout(Duration::from_secs(10)).unwrap().code(), Some(3));
+        TestChild::spawn(&mut Command::new("/nonexistent/program")).unwrap_err();
+    }
+
+    #[test]
+    fn socket_activation_as_systemd_does_it() {
+        use std::io::Read as _;
+        let (mut ours, theirs) = std::os::unix::net::UnixStream::pair().unwrap();
+        let mut command = socket_activated(Path::new("/bin/sh"), OwnedFd::from(theirs));
+        command.args(["-c", "echo \"$$ $LISTEN_PID $LISTEN_FDS\" >&3"]);
+        let mut child = TestChild::spawn(&mut command).unwrap();
+        drop(command);
+        let pid = child.child().id();
+        assert!(child.wait_timeout(Duration::from_secs(10)).unwrap().success());
+        let mut got = String::new();
+        ours.read_to_string(&mut got).unwrap();
+        assert_eq!(got, format!("{pid} {pid} 1\n"));
     }
 
     #[test]
