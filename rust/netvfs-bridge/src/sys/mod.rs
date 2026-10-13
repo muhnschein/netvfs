@@ -1,13 +1,15 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! The calls into libc (and the one `unsafe` constructor of zbus) that the
-//! socket front and the transfers of descriptors need. The only module of the crate with `unsafe` code
-//! besides `ffi` (design §6.12); every block has its SAFETY comment and
-//! every function a safe signature.
+//! The calls into libc (and the one `unsafe` constructor of zbus) of the
+//! bridge, each wrapped in a safe function. The only module of the crate
+//! with `unsafe` code besides `ffi` (design §6.12); every block has its
+//! SAFETY comment.
 #![allow(unsafe_code)]
 
 pub mod fd;
 pub mod frame;
+pub mod inotify;
 pub mod listen;
+pub mod lock;
 pub mod peer;
 
 use std::io;

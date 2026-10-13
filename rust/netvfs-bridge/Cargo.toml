@@ -11,8 +11,11 @@ publish.workspace = true
 workspace = true
 
 [features]
-# Test support: the fake control table of tests/bridge/ffifake, fixtures.
+# Test support: the fake control table of tests/bridge/ffifake, fixtures,
+# and a private dbus-daemon for the session-bus tests (`testbus`).
 testing = []
+# The test-only fake accounts helper `netvfs-accounts-fake` (design §4.1).
+test-bins = []
 
 [dependencies]
 netvfs-bridge-proto = { path = "../netvfs-bridge-proto" }
@@ -20,13 +23,15 @@ libc = "0.2"
 zeroize = "1"
 # The socket front (design §3.2, §8): p2p server with fd passing; `bus-impl`
 # for `Builder::build_message_stream` (no message lost before the stream).
+# Also the session-bus client (notifications, settings handoff,
+# AccountChanged).
 zbus = { version = "5", default-features = false, features = ["tokio", "p2p", "bus-impl"] }
 tokio = { version = "1", features = ["rt", "net", "sync", "time", "signal", "macros"] }
 # Already in the tree through zbus; named for StreamExt.
 futures-lite = { version = "2", default-features = false, features = ["std"] }
 
 [dev-dependencies]
-tokio = { version = "1", features = ["rt", "net", "sync", "time", "macros", "io-util"] }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "net", "sync", "time", "macros", "io-util", "test-util"] }
 
 # The C ABI against the real libnetvfs-bridge-ffi.so and the fake backend
 # (make check-rust-ffi). Its own main(): `init` must run on the main thread,
@@ -43,3 +48,17 @@ name = "backend"
 path = "tests/backend.rs"
 harness = false
 required-features = ["testing"]
+
+[[bin]]
+name = "netvfs-accounts-fake"
+path = "src/bin/accounts_fake.rs"
+required-features = ["test-bins"]
+test = false
+
+[[test]]
+name = "notifications"
+required-features = ["testing"]
+
+[[test]]
+name = "accounts"
+required-features = ["testing", "test-bins"]

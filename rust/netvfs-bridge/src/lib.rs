@@ -15,15 +15,32 @@
 //! connection pools and the worker threads that own the backend
 //! connections; [`jobs`] has the bodies those workers run for listings,
 //! walks, removals and transfers.
+//!
+//! The platform part: consumer registration and paths ([`config`]),
+//! logging ([`log`]), consent and its notification ([`consent`],
+//! [`prompt`]), the settings handoff ([`handoff`]), the accounts helper
+//! ([`accounts`]) and known hosts ([`locations::knownhosts`]). `unsafe` is
+//! confined to `ffi` and `sys`.
 
+pub mod accounts;
+pub mod config;
+pub mod consent;
 pub mod ffi;
+pub mod handoff;
+pub mod ini;
 pub mod jobs;
 pub mod locations;
+pub mod lockfile;
+pub mod log;
 pub mod peer;
+pub mod prompt;
+pub mod savefile;
 pub mod server;
 pub mod status;
 mod sys;
 #[cfg(test)]
 mod test_support;
+#[cfg(any(test, feature = "testing"))]
+pub mod testutil;
 
 pub use status::Status;

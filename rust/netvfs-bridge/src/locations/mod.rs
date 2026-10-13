@@ -4,7 +4,8 @@
 //! per-host limit ([`pool`], XB-12), one std thread per backend connection
 //! ([`worker`], C-8), the copy jobs on threads of their own ([`copyjobs`]),
 //! the connection policy for accounts and ad-hoc locations ([`connector`],
-//! XB-14, C-7) and the book that holds them for the core ([`book`]).
+//! XB-14, C-7), the book that holds them for the core ([`book`]) and the
+//! pins of ad-hoc locations ([`knownhosts`], XB-14).
 //!
 //! # Threads
 //!
@@ -26,6 +27,7 @@
 pub mod book;
 pub mod connector;
 pub mod copyjobs;
+pub mod knownhosts;
 #[cfg(test)]
 mod mock;
 pub mod pool;

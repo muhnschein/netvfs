@@ -111,4 +111,9 @@ exclude_re = [
     # Equivalent: an empty name is no error name, and from_bare returns None
     # for it, so the `_` arm below gives the same Protocol error as this arm.
     'netvfs-bridge-proto/src/errors\.rs:\d+:\d+: delete match arm "" in BridgeError::from_method_error$',
+    # netvfs-bridge consent.rs: the inotify masks are ORs of distinct
+    # single-bit flags, where `|` and `^` give the same value.
+    'netvfs-bridge/src/consent\.rs:\d+:\d+: replace \| with \^',
+    # netvfs-bridge sys/lock.rs: LOCK_EX | LOCK_NB, distinct bits as well.
+    'netvfs-bridge/src/sys/lock\.rs:\d+:\d+: replace \| with \^',
 ]

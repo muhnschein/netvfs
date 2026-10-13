@@ -1,0 +1,61 @@
+# hash comment|QString|with equals|1|with equals
+%|QString|k12|1|k12
+Consent/lautta|QString|granted|1|granted
+Consent/photos|QString|granted|1|granted
+Consent/x|QString|1|1|1
+General/k|QString|pg|1|pg
+Last/bsend|QString|acomma=v|1|acomma=v
+Last/eof|QString|noline|1|noline
+Last/escsp|QString|a\u0009|1|a\u0009
+Last/hexend|QString|\u0004|1|\u0004
+Last/k|QString|v|1|v
+Last/octend|QString|\u0007|1|\u0007
+Last/qspaces|QStringList||2|a  |b
+Last/spaces|QStringList||2|a|b
+Last/xnohex|QString|ag|1|ag
+NoClose/k|QString|nc|1|nc
+Sec/Sub/k|QString|s|1|s
+Spaced/k|QString|v|1|v
+Upper|QString|u|1|u
+a=b/Consent/lautta|QString|override?|1|override?
+a=b/k|QString|ab|1|ab
+atat|QString|@x|1|@x
+atba|QByteArray|granted|0
+atinv|invalid||0
+atpoint|QString|@Point(1)|1|@Point(1)
+atrect|QRect||0
+atsize|QSize||0
+atsizebad|QString|@Size(1 2 3)|1|@Size(1 2 3)
+atstr|QString|granted|1|granted
+back/slash|QString|k6|1|k6
+consent/lower|QString|1|1|1
+cont|QString|first second|1|first second
+dup|QString|second|1|second
+emptyq|QString||1|
+esc|QString|tab\u0009here\u000anl AJJz A0 ? "q" \u005c \u0007\u0008\u000c\u000b\u000d|1|tab\u0009here\u000anl AJJz A0 ? "q" \u005c \u0007\u0008\u000c\u000b\u000d
+g2|QString|after|1|after
+gk|QString|G|1|G
+hexrun|QString|\u41bc|1|\u41bc
+latin|QString|caf\u00e9|1|caf\u00e9
+lead|QStringList||2||b
+list|QStringList||3|one|two|three
+listat|QStringList||2|@a|b
+listvar|QVariantList||2||x
+multi|QString|line one\u000aline two|1|line one\u000aline two
+octrun|QString|\u020a|1|\u020a
+pct\u0001|QString|k8|1|k8
+pct%|QString|k2|1|k2
+pct%4|QString|k3|1|k3
+pct%G1|QString|k5|1|k5
+pct%U00|QString|k11|1|k11
+pctA|QString|k10|1|k10
+pct\u00e9|QString|k4|1|k4
+pct\uffff|QString|k9|1|k9
+plain|QString|value|1|value
+qlist|QStringList||2|a,b|c
+quoted|QString|  keep spaces  |1|  keep spaces  
+semi|QString|a;b|1|a;b
+spaced key|QString|spaced value|1|spaced value
+trail|QStringList||2|a|
+upper|QString|l|1|l
+status|2
