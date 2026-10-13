@@ -1,0 +1,149 @@
+[
+  {
+    "name": "C-7 accept-unknown honoured for a changed identity",
+    "file": "src/bridge/ffi/establish.cpp",
+    "search": "    if (verdict == NVB_ID_ACCEPT_UNKNOWN && check.error() == Error::ServerIdentityUnknown)",
+    "replace": "    if (verdict == NVB_ID_ACCEPT_UNKNOWN)",
+    "test": "build/tests/bridge/ffi/tst_bridgeffi"
+  },
+  {
+    "name": "C-7 authenticate after a refused identity",
+    "file": "src/bridge/ffi/establish.cpp",
+    "search": "    if (const Result r = identityVerdict(conn, seen, pin, hooks); !r.ok())\n        return r;",
+    "replace": "    identityVerdict(conn, seen, pin, hooks);",
+    "test": "build/tests/bridge/ffi/tst_bridgeffi"
+  },
+  {
+    "name": "C-7 identity hook's cancel ignored",
+    "file": "src/bridge/ffi/establish.cpp",
+    "search": "    if (verdict == NVB_ID_CANCEL || conn->canceled.load())",
+    "replace": "    if (conn->canceled.load())",
+    "test": "build/tests/bridge/ffi/tst_bridgeffi"
+  },
+  {
+    "name": "C-7 no disconnect after a failure past connect",
+    "file": "src/bridge/ffi/establish.cpp",
+    "search": "        if (m_backend)\n            m_backend->disconnect();",
+    "replace": "        if (m_backend)\n            m_backend->resetCancel();",
+    "test": "build/tests/bridge/ffi/tst_bridgeffi"
+  },
+  {
+    "name": "XC-16 fingerprint not filled in",
+    "file": "src/bridge/ffi/establish.cpp",
+    "search": "    if (!identity.fingerprint.isEmpty() || identity.publicKey.isEmpty())",
+    "replace": "    if (true)",
+    "test": "build/tests/bridge/ffi/tst_bridgeffi"
+  },
+  {
+    "name": "XC-15 a reply with the wrong count reaches the backend",
+    "file": "src/bridge/ffi/establish.cpp",
+    "search": " || reply.answers.size() != prompts.size())",
+    "replace": ")",
+    "test": "build/tests/bridge/ffi/tst_bridgeffi"
+  },
+  {
+    "name": "XSEC-6 prompt answers released unwiped",
+    "file": "src/bridge/ffi/establish.cpp",
+    "search": "        NetVfs::secureWipe(answer);",
+    "replace": "        answer.clear();",
+    "test": "build/tests/bridge/ffi/tst_bridgeffi"
+  },
+  {
+    "name": "O5 ad-hoc secret copied through an unwiped temporary",
+    "file": "src/bridge/ffi/establish.cpp",
+    "search": "                           QByteArray::fromRawData(reinterpret_cast<const char *>(secret->secret.ptr),\n                                                   static_cast<int>(std::min<size_t>(secret->secret.len, INT_MAX))));",
+    "replace": "                           toByteArray(secret->secret));",
+    "test": "build/tests/bridge/ffi/tst_bridgeffi"
+  },
+  {
+    "name": "XA-7 secretOptional not passed to signond lookup",
+    "file": "src/bridge/ffi/establish.cpp",
+    "search": "    source->setSecretOptional(secretOptional);",
+    "replace": "    source->setSecretOptional(false);",
+    "test": "build/tests/bridge/ffi/tst_bridgeffi"
+  },
+  {
+    "name": "A-6 empty fetched user name kept",
+    "file": "src/bridge/ffi/establish.cpp",
+    "search": "    if (r.ok() && out->userName.isEmpty())",
+    "replace": "    if (false)",
+    "test": "build/tests/bridge/ffi/tst_bridgeffi"
+  },
+  {
+    "name": "T4 conn_cancel does not end a signond wait",
+    "file": "src/bridge/ffi/establish.cpp",
+    "search": "    while (!wait->done && !conn->canceled.load() && Clock::now() < deadline)",
+    "replace": "    while (!wait->done && Clock::now() < deadline)",
+    "test": "build/tests/bridge/ffi/tst_bridgeffi"
+  },
+  {
+    "name": "C-9 conn_cancel does not cancel the backend",
+    "file": "src/bridge/ffi/conn.cpp",
+    "search": "        if (conn->backend)\n            conn->backend->cancel();",
+    "replace": "        if (conn->backend)\n            conn->backend->resetCancel();",
+    "test": "build/tests/bridge/ffi/tst_bridgeffi"
+  },
+  {
+    "name": "XC-6 list sink's stop ignored",
+    "file": "src/bridge/ffi/conn.cpp",
+    "search": "        return m_sink(m_ctx, items.data(), items.size()) != 0;",
+    "replace": "        m_sink(m_ctx, items.data(), items.size());\n        return true;",
+    "test": "build/tests/bridge/ffi/tst_bridgeffi"
+  },
+  {
+    "name": "O4 conn_free does not close open handles",
+    "file": "src/bridge/ffi/conn.cpp",
+    "search": "        if (handle->handle)\n            handle->handle->close();",
+    "replace": "        Q_UNUSED(handle)",
+    "test": "build/tests/bridge/ffi/tst_bridgeffi"
+  },
+  {
+    "name": "XH-3 walk visitor's stop ignored",
+    "file": "src/bridge/ffi/ops.cpp",
+    "search": "        return m_visit(m_ctx, arena.bytes(Names::encode(path)), &item) != 0;",
+    "replace": "        m_visit(m_ctx, arena.bytes(Names::encode(path)), &item);\n        return true;",
+    "test": "build/tests/bridge/ffi/tst_bridgeffi"
+  },
+  {
+    "name": "XH-2 remove_tree's cancel ignored",
+    "file": "src/bridge/ffi/io.cpp",
+    "search": "    update(files + dirs, -1);\n    return !canceled();",
+    "replace": "    update(files + dirs, -1);\n    return true;",
+    "test": "build/tests/bridge/ffi/tst_bridgeffi"
+  },
+  {
+    "name": "XB-11 short writes to a regular file not retried",
+    "file": "src/bridge/ffi/io.cpp",
+    "search": "    while (written < maxSize) {",
+    "replace": "    if (written < maxSize) {",
+    "test": "build/tests/bridge/ffi/tst_bridgeffi"
+  },
+  {
+    "name": "XC-4 URL path not lossless",
+    "file": "src/bridge/ffi/marshal.cpp",
+    "search": "        out->path = arena.bytes(Names::encode(path));",
+    "replace": "        out->path = arena.bytes(path.toUtf8());",
+    "test": "build/tests/bridge/ffi/tst_bridgeffi"
+  },
+  {
+    "name": "XC-24 error detail dropped",
+    "file": "src/bridge/ffi/marshal.h",
+    "search": "    out->detail = arena.bytes(result.detail().toUtf8());",
+    "replace": "    out->detail = arena.bytes(QByteArray());",
+    "test": "build/tests/bridge/ffi/tst_bridgeffi"
+  },
+  {
+    "name": "T2 post accepted while quitting",
+    "file": "src/bridge/ffi/ffi.cpp",
+    "search": "    if (!a.queue || a.quitting)",
+    "replace": "    if (!a.queue)",
+    "test": "build/tests/bridge/ffi/tst_bridgeffi"
+  },
+  {
+    "name": "Design 4.1 NETVFS_FAKE_SEED not read",
+    "file": "tests/fakeplugin/fakeplugin.cpp",
+    "search": "        std::call_once(seeded, seedFromEnvironment);",
+    "replace": "        Q_UNUSED(seeded)",
+    "test": "build/tests/bridge/ffi/tst_bridgeffi"
+  }
+]

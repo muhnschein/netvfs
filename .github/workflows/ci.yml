@@ -83,7 +83,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        list: [accounts, bridge, buteo, cli, core, discovery, ftp, helper, local, ops, packaging, qml, sftp, smb, url, webdav]
+        list: [accounts, bridge, buteo, cli, core, discovery, ffi, ftp, helper, local, ops, packaging, qml, sftp, smb, url, webdav]
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
