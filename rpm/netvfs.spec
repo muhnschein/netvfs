@@ -162,8 +162,8 @@ consumers over a socket in their data folder, without handing out secrets.
 
 # SPEC-v2 XB-2a: cargo builds netvfs-accounts offline from rust/vendor
 # (tools/ci/build-rpm.sh vendors the crates), against the system SQLite.
-# qmake's install target asks cargo again, so %install needs the same
-# environment (and finds the build up to date).
+# qmake's install target asks cargo again, so the install section needs
+# the same environment (and finds the build up to date).
 %define netvfs_cargo_env \
 export CARGO_HOME="$PWD/rust/.cargo-home" \
 export CARGO_INCREMENTAL=0 \
