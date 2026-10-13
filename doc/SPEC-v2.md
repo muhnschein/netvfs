@@ -84,9 +84,9 @@ SonarCloud with zero open issues).
   refuses plugins with other IIDs with a log line naming the expected IID.
 - XC-1a: Library version `1.0.0` (qmake derives soname `libnetvfs.so.1`); package
   version `0.2.0` (`0.3.0` since the package consolidation, XP-6, `0.4.0` since the Rust
-  accounts helper, XB-2a). All netvfs subpackages require the exact same
-  `%{version}-%{release}` of the main package (`netvfs-core` up to 0.2, `netvfs` since
-  0.3) so mixed installs cannot happen.
+  accounts helper, XB-2a, `0.5.0` since the Rust bridge, XB-2). All netvfs subpackages
+  require the exact same `%{version}-%{release}` of the main package (`netvfs-core` up
+  to 0.2, `netvfs` since 0.3) so mixed installs cannot happen.
 - XC-1b: Buteo plugins, CLI, QML module and tests are migrated in the same change set as
   each API step. No compatibility shims for v1 beyond what §4 lists.
 - XC-1c: Qt 5.6 and C++17 remain the baseline. No exceptions cross the API; `Result` is
@@ -762,16 +762,24 @@ permission, links nothing from netvfs, and never sees secrets or pins.
   user has approved (XB-6). It never acts on local paths (XB-11), never discloses secrets
   or pins, and never changes accounts; account changes are handed off to Settings
   (XB-15).
-- XB-2: `/usr/libexec/netvfs/netvfs-bridge` (C++/Qt, links libnetvfs), one process per
-  consumer, started by systemd user socket activation (`Accept=no`). It exits 30 s after
-  its last client disconnected and no job runs.
+- XB-2: `/usr/libexec/netvfs/netvfs-bridge`, one process per consumer, started by systemd
+  user socket activation (`Accept=no`). It exits 30 s after its last client disconnected
+  and no job runs.
   It runs with the user's own groups: everything that parses server data (the backends,
   libssh, libsmb2, libcurl) stays outside the group `privileged`.
+  Since 0.5.0 it is written in Rust (`rust/netvfs-bridge`, doc/RUST.md; up to 0.4 C++/Qt).
+  It reaches the C++ backends through `%{_libdir}/netvfs/libnetvfs-bridge-ffi.so`, a C ABI
+  over libnetvfs (`src/bridge/ffi/netvfs_bridge_ffi.h`) that it loads with `dlopen`
+  (`RTLD_NOW | RTLD_LOCAL`) from that fixed path and that exports one symbol,
+  `nvb_ffi_get`; the library sits next to the backend folder that libnetvfs's
+  `BackendLoader` searches, outside the linker path. The Qt event loop of the backends
+  runs on the main thread, the bridge on threads of its own; the binary itself links no
+  Qt.
 - XB-2a: The Sailfish OS accounts database (`~/.local/share/system/privileged/Accounts/`)
   is readable by the group `privileged` only. The bridge reads it through
   `/usr/libexec/netvfs/netvfs-accounts`, installed setgid `privileged`
   (`%attr(2755,root,privileged)`, `Requires(pre): sailfish-setup` for the group, as
-  mapplauncherd's boosters), started once per request with `QProcess`. Since 0.4.0 it is
+  mapplauncherd's boosters), started once per request. Since 0.4.0 it is
   written in Rust (`rust/netvfs-accounts`, doc/RUST.md) and links no Qt, GLib or
   libaccounts: it reads the database with SQLite as libaccounts-glib stores it and sends
   libaccounts' change signal itself, with the same requests and answers as before:
@@ -870,6 +878,15 @@ permission, links nothing from netvfs, and never sees secrets or pins.
   → (u protocol, s bridgeVersion, as features)` must be the first call. Additive changes
   keep `Bridge1` and add a feature string; breaking changes add `Bridge2` side by side for
   at least one netvfs release.
+  The bridge is the server of the peer-to-peer connection (zbus since 0.5.0, libdbus
+  before): EXTERNAL authentication of its own uid, and unix fd passing when the client
+  negotiates it. Every answer is the bridge's own, none comes from the D-Bus library:
+  `org.freedesktop.DBus.Peer` (`Ping`, `GetMachineId`) on any path, `Introspect` on
+  `/org/netvfs/Bridge` with the interface XML verbatim
+  (`tests/bridge/contract/org.netvfs.Bridge1.xml`), and
+  `org.freedesktop.DBus.Error.UnknownMethod` for any other path, interface or member.
+  Consumers may use any D-Bus implementation; XT-7 checks a libdbus client against the
+  binary.
 - XB-9: Types. Paths and names are `ay` (raw protocol bytes, XC-4), never `s`, because
   D-Bus strings must be valid UTF-8. Entry is the struct
   `(ay name, y type, y targetType, x size, x mtimeMs, x ctimeMs, x atimeMs, i mode,
@@ -894,6 +911,10 @@ permission, links nothing from netvfs, and never sees secrets or pins.
   | Questions | signal `Question(s id, s kind, a{sv})`, `Answer(s id, a{sv})`; kinds: `identity-unknown` (ad-hoc only), `keyboard-interactive`, `insecure-consent` (ad-hoc only) |
   | Handoff | `OpenAccountSettings(s loc)`, `AddAccount(s provider)` |
 
+  `Walk` options: `maxDepth` (−1 for no limit), `followSymlinks` and `postOrder`.
+  `postOrder` is accepted and has no effect: `WalkBatch` reports every folder before its
+  children (its second visit after the children, `Ops::walk`'s `leave()`, is not sent).
+
 - XB-11: File descriptors. `Upload`/`Download` take an fd the consumer opened. The bridge
   checks the fd (`fstat`: regular file or FIFO; `fcntl(F_GETFL)`: the access mode the
   operation needs) and otherwise fails with `PermissionDenied` before any network work.
@@ -904,7 +925,12 @@ permission, links nothing from netvfs, and never sees secrets or pins.
   fd when the job ends. It never receives or opens a local path.
 - XB-12: Connection pools per location live in the bridge, with lanes as the consumer
   hints them (defaults interactive 1, bulk 2, stream ≤ 1; total per host ≤ 4). netvfs
-  rules apply unchanged (C-7, C-9, C-14, establish before credentials).
+  rules apply unchanged (C-7, C-9, C-14, establish before credentials). Since 0.5.0 the
+  bridge asks signond for an account's secret (XA-6) only after the server's identity
+  was accepted, in the same step that connects and authenticates: a server that is not
+  verified costs a connect, but no secret of the account is in the bridge's memory while
+  it talks to it. A signond failure is therefore reported after the connect, and sets no
+  attention (as before).
 - XB-13: Disconnects. When a consumer connection closes, the bridge cancels all of its
   requests and jobs; partial remote temp files are left in place so the consumer can
   resume. Handles are closed.
@@ -923,6 +949,14 @@ permission, links nothing from netvfs, and never sees secrets or pins.
 - XB-17: Limits per consumer: 64 concurrent requests, 16 open handles, 8 running jobs,
   `ListBatch` ≤ 512 entries or 1 MiB, `Read` ≤ 1 MiB. Over-limit calls fail with
   `TooManyConnections` and a `retryAfterMs`.
+  Per connection, a message whose header declares more than 2 MiB, or that carries more
+  than 2 file descriptors, closes the connection before its body is read (the largest
+  valid call is `ConnectAdHoc`: a 64 KiB secret and a 4 KiB URL); at most 16 received
+  messages wait to be handled. Outgoing (C-10): replies and signals leave in order
+  through one queue, written only as fast as the consumer reads; `ListBatch` and
+  `WalkBatch` wait while 4 MiB of them are not yet written, and the bridge reads no
+  further calls while 64 messages wait, so a consumer that does not read cannot make the
+  bridge buffer without bound.
 - XB-18: Logging follows C-16/C-17 and prefixes the consumer id.
 
 ## 9. Security additions
@@ -943,11 +977,16 @@ permission, links nothing from netvfs, and never sees secrets or pins.
 - XSEC-5: C-17 extends to TLS details (subject/issuer may be logged at debug), WebDAV
   hrefs (debug), FTP server replies (debug, with `PASS` never echoed).
 - XSEC-6: SEC-5 wiping extends to `AuthPrompter` answers, bearer tokens, the helper
-  request buffer in XM-7 and ad-hoc secrets received by the bridge (XB-16).
+  request buffer in XM-7 and ad-hoc secrets received by the bridge (XB-16). The bridge
+  wipes its own copies; the received message that carried the secret (`ConnectAdHoc`'s
+  `ay`, the answers of `Answer`) stays unwiped in the D-Bus library's buffer (zbus since
+  0.5.0) until the call is handled and the message dropped, as it did in libdbus's
+  buffer before.
 - XSEC-7: The bridge is the only netvfs component reachable from a sandbox. Its attack
-  surface is the D-Bus message parser (QtDBus) and its own argument validation: every
-  path is checked with `Paths::normalize` before use, every numeric argument is
-  range-checked, and every fd is validated (XB-11).
+  surface is the D-Bus message parser (zbus and zvariant, in Rust, since 0.5.0) and its
+  own argument validation: every path is checked with the rules of `Paths::normalize`
+  before use, every numeric argument is range-checked, and every fd is validated
+  (XB-11). The parser only sees messages within the inbound limits of XB-17.
 
 ## 10. Packaging (amends P-*)
 
@@ -957,7 +996,7 @@ permission, links nothing from netvfs, and never sees secrets or pins.
   |---|---|---|
   | `netvfs` | `libnetvfs.so.1`, backend dir, the `sftp`, `smb`, `webdav`, `ftp` and `local` backends, `netvfs-smb-shares` helper, QML module `org.netvfs.accounts`, provider descriptors, account providers with their UI QML and icons, `<p>-files` services and their service type, `netvfs-cli`, translations | Qt5Core, Qt5DBus, Qt5Network, accounts-qt5, libsignon-qt5, libcurl >= 7.85, Silica, jolla-settings-accounts; Recommends `netvfs-backup` |
   | `netvfs-backup` | `sftp-backup` and `smb-backup` services, Buteo plugins and profiles | netvfs, buteo, jolla-vault |
-  | `netvfs-bridge` | `netvfs-bridge`, `netvfs-accounts` (setgid `privileged`, XB-2a), systemd generator and template units, `consumers/lautta.conf` | netvfs, systemd, sailfish-setup (pre) |
+  | `netvfs-bridge` | `netvfs-bridge` (XB-2), its C ABI `libnetvfs-bridge-ffi.so`, `netvfs-accounts` (setgid `privileged`, XB-2a), systemd generator and template units, `consumers/lautta.conf` | netvfs, systemd, sailfish-setup (pre) |
   | `netvfs-devel` | headers, pkg-config | netvfs |
 
 - XP-2: Upgrade path: updates keep the backups. 0.2 moved the backup plugins out of
@@ -1025,7 +1064,10 @@ permission, links nothing from netvfs, and never sees secrets or pins.
   validation (directory, read-only fd for download, FIFO without size); disconnect
   cancels jobs within C-9's 2 s; folder deletion and recreation (XB-4); limits (XB-17);
   fuzzing of argument validation through a libFuzzer harness that feeds decoded
-  messages to the adaptor.
+  messages to the adaptor. Since 0.5.0 the contract suite also runs as a black box
+  against the built binary from a libdbus client (`tests/bridge/contract`: introspection,
+  peer interface, fd passing, error details, every golden sequence), next to the Rust
+  tests of `rust/netvfs-bridge`; the argument fuzzing is a cargo-fuzz target.
 
 ## 13. Migration plan (PR sequence)
 

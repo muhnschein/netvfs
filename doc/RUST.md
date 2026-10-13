@@ -1,14 +1,27 @@
 # Rust in netvfs
 
-Since 0.4.0 the setgid accounts helper `netvfs-accounts` (SPEC-v2 XB-2a) is
-written in Rust. It is a drop-in replacement for the C++/Qt helper it
-replaces: the same requests (`list`, `files <id>`, `attention <id> <state>
-[pin]`), the same `QDataStream` answer on stdout, the same confinement. The
-bridge and everything else stay C++.
+Two programs of the package netvfs-bridge are written in Rust:
 
-What it gains: the process that holds the group `privileged` links libc,
-libgcc_s and libsqlite3 only, no Qt, GLib, libaccounts or GIO modules, and
-every `unsafe` call is in one module (`sandbox.rs`).
+- `netvfs-accounts`, the setgid accounts helper (SPEC-v2 XB-2a), since 0.4.0.
+  It is a drop-in replacement for the C++/Qt helper it replaced: the same
+  requests (`list`, `files <id>`, `attention <id> <state> [pin]`), the same
+  `QDataStream` answer on stdout, the same confinement. What it gains: the
+  process that holds the group `privileged` links libc, libgcc_s and
+  libsqlite3 only, no Qt, GLib, libaccounts or GIO modules, and every
+  `unsafe` call is in one module (`sandbox.rs`).
+- `netvfs-bridge` (SPEC-v2 §8a), since 0.5.0: the one netvfs process a
+  sandboxed consumer can reach. Everything a consumer sends is decoded and
+  checked in Rust: zbus as the peer-to-peer D-Bus server with the bridge's
+  own inbound limits, the peer check, the argument validation (XSEC-7),
+  consent, locations, questions and jobs. The C++ backends stay; the bridge
+  reaches them through `libnetvfs-bridge-ffi.so` (`src/bridge/ffi`, the C
+  ABI of `netvfs_bridge_ffi.h`), which it loads with `dlopen` from
+  `/usr/lib64/netvfs` and which exports one symbol. The binary links libc,
+  libgcc_s and libm only; Qt and libnetvfs come with that library. Its
+  protocol (`tests/bridge/contract`), command line and files are those of
+  the C++/Qt bridge of 0.4, which it replaces.
+
+Everything else stays C++.
 
 ## Layout
 
@@ -37,17 +50,26 @@ every `unsafe` call is in one module (`sandbox.rs`).
 | `rust/netvfs-bridge/src/ffi/discovery.rs` | `Discovery` (XD-5), Qt thread only (T3) |
 | `rust/netvfs-bridge/src/ffi/fake.rs` | tests only (feature `testing`): the fake backend's control table (`NETVFS_BRIDGE_FFI_FAKE`) |
 | `rust/netvfs-bridge/src/status.rs` | `Status`: XC-21 name, message, detail, retry time |
+| `rust/netvfs-bridge/src/main.rs` | the binary: `[--listen ADDRESS] <consumer-id>` (default `systemd:`, fd 3), the Qt loop on the main thread and the bridge on the thread `nvb-rt`, exit codes 0 (idle exit), 1, 2 (usage) |
+| `rust/netvfs-bridge/src/server/` | the socket front: listener, peer check, one session per connection (zbus p2p server, EXTERNAL, fd passing), inbound limits (`inbound.rs`: 2 MiB, 2 descriptors), dispatch (`Peer`, `Introspect` and unknown members answered by the bridge itself), argument validation (`args.rs`, `paths.rs`), replies and signals (`encode.rs`), the outgoing FIFO and its byte budget (`flow.rs`, C-10) |
+| `rust/netvfs-bridge/src/core/` | the task that owns the state: sessions, consent, quotas (XB-17), questions, discovery, the handlers of every method |
+| `rust/netvfs-bridge/src/locations/`, `jobs/` | the locations a consumer may see, connection pools and lanes (XB-12), the worker threads that own the backend connections, known hosts; the bodies of listings, walks, removals and transfers (`fdio.rs`: the consumer's descriptors, XB-11) |
+| `rust/netvfs-bridge/src/accounts/` | `netvfs-accounts` as the bridge runs it, its answers (`qds.rs`), the `AccountChanged` watch |
+| `rust/netvfs-bridge/src/config.rs`, `consent.rs`, `prompt.rs`, `handoff.rs`, `log.rs` | consumer files and the environment, `bridge.conf` (Qt's INI format, `ini.rs`, with a `QLockFile`-compatible lock, `lockfile.rs`, saved as `QSaveFile` does, `savefile.rs`), the consent notification, the settings handoff, logging (`QT_LOGGING_RULES`) |
+| `rust/netvfs-bridge/src/sys/` | the libc calls of the bridge: the listening socket, peer credentials and pidfd, descriptors, inotify, `flock`, a zbus message from a frame |
+| `rust/netvfs-bridge/src/testing.rs`, `testutil.rs`, `bin/accounts_fake.rs` | tests only (features `testing`, `test-bins`): fixtures, a private bus, `netvfs-accounts-fake` |
+| `src/bridge/rust/rust.pro` | the qmake target that builds both binaries with cargo (see "Build") |
 | `rust/fuzz/` | cargo-fuzz targets (nightly, not in the workspace) |
 
 Dependencies: `libc` and `rusqlite` (without the bundled SQLite: the system
 libsqlite3 through pkg-config). The protocol crate: `zbus` 5 (`tokio`, `p2p`),
 `tokio`, `serde`, `zeroize` and `futures-lite` (already in zbus's tree);
 `serde_json` and `sha2` only behind its test-only `fake` feature.
-netvfs-bridge: the protocol crate, `libc` and `zeroize`.
+netvfs-bridge: the protocol crate, `libc`, `zeroize`, `zbus` 5 (`tokio`,
+`p2p`, `bus-impl`), `tokio` and `futures-lite`.
 
 `unsafe` is allowed in the helper's `sandbox` and in netvfs-bridge's `ffi`
-module only (a later `sys` module joins them); every block says why it
-holds. The `ffi` module keeps the threading and ownership rules of
+and `sys` modules only; every block says why it holds. The `ffi` module keeps the threading and ownership rules of
 `src/bridge/ffi/netvfs_bridge_ffi.h` by its types: plain Rust values in,
 `Result<_, Status>` out, every block C++ returns read and freed at once,
 secrets passed as `Zeroizing` buffers without a copy on the Rust side.
@@ -79,8 +101,9 @@ prebuilt server):
 | Lift `/opt/cross` (gcc 13 for `aarch64-meego-linux-gnu`, i486 binaries), the host libraries it loads and the target sysroot out of the pinned 5.2.0.15 SDK image; add the binutils names gcc looks for, a linker wrapper and an unversioned `libsqlite3.so` | `tools/ci/lift-sdk.sh <image> <target> <dir>` |
 | `cargo build --release` for `aarch64-unknown-linux-gnu` with that linker, PIE, full RELRO, `-z now`, no executable stack | `tools/ci/cross-build.sh <dir> rust/prebuilt` |
 | The workspace's tests for the target under `qemu-aarch64-static`, against the target's glibc and SQLite (the confinement tests run natively only) | `tools/ci/cross-build.sh <dir> <out> test` |
-| The cross-built helper's answers to `list` and `files` equal the host build's, byte for byte | `tools/ci/cross-smoke.sh <dir> rust/prebuilt/netvfs-accounts` |
-| NEEDED, highest GLIBC symbol version (the target's glibc is the floor), PIE, RELRO, BIND_NOW, NX stack | `tools/ci/check-linked-libs.sh`, from `tools/ci/check-rpm.sh` on the packaged binaries |
+| The cross-built helper's answers to `list` and `files` equal the host build's, byte for byte; the cross-built bridge starts and gets as far as loading its C ABI | `tools/ci/cross-smoke.sh <dir> rust/prebuilt/netvfs-accounts rust/prebuilt/netvfs-bridge` |
+| NEEDED (the helper: libc, libgcc_s, libsqlite3; the bridge: libc, libgcc_s, libm), highest GLIBC symbol version (the target's glibc is the floor), PIE, RELRO, BIND_NOW, NX stack | `tools/ci/check-linked-libs.sh`, from `tools/ci/check-rpm.sh` on the packaged binaries |
+| `libnetvfs-bridge-ffi.so`: exports only `nvb_ffi_get`, links libnetvfs, the GLIBC floor, RELRO, BIND_NOW, NX stack; the bridge loads it from where the package puts it, next to the backend folder libnetvfs searches | `tools/ci/check-ffi-lib.sh`, from `tools/ci/check-rpm.sh` (and from `make check-packaging` on the host build) |
 
 The host needs the i386 C library and qemu (`libc6-i386`,
 `qemu-user-static`; `tools/ci/install-host-deps.sh`).
@@ -90,14 +113,16 @@ empty, so a local RPM build is still one command.
 Since the spec only installs the binaries, OBS and Chum cannot rebuild
 netvfs from the spec; netvfs ships no recipe for either. Once an SDK target
 ships rustc 1.95, the cross job goes and the spec runs cargo again: the
-qmake target (`src/bridge/accounts/accounts.pro`) builds with cargo
-whenever `NETVFS_RUST_PREBUILT` is not set.
+qmake target (`src/bridge/rust/rust.pro`) builds with cargo whenever
+`NETVFS_RUST_PREBUILT` is not set.
 
 ## Build
 
-`src/bridge/accounts/accounts.pro` is a qmake aux target that runs
-`cargo build --release --locked` and installs the binary, so `make` builds it
-with the C++ parts. qmake variables: `NETVFS_CARGO` (the cargo to run),
+`src/bridge/rust/rust.pro` is a qmake aux target that runs one
+`cargo build --release --locked` for `netvfs-bridge` and `netvfs-accounts`,
+copies both into the build tree's `libexec/netvfs` (where the C++ tests run
+them) and installs them to `/usr/libexec/netvfs`, so `make` builds them with
+the C++ parts. qmake variables: `NETVFS_CARGO` (the cargo to run),
 `NETVFS_RUST_TARGET` (a target triple), `NETVFS_CARGO_FLAGS` (extra flags),
 `NETVFS_RUST_PREBUILT` (a folder with the binaries to install instead; the
 RPM sets it to `rust/prebuilt`).
@@ -135,13 +160,15 @@ name of its own, as Sailjail requires.
 | What | Where | Run by |
 |---|---|---|
 | Format, clippy (the lints above), tests with `cargo nextest`, doc tests, lockfile, Rust 1.95 | `rust/` | `make check-rust` (part of `make check`; CI: profile `ci` of `rust/.config/nextest.toml`, no retries) |
-| Golden tests: every answer byte for byte against the C++ helper, kept as a test-only reference (`referencehelper.cpp`); about 95 stored values, account shapes, attention writes and refused writes | `tests/bridge/accounts` | `make check-unit` |
+| Golden tests: every answer byte for byte against the C++ helper, kept as a test-only reference (`referencehelper.cpp`), and read back with the C++ bridge's decoder of 0.4 (`referencedecoder.cpp`); about 95 stored values, account shapes, attention writes and refused writes | `tests/bridge/accounts` | `make check-unit` |
 | A live libaccounts-qt manager sees the attention write through the signal | `tests/bridge/accounts` (`attentionSignal`) | `make check-unit` |
 | Each part of the confinement in a fresh process, also from setgid copies | `rust/netvfs-accounts/tests/sandbox.rs` | `make check-rust` |
 | netvfs-bridge's `ffi` module against the built `libnetvfs-bridge-ffi.so` and the fake backend: loading and version, establish (identity verdicts, prompts, phases, signond on the Qt thread), listing, walk, remove tree, handles, transfers through `nvb_io`, a cancel from another thread, copy across, URLs, error mapping, post/quit, panics in callbacks, discovery, no block left unfreed (heap growth over many calls) | `rust/netvfs-bridge/tests/ffi.rs` (its own harness: `init` needs the main thread; a test hung for 30 s fails) | `make check-rust-ffi` (part of `make check`); without the libraries every case says it is skipped |
 | The FFI's C ABI from C++ (and its marshalling into one block per result) | `tests/bridge/ffi` | `make check-unit` |
+| The built `netvfs-bridge` as a black box from a libdbus client (`tests/bridge/common`, the consumer side of the C++ bridge of 0.4): the introspection XML byte for byte, the `Peer` interface, an unknown path, fd passing both ways, error details, and every golden sequence of the contract, with the fake backend seeded through `NETVFS_FAKE_SEED` and a scripted accounts helper | `tests/bridge/contract` (`tst_contract`) | `make check-unit` |
+| The built `netvfs-bridge` under socket activation (the test plays systemd), listing through the built `netvfs-accounts` against a libaccounts database; exit codes for an unknown consumer and a usage error | `tests/bridge/process` (`tst_bridgeprocess`) | `make check-unit` |
 | The target build: tests under qemu, smoke run, linked libraries | see "Cross build" | CI job "Sailfish OS 5.2 aarch64 RPMs" |
-| Mutations the tests must catch: a curated list, and cargo-mutants on every line a pull request changes (with the FFI's C++ libraries built by `tools/ci/ffi-libs.sh`, so `tests/ffi.rs` runs; exclusions with reasons in `rust/.cargo/mutants.toml`) | `tests/mutations/helper.json`; `tools/ci/rust-mutants.sh <base> [<ffi-libs dir>]` | CI matrix `helper`; CI job "Tests bite (Rust, changed code)" |
+| Mutations the tests must catch: curated lists, and cargo-mutants on every line a pull request changes (with the FFI's C++ libraries built by `tools/ci/ffi-libs.sh`, so `tests/ffi.rs` runs; exclusions with reasons in `rust/.cargo/mutants.toml`) | `tests/mutations/helper.json`, `bridge.json`, `ffi.json`; `tools/ci/rust-mutants.sh <base> [<ffi-libs dir>]` | CI matrix `helper`, `bridge`, `ffi`; CI job "Tests bite (Rust, changed code)" |
 | Fuzzing: stored values, bus replies, arguments, the FFI marshalling (`ffi_marshal`: parameters, entries, identities into their C form and back) | `rust/fuzz` | `./tools/ci/rust-fuzz.sh <seconds>` (nightly) |
 | Advisories, yanked crates, licences, sources | `rust/deny.toml` | CI job "Rust supply chain"; advisories again weekly |
 | Tests under ASan + LSan (the FFI test with the C++ side instrumented too, see below), the current stable's clippy, the online workflow audit | `.github/workflows/scheduled.yml` | weekly; `./tools/ci/rust-sanitize.sh <nightly> [<ffi-libs dir>]` |
@@ -172,9 +199,11 @@ and Rust frames). `rust-sanitize.sh <nightly> <dir>` then points the test
 at them; it builds the dev profile with `panic = "unwind"`, since std
 rebuilt under `panic = "abort"` does not build for tests. Qt itself is not
 instrumented; LSan uses `tools/sanitizer/lsan.supp`.
-`make coverage` builds the helper with `-C instrument-coverage`; the
-confinement lets it write its counters to `build-coverage/rust-coverage`
-only in that build (`NETVFS_RUST_COVERAGE_DIR`).
+`make coverage` builds the helper and the bridge with
+`-C instrument-coverage`; the helper's confinement lets it write its
+counters to `build-coverage/rust-coverage` only in that build
+(`NETVFS_RUST_COVERAGE_DIR`). The bridge writes its counters when it exits,
+so the C++ tests let it end with its idle exit instead of killing it.
 
 ## Choices
 
