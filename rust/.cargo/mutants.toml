@@ -2,6 +2,16 @@
 # cargo-mutants (tools/ci/rust-mutants.sh). Every mutant must be caught by a
 # test; these are the few no test can tell from the original, each with why.
 # Matched against the mutant's name with its line and column (\d+:\d+).
+
+# Test doubles, built only with the `fake` / `testing` features and never
+# shipped: the in-process FakeBridge (and its replay of the contract) and the
+# loader of the fake control table. They are the tests' oracle; a mutant in
+# them says nothing about the bridge.
+exclude_globs = [
+    "netvfs-bridge-proto/src/fake/**",
+    "netvfs-bridge/src/ffi/fake.rs",
+]
+
 exclude_re = [
     # Diagnostics only: the sole effect is a line on stderr for whoever runs
     # it by hand; the probe's result is its exit status and check count.
@@ -98,4 +108,7 @@ exclude_re = [
     # revents, not an error).
     'netvfs-bridge/src/sys/fd\.rs:\d+:\d+: replace match guard e\.kind\(\) == io::ErrorKind::Interrupted with (false in retry|(true|false) in poll)$',
     'netvfs-bridge/src/sys/fd\.rs:\d+:\d+: replace == with != in poll$',
+    # Equivalent: an empty name is no error name, and from_bare returns None
+    # for it, so the `_` arm below gives the same Protocol error as this arm.
+    'netvfs-bridge-proto/src/errors\.rs:\d+:\d+: delete match arm "" in BridgeError::from_method_error$',
 ]

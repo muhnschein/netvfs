@@ -109,6 +109,14 @@ mod tests {
         assert_eq!(MAX_READ, 1_048_576);
         assert_eq!(MAX_READ_AHEAD, 16_777_216);
         assert_eq!(MAX_OFFSET, 4_611_686_018_427_387_904);
+        assert_eq!(MAX_SECRET, 65_536);
         assert_eq!(FLOW_LIMIT, 4_194_304);
+    }
+
+    #[test]
+    fn time_bounds_are_the_first_and_last_millisecond() {
+        // 0001-01-01T00:00:00Z and 9999-12-31T23:59:59.999Z, in ms since 1970.
+        assert_eq!(MIN_TIME_MS, -62_135_596_800_000);
+        assert_eq!(MAX_TIME_MS, 253_402_300_799_999);
     }
 }

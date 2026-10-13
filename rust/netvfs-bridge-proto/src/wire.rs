@@ -76,7 +76,7 @@ impl WireEntry {
         Self {
             name: name.to_vec(),
             kind,
-            target_kind: 0,
+            // target_kind keeps its default, entry_kind::UNKNOWN.
             size: -1,
             mtime_ms: -1,
             ctime_ms: -1,
@@ -283,9 +283,40 @@ mod tests {
 
     #[test]
     fn unknown_entry_uses_minus_one() {
-        let e = WireEntry::unknown(b"a", 1);
-        assert_eq!((e.size, e.mtime_ms, e.mode, e.uid), (-1, -1, -1, -1));
-        assert!(e.owner.is_empty() && e.etag.is_empty());
+        let e = WireEntry::unknown(b"a", entry_kind::FILE);
+        assert_eq!(e.name, b"a".to_vec());
+        assert_eq!(e.kind, entry_kind::FILE);
+        assert_eq!(e.target_kind, entry_kind::UNKNOWN);
+        assert_eq!(
+            (e.size, e.mtime_ms, e.ctime_ms, e.atime_ms, e.mode, e.uid, e.gid),
+            (-1, -1, -1, -1, -1, -1, -1)
+        );
+        assert_eq!(e.flags, 0);
+        assert!(e.owner.is_empty() && e.group.is_empty() && e.etag.is_empty() && e.content_type.is_empty());
+    }
+
+    #[test]
+    fn byte_options_and_owned_dictionaries() {
+        let o = OptsBuilder::new().bytes("path", b"/a\xff").build();
+        assert_eq!(value_bytes(&o["path"]), Some(b"/a\xff".to_vec()));
+        assert_eq!(o["path"].value_signature().to_string(), "ay");
+        let owned = OptsBuilder::new().bytes("path", b"/a").str("s", "x").build_owned();
+        assert_eq!(owned.len(), 2);
+        assert_eq!(value_bytes(&owned["path"]), Some(b"/a".to_vec()));
+        assert_eq!(value_str(&owned["s"]).as_deref(), Some("x"));
+        assert!(OptsBuilder::new().build_owned().is_empty());
+    }
+
+    #[test]
+    fn value_i64_reads_every_integer_type() {
+        assert_eq!(value_i64(&Value::from(7u8)), Some(7));
+        assert_eq!(value_i64(&Value::from(-3i16)), Some(-3));
+        assert_eq!(value_i64(&Value::from(7u16)), Some(7));
+        assert_eq!(value_i64(&Value::from(-4i32)), Some(-4));
+        assert_eq!(value_i64(&Value::from(4_000_000_000u32)), Some(4_000_000_000));
+        assert_eq!(value_i64(&Value::from(-5i64)), Some(-5));
+        assert_eq!(value_i64(&Value::from(9u64)), Some(9));
+        assert_eq!(value_i64(&Value::from("9")), None);
     }
 
     #[test]
