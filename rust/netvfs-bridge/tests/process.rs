@@ -147,6 +147,25 @@ fn exits_when_idle_without_a_client() {
 }
 
 #[test]
+fn exits_cleanly_with_a_session_bus() {
+    // The session-bus connection outlives the core: it must be dropped
+    // inside the runtime, or zbus panics as the bridge leaves.
+    if !have_ffi() {
+        return;
+    }
+    let Some(bus) = TestBus::start() else {
+        println!("skipped: no dbus-daemon");
+        return;
+    };
+    let mut run = BridgeRun::new(Path::new(BRIDGE), "proc-test");
+    run.with_session_bus(bus.address());
+    let started = Instant::now();
+    let mut child = run.spawn();
+    let (code, _) = idle_exit(&mut child, started);
+    assert_eq!(code, Some(0), "{}", run.log());
+}
+
+#[test]
 fn exits_when_idle_after_a_client_vanished() {
     // A client that ends without a word (killed): the bridge sees the
     // connection close and still leaves after the idle time, also with a

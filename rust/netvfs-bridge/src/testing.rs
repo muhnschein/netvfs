@@ -745,6 +745,8 @@ impl BridgeRun {
             .env("NETVFS_ACCOUNTS_HELPER", dir.join("no-helper"))
             .env("NETVFS_BRIDGE_IDLE_EXIT_MS", "500")
             .env_remove("DBUS_SESSION_BUS_ADDRESS")
+            // zbus would find the host's session bus there.
+            .env_remove("XDG_RUNTIME_DIR")
             .env_remove("NETVFS_FAKE_SEED")
             .stdin(std::process::Stdio::null());
         Self { dir, consumer: consumer.to_owned(), socket, command }

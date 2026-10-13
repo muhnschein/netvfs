@@ -66,5 +66,12 @@ pub fn serve(config: Config, deps: Deps) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    tokio::task::LocalSet::new().block_on(&runtime, core::run(config, deps))
+    // Inside the runtime's context until the end: tasks the core leaves
+    // behind (a session-bus connection among them) are dropped with the
+    // LocalSet, and zbus spawns its cleanup onto the runtime as they go.
+    let _context = runtime.enter();
+    let local = tokio::task::LocalSet::new();
+    let code = local.block_on(&runtime, core::run(config, deps));
+    drop(local);
+    code
 }
