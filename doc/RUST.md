@@ -178,10 +178,15 @@ name of its own, as Sailjail requires.
 
 `make check-rust` needs `cargo-nextest`
 (`./tools/ci/cargo-tool.sh cargo-nextest 0.9.148`). `make check-rust-ffi`
-runs the same build as `make check-rust` with `NETVFS_BRIDGE_FFI`,
-`NETVFS_BRIDGE_FFI_FAKE` and `NETVFS_BACKEND_PATH` pointing into the build
-tree; under `SANITIZE=1` it preloads gcc's ASan and UBSan runtimes, which the
-instrumented libraries need first in the process.
+runs every test of netvfs-bridge again, in the same build as
+`make check-rust` (features `testing` and `test-bins`), with
+`NETVFS_BRIDGE_FFI`, `NETVFS_BRIDGE_FFI_FAKE` and `NETVFS_BACKEND_PATH`
+pointing into the build tree, so the tests that need the C ABI (`ffi`,
+`backend`, `server`, and `process`, `contract`, `notifications`, `accounts`
+through the cargo-built binary) run instead of saying they are skipped;
+under `SANITIZE=1` it preloads gcc's ASan and UBSan runtimes, which the
+instrumented libraries need first in the process (the bridge binary those
+tests start inherits the preload).
 
 The weekly ASan job checks the boundary from both sides. `rustc
 -Zsanitizer=address` links LLVM's ASan runtime into the test binary; gcc's
@@ -191,11 +196,12 @@ fake plugin, `libnetvfs-bridge-ffi.so`, its fake control table) with clang
 and `-fsanitize=address` alone: clang leaves the `__asan_*` symbols of a
 shared library undefined and the executable's runtime provides them; the
 test binaries are linked with `--export-dynamic` so that the dynamic loader
-sees that runtime. The instrumentation ABI is stable across LLVM versions:
-the distribution's clang (18.1 on Ubuntu 24.04) works with
-nightly-2026-10-01's LLVM 23.1, tried locally (all of netvfs-bridge's
-tests pass, and a block left unfreed on purpose is reported with its C++
-and Rust frames). `rust-sanitize.sh <nightly> <dir>` then points the test
+sees that runtime. The clang must be of rustc's LLVM major (an older
+clang's instrumentation against a newer runtime is not a combination LLVM
+supports; rust-sanitize.sh refuses it), so the weekly job installs
+`clang-<major>` from apt.llvm.org (`tools/ci/install-clang.sh`, the key
+pinned by fingerprint) and builds with it (`CLANG_MAJOR=<major>
+ffi-libs.sh`). `rust-sanitize.sh <nightly> <dir>` then points the test
 at them; it builds the dev profile with `panic = "unwind"`, since std
 rebuilt under `panic = "abort"` does not build for tests. Qt itself is not
 instrumented; LSan uses `tools/sanitizer/lsan.supp`.

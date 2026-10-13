@@ -11,8 +11,10 @@
 # libraries are built with clang, not gcc (whose libasan would be a second
 # runtime), with ASan only (the Rust binary has no UBSan runtime), and link
 # no runtime of their own: clang leaves a shared library's __asan_* symbols
-# to the executable.
-# Usage: ffi-libs.sh <build dir> [--asan]
+# to the executable. CLANG_MAJOR (optional) picks clang-<major> and
+# clang++-<major> over the default clang: rust-sanitize.sh wants rustc's LLVM
+# major (install-clang.sh installs it).
+# Usage: [CLANG_MAJOR=<major>] ffi-libs.sh <build dir> [--asan]
 # Then: NETVFS_BRIDGE_FFI=<dir>/lib/netvfs/libnetvfs-bridge-ffi.so,
 # NETVFS_BRIDGE_FFI_FAKE=<dir>/lib/libnetvfs-bridge-ffi-fake.so,
 # NETVFS_BACKEND_PATH=<dir>/lib/netvfs/test-backends.
@@ -25,7 +27,10 @@ qmake=$(command -v qmake-qt5 || command -v qmake)
 set --
 if [ "$asan" = "--asan" ]; then
     flags="-fsanitize=address -fno-omit-frame-pointer"
-    set -- -spec linux-clang "QMAKE_CXXFLAGS+=$flags" "QMAKE_CFLAGS+=$flags" "QMAKE_LFLAGS+=-fsanitize=address"
+    cc=clang${CLANG_MAJOR:+-$CLANG_MAJOR}
+    cxx=clang++${CLANG_MAJOR:+-$CLANG_MAJOR}
+    set -- -spec linux-clang "QMAKE_CC=$cc" "QMAKE_CXX=$cxx" "QMAKE_LINK=$cxx" "QMAKE_LINK_SHLIB=$cxx" \
+        "QMAKE_CXXFLAGS+=$flags" "QMAKE_CFLAGS+=$flags" "QMAKE_LFLAGS+=-fsanitize=address"
 fi
 for dir in src/core tests/common tests/fakeplugin src/bridge/ffi tests/bridge/ffifake; do
     mkdir -p "$build/$dir"
