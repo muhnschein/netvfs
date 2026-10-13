@@ -896,9 +896,8 @@ impl Core {
                 self.copy_jobs.finish(id, self.book.pools_mut());
                 self.quota.release_job();
                 if let Some((sid, job)) = self.copy_owners.remove(&id) {
-                    let canceled = self.job_canceled(sid, job);
-                    let outcome = JobOutcome { result, extra: HashMap::new() }.settle(canceled);
-                    self.finish_job(sid, job, outcome);
+                    // As in C++, not settled: copy_across reports its own Canceled.
+                    self.finish_job(sid, job, JobOutcome { result, extra: HashMap::new() });
                 }
             }
             WorkerEvent::Warning(text) => crate::log::warning(format_args!("{text}")),

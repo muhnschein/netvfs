@@ -18,6 +18,7 @@
 
 use netvfs_bridge::accounts::{Attention, Value};
 use netvfs_bridge::consent::Consent;
+use netvfs_bridge::core::nearby::{self, NearbySource as _};
 use netvfs_bridge::handoff::HandoffArg;
 use netvfs_bridge::locations::knownhosts::KnownHosts;
 use netvfs_bridge::testing::{
@@ -63,6 +64,8 @@ const TESTS: &[(&str, Test)] = &[
     ("discovery", discovery),
     ("handoff", handoff),
     ("locations_changed", locations_changed),
+    ("ffi_nearby_lives_on_the_qt_thread", ffi_nearby_lives_on_the_qt_thread),
+    ("cancel_copy_across", cancel_copy_across),
 ];
 
 fn main() -> ExitCode {
@@ -1025,5 +1028,52 @@ fn locations_changed(h: &Harness) {
         assert!(wait_signal(&mut signals, WAIT, |s| matches!(s, Signal::LocationsChanged)).await.is_some());
         assert_eq!(f.probe().counters().await.unwrap().pools, 0);
         assert_eq!(error_name(&c.proxy().capabilities("account:5").await), name(ErrorName::NotFound));
+    });
+}
+
+/// The discoveries alive on the Qt thread.
+fn live_discoveries(h: &Harness) -> usize {
+    let (tx, rx) = std::sync::mpsc::channel();
+    assert!(h.ffi.post(move || {
+        let _sent = tx.send(nearby::live_discoveries());
+    }));
+    rx.recv_timeout(WAIT).unwrap()
+}
+
+fn ffi_nearby_lives_on_the_qt_thread(h: &Harness) {
+    let f = Fixture::new(h, Consent::Granted);
+    let mut source = nearby::FfiNearby::new(h.ffi, f.link().clone());
+    assert_eq!(live_discoveries(h), 0);
+    source.set_running(false); // nothing to stop: nothing made
+    assert_eq!(live_discoveries(h), 0);
+    source.set_running(true);
+    assert_eq!(live_discoveries(h), 1);
+    source.set_running(false); // stopped, kept for the next start
+    assert_eq!(live_discoveries(h), 1);
+    source.set_running(true);
+    assert_eq!(live_discoveries(h), 1);
+    drop(source);
+    assert_eq!(live_discoveries(h), 0);
+}
+
+fn cancel_copy_across(h: &Harness) {
+    let f = Fixture::new(h, Consent::Granted);
+    f.accounts.state().accounts.push(FakeAccounts::fake_account(2));
+    f.accounts_changed();
+    h.fake.add_file(b"/big", &vec![b'x'; 4 << 20]);
+    h.fake.set_chunk_delay_ms(50);
+    block_on(async {
+        let c = f.hello_client().await;
+        let mut signals = c.signals();
+        let probe = f.probe();
+        let job =
+            c.proxy().copy_across(ACCOUNT_LOC, b"/big", "account:2", b"/copy", &no_opts()).await.unwrap();
+        assert_eq!(probe.wait_until(WAIT, |n| n.copy_jobs == 1).await.unwrap().copy_jobs, 1);
+        let progress = wait_signal(&mut signals, WAIT, |s| matches!(s, Signal::JobProgress { .. })).await;
+        assert!(matches!(progress, Some(Signal::JobProgress { job: j, .. }) if j == job), "{progress:?}");
+        c.proxy().cancel(job).await.unwrap();
+        assert_eq!(finished(&mut signals, job).await.0, "Canceled");
+        let after = probe.wait_until(WAIT, |n| n.copy_jobs == 0 && n.jobs == 0).await.unwrap();
+        assert_eq!((after.copy_jobs, after.jobs), (0, 0));
     });
 }

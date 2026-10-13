@@ -118,4 +118,8 @@ exclude_re = [
     'netvfs-bridge/src/consent\.rs:\d+:\d+: replace \| with \^',
     # netvfs-bridge sys/lock.rs: LOCK_EX | LOCK_NB, distinct bits as well.
     'netvfs-bridge/src/sys/lock\.rs:\d+:\d+: replace \| with \^',
+    # netvfs-bridge core/nearby.rs FfiNearby::set_running, the warning when
+    # post refuses: only a log line, and post refuses only once the Qt
+    # application quits, which ends the test harness's loop as well.
+    'netvfs-bridge/src/core/nearby\.rs:\d+:\d+: delete ! in <impl NearbySource for FfiNearby>::set_running$',
 ]

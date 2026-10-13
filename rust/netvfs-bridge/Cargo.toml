@@ -68,6 +68,11 @@ path = "src/bin/accounts_fake.rs"
 required-features = ["test-bins"]
 test = false
 
+# The netvfs-bridge binary: command line, exit codes, a run with the C ABI.
+[[test]]
+name = "process"
+required-features = ["testing"]
+
 [[test]]
 name = "notifications"
 required-features = ["testing"]

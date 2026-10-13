@@ -204,12 +204,4 @@ impl Core {
             }
         }
     }
-
-    /// Whether job `job` of `sid` was canceled.
-    pub(super) fn job_canceled(&self, sid: SessionId, job: u32) -> bool {
-        self.sessions
-            .get(&sid)
-            .and_then(|s| s.public.get(&job).and_then(|op| s.ops.get(op)))
-            .is_some_and(|op| op.cancel.load(Ordering::Acquire))
-    }
 }
