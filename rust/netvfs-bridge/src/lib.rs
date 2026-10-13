@@ -41,6 +41,8 @@ pub mod status;
 mod sys;
 #[cfg(test)]
 mod test_support;
+#[cfg(feature = "testing")]
+pub mod testing;
 #[cfg(any(test, feature = "testing"))]
 pub mod testutil;
 

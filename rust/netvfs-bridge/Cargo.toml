@@ -49,6 +49,14 @@ path = "tests/backend.rs"
 harness = false
 required-features = ["testing"]
 
+# The bridge end to end, in-process (the core with the socket front), with
+# the same layout as `ffi` and `backend`.
+[[test]]
+name = "server"
+path = "tests/server.rs"
+harness = false
+required-features = ["testing"]
+
 # The bridge (SPEC-v2 XB-2): `netvfs-bridge [--listen ADDRESS] <consumer-id>`.
 [[bin]]
 name = "netvfs-bridge"

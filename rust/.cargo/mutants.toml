@@ -4,12 +4,14 @@
 # Matched against the mutant's name with its line and column (\d+:\d+).
 
 # Test doubles, built only with the `fake` / `testing` features and never
-# shipped: the in-process FakeBridge (and its replay of the contract) and the
-# loader of the fake control table. They are the tests' oracle; a mutant in
-# them says nothing about the bridge.
+# shipped: the in-process FakeBridge (and its replay of the contract), the
+# loader of the fake control table, and the bridge fixture with its fake
+# accounts, prompt, discovery and launcher. They are the tests' oracle; a
+# mutant in them says nothing about the bridge.
 exclude_globs = [
     "netvfs-bridge-proto/src/fake/**",
     "netvfs-bridge/src/ffi/fake.rs",
+    "netvfs-bridge/src/testing.rs",
 ]
 
 exclude_re = [
