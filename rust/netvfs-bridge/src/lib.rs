@@ -25,6 +25,7 @@
 pub mod accounts;
 pub mod config;
 pub mod consent;
+pub mod core;
 pub mod ffi;
 pub mod handoff;
 pub mod ini;
@@ -43,4 +44,25 @@ mod test_support;
 #[cfg(any(test, feature = "testing"))]
 pub mod testutil;
 
+pub use crate::core::{Config, CoreLink, Counters, Deps, Services};
 pub use status::Status;
+
+use std::process::ExitCode;
+
+/// Serves one consumer (XB-3) until the idle exit (XB-2): binds the
+/// listening socket of `deps`, then runs the [`core`](crate::core) on a
+/// current-thread runtime of the calling thread (the runtime thread, T1).
+/// The C ABI must be loaded and `init`ed, its Qt loop running on the main
+/// thread. Success after the idle exit or [`CoreLink::shutdown`]; failure
+/// when the socket cannot be bound or the runtime cannot start.
+#[must_use]
+pub fn serve(config: Config, deps: Deps) -> ExitCode {
+    let runtime = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
+        Ok(runtime) => runtime,
+        Err(e) => {
+            log::critical(format_args!("Cannot start the runtime: {e}"));
+            return ExitCode::FAILURE;
+        }
+    };
+    tokio::task::LocalSet::new().block_on(&runtime, core::run(config, deps))
+}

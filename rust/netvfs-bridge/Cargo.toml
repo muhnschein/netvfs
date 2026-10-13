@@ -49,6 +49,11 @@ path = "tests/backend.rs"
 harness = false
 required-features = ["testing"]
 
+# The bridge (SPEC-v2 XB-2): `netvfs-bridge [--listen ADDRESS] <consumer-id>`.
+[[bin]]
+name = "netvfs-bridge"
+path = "src/main.rs"
+
 [[bin]]
 name = "netvfs-accounts-fake"
 path = "src/bin/accounts_fake.rs"
