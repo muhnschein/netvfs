@@ -171,7 +171,7 @@ mod tests {
         assert_eq!(to_long_long("9223372036854775807"), Some(i64::MAX));
         assert_eq!(to_long_long("9223372036854775808"), None);
         assert_eq!(to_long_long("-9223372036854775809"), None);
-        for bad in ["", " ", "-", "+", "1x", "0x10", "1 2", "--1", "١"] {
+        for bad in ["", " ", "-", "+", "1x", "0x10", "1 2", "--1", "++1", "-+1", "١"] {
             assert_eq!(to_long_long(bad), None, "{bad:?}");
         }
         assert_eq!(to_int("2147483647"), Some(i32::MAX));
