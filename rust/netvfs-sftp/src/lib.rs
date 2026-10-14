@@ -5,7 +5,9 @@
 pub mod client;
 pub mod errors;
 pub mod io;
+pub mod keys;
 pub mod paths;
+pub mod policy;
 pub mod proto;
 pub mod remote;
 pub mod wire;
