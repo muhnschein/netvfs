@@ -24,10 +24,33 @@ every `unsafe` call is in one module (`sandbox.rs`).
 | `rust/netvfs-accounts/src/dbus.rs` | the `AccountChanged` signal after an attention write |
 | `rust/netvfs-accounts/src/sandbox.rs` | descriptors, process state, set-id, Landlock, seccomp |
 | `rust/netvfs-accounts/src/bin/probe.rs` | tests only: applies one part of the confinement and checks it |
+| `rust/netvfs-bridge-proto/src/methods.rs` | `org.netvfs.Bridge1`: names, the method table (args.cpp order, lane, consent), signals, the served XML |
+| `rust/netvfs-bridge-proto/src/errors.rs`, `limits.rs` | the 24 XC-21 error names; the XB-17, XB-12 and C-10 limits |
+| `rust/netvfs-bridge-proto/src/wire.rs`, `proxy.rs`, `connect.rs`, `signals.rs` | wire types and the client (from lautta) |
+| `rust/netvfs-bridge-proto/src/fake/` | tests only (feature `fake`): lautta's fake bridge, the golden-sequence replayer |
+| `rust/netvfs-bridge-proto/org.netvfs.Bridge1.xml` | copy of the contract XML; `tests/contract.rs` keeps it equal |
+| `rust/netvfs-bridge/src/ffi/raw.rs` | the C ABI of `libnetvfs-bridge-ffi.so` by hand (`#[repr(C)]`, no bindgen), sizes and offsets pinned by tests |
+| `rust/netvfs-bridge/src/ffi/loader.rs`, `mod.rs` | `dlopen` (`RTLD_NOW \| RTLD_LOCAL`, `/usr/lib64/netvfs/libnetvfs-bridge-ffi.so`, `NETVFS_BRIDGE_FFI` for tests), version and size check; `Ffi`: init/run/post/quit on the Qt thread, URLs, `conn_new` |
+| `rust/netvfs-bridge/src/ffi/conn.rs` | `Conn` and `Handle` (`!Send`, owner thread, T4), `CancelHandle` (any thread; shares a lock with `conn_free`) |
+| `rust/netvfs-bridge/src/ffi/callback.rs` | the trampolines (list sink, walk, progress, `nvb_io`, establish hooks, discovery, `post`): panics caught, never into C++ (T7); connection calls refused inside a callback (T6) |
+| `rust/netvfs-bridge/src/ffi/marshal.rs` | plain Rust values both ways: `ParamsBuf` (owns the `nvb_kv`/`nvb_bytes` arrays of a call), readers of C++'s blocks and callback arguments |
+| `rust/netvfs-bridge/src/ffi/discovery.rs` | `Discovery` (XD-5), Qt thread only (T3) |
+| `rust/netvfs-bridge/src/ffi/fake.rs` | tests only (feature `testing`): the fake backend's control table (`NETVFS_BRIDGE_FFI_FAKE`) |
+| `rust/netvfs-bridge/src/status.rs` | `Status`: XC-21 name, message, detail, retry time |
 | `rust/fuzz/` | cargo-fuzz targets (nightly, not in the workspace) |
 
 Dependencies: `libc` and `rusqlite` (without the bundled SQLite: the system
-libsqlite3 through pkg-config).
+libsqlite3 through pkg-config). The protocol crate: `zbus` 5 (`tokio`, `p2p`),
+`tokio`, `serde`, `zeroize` and `futures-lite` (already in zbus's tree);
+`serde_json` and `sha2` only behind its test-only `fake` feature.
+netvfs-bridge: the protocol crate, `libc` and `zeroize`.
+
+`unsafe` is allowed in the helper's `sandbox` and in netvfs-bridge's `ffi`
+module only (a later `sys` module joins them); every block says why it
+holds. The `ffi` module keeps the threading and ownership rules of
+`src/bridge/ffi/netvfs_bridge_ffi.h` by its types: plain Rust values in,
+`Result<_, Status>` out, every block C++ returns read and freed at once,
+secrets passed as `Zeroizing` buffers without a copy on the Rust side.
 
 ## Toolchain
 
@@ -115,17 +138,40 @@ name of its own, as Sailjail requires.
 | Golden tests: every answer byte for byte against the C++ helper, kept as a test-only reference (`referencehelper.cpp`); about 95 stored values, account shapes, attention writes and refused writes | `tests/bridge/accounts` | `make check-unit` |
 | A live libaccounts-qt manager sees the attention write through the signal | `tests/bridge/accounts` (`attentionSignal`) | `make check-unit` |
 | Each part of the confinement in a fresh process, also from setgid copies | `rust/netvfs-accounts/tests/sandbox.rs` | `make check-rust` |
+| netvfs-bridge's `ffi` module against the built `libnetvfs-bridge-ffi.so` and the fake backend: loading and version, establish (identity verdicts, prompts, phases, signond on the Qt thread), listing, walk, remove tree, handles, transfers through `nvb_io`, a cancel from another thread, copy across, URLs, error mapping, post/quit, panics in callbacks, discovery, no block left unfreed (heap growth over many calls) | `rust/netvfs-bridge/tests/ffi.rs` (its own harness: `init` needs the main thread; a test hung for 30 s fails) | `make check-rust-ffi` (part of `make check`); without the libraries every case says it is skipped |
+| The FFI's C ABI from C++ (and its marshalling into one block per result) | `tests/bridge/ffi` | `make check-unit` |
 | The target build: tests under qemu, smoke run, linked libraries | see "Cross build" | CI job "Sailfish OS 5.2 aarch64 RPMs" |
-| Mutations the tests must catch: a curated list, and cargo-mutants on every line a pull request changes | `tests/mutations/helper.json`; `tools/ci/rust-mutants.sh <base>` | CI matrix `helper`; CI job "Tests bite (Rust, changed code)" |
-| Fuzzing: stored values, bus replies, arguments | `rust/fuzz` | `./tools/ci/rust-fuzz.sh <seconds>` (nightly) |
+| Mutations the tests must catch: a curated list, and cargo-mutants on every line a pull request changes (with the FFI's C++ libraries built by `tools/ci/ffi-libs.sh`, so `tests/ffi.rs` runs; exclusions with reasons in `rust/.cargo/mutants.toml`) | `tests/mutations/helper.json`; `tools/ci/rust-mutants.sh <base> [<ffi-libs dir>]` | CI matrix `helper`; CI job "Tests bite (Rust, changed code)" |
+| Fuzzing: stored values, bus replies, arguments, the FFI marshalling (`ffi_marshal`: parameters, entries, identities into their C form and back) | `rust/fuzz` | `./tools/ci/rust-fuzz.sh <seconds>` (nightly) |
 | Advisories, yanked crates, licences, sources | `rust/deny.toml` | CI job "Rust supply chain"; advisories again weekly |
-| Tests under ASan + LSan, the current stable's clippy, the online workflow audit | `.github/workflows/scheduled.yml` | weekly; `./tools/ci/rust-sanitize.sh <nightly>` |
+| Tests under ASan + LSan (the FFI test with the C++ side instrumented too, see below), the current stable's clippy, the online workflow audit | `.github/workflows/scheduled.yml` | weekly; `./tools/ci/rust-sanitize.sh <nightly> [<ffi-libs dir>]` |
 | Workflow audit: no credentials left in checkouts, no `${{ }}` in `run:` | `.github/workflows` | CI job "Workflow audit" (`zizmor --offline`) |
 | Coverage for Sonar | `build-coverage/rust-lcov.info` | `make coverage` |
 | Clippy findings for Sonar | `build-coverage/clippy.json` | `make COVERAGE=1 clippy-report` |
 
 `make check-rust` needs `cargo-nextest`
-(`./tools/ci/cargo-tool.sh cargo-nextest 0.9.148`).
+(`./tools/ci/cargo-tool.sh cargo-nextest 0.9.148`). `make check-rust-ffi`
+runs the same build as `make check-rust` with `NETVFS_BRIDGE_FFI`,
+`NETVFS_BRIDGE_FFI_FAKE` and `NETVFS_BACKEND_PATH` pointing into the build
+tree; under `SANITIZE=1` it preloads gcc's ASan and UBSan runtimes, which the
+instrumented libraries need first in the process.
+
+The weekly ASan job checks the boundary from both sides. `rustc
+-Zsanitizer=address` links LLVM's ASan runtime into the test binary; gcc's
+libasan would be a second runtime, so `tools/ci/ffi-libs.sh <dir> --asan`
+builds only the libraries the FFI test loads (libnetvfs, libnetvfstest, the
+fake plugin, `libnetvfs-bridge-ffi.so`, its fake control table) with clang
+and `-fsanitize=address` alone: clang leaves the `__asan_*` symbols of a
+shared library undefined and the executable's runtime provides them; the
+test binaries are linked with `--export-dynamic` so that the dynamic loader
+sees that runtime. The instrumentation ABI is stable across LLVM versions:
+the distribution's clang (18.1 on Ubuntu 24.04) works with
+nightly-2026-10-01's LLVM 23.1, tried locally (all of netvfs-bridge's
+tests pass, and a block left unfreed on purpose is reported with its C++
+and Rust frames). `rust-sanitize.sh <nightly> <dir>` then points the test
+at them; it builds the dev profile with `panic = "unwind"`, since std
+rebuilt under `panic = "abort"` does not build for tests. Qt itself is not
+instrumented; LSan uses `tools/sanitizer/lsan.supp`.
 `make coverage` builds the helper with `-C instrument-coverage`; the
 confinement lets it write its counters to `build-coverage/rust-coverage`
 only in that build (`NETVFS_RUST_COVERAGE_DIR`).
@@ -136,6 +182,9 @@ only in that build (`NETVFS_RUST_COVERAGE_DIR`).
   against the SDK's compiler and sysroot (0.4.0 built in `mb2` with the
   SDK's 1.75). The bridge (Phase 2) needs crates that 1.75 cannot build
   (zbus 5), and both binaries should use one toolchain.
+- The FFI bindings are written by hand from the frozen header rather than
+  generated by bindgen (which needs libclang at build time); tests pin the
+  sizes and offsets that gcc gives the header on LP64.
 - Landlock and seccomp through raw syscalls, as the C++ code did, rather than
   crates: the code is small, handles Landlock ABI 1 to 7 itself and adds
   nothing to vendor or review in the privileged process.

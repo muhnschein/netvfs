@@ -273,6 +273,9 @@ systemctl-user daemon-reload || :
 
 %files bridge
 %{_prefix}/libexec/netvfs/netvfs-bridge
+# The backends' C ABI for the Rust netvfs-bridge (loaded with dlopen, next to
+# the backend folder, outside the linker path).
+%{_libdir}/netvfs/libnetvfs-bridge-ffi.so
 # SPEC-v2 XB-2a: only the group `privileged` can read the accounts database.
 %attr(2755,root,privileged) %{_prefix}/libexec/netvfs/netvfs-accounts
 %{_prefix}/lib/systemd/user-generators/netvfs-bridge-generator

@@ -1,0 +1,8 @@
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
+/* libnetvfs-bridge-ffi-fake.so exports one symbol (design §4.1). */
+{
+    global:
+        nvb_fake_get;
+    local:
+        *;
+};

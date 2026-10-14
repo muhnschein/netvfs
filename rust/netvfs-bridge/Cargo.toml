@@ -1,0 +1,30 @@
+[package]
+name = "netvfs-bridge"
+description = "netvfs-bridge: org.netvfs.Bridge1 for sandboxed consumers (SPEC-v2 8a), over the C++ backends"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+# Test support: the fake control table of tests/bridge/ffifake, fixtures.
+testing = []
+
+[dependencies]
+netvfs-bridge-proto = { path = "../netvfs-bridge-proto" }
+libc = "0.2"
+zeroize = "1"
+
+# The C ABI against the real libnetvfs-bridge-ffi.so and the fake backend
+# (make check-rust-ffi). Its own main(): `init` must run on the main thread,
+# which then serves the Qt event loop. Without the libraries (the
+# NETVFS_BRIDGE_FFI* variables unset) every test says it is skipped.
+[[test]]
+name = "ffi"
+path = "tests/ffi.rs"
+harness = false
+required-features = ["testing"]

@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-2.1-or-later
-# cargo-deny for the crates the helper links (CI job "Rust supply chain"):
-# known vulnerabilities, yanked versions, licences, sources.
+# cargo-deny for the crates the helper and the bridge link (CI job "Rust
+# supply chain"): known vulnerabilities, yanked versions, licences, sources.
 
 [graph]
 all-features = true
@@ -16,6 +16,13 @@ version = 2
 # what the locked crates use; another licence is a decision to review.
 allow = ["Apache-2.0", "BSD-2-Clause", "MIT"]
 confidence-threshold = 0.9
+# Named exceptions, each for one crate.
+exceptions = [
+    # Unicode tables in a proc-macro helper (zbus and serde derives, through
+    # proc-macro2): "(MIT OR Apache-2.0) AND Unicode-3.0". Build-time only,
+    # nothing of it is linked; Unicode-3.0 is a permissive data licence.
+    { crate = "unicode-ident", allow = ["Unicode-3.0"] },
+]
 
 # The workspace's own crates (publish = false) are netvfs.
 [licenses.private]
@@ -24,6 +31,15 @@ ignore = true
 [bans]
 multiple-versions = "deny"
 wildcards = "deny"
+# Path dependencies between the workspace's own unpublished crates.
+allow-wildcard-paths = true
+# Duplicates allowed by name, each with the reason.
+skip = [
+    # Proc-macro (build-time) only: enumflags2_derive (zvariant) and
+    # tracing-attributes (tokio, zbus) have no release on syn 3 yet, the rest
+    # of the zbus tree is on syn 3.
+    { crate = "syn@2", reason = "enumflags2_derive and tracing-attributes are still on syn 2" },
+]
 
 [sources]
 unknown-registry = "deny"

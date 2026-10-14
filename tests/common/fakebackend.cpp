@@ -366,6 +366,12 @@ Result FakeBackend::key(const QString &path, QString *out)
     return r;
 }
 
+QString FakeServer::keyFor(const QString &path)
+{
+    QString out;
+    return FakeBackend::key(path, &out).ok() ? out : QString();
+}
+
 Result FakeBackend::begin(const QString &op, bool needAuth)
 {
     m_server->log << op;
@@ -464,6 +470,12 @@ Result FakeBackend::authenticate(const Credentials &credentials, AuthPrompter *p
         const bool accepted = answered && answers.size() == 1 && answers.first() == otp;
         for (QByteArray &answer : answers)
             answer.fill('\0');
+        if (answered) {
+            // What the prompter handed over: tests check that a reply with
+            // the wrong count never reaches the backend.
+            QMutexLocker lock(&m_server->mutex);
+            m_server->log << QStringLiteral("answers:%1").arg(answers.size());
+        }
         if (m_canceled)
             return Result(Error::Canceled);
         if (!accepted)

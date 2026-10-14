@@ -1,9 +1,10 @@
 # SPDX-License-Identifier: LGPL-2.1-or-later
-# The Rust parts of netvfs. Today one crate: netvfs-accounts, the setgid
-# accounts helper (SPEC-v2 XB-2a). See doc/RUST.md.
+# The Rust parts of netvfs: netvfs-accounts, the setgid accounts helper
+# (SPEC-v2 XB-2a), and netvfs-bridge-proto, the org.netvfs.Bridge1 protocol
+# crate. See doc/RUST.md.
 [workspace]
 resolver = "3"
-members = ["netvfs-accounts"]
+members = ["netvfs-accounts", "netvfs-bridge-proto", "netvfs-bridge"]
 # The fuzz targets build with a nightly toolchain of their own (doc/RUST.md).
 exclude = ["fuzz"]
 

@@ -63,7 +63,7 @@ public:
 
     // State
     QHash<QString, Node> nodes;
-    QStringList log;                    // "connect", "authenticate", "upload:<path>", ...
+    QStringList log;                    // "connect", "authenticate", "answers:<n>", "upload:<path>", ...
     int liveBackends = 0;
     ConnectionParams lastParams;        // given to the last connect()
 
@@ -80,6 +80,9 @@ public:
 
     // Stores `data` for `path` and every hard link of it.
     void setData(const QString &path, const QByteArray &data);
+    // The key of a backend path (normalised, without a leading '/'); "" for
+    // an invalid path.
+    static QString keyFor(const QString &path);
     // Resolves symlinks in `path` (all components, the last one only with
     // `followLast`). NotFound for dangling links, ProtocolError for loops.
     Result resolve(const QString &path, bool followLast, QString *resolved) const;
@@ -148,6 +151,7 @@ private:
     void finishWrite(const QString &resolved, const WriteOptions &options);
     Result checkHandle(quint64 generation) const;
     static Result key(const QString &path, QString *out);
+    friend class FakeServer;
 
     FakeServer *m_server;
     ConnectionParams m_params;

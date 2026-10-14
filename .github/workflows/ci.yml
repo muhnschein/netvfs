@@ -83,7 +83,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        list: [accounts, bridge, buteo, cli, core, discovery, ftp, helper, local, ops, packaging, qml, sftp, smb, url, webdav]
+        list: [accounts, bridge, buteo, cli, core, discovery, ffi, ftp, helper, local, ops, packaging, qml, sftp, smb, url, webdav]
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
@@ -110,11 +110,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - name: Install dependencies
-        run: |
-          sudo apt-get update -q
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends \
-              pkg-config libsqlite3-dev
-          cd rust && rustup toolchain install
+        run: ./tools/ci/install-host-deps.sh
       - name: Cache cargo-nextest
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
@@ -122,6 +118,9 @@ jobs:
           key: cargo-nextest-${{ env.NEXTEST_VERSION }}-ubuntu-24.04
       - name: Install cargo-nextest
         run: ./tools/ci/cargo-tool.sh cargo-nextest "$NEXTEST_VERSION"
+      # netvfs-bridge's FFI test needs the C++ side (only those libraries).
+      - name: Build the FFI's C++ libraries
+        run: ./tools/ci/ffi-libs.sh build-ffi
       - name: Cache cargo-mutants
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
@@ -132,7 +131,7 @@ jobs:
       - name: Mutants in the diff
         env:
           BASE_REF: ${{ github.base_ref }}
-        run: ./tools/ci/rust-mutants.sh "origin/$BASE_REF"
+        run: ./tools/ci/rust-mutants.sh "origin/$BASE_REF" build-ffi
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: failure()
         with:
