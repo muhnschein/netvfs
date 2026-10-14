@@ -112,7 +112,7 @@ pub struct Negotiated {
 /// Checks a NEGOTIATE response against the offer.
 ///
 /// # Errors
-/// [`crate::Error::Policy`] for another dialect, a cipher or signing algorithm not
+/// [`crate::error::Error::Policy`] for another dialect, a cipher or signing algorithm not
 /// offered, a preauth hash other than SHA-512, compression; protocol errors for malformed or
 /// duplicate contexts.
 pub fn check_response(offer: &Offer, resp: &NegotiateResponse) -> Result<Negotiated> {

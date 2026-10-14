@@ -4,10 +4,16 @@
 #![forbid(unsafe_code)]
 
 pub mod auth;
+pub mod conn;
 pub mod crypto;
 pub mod error;
+#[cfg(test)]
+mod fake;
 pub mod msg;
 pub mod names;
 pub mod negotiate;
+pub mod profile;
+pub mod session;
 pub mod status;
+pub mod transport;
 pub mod wire;
