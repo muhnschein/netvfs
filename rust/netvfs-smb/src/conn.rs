@@ -429,6 +429,24 @@ impl State {
         Ok(None)
     }
 
+    /// Dispatches `elements` if the credits suffice now.
+    fn dispatch_if_credits(
+        &mut self,
+        target: Target,
+        elements: &[Element],
+    ) -> Result<Option<(Sent, Protect)>> {
+        self.usable()?;
+        let mut need = 0u32;
+        for e in elements {
+            need = need.saturating_add(u32::from(self.cost(e.command, e.payload)?));
+        }
+        if self.credits < need {
+            return Ok(None);
+        }
+        let protect = self.protect(target);
+        Ok(Some((self.dispatch(target.tree_id, protect, elements, false)?.0, protect)))
+    }
+
     /// Takes the credits of a checked response; for a final one, the
     /// request is done: returns where the response goes (`None`: nowhere).
     fn accept(
@@ -599,6 +617,12 @@ impl Conn {
         self.0.lock().credits
     }
 
+    /// Sets the credits in hand (tests of other modules).
+    #[cfg(test)]
+    pub(crate) fn grant(&self, credits: u32) {
+        self.0.lock().credits = credits;
+    }
+
     /// `Ok` while the connection works.
     ///
     /// # Errors
@@ -645,20 +669,7 @@ impl Conn {
             notified.as_mut().enable();
             let dispatched = self.0.lock().try_dispatch(target, &elements, need, cancel)?;
             if let Some((sent, chain, protect)) = dispatched {
-                let tickets = sent
-                    .into_iter()
-                    .zip(owners)
-                    .filter_map(|((mid, rx), owns)| {
-                        rx.map(|rx| Ticket {
-                            shared: Arc::clone(&self.0),
-                            mid,
-                            rx,
-                            cleanup: owns.then_some((target.tree_id, protect)),
-                            done: false,
-                        })
-                    })
-                    .collect();
-                return Ok((tickets, chain));
+                return Ok((self.tickets(sent, &owners, target.tree_id, protect), chain));
             }
             let mut sleep = pin!(tokio::time::sleep_until(deadline));
             let woke = poll_fn(|cx| {
@@ -683,6 +694,40 @@ impl Conn {
                 }
             }
         }
+    }
+
+    fn tickets(&self, sent: Sent, owners: &[bool], tree_id: u32, protect: Protect) -> Vec<Ticket> {
+        sent.into_iter()
+            .zip(owners)
+            .filter_map(|((mid, rx), owns)| {
+                rx.map(|rx| Ticket {
+                    shared: Arc::clone(&self.0),
+                    mid,
+                    rx,
+                    cleanup: owns.then_some((tree_id, protect)),
+                    done: false,
+                })
+            })
+            .collect()
+    }
+
+    /// Sends `elements` now if the credits suffice (`None`: they do not),
+    /// without waiting: read-ahead, a hint that may come to nothing.
+    ///
+    /// # Errors
+    /// A broken connection.
+    pub fn send_now(&self, target: Target, elements: &[Element]) -> Result<Option<Vec<Ticket>>> {
+        let owners: Vec<bool> = elements.iter().map(|e| e.owns_handle).collect();
+        let dispatched = self.0.lock().dispatch_if_credits(target, elements)?;
+        Ok(dispatched.map(|(sent, protect)| self.tickets(sent, &owners, target.tree_id, protect)))
+    }
+
+    /// CLOSE of `file_id` without waiting for the answer (a handle whose
+    /// owner went, or a call canceled before it closed what it opened).
+    pub fn close_detached(&self, target: Target, file_id: &FileId) {
+        let mut st = self.0.lock();
+        let protect = st.protect(target);
+        st.close_detached(target.tree_id, protect, file_id);
     }
 
     /// Sends one request and waits for its final response.
