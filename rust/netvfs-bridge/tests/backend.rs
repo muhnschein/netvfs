@@ -30,7 +30,7 @@ use netvfs_bridge::locations::connector::{
     AccountAccess, Connector, IDENTITY_UNKNOWN, KEYBOARD_INTERACTIVE, PinStore,
 };
 use netvfs_bridge::locations::copyjobs::{CopyId, CopyJobs};
-use netvfs_bridge::locations::pool::PoolSet;
+use netvfs_bridge::locations::pool::{CONNECTION_IDLE, PoolSet};
 use netvfs_bridge::locations::spec::{AdHocSecret, Attention, LocationSpec};
 use netvfs_bridge::locations::worker::{Handles, Turn, WorkerId};
 use netvfs_bridge::locations::{Answer, AskId, TaskContext, WorkerEvent, WorkerEvents};
@@ -409,16 +409,28 @@ fn wrap<R: Send + 'static>(
     })
 }
 
-fn get<R>(rx: &mpsc::Receiver<Result<R, Status>>) -> Result<R, Status> {
-    match rx.recv_timeout(Duration::from_secs(20)) {
-        Ok(result) => result,
-        Err(e) => panic!("the work did not run: {e}"),
+/// What the work gave. Waits as the core does, with its maintenance tick:
+/// that reaps the stopped connections whose threads have finished, so that
+/// work waiting for one of their host slots gets it.
+#[track_caller]
+fn get<R>(rig: &mut Rig, rx: &mpsc::Receiver<Result<R, Status>>) -> Result<R, Status> {
+    let deadline = Instant::now() + Duration::from_secs(20);
+    loop {
+        match rx.recv_timeout(Duration::from_millis(50)) {
+            Ok(result) => return result,
+            Err(mpsc::RecvTimeoutError::Timeout) if Instant::now() < deadline => {
+                rig.book.maintain(Instant::now(), CONNECTION_IDLE);
+            }
+            Err(e) => panic!("the work did not run: {e}; {:?}", rig.book),
+        }
     }
 }
 
 /// Establishes a connection of `loc` (an empty item, as `connectAdHoc`).
+#[track_caller]
 fn connect(rig: &mut Rig, loc: &str) -> Result<(), Status> {
-    get(&on_worker(rig, loc, TaskContext::detached(), Box::new(|_, _, _| ((), Ok(())))))
+    let rx = on_worker(rig, loc, TaskContext::detached(), Box::new(|_, _, _| ((), Ok(()))));
+    get(rig, &rx)
 }
 
 fn name_of<T>(r: &Result<T, Status>) -> Option<ErrorName> {
@@ -517,7 +529,7 @@ fn account_data_failures(env: &Env) {
     wait_until("the fetch", || rig.core.seen.lock().unwrap().iter().any(|s| matches!(s, Seen::Fetch(7))));
     task.cancel.store(true, Ordering::Release);
     rig.book.kick();
-    assert_eq!(name_of(&get(&rx)), Some(ErrorName::Canceled));
+    assert_eq!(name_of(&get(&mut rig, &rx)), Some(ErrorName::Canceled));
     assert_eq!(env.fake.log_count("connect"), 0);
 }
 
@@ -668,10 +680,12 @@ fn connections_are_reused_and_dropped(env: &Env) {
     // An operation's own failure keeps the connection; a lost one drops it.
     let failing =
         |name: ErrorName| -> Body<()> { Box::new(move |_, _, _| ((), Err(Status::new(name, "x")))) };
-    drop(get(&on_worker(&mut rig, &id, TaskContext::detached(), failing(ErrorName::NotFound))));
+    let rx = on_worker(&mut rig, &id, TaskContext::detached(), failing(ErrorName::NotFound));
+    drop(get(&mut rig, &rx));
     connect(&mut rig, &id).unwrap();
     assert_eq!(f.log_count("connect"), 1);
-    drop(get(&on_worker(&mut rig, &id, TaskContext::detached(), failing(ErrorName::ConnectionLost))));
+    let rx = on_worker(&mut rig, &id, TaskContext::detached(), failing(ErrorName::ConnectionLost));
+    drop(get(&mut rig, &rx));
     wait_until("the connection freed", || f.live_backends() == 0);
     connect(&mut rig, &id).unwrap();
     assert_eq!(f.log_count("connect"), 2);
@@ -716,7 +730,7 @@ fn cancel_kicks_a_running_listing(env: &Env) {
     let start = Instant::now();
     task.cancel.store(true, Ordering::Release);
     rig.book.kick();
-    assert_eq!(name_of(&get(&rx).unwrap()), Some(ErrorName::Canceled));
+    assert_eq!(name_of(&get(&mut rig, &rx).unwrap()), Some(ErrorName::Canceled));
     assert!(start.elapsed() < Duration::from_secs(2), "{:?}", start.elapsed());
     // The canceled item dropped its connection.
     wait_until("the connection freed", || f.live_backends() == 0);
@@ -749,7 +763,7 @@ fn list_streams_batches(env: &Env) {
                 ((batches, result.clone()), result)
             }),
         );
-        get(&rx).unwrap()
+        get(rig, &rx).unwrap()
     };
     let (batches, result) = run(&mut rig, b"/dir", 4, usize::MAX);
     result.unwrap();
@@ -795,7 +809,7 @@ fn walk_and_remove_tree(env: &Env) {
                 ((items, outcome), result)
             }),
         );
-        get(&rx).unwrap()
+        get(rig, &rx).unwrap()
     };
     let (batches, outcome) = walk_with(&mut rig, WalkOpts::default());
     outcome.result.as_ref().unwrap();
@@ -824,7 +838,7 @@ fn walk_and_remove_tree(env: &Env) {
             ((outcome, updates), result)
         }),
     );
-    let (outcome, updates) = get(&rx).unwrap();
+    let (outcome, updates) = get(&mut rig, &rx).unwrap();
     outcome.result.as_ref().unwrap();
     assert_eq!(i64::try_from(&outcome.extra["files"]).unwrap(), 601);
     assert_eq!(i64::try_from(&outcome.extra["dirs"]).unwrap(), 2);
@@ -843,7 +857,7 @@ fn walk_and_remove_tree(env: &Env) {
             (outcome.result, Ok(()))
         }),
     );
-    assert_eq!(name_of(&get(&rx).unwrap()), Some(ErrorName::Canceled));
+    assert_eq!(name_of(&get(&mut rig, &rx).unwrap()), Some(ErrorName::Canceled));
 }
 
 fn read_handles_live_on_their_worker(env: &Env) {
@@ -861,7 +875,7 @@ fn read_handles_live_on_their_worker(env: &Env) {
             Err(e) => panic!("{e}"),
         }),
     );
-    let (handle, size, worker) = get(&rx).unwrap();
+    let (handle, size, worker) = get(&mut rig, &rx).unwrap();
     assert_eq!(size, 11);
     let (tx, rx) = mpsc::channel();
     rig.book.submit_to(
@@ -877,7 +891,7 @@ fn read_handles_live_on_their_worker(env: &Env) {
             }),
         ),
     );
-    assert_eq!(get(&rx).unwrap(), b"world");
+    assert_eq!(get(&mut rig, &rx).unwrap(), b"world");
     assert_eq!(f.log_count("close"), 0);
     rig.book.close_worker_handle(&id, worker, handle);
     wait_until("the handle closed", || f.log_count("close") == 1);
@@ -906,7 +920,7 @@ fn transfer_job(
             ((outcome, updates), result)
         }),
     );
-    get(&rx).unwrap()
+    get(rig, &rx).unwrap()
 }
 
 fn checked(fd: OwnedFd, access: FdAccess) -> (OwnedFd, FdInfo) {
