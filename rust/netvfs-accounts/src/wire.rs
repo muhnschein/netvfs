@@ -11,32 +11,43 @@ pub const ANSWER_MAGIC: &[u8] = b"netvfs-accounts/1";
 /// `NetVfs::Error` (src/core/error.h), as far as the helper reports it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Error {
+    /// No error.
     None = 0,
+    /// The request breaks a security policy.
     SecurityPolicy = 7,
+    /// The accounts database cannot be used.
     PermissionDenied = 8,
+    /// No such account.
     NotFound = 9,
+    /// An unknown command or state.
     Unsupported = 12,
+    /// An internal failure, such as a failed write.
     Internal = 14,
 }
 
 /// `NetVfs::Result`: an error and its message, null for success.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Outcome {
+    /// The error; `None` on success.
     pub error: Error,
+    /// The message; the null string on success.
     pub message: QString,
 }
 
 impl Outcome {
+    /// A successful outcome: no error, no message.
     #[must_use]
     pub fn success() -> Self {
         Self { error: Error::None, message: None }
     }
 
+    /// A failed outcome with `error` and its `message`.
     #[must_use]
     pub fn failure(error: Error, message: impl Into<String>) -> Self {
         Self { error, message: Some(message.into()) }
     }
 
+    /// Whether no error is set.
     #[must_use]
     pub fn ok(&self) -> bool {
         self.error == Error::None
@@ -63,6 +74,7 @@ pub struct Stream {
 }
 
 impl Stream {
+    /// An empty stream.
     #[must_use]
     pub fn new() -> Self {
         Self::default()
@@ -78,31 +90,38 @@ impl Stream {
         s
     }
 
+    /// The bytes written.
     #[must_use]
     pub fn into_bytes(self) -> Vec<u8> {
         self.bytes
     }
 
+    /// Appends a boolean as one byte.
     pub fn bool(&mut self, value: bool) {
         self.bytes.push(u8::from(value));
     }
 
+    /// Appends a signed byte.
     pub fn i8(&mut self, value: i8) {
         self.bytes.extend_from_slice(&value.to_be_bytes());
     }
 
+    /// Appends a big-endian `i32`.
     pub fn i32(&mut self, value: i32) {
         self.bytes.extend_from_slice(&value.to_be_bytes());
     }
 
+    /// Appends a big-endian `u32`.
     pub fn u32(&mut self, value: u32) {
         self.bytes.extend_from_slice(&value.to_be_bytes());
     }
 
+    /// Appends a big-endian `i64`.
     pub fn i64(&mut self, value: i64) {
         self.bytes.extend_from_slice(&value.to_be_bytes());
     }
 
+    /// Appends a big-endian `u64`.
     pub fn u64(&mut self, value: u64) {
         self.bytes.extend_from_slice(&value.to_be_bytes());
     }
@@ -113,6 +132,7 @@ impl Stream {
         self.u32(u32::try_from(n).unwrap_or(u32::MAX - 1));
     }
 
+    /// Appends a byte array: its length, then the bytes.
     pub fn byte_array(&mut self, value: &[u8]) {
         self.length(value.len());
         self.bytes.extend_from_slice(value);
@@ -125,12 +145,13 @@ impl Stream {
             return;
         };
         let units: Vec<u16> = text.encode_utf16().collect();
-        self.length(units.len() * 2);
+        self.length(units.len().saturating_mul(2));
         for unit in units {
             self.bytes.extend_from_slice(&unit.to_be_bytes());
         }
     }
 
+    /// Appends a string list: its length, then each string.
     pub fn string_list(&mut self, items: &[String]) {
         self.length(items.len());
         for item in items {

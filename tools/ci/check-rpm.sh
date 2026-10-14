@@ -5,7 +5,9 @@
 #     netvfs of the same build (XC-1a), libnetvfs requires QtNetwork
 #     (discovery, XD-1), only netvfs-backup depends on Buteo (XP-4), no
 #     package requires the bridge (XP-5) and only its accounts helper is
-#     setgid privileged (XB-2a), which links only libc, libgcc_s and SQLite;
+#     setgid privileged (XB-2a), which links only libc, libgcc_s and SQLite,
+#     needs no newer glibc than the target's and is hardened
+#     (check-linked-libs.sh);
 #   - libnetvfs-smb.so contains no share enumeration code (XP-3, SPEC 10.2
 #     G-SMB item 4; tools/ci/check-noshareenum.sh), and the check finds that
 #     code in the share helper when it is built;
@@ -116,17 +118,13 @@ elif sh tools/ci/check-noshareenum.sh "$shares_helper" >/dev/null; then
 fi
 
 # SPEC-v2 XB-2a: the setgid helper links only libc, libgcc_s and the
-# system SQLite (no Qt, GLib or libaccounts), and is a hardened PIE.
+# system SQLite (no Qt, GLib or libaccounts), needs no newer glibc than the
+# target's, and is a hardened PIE (check-linked-libs.sh).
+target_glibc=$(sb2 -t "$TARGET" rpm -q --qf '%{VERSION}' glibc)
 if bridge_rpm=$(rpm_of netvfs-bridge); then
     extract "$bridge_rpm" "$work/bridge"
-    helper=$work/bridge/usr/libexec/netvfs/netvfs-accounts
-    needed=$(readelf -d "$helper" | sed -n 's/.*(NEEDED).*\[\(.*\)\]/\1/p' | sort | tr '\n' ' ')
-    if [ "$needed" != "libc.so.6 libgcc_s.so.1 libsqlite3.so.0 " ]; then
-        fail "netvfs-accounts links $needed"
-    fi
-    readelf -h "$helper" | grep -q 'Type: *DYN' || fail "netvfs-accounts is not position independent"
-    readelf -l "$helper" | grep -q GNU_RELRO || fail "netvfs-accounts has no RELRO"
-    readelf -d "$helper" | grep -q 'FLAGS.*NOW' || fail "netvfs-accounts does not bind now"
+    sh tools/ci/check-linked-libs.sh "$work/bridge/usr/libexec/netvfs/netvfs-accounts" \
+        "libc.so.6 libgcc_s.so.1 libsqlite3.so.0" "$target_glibc" || fail "netvfs-accounts: see above"
 fi
 
 # shellcheck disable=SC2086 # one word per file

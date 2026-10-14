@@ -9,9 +9,9 @@
 //! ```
 
 use crate::db::{Database, Environment, NewSetting, PrivilegedOwner, Unusable};
-use crate::policy::{check_files_policy, secret_optional, ConnectionParams};
+use crate::policy::{ConnectionParams, check_files_policy, secret_optional};
 use crate::qvariant;
-use crate::store::{normalize, unusable_outcome, Attention, Store};
+use crate::store::{Attention, Store, normalize, unusable_outcome};
 use crate::wire::{Error, Outcome, Stream};
 
 const USAGE: &str = "Usage: netvfs-accounts list | files <id> | attention <id> <state> [pin]";
@@ -19,13 +19,25 @@ const USAGE: &str = "Usage: netvfs-accounts list | files <id> | attention <id> <
 /// A request, from the arguments without the program name.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Command {
+    /// The Files accounts (`list`).
     List,
+    /// What a connection needs (`files <id>`).
     Files(String),
-    Attention { id: String, state: String, pin: Option<String> },
+    /// Records an attention state (`attention <id> <state> [pin]`).
+    Attention {
+        /// The account id, as given.
+        id: String,
+        /// The state, as given.
+        state: String,
+        /// The host key to remember (`host_key_seen`), if given.
+        pin: Option<String>,
+    },
+    /// Anything else: the usage message.
     Usage,
 }
 
 impl Command {
+    /// The command the arguments name; anything else is `Usage`.
     #[must_use]
     pub fn parse(arguments: &[String]) -> Self {
         match arguments {
@@ -50,15 +62,20 @@ impl Command {
 /// do (dbus.rs).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Change {
+    /// The account's id.
     pub account_id: u32,
+    /// The account's provider.
     pub provider: String,
+    /// The settings written.
     pub settings: Vec<NewSetting>,
 }
 
 /// The answer, and the change made, if any.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Served {
+    /// The answer for stdout.
     pub answer: Vec<u8>,
+    /// The change to announce, if any.
     pub change: Option<Change>,
 }
 

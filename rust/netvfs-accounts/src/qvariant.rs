@@ -15,15 +15,22 @@ pub enum Value {
     /// No value, or one libaccounts-qt does not convert (doubles, bytes,
     /// object paths, ...): an invalid `QVariant`.
     Invalid,
+    /// A boolean.
     Bool(bool),
+    /// A 32-bit signed integer.
     Int(i32),
+    /// A 32-bit unsigned integer.
     UInt(u32),
+    /// A 64-bit signed integer.
     LongLong(i64),
+    /// A 64-bit unsigned integer.
     ULongLong(u64),
+    /// A string.
     String(String),
+    /// A list of strings.
     StringList(Vec<String>),
     /// `a{sv}`; keys as stored, in the order read.
-    Map(Vec<(String, Value)>),
+    Map(Vec<(String, Self)>),
 }
 
 impl Value {
@@ -48,18 +55,25 @@ impl Value {
     /// `QVariant::toInt(&ok)`: `None` when Qt cannot convert. Wider numbers
     /// are cut to 32 bits as Qt does.
     #[must_use]
-    #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
     pub fn to_int(&self) -> Option<i32> {
         match self {
             Self::Invalid | Self::StringList(_) | Self::Map(_) => None,
             Self::Bool(b) => Some(i32::from(*b)),
             Self::Int(i) => Some(*i),
-            Self::UInt(u) => Some(*u as i32),
-            Self::LongLong(i) => Some(*i as i32),
-            Self::ULongLong(u) => Some(*u as i32),
-            Self::String(s) => to_long_long(s).map(|v| v as i32),
+            Self::UInt(u) => Some(u.cast_signed()),
+            Self::LongLong(i) => Some(cut_to_int(*i)),
+            Self::ULongLong(u) => Some(cut_to_int(u.cast_signed())),
+            Self::String(s) => to_long_long(s).map(cut_to_int),
         }
     }
+}
+
+/// The low 32 bits of `v` as a C `int` takes them: how Qt cuts a wider
+/// number, and how SQLite's `sqlite3_column_int` cuts an id.
+#[must_use]
+pub fn cut_to_int(v: i64) -> i32 {
+    let [b0, b1, b2, b3, ..] = v.to_le_bytes();
+    i32::from_le_bytes([b0, b1, b2, b3])
 }
 
 /// `QChar::isSpace()`: the same characters as Unicode's `White_Space`.
@@ -79,10 +93,9 @@ pub fn trimmed(s: &QString) -> QString {
 #[must_use]
 pub fn to_long_long(s: &str) -> Option<i64> {
     let text = s.trim_matches(is_qt_space);
-    let (negative, digits) = match text.as_bytes().first() {
-        Some(b'-') => (true, &text[1..]),
-        Some(b'+') => (false, &text[1..]),
-        _ => (false, text),
+    let (negative, digits) = match text.strip_prefix('-') {
+        Some(rest) => (true, rest),
+        None => (false, text.strip_prefix('+').unwrap_or(text)),
     };
     if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
         return None;
@@ -92,7 +105,7 @@ pub fn to_long_long(s: &str) -> Option<i64> {
         if magnitude == 1 << 63 {
             Some(i64::MIN)
         } else {
-            i64::try_from(magnitude).ok().map(|v| -v)
+            i64::try_from(magnitude).ok().and_then(i64::checked_neg)
         }
     } else {
         i64::try_from(magnitude).ok()

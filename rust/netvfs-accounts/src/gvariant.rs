@@ -9,6 +9,8 @@
 //! libaccounts-qt makes of it too; so is text that does not parse, which
 //! libaccounts-glib keeps as a key without a value (`got_account_setting`).
 
+use std::fmt::Write as _;
+
 use crate::qvariant::Value;
 
 /// The `QVariant` libaccounts-qt makes of a stored setting. `text` is the
@@ -40,7 +42,7 @@ pub fn from_db(type_string: &[u8], text: Option<&[u8]>) -> Value {
 #[must_use]
 pub fn print_string(s: &str) -> String {
     let quote = if s.contains('\'') { '"' } else { '\'' };
-    let mut out = String::with_capacity(s.len() + 2);
+    let mut out = String::with_capacity(s.len().saturating_add(2));
     out.push(quote);
     for c in s.chars() {
         match c {
@@ -57,8 +59,13 @@ pub fn print_string(s: &str) -> String {
             '\r' => out.push_str("\\r"),
             '\t' => out.push_str("\\t"),
             '\u{b}' => out.push_str("\\v"),
-            c if u32::from(c) < 0x1_0000 => out.push_str(&format!("\\u{:04x}", u32::from(c))),
-            c => out.push_str(&format!("\\U{:08x}", u32::from(c))),
+            c if u32::from(c) < 0x1_0000 => {
+                // Writing to a String cannot fail.
+                write!(out, "\\u{:04x}", u32::from(c)).ok();
+            }
+            c => {
+                write!(out, "\\U{:08x}", u32::from(c)).ok();
+            }
         }
     }
     out.push(quote);
@@ -68,11 +75,7 @@ pub fn print_string(s: &str) -> String {
 /// `g_variant_print(value, FALSE)` of a boolean.
 #[must_use]
 pub fn print_bool(b: bool) -> &'static str {
-    if b {
-        "true"
-    } else {
-        "false"
-    }
+    if b { "true" } else { "false" }
 }
 
 /// The types this parser knows by name.
@@ -159,6 +162,11 @@ struct Parser<'a> {
 }
 
 impl Parser<'_> {
+    /// Moves past `n` bytes the parser has just seen, so within the text.
+    fn advance(&mut self, n: usize) {
+        self.pos = self.pos.saturating_add(n);
+    }
+
     fn skip_space(&mut self) {
         // g_ascii_isspace
         while self
@@ -166,7 +174,7 @@ impl Parser<'_> {
             .get(self.pos)
             .is_some_and(|b| matches!(b, b' ' | b'\t' | b'\n' | b'\x0b' | b'\x0c' | b'\r'))
         {
-            self.pos += 1;
+            self.advance(1);
         }
     }
 
@@ -182,7 +190,7 @@ impl Parser<'_> {
 
     fn expect(&mut self, b: u8) -> Parsed<()> {
         if self.peek() == Some(b) {
-            self.pos += 1;
+            self.advance(1);
             Ok(())
         } else {
             Err(Unparsable)
@@ -194,10 +202,11 @@ impl Parser<'_> {
         self.skip_space();
         let start = self.pos;
         while self.text.get(self.pos).is_some_and(|b| b.is_ascii_alphanumeric() || also.contains(b)) {
-            self.pos += 1;
+            self.advance(1);
         }
         // ASCII only, so always UTF-8.
-        std::str::from_utf8(&self.text[start..self.pos]).unwrap_or_default()
+        let word = self.text.get(start..self.pos).unwrap_or_default();
+        std::str::from_utf8(word).unwrap_or_default()
     }
 
     fn value(&mut self, expected: Option<Kind>) -> Parsed<Value> {
@@ -222,8 +231,8 @@ impl Parser<'_> {
             b'{' => self.dict(expected, depth),
             b'<' => {
                 // A variant: libaccounts-qt does not convert one.
-                self.pos += 1;
-                self.value_at(None, depth + 1)?;
+                self.advance(1);
+                self.value_at(None, depth.saturating_add(1))?;
                 self.expect(b'>')?;
                 match expected {
                     None => Ok(Value::Invalid),
@@ -247,16 +256,17 @@ impl Parser<'_> {
     fn annotation(&mut self, expected: Option<Kind>) -> Parsed<Option<Kind>> {
         let annotated = match self.peek() {
             Some(b'@') => {
-                self.pos += 1;
+                self.advance(1);
                 let start = self.pos;
                 while self
                     .text
                     .get(self.pos)
                     .is_some_and(|b| !b.is_ascii_whitespace() && !b",:>]".contains(b))
                 {
-                    self.pos += 1;
+                    self.advance(1);
                 }
-                Some(Kind::from_type_string(&self.text[start..self.pos]).ok_or(Unparsable)?)
+                let word = self.text.get(start..self.pos).ok_or(Unparsable)?;
+                Some(Kind::from_type_string(word).ok_or(Unparsable)?)
             }
             Some(b'a'..=b'z') => {
                 let save = self.pos;
@@ -280,11 +290,11 @@ impl Parser<'_> {
 
     fn string(&mut self) -> Parsed<String> {
         let quote = self.peek().ok_or(Unparsable)?;
-        self.pos += 1;
+        self.advance(1);
         let mut out: Vec<u8> = Vec::new();
         loop {
             let b = *self.text.get(self.pos).ok_or(Unparsable)?;
-            self.pos += 1;
+            self.advance(1);
             if b == quote {
                 break;
             }
@@ -293,7 +303,7 @@ impl Parser<'_> {
                 continue;
             }
             let e = *self.text.get(self.pos).ok_or(Unparsable)?;
-            self.pos += 1;
+            self.advance(1);
             let plain = match e {
                 b'u' | b'U' => {
                     let c = self.unicode_escape(if e == b'u' { 4 } else { 8 })?;
@@ -313,17 +323,18 @@ impl Parser<'_> {
             };
             out.push(plain);
         }
-        String::from_utf8(out).map_err(|_| Unparsable)
+        or_unparsable(String::from_utf8(out))
     }
 
     fn unicode_escape(&mut self, length: usize) -> Parsed<char> {
-        let digits = self.text.get(self.pos..self.pos + length).ok_or(Unparsable)?;
+        let end = self.pos.checked_add(length).ok_or(Unparsable)?;
+        let digits = self.text.get(self.pos..end).ok_or(Unparsable)?;
         if !digits.iter().all(u8::is_ascii_hexdigit) {
             return Err(Unparsable);
         }
-        let value = u32::from_str_radix(std::str::from_utf8(digits).map_err(|_| Unparsable)?, 16)
-            .map_err(|_| Unparsable)?;
-        self.pos += length;
+        let hex = or_unparsable(std::str::from_utf8(digits))?;
+        let value = or_unparsable(u32::from_str_radix(hex, 16))?;
+        self.advance(length);
         match char::from_u32(value) {
             Some(c) if value != 0 => Ok(c),
             _ => Err(Unparsable),
@@ -339,7 +350,7 @@ impl Parser<'_> {
             None => Kind::Int32,
         };
         if kind == Kind::Other(Other::Double) {
-            return token.parse::<f64>().map(|_| Value::Invalid).map_err(|_| Unparsable);
+            return or_unparsable(token.parse::<f64>()).map(|_| Value::Invalid);
         }
         let (negative, digits) = match token.strip_prefix('-') {
             Some(rest) => (true, rest),
@@ -347,21 +358,18 @@ impl Parser<'_> {
         };
         let magnitude = strtoull(digits)?;
         let negative = negative && magnitude != 0;
-        let fits_signed = |max: u64| magnitude - u64::from(negative) <= max;
-        #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
+        // Every u64 and its negation fit an i128, so each range check below is exact.
+        let wide = i128::from(magnitude);
+        let signed = if negative { wide.checked_neg().ok_or(Unparsable)? } else { wide };
         let value = match kind {
-            Kind::Int32 if fits_signed(i32::MAX as u64) => {
-                Value::Int(if negative { (magnitude as i64).wrapping_neg() as i32 } else { magnitude as i32 })
-            }
-            Kind::UInt32 if !negative && u32::try_from(magnitude).is_ok() => Value::UInt(magnitude as u32),
-            Kind::Int64 if fits_signed(i64::MAX as u64) => {
-                Value::LongLong(if negative { (magnitude as i64).wrapping_neg() } else { magnitude as i64 })
-            }
-            Kind::UInt64 if !negative => Value::ULongLong(magnitude),
-            Kind::Other(Other::Byte) if !negative && magnitude <= 0xff => Value::Invalid,
-            Kind::Other(Other::UInt16) if !negative && magnitude <= 0xffff => Value::Invalid,
-            Kind::Other(Other::Int16) if fits_signed(0x7fff) => Value::Invalid,
-            Kind::Other(Other::Handle) if fits_signed(i32::MAX as u64) => Value::Invalid,
+            Kind::Int32 => Value::Int(within(signed)?),
+            Kind::UInt32 => Value::UInt(within(signed)?),
+            Kind::Int64 => Value::LongLong(within(signed)?),
+            Kind::UInt64 => Value::ULongLong(within(signed)?),
+            Kind::Other(Other::Byte) => within::<u8>(signed).map(|_| Value::Invalid)?,
+            Kind::Other(Other::UInt16) => within::<u16>(signed).map(|_| Value::Invalid)?,
+            Kind::Other(Other::Int16) => within::<i16>(signed).map(|_| Value::Invalid)?,
+            Kind::Other(Other::Handle) => within::<i32>(signed).map(|_| Value::Invalid)?,
             _ => return Err(Unparsable),
         };
         Ok(value)
@@ -377,19 +385,19 @@ impl Parser<'_> {
         self.expect(b'[')?;
         let mut items = Vec::new();
         if self.peek() == Some(b']') {
-            self.pos += 1;
+            self.advance(1);
             // An empty array needs its type from an annotation.
             return if expected.is_some() { Ok(Value::StringList(items)) } else { Err(Unparsable) };
         }
         loop {
-            match self.value_at(Some(Kind::String), depth + 1)? {
+            match self.value_at(Some(Kind::String), depth.saturating_add(1))? {
                 Value::String(s) => items.push(s),
                 _ => return Err(Unparsable),
             }
             match self.peek() {
-                Some(b',') => self.pos += 1,
+                Some(b',') => self.advance(1),
                 Some(b']') => {
-                    self.pos += 1;
+                    self.advance(1);
                     return Ok(Value::StringList(items));
                 }
                 _ => return Err(Unparsable),
@@ -405,22 +413,22 @@ impl Parser<'_> {
         self.expect(b'{')?;
         let mut entries = Vec::new();
         if self.peek() == Some(b'}') {
-            self.pos += 1;
+            self.advance(1);
             return if expected.is_some() { Ok(Value::Map(entries)) } else { Err(Unparsable) };
         }
         loop {
-            let Value::String(key) = self.value_at(Some(Kind::String), depth + 1)? else {
+            let Value::String(key) = self.value_at(Some(Kind::String), depth.saturating_add(1))? else {
                 return Err(Unparsable);
             };
             self.expect(b':')?;
             self.expect(b'<')?;
-            let value = self.value_at(None, depth + 1)?;
+            let value = self.value_at(None, depth.saturating_add(1))?;
             self.expect(b'>')?;
             entries.push((key, value));
             match self.peek() {
-                Some(b',') => self.pos += 1,
+                Some(b',') => self.advance(1),
                 Some(b'}') => {
-                    self.pos += 1;
+                    self.advance(1);
                     return Ok(Value::Map(entries));
                 }
                 _ => return Err(Unparsable),
@@ -429,26 +437,35 @@ impl Parser<'_> {
     }
 }
 
+/// Any failure of a conversion reads as an unparsable value.
+fn or_unparsable<T, E>(result: Result<T, E>) -> Parsed<T> {
+    result.ok().ok_or(Unparsable)
+}
+
+/// `value` as a `T`, if it lies in the range of `T`.
+fn within<T: TryFrom<i128>>(value: i128) -> Parsed<T> {
+    or_unparsable(T::try_from(value))
+}
+
 /// `g_ascii_strtoull(token, &end, 0)` that must use the whole token: an
 /// optional sign (a `-` negates modulo 2^64), then hex after `0x`, octal
 /// after `0`, else decimal.
 fn strtoull(token: &str) -> Parsed<u64> {
-    let (negate, rest) = match token.as_bytes().first() {
-        Some(b'-') => (true, &token[1..]),
-        Some(b'+') => (false, &token[1..]),
-        _ => (false, token),
+    let (negate, rest) = match token.strip_prefix('-') {
+        Some(rest) => (true, rest),
+        None => (false, token.strip_prefix('+').unwrap_or(token)),
     };
     let (radix, digits) = if let Some(hex) = rest.strip_prefix("0x").or_else(|| rest.strip_prefix("0X")) {
         (16, hex)
-    } else if rest.len() > 1 && rest.starts_with('0') {
-        (8, &rest[1..])
+    } else if let Some(octal) = rest.strip_prefix('0').filter(|_| rest.len() > 1) {
+        (8, octal)
     } else {
         (10, rest)
     };
     if digits.is_empty() || !digits.chars().all(|c| c.is_digit(radix)) {
         return Err(Unparsable);
     }
-    let value = u64::from_str_radix(digits, radix).map_err(|_| Unparsable)?;
+    let value = or_unparsable(u64::from_str_radix(digits, radix))?;
     Ok(if negate { value.wrapping_neg() } else { value })
 }
 
@@ -609,6 +626,10 @@ mod tests {
         }
         assert_eq!(print_string("auth-failed"), "'auth-failed'");
         assert_eq!(print_string("it's"), "\"it's\"");
+        // \u up to U+FFFF, \U beyond.
+        assert_eq!(print_string("\u{e9}\u{7f}"), r"'\u00e9\u007f'");
+        assert_eq!(print_string("\u{fffd}\u{ffff}"), r"'\ufffd\uffff'");
+        assert_eq!(print_string("\u{10000}\u{1f600}"), r"'\U00010000\U0001f600'");
         assert_eq!(parse("b", print_bool(true)), Value::Bool(true));
         assert_eq!(parse("b", print_bool(false)), Value::Bool(false));
     }

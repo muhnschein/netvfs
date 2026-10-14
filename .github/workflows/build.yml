@@ -7,6 +7,9 @@ on:
     types: [opened, synchronize, reopened]
 permissions:
   contents: read
+env:
+  NEXTEST_VERSION: 0.9.148
+  NEXTEST_PROFILE: ci
 jobs:
   build:
     name: Analyze
@@ -16,12 +19,20 @@ jobs:
         with:
           fetch-depth: 0  # Shallow clones should be disabled for a better relevancy of analysis
           submodules: recursive
+          persist-credentials: false
       - name: Install dependencies
         run: ./tools/ci/install-host-deps.sh
+      - name: Cache cargo-nextest
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.cargo/bin/cargo-nextest
+          key: cargo-nextest-${{ env.NEXTEST_VERSION }}-ubuntu-24.04
+      - name: Install cargo-nextest
+        run: ./tools/ci/cargo-tool.sh cargo-nextest "$NEXTEST_VERSION"
       - name: Build with coverage, run unit and interop tests
         # bear records compile_commands.json for the C/C++ analysis;
         # gcovr writes build-coverage/coverage.xml (generic coverage format),
-        # llvm-cov build-coverage/rust-lcov.info (the Rust helper).
+        # llvm-cov build-coverage/rust-lcov.info (the Rust workspace).
         run: |
           make COVERAGE=1 vendor
           bear --output build-coverage/compile_commands.json -- make COVERAGE=1 -j"$(nproc)"

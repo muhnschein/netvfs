@@ -17,6 +17,13 @@ pub mod serve;
 pub mod store;
 pub mod wire;
 
+/// Writes a diagnostic to stderr. The helper's only other output is the
+/// answer on stdout, which the bridge reads.
+#[allow(clippy::print_stderr)]
+fn report(message: &str) {
+    eprintln!("netvfs-accounts: {message}");
+}
+
 /// The process: confinement, the request, the answer. Returns the exit
 /// status.
 #[must_use]
@@ -28,7 +35,7 @@ pub fn run() -> u8 {
     sandbox::reset_process_state();
     let set_id = sandbox::running_set_id();
     if set_id && sandbox::prepare_set_id_process().is_none() {
-        eprintln!("netvfs-accounts: the user has no home folder");
+        report("the user has no home folder");
         return 1;
     }
     let env = db::Environment::from_process();
@@ -36,15 +43,16 @@ pub fn run() -> u8 {
     // an abstract socket.
     let bus = dbus::session_bus(set_id, &sandbox::runtime_dir());
     let abstract_bus = matches!(bus, Some(dbus::Address::Abstract(_)));
-    let _ = sandbox::restrict_filesystem(&env.database_folders(), abstract_bus);
-    let _ = sandbox::restrict_syscalls();
+    // Best-effort: sandbox reports what the kernel refuses, and the helper goes on either way.
+    let _filesystem = sandbox::restrict_filesystem(&env.database_folders(), abstract_bus);
+    let _syscalls = sandbox::restrict_syscalls();
 
     let arguments: Vec<String> =
         std::env::args_os().skip(1).map(|a| a.to_string_lossy().into_owned()).collect();
     let served = serve::serve(&arguments, &env, &SystemOwner);
     // Announcing the change and writing the answer need no group.
     if !sandbox::drop_set_id_group() {
-        eprintln!("netvfs-accounts: cannot drop the group");
+        report("cannot drop the group");
         return 1;
     }
     if let Some(change) = &served.change {
@@ -52,7 +60,7 @@ pub fn run() -> u8 {
             .ok_or_else(|| std::io::Error::other("no session bus"))
             .and_then(|b| dbus::announce(change, &b));
         if let Err(e) = announced {
-            eprintln!("netvfs-accounts: cannot announce the change: {e}");
+            report(&format!("cannot announce the change: {e}"));
         }
     }
     let mut stdout = std::io::stdout().lock();

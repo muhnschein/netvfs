@@ -10,25 +10,40 @@ permissions:
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
+env:
+  # Pinned cargo tools (tools/ci/cargo-tool.sh), cached per version.
+  NEXTEST_VERSION: 0.9.148
+  MUTANTS_VERSION: 27.1.0
+  DENY_VERSION: 0.20.2
+  ZIZMOR_VERSION: 1.30.1
 jobs:
   check:
     name: Build and test (host)
     runs-on: ubuntu-24.04
     env:
       QMAKE_ARGS: NETVFS_WERROR=1
+      NEXTEST_PROFILE: ci
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           submodules: recursive
+          persist-credentials: false
       - name: Install dependencies
         run: ./tools/ci/install-host-deps.sh
+      - name: Cache cargo-nextest
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.cargo/bin/cargo-nextest
+          key: cargo-nextest-${{ env.NEXTEST_VERSION }}-ubuntu-24.04
+      - name: Install cargo-nextest
+        run: ./tools/ci/cargo-tool.sh cargo-nextest "$NEXTEST_VERSION"
       - name: Build
         run: make -j"$(nproc)"
       - name: Packaging checks (file lists, no share enumeration in the SMB plugin)
         run: make check-packaging
       - name: Every mutation list is in the mutation matrix
         run: ./tools/ci/check-mutation-matrix.py
-      - name: Rust helper (format, lint, tests, lockfile, Rust 1.75)
+      - name: Rust (format, lint, nextest, lockfile, Rust 1.95)
         run: make check-rust
       - name: Unit tests
         run: make check-unit
@@ -38,12 +53,22 @@ jobs:
   sanitize:
     name: Sanitizers (ASan + UBSan)
     runs-on: ubuntu-24.04
+    env:
+      NEXTEST_PROFILE: ci
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           submodules: recursive
+          persist-credentials: false
       - name: Install dependencies
         run: ./tools/ci/install-host-deps.sh
+      - name: Cache cargo-nextest
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.cargo/bin/cargo-nextest
+          key: cargo-nextest-${{ env.NEXTEST_VERSION }}-ubuntu-24.04
+      - name: Install cargo-nextest
+        run: ./tools/ci/cargo-tool.sh cargo-nextest "$NEXTEST_VERSION"
       - name: Build and test under sanitizers
         env:
           ASAN_OPTIONS: detect_leaks=1:abort_on_error=1
@@ -63,18 +88,77 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           submodules: recursive
+          persist-credentials: false
       - name: Install dependencies
         run: ./tools/ci/install-host-deps.sh
       - name: Build
         run: make -j"$(nproc)"
       - name: Mutation check
-        run: ./tools/mutation-check.py --build build tests/mutations/${{ matrix.list }}.json
+        env:
+          LIST: ${{ matrix.list }}
+        run: ./tools/mutation-check.py --build build "tests/mutations/$LIST.json"
+
+  rust-mutants:
+    # cargo-mutants on the Rust lines this pull request changes: every
+    # surviving mutant fails the job (doc/RUST.md "Tests bite").
+    name: Tests bite (Rust, changed code)
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -q
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends \
+              pkg-config libsqlite3-dev
+          cd rust && rustup toolchain install
+      - name: Cache cargo-nextest
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.cargo/bin/cargo-nextest
+          key: cargo-nextest-${{ env.NEXTEST_VERSION }}-ubuntu-24.04
+      - name: Install cargo-nextest
+        run: ./tools/ci/cargo-tool.sh cargo-nextest "$NEXTEST_VERSION"
+      - name: Cache cargo-mutants
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.cargo/bin/cargo-mutants
+          key: cargo-mutants-${{ env.MUTANTS_VERSION }}-ubuntu-24.04
+      - name: Install cargo-mutants
+        run: ./tools/ci/cargo-tool.sh cargo-mutants "$MUTANTS_VERSION"
+      - name: Mutants in the diff
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: ./tools/ci/rust-mutants.sh "origin/$BASE_REF"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: failure()
+        with:
+          name: rust-mutants
+          path: rust/mutants.out
+          if-no-files-found: ignore
+
+  workflows:
+    name: Workflow audit (zizmor, offline)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - name: zizmor
+        run: |
+          python3 -m pip install --user "zizmor==$ZIZMOR_VERSION"
+          zizmor --offline .github/workflows
 
   fuzz:
     name: Fuzzing (fixed budget)
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
       - name: Install dependencies
         run: |
           sudo apt-get update -q
@@ -98,8 +182,15 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - name: Cache cargo-deny
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.cargo/bin/cargo-deny
+          key: cargo-deny-${{ env.DENY_VERSION }}-ubuntu-24.04
       - name: Install cargo-deny
-        run: cargo +stable install --locked cargo-deny@0.20.2
+        run: ./tools/ci/cargo-tool.sh cargo-deny "$DENY_VERSION"
       - name: Advisories, yanked crates, licences, sources
         working-directory: rust
         run: cargo +stable deny --locked check
@@ -120,6 +211,8 @@ jobs:
       CURL_PREFIX: ${{ github.workspace }}/curl-prefix
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
       - name: Install dependencies
         run: |
           sudo apt-get update -q
@@ -155,6 +248,23 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           submodules: recursive
+          persist-credentials: false
+      - name: Cross-build tools (i386 C library for the SDK compiler, qemu)
+        run: |
+          sudo apt-get update -q
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends \
+              libc6-i386 qemu-user-static pkg-config libsqlite3-dev
+          cd rust && rustup toolchain install
+      - name: Lift the SDK compiler and target sysroot
+        run: ./tools/ci/lift-sdk.sh "$SDK_IMAGE" "$TARGET" build-sdk-cross
+      - name: Cross-build the Rust binaries (host cargo, SDK gcc and sysroot)
+        run: ./tools/ci/cross-build.sh build-sdk-cross rust/prebuilt
+      - name: Rust tests on the target's glibc and SQLite (qemu)
+        run: ./tools/ci/cross-build.sh build-sdk-cross build-cross-test test
+      - name: Smoke run of the cross-built helper (qemu)
+        run: ./tools/ci/cross-smoke.sh build-sdk-cross rust/prebuilt/netvfs-accounts
+      - name: Free the lifted SDK
+        run: rm -rf build-sdk-cross build-cross-test
       - name: QML UI and plugin on the target (Qt 5.6, real Silica)
         run: ./tests/qmltarget/run-in-sdk.sh
       - name: Build RPMs in the Sailfish SDK
@@ -174,6 +284,7 @@ jobs:
           ref: ${{ env.UPGRADE_BASE_0_1 }}
           path: build-upgrade/base-0.1
           submodules: recursive
+          persist-credentials: false
       - name: Build the 0.1.0 RPMs
         if: steps.base-rpms-0-1.outputs.cache-hit != 'true'
         run: |
@@ -193,6 +304,7 @@ jobs:
           ref: ${{ env.UPGRADE_BASE_0_2 }}
           path: build-upgrade/base-0.2
           submodules: recursive
+          persist-credentials: false
       - name: Build the 0.2.0 RPMs
         if: steps.base-rpms-0-2.outputs.cache-hit != 'true'
         run: |

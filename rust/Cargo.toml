@@ -2,32 +2,89 @@
 # The Rust parts of netvfs. Today one crate: netvfs-accounts, the setgid
 # accounts helper (SPEC-v2 XB-2a). See doc/RUST.md.
 [workspace]
-resolver = "2"
+resolver = "3"
 members = ["netvfs-accounts"]
 # The fuzz targets build with a nightly toolchain of their own (doc/RUST.md).
 exclude = ["fuzz"]
 
 [workspace.package]
-version = "0.4.0"
-edition = "2021"
-# The Sailfish OS 5.2 SDK target's rustc; the RPM builds with it in mb2.
-rust-version = "1.75"
+version = "0.4.1"
+edition = "2024"
+# The rustc that sailfishos/rust ships next (JB#64166). Until an SDK target
+# has it, CI cross-builds with host cargo against the SDK's compiler and
+# sysroot (tools/ci/cross-build.sh, doc/RUST.md).
+rust-version = "1.95"
 license = "LGPL-2.1-or-later"
 publish = false
 
+# The lint regime (doc/RUST.md "Lints"): clippy `all` and `pedantic` at deny,
+# a picked nursery/restriction set, and for shipped code the restriction
+# lints that rule out panics and silent overflow. Tests opt out of the last
+# group where it only adds noise (clippy.toml, `allow` on test modules).
 [workspace.lints.rust]
+# Allowed only in the modules that talk to C (`ffi`, `sys`, the helper's
+# `sandbox`), each with `#![allow(unsafe_code)]` and SAFETY comments.
 unsafe_code = "deny"
-missing_debug_implementations = "warn"
+missing_docs = "deny"
+missing_debug_implementations = "deny"
+unused_qualifications = "deny"
+trivial_casts = "deny"
+trivial_numeric_casts = "deny"
+unsafe_op_in_unsafe_fn = "deny"
 
 [workspace.lints.clippy]
 all = { level = "deny", priority = -1 }
 pedantic = { level = "deny", priority = -1 }
-unwrap_used = "deny"
-expect_used = "deny"
-panic = "deny"
 module_name_repetitions = "allow"
 doc_markdown = "allow"
 similar_names = "allow"
+# nursery
+significant_drop_in_scrutinee = "deny"
+significant_drop_tightening = "deny"
+redundant_clone = "deny"
+needless_collect = "deny"
+or_fun_call = "deny"
+use_self = "deny"
+useless_let_if_seq = "deny"
+equatable_if_let = "deny"
+option_if_let_else = "allow"
+debug_assert_with_mut_call = "deny"
+iter_on_single_items = "deny"
+path_buf_push_overwrite = "deny"
+# restriction: no panics, no silent overflow, no stray output
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"
+unwrap_in_result = "deny"
+indexing_slicing = "deny"
+arithmetic_side_effects = "deny"
+string_slice = "deny"
+map_err_ignore = "deny"
+assertions_on_result_states = "deny"
+dbg_macro = "deny"
+print_stdout = "deny"
+print_stderr = "deny"
+undocumented_unsafe_blocks = "deny"
+clone_on_ref_ptr = "deny"
+mem_forget = "deny"
+exit = "deny"
+get_unwrap = "deny"
+lossy_float_literal = "deny"
+rest_pat_in_fully_bound_structs = "deny"
+str_to_string = "deny"
+try_err = "deny"
+verbose_file_reads = "deny"
+let_underscore_must_use = "deny"
+as_underscore = "deny"
+fn_to_numeric_cast_any = "deny"
+empty_drop = "deny"
+mutex_atomic = "deny"
+infinite_loop = "deny"
+if_then_some_else_none = "deny"
+large_include_file = "deny"
 
 [profile.release]
 panic = "abort"
