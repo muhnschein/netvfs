@@ -163,7 +163,7 @@ typedef struct nvb_attributes {
 
 /* ------------------------------------------------------------ establish */
 
-enum { NVB_IDENTITY_NONE = 0, NVB_IDENTITY_SSH = 1, NVB_IDENTITY_TLS = 2 };
+enum { NVB_IDENTITY_NONE = 0, NVB_IDENTITY_SSH = 1 };
 
 /* The ServerIdentity seen during connect (XC-16). */
 typedef struct nvb_identity {
@@ -173,10 +173,6 @@ typedef struct nvb_identity {
     nvb_bytes fingerprint;     /* filled by C++ when the backend left it empty
                                   ("SHA256:" + unpadded base64), as connector.cpp did */
     nvb_bytes pin;             /* ServerIdentity::toPin(); empty without identity */
-    uint8_t system_trusted;
-    int32_t problems;          /* ServerIdentity bits */
-    const nvb_kv *details;     /* wire-able values only; dates as ISO-8601 UTC */
-    size_t n_details;
 } nvb_identity;
 
 /* Where the credentials come from. */
@@ -286,7 +282,6 @@ typedef struct nvb_nearby {
     nvb_bytes provider;
     nvb_bytes host;
     uint16_t port;
-    nvb_bytes path;            /* Names::encode(path) */
 } nvb_nearby;
 
 typedef struct nvb_discovery_hooks {

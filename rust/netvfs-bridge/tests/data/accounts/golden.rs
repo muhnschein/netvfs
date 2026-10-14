@@ -73,7 +73,7 @@ fn main() {
     s.string(Some("/srv/ä"));
     s.i32(0);
     s.i32(4);
-    s.string(Some("webdav"));
+    s.string(Some("smb"));
     s.string(None);
     params(&mut s, &empty());
     s.string(None);

@@ -440,7 +440,7 @@ mod tests {
             },
             AccountLocation {
                 account_id: 4,
-                provider: "webdav".into(),
+                provider: "smb".into(),
                 attention: Attention::ServerIdentityChanged,
                 ..AccountLocation::default()
             },
@@ -541,9 +541,9 @@ mod tests {
         let status = |w: Writer| decode_status(&w.into_bytes()).map_err(|s| s.to_string());
         assert_eq!(status(header(MAGIC, 0, Some("ignored"))), Ok(()));
         assert_eq!(status(header(MAGIC, 1, None)), Err("Canceled".into()));
-        assert_eq!(status(header(MAGIC, 24, Some("m"))), Err("NotModified: m".into()));
+        assert_eq!(status(header(MAGIC, 23, Some("m"))), Err("RateLimited: m".into()));
         let malformed = Err("ProtocolError: netvfs-accounts gave a malformed answer".into());
-        assert_eq!(status(header(MAGIC, 25, None)), malformed);
+        assert_eq!(status(header(MAGIC, 24, None)), malformed);
         assert_eq!(status(header(MAGIC, -1, None)), malformed);
         assert_eq!(status(header(b"netvfs-accounts/2", 0, None)), malformed);
         assert_eq!(status(header(b"", 0, None)), malformed);

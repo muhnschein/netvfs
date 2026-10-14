@@ -69,7 +69,7 @@
       <arg name="on" type="b" direction="in"/>
     </method>
     <signal name="NearbyChanged">
-      <arg name="nearby" type="a(sssqay)"/>
+      <arg name="nearby" type="a(sssq)"/>
     </signal>
 
     <!-- Listing -->

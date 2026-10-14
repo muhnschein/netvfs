@@ -30,8 +30,6 @@ pub const NVB_VALUE_STRING_LIST: u32 = 5;
 pub const NVB_IDENTITY_NONE: u32 = 0;
 /// `NVB_IDENTITY_SSH`.
 pub const NVB_IDENTITY_SSH: u32 = 1;
-/// `NVB_IDENTITY_TLS`.
-pub const NVB_IDENTITY_TLS: u32 = 2;
 
 /// `NVB_SECRET_NONE`: `Credentials(user, "")`.
 pub const NVB_SECRET_NONE: u32 = 0;
@@ -285,14 +283,6 @@ pub struct NvbIdentity {
     pub fingerprint: NvbBytes,
     /// `ServerIdentity::toPin()`; empty without identity.
     pub pin: NvbBytes,
-    /// Whether the system trusts it.
-    pub system_trusted: u8,
-    /// `ServerIdentity` bits.
-    pub problems: i32,
-    /// Wire-able values only.
-    pub details: *const NvbKv,
-    /// Number of `details`.
-    pub n_details: usize,
 }
 
 /// `nvb_secret`: where the credentials come from.
@@ -421,8 +411,6 @@ pub struct NvbNearby {
     pub host: NvbBytes,
     /// Port.
     pub port: u16,
-    /// `Names::encode(path)`.
-    pub path: NvbBytes,
 }
 
 /// `changed` of `nvb_discovery_hooks`.
@@ -635,10 +623,8 @@ mod layout {
 
     #[test]
     fn establish_structs() {
-        assert_eq!(size_of::<NvbIdentity>(), 96);
+        assert_eq!(size_of::<NvbIdentity>(), 72);
         assert_eq!((offset_of!(NvbIdentity, algorithm), offset_of!(NvbIdentity, pin)), (8, 56));
-        assert_eq!((offset_of!(NvbIdentity, system_trusted), offset_of!(NvbIdentity, problems)), (72, 76));
-        assert_eq!((offset_of!(NvbIdentity, details), offset_of!(NvbIdentity, n_details)), (80, 88));
         assert_eq!(size_of::<NvbSecret>(), 48);
         assert_eq!((offset_of!(NvbSecret, user), offset_of!(NvbSecret, secret)), (8, 24));
         assert_eq!((offset_of!(NvbSecret, credentials_id), offset_of!(NvbSecret, secret_optional)), (40, 44));
@@ -671,8 +657,7 @@ mod layout {
             (16, 24)
         );
         assert_eq!(offset_of!(NvbUploadOpts, mtime_ms), 32);
-        assert_eq!(size_of::<NvbNearby>(), 72);
-        assert_eq!((offset_of!(NvbNearby, port), offset_of!(NvbNearby, path)), (48, 56));
+        assert_eq!((size_of::<NvbNearby>(), offset_of!(NvbNearby, port)), (56, 48));
         assert_eq!(size_of::<NvbDiscoveryHooks>(), 16);
     }
 

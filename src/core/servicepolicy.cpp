@@ -5,18 +5,12 @@ namespace NetVfs {
 
 namespace OptionKeys {
 const char HostKey[] = "host_key";
-const char TlsVerifyPeer[] = "tls_verify_peer";
-const char PinTrusted[] = "pin_trusted";
 const char AuthMode[] = "auth_mode";
 const char SecurityProfile[] = "security_profile";
 const char RequireEncryption[] = "require_encryption";
 const char Share[] = "share";
 const char Shares[] = "shares";
 const char ShowAdminShares[] = "show_admin_shares";
-const char BasePath[] = "base_path";
-const char Tls[] = "tls";
-const char Flavor[] = "flavor";
-const char TlsMode[] = "tls_mode";
 const char AllowInsecure[] = "allow_insecure";
 const char AllowShell[] = "allow_shell";
 } // namespace OptionKeys
@@ -30,8 +24,6 @@ const char Guest[] = "guest";
 
 namespace {
 const char ProviderSmb[] = "smb";
-const char ProviderWebDav[] = "webdav";
-const char ProviderFtp[] = "ftp";
 const char AuthInteractive[] = "interactive";
 const char ServiceBackup[] = "backup";
 const char ServiceFiles[] = "files";
@@ -106,10 +98,6 @@ QString securityProfile(const ConnectionParams &params)
 
 bool isInsecureConfiguration(const ConnectionParams &params)
 {
-    if (params.provider == QLatin1String(ProviderWebDav))
-        return params.option(str(OptionKeys::Tls), QStringLiteral("https")) == QLatin1String("http");
-    if (params.provider == QLatin1String(ProviderFtp))
-        return params.option(str(OptionKeys::TlsMode), QStringLiteral("explicit")) == QLatin1String("none");
     if (isSmb(params)) {
         const QString profile = securityProfile(params);
         return profile == QLatin1String(SecurityProfiles::Legacy) || profile == QLatin1String(SecurityProfiles::Guest);
@@ -149,8 +137,6 @@ QVariantMap pinOptions(const ServerIdentity &identity)
     if (identity.isEmpty())
         return options;
     options.insert(str(OptionKeys::HostKey), identity.toPin());
-    if (identity.kind == ServerIdentity::Kind::TlsCertificate)
-        options.insert(str(OptionKeys::TlsVerifyPeer), identity.systemTrusted);
     return options;
 }
 

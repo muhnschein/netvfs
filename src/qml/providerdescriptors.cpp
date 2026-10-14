@@ -112,9 +112,9 @@ Result checkServices(const QJsonObject &descriptor)
 Result checkAuthMode(const QJsonObject &mode, const QSet<QString> &known)
 {
     const QString id = mode.value(QStringLiteral("id")).toString();
-    if (!list({ "password", "publickey", "interactive", "token" }).contains(id))
+    if (!list({ "password", "publickey", "interactive" }).contains(id))
         return invalid(QStringLiteral("bad auth mode ") + id);
-    if (!list({ "password", "token", "key", "none" }).contains(mode.value(QStringLiteral("secret")).toString()))
+    if (!list({ "password", "key", "none" }).contains(mode.value(QStringLiteral("secret")).toString()))
         return invalid(QStringLiteral("bad secret kind for ") + id);
     if (!isTextId(mode.value(QStringLiteral("label")), known))
         return invalid(QStringLiteral("unknown label for auth mode ") + id);
@@ -179,7 +179,7 @@ Result checkFieldShape(const QJsonObject &field, const QString &key)
         return invalid(key + QStringLiteral(": default has the wrong type"));
     if (const QJsonValue rule = field.value(QStringLiteral("validation"));
         !rule.isUndefined()
-            && !list({ "host", "port", "userName", "share", "folder", "path", "consent" }).contains(rule.toString()))
+            && !list({ "host", "port", "userName", "share", "folder", "consent" }).contains(rule.toString()))
         return invalid(key + QStringLiteral(": unknown validation ") + rule.toString());
     if (const QJsonValue input = field.value(QStringLiteral("input"));
         !input.isUndefined() && !list({ "url", "digits", "text" }).contains(input.toString()))
@@ -371,8 +371,6 @@ QString ProviderDescriptors::ruleProblem(const QString &provider, const QString 
         return m_rules->shareProblem(text);
     if (rule == QLatin1String("folder"))
         return m_rules->backupsPathProblem(provider, text);
-    if (rule == QLatin1String("path"))
-        return m_rules->serverPathProblem(text);
     if (rule == QLatin1String("consent") && !value.toBool()) {
         //% "Confirm that you accept the risk to continue."
         return qtTrId("settings-accounts-netvfs-la-consent_missing");

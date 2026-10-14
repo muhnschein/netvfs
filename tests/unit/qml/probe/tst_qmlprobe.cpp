@@ -138,15 +138,6 @@ private:
         return options;
     }
 
-    static ServerIdentity tlsIdentity(bool trusted)
-    {
-        ServerIdentity identity = ServerIdentity::fromTlsSpki(QByteArray("server-spki"));
-        identity.systemTrusted = trusted;
-        if (!trusted)
-            identity.problems = ServerIdentity::SelfSigned;
-        return identity;
-    }
-
 private slots:
     void initTestCase()
     {
@@ -608,60 +599,15 @@ private slots:
         QCOMPARE(probe.error(), NetVfsProbe::ErrorCode::SecurityPolicy);
     }
 
-    // XC-16: TLS identities in the account flow.
-    void tlsIdentityStatus_data()
-    {
-        QTest::addColumn<bool>("trusted");
-        QTest::addColumn<bool>("pinTrusted");
-        QTest::addColumn<bool>("pinned");
-        QTest::addColumn<int>("status");
-        QTest::newRow("trusted") << true << false << false << int(NetVfsProbe::IdentityStatus::IdentityTrusted);
-        QTest::newRow("trusted, pin wanted") << true << true << false << int(NetVfsProbe::IdentityStatus::IdentityUnknown);
-        QTest::newRow("untrusted") << false << false << false << int(NetVfsProbe::IdentityStatus::IdentityUnknown);
-        QTest::newRow("untrusted, pin wanted") << false << true << false << int(NetVfsProbe::IdentityStatus::IdentityUnknown);
-        QTest::newRow("pinned") << false << false << true << int(NetVfsProbe::IdentityStatus::IdentityMatches);
-        QTest::newRow("pinned trusted") << true << true << true << int(NetVfsProbe::IdentityStatus::IdentityMatches);
-    }
-
-    void tlsIdentityStatus()
-    {
-        QFETCH(bool, trusted);
-        QFETCH(bool, pinTrusted);
-        QFETCH(bool, pinned);
-        QFETCH(int, status);
-        const ServerIdentity identity = tlsIdentity(trusted);
-        FakeServer::instance()->identity = identity;
-        QVariantMap map = params(pinned ? identity.toPin() : QString());
-        QVariantMap options = map.value(QStringLiteral("options")).toMap();
-        options.insert(QStringLiteral("pin_trusted"), pinTrusted);
-        map.insert(QStringLiteral("options"), options);
-        NetVfsProbe probe;
-        QSignalSpy identified(&probe, &NetVfsProbe::identified);
-        probe.identify(map);
-        QTRY_COMPARE(identified.count(), 1);
-        QCOMPARE(int(probe.identityStatus()), status);
-        const QVariantMap seen = probe.serverIdentity();
-        QCOMPARE(seen.value(QStringLiteral("kind")).toString(), QStringLiteral("tls"));
-        // W-4: the accepted pin records whether the certificate was system trusted.
-        const QVariantMap accepted = seen.value(QStringLiteral("pinOptions")).toMap();
-        QCOMPARE(accepted.value(QStringLiteral("host_key")).toString(), identity.toPin());
-        QCOMPARE(accepted.value(QStringLiteral("tls_verify_peer")), QVariant(trusted));
-    }
-
-    void identityCheckForPinTrusted()
+    // XC-16: the probe's identity check is the pin check.
+    void identityCheckForPins()
     {
         ConnectionParams params;
-        ServerIdentity trusted = tlsIdentity(true);
-        QVERIFY(NetVfsUi::identityCheckFor(trusted, params).ok());
-        params.options.insert(QStringLiteral("pin_trusted"), true);
-        QCOMPARE(NetVfsUi::identityCheckFor(trusted, params).error(), Error::ServerIdentityUnknown);
-        params.options.insert(QStringLiteral("host_key"), trusted.toPin());
-        QVERIFY(NetVfsUi::identityCheckFor(trusted, params).ok());
-        // SSH is unaffected by pin_trusted.
-        params.options.remove(QStringLiteral("host_key"));
         QCOMPARE(NetVfsUi::identityCheckFor(identityOf(KeyBlob), params).error(), Error::ServerIdentityUnknown);
         params.options.insert(QStringLiteral("host_key"), pinOf(KeyBlob));
         QVERIFY(NetVfsUi::identityCheckFor(identityOf(KeyBlob), params).ok());
+        params.options.insert(QStringLiteral("host_key"), pinOf(QByteArray("other-key")));
+        QCOMPARE(NetVfsUi::identityCheckFor(identityOf(KeyBlob), params).error(), Error::ServerIdentityChanged);
     }
 
     void verifyAccountFiles()

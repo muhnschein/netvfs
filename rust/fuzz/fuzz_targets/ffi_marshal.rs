@@ -65,16 +65,13 @@ fn entry(u: &mut Unstructured<'_>) -> Result<WireEntry> {
 }
 
 fn identity(u: &mut Unstructured<'_>) -> Result<Identity> {
-    let kind = [IdentityKind::None, IdentityKind::Ssh, IdentityKind::Tls][u.choose_index(3)?];
+    let kind = [IdentityKind::None, IdentityKind::Ssh][u.choose_index(2)?];
     Ok(Identity {
         kind,
         algorithm: u.arbitrary()?,
         public_key: u.arbitrary()?,
         fingerprint: u.arbitrary()?,
         pin: u.arbitrary()?,
-        system_trusted: u.arbitrary()?,
-        problems: u.arbitrary()?,
-        details: values(u)?,
     })
 }
 

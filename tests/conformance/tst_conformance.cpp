@@ -325,7 +325,7 @@ void TestConformance::entryFields()
     QVERIFY(listedFile && listedDir);
     QCOMPARE(listedFile->type, EntryType::File);
     QCOMPARE(listedFile->size, file.size);
-    // Listings may carry coarser times than stat (FTP LIST: minutes).
+    // Listings may carry coarser times than stat.
     QVERIFY(qAbs(listedFile->modified.secsTo(file.modified)) <= ListTimeToleranceSecs);
     QCOMPARE(listedFile->mode, file.mode);
     QCOMPARE(listedDir->type, EntryType::Directory);

@@ -189,7 +189,7 @@ pub enum OutSignal {
     ConsentChanged(String),
     /// `""`.
     LocationsChanged,
-    /// `a(sssqay)`.
+    /// `a(sssq)`.
     NearbyChanged(Vec<WireNearby>),
     /// `ua(ayyyxxxxixxssqays)`.
     ListBatch {
@@ -296,7 +296,6 @@ fn wire_nearby(n: &WireNearby) -> WireNearby {
         provider: wire_text(&n.provider),
         host: wire_text(&n.host),
         port: n.port,
-        path: n.path.clone(),
     }
 }
 

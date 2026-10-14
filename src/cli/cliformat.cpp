@@ -116,58 +116,6 @@ QJsonArray flagNames(EntryFlags flags)
     return names;
 }
 
-QString problemNames(int problems)
-{
-    struct Problem {
-        int bit;
-        const char *name;
-    };
-    static const std::array<Problem, 5> table = { {
-        { ServerIdentity::SelfSigned, "self-signed" }, { ServerIdentity::UntrustedRoot, "untrusted-root" },
-        { ServerIdentity::Expired, "expired" }, { ServerIdentity::NotYetValid, "not-yet-valid" },
-        { ServerIdentity::HostnameMismatch, "hostname-mismatch" },
-    } };
-    QStringList names;
-    for (const Problem &entry : table) {
-        if (problems & entry.bit)
-            names << QLatin1String(entry.name);
-    }
-    return names.join(QLatin1Char(' '));
-}
-
-QStringList tlsLines(const ServerIdentity &identity)
-{
-    QStringList lines;
-    lines << QStringLiteral("system-trusted: ") + (identity.systemTrusted ? QStringLiteral("yes") : QStringLiteral("no"));
-    if (identity.problems != 0)
-        lines << QStringLiteral("problems: ") + problemNames(identity.problems);
-    struct Detail {
-        const char *key;
-        const char *label;
-    };
-    static const std::array<Detail, 6> details = { {
-        { "subject", "subject" }, { "issuer", "issuer" }, { "notBefore", "not-before" },
-        { "notAfter", "not-after" }, { "sans", "sans" }, { "certSha256", "cert-sha256" },
-    } };
-    for (const Detail &detail : details) {
-        const QVariant value = identity.details.value(QLatin1String(detail.key));
-        if (value.isValid()) {
-            lines << QLatin1String(detail.label) + QStringLiteral(": ")
-                    + sanitizeForTerminal(value.toStringList().join(QStringLiteral(", ")));
-        }
-    }
-    // W-4: tls_verify_peer records whether the pinned certificate was system trusted.
-    if (identity.systemTrusted) {
-        lines << QStringLiteral("advice: pin it with --host-key and add --option tls_verify_peer=true to keep "
-                                "chain and host name verification; public CAs rotate keys, so the pin may "
-                                "need updating");
-    } else {
-        lines << QStringLiteral("advice: pin it with --host-key and leave tls_verify_peer unset: the pin alone "
-                                "is relied upon, chain and host name are not verified");
-    }
-    return lines;
-}
-
 QString sanitizeField(const QString &text)
 {
     QString clean = text;
@@ -306,8 +254,6 @@ QStringList identityLines(const ServerIdentity &identity)
 {
     QStringList lines;
     lines << identity.fingerprint << identity.toPin();
-    if (identity.kind == ServerIdentity::Kind::TlsCertificate)
-        lines << tlsLines(identity);
     return lines;
 }
 
@@ -320,9 +266,7 @@ QVector<ServiceView> mergeServices(const QVector<DiscoveredService> &services)
         if (it == byEndpoint.end()) {
             ServiceView view;
             view.service = service;
-            QString path;
-            const ConnectionParams params = toConnectionParams(service, &path);
-            view.url = Url::format(params, path);
+            view.url = Url::format(toConnectionParams(service), QStringLiteral("/"));
             it = byEndpoint.insert(key, view);
         }
         if (!it->serviceTypes.contains(service.serviceType))

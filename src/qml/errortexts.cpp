@@ -128,9 +128,6 @@ QString genericText(Error error)
     case Error::RateLimited:
         //% "The server asks to wait before trying again."
         return qtTrId("settings-accounts-netvfs-la-error_rate_limited");
-    case Error::NotModified:
-        //% "The server reported no change."
-        return qtTrId("settings-accounts-netvfs-la-error_not_modified");
     case Error::Internal:
         break;
     }

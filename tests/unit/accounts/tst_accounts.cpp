@@ -330,9 +330,9 @@ private slots:
 
     void serviceNames()
     {
-        QCOMPARE(serviceName(QStringLiteral("webdav"), Service::Files), QStringLiteral("webdav-files"));
+        QCOMPARE(serviceName(QStringLiteral("sftp"), Service::Files), QStringLiteral("sftp-files"));
         QCOMPARE(serviceName(QStringLiteral("smb"), Service::Backup), QStringLiteral("smb-backup"));
-        QCOMPARE(filesServiceName(QStringLiteral("ftp")), QStringLiteral("ftp-files"));
+        QCOMPARE(filesServiceName(QStringLiteral("smb")), QStringLiteral("smb-files"));
         QCOMPARE(serviceId(Service::Backup), QStringLiteral("backup"));
         QCOMPARE(serviceId(Service::Files), QStringLiteral("files"));
         Service service = Service::Backup;
@@ -381,16 +381,6 @@ private slots:
         QTest::newRow("smb server mode") << "smb" << QVariantMap() << false << true << "strict" << false;
         QTest::newRow("smb blank share") << "smb" << with(QVariantMap(), share, "  ") << false << true << "strict" << false;
         QTest::newRow("smb strict consent") << "smb" << with(withShare, consent, true) << false << true << "strict" << false;
-        QTest::newRow("webdav https") << "webdav" << QVariantMap() << true << true << "" << false;
-        QTest::newRow("webdav http") << "webdav" << with(QVariantMap(), "tls", "http") << false << false << "" << true;
-        QTest::newRow("webdav http consent") << "webdav" << with(with(QVariantMap(), "tls", "http"), consent, true)
-                                             << false << true << "" << true;
-        QTest::newRow("webdav token") << "webdav" << with(QVariantMap(), "auth_mode", "token") << true << true << "" << false;
-        QTest::newRow("ftp explicit") << "ftp" << with(QVariantMap(), "tls_mode", "explicit") << true << true << "" << false;
-        QTest::newRow("ftp implicit") << "ftp" << with(QVariantMap(), "tls_mode", "implicit") << true << true << "" << false;
-        QTest::newRow("ftp none") << "ftp" << with(QVariantMap(), "tls_mode", "none") << false << false << "" << true;
-        QTest::newRow("ftp none consent") << "ftp" << with(with(QVariantMap(), "tls_mode", "none"), consent, true)
-                                          << false << true << "" << true;
         QTest::newRow("sftp") << "sftp" << QVariantMap() << true << true << "" << false;
         QTest::newRow("sftp consent false") << "sftp" << with(QVariantMap(), consent, false) << true << true << "" << false;
         QTest::newRow("sftp interactive") << "sftp" << with(QVariantMap(), "auth_mode", "interactive")
@@ -450,12 +440,10 @@ private slots:
         QTest::newRow("sftp password") << "sftp" << "auth_mode" << "password" << false;
         QTest::newRow("sftp key") << "sftp" << "auth_mode" << "publickey" << false;
         QTest::newRow("sftp interactive") << "sftp" << "auth_mode" << "interactive" << true;
-        QTest::newRow("webdav token") << "webdav" << "auth_mode" << "token" << false;
-        QTest::newRow("webdav password") << "webdav" << "auth_mode" << "password" << false;
         QTest::newRow("smb guest") << "smb" << "security_profile" << "guest" << true;
         QTest::newRow("smb legacy") << "smb" << "security_profile" << "legacy" << false;
         QTest::newRow("smb strict") << "smb" << "security_profile" << "strict" << false;
-        QTest::newRow("ftp guest is no smb profile") << "ftp" << "security_profile" << "guest" << false;
+        QTest::newRow("sftp guest is no smb profile") << "sftp" << "security_profile" << "guest" << false;
     }
 
     void secretOptionality()
@@ -513,21 +501,7 @@ private slots:
         ssh.publicKey = QByteArray("key");
         QVariantMap options = pinOptions(ssh);
         QCOMPARE(options.value(QStringLiteral("host_key")).toString(), ssh.toPin());
-        QVERIFY(!options.contains(QStringLiteral("tls_verify_peer")));
-
-        // W-4: the backend verifies the chain only for a pin of a trusted certificate.
-        ServerIdentity tls = ServerIdentity::fromTlsSpki(QByteArray("spki-der"));
-        tls.systemTrusted = false;
-        options = pinOptions(tls);
-        QCOMPARE(options.value(QStringLiteral("host_key")).toString(), tls.toPin());
-        QVERIFY(options.value(QStringLiteral("tls_verify_peer")).isValid());
-        QCOMPARE(options.value(QStringLiteral("tls_verify_peer")).toBool(), false);
-        tls.systemTrusted = true;
-        options = pinOptions(tls);
-        QCOMPARE(options.value(QStringLiteral("tls_verify_peer")).toBool(), true);
-        ConnectionParams params;
-        params.options = options;
-        QVERIFY(params.flag(QStringLiteral("tls_verify_peer")));
+        QCOMPARE(options.size(), 1);
     }
 
     // XA-4: the session refuses a configuration before reading the secret.

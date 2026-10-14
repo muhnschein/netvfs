@@ -38,7 +38,7 @@ Result readHeader(QDataStream &stream)
     QString message;
     stream >> magic >> error >> message;
     if (stream.status() != QDataStream::Ok || magic != AnswerMagic || error < 0
-            || error > qint32(Error::NotModified))
+            || error > qint32(Error::RateLimited))
         return malformed();
     return Result(Error(error), message);
 }

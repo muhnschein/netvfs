@@ -197,13 +197,8 @@ fn reply_values() {
 }
 
 fn all_signals() -> Vec<OutSignal> {
-    let nearby = WireNearby {
-        name: "n\0".to_owned(),
-        provider: "smb".to_owned(),
-        host: "h".to_owned(),
-        port: 445,
-        path: b"/s".to_vec(),
-    };
+    let nearby =
+        WireNearby { name: "n\0".to_owned(), provider: "smb".to_owned(), host: "h".to_owned(), port: 445 };
     vec![
         OutSignal::ConsentChanged("granted".to_owned()),
         OutSignal::LocationsChanged,
@@ -267,10 +262,7 @@ fn signal_values() {
     assert_eq!(progress.body().deserialize::<(u32, i64, i64)>().unwrap(), (2, 3, 4));
     let nearby = decoded(&all_signals()[2]);
     let (items,): (Vec<WireNearby>,) = nearby.body().deserialize().unwrap();
-    assert_eq!(
-        (items[0].name.as_str(), items[0].port, items[0].path.as_slice()),
-        ("n\u{fffd}", 445, b"/s".as_slice())
-    );
+    assert_eq!((items[0].name.as_str(), items[0].port), ("n\u{fffd}", 445));
     let details = OptsBuilder::new().str("host", "h").build_owned();
     let question = decoded(&OutSignal::Question { id: "q\0".to_owned(), kind: "k\0".to_owned(), details });
     let (id, kind, back): (String, String, HashMap<String, OwnedValue>) =

@@ -24,23 +24,12 @@ namespace {
 constexpr const char *HostKeyOption = "host_key";
 constexpr const char *AuthInteractive = "interactive";
 
-NetVfsProbe::IdentityStatus matchedStatus(const ProbeOutcome &outcome)
-{
-    using Status = NetVfsProbe::IdentityStatus;
-    if (outcome.identity.isEmpty())
-        return Status::NoIdentity;
-    // XC-16: accepted without a pin because the system trusts the certificate.
-    if (!outcome.pinned && outcome.identity.kind == ServerIdentity::Kind::TlsCertificate)
-        return Status::IdentityTrusted;
-    return Status::IdentityMatches;
-}
-
 NetVfsProbe::IdentityStatus identityStatusFor(const ProbeOutcome &outcome)
 {
     using Status = NetVfsProbe::IdentityStatus;
     switch (outcome.identityCheck.error()) {
     case Error::None:
-        return matchedStatus(outcome);
+        return outcome.identity.isEmpty() ? Status::NoIdentity : Status::IdentityMatches;
     case Error::ServerIdentityUnknown:
         return Status::IdentityUnknown;
     default:
@@ -87,18 +76,12 @@ Activity verifyActivity(const ProbeOutcome &outcome, Service service)
 
 Result identityCheckFor(const ServerIdentity &seen, const ConnectionParams &params)
 {
-    const QString pin = params.option(QLatin1String(HostKeyOption));
-    const Result r = checkServerIdentity(seen, pin);
-    if (r.ok() && pin.isEmpty() && seen.kind == ServerIdentity::Kind::TlsCertificate
-            && params.flag(QLatin1String(OptionKeys::PinTrusted)))
-        return Result(Error::ServerIdentityUnknown, QStringLiteral("The certificate is to be pinned (pin_trusted)"));
-    return r;
+    return checkServerIdentity(seen, params.option(QLatin1String(HostKeyOption)));
 }
 
 ProbeOutcome runIdentify(Backend *backend, const ConnectionParams &params)
 {
     ProbeOutcome outcome;
-    outcome.pinned = !params.option(QLatin1String(HostKeyOption)).isEmpty();
     outcome.result = backend->connect(params, &outcome.identity);
     if (outcome.result.ok()) {
         outcome.identityCheck = identityCheckFor(outcome.identity, params);
@@ -111,7 +94,6 @@ ProbeOutcome runVerify(Backend *backend, const ConnectionParams &params, const C
                        const QString &folder, Service service)
 {
     ProbeOutcome outcome;
-    outcome.pinned = !params.option(QLatin1String(HostKeyOption)).isEmpty();
     outcome.result = checkServicePolicy(params, service);   // XA-4, before anything is sent
     if (!outcome.result.ok()) {
         outcome.refusedByPolicy = true;

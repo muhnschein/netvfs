@@ -439,7 +439,7 @@ private slots:
         for (Error e : { Error::SecurityPolicy, Error::PermissionDenied, Error::NotFound, Error::AlreadyExists,
                          Error::NoSpace, Error::Unsupported, Error::ProtocolError, Error::Internal,
                          Error::NotADirectory, Error::IsADirectory, Error::DirectoryNotEmpty, Error::InvalidName,
-                         Error::ReadOnlyFilesystem, Error::Locked, Error::NotModified })
+                         Error::ReadOnlyFilesystem, Error::Locked })
             QCOMPARE(BackupClient::minorCodeFor(e), Buteo::SyncResults::INTERNAL_ERROR);
 
         QCOMPARE(BackupClient::minorCodeForAbort(Sync::SYNC_ABORTED), Buteo::SyncResults::ABORTED);

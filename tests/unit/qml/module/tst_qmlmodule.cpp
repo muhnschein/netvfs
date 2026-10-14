@@ -288,8 +288,7 @@ private slots:
         QTest::addColumn<QString>("file");
         QTest::addColumn<QString>("type");
         QTest::addColumn<QString>("provider");
-        for (const QString &p : { QStringLiteral("sftp"), QStringLiteral("smb"), QStringLiteral("webdav"),
-                                  QStringLiteral("ftp") }) {
+        for (const QString &p : { QStringLiteral("sftp"), QStringLiteral("smb") }) {
             QTest::newRow(qPrintable(p)) << p + QStringLiteral(".qml") << "NetVfsCreationAgent" << p;
             QTest::newRow(qPrintable(p + QStringLiteral("-settings"))) << p + QStringLiteral("-settings.qml")
                                                                        << "NetVfsSettingsAgent" << p;
@@ -309,7 +308,7 @@ private slots:
         QVERIFY(code.contains(type + QStringLiteral(" {")));
         QVERIFY(code.contains(QStringLiteral("provider: \"") + provider + QLatin1Char('"')));
         const QString pri = readFile(SourceDir + QStringLiteral("/accounts/providers.pri"));
-        QVERIFY(pri.contains(QStringLiteral("NETVFS_PROVIDERS = sftp smb webdav ftp\n")));
+        QVERIFY(pri.contains(QStringLiteral("NETVFS_PROVIDERS = sftp smb\n")));
         QVERIFY(pri.contains(QStringLiteral("NETVFS_BACKUP_PROVIDERS = sftp smb\n")));
     }
 
@@ -317,11 +316,8 @@ private slots:
     {
         QTest::addColumn<QString>("provider");
         QTest::addColumn<QString>("name");
-        QTest::addColumn<bool>("backup");
-        QTest::newRow("sftp") << "sftp" << "SFTP" << true;
-        QTest::newRow("smb") << "smb" << "SMB" << true;
-        QTest::newRow("webdav") << "webdav" << "WebDAV" << false;
-        QTest::newRow("ftp") << "ftp" << "FTP" << false;
+        QTest::newRow("sftp") << "sftp" << "SFTP";
+        QTest::newRow("smb") << "smb" << "SMB";
     }
 
     void providerFiles()
@@ -329,7 +325,6 @@ private slots:
         // SPEC 6.1 and 3.2/3.3: discovery by the Backup page depends on these values.
         QFETCH(QString, provider);
         QFETCH(QString, name);
-        QFETCH(bool, backup);
         const QString providerPath = BuildDir + QStringLiteral("/accounts/providers/") + provider + QStringLiteral(".provider");
         const QMap<QString, QString> p = readXml(providerPath);
         QVERIFY2(!p.isEmpty() && !p.contains(QStringLiteral("error")), qPrintable(providerPath));
@@ -353,10 +348,6 @@ private slots:
         QVERIFY(!f.contains(QStringLiteral("setting:sync_profile_templates")));
 
         const QString servicePath = BuildDir + QStringLiteral("/accounts/services/") + provider + QStringLiteral("-backup.service");
-        // XA-2: no backup service (and no Buteo profile) for webdav and ftp yet.
-        QCOMPARE(QFile::exists(servicePath), backup);
-        if (!backup)
-            return;
         const QMap<QString, QString> s = readXml(servicePath);
         QVERIFY2(!s.isEmpty() && !s.contains(QStringLiteral("error")), qPrintable(servicePath));
         QCOMPARE(s.value(QStringLiteral("service@id")), provider + QStringLiteral("-backup"));
@@ -386,8 +377,6 @@ private slots:
         QTest::addColumn<QString>("provider");
         QTest::newRow("sftp") << "sftp";
         QTest::newRow("smb") << "smb";
-        QTest::newRow("webdav") << "webdav";
-        QTest::newRow("ftp") << "ftp";
     }
 
     void icons()

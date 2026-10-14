@@ -44,9 +44,16 @@
   {
     "name": "XB-2a helper lists disabled accounts",
     "file": "rust/netvfs-accounts/src/store.rs",
-    "search": "            if !account.enabled {\n                continue;\n            }\n",
-    "replace": "",
+    "search": "            if !account.enabled || !account.provider",
+    "replace": "            if !account.provider",
     "test": "dbus-run-session -- build/tests/bridge/accounts/tst_bridgeaccounts"
+  },
+  {
+    "name": "XB-2a helper lists accounts of other providers",
+    "file": "rust/netvfs-accounts/src/store.rs",
+    "search": "            if !account.enabled || !account.provider.as_deref().is_some_and(|p| PROVIDERS.contains(&p)) {",
+    "replace": "            if !account.enabled {",
+    "test": "cd rust && cargo test --locked -q -p netvfs-accounts --lib"
   },
   {
     "name": "XB-2a helper takes any value of the Files flag",

@@ -17,27 +17,23 @@ constexpr int MaxPortDigits = 5;
 constexpr ushort FirstPrintable = 0x20;
 constexpr ushort Delete = 0x7F;
 
-enum class Kind { Sftp, Smb, WebDav, Ftp, Local };
+enum class Kind { Sftp, Smb, Local };
 
 struct SchemeInfo {
     const char *scheme;
     Kind kind;
     int defaultPort;
-    const char *mode;    // webdav: "tls" option, ftp: "tls_mode" option; unused otherwise
 };
 
-constexpr std::array<SchemeInfo, 10> Schemes = {{
-    { "sftp", Kind::Sftp, 22, nullptr },
-    { "ssh", Kind::Sftp, 22, nullptr },
-    { "smb", Kind::Smb, 445, nullptr },
-    { "dav", Kind::WebDav, 80, "http" },
-    { "davs", Kind::WebDav, 443, "https" },
-    { "http", Kind::WebDav, 80, "http" },
-    { "https", Kind::WebDav, 443, "https" },
-    { "ftp", Kind::Ftp, 21, "explicit" },
-    { "ftps", Kind::Ftp, 990, "implicit" },
-    { "file", Kind::Local, 0, nullptr },
+constexpr std::array<SchemeInfo, 4> Schemes = {{
+    { "sftp", Kind::Sftp, 22 },
+    { "ssh", Kind::Sftp, 22 },
+    { "smb", Kind::Smb, 445 },
+    { "file", Kind::Local, 0 },
 }};
+
+// WebDAV and FTP are gone; their URLs get a clearer refusal than an unknown scheme.
+constexpr std::array<const char *, 4> RemovedSchemes = { "dav", "davs", "ftp", "ftps" };
 
 const SchemeInfo *findScheme(const QString &scheme)
 {
@@ -46,6 +42,12 @@ const SchemeInfo *findScheme(const QString &scheme)
             return &info;
     }
     return nullptr;
+}
+
+bool isRemovedScheme(const QString &scheme)
+{
+    return std::any_of(RemovedSchemes.begin(), RemovedSchemes.end(),
+                       [&scheme](const char *removed) { return scheme == QLatin1String(removed); });
 }
 
 Result invalid(const char *what)
@@ -290,17 +292,6 @@ void applyKind(const SchemeInfo &info, const QString &urlPath, ConnectionParams 
             params->options.insert(QStringLiteral("share"), share);
         break;
     }
-    case Kind::WebDav:
-        params->provider = QStringLiteral("webdav");
-        params->options.insert(QStringLiteral("tls"), QLatin1String(info.mode));
-        if (urlPath.size() > 1)
-            params->options.insert(QStringLiteral("base_path"), urlPath);
-        break;
-    case Kind::Ftp:
-        params->provider = QStringLiteral("ftp");
-        params->options.insert(QStringLiteral("tls_mode"), QLatin1String(info.mode));
-        *path = urlPath;
-        break;
     case Kind::Local:
         params->provider = QStringLiteral("local");
         params->host.clear();
@@ -329,40 +320,30 @@ const char *schemeFor(const ConnectionParams &params)
         return "sftp";
     if (params.provider == QLatin1String("smb"))
         return "smb";
-    if (params.provider == QLatin1String("webdav"))
-        return params.option(QStringLiteral("tls"), QStringLiteral("https")) == QLatin1String("http") ? "http" : "https";
-    if (params.provider == QLatin1String("ftp"))
-        return params.option(QStringLiteral("tls_mode")) == QLatin1String("implicit") ? "ftps" : "ftp";
     if (params.provider == QLatin1String("local"))
         return "file";
     return nullptr;
 }
 
-QString joinUrlPath(const QString &base, const QString &path)
+// The location path below an SMB share: empty for the share root, else "/a/b".
+QString belowShare(const QString &path)
 {
-    QString trimmedBase = base;
-    while (trimmedBase.endsWith(QLatin1Char('/')))
-        trimmedBase.chop(1);
-    QString trimmedPath = path;
-    while (trimmedPath.startsWith(QLatin1Char('/')))
-        trimmedPath.remove(0, 1);
-    if (trimmedPath.isEmpty())
-        return trimmedBase;
-    return trimmedBase + QLatin1Char('/') + trimmedPath;
+    QString trimmed = path;
+    while (trimmed.startsWith(QLatin1Char('/')))
+        trimmed.remove(0, 1);
+    if (trimmed.isEmpty())
+        return trimmed;
+    return QLatin1Char('/') + trimmed;
 }
 
 QString encodedLocation(const ConnectionParams &params, const QString &path)
 {
-    if (params.provider == QLatin1String("webdav")) {
-        const QString base = withLeadingSlash(params.option(QStringLiteral("base_path")));
-        return percentEncode(withLeadingSlash(joinUrlPath(base, path)), true);
-    }
     if (params.provider == QLatin1String("smb")) {
         const QString share = params.option(QStringLiteral("share"));
         if (share.isEmpty())
             return QString();
         return QLatin1Char('/') + percentEncode(share, false)
-            + percentEncode(withLeadingSlash(joinUrlPath(QString(), path)), true);
+            + percentEncode(belowShare(path), true);
     }
     return percentEncode(withLeadingSlash(path), true);
 }
@@ -392,6 +373,8 @@ Result parse(const QString &url, ConnectionParams *params, QString *path)
     Result r = parseScheme(url, &scheme, &rest);
     if (!r.ok())
         return r;
+    if (isRemovedScheme(scheme))
+        return Result(Error::Unsupported, QStringLiteral("%1 URLs are no longer supported").arg(scheme));
     const SchemeInfo *info = findScheme(scheme);
     if (!info)
         return Result(Error::Unsupported, QStringLiteral("Unsupported URL scheme \"%1\"").arg(scheme));
@@ -412,8 +395,7 @@ Result parse(const QString &url, ConnectionParams *params, QString *path)
         return r;
 
     ConnectionParams result = *params;
-    for (const char *key : { "share", "tls", "base_path", "tls_mode" })
-        result.options.remove(QLatin1String(key));
+    result.options.remove(QStringLiteral("share"));
     result.host = authority.host;
     result.username = authority.user;
     result.port = authority.port == info->defaultPort ? 0 : authority.port;

@@ -856,8 +856,11 @@ fn url_parse_format(env: &Env) {
     assert_eq!(ffi.url_format(&smb.params, &smb.path).unwrap(), "smb://nas/share/dir");
     assert_eq!(ffi.url_parse("file:///tmp/x").unwrap().params.provider, "local");
     assert_eq!(name_of(&ffi.url_parse("gopher://h/")), Some(ErrorName::Unsupported));
-    let dav = ffi.url_parse("davs://dav.example/remote.php/files").unwrap();
-    assert_eq!(dav.params.options.get("base_path"), Some(&Value::Str("/remote.php/files".into())));
+    let dav = ffi.url_parse("davs://dav.example/remote.php/files").unwrap_err();
+    assert_eq!(
+        (dav.name, dav.message.as_str()),
+        (ErrorName::Unsupported, "davs URLs are no longer supported")
+    );
     let unknown = Params { provider: "fake".into(), ..Params::default() };
     assert_eq!(name_of(&ffi.url_format(&unknown, b"/")), Some(ErrorName::Unsupported));
     // Options of every kind reach C++ (an unknown one is not carried).

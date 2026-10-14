@@ -33,10 +33,9 @@ enum class Error {
     DirectoryNotEmpty,
     InvalidName,
     ReadOnlyFilesystem,
-    Locked,                 // SMB sharing violation, WebDAV 423
-    TooManyConnections,     // MaxSessions, SMB/HTTP connection limits
-    RateLimited,            // HTTP 429/503 with Retry-After
-    NotModified             // internal: WebDAV conditional requests
+    Locked,                 // SMB sharing violation
+    TooManyConnections,     // MaxSessions, SMB connection limits, the bridge's own limits
+    RateLimited             // the server asks to wait (Retry-After)
 };
 
 NETVFS_EXPORT QString errorName(Error error);

@@ -70,15 +70,15 @@ Message sampleMessage()
     m.id = 0x1234;
     m.flags = FlagResponse | FlagAuthoritative;
     Question q;
-    q.name = "_webdav._tcp.local";
+    q.name = "_sftp-ssh._tcp.local";
     q.type = TypePtr;
     q.unicastResponse = true;
     m.questions.append(q);
     Record ptr;
-    ptr.name = "_webdav._tcp.local";
+    ptr.name = "_sftp-ssh._tcp.local";
     ptr.type = TypePtr;
     ptr.ttl = 4500;
-    ptr.target = "Files\\.Box._webdav._tcp.local";
+    ptr.target = "Files\\.Box._sftp-ssh._tcp.local";
     m.answers.append(ptr);
     Record srv;
     srv.name = ptr.target;
@@ -95,7 +95,7 @@ Message sampleMessage()
     txt.type = TypeTxt;
     txt.cacheFlush = true;
     txt.ttl = 4500;
-    txt.txt = {"path=/dav", "u=alice", "flag"};
+    txt.txt = {"txtvers=1", "u=alice", "flag"};
     m.additional.append(txt);
     Record a;
     a.name = "box.local";
@@ -561,18 +561,6 @@ private slots:
         QCOMPARE(canonicalName("My NAS._SMB._tcp.LOCAL"), QByteArray("my nas._smb._tcp.local"));
     }
 
-    void readsTxtAttributes()
-    {
-        const QList<QByteArray> txt = {"txtvers=1", "Path=/dav", "u=", "bool", "=novalue", "path=/second"};
-        QCOMPARE(txtValue(txt, "path"), QByteArray("/dav"));       // case-insensitive key, first wins
-        QCOMPARE(txtValue(txt, "PATH"), QByteArray("/dav"));
-        QCOMPARE(txtValue(txt, "u", "x"), QByteArray());           // present but empty
-        QCOMPARE(txtValue(txt, "missing", "fallback"), QByteArray("fallback"));
-        QVERIFY(txtHasKey(txt, "bool"));
-        QCOMPARE(txtValue(txt, "bool", "x"), QByteArray());
-        QVERIFY(!txtHasKey(txt, "novalue"));                       // an empty key never matches
-        QVERIFY(!txtHasKey(txt, "txtver"));
-    }
 };
 
 int runDnsMessageTests(int argc, char **argv)

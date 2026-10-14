@@ -135,7 +135,7 @@ pub const METHODS: [MethodInfo; 35] = [
 pub const SIGNALS: [(&str, &str); 9] = [
     ("ConsentChanged", "s"),
     ("LocationsChanged", ""),
-    ("NearbyChanged", "a(sssqay)"),
+    ("NearbyChanged", "a(sssq)"),
     ("ListBatch", "ua(ayyyxxxxixxssqays)"),
     ("ListDone", "uss"),
     ("JobProgress", "uxx"),

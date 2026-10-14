@@ -170,12 +170,10 @@ private slots:
         FakeServer::instance()->identity = ssh;
         QCOMPARE(run({ S("--host-key"), ssh.toPin(), S("ls"), QString() }), 0);
         QCOMPARE(FakeServer::instance()->lastParams.option(S("host_key")), ssh.toPin());
-
-        const ServerIdentity tls = ServerIdentity::fromTlsSpki("SPKIDER");
-        FakeServer::instance()->identity = tls;
-        QCOMPARE(run({ S("--host-key"), tls.toPin(), S("ls"), QString() }), 0);
-        QCOMPARE(FakeServer::instance()->lastParams.option(S("host_key")), tls.toPin());
         // The pin of another key is refused.
+        ServerIdentity other = ssh;
+        other.publicKey = "OTHERBLOB";
+        FakeServer::instance()->identity = other;
         QCOMPARE(run({ S("--host-key"), ssh.toPin(), S("ls"), QString() }), code(Error::ServerIdentityChanged));
     }
 
@@ -195,6 +193,10 @@ private slots:
     void urlErrors()
     {
         QCOMPARE(runArgs({ S("--url"), S("gopher://h/"), S("ls"), QString() }), code(Error::Unsupported));
+        QCOMPARE(runArgs({ S("--url"), S("davs://h/x"), S("ls"), QString() }), code(Error::Unsupported));
+        QVERIFY(err.contains(S("davs URLs are no longer supported")));
+        QCOMPARE(runArgs({ S("--url"), S("ftp://h/"), S("ls"), QString() }), code(Error::Unsupported));
+        QVERIFY(FakeServer::instance()->log.isEmpty());
         QCOMPARE(runArgs({ S("--url"), S("sftp:///nohost"), S("ls"), QString() }), code(Error::InvalidName));
         // The URL replaces --provider/--host/--port/--user.
         QCOMPARE(runArgs({ S("--url"), S("sftp://h/"), S("--host"), S("h"), S("ls"), QString() }), 2);
@@ -249,47 +251,6 @@ private slots:
         FakeServer::instance()->connectResult = Result(Error::NetworkUnreachable, S("down"));
         QCOMPARE(run({ S("identify") }), code(Error::NetworkUnreachable));
         QVERIFY(err.contains(S("NetworkUnreachable: down")));
-    }
-
-    void identifyTls()
-    {
-        ServerIdentity id = ServerIdentity::fromTlsSpki("SPKIDER");
-        id.systemTrusted = false;
-        id.problems = ServerIdentity::SelfSigned | ServerIdentity::HostnameMismatch;
-        id.details.insert(S("subject"), S("CN=nas.local\x1b[31m"));
-        id.details.insert(S("issuer"), S("CN=nas.local"));
-        id.details.insert(S("notBefore"), S("2024-01-01T00:00:00Z"));
-        id.details.insert(S("notAfter"), S("2034-01-01T00:00:00Z"));
-        id.details.insert(S("sans"), QStringList({ S("nas.local"), S("nas") }));
-        id.details.insert(S("certSha256"), S("abcd"));
-        FakeServer::instance()->identity = id;
-
-        QCOMPARE(run({ S("identify") }), 0);
-        const QStringList lines = out.split(QLatin1Char('\n'));
-        QCOMPARE(lines.at(0), id.fingerprint);
-        QCOMPARE(lines.at(1), id.toPin());
-        QVERIFY(lines.at(1).startsWith(S("tls-spki-sha256 ")));
-        QVERIFY(lines.contains(S("system-trusted: no")));
-        QVERIFY(lines.contains(S("problems: self-signed hostname-mismatch")));
-        QVERIFY(lines.contains(S("subject: CN=nas.local?[31m")));   // escape sequences never reach the terminal
-        QVERIFY(lines.contains(S("sans: nas.local, nas")));
-        QVERIFY(lines.contains(S("cert-sha256: abcd")));
-        QVERIFY(out.contains(S("advice: pin it with --host-key and leave tls_verify_peer unset")));
-        QVERIFY(!out.contains(QChar(0x1b)));
-
-        // Trusted by the system: no pin needed, and the advice names tls_verify_peer=true.
-        id.systemTrusted = true;
-        id.problems = 0;
-        FakeServer::instance()->identity = id;
-        QCOMPARE(run({ S("identify") }), 0);
-        QVERIFY(out.contains(S("system-trusted: yes")));
-        QVERIFY(!out.contains(S("problems:")));
-        QVERIFY(out.contains(S("--option tls_verify_peer=true")));
-        QCOMPARE(run({ S("ls"), QString() }), 0);
-        // Untrusted and unpinned: refused.
-        id.systemTrusted = false;
-        FakeServer::instance()->identity = id;
-        QCOMPARE(run({ S("ls"), QString() }), code(Error::ServerIdentityUnknown));
     }
 
     // -------------------------------------------------------------- commands
@@ -749,24 +710,15 @@ private slots:
         smb.provider = S("smb");
         smb.host = S("nas.local");
         smb.port = 445;
-        DiscoveredService dav;
-        dav.instanceName = S("Cloud");
-        dav.serviceType = S("_webdavs._tcp");
-        dav.provider = S("webdav");
-        dav.tls = S("https");
-        dav.host = S("cloud.local");
-        dav.port = 8443;
-        dav.path = S("/dav");
 
-        const QVector<Cli::ServiceView> views = Cli::mergeServices({ ssh, smb, sftp, dav });
-        QCOMPARE(views.size(), 3);   // _ssh and _sftp-ssh of one endpoint are one entry
+        const QVector<Cli::ServiceView> views = Cli::mergeServices({ ssh, smb, sftp });
+        QCOMPARE(views.size(), 2);   // _ssh and _sftp-ssh of one endpoint are one entry
         QMap<QString, Cli::ServiceView> byProvider;
         for (const Cli::ServiceView &view : views)
             byProvider.insert(view.service.provider, view);
         QCOMPARE(byProvider.value(S("sftp")).serviceTypes, QStringList({ S("_sftp-ssh._tcp"), S("_ssh._tcp") }));
         QCOMPARE(byProvider.value(S("sftp")).url, S("sftp://nas.local:22/"));
         QCOMPARE(byProvider.value(S("smb")).url, S("smb://nas.local:445"));
-        QCOMPARE(byProvider.value(S("webdav")).url, S("https://cloud.local:8443/dav"));
         QCOMPARE(Cli::serviceLine(byProvider.value(S("sftp"))),
                  S("sftp://nas.local:22/\tMy NAS\t_sftp-ssh._tcp,_ssh._tcp\t") + lan.toString());
         QCOMPARE(Cli::serviceLine(byProvider.value(S("smb"))), S("smb://nas.local:445\tMy NAS\t_smb._tcp\t"));

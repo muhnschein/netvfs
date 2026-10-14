@@ -95,11 +95,8 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
         checkRoundTrip(message);
         for (const Dns::Question &q : message.questions)
             checkNames(q.name);
-        for (const Dns::Record &r : message.answers) {
+        for (const Dns::Record &r : message.answers)
             checkNames(r.name);
-            Dns::txtValue(r.txt, "path");
-            Dns::txtHasKey(r.txt, "u");
-        }
     } else {
         require(message.questions.isEmpty() && message.answers.isEmpty() && message.authority.isEmpty()
                 && message.additional.isEmpty());

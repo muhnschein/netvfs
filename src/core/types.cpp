@@ -2,8 +2,6 @@
 #include "types.h"
 #include "secure.h"
 
-#include <QtCore/QCryptographicHash>
-
 #include <algorithm>
 #include <array>
 
@@ -91,19 +89,6 @@ QStringList Capabilities::names() const
 
 AuthPrompter::~AuthPrompter() = default;
 
-ServerIdentity ServerIdentity::fromTlsSpki(const QByteArray &spkiDer)
-{
-    ServerIdentity identity;
-    if (spkiDer.isEmpty())
-        return identity;
-    identity.kind = Kind::TlsCertificate;
-    identity.algorithm = QLatin1String(TlsAlgorithm);
-    identity.publicKey = spkiDer;
-    identity.fingerprint = QString::fromLatin1(
-        QCryptographicHash::hash(spkiDer, QCryptographicHash::Sha256).toBase64());
-    return identity;
-}
-
 QString ServerIdentity::toPin() const
 {
     if (isEmpty())
@@ -120,8 +105,6 @@ ServerIdentity ServerIdentity::fromPin(const QString &pin)
     const QByteArray blob = QByteArray::fromBase64(parts.at(1).toLatin1());
     if (blob.isEmpty() || blob.toBase64() != parts.at(1).toLatin1())
         return identity;
-    if (parts.at(0) == QLatin1String(TlsAlgorithm))
-        return fromTlsSpki(blob);
     identity.kind = Kind::SshHostKey;
     identity.algorithm = parts.at(0);
     identity.publicKey = blob;

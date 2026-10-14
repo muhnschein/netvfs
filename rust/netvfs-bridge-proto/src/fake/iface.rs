@@ -240,9 +240,10 @@ fn parse_adhoc(url: &str, opts: &args::AdHocOpts) -> Result<AdHocUrl, Fail> {
     let provider = match scheme {
         "sftp" | "ssh" => "sftp",
         "smb" => "smb",
-        "ftp" | "ftps" => "ftp",
-        "http" | "https" | "dav" | "davs" | "webdav" => "webdav",
         "fake" => "fake",
+        "dav" | "davs" | "ftp" | "ftps" => {
+            return Err(Fail::net(ErrorName::Unsupported, &format!("{scheme} URLs are no longer supported")));
+        }
         "file" | "local" => {
             return Err(Fail::net(ErrorName::PermissionDenied, "The bridge never accesses local files"));
         }
@@ -852,9 +853,7 @@ mod tests {
         assert!(info.contains(&("kind".to_owned(), InfoValue::Str("adhoc".into()))));
         assert!(info.contains(&("user".to_owned(), InfoValue::Str("other".into()))));
         assert!(!info.iter().any(|(k, _)| k == "port"));
-        for (url, provider) in [("https://h/", "webdav"), ("ftps://h/", "ftp"), ("smb://h/", "smb")] {
-            assert_eq!(parse_adhoc(url, &plain()).unwrap().provider, provider);
-        }
+        assert_eq!(parse_adhoc("smb://h/", &plain()).unwrap().provider, "smb");
     }
 
     #[test]
@@ -863,6 +862,11 @@ mod tests {
         assert_eq!(bare("sftp://u:pw@h/", &plain()).as_deref(), Some("SecurityPolicy"));
         assert_eq!(bare("file:///x", &plain()).as_deref(), Some("PermissionDenied"));
         assert_eq!(bare("gopher://h/", &plain()).as_deref(), Some("Unsupported"));
+        for url in ["dav://h/", "davs://h/", "ftp://h/", "ftps://h/", "https://h/"] {
+            assert_eq!(bare(url, &plain()).as_deref(), Some("Unsupported"), "{url}");
+        }
+        let removed = parse_adhoc("davs://h/", &plain()).err();
+        assert_eq!(removed.as_ref().map(Fail::message), Some("davs URLs are no longer supported"));
         let legacy = AdHocOpts { user: None, security_profile: Some("legacy".into()) };
         assert!(bare("sftp://h/", &legacy).is_some_and(|n| n.contains("InvalidArgs")));
         assert!(bare("smb://h/", &legacy).is_none());

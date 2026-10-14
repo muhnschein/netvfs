@@ -21,17 +21,17 @@
     "test": "build/tests/unit/url/tst_url"
   },
   {
-    "name": "XH-6 ftp:// maps to plain FTP",
+    "name": "XH-6 removed schemes parsed as unknown ones",
     "file": "src/core/url.cpp",
-    "search": "{ \"ftp\", Kind::Ftp, 21, \"explicit\" },",
-    "replace": "{ \"ftp\", Kind::Ftp, 21, \"none\" },",
+    "search": "    if (isRemovedScheme(scheme))\n",
+    "replace": "    if (false)\n",
     "test": "build/tests/unit/url/tst_url"
   },
   {
-    "name": "XH-6 dav:// maps to TLS",
+    "name": "XH-6 SMB location keeps leading slashes below the share",
     "file": "src/core/url.cpp",
-    "search": "{ \"dav\", Kind::WebDav, 80, \"http\" },",
-    "replace": "{ \"dav\", Kind::WebDav, 80, \"https\" },",
+    "search": "    while (trimmed.startsWith(QLatin1Char('/')))\n",
+    "replace": "    while (false)\n",
     "test": "build/tests/unit/url/tst_url"
   },
   {

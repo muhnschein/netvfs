@@ -22,7 +22,7 @@ const TABLE: &str = "# The fake's table\n\n\
                      option\t1\tkey-file\ts\t/k\n\
                      option\t1\tretries\ti\t-3\n\
                      option\t1\tretries\tu\t3\n\
-                     account\t5\twebdav\tDAV\tdav.example\t0\tbob\t/\tauth-failed\n";
+                     account\t5\tsmb\tNAS\tnas.example\t0\tbob\t/\tauth-failed\n";
 
 /// A directory over the fake helper with its table, through a wrapper
 /// script that sets `NETVFS_FAKE_ACCOUNTS` (the directory passes on the
@@ -93,7 +93,7 @@ async fn directory_fetch_files() {
     let access = directory.files(5).await.unwrap();
     assert_eq!(
         (access.params.host.as_str(), access.credentials_id, access.secret_optional),
-        ("dav.example", 0, true)
+        ("nas.example", 0, true)
     );
     // An account the helper does not hand out.
     for id in [2, 0, -1] {

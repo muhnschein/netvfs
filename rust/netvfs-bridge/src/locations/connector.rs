@@ -29,8 +29,8 @@ use super::worker::Backend;
 use super::{Answer, AskId, TaskContext, WorkerEvent, WorkerEvents};
 use crate::Status;
 use crate::ffi::{
-    CancelHandle, Conn, EstablishError, EstablishHooks, Ffi, Handle, Identity, IdentityKind, Params, Phase,
-    PromptRequest, Reply, Secret, Value, Verdict,
+    CancelHandle, Conn, EstablishError, EstablishHooks, Ffi, Handle, Identity, Params, Phase, PromptRequest,
+    Reply, Secret, Value, Verdict,
 };
 use netvfs_bridge_proto::ErrorName;
 use std::collections::HashMap;
@@ -174,17 +174,6 @@ fn owned(v: zvariant::Value<'_>) -> Option<OwnedValue> {
     OwnedValue::try_from(v).ok()
 }
 
-/// A typed value of the C ABI as a variant: `s`, `b`, `x`, `ay`, `as`.
-fn value(v: &Value) -> Option<OwnedValue> {
-    match v {
-        Value::Str(s) => Some(text(s)),
-        Value::Bool(b) => Some(OwnedValue::from(*b)),
-        Value::Int(i) => Some(OwnedValue::from(*i)),
-        Value::Bytes(b) => owned(zvariant::Value::from(b.clone())),
-        Value::StrList(l) => owned(zvariant::Value::from(l.clone())),
-    }
-}
-
 /// The details of `Question(identity-unknown)` (`identityDetails`).
 #[must_use]
 pub fn identity_details(identity: &Identity, spec: &LocationSpec) -> HashMap<String, OwnedValue> {
@@ -193,18 +182,10 @@ pub fn identity_details(identity: &Identity, spec: &LocationSpec) -> HashMap<Str
     d.insert("host".to_owned(), text(&spec.params.host));
     d.insert("port".to_owned(), OwnedValue::from(spec.params.port));
     d.insert("provider".to_owned(), text(&spec.provider));
-    d.insert("kind".to_owned(), text(if identity.kind == IdentityKind::Tls { "tls" } else { "ssh" }));
     d.insert("algorithm".to_owned(), text(&identity.algorithm));
     d.insert("fingerprint".to_owned(), text(&identity.fingerprint));
     if let Some(key) = owned(zvariant::Value::from(identity.public_key.clone())) {
         d.insert("publicKey".to_owned(), key);
-    }
-    d.insert("systemTrusted".to_owned(), OwnedValue::from(identity.system_trusted));
-    d.insert("problems".to_owned(), OwnedValue::from(identity.problems));
-    for (key, v) in &identity.details {
-        if let Some(v) = value(v) {
-            d.insert(key.clone(), v);
-        }
     }
     d
 }

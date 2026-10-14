@@ -208,13 +208,7 @@ mod tests {
     }
 
     fn server(name: &str) -> WireNearby {
-        WireNearby {
-            name: name.into(),
-            provider: "smb".into(),
-            host: "h".into(),
-            port: 445,
-            path: b"/".to_vec(),
-        }
+        WireNearby { name: name.into(), provider: "smb".into(), host: "h".into(), port: 445 }
     }
 
     #[test]

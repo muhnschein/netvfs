@@ -988,6 +988,19 @@ fn connect_ad_hoc_refusals(h: &Harness) {
         assert_eq!(error_name(&refused), name(ErrorName::SecurityPolicy)); // XH-6
         let local = p.connect_ad_hoc("file:///etc", b"", &no_opts()).await;
         assert_eq!(error_name(&local), name(ErrorName::PermissionDenied)); // XB-11: never local paths
+        // WebDAV and FTP are gone; their schemes are refused before any backend.
+        for url in ["dav://host/", "davs://host/", "ftp://host/", "ftps://host/"] {
+            let removed = p.connect_ad_hoc(url, b"", &no_opts()).await;
+            assert_eq!(error_name(&removed), name(ErrorName::Unsupported), "{url}");
+        }
+        let removed = p.connect_ad_hoc("davs://host/", b"", &no_opts()).await.unwrap_err();
+        assert_eq!(
+            netvfs_bridge_proto::BridgeError::from(removed),
+            netvfs_bridge_proto::BridgeError::remote(
+                ErrorName::Unsupported,
+                "davs URLs are no longer supported"
+            )
+        );
         let missing = p.connect_ad_hoc("sftp://host/", b"", &no_opts()).await;
         assert_eq!(error_name(&missing), name(ErrorName::Unsupported)); // no sftp backend in the tests
         let bad =
@@ -1035,7 +1048,6 @@ fn discovery(h: &Harness) {
             provider: "smb".to_owned(),
             host: "nas.local".to_owned(),
             port: 445,
-            path: b"/".to_vec(),
         };
         assert!(f.link().nearby(vec![server.clone()]));
         let found = wait_signal(&mut signals, WAIT, |s| matches!(s, Signal::NearbyChanged(_))).await;
@@ -1069,14 +1081,14 @@ fn handoff(h: &Harness) {
     block_on(async {
         let c = f.hello_client().await;
         c.proxy().open_account_settings(ACCOUNT_LOC).await.unwrap();
-        c.proxy().add_account("webdav").await.unwrap();
+        c.proxy().add_account("smb").await.unwrap();
         let calls = f.launcher.calls();
         assert_eq!(calls.len(), 2);
         assert_eq!(
             (calls[0].method.as_str(), calls[0].arguments.as_slice()),
             ("show", &[HandoffArg::Int(1)][..])
         );
-        assert_eq!(calls[1].arguments, [HandoffArg::Str("webdav".to_owned())]);
+        assert_eq!(calls[1].arguments, [HandoffArg::Str("smb".to_owned())]);
         assert_eq!(error_name(&c.proxy().open_account_settings("adhoc:7").await), name(ErrorName::NotFound));
     });
     let f = Fixture::new(h, Consent::Granted);
@@ -1086,7 +1098,7 @@ fn handoff(h: &Harness) {
             error_name(&c.proxy().open_account_settings(ACCOUNT_LOC).await),
             name(ErrorName::Unsupported)
         );
-        assert_eq!(error_name(&c.proxy().add_account("webdav").await), name(ErrorName::Unsupported));
+        assert_eq!(error_name(&c.proxy().add_account("smb").await), name(ErrorName::Unsupported));
         assert!(f.launcher.calls().is_empty());
     });
 }

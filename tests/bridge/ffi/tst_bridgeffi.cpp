@@ -1170,20 +1170,21 @@ void tst_BridgeFfi::errorBlockContents()
     QVERIFY(insideBlock(caps, nvb_bytes { reinterpret_cast<const uint8_t *>(caps->flags),
                                           caps->n_flags * sizeof(nvb_bytes) }));
     nvb_url *url = nullptr;
-    QVERIFY(!ErrorPtr(t->url_parse(lit("davs://dav.example/remote.php/files"), &url)));
+    QVERIFY(!ErrorPtr(t->url_parse(lit("smb://nas/share/dir"), &url)));
     const Owned<nvb_url> ownedUrl(url);
-    QVERIFY(url->params.n_options >= 2);
+    QCOMPARE(url->params.n_options, size_t(1));
     for (size_t i = 0; i < url->params.n_options; ++i) {
         QVERIFY(insideBlock(url, url->params.options[i].key));
         QVERIFY(insideBlock(url, url->params.options[i].value.bytes));
     }
-    QCOMPARE(optionsOf(url->params).value(QStringLiteral("base_path")), QStringLiteral("/remote.php/files"));
+    QVERIFY(insideBlock(url, url->path));
+    QCOMPARE(optionsOf(url->params).value(QStringLiteral("share")), QStringLiteral("share"));
 }
 
 void tst_BridgeFfi::mapValuesNotCarried()
 {
     // fillMap() leaves out the values the ABI cannot carry (no backend has
-    // such options or identity details yet) and keeps the key order of the
+    // such options yet) and keeps the key order of the
     // others. With none left the array is empty: never indexed, not null,
     // and in the block (O3).
     using namespace NetVfs::Ffi;

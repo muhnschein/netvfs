@@ -11,15 +11,13 @@
 namespace NetVfsUi {
 
 namespace {
-const std::array<const char *, 56> TextIds = { {
+const std::array<const char *, 34> TextIds = { {
     //% "Server"
     QT_TRID_NOOP("settings-accounts-netvfs-la-server"),
     //% "Server name or IP address"
     QT_TRID_NOOP("settings-accounts-netvfs-ph-server"),
     //% "Port"
     QT_TRID_NOOP("settings-accounts-netvfs-la-port"),
-    //% "Default port"
-    QT_TRID_NOOP("settings-accounts-netvfs-ph-port_default"),
     //% "Share"
     QT_TRID_NOOP("settings-accounts-netvfs-la-share"),
     //% "Name of the shared folder on the server"
@@ -36,8 +34,6 @@ const std::array<const char *, 56> TextIds = { {
     QT_TRID_NOOP("settings-accounts-netvfs-la-folder_in_share"),
     //% "Relative to the home folder, or starting with / for an absolute path."
     QT_TRID_NOOP("settings-accounts-netvfs-la-folder_in_home"),
-    //% "Relative to the server path."
-    QT_TRID_NOOP("settings-accounts-netvfs-la-folder_in_base"),
     //% "Start folder"
     QT_TRID_NOOP("settings-accounts-netvfs-la-files_root"),
     //% "Password"
@@ -48,8 +44,6 @@ const std::array<const char *, 56> TextIds = { {
     QT_TRID_NOOP("settings-accounts-netvfs-me-key_import"),
     //% "Ask each time (one-time codes)"
     QT_TRID_NOOP("settings-accounts-netvfs-me-interactive"),
-    //% "Access token"
-    QT_TRID_NOOP("settings-accounts-netvfs-me-token"),
     //% "Use a strong password that you use nowhere else: any server this account connects to can try to guess it."
     QT_TRID_NOOP("settings-accounts-netvfs-la-smb_password_warning"),
     //% "After checking the server's identity you can copy the public key, or install it on the server with your password."
@@ -74,50 +68,12 @@ const std::array<const char *, 56> TextIds = { {
     QT_TRID_NOOP("settings-accounts-netvfs-la-allow_insecure"),
     //% "Older SMB servers are not encrypted, and guest connections are not signed either: others on the network can read or change files. Never used for backups."
     QT_TRID_NOOP("settings-accounts-netvfs-la-allow_insecure_smb"),
-    //% "Plain HTTP is not encrypted: others on the network can read the password and the files. Never used for backups."
-    QT_TRID_NOOP("settings-accounts-netvfs-la-allow_insecure_http"),
-    //% "FTP without TLS sends the password and the files unencrypted. Never used for backups."
-    QT_TRID_NOOP("settings-accounts-netvfs-la-allow_insecure_ftp"),
-    //% "Connection"
-    QT_TRID_NOOP("settings-accounts-netvfs-la-tls"),
-    //% "Encrypted (HTTPS)"
-    QT_TRID_NOOP("settings-accounts-netvfs-me-tls_https"),
-    //% "Not encrypted (HTTP)"
-    QT_TRID_NOOP("settings-accounts-netvfs-me-tls_http"),
-    //% "Path on the server"
-    QT_TRID_NOOP("settings-accounts-netvfs-la-base_path"),
-    //% "The WebDAV folder, for example /remote.php/dav/files/<user>/ on Nextcloud."
-    QT_TRID_NOOP("settings-accounts-netvfs-la-base_path_description"),
-    //% "Server type"
-    QT_TRID_NOOP("settings-accounts-netvfs-la-flavor"),
-    //% "Detect automatically"
-    QT_TRID_NOOP("settings-accounts-netvfs-me-flavor_auto"),
-    //% "Nextcloud or ownCloud"
-    QT_TRID_NOOP("settings-accounts-netvfs-me-flavor_nextcloud"),
-    //% "Other WebDAV server"
-    QT_TRID_NOOP("settings-accounts-netvfs-me-flavor_generic"),
-    //% "Encryption"
-    QT_TRID_NOOP("settings-accounts-netvfs-la-tls_mode"),
-    //% "TLS (explicit, usually port 21)"
-    QT_TRID_NOOP("settings-accounts-netvfs-me-tls_explicit"),
-    //% "TLS (implicit, usually port 990)"
-    QT_TRID_NOOP("settings-accounts-netvfs-me-tls_implicit"),
-    //% "None (plain FTP)"
-    QT_TRID_NOOP("settings-accounts-netvfs-me-tls_none"),
-    //% "Confirm trusted certificates too"
-    QT_TRID_NOOP("settings-accounts-netvfs-la-pin_trusted"),
-    //% "Also asks you to confirm a certificate that this device trusts, and accepts only that certificate later. Public certificates are replaced regularly, so you will be asked again then."
-    QT_TRID_NOOP("settings-accounts-netvfs-la-pin_trusted_description"),
     //% "Allow commands on the server"
     QT_TRID_NOOP("settings-accounts-netvfs-la-allow_shell"),
     //% "Lets file browsing copy files on the server and compute checksums with shell commands. Never used for backups."
     QT_TRID_NOOP("settings-accounts-netvfs-la-allow_shell_description"),
     //% "Inside the share, or /share/folder when no share is set."
     QT_TRID_NOOP("settings-accounts-netvfs-la-files_root_smb"),
-    //% "Accounts on this server are created by its administrator. Ask for an app password if the server uses two-step verification."
-    QT_TRID_NOOP("settings-accounts-netvfs-la-webdav_password_hint"),
-    //% "Create the token in the server's web interface, for example under Security in Nextcloud."
-    QT_TRID_NOOP("settings-accounts-netvfs-la-token_hint"),
     //% "Leave empty for the home folder."
     QT_TRID_NOOP("settings-accounts-netvfs-la-files_root_home"),
     //% "Guests can only use shares that the server opens to everyone."

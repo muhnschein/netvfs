@@ -27,19 +27,18 @@ const char Usage[] =
     "                  [--secret-env VAR] [--prompt] COMMAND [FLAGS] [ARGS]\n"
     "       netvfs-cli discover [--seconds N]\n"
     "\n"
-    "A location is a URL (sftp://, smb://host[/share[/path]], dav(s)://, http(s)://,\n"
-    "ftp(s)://, file://; a user name is fine, a password is refused) or\n"
-    "--provider/--host/--port/--user. Relative paths resolve against the URL's path.\n"
+    "A location is a URL (sftp://, smb://host[/share[/path]], file://; a user name\n"
+    "is fine, a password is refused) or --provider/--host/--port/--user. Relative\n"
+    "paths resolve against the URL's path.\n"
     "The secret is read from the environment variable named by --secret-env (default\n"
     "NETVFS_SECRET), never from the command line; --prompt answers server questions\n"
     "(keyboard-interactive) on the terminal. --option sets provider keys such as\n"
-    "auth_mode, share, domain; --host-key PIN pins the server identity (SSH key or\n"
-    "\"tls-spki-sha256 ...\"); --profile is the SMB security profile (strict, signed,\n"
-    "legacy, guest).\n"
+    "auth_mode, share, domain; --host-key PIN pins the server's SSH key; --profile\n"
+    "is the SMB security profile (strict, signed, legacy, guest).\n"
     "\n"
     "commands:\n"
     "  identify                     connect without credentials, print the server identity\n"
-    "                               (fingerprint, pin; TLS: certificate details and advice)\n"
+    "                               (fingerprint, pin)\n"
     "  verify DIR                   sign in, create DIR, write and delete a probe file\n"
     "  ls [-l] [--json] DIR         list; -l: mode owner group size mtime(UTC) flags name\n"
     "  stat [--json] PATH           the same full entry, following symlinks\n"
@@ -110,7 +109,6 @@ bool applyValueOption(const QString &arg, const QString &value, Options *options
         }
         options->overrides.insert(value.left(eq), value.mid(eq + 1));
     } else if (arg == QLatin1String("--host-key")) {
-        // SSH and "tls-spki-sha256 ..." pins alike.
         if (ServerIdentity::fromPin(value).isEmpty()) {
             *error = QStringLiteral("--host-key needs a pin as printed by identify");
             return false;

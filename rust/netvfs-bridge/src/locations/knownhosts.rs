@@ -176,11 +176,11 @@ mod tests {
         let dir = TempDir::new();
         let path = dir.write(
             "known_hosts",
-            "webdav://b:443 sha256/x\n sftp://lead:22 p\nnospace\nsftp://a:22   ssh-rsa AAA  \r\nwebdav://b:443 later\n",
+            "smb://b:445 sha256/x\n sftp://lead:22 p\nnospace\nsftp://a:22   ssh-rsa AAA  \r\nsmb://b:445 later\n",
         );
         let hosts = KnownHosts::new(&path);
         assert_eq!(hosts.pin("sftp://a:22"), "ssh-rsa AAA");
-        assert_eq!(hosts.pin("webdav://b:443"), "later");
+        assert_eq!(hosts.pin("smb://b:445"), "later");
         assert_eq!(hosts.pin("nospace"), "");
         assert_eq!(hosts.pin(""), "");
         assert!(hosts.set_pin("\u{1f600}://c:1", "z"));
@@ -188,7 +188,7 @@ mod tests {
         // Sorted by UTF-16 code units: a supplementary character before U+FFFF.
         assert_eq!(
             std::fs::read_to_string(&path).unwrap(),
-            "sftp://a:22 ssh-rsa AAA\nwebdav://b:443 later\n\u{1f600}://c:1 z\n\u{ffff}://c:1 y\n"
+            "sftp://a:22 ssh-rsa AAA\nsmb://b:445 later\n\u{1f600}://c:1 z\n\u{ffff}://c:1 y\n"
         );
     }
 

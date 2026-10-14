@@ -189,45 +189,10 @@
     "test": "build/tests/unit/transfer/tst_transfer"
   },
   {
-    "name": "XC-16 trusted TLS without pin prompts",
+    "name": "XC-16 unknown key accepted without a pin",
     "file": "src/core/identity.cpp",
-    "search": "    if (pin.isEmpty() && tls && seen.systemTrusted)\n        return Result::success();",
-    "replace": "",
-    "test": "build/tests/unit/core/tst_core"
-  },
-  {
-    "name": "XC-16 systemTrusted accepted for SSH",
-    "file": "src/core/identity.cpp",
-    "search": "    if (pin.isEmpty() && tls && seen.systemTrusted)",
-    "replace": "    if (pin.isEmpty() && seen.systemTrusted)",
-    "test": "build/tests/unit/core/tst_core"
-  },
-  {
-    "name": "XC-16 untrusted TLS without pin accepted",
-    "file": "src/core/identity.cpp",
-    "search": "    if (pin.isEmpty() && tls && seen.systemTrusted)",
-    "replace": "    if (pin.isEmpty() && tls)",
-    "test": "build/tests/unit/core/tst_core"
-  },
-  {
-    "name": "XC-16 trust overrides a pin mismatch",
-    "file": "src/core/identity.cpp",
-    "search": "if (ServerIdentity::fromPin(pin) == seen)",
-    "replace": "if (ServerIdentity::fromPin(pin) == seen || seen.systemTrusted)",
-    "test": "build/tests/unit/core/tst_core"
-  },
-  {
-    "name": "XC-16 TLS fingerprint not SHA-256",
-    "file": "src/core/types.cpp",
-    "search": "QCryptographicHash::hash(spkiDer, QCryptographicHash::Sha256)",
-    "replace": "QCryptographicHash::hash(spkiDer, QCryptographicHash::Sha1)",
-    "test": "build/tests/unit/core/tst_core"
-  },
-  {
-    "name": "XC-16 TLS pin read as SSH",
-    "file": "src/core/types.cpp",
-    "search": "    if (parts.at(0) == QLatin1String(TlsAlgorithm))\n        return fromTlsSpki(blob);",
-    "replace": "",
+    "search": "    if (pin.isEmpty()) {\n        return Result(Error::ServerIdentityUnknown,",
+    "replace": "    if (false) {\n        return Result(Error::ServerIdentityUnknown,",
     "test": "build/tests/unit/core/tst_core"
   },
   {

@@ -11,9 +11,8 @@ import org.netvfs.accounts 1.0
 // for files (nothing written, SPEC-v2-review 2.19).
 //
 //  1. identify() on the stored settings (no credentials sent, C-7).
-//  2. A changed (or missing) server key or certificate is shown next to the
-//     stored one; only an explicit acceptance replaces the pin (S-9; for TLS
-//     also tls_verify_peer, XC-16).
+//  2. A changed (or missing) server key is shown next to the stored one;
+//     only an explicit acceptance replaces the pin (S-9, XC-16).
 //  3. server-identity-changed, or an account without a secret by design
 //     (SPEC-v2 XA-7: interactive, smb guest; this also clears the "not
 //     signed in" state a device restore leaves, SPEC-v2-review 2.15):
@@ -121,7 +120,7 @@ AccountCredentialsAgent {
         _afterIdentity({}, _busyPage)
     }
 
-    // pinOptions: the accepted identity's (host_key, tls_verify_peer), or {}
+    // pinOptions: the accepted identity's (host_key), or {}
     // to keep the stored pin.
     function _afterIdentity(pinOptions, page) {
         _busyPage = page

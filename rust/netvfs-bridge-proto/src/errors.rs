@@ -90,14 +90,12 @@ error_names! {
     InvalidName,
     /// The file system is read-only.
     ReadOnlyFilesystem,
-    /// The file is locked (SMB sharing violation, WebDAV 423).
+    /// The file is locked (SMB sharing violation).
     Locked,
     /// Too many connections, requests, handles or jobs.
     TooManyConnections,
-    /// The server asks to slow down (HTTP 429/503 with Retry-After).
+    /// The server asks to slow down (with Retry-After).
     RateLimited,
-    /// Internal to WebDAV conditional requests.
-    NotModified,
 }
 
 impl ErrorName {
@@ -303,7 +301,6 @@ mod tests {
                 "Locked",
                 "TooManyConnections",
                 "RateLimited",
-                "NotModified",
             ]
         );
         for n in ErrorName::ALL {

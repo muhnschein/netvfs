@@ -98,8 +98,6 @@ private slots:
         QTest::addColumn<QStringList>("offered");
         QTest::newRow("sftp") << "sftp" << QStringList({ QStringLiteral("backup"), QStringLiteral("files") });
         QTest::newRow("smb") << "smb" << QStringList({ QStringLiteral("backup"), QStringLiteral("files") });
-        QTest::newRow("webdav") << "webdav" << QStringList({ QStringLiteral("files") });
-        QTest::newRow("ftp") << "ftp" << QStringList({ QStringLiteral("files") });
     }
 
     void shippedDescriptorsAreValid()
@@ -125,8 +123,7 @@ private slots:
     void providersListed()
     {
         ProviderDescriptors descriptors;
-        QCOMPARE(descriptors.providers(), QStringList({ QStringLiteral("ftp"), QStringLiteral("sftp"),
-                                                        QStringLiteral("smb"), QStringLiteral("webdav") }));
+        QCOMPARE(descriptors.providers(), QStringList({ QStringLiteral("sftp"), QStringLiteral("smb") }));
         QVERIFY(descriptors.descriptor(QStringLiteral("local")).isEmpty());   // not an account provider
         QVERIFY(descriptors.descriptor(QStringLiteral("../etc")).isEmpty());
         QCOMPARE(ProviderDescriptors::load(QStringLiteral("../sftp"), nullptr).error(), Error::InvalidName);
@@ -137,8 +134,7 @@ private slots:
     {
         // Every known id is used by a shipped descriptor, and translated.
         QSet<QString> used;
-        for (const QString &provider : { QStringLiteral("sftp"), QStringLiteral("smb"), QStringLiteral("webdav"),
-                                         QStringLiteral("ftp") }) {
+        for (const QString &provider : { QStringLiteral("sftp"), QStringLiteral("smb") }) {
             QFile file(DescriptorDir + QLatin1Char('/') + provider + QStringLiteral(".json"));
             QVERIFY(file.open(QIODevice::ReadOnly));
             const QString text = QString::fromUtf8(file.readAll());
@@ -404,57 +400,6 @@ private slots:
         QVERIFY(shown.contains(QStringLiteral("Yes")));
         QVERIFY(shown.contains(QStringLiteral("nas")));
         QVERIFY(!labels.contains(QStringLiteral("User name")));
-    }
-
-    void webdavForm()
-    {
-        ProviderDescriptors d;
-        const QString p = QStringLiteral("webdav");
-        QVariantMap values = d.initialValues(p);
-        QCOMPARE(values.value(QStringLiteral("port")).toString(), QString());   // protocol default
-        QCOMPARE(values.value(QStringLiteral("tls")).toString(), QStringLiteral("https"));
-        QCOMPARE(values.value(QStringLiteral("base_path")).toString(), QStringLiteral("/"));
-        values.insert(QStringLiteral("host"), QStringLiteral("cloud.example"));
-        values.insert(QStringLiteral("username"), QStringLiteral("me"));
-        QVERIFY(d.isValid(p, values, services(false, true)));
-        values.insert(QStringLiteral("base_path"), QStringLiteral("dav"));
-        QVERIFY(!d.isValid(p, values, services(false, true)));
-        values.insert(QStringLiteral("base_path"), QStringLiteral("/remote.php/dav/files/me/"));
-        values.insert(QStringLiteral("auth_mode"), QStringLiteral("token"));
-        QCOMPARE(d.secretKind(p, values), QStringLiteral("token"));
-        values.insert(QStringLiteral("tls"), QStringLiteral("http"));
-        QVERIFY(!d.isValid(p, values, services(false, true)));   // consent needed
-        values.insert(QStringLiteral("allow_insecure"), true);
-        QVERIFY(d.isValid(p, values, services(false, true)));
-        const NetVfs::ConnectionParams params = NetVfsUi::paramsFromVariant(d.makeParams(p, values, QVariantMap()));
-        QCOMPARE(params.option(QStringLiteral("auth_mode")), QStringLiteral("token"));
-        QCOMPARE(params.option(QStringLiteral("tls")), QStringLiteral("http"));
-        QCOMPARE(params.option(QStringLiteral("base_path")), QStringLiteral("/remote.php/dav/files/me/"));
-        QVERIFY(!params.options.contains(QStringLiteral("pin_trusted")));   // https only
-        QCOMPARE(params.port, 0);
-        QVERIFY(checkServicePolicy(params, Service::Files).ok());
-    }
-
-    void ftpForm()
-    {
-        ProviderDescriptors d;
-        const QString p = QStringLiteral("ftp");
-        QVariantMap values = d.initialValues(p);
-        QCOMPARE(values.value(QStringLiteral("tls_mode")).toString(), QStringLiteral("explicit"));
-        values.insert(QStringLiteral("host"), QStringLiteral("ftp.example"));
-        values.insert(QStringLiteral("username"), QStringLiteral("me"));
-        values.insert(QStringLiteral("pin_trusted"), true);
-        QVERIFY(d.isValid(p, values, services(false, true)));
-        NetVfs::ConnectionParams params = NetVfsUi::paramsFromVariant(d.makeParams(p, values, QVariantMap()));
-        QVERIFY(params.flag(QStringLiteral("pin_trusted")));
-        QVERIFY(!params.options.contains(QStringLiteral("allow_insecure")));
-        values.insert(QStringLiteral("tls_mode"), QStringLiteral("none"));
-        QVERIFY(!d.isValid(p, values, services(false, true)));
-        values.insert(QStringLiteral("allow_insecure"), true);
-        QVERIFY(d.isValid(p, values, services(false, true)));
-        params = NetVfsUi::paramsFromVariant(d.makeParams(p, values, QVariantMap()));
-        QVERIFY(!params.options.contains(QStringLiteral("pin_trusted")));
-        QVERIFY(isInsecureConfiguration(params));
     }
 
     // XB-3 registrations as the page lists them (the store itself is tested with the bridge).

@@ -203,17 +203,17 @@
     "test": "timeout 120 build/tests/unit/discovery/tst_discovery"
   },
   {
-    "name": "discovery: _webdavs is reported as plain http",
+    "name": "discovery: _smb is reported as sftp",
     "file": "src/core/discoverycache.cpp",
-    "search": "{\"_webdavs._tcp\", \"webdav\", \"https\"},",
-    "replace": "{\"_webdavs._tcp\", \"webdav\", \"http\"},",
+    "search": "{\"_smb._tcp\", \"smb\"},",
+    "replace": "{\"_smb._tcp\", \"sftp\"},",
     "test": "timeout 120 build/tests/unit/discovery/tst_discovery"
   },
   {
-    "name": "discovery: an ftp template drops the TXT path",
-    "file": "src/core/discovery.cpp",
-    "search": "location = service.path;",
-    "replace": "location = QStringLiteral(\"/\");",
+    "name": "cache: a service without addresses counts as complete",
+    "file": "src/core/discoverycache.cpp",
+    "search": "    return inst.hasSrv && hasAddresses(inst.target);",
+    "replace": "    return inst.hasSrv;",
     "test": "timeout 120 build/tests/unit/discovery/tst_discovery"
   },
   {

@@ -157,13 +157,7 @@ async fn a_listing_can_be_canceled() {
 #[tokio::test]
 async fn discovery_results_arrive_as_signals() {
     let (fake, conn, mut signals) = setup().await;
-    let server = WireNearby {
-        name: "NAS".into(),
-        provider: "smb".into(),
-        host: "nas".into(),
-        port: 445,
-        path: b"share".to_vec(),
-    };
+    let server = WireNearby { name: "NAS".into(), provider: "smb".into(), host: "nas".into(), port: 445 };
     fake.set_nearby(vec![server.clone()]).await;
     conn.proxy().discover(true).await.unwrap();
     loop {

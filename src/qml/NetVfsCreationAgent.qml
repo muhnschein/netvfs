@@ -6,8 +6,7 @@ import org.netvfs.accounts 1.0
 
 // Creation flow (SPEC 7.3) shared by the providers' <p>.qml files:
 // input (from the provider descriptor, SPEC-v2 XA-5) -> identify (no
-// credentials, C-7) -> confirm server identity (SSH key, or a TLS
-// certificate the system does not trust or the user wants pinned; XC-16,
+// credentials, C-7) -> confirm server identity (SSH key; XC-16,
 // SPEC-v2-review 2.20) -> [SSH key page, S-16] -> verify (for backup when
 // chosen, else for files: nothing is written, 2.19) -> create (U-3) with the
 // chosen services (XA-1) -> final dialog.
@@ -87,10 +86,8 @@ AccountCreationAgent {
         }
         if (_probe.identityStatus === NetVfsProbe.IdentityUnknown) {
             pageStack.replace(identityComponent, { "identity": _probe.serverIdentity })
-        } else if (_probe.identityStatus === NetVfsProbe.NoIdentity
-                   || _probe.identityStatus === NetVfsProbe.IdentityTrusted) {
-            // SMB has no server identity to confirm (SPEC-smb 3); a TLS
-            // certificate the system trusts needs no pin (XC-16).
+        } else if (_probe.identityStatus === NetVfsProbe.NoIdentity) {
+            // SMB has no server identity to confirm (SPEC-smb 3).
             _busyPage.showBusy(_verifyText())
             _startVerify(_busyPage)
         } else {
@@ -99,7 +96,7 @@ AccountCreationAgent {
         }
     }
 
-    // XC-16, W-4: host_key and, for TLS, tls_verify_peer.
+    // XC-16: host_key.
     function _identityAccepted(pinOptions) {
         _params = connectionDialog.connectionParams(pinOptions)
     }

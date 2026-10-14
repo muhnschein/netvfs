@@ -261,7 +261,8 @@ mod tests {
     }
 
     /// A database with three listed accounts: 1 usable, 2 refused by the
-    /// policy, and 2^32, whose id reads as 0. Its path.
+    /// policy, and 2^32, whose id reads as 0; 5 is a WebDAV account with its
+    /// Files service enabled, which is not handed out. Its path.
     fn listed_accounts(name: &str) -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(format!("netvfs-accounts-serve-{name}-{}", std::process::id()));
         std::fs::remove_dir_all(&dir).ok();
@@ -270,9 +271,10 @@ mod tests {
         let c = rusqlite::Connection::open(&path).unwrap();
         c.execute_batch(crate::db::TEST_SCHEMA).unwrap();
         c.execute_batch(
-            "INSERT INTO Services VALUES (1, 'smb-files', 'Files', 'smb', 'netvfs-files');
+            "INSERT INTO Services VALUES (1, 'smb-files', 'Files', 'smb', 'netvfs-files'),
+                                         (2, 'webdav-files', 'Files', 'webdav', 'netvfs-files');
              INSERT INTO Accounts VALUES (1, 'alice@nas', 'smb', 1), (2, 'b', 'smb', 1),
-                                         (4294967296, 'z', 'smb', 1);
+                                         (4294967296, 'z', 'smb', 1), (5, 'dav', 'webdav', 1);
              INSERT INTO Settings VALUES (1, 0, 'netvfs/host', 's', '''nas'''),
                                          (1, 0, 'netvfs/port', 'i', '445'),
                                          (1, 0, 'netvfs/username', 's', '''alice'''),
@@ -285,7 +287,9 @@ mod tests {
                                          (2, 0, 'netvfs/smb/security_profile', 's', '''bogus'''),
                                          (2, 1, 'enabled', 'b', 'true'),
                                          (4294967296, 0, 'netvfs/host', 's', '''zero'''),
-                                         (4294967296, 1, 'enabled', 'b', 'true');",
+                                         (4294967296, 1, 'enabled', 'b', 'true'),
+                                         (5, 0, 'netvfs/host', 's', '''dav'''),
+                                         (5, 2, 'enabled', 'b', 'true');",
         )
         .unwrap();
         drop(c);
@@ -323,6 +327,7 @@ mod tests {
         let not_found = Served::failure(&Outcome::failure(Error::NotFound, "No such account"));
         assert_eq!(files("0"), not_found);
         assert_eq!(files("3"), not_found);
+        assert_eq!(files("5"), not_found);
         assert_eq!(files("x"), not_found);
         std::fs::remove_dir_all(path.parent().unwrap()).ok();
     }

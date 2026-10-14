@@ -439,7 +439,7 @@ fn identifiers() {
     );
     assert_eq!(validate("AddAccount", &("../sftp",)).unwrap_err().message, "Argument 1 is not a valid name");
     assert!(
-        matches!(validate("AddAccount", &("webdav",)).unwrap(), Call::AddAccount { ref provider } if provider == "webdav")
+        matches!(validate("AddAccount", &("smb",)).unwrap(), Call::AddAccount { ref provider } if provider == "smb")
     );
     assert_eq!(validate("Capabilities", &("",)).unwrap_err().message, "Invalid location id");
     assert_eq!(error("Disconnect", &("a b",)), ErrorName::ProtocolError);

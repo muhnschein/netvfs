@@ -39,11 +39,10 @@ Item {
         check(NetVfsInput.defaultPort("sftp") === 22 && NetVfsInput.portValue("2222") === 2222, "NetVfsInput")
         check(NetVfsInput.backupsPathProblem("smb", "a:b") !== "", "NetVfsInput M-9")
         check(NetVfsHelpers.credentialsApplication === "netvfs", "NetVfsHelpers")
-        check(NetVfsProbe.IdentityTrusted === 5, "IdentityStatus.IdentityTrusted")
         // SPEC-v2 XA-5: run-in-sdk.sh points NETVFS_PROVIDERS_DIR at accounts/descriptors.
-        check(NetVfsProviders.providers().length === 4, "NetVfsProviders.providers")
+        check(NetVfsProviders.providers().length === 2, "NetVfsProviders.providers")
         check(NetVfsProviders.descriptor("smb").fields.length > 5, "NetVfsProviders.descriptor")
-        check(NetVfsProviders.offersService("webdav", "files") && !NetVfsProviders.offersService("webdav", "backup"),
+        check(NetVfsProviders.offersService("smb", "files") && !NetVfsProviders.offersService("local", "backup"),
               "NetVfsProviders.offersService")
         check(NetVfsProviders.secretKind("smb", { "security_profile": "guest" }) === "none", "secretKind")
         check(!NetVfsHelpers.serviceAllowed(NetVfsHelpers.makeParams("smb", "nas", "", "",

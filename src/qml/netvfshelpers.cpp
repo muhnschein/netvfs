@@ -25,7 +25,6 @@ constexpr const char *OptAuthMode = "auth_mode";
 constexpr const char *OptPublicKey = "public_key";
 constexpr const char *AuthPublicKey = "publickey";
 constexpr const char *AuthInteractive = "interactive";
-constexpr const char *AuthToken = "token";
 constexpr const char *ProviderSftp = "sftp";
 constexpr const char *ProviderSmb = "smb";
 constexpr const char *StateCredentialsMissing = "credentials-missing";
@@ -128,78 +127,17 @@ QString sha256Fingerprint(const QByteArray &publicKeyBlob)
     return QStringLiteral("SHA256:") + QString::fromLatin1(encoded);
 }
 
-QStringList tlsProblemTexts(int problems)
-{
-    QStringList texts;
-    if (problems & ServerIdentity::SelfSigned) {
-        //% "The certificate is self-signed: no certificate authority vouches for it."
-        texts << qtTrId("settings-accounts-netvfs-la-tls_self_signed");
-    }
-    if (problems & ServerIdentity::UntrustedRoot) {
-        //% "The certificate is issued by an authority this device does not trust."
-        texts << qtTrId("settings-accounts-netvfs-la-tls_untrusted_root");
-    }
-    if (problems & ServerIdentity::Expired) {
-        //% "The certificate has expired."
-        texts << qtTrId("settings-accounts-netvfs-la-tls_expired");
-    }
-    if (problems & ServerIdentity::NotYetValid) {
-        //% "The certificate is not valid yet."
-        texts << qtTrId("settings-accounts-netvfs-la-tls_not_yet_valid");
-    }
-    if (problems & ServerIdentity::HostnameMismatch) {
-        //% "The certificate is issued for a different server name."
-        texts << qtTrId("settings-accounts-netvfs-la-tls_hostname_mismatch");
-    }
-    return texts;
-}
-
-QString colonHex(const QString &hex)
-{
-    QStringList pairs;
-    const QString upper = hex.toUpper();
-    for (int i = 0; i + 1 < upper.size(); i += 2)
-        pairs << upper.mid(i, 2);
-    return pairs.join(QLatin1Char(':'));
-}
-
-namespace {
-QString dateText(const QVariant &value)
-{
-    const QDateTime time = value.toDateTime();
-    return time.isValid() ? time.toUTC().toString(Qt::ISODate) : QString();
-}
-
-void insertTlsDetails(QVariantMap *map, const ServerIdentity &identity)
-{
-    const QVariantMap &details = identity.details;
-    map->insert(QStringLiteral("subject"), details.value(QStringLiteral("subject")).toString());
-    map->insert(QStringLiteral("issuer"), details.value(QStringLiteral("issuer")).toString());
-    map->insert(QStringLiteral("notBefore"), dateText(details.value(QStringLiteral("notBefore"))));
-    map->insert(QStringLiteral("notAfter"), dateText(details.value(QStringLiteral("notAfter"))));
-    map->insert(QStringLiteral("sans"), details.value(QStringLiteral("sans")).toStringList());
-    map->insert(QStringLiteral("certSha256"), colonHex(details.value(QStringLiteral("certSha256")).toString()));
-    map->insert(QStringLiteral("systemTrusted"), identity.systemTrusted);
-    map->insert(QStringLiteral("problems"), identity.problems);
-    map->insert(QStringLiteral("problemTexts"), tlsProblemTexts(identity.problems));
-}
-} // namespace
-
 QVariantMap identityToVariant(const ServerIdentity &identity)
 {
     QVariantMap map;
     if (identity.isEmpty())
         return map;
-    const bool tls = identity.kind == ServerIdentity::Kind::TlsCertificate;
-    map.insert(QStringLiteral("kind"), tls ? QStringLiteral("tls") : QStringLiteral("ssh"));
     map.insert(QStringLiteral("algorithm"), identity.algorithm);
     map.insert(QStringLiteral("fingerprint"),
                identity.fingerprint.isEmpty() ? sha256Fingerprint(identity.publicKey) : identity.fingerprint);
     map.insert(QStringLiteral("pin"), identity.toPin());
-    // XC-16, W-4: what to store on acceptance (host_key, tls_verify_peer).
+    // XC-16: what to store on acceptance (host_key).
     map.insert(QStringLiteral("pinOptions"), pinOptions(identity));
-    if (tls)
-        insertTlsDetails(&map, identity);
     return map;
 }
 
@@ -361,17 +299,6 @@ QString InputRules::shareProblem(const QString &share) const
     if (value.size() > MaxShareLength || !Paths::windowsComponentProblem(value).isEmpty()) {
         //% "This is not a valid share name."
         return qtTrId("settings-accounts-netvfs-la-share_invalid");
-    }
-    return QString();
-}
-
-QString InputRules::serverPathProblem(const QString &path) const
-{
-    const QString value = path.trimmed();
-    if (QString normalized;
-        !value.startsWith(QLatin1Char('/')) || hasControlCharacter(value) || !Paths::normalize(value, &normalized).ok()) {
-        //% "Enter a path that starts with /, for example /remote.php/dav/files/me/."
-        return qtTrId("settings-accounts-netvfs-la-server_path_invalid");
     }
     return QString();
 }
@@ -587,10 +514,6 @@ QString Helpers::authModeText(const QString &authMode) const
     if (authMode == QLatin1String(AuthInteractive)) {
         //% "Asked each time"
         return qtTrId("settings-accounts-netvfs-la-auth_interactive");
-    }
-    if (authMode == QLatin1String(AuthToken)) {
-        //% "Access token"
-        return qtTrId("settings-accounts-netvfs-la-auth_token");
     }
     //% "Password"
     return qtTrId("settings-accounts-netvfs-la-auth_password");

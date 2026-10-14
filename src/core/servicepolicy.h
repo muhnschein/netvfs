@@ -21,19 +21,13 @@ NETVFS_EXPORT bool serviceFromId(const QString &id, Service *service);
 // Option keys of ConnectionParams::options, stored as "netvfs/<provider>/<key>"
 // (SPEC 6.2, SPEC-v2 XA-3).
 namespace OptionKeys {
-NETVFS_EXPORT extern const char HostKey[];          // SSH and TLS pins (XC-16)
-NETVFS_EXPORT extern const char TlsVerifyPeer[];    // with a TLS pin: pinned certificate was system trusted (W-4)
-NETVFS_EXPORT extern const char PinTrusted[];       // webdav, ftp: pin even a system-trusted certificate
-NETVFS_EXPORT extern const char AuthMode[];         // password | publickey | interactive (sftp) | token (webdav)
+NETVFS_EXPORT extern const char HostKey[];          // SSH host key pin (XC-16)
+NETVFS_EXPORT extern const char AuthMode[];         // password | publickey | interactive (sftp)
 NETVFS_EXPORT extern const char SecurityProfile[];  // smb: strict | signed | legacy | guest (XM-1)
 NETVFS_EXPORT extern const char RequireEncryption[];// smb, v1 (M-3): false maps to "signed"
 NETVFS_EXPORT extern const char Share[];            // smb; empty: server mode (XM-2)
 NETVFS_EXPORT extern const char Shares[];           // smb: string list of saved shares (XM-3)
 NETVFS_EXPORT extern const char ShowAdminShares[];  // smb (XM-7)
-NETVFS_EXPORT extern const char BasePath[];         // webdav
-NETVFS_EXPORT extern const char Tls[];              // webdav: https | http
-NETVFS_EXPORT extern const char Flavor[];           // webdav: auto | nextcloud | generic
-NETVFS_EXPORT extern const char TlsMode[];          // ftp: explicit | implicit | none
 NETVFS_EXPORT extern const char AllowInsecure[];    // consent to an unprotected or weakened transport
 NETVFS_EXPORT extern const char AllowShell[];       // sftp: exec channel (XS-9), never for backups
 } // namespace OptionKeys
@@ -53,8 +47,7 @@ NETVFS_EXPORT extern const char Guest[];
 NETVFS_EXPORT QString securityProfile(const ConnectionParams &params);
 
 // A configuration whose transport is unprotected or weakened and so needs
-// the account's consent (allow_insecure=true): WebDAV over plain HTTP, FTP
-// without TLS, SMB profiles legacy and guest.
+// the account's consent (allow_insecure=true): SMB profiles legacy and guest.
 NETVFS_EXPORT bool isInsecureConfiguration(const ConnectionParams &params);
 
 // SPEC-v2 XA-4, the "allowed for service" column of XM-1 (amends SEC-2, M-4,
@@ -66,7 +59,6 @@ NETVFS_EXPORT bool isInsecureConfiguration(const ConnectionParams &params);
 //  | smb legacy, guest                            | no     | with allow_insecure    |
 //  | smb unknown profile                          | no     | no                     |
 //  | smb without a share (server mode)            | no     | yes                    |
-//  | webdav tls=http, ftp tls_mode=none           | no     | with allow_insecure    |
 //  | allow_insecure=true (any provider)           | no     | yes                    |
 //  | auth_mode=interactive (needs a person)       | no     | yes                    |
 //  | anything else                                | yes    | yes                    |
@@ -80,13 +72,10 @@ NETVFS_EXPORT ConnectionParams paramsForService(const ConnectionParams &params, 
 
 // SPEC-v2 XA-7 (and SPEC-v2-review 2.15): accounts that legitimately have no
 // stored secret: auth_mode=interactive (the person answers the prompts) and
-// the smb guest profile. Token accounts store their token as the secret.
+// the smb guest profile.
 NETVFS_EXPORT bool secretOptional(const ConnectionParams &params);
 
-// The options to store when the user accepts `identity` (XC-16): host_key,
-// and for a TLS identity also tls_verify_peer = identity.systemTrusted (W-4:
-// the backend keeps chain and host name verification on only for a pin of a
-// certificate that was system trusted when it was pinned).
+// The options to store when the user accepts `identity` (XC-16): host_key.
 NETVFS_EXPORT QVariantMap pinOptions(const ServerIdentity &identity);
 
 } // namespace NetVfs
