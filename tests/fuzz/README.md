@@ -29,9 +29,9 @@ by the cargo-fuzz targets in `rust/fuzz` (`tools/ci/rust-fuzz.sh`, doc/RUST.md).
    Make a violated property crash (`__builtin_trap()`); never print or exit.
 2. Name what it needs in comment directives near the top (all optional):
 
-       // fuzz-sources: src/core/names.cpp src/backends/webdav/multistatus.cpp
-       // fuzz-includes: src/backends/webdav
-       // fuzz-qt: Core Xml
+       // fuzz-sources: src/backends/smb/smbshares.cpp src/core/error.cpp
+       // fuzz-includes: src/backends/smb
+       // fuzz-qt: Core
 
    `fuzz-sources` are repository-relative `.cpp` files compiled into the harness (compile only what
    the parser needs, not whole plugins); `src/core` is always on the include path; `fuzz-qt` lists Qt

@@ -25,7 +25,7 @@ Evidence tags are as in SPEC.md. **[test]** refers to the runs listed in section
 | User name | | |
 | Domain | empty | optional workgroup or domain |
 | Password | | must not be empty |
-| Require encryption | on | see M-3 |
+| Security profile | `strict` | see XM-1 |
 | Backups folder | `Sailfish OS/Backups` | relative to the share root |
 
 ## 2. Settings keys and secret
@@ -36,7 +36,7 @@ In addition to the common keys (SPEC.md 6.2):
 |---|---|---|
 | `remotefs/smb/share` | string | share name |
 | `remotefs/smb/domain` | string | optional |
-| `remotefs/smb/require_encryption` | bool | default true |
+| `remotefs/smb/security_profile` | string | default `strict` (XM-1) |
 
 The secret stored in signond is the password, unchanged.
 
@@ -47,8 +47,8 @@ The secret stored in signond is the password, unchanged.
 - **M-1 Dialects.** SMB 3.0, 3.0.2 and 3.1.1 only: `smb2_set_version(SMB2_VERSION_ANY3)`. There is no fallback to SMB 2.x or SMB1 and no setting to enable one. Samba negotiated 3.1.1 **[test]**.
 - **M-2 Signing.** Always required: `smb2_set_security_mode(SMB2_NEGOTIATE_SIGNING_ENABLED | SMB2_NEGOTIATE_SIGNING_REQUIRED)` and `smb2_set_sign(smb2, 1)`.
 - **M-3 Encryption.**
-  - *Require encryption* on (default): `smb2_set_seal(smb2, 1)`. The connection fails if the server does not negotiate encryption **[test]**.
-  - Off: `smb2_set_seal()` is not called. The library then still uses encryption where the server or share mandates it and otherwise runs signed but unencrypted **[test]**. The settings page labels this state "Signed, not encrypted".
+  - Profile `strict` (default): `smb2_set_seal(smb2, 1)`. The connection fails if the server does not negotiate encryption **[test]**.
+  - Profile `signed`: `smb2_set_seal()` is not called. The library then still uses encryption where the server or share mandates it and otherwise runs signed but unencrypted **[test]**.
 - **M-4 Authentication.** NTLMv2 through NTLMSSP only: `smb2_set_authentication(smb2, SMB2_SEC_NTLMSSP)`, with user, password and optional domain set explicitly. Guest and anonymous sessions are not offered.
 - **M-5** The password is always set with `smb2_set_password()`. libsmb2 can also read passwords from a file named by the `NTLM_USER_FILE` environment variable **[src: `lib/init.c`]**; code review of the pinned commit MUST confirm that an explicit password takes precedence.
 - **M-6** Kerberos and DCE/RPC (share enumeration) are compiled out (SPEC.md P-3).
@@ -135,7 +135,7 @@ This is the pass criterion for the SMB part of the interop suite (SPEC.md 12.2) 
 | M-T1 | Samba 4.19.5 strict: `server min protocol = SMB3_11`, `server signing = mandatory`, `server smb encrypt = required`, `ntlm auth = ntlmv2-only` | pass; `smbstatus` shows SMB3_11, AES-128-CCM, AES-128-CMAC | verified |
 | M-T2 | Samba 4.19.5 with distribution-default security settings, encryption required by the account | pass, dialect 3.1.1 | verified (see note) |
 | M-T3 | server with `server smb encrypt = off`, encryption required by the account | refused | verified |
-| M-T4 | same server, *Require encryption* off | pass | verified |
+| M-T4 | same server, profile `signed` | pass | verified |
 | M-T5 | wrong password; unknown user | refused, `STATUS_LOGON_FAILURE` | verified |
 | M-T6 | unknown share | refused, `STATUS_BAD_NETWORK_NAME` | verified |
 | M-T7 | client pinned to SMB 2.1 against a server that requires 3.1.1 | refused | verified |
@@ -180,7 +180,7 @@ How the backend implements XM-1..XM-9, where the v2 text leaves a choice.
 
 | Item | Decision |
 |---|---|
-| XM-1 profiles | Option `security_profile` = `strict` (default) / `signed` / `legacy` / `guest`; without it `require_encryption=false` means `signed`. Any other value is `SecurityPolicy` (nothing weaker is guessed, XSEC-2). Dialects: `strict`/`signed` `SMB2_VERSION_ANY3`, `legacy`/`guest` `SMB2_VERSION_ANY`; the negotiated dialect is checked again against the profile (M-1 defence in depth). Signing required except for `guest` (`SIGNING_ENABLED` only). Encryption: `strict` `smb2_set_seal(1)`; `signed`/`legacy` leave seal unset, so libsmb2 encrypts exactly when the server or the share requires it (libsmb2 has no opportunistic encryption); `guest` `smb2_set_seal(0)`. `guest` sends an empty user name and no password (NTLMSSP anonymous) and ignores the account's credentials. The "allowed for service" column is enforced by `AccountSession` (XA-4), not here. |
+| XM-1 profiles | Option `security_profile` = `strict` (default) / `signed` / `legacy` / `guest`; without it the profile is `strict`. Any other value is `SecurityPolicy` (nothing weaker is guessed, XSEC-2). Dialects: `strict`/`signed` `SMB2_VERSION_ANY3`, `legacy`/`guest` `SMB2_VERSION_ANY`; the negotiated dialect is checked again against the profile (M-1 defence in depth). Signing required except for `guest` (`SIGNING_ENABLED` only). Encryption: `strict` `smb2_set_seal(1)`; `signed`/`legacy` leave seal unset, so libsmb2 encrypts exactly when the server or the share requires it (libsmb2 has no opportunistic encryption); `guest` `smb2_set_seal(0)`. `guest` sends an empty user name and no password (NTLMSSP anonymous) and ignores the account's credentials. The "allowed for service" column is enforced by `AccountSession` (XA-4), not here. |
 | XM-1 guest mapping | `smb2_get_session_flags()` (vendor patch 0004): `IS_GUEST` or `IS_NULL` on a session of any other profile is `SecurityPolicy`, also when the sign-in failed because the guest session could not sign. Verified against Samba with `map to guest = Bad User` for `strict`, `signed` and `legacy`. |
 | XM-2 server mode | Empty `share`. `authenticate()` signs in to `IPC$`: that proves credentials and profile before anything else and serves `keepAlive()` (ECHO) and the chunk sizes; it is not counted among the four share contexts. Share contexts open on first use of `/<share>/…`; the fifth closes the least recently used one without open handles, or fails with `TooManyConnections` when every context holds handles. Only in server mode is the password kept in memory after sign-in (wiped on `disconnect()`). `/`: `list`, `stat` only, everything else `PermissionDenied`; `/<share>`: `removeDir`, `rename`, `openWrite`/`upload` `PermissionDenied`, `makeDir` succeeds for an existing share (needed by `makePath`) and is `PermissionDenied` for a missing one. Moving between shares is `Unsupported`. |
 | XM-3 share list | `shares` (QStringList, list or comma separated string), trimmed, invalid names dropped, de-duplicated without regard to case; then the enumerated shares not yet listed. Entries are `Directory`; an enumerated remark is `Entry::extra["remark"]`. |

@@ -122,11 +122,10 @@ runs the suite after its own driver:
 conformance_config="$work/conformance.json"
 cat > "$conformance_config" <<JSON
 { "targets": [ {
-    "name": "webdav-apache",
-    "provider": "webdav",
+    "name": "sftp-openssh",
+    "provider": "sftp",
     "host": "127.0.0.1", "port": $port,
     "user": "alice", "secretEnv": "NETVFS_CONFORMANCE_SECRET",
-    "options": { "tls": "https", "base_path": "/dav/" },
     "trustOnFirstUse": true,
     "baseDir": "conformance",
     "hostPath": "$work/data/conformance"
