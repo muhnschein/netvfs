@@ -3,4 +3,11 @@
 //! design §5, doc/RUST.md "netvfs-smb").
 #![forbid(unsafe_code)]
 
+pub mod auth;
 pub mod crypto;
+pub mod error;
+pub mod msg;
+pub mod names;
+pub mod negotiate;
+pub mod status;
+pub mod wire;
