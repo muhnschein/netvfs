@@ -4,8 +4,8 @@
 use super::*;
 use crate::fake::{Action, Fake, Rule};
 use crate::proto::{
-    FX_FAILURE, FX_NO_SUCH_FILE, FXF_CREAT, FXF_READ, FXF_WRITE, FXP_ATTRS, FXP_DATA, FXP_HANDLE, FXP_NAME, FXP_STATUS,
-    StatusReply,
+    FX_FAILURE, FX_NO_SUCH_FILE, FXF_CREAT, FXF_READ, FXF_WRITE, FXP_ATTRS, FXP_DATA, FXP_HANDLE, FXP_NAME,
+    FXP_STATUS, StatusReply,
 };
 use tokio::io::DuplexStream;
 
@@ -70,7 +70,9 @@ async fn handshake_refuses_other_versions() {
     let (stream, _task) = fake.connect();
     let (r, w) = split(stream);
     let (tx, rx) = oneshot::channel();
-    let e = Client::start(r, w, async move { tx.send(()).unwrap_or_default() }, LONG, &CancelToken::new()).await.unwrap_err();
+    let e = Client::start(r, w, async move { tx.send(()).unwrap_or_default() }, LONG, &CancelToken::new())
+        .await
+        .unwrap_err();
     assert_eq!((e.name, e.detail.as_str()), (ErrorName::Unsupported, "version 4"));
     // The channel is closed after a failed start.
     tokio::time::timeout(LONG, rx).await.unwrap().unwrap();
@@ -155,14 +157,20 @@ async fn typed_requests_and_their_replies() {
     assert_eq!(missing.code(), Some(FX_NO_SUCH_FILE));
     assert_eq!(client.path_of(PathOf::Realpath(b"."), &c).await.unwrap(), b"/home/u");
     assert_eq!(client.path_of(PathOf::Readlink(b"/home/u/l"), &c).await.unwrap(), b"f");
-    client.simple(Simple::Mkdir(b"/home/u/d", Attrs { permissions: Some(0o700), ..Attrs::default() }), &c).await.unwrap();
+    client
+        .simple(Simple::Mkdir(b"/home/u/d", Attrs { permissions: Some(0o700), ..Attrs::default() }), &c)
+        .await
+        .unwrap();
     assert_eq!(fake.node("/home/u/d"), Some(crate::fake::Node::Dir { mode: 0o700, mtime: 7000 }));
     client.simple(Simple::Rename(b"/home/u/d", b"/home/u/e"), &c).await.unwrap();
     client.simple(Simple::Rmdir(b"/home/u/e"), &c).await.unwrap();
     client.simple(Simple::Symlink { target: b"f", link: b"/home/u/s" }, &c).await.unwrap();
     let symlink = fake.requests(FXP_SYMLINK);
     assert_eq!(symlink[0].strings, [b"f".to_vec(), b"/home/u/s".to_vec()]);
-    client.simple(Simple::Setstat(b"/home/u/f", Attrs { size: Some(1), ..Attrs::default() }), &c).await.unwrap();
+    client
+        .simple(Simple::Setstat(b"/home/u/f", Attrs { size: Some(1), ..Attrs::default() }), &c)
+        .await
+        .unwrap();
     assert_eq!(fake.data("/home/u/f").unwrap(), b"a");
     client.simple(Simple::Remove(b"/home/u/f"), &c).await.unwrap();
     let failed = client.simple(Simple::Remove(b"/home/u/f"), &c).await.unwrap_err();
@@ -194,7 +202,16 @@ async fn replies_of_the_wrong_kind_are_protocol_errors() {
     fake.rule(Rule::new(FXP_STAT, Action::Raw(raw(FXP_HANDLE, id_of(1), &crate::fake::string(b"h")))).once());
     let e = client.stat(b"/", true, &c).await.unwrap_err();
     assert_eq!(e, unexpected());
-    let two = [2u32.to_be_bytes().to_vec(), crate::fake::string(b"a"), crate::fake::string(b""), vec![0; 4], crate::fake::string(b"b"), crate::fake::string(b""), vec![0; 4]].concat();
+    let two = [
+        2u32.to_be_bytes().to_vec(),
+        crate::fake::string(b"a"),
+        crate::fake::string(b""),
+        vec![0; 4],
+        crate::fake::string(b"b"),
+        crate::fake::string(b""),
+        vec![0; 4],
+    ]
+    .concat();
     fake.rule(Rule::new(FXP_REALPATH, Action::Raw(raw(FXP_NAME, id_of(2), &two))).once());
     assert_eq!(client.path_of(PathOf::Realpath(b"."), &c).await.unwrap_err(), unexpected());
     fake.rule(Rule::new(FXP_OPEN, Action::Status(FX_OK, "")).once());
@@ -325,16 +342,19 @@ async fn a_reply_to_no_request_ends_the_client() {
     let (client, _, ended) = start_with(&fake, LONG).await;
     let e = client.stat(b"/", true, &CancelToken::new()).await.unwrap_err();
     let s = e.status("x");
-    assert_eq!((s.name, s.message.as_str(), s.detail.as_str()), (ErrorName::ProtocolError, "The server answered a request that was not sent", "id 999"));
+    assert_eq!(
+        (s.name, s.message.as_str(), s.detail.as_str()),
+        (ErrorName::ProtocolError, "The server answered a request that was not sent", "id 999")
+    );
     tokio::time::timeout(LONG, ended).await.unwrap().unwrap();
 }
 
 #[tokio::test]
 async fn malformed_replies_end_the_client() {
     for bad in [
-        raw(FXP_STATUS, 1, &[0, 0]),       // short
-        raw(77, 1, &[]),                     // unknown type
-        vec![0, 0, 0, 0],                    // empty packet
+        raw(FXP_STATUS, 1, &[0, 0]),                                   // short
+        raw(77, 1, &[]),                                               // unknown type
+        vec![0, 0, 0, 0],                                              // empty packet
         u32::try_from(MAX_PACKET + 1).unwrap().to_be_bytes().to_vec(), // too long
     ] {
         let fake = Fake::new();
@@ -380,7 +400,10 @@ async fn ending_fails_waiters_with_the_reason_and_closes_the_channel() {
     assert_eq!(client.end_reason(), connection_lost());
     client.end(crate::errors::connection_closed());
     client.end(Status::internal("second reason loses"));
-    assert_eq!(waiting.wait(&CancelToken::new()).await.unwrap_err(), Failure::Local(crate::errors::connection_closed()));
+    assert_eq!(
+        waiting.wait(&CancelToken::new()).await.unwrap_err(),
+        Failure::Local(crate::errors::connection_closed())
+    );
     assert_eq!(client.end_reason(), crate::errors::connection_closed());
     tokio::time::timeout(LONG, ended).await.unwrap().unwrap();
     assert_eq!(client.timeout(), LONG);

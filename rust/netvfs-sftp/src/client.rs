@@ -14,9 +14,9 @@
 
 use crate::errors::{Failure, connection_lost, malformed, timed_out, unexpected};
 use crate::proto::{
-    Attrs, FX_EOF, FX_OK, FXP_CLOSE, FXP_EXTENDED, FXP_FSTAT, FXP_LSTAT, FXP_MKDIR, FXP_OPEN, FXP_OPENDIR, FXP_READ,
-    FXP_READDIR, FXP_READLINK, FXP_REALPATH, FXP_REMOVE, FXP_RENAME, FXP_RMDIR, FXP_SETSTAT, FXP_STAT, FXP_SYMLINK,
-    FXP_WRITE, Name, Reply, ServerVersion, VERSION, decode_reply, decode_version,
+    Attrs, FX_EOF, FX_OK, FXP_CLOSE, FXP_EXTENDED, FXP_FSTAT, FXP_LSTAT, FXP_MKDIR, FXP_OPEN, FXP_OPENDIR,
+    FXP_READ, FXP_READDIR, FXP_READLINK, FXP_REALPATH, FXP_REMOVE, FXP_RENAME, FXP_RMDIR, FXP_SETSTAT,
+    FXP_STAT, FXP_SYMLINK, FXP_WRITE, Name, Reply, ServerVersion, VERSION, decode_reply, decode_version,
 };
 use crate::wire::{MAX_PACKET, Packet, WireError};
 use netvfs_vfs::{CancelToken, ErrorName, Status};
@@ -58,7 +58,9 @@ struct Table {
 enum Slot {
     Waiting(oneshot::Sender<Reply>),
     /// The reply is dropped when it comes; a handle in it is closed.
-    Abandoned { close_handle: bool },
+    Abandoned {
+        close_handle: bool,
+    },
 }
 
 impl Shared {
@@ -162,8 +164,10 @@ impl Shared {
                 }
                 Ok(())
             }
-            None => Err(Status::new(ErrorName::ProtocolError, "The server answered a request that was not sent")
-                .with_detail(format!("id {id}"))),
+            None => {
+                Err(Status::new(ErrorName::ProtocolError, "The server answered a request that was not sent")
+                    .with_detail(format!("id {id}")))
+            }
         }
     }
 }
@@ -229,7 +233,9 @@ async fn read_packet<R: AsyncRead + Unpin>(read: &mut R) -> Result<Vec<u8>, Stat
     read.read_exact(&mut len).await.map_err(|e| lost(&e))?;
     let len = usize::try_from(u32::from_be_bytes(len)).unwrap_or(usize::MAX);
     if len == 0 || len > MAX_PACKET {
-        return Err(malformed(WireError("a packet length is out of range")).with_detail(format!("{len} bytes")));
+        return Err(
+            malformed(WireError("a packet length is out of range")).with_detail(format!("{len} bytes"))
+        );
     }
     let mut body = vec![0; len];
     read.read_exact(&mut body).await.map_err(|e| lost(&e))?;
@@ -257,8 +263,12 @@ async fn read_loop<R: AsyncRead + Unpin>(mut read: R, shared: Arc<Shared>) {
     }
 }
 
-async fn write_loop<W, F>(mut write: W, mut queue: mpsc::UnboundedReceiver<Vec<u8>>, shared: Arc<Shared>, on_end: F)
-where
+async fn write_loop<W, F>(
+    mut write: W,
+    mut queue: mpsc::UnboundedReceiver<Vec<u8>>,
+    shared: Arc<Shared>,
+    on_end: F,
+) where
     W: AsyncWrite + Unpin,
     F: Future<Output = ()>,
 {
@@ -417,7 +427,13 @@ impl Client {
     ///
     /// # Errors
     /// The server's status or a local failure.
-    pub async fn open(&self, path: &[u8], flags: u32, attrs: &Attrs, cancel: &CancelToken) -> Result<Vec<u8>, Failure> {
+    pub async fn open(
+        &self,
+        path: &[u8],
+        flags: u32,
+        attrs: &Attrs,
+        cancel: &CancelToken,
+    ) -> Result<Vec<u8>, Failure> {
         let packet = attrs.encode(Packet::request(FXP_OPEN).string(path).u32(flags));
         handle(self.send_as(packet, true)?.wait(cancel).await?)
     }
@@ -496,7 +512,9 @@ impl Client {
             PathOf::Readlink(path) => Packet::request(FXP_READLINK).string(path),
         };
         match self.call(packet, cancel).await? {
-            Reply::Name(mut names) if names.len() == 1 => Ok(names.pop().map(|n| n.filename).unwrap_or_default()),
+            Reply::Name(mut names) if names.len() == 1 => {
+                Ok(names.pop().map(|n| n.filename).unwrap_or_default())
+            }
             other => Err(not_ok(other)),
         }
     }
@@ -505,7 +523,12 @@ impl Client {
     ///
     /// # Errors
     /// A local failure (the server's status comes back as a reply).
-    pub async fn extended(&self, name: &str, fields: Fields<'_>, cancel: &CancelToken) -> Result<Reply, Failure> {
+    pub async fn extended(
+        &self,
+        name: &str,
+        fields: Fields<'_>,
+        cancel: &CancelToken,
+    ) -> Result<Reply, Failure> {
         let mut packet = Packet::request(FXP_EXTENDED).string(name.as_bytes());
         for field in fields {
             packet = match *field {

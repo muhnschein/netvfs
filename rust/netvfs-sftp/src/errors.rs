@@ -144,7 +144,12 @@ mod tests {
             (FX_CONNECTION_LOST, "", ErrorName::ConnectionLost, "/a: the server lost its connection"),
             (FX_FAILURE, "Failure", ErrorName::ProtocolError, "/a: Failure"),
             (FX_FAILURE, "", ErrorName::ProtocolError, "/a: the server reported a failure"),
-            (FX_FAILURE, "rmdir: Directory not empty", ErrorName::DirectoryNotEmpty, "/a: Directory not empty"),
+            (
+                FX_FAILURE,
+                "rmdir: Directory not empty",
+                ErrorName::DirectoryNotEmpty,
+                "/a: Directory not empty",
+            ),
             (FX_FAILURE, "Not a directory", ErrorName::NotADirectory, "/a: Not a directory"),
             (FX_FAILURE, "unlink: Is a directory", ErrorName::IsADirectory, "/a: Is a directory"),
             (FX_FAILURE, "Is a directory, really?", ErrorName::ProtocolError, "/a: Is a directory, really?"),

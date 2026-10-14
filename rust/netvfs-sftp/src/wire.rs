@@ -116,10 +116,7 @@ pub struct Packet {
 impl fmt::Debug for Packet {
     // Packets carry file data; only the type and size are shown.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Packet")
-            .field("type", &self.buf.get(4))
-            .field("len", &self.buf.len())
-            .finish()
+        f.debug_struct("Packet").field("type", &self.buf.get(4)).field("len", &self.buf.len()).finish()
     }
 }
 
@@ -191,7 +188,9 @@ mod tests {
 
     #[test]
     fn reads_numbers_and_strings_in_order() {
-        let buf = [&[7, 0, 0, 1, 2][..], &[0, 0, 0, 1, 0, 0, 0, 0], &[0, 0, 0, 2, b'h', b'i'], &[0, 0, 0, 1, b'x']].concat();
+        let buf =
+            [&[7, 0, 0, 1, 2][..], &[0, 0, 0, 1, 0, 0, 0, 0], &[0, 0, 0, 2, b'h', b'i'], &[0, 0, 0, 1, b'x']]
+                .concat();
         let mut r = Reader::new(&buf);
         assert_eq!(r.u8(), Ok(7));
         assert_eq!(r.u32(), Ok(0x102));
@@ -236,9 +235,7 @@ mod tests {
         let p = Packet::request(17).u32(9).u64(2).string(b"ab").finish(0x0102_0304).unwrap();
         assert_eq!(
             p,
-            [
-                0, 0, 0, 23, 17, 1, 2, 3, 4, 0, 0, 0, 9, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 2, b'a', b'b'
-            ]
+            [0, 0, 0, 23, 17, 1, 2, 3, 4, 0, 0, 0, 9, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 2, b'a', b'b']
         );
         assert_eq!(Packet::init(3).finish(99).unwrap(), [0, 0, 0, 5, 1, 0, 0, 0, 3]);
         assert_eq!(Packet::request(4).finish(1).unwrap(), [0, 0, 0, 5, 4, 0, 0, 0, 1]);

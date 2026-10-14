@@ -349,7 +349,8 @@ impl Statvfs {
     /// A short or long reply.
     pub fn decode(data: &[u8]) -> Result<Self, WireError> {
         let mut r = Reader::new(data);
-        let s = Self { bsize: r.u64()?, frsize: r.u64()?, blocks: r.u64()?, bfree: r.u64()?, bavail: r.u64()? };
+        let s =
+            Self { bsize: r.u64()?, frsize: r.u64()?, blocks: r.u64()?, bfree: r.u64()?, bavail: r.u64()? };
         for _ in 0..6 {
             r.u64()?;
         }
@@ -377,7 +378,12 @@ impl Limits {
     /// A short or long reply.
     pub fn decode(data: &[u8]) -> Result<Self, WireError> {
         let mut r = Reader::new(data);
-        let l = Self { max_packet: r.u64()?, max_read: r.u64()?, max_write: r.u64()?, max_open_handles: r.u64()? };
+        let l = Self {
+            max_packet: r.u64()?,
+            max_read: r.u64()?,
+            max_write: r.u64()?,
+            max_open_handles: r.u64()?,
+        };
         if r.is_empty() { Ok(l) } else { Err(WireError("a limits reply has bytes left over")) }
     }
 }
@@ -444,7 +450,12 @@ mod tests {
 
     #[test]
     fn attrs_round_trip_every_field() {
-        let all = Attrs { size: Some(1 << 40), ids: Some((1000, 100)), permissions: Some(0o100_644), times: Some((5, 6)) };
+        let all = Attrs {
+            size: Some(1 << 40),
+            ids: Some((1000, 100)),
+            permissions: Some(0o100_644),
+            times: Some((5, 6)),
+        };
         for attrs in [Attrs::default(), all, Attrs { permissions: Some(0o755), ..Attrs::default() }] {
             let bytes = attrs.encode(Packet::request(9)).finish(0).unwrap();
             let mut r = Reader::new(&bytes[9..]);
@@ -453,9 +464,11 @@ mod tests {
         }
         let bytes = all.encode(Packet::request(9)).finish(0).unwrap();
         assert_eq!(&bytes[9..13], &[0, 0, 0, 0x0f]);
-        let times = Attrs { times: Some((1, 2)), ..Attrs::default() }.encode(Packet::request(9)).finish(0).unwrap();
+        let times =
+            Attrs { times: Some((1, 2)), ..Attrs::default() }.encode(Packet::request(9)).finish(0).unwrap();
         assert_eq!(&times[9..], &[0, 0, 0, 8, 0, 0, 0, 1, 0, 0, 0, 2]);
-        let ids = Attrs { ids: Some((3, 4)), ..Attrs::default() }.encode(Packet::request(9)).finish(0).unwrap();
+        let ids =
+            Attrs { ids: Some((3, 4)), ..Attrs::default() }.encode(Packet::request(9)).finish(0).unwrap();
         assert_eq!(&ids[9..], &[0, 0, 0, 2, 0, 0, 0, 3, 0, 0, 0, 4]);
         let size = Attrs { size: Some(7), ..Attrs::default() }.encode(Packet::request(9)).finish(0).unwrap();
         assert_eq!(&size[9..], &[0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 7]);
@@ -487,7 +500,11 @@ mod tests {
         }
         assert_eq!(Attrs::decode(&mut Reader::new(&b)), Ok(Attrs::default()));
         for flags in [ATTR_SIZE, ATTR_UIDGID, ATTR_PERMISSIONS, ATTR_ACMODTIME, ATTR_EXTENDED] {
-            assert_eq!(Attrs::decode(&mut Reader::new(&be(flags))), Err(WireError("the packet ends early")), "{flags:#x}");
+            assert_eq!(
+                Attrs::decode(&mut Reader::new(&be(flags))),
+                Err(WireError("the packet ends early")),
+                "{flags:#x}"
+            );
         }
     }
 
@@ -499,7 +516,8 @@ mod tests {
         let r = decode_reply(&body(FXP_STATUS, 1, &[&be(2)])).unwrap();
         assert_eq!(r.1, Reply::Status(StatusReply { code: 2, message: String::new() }));
         let long = vec![b'x'; MAX_MESSAGE + 10];
-        let Reply::Status(st) = decode_reply(&body(FXP_STATUS, 1, &[&be(4), &s(&long), &s(b"")])).unwrap().1 else {
+        let Reply::Status(st) = decode_reply(&body(FXP_STATUS, 1, &[&be(4), &s(&long), &s(b"")])).unwrap().1
+        else {
             panic!("not a status");
         };
         assert_eq!(st.message.len(), MAX_MESSAGE);
@@ -514,7 +532,10 @@ mod tests {
         let ok = vec![1; MAX_HANDLE];
         assert_eq!(decode_reply(&body(FXP_HANDLE, 2, &[&s(&ok)])), Ok((2, Reply::Handle(ok.clone()))));
         let long = vec![1; MAX_HANDLE + 1];
-        assert_eq!(decode_reply(&body(FXP_HANDLE, 2, &[&s(&long)])), Err(WireError("the handle is too long")));
+        assert_eq!(
+            decode_reply(&body(FXP_HANDLE, 2, &[&s(&long)])),
+            Err(WireError("the handle is too long"))
+        );
     }
 
     #[test]
@@ -596,7 +617,10 @@ mod tests {
         assert_eq!(decode_version(&b), Err(WireError("an extension name is too long")));
         let b = [vec![FXP_VERSION, 0, 0, 0, 3], s(b"n"), s(&long)].concat();
         assert_eq!(decode_version(&b), Err(WireError("an extension is too long")));
-        assert_eq!(decode_version(&[FXP_STATUS, 0, 0, 0, 3]), Err(WireError("the server did not answer with VERSION")));
+        assert_eq!(
+            decode_version(&[FXP_STATUS, 0, 0, 0, 3]),
+            Err(WireError("the server did not answer with VERSION"))
+        );
         decode_version(&[FXP_VERSION, 0, 0]).unwrap_err();
         // A name without its data.
         decode_version(&[vec![FXP_VERSION, 0, 0, 0, 3], s(b"n")].concat()).unwrap_err();
@@ -609,7 +633,10 @@ mod tests {
         Statvfs::decode(&v[..80]).unwrap_err();
         Statvfs::decode(&[v, vec![0]].concat()).unwrap_err();
         let l: Vec<u8> = (1..=4u64).flat_map(u64::to_be_bytes).collect();
-        assert_eq!(Limits::decode(&l), Ok(Limits { max_packet: 1, max_read: 2, max_write: 3, max_open_handles: 4 }));
+        assert_eq!(
+            Limits::decode(&l),
+            Ok(Limits { max_packet: 1, max_read: 2, max_write: 3, max_open_handles: 4 })
+        );
         Limits::decode(&l[..31]).unwrap_err();
         Limits::decode(&[l, vec![0]].concat()).unwrap_err();
     }
@@ -627,7 +654,10 @@ mod tests {
         assert_eq!(decode_owner_names(&reply, 3, 1), Err(WireError("fewer names than ids")));
         assert_eq!(decode_owner_names(&[s(b""), s(b"")].concat(), 0, 0), Ok((vec![], vec![])));
         let long = s(&[b'u'; MAX_OWNER_NAME + 1]);
-        assert_eq!(decode_owner_names(&[s(&long), s(b"")].concat(), 1, 0), Err(WireError("an owner name is too long")));
+        assert_eq!(
+            decode_owner_names(&[s(&long), s(b"")].concat(), 1, 0),
+            Err(WireError("an owner name is too long"))
+        );
         assert_eq!(
             decode_owner_names(&[s(b""), s(b""), vec![1]].concat(), 0, 0),
             Err(WireError("an owner reply has bytes left over"))
