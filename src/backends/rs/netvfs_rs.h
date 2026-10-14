@@ -80,16 +80,19 @@ typedef struct nvr_prompter {
 } nvr_prompter;
 
 typedef struct nvr_write_opts {      /* WriteOptions */
-    uint32_t disposition;            /* NVB_DISPOSITION_* */
+    uint32_t disposition;            /* one of the NVB_DISPOSITION_ values */
     int32_t create_mode;             /* -1 backend default */
     int64_t resume_offset;
     int64_t expected_size;           /* -1 unknown */
-    uint8_t has_mtime; int64_t mtime_ms;
+    uint8_t has_mtime;
+    int64_t mtime_ms;
 } nvr_write_opts;
 
 typedef struct nvr_key {             /* SshKeyMaterial, one block; private part wiped by free */
     nvb_bytes private_key;           /* OpenSSH format, unencrypted */
-    nvb_bytes algorithm, public_line, fingerprint;
+    nvb_bytes algorithm;
+    nvb_bytes public_line;
+    nvb_bytes fingerprint;
 } nvr_key;
 
 /* upload and download: the shim's nvb_io reads and writes its QIODevice in
