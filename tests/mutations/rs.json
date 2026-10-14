@@ -1,0 +1,317 @@
+[
+  {
+    "name": "Loader: NETVFS_RS_LIB ignored",
+    "file": "src/backends/rs/rsloader.cpp",
+    "search": "        QByteArray path = qgetenv(\"NETVFS_RS_LIB\");",
+    "replace": "        QByteArray path;",
+    "test": "build/tests/backends/rs/tst_rsshim"
+  },
+  {
+    "name": "Loader: a loaded table is not kept",
+    "file": "src/backends/rs/rsloader.cpp",
+    "search": "    if (!lib.table) {",
+    "replace": "    {",
+    "test": "build/tests/backends/rs/tst_rsshim"
+  },
+  {
+    "name": "Names: a name the server cannot store is sent anyway",
+    "file": "src/backends/rs/rsmarshal.cpp",
+    "search": "    if (!Names::isEncodable(path))",
+    "replace": "    if (false)",
+    "test": "build/tests/backends/rs/tst_rsshim"
+  },
+  {
+    "name": "Errors: the detail is lost",
+    "file": "src/backends/rs/rsmarshal.cpp",
+    "search": "    return Result(errorFromName(toUtf8String(error->name)), toUtf8String(error->message),\n                  toUtf8String(error->detail), error->retry_after_ms);",
+    "replace": "    return Result(errorFromName(toUtf8String(error->name)), toUtf8String(error->message),\n                  QString(), error->retry_after_ms);",
+    "test": "build/tests/backends/rs/tst_rsshim"
+  },
+  {
+    "name": "Errors: the retry time is lost",
+    "file": "src/backends/rs/rsmarshal.cpp",
+    "search": "toUtf8String(error->detail), error->retry_after_ms);",
+    "replace": "toUtf8String(error->detail));",
+    "test": "build/tests/backends/rs/tst_rsshim"
+  },
+  {
+    "name": "Entries: an unknown time becomes the epoch",
+    "file": "src/backends/rs/rsmarshal.cpp",
+    "search": "    return ms == -1 ? QDateTime() : Ffi::fromMs(ms);",
+    "replace": "    return Ffi::fromMs(ms);",
+    "test": "make -s -C build/tests/backends/rs check"
+  },
+  {
+    "name": "Entries: the target type is lost",
+    "file": "src/backends/rs/rsmarshal.cpp",
+    "search": "    out.targetType = static_cast<EntryType>(entry.target_type);\n",
+    "replace": "",
+    "test": "build/tests/backends/rs/tst_rsshim"
+  },
+  {
+    "name": "Entries: the access time is lost",
+    "file": "src/backends/rs/rsmarshal.cpp",
+    "search": "    out.accessed = timeOf(entry.atime_ms);\n",
+    "replace": "",
+    "test": "build/tests/backends/rs/tst_rsshim"
+  },
+  {
+    "name": "Capabilities: the name limit is lost",
+    "file": "src/backends/rs/rsmarshal.cpp",
+    "search": "    out.maxNameBytes = capabilities.max_name_bytes;\n",
+    "replace": "",
+    "test": "build/tests/backends/rs/tst_rsshim"
+  },
+  {
+    "name": "Identity: an SSH host key becomes none",
+    "file": "src/backends/rs/rsmarshal.cpp",
+    "search": "identity.kind == NVB_IDENTITY_SSH ? ServerIdentity::Kind::SshHostKey : ServerIdentity::Kind::None;",
+    "replace": "ServerIdentity::Kind::None;",
+    "test": "build/tests/backends/rs/tst_rsshim"
+  },
+  {
+    "name": "Params: the port is lost",
+    "file": "src/backends/rs/rsmarshal.cpp",
+    "search": "    out.port = params.port;\n",
+    "replace": "",
+    "test": "build/tests/backends/rs/tst_rsshim"
+  },
+  {
+    "name": "Params: the options are lost",
+    "file": "src/backends/rs/rsmarshal.cpp",
+    "search": "    out.options = Ffi::fillMap(arena, params.options, &out.n_options);\n",
+    "replace": "",
+    "test": "build/tests/backends/rs/tst_rsshim"
+  },
+  {
+    "name": "Params: the request timeout is the connect timeout",
+    "file": "src/backends/rs/rsmarshal.cpp",
+    "search": "    out.request_timeout_ms = params.requestTimeoutMs;",
+    "replace": "    out.request_timeout_ms = params.connectTimeoutMs;",
+    "test": "build/tests/backends/rs/tst_rsshim"
+  },
+  {
+    "name": "Attributes: the modification time is never set",
+    "file": "src/backends/rs/rsmarshal.cpp",
+    "search": "    out.has_mtime = changes.modified.isValid() ? 1 : 0;",
+    "replace": "    out.has_mtime = 0;",
+    "test": "make -s -C build/tests/backends/rs check"
+  },
+  {
+    "name": "Write options: the resume offset is lost",
+    "file": "src/backends/rs/rsmarshal.cpp",
+    "search": "    out.resume_offset = options.resumeOffset;",
+    "replace": "    out.resume_offset = 0;",
+    "test": "make -s -C build/tests/backends/rs check"
+  },
+  {
+    "name": "Write options: the expected size is lost",
+    "file": "src/backends/rs/rsmarshal.cpp",
+    "search": "    out.expected_size = options.expectedSize;",
+    "replace": "    out.expected_size = -1;",
+    "test": "build/tests/backends/rs/tst_rsshim"
+  },
+  {
+    "name": "Upload options: the disposition is always Truncate",
+    "file": "src/backends/rs/rsmarshal.cpp",
+    "search": "    out.disposition = write.disposition;",
+    "replace": "    out.disposition = NVB_DISPOSITION_TRUNCATE;",
+    "test": "make -s -C build/tests/backends/rs check"
+  },
+  {
+    "name": "Upload options: the mode is lost",
+    "file": "src/backends/rs/rsmarshal.cpp",
+    "search": "    out.create_mode = write.create_mode;",
+    "replace": "    out.create_mode = -1;",
+    "test": "build/tests/backends/rs/tst_rsshim"
+  },
+  {
+    "name": "S5: a throwing callback goes unreported",
+    "file": "src/backends/rs/rshooks.cpp",
+    "search": "        m_thrown = true;\n",
+    "replace": "",
+    "test": "build/tests/backends/rs/tst_rsshim"
+  },
+  {
+    "name": "S5: how the call ended is lost",
+    "file": "src/backends/rs/rshooks.cpp",
+    "search": "call.ok() ? QString() : call.toString());",
+    "replace": "QString());",
+    "test": "build/tests/backends/rs/tst_rsshim"
+  },
+  {
+    "name": "XC-6: the sink's stop is ignored",
+    "file": "src/backends/rs/rshooks.cpp",
+    "search": "        return hooks->m_sink->entries(batch) ? 1 : 0;",
+    "replace": "        hooks->m_sink->entries(batch);\n        return 1;",
+    "test": "build/tests/backends/rs/tst_rsshim"
+  },
+  {
+    "name": "XC-15: the answers do not reach Rust",
+    "file": "src/backends/rs/rshooks.cpp",
+    "search": "        hooks->m_table->reply_set(reply, views.data(), views.size());\n",
+    "replace": "",
+    "test": "build/tests/backends/rs/tst_rsshim"
+  },
+  {
+    "name": "XC-15: every prompt echoes",
+    "file": "src/backends/rs/rshooks.cpp",
+    "search": "prompts[i].echo != 0 });",
+    "replace": "true });",
+    "test": "build/tests/backends/rs/tst_rsshim"
+  },
+  {
+    "name": "XC-14: a progress whose canceled() throws does not stop the transfer",
+    "file": "src/backends/rs/rshooks.cpp",
+    "search": "return hooks->guard(1, [hooks]() {",
+    "replace": "return hooks->guard(0, [hooks]() {",
+    "test": "build/tests/backends/rs/tst_rsshim"
+  },
+  {
+    "name": "XC-14: the upload size ignores the source's position",
+    "file": "src/backends/rs/rshooks.cpp",
+    "search": "sequential ? 0 : qMax<qint64>(0, device->size() - device->pos())",
+    "replace": "sequential ? 0 : device->size()",
+    "test": "build/tests/backends/rs/tst_rsshim"
+  },
+  {
+    "name": "Provider: the provider is not passed",
+    "file": "src/backends/rs/rsbackend.cpp",
+    "search": "    r = resultOf(t, t->conn_new(view(name), &conn));",
+    "replace": "    r = resultOf(t, t->conn_new(view(QByteArrayLiteral(\"mem\")), &conn));",
+    "test": "build/tests/backends/rs/tst_rsshim"
+  },
+  {
+    "name": "Credentials: the domain is lost",
+    "file": "src/backends/rs/rsbackend.cpp",
+    "search": "    m_domain = params.option(QStringLiteral(\"domain\"));\n",
+    "replace": "",
+    "test": "build/tests/backends/rs/tst_rsshim"
+  },
+  {
+    "name": "XC-22: cancel cannot reach the prompter",
+    "file": "src/backends/rs/rsbackend.cpp",
+    "search": "        m_prompter = prompter;\n",
+    "replace": "",
+    "test": "build/tests/backends/rs/tst_rsshim"
+  },
+  {
+    "name": "XC-22: cancel does not wake the prompter",
+    "file": "src/backends/rs/rsbackend.cpp",
+    "search": "    if (m_prompter)\n        m_prompter->cancel();\n",
+    "replace": "",
+    "test": "build/tests/backends/rs/tst_rsshim"
+  },
+  {
+    "name": "XC-5: the capabilities are not kept after authenticate",
+    "file": "src/backends/rs/rsbackend.cpp",
+    "search": "    m_authenticated = r.ok() && fetchCapabilities(&m_capabilities).ok();",
+    "replace": "    m_authenticated = false;",
+    "test": "build/tests/backends/rs/tst_rsshim"
+  },
+  {
+    "name": "XC-6: a batch size below 1 is passed on",
+    "file": "src/backends/rs/rsbackend.cpp",
+    "search": "static_cast<uint32_t>(qMax(1, options.batchSize))",
+    "replace": "static_cast<uint32_t>(options.batchSize)",
+    "test": "build/tests/backends/rs/tst_rsshim"
+  },
+  {
+    "name": "XC-6: symlink types are never resolved",
+    "file": "src/backends/rs/rsbackend.cpp",
+    "search": "                         options.resolveSymlinkTypes ? 1 : 0, batch, &hooks);",
+    "replace": "                         0, batch, &hooks);",
+    "test": "build/tests/backends/rs/tst_rsshim"
+  },
+  {
+    "name": "lstat follows links",
+    "file": "src/backends/rs/rsbackend.cpp",
+    "search": "    return statWith(path, false, out);",
+    "replace": "    return statWith(path, true, out);",
+    "test": "make -s -C build/tests/backends/rs check"
+  },
+  {
+    "name": "rename always replaces",
+    "file": "src/backends/rs/rsbackend.cpp",
+    "search": "        return m_t->rename(m_conn, a, b, mode == RenameMode::Replace ? 1 : 0);",
+    "replace": "        return m_t->rename(m_conn, a, b, 1);",
+    "test": "make -s -C build/tests/backends/rs check"
+  },
+  {
+    "name": "copy is never recursive",
+    "file": "src/backends/rs/rsbackend.cpp",
+    "search": "options.recursive ? 1 : 0",
+    "replace": "0",
+    "test": "make -s -C build/tests/backends/rs check"
+  },
+  {
+    "name": "spaceInfo swaps free and total",
+    "file": "src/backends/rs/rsbackend.cpp",
+    "search": "        *out = SpaceInfo { space.free_bytes, space.total_bytes, space.used_bytes };",
+    "replace": "        *out = SpaceInfo { space.total_bytes, space.free_bytes, space.used_bytes };",
+    "test": "build/tests/backends/rs/tst_rsshim"
+  },
+  {
+    "name": "readLink returns no target",
+    "file": "src/backends/rs/rsbackend.cpp",
+    "search": "        *target = link ? Names::decode(Ffi::toByteArray(link->data)) : QString();",
+    "replace": "        *target = QString();",
+    "test": "make -s -C build/tests/backends/rs check"
+  },
+  {
+    "name": "checksum returns no digest",
+    "file": "src/backends/rs/rsbackend.cpp",
+    "search": "        *digest = sum ? Ffi::toByteArray(sum->data) : QByteArray();",
+    "replace": "        *digest = QByteArray();",
+    "test": "make -s -C build/tests/backends/rs check"
+  },
+  {
+    "name": "openRead loses the size",
+    "file": "src/backends/rs/rsbackend.cpp",
+    "search": "std::make_unique<RsReadHandle>(m_t, raw, size)",
+    "replace": "std::make_unique<RsReadHandle>(m_t, raw, -1)",
+    "test": "build/tests/backends/rs/tst_rsshim"
+  },
+  {
+    "name": "upload reports no progress",
+    "file": "src/backends/rs/rsbackend.cpp",
+    "search": "    const nvb_io *io = hooks.source(source);\n    const nvb_progress *watch = hooks.progress(progress);",
+    "replace": "    const nvb_io *io = hooks.source(source);\n    const nvb_progress *watch = nullptr;",
+    "test": "build/tests/backends/rs/tst_rsshim"
+  },
+  {
+    "name": "download ignores the offset",
+    "file": "src/backends/rs/rsbackend.cpp",
+    "search": "m_t->download(m_conn, p, options.offset, options.length, io, watch);",
+    "replace": "m_t->download(m_conn, p, 0, options.length, io, watch);",
+    "test": "make -s -C build/tests/backends/rs check"
+  },
+  {
+    "name": "Read handles: a negative length is passed on",
+    "file": "src/backends/rs/rshandles.cpp",
+    "search": "    if (maxBytes < 0 || maxBytes > MaxReadBytes)",
+    "replace": "    if (maxBytes > MaxReadBytes)",
+    "test": "build/tests/backends/rs/tst_rsshim"
+  },
+  {
+    "name": "Read handles: a failed read keeps stale data",
+    "file": "src/backends/rs/rshandles.cpp",
+    "search": "    if (out)\n        out->clear();\n",
+    "replace": "",
+    "test": "build/tests/backends/rs/tst_rsshim"
+  },
+  {
+    "name": "Write handles: the position is not asked",
+    "file": "src/backends/rs/rshandles.cpp",
+    "search": "    return m_t->position(m_h);",
+    "replace": "    return 0;",
+    "test": "build/tests/backends/rs/tst_rsshim"
+  },
+  {
+    "name": "Write handles: commit discards",
+    "file": "src/backends/rs/rshandles.cpp",
+    "search": "    return resultOf(m_t, m_t->commit(std::exchange(m_h, nullptr)));",
+    "replace": "    m_t->abort(std::exchange(m_h, nullptr));\n    return Result::success();",
+    "test": "make -s -C build/tests/backends/rs check"
+  }
+]

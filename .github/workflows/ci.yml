@@ -83,7 +83,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        list: [accounts, bridge, buteo, cli, core, discovery, ffi, helper, local, ops, packaging, qml, sftp, smb, url]
+        list: [accounts, bridge, buteo, cli, core, discovery, ffi, helper, local, ops, packaging, qml, rs, sftp, smb, url]
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
@@ -139,7 +139,7 @@ jobs:
         env:
           BASE_REF: ${{ github.base_ref }}
           SHARD: ${{ matrix.shard }}
-        run: ./tools/ci/rust-mutants.sh "origin/$BASE_REF" build-ffi "$SHARD/12"
+        run: ./tools/ci/rust-mutants.sh diff "origin/$BASE_REF" build-ffi "$SHARD/12"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: failure()
         with:
