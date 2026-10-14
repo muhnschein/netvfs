@@ -102,7 +102,7 @@ fn check(data: &[u8]) -> Result<()> {
 
     let i = identity(&mut u)?;
     let buf = IdentityBuf::new(&i);
-    assert_eq!(buf.raw().n_details, i.details.len());
+    assert_eq!(buf.raw().public_key.len, i.public_key.len());
     assert_eq!(buf.read_back(), i);
     Ok(())
 }
