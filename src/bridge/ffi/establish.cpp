@@ -44,12 +44,7 @@ constexpr int WaitSliceMs = 50;          // C-9: a cancel ends the wait within t
 
 uint32_t identityKind(ServerIdentity::Kind kind)
 {
-    switch (kind) {
-    case ServerIdentity::Kind::SshHostKey:
-        return NVB_IDENTITY_SSH;
-    default:
-        return NVB_IDENTITY_NONE;
-    }
+    return kind == ServerIdentity::Kind::SshHostKey ? NVB_IDENTITY_SSH : NVB_IDENTITY_NONE;
 }
 
 // XC-16 as connector.cpp showed it: OpenSSH form "SHA256:" + unpadded base64
