@@ -11,8 +11,11 @@
     reason = "test fake: a request it cannot parse is a bug in the test"
 )]
 
+use crate::client::Client;
 use crate::proto::*;
+use crate::remote::{Quirks, Remote};
 use crate::wire::{MAX_PACKET, Reader};
+use netvfs_vfs::CancelToken;
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
@@ -36,6 +39,8 @@ pub enum Action {
     Status(u32, &'static str),
     /// Answer with these raw packet bytes (length included) instead.
     Raw(Vec<u8>),
+    /// Answer with a reply of this type and body after the request's id.
+    Reply(u8, Vec<u8>),
     /// Do not answer at all.
     Ignore,
     /// Answer after this long.
@@ -91,6 +96,8 @@ pub struct Logged {
     pub offset: Option<u64>,
     /// The pflags of OPEN.
     pub pflags: Option<u32>,
+    /// The length of READ.
+    pub len: Option<u32>,
     /// The attributes of OPEN, MKDIR, SETSTAT.
     pub attrs: Option<Attrs>,
 }
@@ -150,7 +157,12 @@ impl Fake {
             nodes,
             home: b"/home/u".to_vec(),
             extensions: ALL_EXTENSIONS.to_vec(),
-            limits: Limits { max_packet: 262_144, max_read: 261_120, max_write: 261_120, max_open_handles: 0 },
+            limits: Limits {
+                max_packet: 262_144,
+                max_read: 261_120,
+                max_write: 261_120,
+                max_open_handles: 0,
+            },
             statvfs: [4096, 4096, 1000, 600, 500, 100, 50, 50, 1, 0, 255],
             users: [(1000, "alice")].into(),
             groups: [(100, "users")].into(),
@@ -181,9 +193,10 @@ impl Fake {
     }
 
     pub fn file(&self, path: &str, data: &[u8]) {
-        self.state()
-            .nodes
-            .insert(path.as_bytes().to_vec(), Node::File { data: data.to_vec(), mode: 0o644, mtime: 2000, atime: 1500 });
+        self.state().nodes.insert(
+            path.as_bytes().to_vec(),
+            Node::File { data: data.to_vec(), mode: 0o644, mtime: 2000, atime: 1500 },
+        );
     }
 
     pub fn dir(&self, path: &str) {
@@ -191,7 +204,9 @@ impl Fake {
     }
 
     pub fn link(&self, path: &str, target: &str) {
-        self.state().nodes.insert(path.as_bytes().to_vec(), Node::Link { target: target.as_bytes().to_vec() });
+        self.state()
+            .nodes
+            .insert(path.as_bytes().to_vec(), Node::Link { target: target.as_bytes().to_vec() });
     }
 
     pub fn node(&self, path: &str) -> Option<Node> {
@@ -224,6 +239,39 @@ impl Fake {
     pub fn connect(&self) -> (DuplexStream, tokio::task::JoinHandle<()>) {
         let (client, server) = tokio::io::duplex(4 * MAX_PACKET);
         (client, self.serve(server))
+    }
+
+    /// A started client.
+    pub async fn client(&self) -> (Client, ServerVersion) {
+        let (stream, _task) = self.connect();
+        let (r, w) = tokio::io::split(stream);
+        Client::start(r, w, async {}, Duration::from_secs(10), &CancelToken::new()).await.unwrap()
+    }
+
+    /// The file operations of a server with `quirks`, folders made with
+    /// mode 0o750.
+    pub async fn remote_with(&self, quirks: Quirks) -> Remote {
+        let (client, version) = self.client().await;
+        Remote::new(client, &version, quirks, 0o750, &CancelToken::new()).await.unwrap()
+    }
+
+    /// The file operations of an OpenSSH server.
+    pub async fn remote(&self) -> Remote {
+        self.remote_with(Quirks::of(b"SSH-2.0-OpenSSH_9.9")).await
+    }
+
+    /// The log so far, then cleared.
+    pub fn take_log(&self) -> Vec<Logged> {
+        std::mem::take(&mut self.state().log)
+    }
+
+    /// The kinds of the requests so far (extension names for EXTENDED).
+    pub fn kinds(&self) -> Vec<String> {
+        self.state()
+            .log
+            .iter()
+            .map(|l| if l.kind == FXP_EXTENDED { l.ext.clone() } else { kind_name(l.kind).to_owned() })
+            .collect()
     }
 
     async fn run<S: AsyncRead + AsyncWrite + Unpin + Send + 'static>(&self, stream: S) {
@@ -274,6 +322,30 @@ enum Answer {
     Bytes(Vec<u8>),
 }
 
+/// A request type's name, for readable assertions.
+pub fn kind_name(kind: u8) -> &'static str {
+    match kind {
+        FXP_OPEN => "OPEN",
+        FXP_CLOSE => "CLOSE",
+        FXP_READ => "READ",
+        FXP_WRITE => "WRITE",
+        FXP_LSTAT => "LSTAT",
+        FXP_FSTAT => "FSTAT",
+        FXP_SETSTAT => "SETSTAT",
+        FXP_OPENDIR => "OPENDIR",
+        FXP_READDIR => "READDIR",
+        FXP_REMOVE => "REMOVE",
+        FXP_MKDIR => "MKDIR",
+        FXP_RMDIR => "RMDIR",
+        FXP_REALPATH => "REALPATH",
+        FXP_STAT => "STAT",
+        FXP_RENAME => "RENAME",
+        FXP_READLINK => "READLINK",
+        FXP_SYMLINK => "SYMLINK",
+        _ => "?",
+    }
+}
+
 fn packet(kind: u8, id: u32, rest: &[u8]) -> Vec<u8> {
     let mut out = ((rest.len() + 5) as u32).to_be_bytes().to_vec();
     out.push(kind);
@@ -295,7 +367,7 @@ fn status(id: u32, code: u32, message: &str) -> Vec<u8> {
     packet(FXP_STATUS, id, &rest)
 }
 
-fn encode_attrs(a: &Attrs) -> Vec<u8> {
+pub fn encode_attrs(a: &Attrs) -> Vec<u8> {
     let bytes = a.encode(crate::wire::Packet::request(0)).finish(0).unwrap();
     bytes[9..].to_vec()
 }
@@ -388,11 +460,18 @@ impl State {
 
     fn attrs_of(&self, node: &Node) -> Attrs {
         let (size, permissions, times) = match node {
-            Node::File { data, mode, mtime, atime } => (data.len() as u64, 0o100_000 | mode, (*atime, *mtime)),
+            Node::File { data, mode, mtime, atime } => {
+                (data.len() as u64, 0o100_000 | mode, (*atime, *mtime))
+            }
             Node::Dir { mode, mtime } => (4096, 0o040_000 | mode, (*mtime, *mtime)),
             Node::Link { target } => (target.len() as u64, 0o120_777, (0, 0)),
         };
-        Attrs { size: Some(size), ids: Some((self.uid, self.gid)), permissions: Some(permissions), times: Some(times) }
+        Attrs {
+            size: Some(size),
+            ids: Some((self.uid, self.gid)),
+            permissions: Some(permissions),
+            times: Some(times),
+        }
     }
 
     fn stat(&self, path: &[u8], follow: bool) -> Result<Attrs, (u32, &'static str)> {
@@ -448,7 +527,8 @@ impl State {
         let rule = self.rules.iter_mut().position(|rule| {
             rule.kind == kind
                 && (rule.ext.is_empty() || rule.ext == logged.ext)
-                && (rule.path.is_empty() || logged.strings.first().is_some_and(|s| s.ends_with(rule.path.as_bytes())))
+                && (rule.path.is_empty()
+                    || logged.strings.first().is_some_and(|s| s.ends_with(rule.path.as_bytes())))
         });
         let action = rule.map(|i| {
             let rule = &mut self.rules[i];
@@ -466,6 +546,7 @@ impl State {
         match action {
             Some(Action::Status(code, message)) => return (Answer::Bytes(status(id, code, message)), None),
             Some(Action::Raw(bytes)) => return (Answer::Bytes(bytes), None),
+            Some(Action::Reply(kind, rest)) => return (Answer::Bytes(packet(kind, id, &rest)), None),
             Some(Action::Ignore) => return (Answer::None, None),
             Some(Action::Hangup) => return (Answer::Hangup, None),
             Some(Action::Delay(d)) => delay = Some(d),
@@ -480,7 +561,13 @@ impl State {
     }
 
     #[allow(clippy::too_many_lines, reason = "one arm per request type")]
-    fn handle(&mut self, kind: u8, id: u32, r: &mut Reader<'_>, short: Option<u32>) -> Result<Vec<u8>, (u32, &'static str)> {
+    fn handle(
+        &mut self,
+        kind: u8,
+        id: u32,
+        r: &mut Reader<'_>,
+        short: Option<u32>,
+    ) -> Result<Vec<u8>, (u32, &'static str)> {
         let ok = |id| status(id, FX_OK, "Success");
         let s = |r: &mut Reader<'_>| r.string(MAX_PACKET, "").unwrap().to_vec();
         match kind {
@@ -490,14 +577,19 @@ impl State {
                 let attrs = Attrs::decode(r).unwrap();
                 let p = self.resolve(&path, true)?;
                 match self.nodes.get_mut(&p) {
-                    Some(Node::Dir { .. }) if flags & FXF_WRITE != 0 => return Err((FX_FAILURE, "Is a directory")),
+                    Some(Node::Dir { .. }) if flags & FXF_WRITE != 0 => {
+                        return Err((FX_FAILURE, "Is a directory"));
+                    }
                     Some(_) if flags & FXF_CREAT != 0 && flags & FXF_EXCL != 0 => return Err(FAILURE),
                     Some(Node::File { data, .. }) if flags & FXF_TRUNC != 0 => data.clear(),
                     Some(_) => {}
                     None if flags & FXF_CREAT != 0 => {
                         self.check_parent(&p)?;
                         let mode = attrs.permissions.unwrap_or(0o666) & 0o7777;
-                        self.nodes.insert(p.clone(), Node::File { data: Vec::new(), mode, mtime: 5000, atime: 5000 });
+                        self.nodes.insert(
+                            p.clone(),
+                            Node::File { data: Vec::new(), mode, mtime: 5000, atime: 5000 },
+                        );
                     }
                     None => return Err(NO_SUCH_FILE),
                 }
@@ -515,7 +607,10 @@ impl State {
                 let mut listing = vec![(b".".to_vec(), dot), (b"..".to_vec(), dot)];
                 let prefix = if p == b"/" { b"/".to_vec() } else { [&p[..], b"/"].concat() };
                 for (name, node) in &self.nodes {
-                    if name.starts_with(&prefix) && name.len() > prefix.len() && !name[prefix.len()..].contains(&b'/') {
+                    if name.starts_with(&prefix)
+                        && name.len() > prefix.len()
+                        && !name[prefix.len()..].contains(&b'/')
+                    {
                         listing.push((name[prefix.len()..].to_vec(), self.attrs_of(node)));
                     }
                 }
@@ -797,7 +892,16 @@ impl State {
 
 fn log_entry(kind: u8, id: u32, body: &[u8]) -> Logged {
     let mut r = Reader::new(body.get(5..).unwrap_or_default());
-    let mut logged = Logged { kind, id, ext: String::new(), strings: Vec::new(), offset: None, pflags: None, attrs: None };
+    let mut logged = Logged {
+        kind,
+        id,
+        ext: String::new(),
+        strings: Vec::new(),
+        offset: None,
+        pflags: None,
+        len: None,
+        attrs: None,
+    };
     let one = |r: &mut Reader<'_>, logged: &mut Logged| {
         if let Ok(v) = r.string(MAX_PACKET, "") {
             logged.strings.push(v.to_vec());
@@ -818,7 +922,12 @@ fn log_entry(kind: u8, id: u32, body: &[u8]) -> Logged {
             one(&mut r, &mut logged);
             logged.attrs = Attrs::decode(&mut r).ok();
         }
-        FXP_READ | FXP_WRITE => {
+        FXP_READ => {
+            one(&mut r, &mut logged);
+            logged.offset = r.u64().ok();
+            logged.len = r.u32().ok();
+        }
+        FXP_WRITE => {
             one(&mut r, &mut logged);
             logged.offset = r.u64().ok();
             one(&mut r, &mut logged);

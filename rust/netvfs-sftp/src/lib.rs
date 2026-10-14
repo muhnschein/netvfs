@@ -4,8 +4,10 @@
 
 pub mod client;
 pub mod errors;
+pub mod io;
 pub mod paths;
 pub mod proto;
+pub mod remote;
 pub mod wire;
 
 #[cfg(test)]
