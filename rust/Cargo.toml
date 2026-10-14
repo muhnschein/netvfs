@@ -6,7 +6,7 @@
 # plugins). See doc/RUST.md.
 [workspace]
 resolver = "3"
-members = ["netvfs-accounts", "netvfs-bridge-proto", "netvfs-bridge", "netvfs-vfs", "netvfs-backend"]
+members = ["netvfs-accounts", "netvfs-bridge-proto", "netvfs-bridge", "netvfs-vfs", "netvfs-sftp", "netvfs-backend"]
 # The fuzz targets build with a nightly toolchain of their own (doc/RUST.md).
 exclude = ["fuzz"]
 

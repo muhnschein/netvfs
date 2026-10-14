@@ -4,17 +4,27 @@
 
 [graph]
 all-features = true
+# The targets netvfs ships for (Sailfish OS aarch64) and builds and tests on
+# (x86_64 CI): crates only other systems use (windows-sys, r-efi) are out of
+# every check.
+targets = ["aarch64-unknown-linux-gnu", "x86_64-unknown-linux-gnu"]
 
 [advisories]
 version = 2
 yanked = "deny"
+ignore = [
+    # rsa: Marvin timing side channel in RSA decryption and signing, unfixed
+    # upstream. netvfs-sftp refuses RSA user keys, so the only RSA operation
+    # is verifying a server's rsa-sha2 host signature.
+    { id = "RUSTSEC-2023-0071", reason = "no RSA private-key operation: RSA user keys refused" },
+]
 
 [licenses]
 version = 2
 # netvfs is LGPL-2.1-or-later and links these statically into a setgid
 # binary: permissive licences only, so no GPL-only crate. The list holds
 # what the locked crates use; another licence is a decision to review.
-allow = ["Apache-2.0", "BSD-2-Clause", "MIT"]
+allow = ["Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "MIT"]
 confidence-threshold = 0.9
 # Named exceptions, each for one crate.
 exceptions = [
@@ -22,6 +32,11 @@ exceptions = [
     # proc-macro2): "(MIT OR Apache-2.0) AND Unicode-3.0". Build-time only,
     # nothing of it is linked; Unicode-3.0 is a permissive data licence.
     { crate = "unicode-ident", allow = ["Unicode-3.0"] },
+    # ring (russh's crypto provider): "Apache-2.0 AND ISC", the ISC part
+    # from BoringSSL.
+    { crate = "ring", allow = ["ISC"] },
+    # untrusted, ring's input parser: ISC.
+    { crate = "untrusted", allow = ["ISC"] },
 ]
 
 # The workspace's own crates (publish = false) are netvfs.
@@ -39,6 +54,12 @@ skip = [
     # tracing-attributes (tokio, zbus) have no release on syn 3 yet, the rest
     # of the zbus tree is on syn 3.
     { crate = "syn@2", reason = "enumflags2_derive and tracing-attributes are still on syn 2" },
+    # russh's tree. ring 0.17 is on getrandom 0.2, the RustCrypto
+    # pre-releases (ssh-key, rsa, crypto-bigint) on 0.4.
+    { crate = "getrandom@0.2", reason = "ring 0.17 has no release on getrandom 0.3 or later" },
+    # ml-kem 0.3 (russh's mlkem768x25519-sha256) is on sha3 0.11, the rest
+    # of russh's tree on 0.12.
+    { crate = "sha3@0.11", reason = "ml-kem 0.3 has no release on sha3 0.12" },
 ]
 
 [sources]
