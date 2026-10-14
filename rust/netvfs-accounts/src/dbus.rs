@@ -530,6 +530,16 @@ mod tests {
     }
 
     #[test]
+    fn only_messages_with_a_body_have_a_signature() {
+        let contains = |message: &[u8], part: &[u8]| message.windows(part.len()).any(|w| w == part);
+        // The SIGNATURE field: code 8, signature "g", then the value.
+        assert!(!contains(&bus_call(1, "Hello", "", &[]), b"\x01g\0"));
+        assert!(contains(&bus_call(2, "RequestName", "su", &[]), b"\x08\x01g\0\x02su\0"));
+        let all = messages(&change(), &guid(), (1, 2));
+        assert!(contains(&all, b"\x08\x01g\0\x13uuubbsa(ssua{sv}as)\0"));
+    }
+
+    #[test]
     fn messages_parse_back() {
         let payload = messages(&change(), &guid(), (1, 2));
         let mut input = &payload[..];
@@ -654,6 +664,47 @@ mod tests {
         let mut garbage = b"OK 1\r\n".to_vec();
         garbage.extend([b'x'; 32]);
         assert!(run(garbage).0.is_err());
+    }
+
+    /// `reply` with a body of `body` zero bytes.
+    fn reply_with_body(kind: u8, serial: u32, reply_serial: u32, body: usize) -> Vec<u8> {
+        let mut bytes = reply(kind, serial, reply_serial, b'l');
+        bytes[4..8].copy_from_slice(&u32::try_from(body).unwrap().to_le_bytes());
+        bytes.resize(bytes.len() + body, 0);
+        bytes
+    }
+
+    #[test]
+    fn exchanges_end_at_the_reply_to_get_id() {
+        // Only the reply to GetId ends the exchange, whatever comes first.
+        let mut late_error = b"OK 1\r\n".to_vec();
+        late_error.extend(reply(kind::METHOD_RETURN, 1, 1, b'l'));
+        late_error.extend(reply(kind::ERROR, 2, 4, b'l'));
+        assert!(run(late_error).0.is_err());
+    }
+
+    #[test]
+    fn exchanges_take_messages_up_to_the_limits() {
+        let ok = |before: &[Vec<u8>]| {
+            let mut input = b"OK 1\r\n".to_vec();
+            for message in before {
+                input.extend(message);
+            }
+            input.extend(reply(kind::METHOD_RETURN, 2, 4, b'l'));
+            run(input).0
+        };
+        // A message up to MAX_MESSAGE long.
+        let largest = reply_with_body(kind::METHOD_RETURN, 1, 1, MAX_MESSAGE - reply(0, 0, 0, b'l').len());
+        assert_eq!(largest.len(), MAX_MESSAGE);
+        assert!(matches!(ok(std::slice::from_ref(&largest)), Ok(())));
+        let too_large = reply_with_body(kind::METHOD_RETURN, 1, 1, MAX_MESSAGE + 1);
+        assert!(ok(&[too_large]).is_err());
+        // Up to MAX_READ in all before the reply.
+        let filler = vec![largest; MAX_READ / MAX_MESSAGE - 1];
+        assert!(matches!(ok(&filler), Ok(())));
+        let more =
+            vec![reply_with_body(kind::METHOD_RETURN, 1, 1, MAX_MESSAGE / 2); 2 * MAX_READ / MAX_MESSAGE];
+        assert!(ok(&more).is_err());
     }
 
     #[test]
