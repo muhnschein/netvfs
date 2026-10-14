@@ -1,25 +1,26 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 // The bridge protocol contract (SPEC-v2 XT-7), shared with the consumer's
 // fake bridge: the introspection XML in this folder and the golden message
-// sequences (*.json, format in README.md) replayed against the real bridge
-// with the FakeBackend (provider "fake", account "account:1").
+// sequences (*.json, format in README.md) replayed against the netvfs-bridge
+// binary with the FakeBackend (provider "fake", account "account:1"). The
+// client is libdbus, the bridge zbus (design §4.3): these cases also show
+// that the two agree on authentication, fd passing and error replies.
 #include "bridgetest.h"
-
-#include "args.h"
-#include "fakebackend.h"
-#include "protocol.h"
 
 #include <QtCore/QDir>
 #include <QtCore/QFile>
 #include <QtCore/QJsonArray>
 #include <QtCore/QJsonDocument>
 #include <QtCore/QJsonObject>
+#include <QtCore/QTemporaryFile>
 #include <QtCore/QXmlStreamReader>
 #include <QtTest/QtTest>
 
+#include <fcntl.h>
+#include <unistd.h>
+
 using namespace NetVfs;
 using namespace NetVfs::BridgeTest;
-using NetVfs::Bridge::WireWriter;
 
 namespace {
 
@@ -108,52 +109,122 @@ class tst_Contract : public QObject
     Q_OBJECT
 
 private Q_SLOTS:
-    void contractCopyIsCurrent();
     void introspection();
-    void methodTableMatchesXml();
+    void signalsOfTheXml();
+    void unixFdPassing();
+    void errorDetails();
     void goldenSequences_data();
     void goldenSequences();
 };
 
-void tst_Contract::contractCopyIsCurrent()
-{
-    // The XML the bridge serves (src) and the contract copy must not drift.
-    QCOMPARE(readFile(ContractDir + QStringLiteral("/org.netvfs.Bridge1.xml")),
-             readFile(QStringLiteral(NETVFS_SOURCE_DIR "/src/bridge/lib/org.netvfs.Bridge1.xml")));
-}
-
 void tst_Contract::introspection()
 {
-    Fixture f;
+    // XB-8: the XML the bridge serves is the contract's, byte for byte.
+    BridgeProcess f;
+    QVERIFY(f.start());
     auto c = f.client();
+    QVERIFY(c->isConnected());
     const TestClient::Message reply = c->waitReply(c->send("Introspect", TestClient::Args(),
                                                            "org.freedesktop.DBus.Introspectable"));
-    QVERIFY2(!reply.isError, qPrintable(reply.name));
+    QVERIFY2(reply.valid && !reply.isError, qPrintable(reply.name));
     QCOMPARE(reply.args.value(0).toString().toUtf8(), readFile(ContractDir + QStringLiteral("/org.netvfs.Bridge1.xml")));
-    // libdbus answers Peer.Ping itself.
-    QVERIFY(!c->waitReply(c->send("Ping", TestClient::Args(), "org.freedesktop.DBus.Peer")).isError);
+    // org.freedesktop.DBus.Peer, as libdbus answered it for the C++ bridge.
+    const TestClient::Message ping = c->waitReply(c->send("Ping", TestClient::Args(), "org.freedesktop.DBus.Peer"));
+    QVERIFY(ping.valid && !ping.isError);
+    // Nothing else lives on the connection.
+    const TestClient::Message other = c->waitReply(c->send("Introspect", TestClient::Args(),
+                                                           "org.freedesktop.DBus.Introspectable", "/org/other"));
+    QVERIFY(other.isError);
+    QCOMPARE(other.name, QStringLiteral("org.freedesktop.DBus.Error.UnknownMethod"));
+    c->close();
+    QCOMPARE(f.waitExit(), 0);
 }
 
-void tst_Contract::methodTableMatchesXml()
+void tst_Contract::signalsOfTheXml()
 {
     const XmlInterface xml = parseInterface(readFile(ContractDir + QStringLiteral("/org.netvfs.Bridge1.xml")),
                                             QStringLiteral("org.netvfs.Bridge1"));
-    QStringList implemented;
-    for (const Bridge::MethodInfo &m : Bridge::methods()) {
-        const QString name = QLatin1String(m.name);
-        implemented << name;
-        QVERIFY2(xml.methods.contains(name), qPrintable(name));
-        QCOMPARE(xml.methods.value(name).in, QByteArray(m.in));
-        QCOMPARE(xml.methods.value(name).out, QByteArray(m.out));
-    }
-    QStringList declared = xml.methods.keys();
-    declared.sort();
-    implemented.sort();
-    QCOMPARE(implemented, declared);
     const QStringList expectedSignals = { "ConsentChanged", "JobFinished", "JobProgress", "ListBatch", "ListDone",
                                           "LocationsChanged", "NearbyChanged", "Question", "WalkBatch" };
     QCOMPARE(xml.signalSignatures.keys(), expectedSignals);
-    QCOMPARE(xml.signalSignatures.value("ListBatch"), QByteArray("ua") + Bridge::Protocol::EntrySignature);
+    QCOMPARE(xml.signalSignatures.value("ListBatch"), QByteArray("ua(ayyyxxxxixxssqays)"));
+}
+
+void tst_Contract::unixFdPassing()
+{
+    // XB-11: Upload and Download take an fd the consumer opened; libdbus
+    // sends it, the bridge's zbus must have negotiated fd passing.
+    BridgeProcess f;
+    QVERIFY(f.start());
+    auto c = f.client();
+    QVERIFY(c->hello().valid);
+    QVERIFY(c->canPassUnixFds());
+    QTemporaryFile source;
+    QVERIFY(source.open());
+    const QByteArray content = QByteArray("through a descriptor\n").repeated(1000);
+    QCOMPARE(source.write(content), qint64(content.size()));
+    QVERIFY(source.flush());
+    const int readFd = ::open(QFile::encodeName(source.fileName()).constData(), O_RDONLY | O_CLOEXEC);
+    QVERIFY(readFd >= 0);
+    const TestClient::Message upload = c->call("Upload", [&](WireWriter &w) {
+        w.string(QStringLiteral("account:1")).bytes("/uploaded.txt").unixFd(readFd).variantMap(QVariantMap());
+    });
+    ::close(readFd);   // the message carried a duplicate
+    QVERIFY2(upload.valid && !upload.isError, qPrintable(upload.name + QLatin1Char(' ') + upload.args.value(0).toString()));
+    const uint uploadJob = upload.args.value(0).toUInt();
+    const TestClient::Message uploaded = c->waitSignal(QStringLiteral("JobFinished"), [&](const QVariantList &args) {
+        return args.value(0).toUInt() == uploadJob;
+    }, 10000);
+    QVERIFY(uploaded.valid);
+    QVERIFY2(uploaded.args.value(1).toString().isEmpty(), qPrintable(uploaded.args.value(2).toString()));
+
+    QTemporaryFile target;
+    QVERIFY(target.open());
+    const int writeFd = ::open(QFile::encodeName(target.fileName()).constData(), O_WRONLY | O_CLOEXEC);
+    QVERIFY(writeFd >= 0);
+    const TestClient::Message download = c->call("Download", [&](WireWriter &w) {
+        w.string(QStringLiteral("account:1")).bytes("/uploaded.txt").unixFd(writeFd).variantMap(QVariantMap());
+    });
+    ::close(writeFd);
+    QVERIFY2(download.valid && !download.isError, qPrintable(download.name));
+    const uint downloadJob = download.args.value(0).toUInt();
+    const TestClient::Message downloaded = c->waitSignal(QStringLiteral("JobFinished"), [&](const QVariantList &args) {
+        return args.value(0).toUInt() == downloadJob;
+    }, 10000);
+    QVERIFY(downloaded.valid);
+    QVERIFY2(downloaded.args.value(1).toString().isEmpty(), qPrintable(downloaded.args.value(2).toString()));
+    QCOMPARE(target.readAll(), content);
+    c->close();
+    QCOMPARE(f.waitExit(), 0);
+}
+
+void tst_Contract::errorDetails()
+{
+    // XB-17, XC-24: an error reply carries the message and an a{sv} with
+    // retryAfterMs (feature "error-details"), as libdbus decodes it.
+    BridgeProcess f;
+    f.addFile("f.txt", "12345");
+    QVERIFY(f.start());
+    auto c = f.client();
+    QVERIFY(c->hello().valid);
+    const auto openRead = [&c]() {
+        return c->call("OpenRead", [](WireWriter &w) {
+            w.string(QStringLiteral("account:1")).bytes("/f.txt").string(QStringLiteral("stream"));
+        });
+    };
+    for (int i = 0; i < 16; ++i) {
+        const TestClient::Message opened = openRead();
+        QVERIFY2(opened.valid && !opened.isError, qPrintable(opened.name));
+        QCOMPARE(opened.signature, QByteArray("ux"));
+    }
+    const TestClient::Message refused = openRead();
+    QVERIFY(refused.isError);
+    QCOMPARE(refused.name, QStringLiteral("org.netvfs.Error.TooManyConnections"));
+    QCOMPARE(refused.signature, QByteArray("sa{sv}"));
+    QVERIFY(!refused.args.value(0).toString().isEmpty());
+    QCOMPARE(refused.args.value(1).toMap().value(QStringLiteral("retryAfterMs")).toLongLong(), 1000);
+    c->close();
+    QCOMPARE(f.waitExit(), 0);
 }
 
 void tst_Contract::goldenSequences_data()
@@ -174,11 +245,11 @@ void tst_Contract::goldenSequences()
     const XmlInterface xml = parseInterface(readFile(ContractDir + QStringLiteral("/org.netvfs.Bridge1.xml")),
                                             QStringLiteral("org.netvfs.Bridge1"));
 
-    const Consent consent = consentFromString(script.value(QStringLiteral("consent")).toString());
-    Fixture f(consent);
+    BridgeProcess f(script.value(QStringLiteral("consent")).toString());
     const QJsonObject files = script.value(QStringLiteral("files")).toObject();
     for (auto it = files.constBegin(); it != files.constEnd(); ++it)
-        Test::FakeServer::instance()->addFile(it.key(), it.value().toString().toUtf8());
+        f.addFile(it.key().toUtf8(), it.value().toString().toUtf8());
+    QVERIFY(f.start());
     auto c = f.client();
 
     QHash<QString, QJsonValue> vars;
@@ -219,6 +290,8 @@ void tst_Contract::goldenSequences()
                  qPrintable(where + QStringLiteral(": ") + why + QStringLiteral(" in ")
                             + QString::fromUtf8(QJsonDocument(argsToJson(m.args)).toJson(QJsonDocument::Compact))));
     }
+    c->close();
+    QCOMPARE(f.waitExit(), 0);
 }
 
 QTEST_GUILESS_MAIN(tst_Contract)

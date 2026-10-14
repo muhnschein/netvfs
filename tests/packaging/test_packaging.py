@@ -2,8 +2,10 @@
 # SPDX-License-Identifier: LGPL-2.1-or-later
 """Tests of the packaging checks (SPEC-v2 XP-1, XP-3): tools/ci/check-files.py
 against small specs and install trees, tools/ci/check-noshareenum.sh against
-shared objects built here with and without DCE/RPC code (needs cc and
-readelf). Run from anywhere: tests/packaging/test_packaging.py
+shared objects built here with and without DCE/RPC code, and
+tools/ci/check-ffi-lib.sh against stand-ins for netvfs-bridge's C ABI built
+here (both need cc and readelf). Run from anywhere:
+tests/packaging/test_packaging.py
 """
 import os
 import shutil
@@ -16,6 +18,7 @@ import unittest
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 CHECK_FILES = os.path.join(ROOT, "tools", "ci", "check-files.py")
 CHECK_NOSHAREENUM = os.path.join(ROOT, "tools", "ci", "check-noshareenum.sh")
+CHECK_FFI_LIB = os.path.join(ROOT, "tools", "ci", "check-ffi-lib.sh")
 
 SPEC = """\
 %bcond_with extra
@@ -221,6 +224,96 @@ class CheckNoShareEnum(unittest.TestCase):
     def test_not_elf_fails(self):
         code, output = self.run_check(os.path.join(ROOT, "LICENSE"))
         self.assertEqual(code, 1, output)
+
+
+FFI_INSTALLED = "/usr/lib64/netvfs/libnetvfs-bridge-ffi.so"
+
+
+@unittest.skipUnless(shutil.which("cc") and shutil.which("readelf"), "needs cc and readelf")
+class CheckFfiLib(unittest.TestCase):
+    """A library that exports nvb_ffi_get only and links a stand-in for
+    libnetvfs.so.1, and a "bridge" that names its installed path."""
+
+    def setUp(self):
+        self.work = tempfile.mkdtemp()
+        self.write("netvfs.c", "int netvfs_version(void) { return 1; }\n")
+        subprocess.run(["cc", "-shared", "-fPIC", "-Wl,-soname,libnetvfs.so.1", "-o",
+                        os.path.join(self.work, "libnetvfs.so.1"), os.path.join(self.work, "netvfs.c")],
+                       check=True)
+        self.write("exports.map", "{ global: nvb_ffi_get; local: *; };\n")
+        self.bridge = self.write("netvfs-bridge", "\0loads " + FFI_INSTALLED + "\0")
+
+    def tearDown(self):
+        shutil.rmtree(self.work)
+
+    def write(self, name, text):
+        path = os.path.join(self.work, name)
+        with open(path, "w", encoding="utf-8") as file:
+            file.write(text)
+        return path
+
+    def build(self, source=None, flags=("-Wl,-z,relro", "-Wl,-z,now", "-Wl,-z,noexecstack"),
+              exports=True, netvfs=True):
+        source = source or """
+            #include <unistd.h>
+            int netvfs_version(void);
+            const void *nvb_ffi_get(unsigned version) { return version + netvfs_version() + getpid() ? "" : 0; }
+            """
+        c_file = self.write("ffi.c", textwrap.dedent(source))
+        so_file = os.path.join(self.work, "libnetvfs-bridge-ffi.so")
+        command = ["cc", "-shared", "-fPIC", "-o", so_file, c_file, *flags]
+        if exports:
+            command.append("-Wl,--version-script=" + os.path.join(self.work, "exports.map"))
+        if netvfs:
+            command += ["-L" + self.work, "-l:libnetvfs.so.1"]
+        subprocess.run(command, check=True)
+        return so_file
+
+    def run_check(self, so_file, max_glibc="99.0", bridge=None, installed=FFI_INSTALLED):
+        result = subprocess.run([CHECK_FFI_LIB, so_file, installed, bridge or self.bridge, max_glibc],
+                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, check=False)
+        return result.returncode, result.stdout
+
+    def assert_fails(self, text, so_file, **kwargs):
+        code, output = self.run_check(so_file, **kwargs)
+        self.assertEqual(code, 1, output)
+        self.assertIn(text, output)
+
+    def test_hardened_library_passes(self):
+        code, output = self.run_check(self.build())
+        self.assertEqual(code, 0, output)
+        self.assertIn("exports nvb_ffi_get, links libnetvfs.so.1", output)
+
+    def test_second_export_fails(self):
+        so_file = self.build("""
+            #include <unistd.h>
+            int netvfs_version(void);
+            int nvb_extra(void) { return netvfs_version() + getpid(); }
+            const void *nvb_ffi_get(unsigned version) { return version + nvb_extra() ? "" : 0; }
+            """, exports=False)
+        self.assert_fails('exports "nvb_extra nvb_ffi_get", expected only nvb_ffi_get', so_file)
+
+    def test_no_libnetvfs_fails(self):
+        so_file = self.build("const void *nvb_ffi_get(unsigned version) { return version ? \"\" : 0; }\n",
+                             netvfs=False)
+        self.assert_fails("does not link libnetvfs.so.1", so_file)
+
+    def test_newer_glibc_fails(self):
+        self.assert_fails("needs GLIBC_", self.build(), max_glibc="2.0")
+
+    def test_lazy_binding_fails(self):
+        self.assert_fails("does not bind now", self.build(flags=("-Wl,-z,relro", "-Wl,-z,lazy")))
+
+    def test_no_relro_fails(self):
+        self.assert_fails("no RELRO", self.build(flags=("-Wl,-z,norelro", "-Wl,-z,now")))
+
+    def test_executable_stack_fails(self):
+        self.assert_fails("executable stack",
+                          self.build(flags=("-Wl,-z,relro", "-Wl,-z,now", "-Wl,-z,execstack")))
+
+    def test_bridge_looking_elsewhere_fails(self):
+        bridge = self.write("other-bridge", "\0loads /usr/lib/netvfs/libnetvfs-bridge-ffi.so\0")
+        self.assert_fails("does not load it from " + FFI_INSTALLED, self.build(), bridge=bridge)
 
 
 if __name__ == "__main__":

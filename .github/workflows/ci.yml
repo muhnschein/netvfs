@@ -39,7 +39,7 @@ jobs:
         run: ./tools/ci/cargo-tool.sh cargo-nextest "$NEXTEST_VERSION"
       - name: Build
         run: make -j"$(nproc)"
-      - name: Packaging checks (file lists, no share enumeration in the SMB plugin)
+      - name: Packaging checks (file lists, no share enumeration in the SMB plugin, the bridge's C ABI)
         run: make check-packaging
       - name: Every mutation list is in the mutation matrix
         run: ./tools/ci/check-mutation-matrix.py
@@ -100,10 +100,17 @@ jobs:
 
   rust-mutants:
     # cargo-mutants on the Rust lines this pull request changes: every
-    # surviving mutant fails the job (doc/RUST.md "Tests bite").
-    name: Tests bite (Rust, changed code)
+    # surviving mutant fails the job (doc/RUST.md "Tests bite"). Split into
+    # shards: a large diff has thousands of mutants, more than one job's
+    # time limit allows.
+    name: Tests bite (Rust, changed code, ${{ matrix.shard }}/12)
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
@@ -131,11 +138,12 @@ jobs:
       - name: Mutants in the diff
         env:
           BASE_REF: ${{ github.base_ref }}
-        run: ./tools/ci/rust-mutants.sh "origin/$BASE_REF" build-ffi
+          SHARD: ${{ matrix.shard }}
+        run: ./tools/ci/rust-mutants.sh "origin/$BASE_REF" build-ffi "$SHARD/12"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: failure()
         with:
-          name: rust-mutants
+          name: rust-mutants-${{ matrix.shard }}
           path: rust/mutants.out
           if-no-files-found: ignore
 
@@ -260,8 +268,8 @@ jobs:
         run: ./tools/ci/cross-build.sh build-sdk-cross rust/prebuilt
       - name: Rust tests on the target's glibc and SQLite (qemu)
         run: ./tools/ci/cross-build.sh build-sdk-cross build-cross-test test
-      - name: Smoke run of the cross-built helper (qemu)
-        run: ./tools/ci/cross-smoke.sh build-sdk-cross rust/prebuilt/netvfs-accounts
+      - name: Smoke run of the cross-built binaries (qemu)
+        run: ./tools/ci/cross-smoke.sh build-sdk-cross rust/prebuilt/netvfs-accounts rust/prebuilt/netvfs-bridge
       - name: Free the lifted SDK
         run: rm -rf build-sdk-cross build-cross-test
       - name: QML UI and plugin on the target (Qt 5.6, real Silica)

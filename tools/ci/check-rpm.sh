@@ -5,9 +5,14 @@
 #     netvfs of the same build (XC-1a), libnetvfs requires QtNetwork
 #     (discovery, XD-1), only netvfs-backup depends on Buteo (XP-4), no
 #     package requires the bridge (XP-5) and only its accounts helper is
-#     setgid privileged (XB-2a), which links only libc, libgcc_s and SQLite,
-#     needs no newer glibc than the target's and is hardened
-#     (check-linked-libs.sh);
+#     setgid privileged (XB-2a);
+#   - the Rust binaries of the bridge package link only the libraries they
+#     should (the setgid helper libc, libgcc_s and SQLite; netvfs-bridge no
+#     Qt, which it reaches only through its C ABI), need no newer glibc than
+#     the target's and are hardened (check-linked-libs.sh);
+#   - that C ABI, libnetvfs-bridge-ffi.so, exports one symbol, is hardened and
+#     sits where netvfs-bridge loads it from, next to the backend folder of
+#     libnetvfs's BackendLoader (check-ffi-lib.sh; doc/RUST.md);
 #   - libnetvfs-smb.so contains no share enumeration code (XP-3, SPEC 10.2
 #     G-SMB item 4; tools/ci/check-noshareenum.sh), and the check finds that
 #     code in the share helper when it is built;
@@ -118,13 +123,35 @@ elif sh tools/ci/check-noshareenum.sh "$shares_helper" >/dev/null; then
 fi
 
 # SPEC-v2 XB-2a: the setgid helper links only libc, libgcc_s and the
-# system SQLite (no Qt, GLib or libaccounts), needs no newer glibc than the
-# target's, and is a hardened PIE (check-linked-libs.sh).
+# system SQLite (no Qt, GLib or libaccounts); netvfs-bridge only libc,
+# libgcc_s and libm (Qt and the backends come with its C ABI, by dlopen).
+# Both need no newer glibc than the target's and are hardened PIEs
+# (check-linked-libs.sh).
 target_glibc=$(sb2 -t "$TARGET" rpm -q --qf '%{VERSION}' glibc)
 if bridge_rpm=$(rpm_of netvfs-bridge); then
     extract "$bridge_rpm" "$work/bridge"
     sh tools/ci/check-linked-libs.sh "$work/bridge/usr/libexec/netvfs/netvfs-accounts" \
         "libc.so.6 libgcc_s.so.1 libsqlite3.so.0" "$target_glibc" || fail "netvfs-accounts: see above"
+    sh tools/ci/check-linked-libs.sh "$work/bridge/usr/libexec/netvfs/netvfs-bridge" \
+        "libc.so.6 libgcc_s.so.1 libm.so.6" "$target_glibc" || fail "netvfs-bridge: see above"
+    # The C ABI where the package puts it: the path compiled into the
+    # bridge, and next to the backend folder compiled into libnetvfs
+    # (BackendLoader::searchPaths, a UTF-16 string literal).
+    ffi_path=$(rpm -qpl "$bridge_rpm" | grep '/libnetvfs-bridge-ffi\.so$' || true)
+    if [ -z "$ffi_path" ]; then
+        fail "netvfs-bridge contains no libnetvfs-bridge-ffi.so"
+    else
+        sh tools/ci/check-ffi-lib.sh "$work/bridge$ffi_path" "$ffi_path" \
+            "$work/bridge/usr/libexec/netvfs/netvfs-bridge" "$target_glibc" || fail "libnetvfs-bridge-ffi.so: see above"
+        backend_dir=$(dirname "$ffi_path")/backends
+        libnetvfs=$(find "$work/main" -name 'libnetvfs.so.*' -type f | head -n 1)
+        if [ -z "$libnetvfs" ] || ! strings -a -el "$libnetvfs" | grep -qxF "$backend_dir"; then
+            fail "libnetvfs does not load its backends from $backend_dir"
+        fi
+        if ! rpm -qpl "$main_rpm" | grep -q "^$backend_dir/libnetvfs-[a-z]*\.so$"; then
+            fail "netvfs installs no backends in $backend_dir"
+        fi
+    fi
 fi
 
 # shellcheck disable=SC2086 # one word per file

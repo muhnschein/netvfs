@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 //! The commands of netvfs-accounts (SPEC-v2 XB-2a), answered as
-//! `AccountsHelper::serve` did (src/bridge/lib/accountshelper.h):
+//! `AccountsHelper::serve` of the C++ bridge (netvfs 0.4) did:
 //!
 //! ```text
 //! netvfs-accounts list                          the Files accounts (XA-1)

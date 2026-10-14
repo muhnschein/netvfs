@@ -2,12 +2,16 @@
 
 Shared with consumers (the file browser's fake bridge replays the same files).
 
-- `org.netvfs.Bridge1.xml`: the introspection data the bridge serves. A copy of
-  `src/bridge/lib/org.netvfs.Bridge1.xml`; `tst_contract` fails when they differ, when the
-  bridge's method table differs from it, or when a reply or signal has another signature.
-- `*.json`: golden message sequences, replayed by `tst_contract` against the bridge with the
-  in-memory FakeBackend behind one account, `account:1` (provider `fake`, name `Fake 1`, host
-  `fake.example`).
+- `org.netvfs.Bridge1.xml`: the introspection data the bridge serves. The Rust bridge serves
+  its copy, `rust/netvfs-bridge-proto/org.netvfs.Bridge1.xml`; the crate's `tests/contract.rs`
+  fails when the two differ or when the method table or the signals differ from the XML, and
+  `tst_contract` when the running bridge serves anything else or a reply or signal has another
+  signature.
+- `*.json`: golden message sequences, replayed against the `netvfs-bridge` binary by
+  `tst_contract` (a libdbus client, C++) and by `rust/netvfs-bridge/tests/contract.rs` (zbus),
+  both with the in-memory FakeBackend behind one account, `account:1` (provider `fake`, name
+  `Fake 1`, host `fake.example`), and against the fake bridge by the protocol crate's
+  `tests/contract.rs`.
 
 ## Sequence format
 

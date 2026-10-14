@@ -88,8 +88,12 @@ jobs:
       - name: Install cargo-nextest
         run: ./tools/ci/cargo-tool.sh cargo-nextest "$NEXTEST_VERSION"
       # The C++ side of the FFI test with clang's ASan, whose runtime the
-      # Rust test binary links (doc/RUST.md "Tests", design §6.6).
-      - name: Build the FFI's C++ libraries with ASan (clang)
-        run: ./tools/ci/ffi-libs.sh build-ffi-asan --asan
+      # Rust test binary links: a clang of rustc's LLVM major, which
+      # rust-sanitize.sh checks (doc/RUST.md "Tests", design §6.6).
+      - name: Build the FFI's C++ libraries with ASan (the clang of rustc's LLVM)
+        run: |
+          major=$(rustc +"$SANITIZER_NIGHTLY" -vV | sed -n 's/^LLVM version: \([0-9]*\).*/\1/p')
+          ./tools/ci/install-clang.sh "$major"
+          CLANG_MAJOR=$major ./tools/ci/ffi-libs.sh build-ffi-asan --asan
       - name: Tests under ASan + LSan
         run: ./tools/ci/rust-sanitize.sh "$SANITIZER_NIGHTLY" build-ffi-asan

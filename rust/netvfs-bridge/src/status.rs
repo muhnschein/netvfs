@@ -27,6 +27,39 @@ impl Status {
         Self { name, message: message.into(), detail: String::new(), retry_after_ms: -1 }
     }
 
+    /// The same status with `detail` set.
+    #[must_use]
+    pub fn with_detail(mut self, detail: impl Into<String>) -> Self {
+        self.detail = detail.into();
+        self
+    }
+
+    /// The same status with `retryAfterMs` set.
+    #[must_use]
+    pub const fn with_retry_after_ms(mut self, ms: i64) -> Self {
+        self.retry_after_ms = ms;
+        self
+    }
+
+    /// A malformed call (`ProtocolError`; the dispatch replies
+    /// `org.freedesktop.DBus.Error.InvalidArgs` for it, XSEC-7).
+    #[must_use]
+    pub fn invalid_args(message: impl Into<String>) -> Self {
+        Self::new(ErrorName::ProtocolError, message)
+    }
+
+    /// An invalid path or name (`InvalidName`).
+    #[must_use]
+    pub fn invalid_name(message: impl Into<String>) -> Self {
+        Self::new(ErrorName::InvalidName, message)
+    }
+
+    /// The bridge refuses (`PermissionDenied`).
+    #[must_use]
+    pub fn permission_denied(message: impl Into<String>) -> Self {
+        Self::new(ErrorName::PermissionDenied, message)
+    }
+
     /// An `Internal` status: a bug or an unexpected state.
     #[must_use]
     pub fn internal(message: impl Into<String>) -> Self {
@@ -47,8 +80,22 @@ impl fmt::Display for Status {
 impl std::error::Error for Status {}
 
 #[cfg(test)]
+#[allow(clippy::assertions_on_result_states, reason = "tests")]
 mod tests {
     use super::*;
+
+    #[test]
+    fn builders_and_display() {
+        let s = Status::new(ErrorName::RateLimited, "slow").with_detail("429").with_retry_after_ms(1500);
+        assert_eq!(s.name, ErrorName::RateLimited);
+        assert_eq!((s.message.as_str(), s.detail.as_str(), s.retry_after_ms), ("slow", "429", 1500));
+        assert_eq!(s.to_string(), "RateLimited: slow");
+        assert_eq!(Status::new(ErrorName::Locked, "").to_string(), "Locked");
+        assert_eq!(Status::new(ErrorName::Locked, "").retry_after_ms, -1);
+        assert_eq!(Status::invalid_args("x").name, ErrorName::ProtocolError);
+        assert_eq!(Status::invalid_name("x").name, ErrorName::InvalidName);
+        assert_eq!(Status::permission_denied("x").name, ErrorName::PermissionDenied);
+    }
 
     #[test]
     fn constructors_and_display() {

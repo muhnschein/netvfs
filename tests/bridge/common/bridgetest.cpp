@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 #include "bridgetest.h"
 
-#include "fakebackend.h"
-#include "protocol.h"
-
 #include <QtCore/QCoreApplication>
+#include <QtCore/QDataStream>
+#include <QtCore/QDir>
 #include <QtCore/QElapsedTimer>
+#include <QtCore/QFile>
+#include <QtCore/QFileInfo>
 #include <QtCore/QJsonArray>
 #include <QtCore/QJsonObject>
 #include <QtCore/QTextCodec>
@@ -15,7 +16,14 @@
 namespace NetVfs {
 namespace BridgeTest {
 
+const char ObjectPath[] = "/org/netvfs/Bridge";
+const char Interface[] = "org.netvfs.Bridge1";
+
 namespace {
+
+// The consumer the bridge serves and the time it stays without a client.
+const char ConsumerId[] = "test";
+const char IdleExitMs[] = "2000";
 
 bool spin(const std::function<bool()> &done, int timeoutMs)
 {
@@ -29,6 +37,34 @@ bool spin(const std::function<bool()> &done, int timeoutMs)
     return true;
 }
 
+bool writeFile(const QString &path, const QByteArray &content)
+{
+    QDir().mkpath(QFileInfo(path).absolutePath());
+    QFile f(path);
+    return f.open(QIODevice::WriteOnly | QIODevice::Truncate) && f.write(content) == content.size();
+}
+
+// An answer of netvfs-accounts/1 (XB-2a) that reports success: QDataStream
+// Qt_5_6, the magic, error 0 and a null message, then `payload`.
+QByteArray helperAnswer(const std::function<void(QDataStream &)> &payload = nullptr)
+{
+    QByteArray bytes;
+    QDataStream stream(&bytes, QIODevice::WriteOnly);
+    stream.setVersion(QDataStream::Qt_5_6);
+    stream << QByteArray("netvfs-accounts/1") << qint32(0) << QString();
+    if (payload)
+        payload(stream);
+    return bytes;
+}
+
+// The connection parameters of account 1: provider, host, port, user name,
+// options, connect and request timeout.
+void writeAccountParams(QDataStream &stream)
+{
+    stream << QStringLiteral("fake") << QStringLiteral("fake.example") << qint32(0) << QStringLiteral("user")
+           << QVariantMap() << qint32(0) << qint32(0);
+}
+
 } // namespace
 
 // ------------------------------------------------------------- TestClient
@@ -37,7 +73,7 @@ TestClient::TestClient(const QString &address, QObject *parent)
     : QObject(parent)
 {
     Result r;
-    m_connection = Bridge::WireConnection::connectTo(address, &r, this);
+    m_connection = WireConnection::connectTo(address, &r, this);
     if (m_connection)
         m_connection->setHandler([this](DBusMessage *message) { onMessage(message); });
 }
@@ -49,12 +85,17 @@ bool TestClient::isConnected() const
     return m_connection && m_connection->isConnected();
 }
 
+bool TestClient::canPassUnixFds() const
+{
+    return m_connection && m_connection->canPassUnixFds();
+}
+
 void TestClient::onMessage(DBusMessage *raw)
 {
     Message m;
     m.valid = true;
     m.signature = dbus_message_get_signature(raw);
-    Bridge::decodeArguments(raw, &m.args);
+    decodeArguments(raw, &m.args);
     const int type = dbus_message_get_type(raw);
     if (type == DBUS_MESSAGE_TYPE_SIGNAL) {
         m.name = QString::fromUtf8(dbus_message_get_member(raw));
@@ -68,12 +109,12 @@ void TestClient::onMessage(DBusMessage *raw)
     m_replies.insert(dbus_message_get_reply_serial(raw), m);
 }
 
-quint32 TestClient::send(const char *member, const Args &args, const char *interface)
+quint32 TestClient::send(const char *member, const Args &args, const char *interface, const char *path)
 {
     if (!m_connection)
         return 0;
-    Bridge::MessagePtr message(dbus_message_new_method_call(nullptr, Bridge::Protocol::ObjectPath,
-                                                            interface ? interface : Bridge::Protocol::Interface, member));
+    MessagePtr message(dbus_message_new_method_call(nullptr, path ? path : ObjectPath,
+                                                    interface ? interface : Interface, member));
     if (args) {
         WireWriter w(message.get());
         args(w);
@@ -136,94 +177,132 @@ TestClient::Message TestClient::hello()
     return call("Hello", [](WireWriter &w) { w.uint32(1).string(QStringLiteral("test")); });
 }
 
-// ----------------------------------------------------------- FakeAccounts
+// ---------------------------------------------------------- the binary
 
-Bridge::AccountLocation FakeAccounts::fakeAccount(int id)
+QString bridgeBinary()
 {
-    Bridge::AccountLocation a;
-    a.accountId = id;
-    a.provider = QStringLiteral("fake");
-    a.displayName = QStringLiteral("Fake %1").arg(id);
-    a.params.provider = QStringLiteral("fake");
-    a.params.host = QStringLiteral("fake.example");
-    a.params.username = QStringLiteral("user");
-    return a;
+    return QStringLiteral(NETVFS_TEST_LIBEXEC_DIR "/netvfs-bridge");
 }
 
-void FakeAccounts::fetch(int accountId, const Fetched &done)
+QProcessEnvironment bridgeEnvironment()
 {
-    ++fetches;
-    if (!fetchResult.ok()) {
-        done(fetchResult, ConnectionParams(), Credentials());
-        return;
+    QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+    env.insert(QStringLiteral("NETVFS_BRIDGE_FFI"), QStringLiteral(NETVFS_TEST_BRIDGE_FFI));
+    env.insert(QStringLiteral("NETVFS_BACKEND_PATH"), QStringLiteral(NETVFS_TEST_FAKE_BACKEND_DIR));
+#ifdef NETVFS_TEST_BRIDGE_PRELOAD
+    env.insert(QStringLiteral("LD_PRELOAD"), QStringLiteral(NETVFS_TEST_BRIDGE_PRELOAD));
+#endif
+    // Not socket-activated, and no session bus: no consent notification, no
+    // account change signals.
+    env.remove(QStringLiteral("LISTEN_PID"));
+    env.remove(QStringLiteral("LISTEN_FDS"));
+    env.remove(QStringLiteral("DBUS_SESSION_BUS_ADDRESS"));
+    return env;
+}
+
+// --------------------------------------------------------- BridgeProcess
+
+BridgeProcess::BridgeProcess(const QString &consent)
+    : m_consent(consent)
+{
+    m_process.setProcessChannelMode(QProcess::ForwardedChannels);
+}
+
+BridgeProcess::~BridgeProcess()
+{
+    if (m_process.state() != QProcess::NotRunning)
+        waitExit();
+}
+
+void BridgeProcess::addFile(const QByteArray &path, const QByteArray &content)
+{
+    m_seed += "file " + ('/' + path).toHex() + ' ' + content.toHex() + '\n';
+}
+
+bool BridgeProcess::writeAccountsHelper() const
+{
+    const QString folder = m_dir.filePath(QStringLiteral("helper"));
+    const QString script = folder + QStringLiteral("/netvfs-accounts");
+    return writeFile(folder + QStringLiteral("/list"), helperAnswer([](QDataStream &s) {
+               // One account: id, provider, display name, the parameters,
+               // files root, attention.
+               s << qint32(1) << qint32(1) << QStringLiteral("fake") << QStringLiteral("Fake 1");
+               writeAccountParams(s);
+               s << QStringLiteral("") << qint32(0);
+           }))
+        // XA-7: credentials id 0 with an optional secret, so no signond.
+        && writeFile(folder + QStringLiteral("/files-1"), helperAnswer([](QDataStream &s) {
+               writeAccountParams(s);
+               s << quint32(0) << true;
+           }))
+        && writeFile(folder + QStringLiteral("/status"), helperAnswer())
+        && writeFile(script, "#!/bin/sh\n"
+                             "cd \"$(dirname \"$0\")\" || exit 1\n"
+                             "case \"$1\" in\n"
+                             "list) exec cat list ;;\n"
+                             "files) exec cat \"files-$2\" ;;\n"
+                             "*) exec cat status ;;\n"
+                             "esac\n")
+        && QFile::setPermissions(script, QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner);
+}
+
+bool BridgeProcess::writeFiles() const
+{
+    const QByteArray id = ConsumerId;
+    const QByteArray executable = QFile::encodeName(QCoreApplication::applicationFilePath());
+    QByteArray consent = "[Consent]\n";
+    if (m_consent != QLatin1String("unknown"))
+        consent += id + '=' + m_consent.toUtf8() + '\n';
+    return m_dir.isValid()
+        && writeFile(m_dir.filePath(QStringLiteral("consumers/%1.conf").arg(QLatin1String(ConsumerId))),
+                     "[Consumer]\nId=" + id + "\nDisplayName=Test\nExecutable=" + executable
+                         + "\nDataDir=.local/share/" + id + '\n')
+        && writeFile(m_dir.filePath(QStringLiteral("config/netvfs/bridge.conf")), consent)
+        && QDir().mkpath(m_dir.filePath(QStringLiteral("home")))
+        && writeAccountsHelper()
+        // The account's user, with no secret (see writeAccountsHelper).
+        && writeFile(m_dir.filePath(QStringLiteral("seed")), m_seed + "credentials user\n");
+}
+
+bool BridgeProcess::start()
+{
+    if (!writeFiles())
+        return false;
+    QProcessEnvironment env = bridgeEnvironment();
+    env.insert(QStringLiteral("HOME"), m_dir.filePath(QStringLiteral("home")));
+    env.insert(QStringLiteral("XDG_CONFIG_HOME"), m_dir.filePath(QStringLiteral("config")));
+    env.insert(QStringLiteral("XDG_DATA_HOME"), m_dir.filePath(QStringLiteral("data")));
+    env.insert(QStringLiteral("NETVFS_CONSUMERS_DIR"), m_dir.filePath(QStringLiteral("consumers")));
+    env.insert(QStringLiteral("NETVFS_ACCOUNTS_HELPER"), m_dir.filePath(QStringLiteral("helper/netvfs-accounts")));
+    env.insert(QStringLiteral("NETVFS_FAKE_SEED"), m_dir.filePath(QStringLiteral("seed")));
+    env.insert(QStringLiteral("NETVFS_BRIDGE_IDLE_EXIT_MS"), QLatin1String(IdleExitMs));
+    m_process.setProcessEnvironment(env);
+    m_process.start(bridgeBinary(), { QStringLiteral("--listen"), address(), QLatin1String(ConsumerId) });
+    if (!m_process.waitForStarted(10000))
+        return false;
+    const QString socket = m_dir.filePath(QStringLiteral("bridge.sock"));
+    return spin([&]() { return QFileInfo::exists(socket) || m_process.state() == QProcess::NotRunning; }, 10000)
+        && m_process.state() == QProcess::Running;
+}
+
+QString BridgeProcess::address() const
+{
+    return QStringLiteral("unix:path=") + m_dir.filePath(QStringLiteral("bridge.sock"));
+}
+
+std::unique_ptr<TestClient> BridgeProcess::client() const
+{
+    return std::make_unique<TestClient>(address());
+}
+
+int BridgeProcess::waitExit(int timeoutMs)
+{
+    if (m_process.state() != QProcess::NotRunning && !m_process.waitForFinished(timeoutMs)) {
+        m_process.kill();
+        m_process.waitForFinished();
+        return -1;
     }
-    for (const Bridge::AccountLocation &a : accounts) {
-        if (a.accountId == accountId) {
-            done(Result::success(), a.params, Credentials(QStringLiteral("user"), QByteArray("secret")));
-            return;
-        }
-    }
-    done(Result(Error::NotFound, QStringLiteral("no account")), ConnectionParams(), Credentials());
-}
-
-void FakeAccounts::setAttention(int accountId, Attention value, const QString &)
-{
-    attention.append(qMakePair(accountId, value));
-}
-
-// ---------------------------------------------------------------- Fixture
-
-Fixture::Fixture(Consent consent, bool start)
-{
-    qputenv("NETVFS_BACKEND_PATH", NETVFS_TEST_FAKE_BACKEND_DIR);
-    Test::FakeServer::instance()->reset();
-    config.consumer.id = QStringLiteral("test");
-    config.consumer.displayName = QStringLiteral("Test");
-    config.consumer.executable = QCoreApplication::applicationFilePath();
-    config.consumer.dataDir = QStringLiteral("data");
-    config.listenAddress = QStringLiteral("unix:path=") + dir.path() + QStringLiteral("/bridge.sock");
-    config.consentFile = dir.path() + QStringLiteral("/config/bridge.conf");
-    config.knownHostsFile = dir.path() + QStringLiteral("/known_hosts");
-    config.handoffConfig = dir.path() + QStringLiteral("/handoff.conf");
-    config.idleExitMs = 300;
-    accounts = new FakeAccounts;
-    accounts->accounts << FakeAccounts::fakeAccount(1);
-    prompt = new FakePrompt;
-    config.accounts = accounts;
-    config.prompt = prompt;
-    setConsent(consent);
-    if (start)
-        startServer();
-}
-
-Fixture::~Fixture()
-{
-    server.reset();
-}
-
-void Fixture::setConsent(Consent consent)
-{
-    ConsentStore(config.consentFile).setConsent(config.consumer.id, consent);
-}
-
-void Fixture::startServer()
-{
-    server = std::make_unique<Bridge::BridgeServer>(config);
-    if (server->start().ok())
-        address = config.listenAddress;
-}
-
-std::unique_ptr<TestClient> Fixture::client()
-{
-    auto c = std::make_unique<TestClient>(address);
-    return c;
-}
-
-std::unique_ptr<TestClient> Fixture::helloClient()
-{
-    auto c = client();
-    c->hello();
-    return c;
+    return m_process.exitStatus() == QProcess::NormalExit ? m_process.exitCode() : -1;
 }
 
 // ------------------------------------------------------------------- JSON

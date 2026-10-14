@@ -26,9 +26,9 @@ void seedLine(FakeServer *server, const QByteArray &line)
         server->addFile(keyOfHex(words.at(1)), QByteArray::fromHex(words.at(2)));
     } else if (kind == "dir" && words.size() == 2) {
         server->addDir(keyOfHex(words.at(1)));
-    } else if (kind == "credentials" && words.size() == 3) {
+    } else if (kind == "credentials" && (words.size() == 2 || words.size() == 3)) {
         server->userName = QString::fromUtf8(words.at(1));
-        server->secret = QByteArray::fromHex(words.at(2));
+        server->secret = QByteArray::fromHex(words.value(2));
     } else if (kind == "identity" && words.size() > 1) {
         // The pin itself holds a space: "<algorithm> <base64 key>".
         server->identity = NetVfs::ServerIdentity::fromPin(QString::fromUtf8(line.simplified().mid(kind.size() + 1)));
@@ -39,7 +39,7 @@ void seedLine(FakeServer *server, const QByteArray &line)
 // a test starts (the bridge binary), on the first backend created. Lines:
 //   file <path-hex> <data-hex>
 //   dir <path-hex>
-//   credentials <user> <secret-hex>
+//   credentials <user> [<secret-hex>]   (without one, the secret is empty)
 //   identity <pin>
 void seedFromEnvironment()
 {

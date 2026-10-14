@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 //! Limits of the protocol (SPEC-v2 XB-17, XSEC-7) and of the bridge (XB-12,
-//! C-10). The values are those of the C++ bridge: `src/bridge/lib/args.h`
+//! C-10). The values are those of the C++ bridge of netvfs 0.4: `args.h`
 //! (`Limits`), `bridgeserver.h` (`ConsumerLimits`), `pool.h` (`PoolLimits`),
 //! `streaming.h` (`FlowControl`) and `wire.h` (`DecodeLimits`).
 //!

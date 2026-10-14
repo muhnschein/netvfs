@@ -7,9 +7,15 @@
 # With a second argument, netvfs-bridge's FFI test runs against the C++
 # libraries `tools/ci/ffi-libs.sh <dir>` built there (else it is skipped and
 # catches nothing). Exclusions, each with its reason: rust/.cargo/mutants.toml.
-# Usage: rust-mutants.sh <base revision> [<ffi-libs.sh dir>]
+# With a third argument k/n, only shard k (from 0) of n runs, every n-th
+# mutant (CI runs the shards as parallel jobs).
+# Usage: rust-mutants.sh <base revision> [<ffi-libs.sh dir> [<k>/<n>]]
 set -eu
 base=$1
+shard=
+if [ $# -ge 3 ]; then
+    shard="--shard=$3 --sharding=round-robin"
+fi
 root=$(cd "$(dirname "$0")/../.." && pwd)
 if [ $# -ge 2 ]; then
     lib=$(cd "$2" && pwd)/lib
@@ -35,7 +41,7 @@ status=0
 # rust/ (the shared contract), which a copy of the workspace would not have;
 # each mutated file is restored after its test run.
 cargo mutants --in-place --in-diff "$diff" --workspace --all-features \
-    --test-tool nextest --no-shuffle --timeout-multiplier 3 || status=$?
+    --test-tool nextest --no-shuffle --timeout-multiplier 3 $shard || status=$?
 # Its exit status says "timeouts" also when mutants were missed, so the
 # outcome is read from the lists: 0 ok, 2 missed, 3 timeouts, anything
 # else (the baseline failed, a usage error) stands.

@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 //! netvfs-accounts (SPEC-v2 XB-2a): the bridge's only access to the accounts
 //! database, installed setgid `privileged`. One request per run, from the
-//! arguments; the answer goes to stdout in the format the C++ bridge reads
-//! (src/bridge/lib/accountshelper.h). No Qt, GLib or libaccounts: the
+//! arguments; the answer goes to stdout in the format netvfs-bridge reads
+//! (netvfs-bridge/src/accounts/qds.rs). No Qt, GLib or libaccounts: the
 //! database is read with SQLite, changes are announced on the session bus
 //! by a small client of its own. Confined as `sandbox` describes, set-id or
 //! not, so that the tests run it confined too.

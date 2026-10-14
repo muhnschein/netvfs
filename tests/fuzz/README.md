@@ -19,7 +19,9 @@ budget)".
 | `fuzz_names.cpp` | `Names::encode(Names::decode(x)) == x` for every byte string; UTF-16 input never crashes |
 | `fuzz_url.cpp` | `Url::parse` never crashes; what it accepts survives parse, format, parse unchanged |
 | `fuzz_smb_shares.cpp` | the SMB share helper's output parser (XM-7) never crashes; what it accepts obeys the limits, holds only valid unique share names and survives the helper's writers; the request codec is canonical |
-| `fuzz_bridge_args.cpp` | netvfs-bridge argument validation (`validateCall`) on decoded argument tuples never crashes; what it accepts has normalised paths and numbers in range, and secrets only in the `Call` |
+
+netvfs-bridge is Rust since 0.5: its argument validation, paths and FFI marshalling are fuzzed
+by the cargo-fuzz targets in `rust/fuzz` (`tools/ci/rust-fuzz.sh`, doc/RUST.md).
 
 ## Adding a harness: one file
 

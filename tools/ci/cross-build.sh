@@ -35,12 +35,16 @@ cd "$root/rust"
 rustup target add "$triple" > /dev/null
 if [ "$mode" = test ]; then
     # The confinement tests start set-id copies and seccomp filters, which
-    # qemu-user cannot run faithfully; they run natively on the host.
-    cargo test --locked --workspace --target "$triple" -- --skip sandbox
+    # qemu-user cannot run faithfully; they run natively on the host. So do
+    # the bridge's tests of a helper that cannot be started: under qemu-user
+    # posix_spawn reports a failed exec as a started child that exits 127.
+    cargo test --locked --workspace --target "$triple" -- --skip sandbox \
+        --skip accounts::helper::tests::failures_list_nothing \
+        --skip accounts::helper::tests::files_are_fetched
     exit 0
 fi
 cargo build --release --locked --workspace --target "$triple" --bins
-for bin in netvfs-accounts; do
+for bin in netvfs-bridge netvfs-accounts; do
     cp -f "$CARGO_TARGET_DIR/$triple/release/$bin" "$out/$bin"
 done
 ls -l "$out"

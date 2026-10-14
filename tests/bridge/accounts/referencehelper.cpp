@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-// The C++ netvfs-accounts of netvfs 0.3 (src/bridge/lib/accountshelper.cpp
-// at b143680), unchanged but for its name: the golden reference of the Rust
-// helper's answers.
+// The C++ netvfs-accounts of netvfs 0.3 (the bridge's accountshelper.cpp
+// at b143680), unchanged but for its name and the account record, now in
+// referencedecoder.h: the golden reference of the Rust helper's answers.
 #include "referencehelper.h"
 
 #include "accountstore.h"
-#include "location.h"
 #include "paths.h"
+#include "referencedecoder.h"
 
 #include <Accounts/Manager>
 
@@ -14,8 +14,6 @@
 
 namespace NetVfs {
 namespace Test {
-
-using namespace NetVfs::Bridge;
 
 namespace {
 
