@@ -44,14 +44,14 @@ bool writeFile(const QString &path, const QByteArray &content)
     return f.open(QIODevice::WriteOnly | QIODevice::Truncate) && f.write(content) == content.size();
 }
 
-// An answer of netvfs-accounts/1 (XB-2a) that reports success: QDataStream
-// Qt_5_6, the magic, error 0 and a null message, then `payload`.
+// An answer of netvfs-accounts (XB-2a) that reports success: QDataStream
+// Qt_5_6, error 0 and a null message, then `payload`.
 QByteArray helperAnswer(const std::function<void(QDataStream &)> &payload = nullptr)
 {
     QByteArray bytes;
     QDataStream stream(&bytes, QIODevice::WriteOnly);
     stream.setVersion(QDataStream::Qt_5_6);
-    stream << QByteArray("netvfs-accounts/1") << qint32(0) << QString();
+    stream << qint32(0) << QString();
     if (payload)
         payload(stream);
     return bytes;
@@ -174,7 +174,7 @@ void TestClient::close()
 
 TestClient::Message TestClient::hello()
 {
-    return call("Hello", [](WireWriter &w) { w.uint32(1).string(QStringLiteral("test")); });
+    return call("Hello", [](WireWriter &w) { w.string(QStringLiteral("test")); });
 }
 
 // ---------------------------------------------------------- the binary

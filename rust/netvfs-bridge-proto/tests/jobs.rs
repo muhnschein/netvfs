@@ -8,7 +8,7 @@
 use futures_lite::StreamExt as _;
 use netvfs_bridge_proto::fake::FakeBridge;
 use netvfs_bridge_proto::{
-    BridgeError, Connection, OptsBuilder, PROTOCOL_VERSION, Signal, SignalStream, WireNearby, value_i64,
+    BridgeError, Connection, OptsBuilder, Signal, SignalStream, WireNearby, value_i64,
 };
 use std::collections::HashMap;
 use std::time::Duration;
@@ -19,7 +19,7 @@ async fn setup() -> (FakeBridge, Connection, SignalStream) {
     fake.add_account(2, "fake", "Fake 2", "other.example").await;
     let conn = fake.connect().await.unwrap();
     let signals = conn.signals();
-    conn.proxy().hello(PROTOCOL_VERSION, "test").await.unwrap();
+    conn.proxy().hello("test").await.unwrap();
     (fake, conn, signals)
 }
 

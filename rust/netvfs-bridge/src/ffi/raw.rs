@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 //! The C ABI of `libnetvfs-bridge-ffi.so`, written by hand from
-//! `src/bridge/ffi/netvfs_bridge_ffi.h` (frozen; fields are only ever
-//! appended). Field order, types and the table's slot order are the
+//! `src/bridge/ffi/netvfs_bridge_ffi.h`. Field order, types and the table's slot order are the
 //! header's; `layout` tests below pin sizes and offsets on LP64 to what the
 //! C compiler gives. Names are the header's in Rust case (`nvb_bytes` is
 //! [`NvbBytes`]). The comments say what each field carries; ownership (O1 to
@@ -10,8 +9,6 @@
 use std::ffi::{c_int, c_void};
 use std::marker::{PhantomData, PhantomPinned};
 
-/// `NVB_FFI_VERSION`.
-pub const NVB_FFI_VERSION: u32 = 1;
 /// `NVB_FFI_ENTRY`, NUL-terminated for `dlsym`.
 pub const NVB_FFI_ENTRY: &[u8] = b"nvb_ffi_get\0";
 
@@ -429,15 +426,11 @@ pub struct NvbDiscoveryHooks {
 /// A function `post` runs on the Qt thread.
 pub type NvbPostFn = unsafe extern "C" fn(*mut c_void);
 
-/// `nvb_ffi_v1`: the table, in the header's order.
+/// `nvb_ffi`: the table, in the header's order.
 #[repr(C)]
 #[derive(Debug)]
 #[allow(clippy::type_complexity)]
-pub struct NvbFfiV1 {
-    /// `NVB_FFI_VERSION`.
-    pub version: u32,
-    /// `sizeof(nvb_ffi_v1)` in the library.
-    pub struct_size: u32,
+pub struct NvbFfi {
     /// `QCoreApplication`; 0 ok, -1 twice.
     pub init: unsafe extern "C" fn(NvbBytes) -> i32,
     /// `exec()`; returns `quit()`'s code.
@@ -567,7 +560,7 @@ pub struct NvbFfiV1 {
 }
 
 /// `nvb_ffi_get_fn`.
-pub type NvbFfiGetFn = unsafe extern "C" fn(u32) -> *const NvbFfiV1;
+pub type NvbFfiGetFn = unsafe extern "C" fn() -> *const NvbFfi;
 
 #[cfg(all(test, target_pointer_width = "64"))]
 mod layout {
@@ -663,11 +656,11 @@ mod layout {
 
     #[test]
     fn table() {
-        assert_eq!(size_of::<NvbFfiV1>(), 336);
-        assert_eq!((offset_of!(NvbFfiV1, init), offset_of!(NvbFfiV1, free)), (8, 48));
-        assert_eq!((offset_of!(NvbFfiV1, conn_new), offset_of!(NvbFfiV1, reply_set)), (80, 120));
-        assert_eq!((offset_of!(NvbFfiV1, conn_open_read), offset_of!(NvbFfiV1, copy_across)), (240, 304));
-        assert_eq!(offset_of!(NvbFfiV1, discovery_free), 328);
+        assert_eq!(size_of::<NvbFfi>(), 328);
+        assert_eq!((offset_of!(NvbFfi, init), offset_of!(NvbFfi, free)), (0, 40));
+        assert_eq!((offset_of!(NvbFfi, conn_new), offset_of!(NvbFfi, reply_set)), (72, 112));
+        assert_eq!((offset_of!(NvbFfi, conn_open_read), offset_of!(NvbFfi, copy_across)), (232, 296));
+        assert_eq!(offset_of!(NvbFfi, discovery_free), 320);
     }
 
     #[test]

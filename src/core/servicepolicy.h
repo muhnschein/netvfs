@@ -24,7 +24,6 @@ namespace OptionKeys {
 NETVFS_EXPORT extern const char HostKey[];          // SSH host key pin (XC-16)
 NETVFS_EXPORT extern const char AuthMode[];         // password | publickey | interactive (sftp)
 NETVFS_EXPORT extern const char SecurityProfile[];  // smb: strict | signed | legacy | guest (XM-1)
-NETVFS_EXPORT extern const char RequireEncryption[];// smb, v1 (M-3): false maps to "signed"
 NETVFS_EXPORT extern const char Share[];            // smb; empty: server mode (XM-2)
 NETVFS_EXPORT extern const char Shares[];           // smb: string list of saved shares (XM-3)
 NETVFS_EXPORT extern const char ShowAdminShares[];  // smb (XM-7)
@@ -40,9 +39,8 @@ NETVFS_EXPORT extern const char Legacy[];
 NETVFS_EXPORT extern const char Guest[];
 } // namespace SecurityProfiles
 
-// The SMB profile in effect: security_profile when set, else "signed" for
-// the v1 option require_encryption=false and "strict" otherwise. Empty for
-// other providers. The value is returned as stored (an unknown profile is
+// The SMB profile in effect: security_profile when set, else "strict".
+// Empty for other providers. The value is returned as stored (an unknown profile is
 // refused by checkServicePolicy()).
 NETVFS_EXPORT QString securityProfile(const ConnectionParams &params);
 

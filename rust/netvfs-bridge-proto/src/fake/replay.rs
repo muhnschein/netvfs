@@ -556,7 +556,7 @@ fn check_reply_signature(call: &str, sig: &str) -> Result<(), String> {
     }
 }
 
-/// Error replies carry the message, and with `error-details` an `a{sv}`.
+/// Error replies carry the message and an `a{sv}` of details.
 fn check_error_signature(call: &str, name: &str, msg: &zbus::Message) -> Result<(), String> {
     let sig = wire_signature(msg)?;
     let fine = if name.starts_with(crate::errors::ERROR_PREFIX) {
@@ -830,7 +830,7 @@ mod tests {
     async fn a_failing_expectation_is_reported() {
         let seq = parse(
             r#"{"description":"d","consent":"granted","steps":[
-                {"call":"Hello","sig":"us","args":[1,"t"],"reply":[2,"*","*"]}]}"#,
+                {"call":"Hello","sig":"s","args":["t"],"reply":["another version"]}]}"#,
         )
         .unwrap();
         let err = replay(&seq).await.unwrap_err();

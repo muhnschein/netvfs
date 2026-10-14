@@ -51,7 +51,7 @@ fn valid_message(name: &str) -> Message {
     let fd = Fd::from(fd.as_fd());
     let p: &[u8] = b"a";
     match name {
-        "Hello" => message(name, &(1u32, "x")),
+        "Hello" => message(name, &("x",)),
         "GetConsent" | "RequestConsent" | "ListLocations" => message(name, &()),
         "Capabilities" | "Disconnect" | "ForgetAdHoc" | "OpenAccountSettings" => message(name, &(LOC,)),
         "ConnectAdHoc" => message(name, &("sftp://h/", p, none())),
@@ -95,21 +95,17 @@ fn every_method_decodes_to_its_variant() {
 
 #[test]
 fn signatures_and_counts() {
-    assert!(
-        matches!(validate("Hello", &(1u32, "x")).unwrap(), Call::Hello { protocol: 1, ref client } if client == "x")
-    );
-    let wrong = validate("Hello", &("x", 1u32)).unwrap_err();
-    assert_eq!((wrong.name, wrong.message.as_str()), (ErrorName::ProtocolError, "Hello takes (us)"));
-    assert_eq!(error("Hello", &(1u32,)), ErrorName::ProtocolError); // count
-    assert_eq!(error("Hello", &(1u32, "x", 2u32)), ErrorName::ProtocolError);
-    let zero = validate("Hello", &(0u32, "x")).unwrap_err();
-    assert_eq!(zero.message, "Protocol version 0 does not exist");
+    assert!(matches!(validate("Hello", &("x",)).unwrap(), Call::Hello { ref client } if client == "x"));
+    let wrong = validate("Hello", &(1u32,)).unwrap_err();
+    assert_eq!((wrong.name, wrong.message.as_str()), (ErrorName::ProtocolError, "Hello takes (s)"));
+    assert_eq!(error("Hello", &()), ErrorName::ProtocolError); // count
+    assert_eq!(error("Hello", &("x", 2u32)), ErrorName::ProtocolError);
     // Same values, other D-Bus types (object path, signature): only the
     // signature check refuses them.
-    assert_eq!(error("Hello", &(1u32, ObjectPath::try_from("/x").unwrap())), ErrorName::ProtocolError);
-    assert_eq!(error("Hello", &(1u32, Signature::try_from("s").unwrap())), ErrorName::ProtocolError);
+    assert_eq!(error("Hello", &(ObjectPath::try_from("/x").unwrap(),)), ErrorName::ProtocolError);
+    assert_eq!(error("Hello", &(Signature::try_from("s").unwrap(),)), ErrorName::ProtocolError);
     assert_eq!(error("Frobnicate", &()), ErrorName::Unsupported);
-    let nameless = Message::method_call(OBJECT_PATH, "Hello").unwrap().build(&(1u32, "x")).unwrap();
+    let nameless = Message::method_call(OBJECT_PATH, "Hello").unwrap().build(&("x",)).unwrap();
     assert_eq!(decode(&nameless).unwrap().name(), "Hello");
     validate("Stat", &(LOC, b"a".as_slice(), true, "")).unwrap();
     // A Download whose "h" is not a file descriptor.
@@ -446,9 +442,9 @@ fn identifiers() {
     assert_eq!(location_id("account:1".to_owned()).unwrap().as_str(), "account:1");
     assert_eq!(lane_hint("", Lane::Bulk).unwrap(), Lane::Bulk);
     // Hello's client name: at most 256 UTF-16 units.
-    assert!(validate("Hello", &(1u32, "é".repeat(256))).is_ok());
-    assert_eq!(validate("Hello", &(1u32, "x".repeat(257))).unwrap_err().message, "Argument 2 is too long");
-    assert_eq!(validate("Hello", &(1u32, "😀".repeat(129))).unwrap_err().message, "Argument 2 is too long");
+    assert!(validate("Hello", &("é".repeat(256),)).is_ok());
+    assert_eq!(validate("Hello", &("x".repeat(257),)).unwrap_err().message, "Argument 1 is too long");
+    assert_eq!(validate("Hello", &("😀".repeat(129),)).unwrap_err().message, "Argument 1 is too long");
 }
 
 #[test]

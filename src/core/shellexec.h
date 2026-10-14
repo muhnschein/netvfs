@@ -62,6 +62,6 @@ public:
 
 } // namespace NetVfs
 
-Q_DECLARE_INTERFACE(NetVfs::ShellExec, "org.netvfs.ShellExec/1.0")
+Q_DECLARE_INTERFACE(NetVfs::ShellExec, "org.netvfs.ShellExec")
 
 #endif

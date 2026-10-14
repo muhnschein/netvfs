@@ -11,7 +11,7 @@ use netvfs_bridge::consent::{Consent, ConsentStore};
 use netvfs_bridge::prompt::{ConsentPrompt, NotificationPrompt, PromptEvent};
 use netvfs_bridge::testing::{BridgeRun, WAIT, wait_signal};
 use netvfs_bridge::testutil::{TestBus, TestChild};
-use netvfs_bridge_proto::{PROTOCOL_VERSION, Signal, SignalStream};
+use netvfs_bridge_proto::{Signal, SignalStream};
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -340,7 +340,7 @@ async fn bridge_on_bus() -> Option<(TestBus, Fake, BridgeRun, TestChild, netvfs_
     run.with_session_bus(bus.address());
     let child = run.spawn();
     let client = run.client().await;
-    client.proxy().hello(PROTOCOL_VERSION, "notifications").await.unwrap();
+    client.proxy().hello("notifications").await.unwrap();
     assert_eq!(client.proxy().get_consent().await.unwrap(), "unknown");
     Some((bus, fake, run, child, client))
 }

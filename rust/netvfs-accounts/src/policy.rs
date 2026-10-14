@@ -74,8 +74,6 @@ pub mod option_keys {
     pub const AUTH_MODE: &str = "auth_mode";
     /// The SMB security profile, if one is set.
     pub const SECURITY_PROFILE: &str = "security_profile";
-    /// The older SMB switch for encryption, true by default.
-    pub const REQUIRE_ENCRYPTION: &str = "require_encryption";
     /// The account's consent to an insecure setting.
     pub const ALLOW_INSECURE: &str = "allow_insecure";
 }
@@ -105,9 +103,7 @@ pub fn security_profile(params: &ConnectionParams) -> QString {
     if profile.as_deref().is_some_and(|p| !p.is_empty()) {
         return profile;
     }
-    // M-3 (v1): require_encryption, default true.
-    let strict = params.flag(option_keys::REQUIRE_ENCRYPTION, true);
-    Some(if strict { security_profiles::STRICT } else { security_profiles::SIGNED }.to_owned())
+    Some(security_profiles::STRICT.to_owned())
 }
 
 fn is_known_profile(profile: Option<&str>) -> bool {
@@ -188,12 +184,9 @@ mod tests {
     fn smb_profiles() {
         assert_eq!(security_profile(&params("sftp", &[])), None);
         assert_eq!(security_profile(&params("smb", &[])).as_deref(), Some("strict"));
+        // No other option selects a profile.
         assert_eq!(
             security_profile(&params("smb", &[("require_encryption", Value::Bool(false))])).as_deref(),
-            Some("signed")
-        );
-        assert_eq!(
-            security_profile(&params("smb", &[("require_encryption", s("true"))])).as_deref(),
             Some("strict")
         );
         assert_eq!(

@@ -27,12 +27,12 @@ QVariantMap sftpParams()
     return params;
 }
 
-QVariantMap smbParams(const QVariant &requireEncryption)
+QVariantMap smbParams(const QString &profile = QString())
 {
     QVariantMap options;
     options.insert(QStringLiteral("share"), QStringLiteral("backup"));
-    if (requireEncryption.isValid())
-        options.insert(QStringLiteral("require_encryption"), requireEncryption);
+    if (!profile.isEmpty())
+        options.insert(QStringLiteral("security_profile"), profile);
     QVariantMap params;
     params.insert(QStringLiteral("provider"), QStringLiteral("smb"));
     params.insert(QStringLiteral("host"), QStringLiteral("nas"));
@@ -271,12 +271,12 @@ private slots:
         QVariantMap change;
         change.insert(QStringLiteral("host_key"), QStringLiteral("ssh-ed25519 NEW"));
         change.insert(QStringLiteral("public_key"), QString());
-        change.insert(QStringLiteral("require_encryption"), false);
+        change.insert(QStringLiteral("allow_shell"), false);
         const QVariantMap merged = helpers.withOptions(sftpParams(), change);
         const QVariantMap options = merged.value(QStringLiteral("options")).toMap();
         QCOMPARE(options.value(QStringLiteral("host_key")).toString(), QStringLiteral("ssh-ed25519 NEW"));
         QVERIFY(!options.contains(QStringLiteral("public_key")));
-        QCOMPARE(options.value(QStringLiteral("require_encryption")), QVariant(false));
+        QCOMPARE(options.value(QStringLiteral("allow_shell")), QVariant(false));
         QCOMPARE(options.value(QStringLiteral("auth_mode")).toString(), QStringLiteral("publickey"));
         QCOMPARE(merged.value(QStringLiteral("host")).toString(), QStringLiteral("nas.example"));
     }
@@ -328,10 +328,10 @@ private slots:
         QVariantMap services;
         services.insert(QStringLiteral("backup"), true);
         services.insert(QStringLiteral("backupsPath"), QStringLiteral("/Backups"));
-        const QVariantMap settings = helpers.creationSettings(smbParams(false), services);
+        const QVariantMap settings = helpers.creationSettings(smbParams(QStringLiteral("signed")), services);
         const QVariantMap global = settings.value(QStringLiteral("global")).toMap();
         QCOMPARE(global.value(QStringLiteral("netvfs/smb/share")).toString(), QStringLiteral("backup"));
-        QCOMPARE(global.value(QStringLiteral("netvfs/smb/require_encryption")), QVariant(false));
+        QCOMPARE(global.value(QStringLiteral("netvfs/smb/security_profile")), QVariant(QStringLiteral("signed")));
         QCOMPARE(global.value(QStringLiteral("netvfs/port")).toInt(), 0);
         QVERIFY(!global.contains(QStringLiteral("netvfs/smb/host_key")));
         QCOMPARE(settings.value(QStringLiteral("services")).toMap().value(QStringLiteral("smb-backup")).toMap()
@@ -454,10 +454,10 @@ private slots:
     void serviceRules()
     {
         // SPEC-v2 XA-4 in the UI: the backup switch follows the policy table.
-        QVERIFY(helpers.serviceAllowed(smbParams(true), QStringLiteral("backup")));
-        QVERIFY(helpers.serviceAllowed(smbParams(true), QStringLiteral("files")));
-        QVERIFY(helpers.serviceRefusalText(smbParams(true), QStringLiteral("backup")).isEmpty());
-        QVariantMap guest = helpers.withOptions(smbParams(true), { { QStringLiteral("security_profile"), QStringLiteral("guest") },
+        QVERIFY(helpers.serviceAllowed(smbParams(), QStringLiteral("backup")));
+        QVERIFY(helpers.serviceAllowed(smbParams(), QStringLiteral("files")));
+        QVERIFY(helpers.serviceRefusalText(smbParams(), QStringLiteral("backup")).isEmpty());
+        QVariantMap guest = helpers.withOptions(smbParams(), { { QStringLiteral("security_profile"), QStringLiteral("guest") },
                                                                     { QStringLiteral("allow_insecure"), true } });
         QVERIFY(!helpers.serviceAllowed(guest, QStringLiteral("backup")));
         QVERIFY(helpers.serviceAllowed(guest, QStringLiteral("files")));
@@ -466,7 +466,7 @@ private slots:
         QVERIFY(!helpers.serviceAllowed(guest, QStringLiteral("storage")));
         QVERIFY(!helpers.serviceRefusalText(guest, QStringLiteral("storage")).isEmpty());
         QVERIFY(helpers.secretOptional(guest));
-        QVERIFY(!helpers.secretOptional(smbParams(true)));
+        QVERIFY(!helpers.secretOptional(smbParams()));
         QCOMPARE(helpers.filesServiceName(QStringLiteral("smb")), QStringLiteral("smb-files"));
         QCOMPARE(helpers.filesRootKey(), QStringLiteral("files_root"));
         QVERIFY(!helpers.isServiceInstalled(QStringLiteral("no-such-service")));

@@ -169,7 +169,7 @@ QString isoTime(const QDateTime &time)
 
 QString shortLine(const Entry &entry)
 {
-    // A symlink to a folder shows as "d" (isDir() follows targetType), as in v1.
+    // A symlink to a folder shows as "d" (isDir() follows targetType).
     const QChar type = entry.isDir() ? QLatin1Char('d') : typeChar(entry.type);
     return QString(type) + QLatin1Char(' ') + QString::number(entry.size) + QLatin1Char(' ')
         + sanitizeForTerminal(Names::display(entry.name));

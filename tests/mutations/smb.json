@@ -42,11 +42,11 @@
     "test": "build/tests/unit/smb/tst_smb withoutStatus"
   },
   {
-    "name": "M-3 encryption off by default",
+    "name": "M-3 signed by default",
     "file": "src/backends/smb/smbutil.cpp",
-    "search": "options.value(QStringLiteral(\"require_encryption\"), true)",
-    "replace": "options.value(QStringLiteral(\"require_encryption\"), false)",
-    "test": "build/tests/unit/smb/tst_smb encryptionOption"
+    "search": "        *out = Profile::Strict;   // XM-1: the default",
+    "replace": "        *out = Profile::Signed;   // XM-1: the default",
+    "test": "build/tests/unit/smb/tst_smb defaultProfile"
   },
   {
     "name": "M-1 SMB 2.1 dialect accepted",

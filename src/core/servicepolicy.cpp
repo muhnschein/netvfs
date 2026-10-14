@@ -7,7 +7,6 @@ namespace OptionKeys {
 const char HostKey[] = "host_key";
 const char AuthMode[] = "auth_mode";
 const char SecurityProfile[] = "security_profile";
-const char RequireEncryption[] = "require_encryption";
 const char Share[] = "share";
 const char Shares[] = "shares";
 const char ShowAdminShares[] = "show_admin_shares";
@@ -91,9 +90,7 @@ QString securityProfile(const ConnectionParams &params)
         return QString();
     if (const QString profile = params.option(str(OptionKeys::SecurityProfile)).trimmed(); !profile.isEmpty())
         return profile;
-    // M-3 (v1): require_encryption, default true.
-    return str(params.flag(str(OptionKeys::RequireEncryption), true) ? SecurityProfiles::Strict
-                                                                      : SecurityProfiles::Signed);
+    return str(SecurityProfiles::Strict);
 }
 
 bool isInsecureConfiguration(const ConnectionParams &params)

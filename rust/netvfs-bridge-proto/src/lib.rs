@@ -21,7 +21,7 @@ pub mod fake;
 
 pub use connect::{Connection, SignalStream, connect};
 pub use errors::{BridgeError, ErrorName};
-pub use methods::{INTERFACE, Lane, METHODS, MethodInfo, OBJECT_PATH, PROTOCOL_VERSION, SIGNALS};
+pub use methods::{INTERFACE, Lane, METHODS, MethodInfo, OBJECT_PATH, SIGNALS};
 pub use proxy::Bridge1Proxy;
 pub use signals::Signal;
 pub use wire::*;

@@ -65,7 +65,6 @@ for r in $rpms; do
     echo "== $name"
     echo "$requires" | sed 's/^/  requires: /'
     rpm -qp --recommends "$r" | sed 's/^/  recommends: /'
-    rpm -qp --obsoletes "$r" | sed 's/^/  obsoletes: /'
     # XC-1a
     if [ "$name" != netvfs ] && ! echo "$requires" | grep -qxF "$main_dependency"; then
         fail "$name does not require $main_dependency"

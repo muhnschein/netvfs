@@ -3,7 +3,7 @@
     "consent": "denied",
     "steps": [
         { "call": "ListLocations", "sig": "", "args": [], "error": "org.netvfs.Error.ProtocolError" },
-        { "call": "Hello", "sig": "us", "args": [1, "contract"], "reply": [1, "*", "*"] },
+        { "call": "Hello", "sig": "s", "args": ["contract"], "reply": ["*"] },
         { "call": "GetConsent", "sig": "", "args": [], "reply": ["denied"] },
         { "call": "ListLocations", "sig": "", "args": [], "reply": [[]] },
         { "call": "Stat", "sig": "saybs", "args": ["account:1", { "bytes": "" }, true, ""],

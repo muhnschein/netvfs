@@ -364,12 +364,8 @@ private slots:
         QTest::newRow("smb default") << "smb" << withShare << true << true << "strict" << false;
         QTest::newRow("smb strict") << "smb" << with(withShare, profile, "strict") << true << true << "strict" << false;
         QTest::newRow("smb signed") << "smb" << with(withShare, profile, "signed") << true << true << "signed" << false;
-        QTest::newRow("smb v1 no encryption") << "smb" << with(withShare, "require_encryption", false)
-                                              << true << true << "signed" << false;
-        QTest::newRow("smb v1 encryption") << "smb" << with(withShare, "require_encryption", true)
-                                           << true << true << "strict" << false;
-        QTest::newRow("smb profile wins") << "smb" << with(with(withShare, "require_encryption", false), profile, "strict")
-                                          << true << true << "strict" << false;
+        QTest::newRow("smb only the profile counts") << "smb" << with(withShare, "require_encryption", false)
+                                                     << true << true << "strict" << false;
         QTest::newRow("smb legacy") << "smb" << with(withShare, profile, "legacy") << false << false << "legacy" << true;
         QTest::newRow("smb legacy consent") << "smb" << with(with(withShare, profile, "legacy"), consent, true)
                                             << false << true << "legacy" << true;

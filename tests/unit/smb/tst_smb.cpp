@@ -408,20 +408,16 @@ private slots:
         QCOMPARE(errorForSocket(ECONNREFUSED, QString()).error(), Error::NetworkUnreachable);
     }
 
-    // M-3, XM-1: the v1 option maps to strict or signed.
-    void encryptionOption()
+    // M-3, XM-1: without a profile the profile is strict; no other option
+    // selects one.
+    void defaultProfile()
     {
         QVariantMap options;
         Profile profile = Profile::Guest;
         QVERIFY(profileFromOptions(options, &profile).ok());
         QCOMPARE(profile, Profile::Strict);
         options.insert(QStringLiteral("require_encryption"), false);
-        QVERIFY(profileFromOptions(options, &profile).ok());
-        QCOMPARE(profile, Profile::Signed);
-        options.insert(QStringLiteral("require_encryption"), QStringLiteral("false"));
-        QVERIFY(profileFromOptions(options, &profile).ok());
-        QCOMPARE(profile, Profile::Signed);
-        options.insert(QStringLiteral("require_encryption"), QStringLiteral("true"));
+        profile = Profile::Guest;
         QVERIFY(profileFromOptions(options, &profile).ok());
         QCOMPARE(profile, Profile::Strict);
     }
@@ -449,7 +445,6 @@ private slots:
         QFETCH(int, profile);
         QVariantMap options;
         options.insert(QStringLiteral("security_profile"), name);
-        options.insert(QStringLiteral("require_encryption"), false);   // ignored next to a profile
         Profile out = Profile::Signed;
         const Result r = profileFromOptions(options, &out);
         QCOMPARE(r.ok(), valid);

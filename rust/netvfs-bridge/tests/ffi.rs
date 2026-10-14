@@ -50,7 +50,7 @@ struct Env {
 type Test = fn(&Env);
 
 const TESTS: &[(&str, Test)] = &[
-    ("loading_and_version", loading_and_version),
+    ("loading", loading),
     ("conn_lifecycle", conn_lifecycle),
     ("establish_identity_verdicts", establish_identity_verdicts),
     ("establish_prompt_replies", establish_prompt_replies),
@@ -301,12 +301,10 @@ fn names(batch: &[WireEntry]) -> Vec<Vec<u8>> {
 
 // --------------------------------------------------------------- tests
 
-fn loading_and_version(env: &Env) {
+fn loading(env: &Env) {
     let path = library_path();
-    assert_eq!(Ffi::load_requesting(&path, 2).unwrap_err(), LoadError::VersionRefused { version: 2 });
-    assert_eq!(Ffi::load_requesting(&path, 0).unwrap_err(), LoadError::VersionRefused { version: 0 });
     let again = Ffi::load_from(&path).unwrap();
-    assert_eq!(usize::try_from(again.struct_size()).unwrap(), size_of::<netvfs_bridge::ffi::raw::NvbFfiV1>());
+    assert!(again.provider_available("fake"));
     // The fake's library has no nvb_ffi_get, and a missing one does not load.
     let fake_path = PathBuf::from(std::env::var_os(fake::PATH_ENV).unwrap());
     assert!(
@@ -329,7 +327,7 @@ fn loading_and_version(env: &Env) {
     })
     .join()
     .unwrap();
-    assert!(format!("{ffi:?}").starts_with("Ffi { version: 1"));
+    assert_eq!(format!("{ffi:?}"), "Ffi { .. }");
     assert!(format!("{:?}", env.fake).starts_with("Fake"));
 }
 

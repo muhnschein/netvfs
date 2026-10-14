@@ -15,15 +15,11 @@ use std::path::{Path, PathBuf};
 /// Where the tests find the library.
 pub const PATH_ENV: &str = "NETVFS_BRIDGE_FFI_FAKE";
 
-/// `nvb_fake_v1`, in the header's order.
+/// `nvb_fake`, in the header's order.
 #[repr(C)]
 #[derive(Debug)]
 #[allow(clippy::struct_field_names)]
-pub struct NvbFakeV1 {
-    /// `NVB_FAKE_VERSION`.
-    pub version: u32,
-    /// `sizeof(nvb_fake_v1)` in the library.
-    pub struct_size: u32,
+pub struct NvbFake {
     /// Empty server, user "user", secret "secret".
     pub reset: unsafe extern "C" fn(),
     /// A file, with missing parents.
@@ -56,17 +52,11 @@ pub struct NvbFakeV1 {
     pub free: unsafe extern "C" fn(*mut c_void),
 }
 
-impl loader::Table for NvbFakeV1 {
-    fn header(&self) -> (u32, u32) {
-        (self.version, self.struct_size)
-    }
-}
-
 /// The fake backend's controls; any thread, every call takes the server's
 /// lock. Paths are protocol bytes; a leading `/` does not matter.
 #[derive(Clone, Copy)]
 pub struct Fake {
-    t: &'static NvbFakeV1,
+    t: &'static NvbFake,
 }
 
 impl fmt::Debug for Fake {
@@ -95,9 +85,9 @@ impl Fake {
     /// Loads the library at `path`.
     ///
     /// # Errors
-    /// When it cannot be loaded or does not offer version 1.
+    /// When it cannot be loaded.
     pub fn load_from(path: &Path) -> Result<Self, LoadError> {
-        loader::load_table::<NvbFakeV1>(path, c"nvb_fake_get", 1).map(|t| Self { t })
+        loader::load_table::<NvbFake>(path, c"nvb_fake_get").map(|t| Self { t })
     }
 
     /// Empties the server; user "user", secret "secret".

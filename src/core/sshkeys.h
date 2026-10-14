@@ -57,6 +57,6 @@ NETVFS_EXPORT Result installAuthorizedKey(Backend *backend, const QString &publi
 
 } // namespace NetVfs
 
-Q_DECLARE_INTERFACE(NetVfs::SshKeyTools, "org.netvfs.SshKeyTools/1.0")
+Q_DECLARE_INTERFACE(NetVfs::SshKeyTools, "org.netvfs.SshKeyTools")
 
 #endif

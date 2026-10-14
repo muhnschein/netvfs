@@ -257,7 +257,7 @@ class CheckFfiLib(unittest.TestCase):
         source = source or """
             #include <unistd.h>
             int netvfs_version(void);
-            const void *nvb_ffi_get(unsigned version) { return version + netvfs_version() + getpid() ? "" : 0; }
+            const void *nvb_ffi_get(void) { return netvfs_version() + getpid() ? "" : 0; }
             """
         c_file = self.write("ffi.c", textwrap.dedent(source))
         so_file = os.path.join(self.work, "libnetvfs-bridge-ffi.so")
@@ -289,12 +289,12 @@ class CheckFfiLib(unittest.TestCase):
             #include <unistd.h>
             int netvfs_version(void);
             int nvb_extra(void) { return netvfs_version() + getpid(); }
-            const void *nvb_ffi_get(unsigned version) { return version + nvb_extra() ? "" : 0; }
+            const void *nvb_ffi_get(void) { return nvb_extra() ? "" : 0; }
             """, exports=False)
         self.assert_fails('exports "nvb_extra nvb_ffi_get", expected only nvb_ffi_get', so_file)
 
     def test_no_libnetvfs_fails(self):
-        so_file = self.build("const void *nvb_ffi_get(unsigned version) { return version ? \"\" : 0; }\n",
+        so_file = self.build("const void *nvb_ffi_get(void) { return \"\"; }\n",
                              netvfs=False)
         self.assert_fails("does not link libnetvfs.so.1", so_file)
 

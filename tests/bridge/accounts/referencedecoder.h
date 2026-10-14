@@ -37,8 +37,8 @@ struct FilesAccess {
 };
 
 // A malformed answer is ProtocolError; otherwise the helper's own result.
-// The format is that of a QDataStream of version Qt_5_6: the QByteArray
-// "netvfs-accounts/1", the qint32 error and the QString message, then for
+// The format is that of a QDataStream of version Qt_5_6: the qint32 error
+// and the QString message, then for
 //   list   qint32 count, per account: qint32 id, QString provider and
 //          display name, the parameters, QString files root, qint32 attention
 //   files  the parameters, quint32 credentials id, bool secret optional

@@ -123,11 +123,11 @@ fn insecure_details(url: &str, params: &Params) -> HashMap<String, OwnedValue> {
 impl Core {
     // ----------------------------------------------------------- session
 
-    pub(super) fn on_hello(&mut self, sid: SessionId, reply: ReplyTo, protocol: u32, client: &str) {
+    pub(super) fn on_hello(&mut self, sid: SessionId, reply: ReplyTo, client: &str) {
         if let Some(session) = self.session(sid) {
             session.hello = true;
         }
-        crate::log::debug(format_args!("Hello from {client} protocol {protocol}"));
+        crate::log::debug(format_args!("Hello from {client}"));
         reply.ok(&Reply::Hello);
         if self.consent == Consent::Unknown {
             self.request_consent(); // XB-6: first Hello while unknown

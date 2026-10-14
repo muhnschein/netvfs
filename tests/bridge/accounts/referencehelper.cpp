@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-// The C++ netvfs-accounts of netvfs 0.3 (the bridge's accountshelper.cpp
-// at b143680), unchanged but for its name and the account record, now in
-// referencedecoder.h: the golden reference of the Rust helper's answers.
+// The C++ netvfs-accounts (the bridge's accountshelper.cpp at b143680), with
+// its name, the account record (now in referencedecoder.h) and the answer
+// header of today: the golden reference of the Rust helper's answers.
 #include "referencehelper.h"
 
 #include "accountstore.h"
@@ -17,7 +17,6 @@ namespace Test {
 
 namespace {
 
-const char AnswerMagic[] = "netvfs-accounts/1";
 constexpr QDataStream::Version StreamVersion = QDataStream::Qt_5_6;
 
 void writeParams(QDataStream &s, const ConnectionParams &p)
@@ -32,7 +31,7 @@ public:
     explicit Answer(const Result &result) : m_stream(&m_bytes, QIODevice::WriteOnly)
     {
         m_stream.setVersion(StreamVersion);
-        m_stream << QByteArray(AnswerMagic) << qint32(result.error()) << result.message();
+        m_stream << qint32(result.error()) << result.message();
     }
     QDataStream &stream() { return m_stream; }
     QByteArray bytes() const { return m_bytes; }

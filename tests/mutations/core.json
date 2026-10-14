@@ -266,13 +266,6 @@
     "test": "build/tests/unit/core/tst_core"
   },
   {
-    "name": "XC-1 plugin IID not checked",
-    "file": "src/core/backendloader.cpp",
-    "search": "!iid.isEmpty() && iid != QLatin1String(BackendFactoryIid)",
-    "replace": "false",
-    "test": "build/tests/unit/core/tst_core"
-  },
-  {
     "name": "remove() helper does not fall back to removeDir",
     "file": "src/core/backend.cpp",
     "search": "    if (r.error() == Error::IsADirectory)\n        return removeDir(path);",

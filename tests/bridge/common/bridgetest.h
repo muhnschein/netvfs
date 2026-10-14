@@ -54,7 +54,7 @@ public:
     int signalCount(const QString &member) const;
     bool waitDisconnected(int timeoutMs = 5000);
     void close();
-    // Hello with protocol 1.
+    // Hello from client "test".
     Message hello();
 
 private:

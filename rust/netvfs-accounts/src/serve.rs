@@ -366,12 +366,12 @@ mod tests {
         let env = Environment { accounts: Some("/dev/null/accounts".into()), ..Environment::default() };
         let served = serve(&args(&["list"]), &env, &NoOwner);
         assert_eq!(served.change, None);
-        // magic, then PermissionDenied
-        assert_eq!(served.answer[21..25], [0, 0, 0, 8]);
+        // PermissionDenied
+        assert_eq!(served.answer[..4], [0, 0, 0, 8]);
         // Also before the usage is checked, as the C++ helper did.
-        assert_eq!(serve(&args(&["bogus"]), &env, &NoOwner).answer[21..25], [0, 0, 0, 8]);
+        assert_eq!(serve(&args(&["bogus"]), &env, &NoOwner).answer[..4], [0, 0, 0, 8]);
         let missing =
             Environment { accounts: Some("/nonexistent/accounts".into()), ..Environment::default() };
-        assert_eq!(serve(&args(&["bogus"]), &missing, &NoOwner).answer[21..25], [0, 0, 0, 12]);
+        assert_eq!(serve(&args(&["bogus"]), &missing, &NoOwner).answer[..4], [0, 0, 0, 12]);
     }
 }

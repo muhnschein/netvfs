@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-// The C++ bridge's side of the netvfs-accounts protocol (XB-2a), as netvfs
-// 0.4 had it: the reference decoder of the golden tests.
+// The C++ bridge's side of the netvfs-accounts protocol (XB-2a): the
+// reference decoder of the golden tests.
 #include "referencedecoder.h"
 
 #include <QtCore/QDataStream>
@@ -9,7 +9,6 @@ namespace NetVfs::Test {
 
 namespace {
 
-const char AnswerMagic[] = "netvfs-accounts/1";
 constexpr QDataStream::Version StreamVersion = QDataStream::Qt_5_6;
 constexpr int MaxAccounts = 10000;
 
@@ -33,12 +32,10 @@ Result malformed()
 Result readHeader(QDataStream &stream)
 {
     stream.setVersion(StreamVersion);
-    QByteArray magic;
     qint32 error = 0;
     QString message;
-    stream >> magic >> error >> message;
-    if (stream.status() != QDataStream::Ok || magic != AnswerMagic || error < 0
-            || error > qint32(Error::RateLimited))
+    stream >> error >> message;
+    if (stream.status() != QDataStream::Ok || error < 0 || error > qint32(Error::RateLimited))
         return malformed();
     return Result(Error(error), message);
 }

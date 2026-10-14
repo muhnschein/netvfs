@@ -63,10 +63,10 @@
     "test": "dbus-run-session -- build/tests/unit/accounts/tst_accounts"
   },
   {
-    "name": "M-3 missing require_encryption read as signed",
+    "name": "M-3 missing security_profile read as signed",
     "file": "src/core/servicepolicy.cpp",
-    "search": "params.flag(str(OptionKeys::RequireEncryption), true)",
-    "replace": "params.flag(str(OptionKeys::RequireEncryption), false)",
+    "search": "    return str(SecurityProfiles::Strict);",
+    "replace": "    return str(SecurityProfiles::Signed);",
     "test": "dbus-run-session -- build/tests/unit/accounts/tst_accounts"
   },
   {

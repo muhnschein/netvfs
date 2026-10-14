@@ -359,9 +359,7 @@ Result profileFromOptions(const QVariantMap &options, Profile *out)
 {
     const QString name = options.value(QStringLiteral("security_profile")).toString().trimmed();
     if (name.isEmpty()) {
-        // XM-1: the v1 option keeps its meaning (M-3: default on).
-        const bool encrypt = options.value(QStringLiteral("require_encryption"), true).toBool();
-        *out = encrypt ? Profile::Strict : Profile::Signed;
+        *out = Profile::Strict;   // XM-1: the default
         return Result::success();
     }
     for (const Profile profile : { Profile::Strict, Profile::Signed, Profile::Legacy, Profile::Guest }) {

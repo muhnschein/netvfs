@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! The answers of netvfs-accounts, `netvfs-accounts/1`: a `QDataStream` of
-//! version `Qt_5_6` (big-endian; strings UTF-16 with a byte length, a null
-//! string as length `0xffffffff`). Every answer starts with the
-//! `QByteArray` magic, the `qint32` error and the `QString` message; then
+//! The answers of netvfs-accounts: a `QDataStream` of version `Qt_5_6`
+//! (big-endian; strings UTF-16 with a byte length, a null string as length
+//! `0xffffffff`). Every answer starts with the `qint32` error and the
+//! `QString` message; then
 //!
 //! - `list`: `qint32` count, per account `qint32` id, `QString` provider and
 //!   display name, the parameters, `QString` files root, `qint32` attention;
@@ -19,8 +19,6 @@ use crate::status::Status;
 use netvfs_bridge_proto::ErrorName;
 use std::collections::BTreeMap;
 
-/// The first item of every answer.
-pub const MAGIC: &[u8] = b"netvfs-accounts/1";
 /// More accounts than this is a malformed list.
 pub const MAX_ACCOUNTS: i32 = 10_000;
 /// Nested maps deeper than this are a malformed answer (Qt has no limit;
@@ -213,12 +211,8 @@ impl<'a> Reader<'a> {
 
     /// The header: `Err` is the helper's failure or a malformed header.
     fn header(&mut self) -> Result<(), Status> {
-        let magic = self.byte_array().ok_or_else(malformed)?;
         let error = self.i32().ok_or_else(malformed)?;
         let message = self.string().ok_or_else(malformed)?;
-        if magic != MAGIC {
-            return Err(malformed());
-        }
         if error == 0 {
             return Ok(());
         }
@@ -278,12 +272,10 @@ pub struct Writer {
 
 #[cfg(any(test, feature = "test-bins"))]
 impl Writer {
-    /// The header: magic, error (`0` for success) and message (null for
-    /// success).
+    /// The header: error (`0` for success) and message (null for success).
     #[must_use]
     pub fn answer(failure: Option<&Status>) -> Self {
         let mut w = Self::default();
-        w.byte_array(MAGIC);
         let error = failure
             .and_then(|s| ErrorName::ALL.iter().position(|n| *n == s.name))
             .map_or(0, |i| i.saturating_add(1));
@@ -528,9 +520,8 @@ mod tests {
         }
     }
 
-    fn header(magic: &[u8], error: i32, message: Option<&str>) -> Writer {
+    fn header(error: i32, message: Option<&str>) -> Writer {
         let mut w = Writer::default();
-        w.byte_array(magic);
         w.i32(error);
         w.string(message);
         w
@@ -539,30 +530,22 @@ mod tests {
     #[test]
     fn headers() {
         let status = |w: Writer| decode_status(&w.into_bytes()).map_err(|s| s.to_string());
-        assert_eq!(status(header(MAGIC, 0, Some("ignored"))), Ok(()));
-        assert_eq!(status(header(MAGIC, 1, None)), Err("Canceled".into()));
-        assert_eq!(status(header(MAGIC, 23, Some("m"))), Err("RateLimited: m".into()));
+        assert_eq!(status(header(0, Some("ignored"))), Ok(()));
+        assert_eq!(status(header(1, None)), Err("Canceled".into()));
+        assert_eq!(status(header(23, Some("m"))), Err("RateLimited: m".into()));
         let malformed = Err("ProtocolError: netvfs-accounts gave a malformed answer".into());
-        assert_eq!(status(header(MAGIC, 24, None)), malformed);
-        assert_eq!(status(header(MAGIC, -1, None)), malformed);
-        assert_eq!(status(header(b"netvfs-accounts/2", 0, None)), malformed);
-        assert_eq!(status(header(b"", 0, None)), malformed);
-        // A null magic.
-        let mut null = Writer::default();
-        null.u32(NULL_LENGTH);
-        null.i32(0);
-        null.string(None);
-        assert_eq!(status(null), malformed);
+        assert_eq!(status(header(24, None)), malformed);
+        assert_eq!(status(header(-1, None)), malformed);
         // An odd string length is corrupt.
-        let mut odd = header(MAGIC, 9, None).into_bytes();
+        let mut odd = header(9, None).into_bytes();
         let at = odd.len() - 4;
         odd.splice(at.., [0, 0, 0, 1, b'x']);
         assert_eq!(decode_status(&odd).unwrap_err().name, ErrorName::ProtocolError);
         // A failure ignores what follows it; a success may not have more.
-        let mut failed = header(MAGIC, 9, Some("gone"));
+        let mut failed = header(9, Some("gone"));
         failed.i32(5);
         assert_eq!(status(failed), Err("NotFound: gone".into()));
-        let mut extra = header(MAGIC, 0, None);
+        let mut extra = header(0, None);
         extra.bool(false);
         assert_eq!(status(extra), malformed);
     }

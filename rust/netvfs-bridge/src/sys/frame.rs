@@ -30,11 +30,11 @@ mod tests {
 
     #[test]
     fn round_trips_a_message_and_refuses_garbage() {
-        let msg = Message::method_call("/org/netvfs/Bridge", "Hello").unwrap().build(&(1u32, "x")).unwrap();
+        let msg = Message::method_call("/org/netvfs/Bridge", "Hello").unwrap().build(&("x",)).unwrap();
         let bytes = msg.data().to_vec();
         let back = message_from_frame(bytes, vec![], Endian::native()).unwrap();
         assert_eq!(back.header().member().unwrap().as_str(), "Hello");
-        assert_eq!(back.body().deserialize::<(u32, String)>().unwrap(), (1, "x".to_owned()));
+        assert_eq!(back.body().deserialize::<(String,)>().unwrap(), ("x".to_owned(),));
         assert!(message_from_frame(vec![b'x'; 32], vec![], Endian::Little).is_err());
     }
 }

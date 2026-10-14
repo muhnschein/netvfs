@@ -583,14 +583,6 @@ private slots:
         QVERIFY(!BackendLoader::isAvailable(QStringLiteral("bogus")));
         QTest::ignoreMessage(QtWarningMsg, QRegularExpression(QStringLiteral("reports provider")));
         QVERIFY(!BackendLoader::isAvailable(QStringLiteral("other")));
-        // XC-1: a plugin declaring another interface version is not loaded.
-        QVERIFY(QFile::copy(QStringLiteral(NETVFS_TEST_FAKE_BACKEND_DIR "/libnetvfs-oldiid.so"),
-                            dir.filePath(QStringLiteral("libnetvfs-oldiid.so"))));
-        QTest::ignoreMessage(QtWarningMsg,
-                             QRegularExpression(QStringLiteral("BackendFactory/1.0.*BackendFactory/2.0 is expected")));
-        QVERIFY(!BackendLoader::isAvailable(QStringLiteral("oldiid")));
-        QTest::ignoreMessage(QtWarningMsg, QRegularExpression(QStringLiteral("BackendFactory/2.0 is expected")));
-        QVERIFY(!BackendLoader::create(QStringLiteral("oldiid")));
         qunsetenv("NETVFS_BACKEND_PATH");
         QCOMPARE(BackendLoader::searchPaths().size(), 1);
     }

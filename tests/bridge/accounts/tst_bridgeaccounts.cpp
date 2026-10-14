@@ -472,7 +472,7 @@ void tst_BridgeAccounts::goldenAnswers()
     QVERIFY(bogus > 0);
     const int signedSmb = listedAccount(
         QStringLiteral("smb"),
-        globals(QStringLiteral("signed.example"), { { QStringLiteral("netvfs/smb/require_encryption"), QStringLiteral("false") },
+        globals(QStringLiteral("signed.example"), { { QStringLiteral("netvfs/smb/security_profile"), QStringLiteral("signed") },
                                                     { QStringLiteral("netvfs/port"), 70000u } }));
     QVERIFY(signedSmb > 0);
     const int legacy = listedAccount(

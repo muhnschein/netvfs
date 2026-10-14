@@ -166,7 +166,7 @@ private:
         p.username = QStringLiteral("backup");
         p.options.insert(QStringLiteral("share"), share);
         if (!encrypt)
-            p.options.insert(QStringLiteral("require_encryption"), false);
+            p.options.insert(QStringLiteral("security_profile"), QStringLiteral("signed"));
         return p;
     }
 
@@ -381,7 +381,7 @@ private slots:
         QVERIFY(!backend->stat(QString(), &entry).ok());
     }
 
-    // M-T4: same server, "Require encryption" off: signed, not encrypted.
+    // M-T4: same server, profile signed: signed, not encrypted.
     void encryptionOffSigned()
     {
         const auto backend = newBackend();
@@ -398,7 +398,7 @@ private slots:
         QVERIFY2(!row.contains("AES-128-CCM"), row.constData());
     }
 
-    // M-3: with "Require encryption" off the library still encrypts where the
+    // M-3: with profile signed the library still encrypts where the
     // server mandates it (smb2_set_seal() is not called at all).
     void encryptionOffServerRequires()
     {

@@ -30,7 +30,7 @@ use netvfs_bridge::testutil::TempDir;
 use netvfs_bridge::{Deps, Services};
 use netvfs_bridge_proto::limits::{MAX_HANDLES, MAX_JOBS, MAX_LIST_BATCH, MAX_REQUESTS, POOL_PER_HOST};
 use netvfs_bridge_proto::zvariant::Fd;
-use netvfs_bridge_proto::{Connection, ErrorName, Opts, OptsBuilder, PROTOCOL_VERSION, Signal, SignalStream};
+use netvfs_bridge_proto::{Connection, ErrorName, Opts, OptsBuilder, Signal, SignalStream};
 use std::fs::{File, OpenOptions};
 use std::io::{Read as _, Seek as _, SeekFrom, Write as _};
 use std::os::fd::AsFd as _;
@@ -97,13 +97,10 @@ fn hello_first(h: &Harness) {
         let c = f.client().await;
         let early = c.proxy().get_consent().await;
         assert_eq!(error_name(&early), name(ErrorName::ProtocolError));
-        let (protocol, version, features) = c.proxy().hello(PROTOCOL_VERSION, "t").await.unwrap();
-        assert_eq!(protocol, PROTOCOL_VERSION);
-        assert!(!version.is_empty());
-        assert!(!features.is_empty());
+        assert_eq!(c.proxy().hello("t").await.unwrap(), env!("CARGO_PKG_VERSION"));
         assert_eq!(c.proxy().get_consent().await.unwrap(), "granted");
         // A second Hello is answered as well.
-        assert!(c.proxy().hello(PROTOCOL_VERSION, "t").await.is_ok());
+        assert!(c.proxy().hello("t").await.is_ok());
         assert_eq!(f.prompt.state().shown, 0);
     });
 }
@@ -137,7 +134,7 @@ fn consent_unknown_then_granted(h: &Harness) {
         let stat = c.proxy().stat(ACCOUNT_LOC, b"/x", true, "").await;
         assert_eq!(error_name(&stat), name(ErrorName::PermissionDenied));
         assert_eq!(error_name(&c.proxy().discover(true).await), name(ErrorName::PermissionDenied));
-        c.proxy().hello(PROTOCOL_VERSION, "t").await.unwrap();
+        c.proxy().hello("t").await.unwrap();
         assert_eq!(f.prompt.state().shown, 1); // not again while shown
         f.answer_prompt(true);
         let changed = wait_signal(&mut signals, WAIT, |s| matches!(s, Signal::ConsentChanged(_))).await;
@@ -1027,7 +1024,7 @@ fn peer_check_refuses(h: &Harness) {
     block_on(async {
         // Closed without a reply.
         if let Ok(c) = netvfs_bridge_proto::connect(&f.socket).await {
-            assert!(c.proxy().hello(PROTOCOL_VERSION, "x").await.is_err());
+            assert!(c.proxy().hello("x").await.is_err());
         }
         let counters = f.probe().counters().await.unwrap();
         assert_eq!(counters.sessions, 0);

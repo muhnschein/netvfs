@@ -292,19 +292,16 @@ fn adhoc_info(p: &AdHocUrl) -> Vec<(String, InfoValue)> {
 impl Iface {
     // ---- Session ---------------------------------------------------------
 
-    async fn hello(&self, protocol: u32, client: String) -> Result<(u32, String, Vec<String>), Fail> {
-        if protocol == 0 {
-            return Err(Fail::args("Protocol version 0 does not exist"));
-        }
+    async fn hello(&self, client: String) -> Result<String, Fail> {
         if client.len() > 256 {
-            return Err(Fail::args("Argument 2 is too long"));
+            return Err(Fail::args("Argument 1 is too long"));
         }
         self.begin("Hello", None, &client).await?;
         self.session.with(|s| s.hello = true);
         if self.shared.with(|s| s.consent) == Consent::Unknown {
             self.ask_consent();
         }
-        Ok(self.shared.with(|s| (s.protocol, s.bridge_version.clone(), s.features.clone())))
+        Ok(self.shared.with(|s| s.bridge_version.clone()))
     }
 
     async fn get_consent(&self) -> Result<String, Fail> {

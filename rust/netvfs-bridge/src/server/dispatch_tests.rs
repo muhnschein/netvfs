@@ -27,7 +27,7 @@ fn bridge<B: Serialize + DynamicType>(member: &str, body: &B) -> Message {
 }
 
 fn hello() -> Message {
-    bridge("Hello", &(1u32, "test"))
+    bridge("Hello", &("test",))
 }
 
 fn reply(msg: &Message, state: &mut State) -> Message {
@@ -127,9 +127,9 @@ fn introspection_is_verbatim() {
 #[test]
 fn unknown_object_interface_member() {
     let mut state = fresh();
-    let path = call("/org/netvfs", Some(INTERFACE), "Hello").build(&(1u32, "x")).unwrap();
+    let path = call("/org/netvfs", Some(INTERFACE), "Hello").build(&("x",)).unwrap();
     assert_eq!(error(&path, &mut state), (UNKNOWN_METHOD.to_owned(), "No such object".to_owned()));
-    let interface = call(OBJECT_PATH, Some("org.netvfs.Bridge2"), "Hello").build(&(1u32, "x")).unwrap();
+    let interface = call(OBJECT_PATH, Some("org.netvfs.Bridge2"), "Hello").build(&("x",)).unwrap();
     assert_eq!(error(&interface, &mut state), (UNKNOWN_METHOD.to_owned(), "No such interface".to_owned()));
     let member = bridge("Frobnicate", &());
     assert_eq!(error(&member, &mut state), (UNKNOWN_METHOD.to_owned(), "No such method".to_owned()));
@@ -139,10 +139,10 @@ fn unknown_object_interface_member() {
 #[test]
 fn arguments_are_checked_before_hello() {
     let mut state = fresh();
-    let wrong = bridge("Hello", &("x",));
-    assert_eq!(error(&wrong, &mut state), (INVALID_ARGS.to_owned(), "Hello takes (us)".to_owned()));
-    let zero = bridge("Hello", &(0u32, "x"));
-    assert_eq!(error(&zero, &mut state).0, INVALID_ARGS);
+    let wrong = bridge("Hello", &(1u32,));
+    assert_eq!(error(&wrong, &mut state), (INVALID_ARGS.to_owned(), "Hello takes (s)".to_owned()));
+    let long = bridge("Hello", &("x".repeat(257),));
+    assert_eq!(error(&long, &mut state).0, INVALID_ARGS);
     let bad_path = bridge("Stat", &("account:1", b"/a/../b".as_slice(), true, ""));
     assert_eq!(error(&bad_path, &mut state).0, "org.netvfs.Error.InvalidName");
     assert!(!state.hello_done());
@@ -157,9 +157,9 @@ fn hello_must_come_first() {
         ("org.netvfs.Error.ProtocolError".to_owned(), "Hello must be the first call".to_owned())
     );
     // Without an interface the bridge interface is meant.
-    let first = call(OBJECT_PATH, None, "Hello").build(&(1u32, "x")).unwrap();
+    let first = call(OBJECT_PATH, None, "Hello").build(&("x",)).unwrap();
     match classify(&first, &mut state) {
-        Action::Forward(method, Call::Hello { protocol: 1, client }) => {
+        Action::Forward(method, Call::Hello { client }) => {
             assert_eq!(method.name, "Hello");
             assert_eq!(client, "x");
         }
@@ -190,11 +190,11 @@ fn no_reply_expected_and_other_types() {
     let quiet_hello = call(OBJECT_PATH, Some(INTERFACE), "Hello")
         .with_flags(Flags::NoReplyExpected)
         .unwrap()
-        .build(&(1u32, "x"))
+        .build(&("x",))
         .unwrap();
     assert!(matches!(classify(&quiet_hello, &mut state), Action::Forward(..)));
 
-    let signal = Message::signal(OBJECT_PATH, INTERFACE, "Hello").unwrap().build(&(1u32, "x")).unwrap();
+    let signal = Message::signal(OBJECT_PATH, INTERFACE, "Hello").unwrap().build(&("x",)).unwrap();
     assert!(matches!(classify(&signal, &mut fresh()), Action::Ignore));
     let ping = call("/", Some(PEER), "Ping").build(&()).unwrap();
     let ret = Message::method_return(&ping.header()).unwrap().build(&()).unwrap();

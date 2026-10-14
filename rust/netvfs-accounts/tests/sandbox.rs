@@ -356,12 +356,9 @@ fn helper(args: &[&str], accounts: &Path) -> (Option<i32>, Vec<u8>) {
     (output.status.code(), output.stdout)
 }
 
-/// An answer's header: magic, error, and the message's length.
+/// An answer's first item: the error.
 fn header(error: u8) -> Vec<u8> {
-    let mut bytes = vec![0, 0, 0, 17];
-    bytes.extend_from_slice(b"netvfs-accounts/1");
-    bytes.extend_from_slice(&[0, 0, 0, error]);
-    bytes
+    vec![0, 0, 0, error]
 }
 
 #[test]

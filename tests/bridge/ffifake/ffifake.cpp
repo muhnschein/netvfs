@@ -145,9 +145,7 @@ void freeBlock(void *p)
     std::free(p);
 }
 
-const nvb_fake_v1 Table = {
-    NVB_FAKE_VERSION,
-    sizeof(nvb_fake_v1),
+const nvb_fake Table = {
     reset,
     addFile,
     addDir,
@@ -167,7 +165,7 @@ const nvb_fake_v1 Table = {
 
 } // namespace
 
-extern "C" __attribute__((visibility("default"))) const nvb_fake_v1 *nvb_fake_get(uint32_t version)
+extern "C" __attribute__((visibility("default"))) const nvb_fake *nvb_fake_get()
 {
-    return version == NVB_FAKE_VERSION ? &Table : nullptr;
+    return &Table;
 }

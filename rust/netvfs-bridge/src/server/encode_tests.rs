@@ -153,8 +153,8 @@ fn reply_values() {
     let call_msg = call(1);
     let header = call_msg.header();
     let hello = Reply::Hello.build(&header).unwrap();
-    let (version, bridge, features): (u32, String, Vec<String>) = hello.body().deserialize().unwrap();
-    assert_eq!((version, bridge.as_str(), features), (1, BRIDGE_VERSION, vec!["error-details".to_owned()]));
+    let (bridge,): (String,) = hello.body().deserialize().unwrap();
+    assert_eq!(bridge, BRIDGE_VERSION);
     let text = Reply::Text("a\0".to_owned()).build(&header).unwrap();
     assert_eq!(text.body().deserialize::<(String,)>().unwrap().0, "a\u{fffd}");
     let caps = WireCapabilities {

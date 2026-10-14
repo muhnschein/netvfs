@@ -9,8 +9,8 @@
  * Loading:
  *   void *lib = dlopen(path, RTLD_NOW | RTLD_LOCAL);
  *   nvb_ffi_get_fn get = (nvb_ffi_get_fn)dlsym(lib, NVB_FFI_ENTRY);
- *   const nvb_ffi_v1 *t = get(NVB_FFI_VERSION);   NULL: version not offered
- * t->struct_size may exceed sizeof(nvb_ffi_v1): fields are only ever appended.
+ *   const nvb_ffi *t = get();
+ * Library and caller are built from the same source and ship together.
  *
  * Ownership:
  *  O1 nvb_bytes and structs passed in are borrowed for the call only; C++ copies.
@@ -50,7 +50,6 @@
 extern "C" {
 #endif
 
-#define NVB_FFI_VERSION 1u
 #define NVB_FFI_ENTRY "nvb_ffi_get"
 
 /* ------------------------------------------------------------- basics */
@@ -292,10 +291,7 @@ typedef struct nvb_discovery_hooks {
 
 /* ------------------------------------------------------------ the table */
 
-typedef struct nvb_ffi_v1 {
-    uint32_t version;          /* NVB_FFI_VERSION */
-    uint32_t struct_size;      /* sizeof(nvb_ffi_v1) in the library */
-
+typedef struct nvb_ffi {
     /* Process and Qt event loop (T1, T2). */
     int32_t (*init)(nvb_bytes app_name);        /* QCoreApplication; 0 ok, -1 twice */
     int32_t (*run)(void);                       /* exec(); returns quit()'s code */
@@ -374,14 +370,14 @@ typedef struct nvb_ffi_v1 {
     int32_t (*discovery_set_running)(nvb_discovery *d, int32_t on);  /* idempotent; 1 if
                                                                          a socket is open */
     void (*discovery_free)(nvb_discovery *d);   /* no hook call after it returns */
-} nvb_ffi_v1;
+} nvb_ffi;
 
-typedef const nvb_ffi_v1 *(*nvb_ffi_get_fn)(uint32_t version);
+typedef const nvb_ffi *(*nvb_ffi_get_fn)(void);
 
 #if defined(__GNUC__)
 __attribute__((visibility("default")))
 #endif
-const nvb_ffi_v1 *nvb_ffi_get(uint32_t version);
+const nvb_ffi *nvb_ffi_get(void);
 
 #ifdef __cplusplus
 }

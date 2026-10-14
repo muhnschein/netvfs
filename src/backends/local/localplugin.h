@@ -13,7 +13,7 @@ namespace NetVfs {
 class LocalBackendFactory : public QObject, public BackendFactory
 {
     Q_OBJECT
-    Q_PLUGIN_METADATA(IID "org.netvfs.BackendFactory/2.0")
+    Q_PLUGIN_METADATA(IID "org.netvfs.BackendFactory")
     Q_INTERFACES(NetVfs::BackendFactory)
 
 public:

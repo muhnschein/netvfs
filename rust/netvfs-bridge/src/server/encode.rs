@@ -9,7 +9,7 @@
 
 use crate::status::Status;
 use netvfs_bridge_proto::errors::{INVALID_ARGS, UNKNOWN_METHOD};
-use netvfs_bridge_proto::methods::{FEATURES, INTERFACE, OBJECT_PATH, PROTOCOL_VERSION};
+use netvfs_bridge_proto::methods::{INTERFACE, OBJECT_PATH};
 use netvfs_bridge_proto::{ErrorName, WireCapabilities, WireEntry, WireLocation, WireNearby, WireWalkItem};
 use std::collections::HashMap;
 use zbus::Message;
@@ -53,7 +53,7 @@ fn wire_texts(items: &[String]) -> Vec<String> {
 pub enum Reply {
     /// `""`: no return values.
     Empty,
-    /// `Hello`: `usas` (protocol, bridge version, features).
+    /// `Hello`: `s` (the bridge version).
     Hello,
     /// `s`: `GetConsent`, `ConnectAdHoc`.
     Text(String),
@@ -92,8 +92,7 @@ impl Reply {
     pub const fn signature(&self) -> &'static str {
         match self {
             Self::Empty => "",
-            Self::Hello => "usas",
-            Self::Text(_) => "s",
+            Self::Hello | Self::Text(_) => "s",
             Self::Locations(_) => "a(sssa{sv})",
             Self::Capabilities(_) => "(asasx)",
             Self::Id(_) => "u",
@@ -112,7 +111,7 @@ impl Reply {
         let reply = Message::method_return(call)?;
         match self {
             Self::Empty => reply.build(&()),
-            Self::Hello => reply.build(&(PROTOCOL_VERSION, BRIDGE_VERSION, FEATURES.to_vec())),
+            Self::Hello => reply.build(&(BRIDGE_VERSION,)),
             Self::Text(s) => reply.build(&(wire_text(s),)),
             Self::Locations(list) => reply.build(&(list.iter().map(wire_location).collect::<Vec<_>>(),)),
             Self::Capabilities(c) => reply.build(&(WireCapabilities {

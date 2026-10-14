@@ -63,7 +63,7 @@ fn bridge_call<B: Serialize + DynamicType>(member: &str, body: &B) -> Message {
 }
 
 fn hello() -> Message {
-    bridge_call("Hello", &(1u32, "test"))
+    bridge_call("Hello", &("test",))
 }
 
 async fn call<B: Serialize + DynamicType>(
@@ -98,8 +98,7 @@ async fn hello_right_after_the_handshake_is_answered() {
         let reply = tokio::time::timeout(WAIT, client.receive()).await.unwrap().unwrap();
         assert_eq!(reply.message_type(), Type::MethodReturn);
         assert_eq!(reply.header().reply_serial(), Some(hello.primary_header().serial_num()));
-        let (version, _, _): (u32, String, Vec<String>) = reply.body().deserialize().unwrap();
-        assert_eq!(version, 1);
+        assert_eq!(reply.body().deserialize::<(String,)>().unwrap().0, env!("CARGO_PKG_VERSION"));
         drop(client);
         tokio::time::timeout(WAIT, session).await.unwrap().unwrap();
         assert!(matches!(next(&mut seen).await, Seen::Accepted(SID, _)));
@@ -121,7 +120,7 @@ async fn own_answers_hello_first_and_consent_free_calls() {
     let pong = call(&client, "/", "org.freedesktop.DBus.Peer", "Ping", &()).await.unwrap();
     assert_eq!(pong.message_type(), Type::MethodReturn);
     assert_eq!(
-        method_error(call(&client, "/x", INTERFACE, "Hello", &(1u32, "t")).await),
+        method_error(call(&client, "/x", INTERFACE, "Hello", &("t",)).await),
         (UNKNOWN_METHOD.to_owned(), "No such object".to_owned())
     );
     assert_eq!(
@@ -135,12 +134,11 @@ async fn own_answers_hello_first_and_consent_free_calls() {
     assert_eq!(method_error(call(&client, OBJECT_PATH, INTERFACE, "Hello", &(1u32,)).await).0, INVALID_ARGS);
     // The core's answers.
     assert_eq!(
-        method_error(call(&client, OBJECT_PATH, INTERFACE, "Hello", &(2u32, "t")).await).0,
+        method_error(call(&client, OBJECT_PATH, INTERFACE, "Hello", &("old",)).await).0,
         "org.netvfs.Error.ProtocolError"
     );
-    let reply = call(&client, OBJECT_PATH, INTERFACE, "Hello", &(1u32, "t")).await.unwrap();
-    let (_, bridge, features): (u32, String, Vec<String>) = reply.body().deserialize().unwrap();
-    assert_eq!((bridge.as_str(), features), (env!("CARGO_PKG_VERSION"), vec!["error-details".to_owned()]));
+    let reply = call(&client, OBJECT_PATH, INTERFACE, "Hello", &("t",)).await.unwrap();
+    assert_eq!(reply.body().deserialize::<(String,)>().unwrap().0, env!("CARGO_PKG_VERSION"));
     let consent = call(&client, OBJECT_PATH, INTERFACE, "GetConsent", &()).await.unwrap();
     assert_eq!(consent.body().deserialize::<(String,)>().unwrap().0, "unknown");
     let locations = call(&client, OBJECT_PATH, INTERFACE, "ListLocations", &()).await.unwrap();
@@ -172,7 +170,7 @@ async fn descriptors_reach_the_core() {
     let (stream, _session) = start(sink);
     let client = zbus_client(stream).await;
     let _outbox = accepted(&mut seen).await;
-    call(&client, OBJECT_PATH, INTERFACE, "Hello", &(1u32, "t")).await.unwrap();
+    call(&client, OBJECT_PATH, INTERFACE, "Hello", &("t",)).await.unwrap();
     let dir = crate::test_support::TempDir::new();
     let path = dir.path().join("data");
     std::fs::write(&path, b"twelve bytes").unwrap();
@@ -194,7 +192,7 @@ async fn an_oversized_message_closes_the_session() {
     let _outbox = accepted(&mut seen).await;
     let reply = tokio::time::timeout(WAIT, client.receive()).await.unwrap().unwrap();
     assert_eq!(reply.message_type(), Type::MethodReturn);
-    let big = bridge_call("Hello", &(1u32, "x".repeat(inbound::MAX_MESSAGE_BYTES)));
+    let big = bridge_call("Hello", &("x".repeat(inbound::MAX_MESSAGE_BYTES),));
     client.write(&big.data()[..64]).await;
     assert!(client.closed_within(WAIT).await);
     closed(&mut seen).await;

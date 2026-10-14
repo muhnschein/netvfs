@@ -696,7 +696,7 @@ impl Core {
         }
         let lane = call.lane();
         match call {
-            Call::Hello { protocol, client } => self.on_hello(sid, reply, protocol, &client),
+            Call::Hello { client } => self.on_hello(sid, reply, &client),
             Call::GetConsent => self.on_get_consent(reply),
             Call::RequestConsent => self.on_request_consent(reply),
             Call::ListLocations => self.on_list_locations(reply),

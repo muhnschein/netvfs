@@ -48,7 +48,7 @@ pub use marshal::{
 };
 
 use crate::Status;
-use raw::{NvbBlob, NvbBytes, NvbError, NvbFfiV1, NvbUrl};
+use raw::{NvbBlob, NvbBytes, NvbError, NvbFfi, NvbUrl};
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use std::thread::ThreadId;
@@ -61,22 +61,16 @@ pub const PATH_ENV: &str = "NETVFS_BRIDGE_FFI";
 /// The thread `init` made the Qt thread.
 static QT_THREAD: OnceLock<ThreadId> = OnceLock::new();
 
-impl loader::Table for NvbFfiV1 {
-    fn header(&self) -> (u32, u32) {
-        (self.version, self.struct_size)
-    }
-}
-
 /// The loaded table. Cheap to copy, `Send` and `Sync`: the library is never
 /// unloaded.
 #[derive(Clone, Copy)]
 pub struct Ffi {
-    t: &'static NvbFfiV1,
+    t: &'static NvbFfi,
 }
 
 impl std::fmt::Debug for Ffi {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Ffi").field("version", &self.t.version).finish_non_exhaustive()
+        f.debug_struct("Ffi").finish_non_exhaustive()
     }
 }
 
@@ -121,7 +115,7 @@ impl Ffi {
     /// Loads the library at [`library_path`].
     ///
     /// # Errors
-    /// When it cannot be loaded or does not offer this build's table.
+    /// When it cannot be loaded.
     pub fn load() -> Result<Self, LoadError> {
         Self::load_from(&library_path())
     }
@@ -129,29 +123,9 @@ impl Ffi {
     /// Loads the library at `path`.
     ///
     /// # Errors
-    /// When it cannot be loaded or does not offer this build's table.
+    /// When it cannot be loaded.
     pub fn load_from(path: &Path) -> Result<Self, LoadError> {
-        Self::load_version(path, raw::NVB_FFI_VERSION)
-    }
-
-    /// Loads `path` asking for another version of the table (tests of the
-    /// refusal).
-    ///
-    /// # Errors
-    /// As [`Ffi::load_from`].
-    #[cfg(feature = "testing")]
-    pub fn load_requesting(path: &Path, version: u32) -> Result<Self, LoadError> {
-        Self::load_version(path, version)
-    }
-
-    fn load_version(path: &Path, version: u32) -> Result<Self, LoadError> {
-        loader::load_table::<NvbFfiV1>(path, c"nvb_ffi_get", version).map(|t| Self { t })
-    }
-
-    /// The table's `struct_size`.
-    #[must_use]
-    pub const fn struct_size(&self) -> u32 {
-        self.t.struct_size
+        loader::load_table::<NvbFfi>(path, c"nvb_ffi_get").map(|t| Self { t })
     }
 
     /// `Err` with the block's status, `Ok` for NULL; frees the block.

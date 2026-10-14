@@ -13,9 +13,9 @@
 #                   since 0.5: rust/, doc/RUST.md)
 #   netvfs-devel    headers, pkg-config
 #
-# Since 0.3 the parts nobody installs on their own are one package; what
-# stays separate pulls in something the rest does not need (Buteo, a setgid
-# binary) or is only for development (XP-6).
+# The parts nobody installs on their own are one package; what stays
+# separate pulls in something the rest does not need (Buteo, a setgid
+# binary) or is only for development.
 #
 # XC-1a: every package requires netvfs of the same build. Library
 # dependencies (Qt, libaccounts-qt5, libsignon-qt5, libsqlite3,
@@ -65,37 +65,8 @@ Requires:   sailfish-components-accounts-qt5
 # picker (SPEC-sftp; the page is part of the module, so every account UI
 # loads it).
 Requires:   sailfish-components-pickers-qt5
-# SPEC-v2 XP-2: updates keep the backups (see netvfs-backup).
+# SPEC-v2 XP-1: backups come along unless they are removed.
 Recommends: %{name}-backup = %{version}-%{release}
-# SPEC-v2 XP-6: the packages of 0.2 that this one replaces.
-Provides:   %{name}-core = %{version}-%{release}
-Obsoletes:  %{name}-core < 0.3.0
-Provides:   %{name}-ui = %{version}-%{release}
-Obsoletes:  %{name}-ui < 0.3.0
-Provides:   %{name}-backend-sftp = %{version}-%{release}
-Obsoletes:  %{name}-backend-sftp < 0.3.0
-Provides:   %{name}-backend-smb = %{version}-%{release}
-Obsoletes:  %{name}-backend-smb < 0.3.0
-Provides:   %{name}-backend-smb-shares = %{version}-%{release}
-Obsoletes:  %{name}-backend-smb-shares < 0.3.0
-Provides:   %{name}-backend-webdav = %{version}-%{release}
-Obsoletes:  %{name}-backend-webdav < 0.3.0
-Provides:   %{name}-backend-ftp = %{version}-%{release}
-Obsoletes:  %{name}-backend-ftp < 0.3.0
-Provides:   %{name}-backend-local = %{version}-%{release}
-Obsoletes:  %{name}-backend-local < 0.3.0
-Provides:   %{name}-files-services = %{version}-%{release}
-Obsoletes:  %{name}-files-services < 0.3.0
-Provides:   %{name}-account-sftp = %{version}-%{release}
-Obsoletes:  %{name}-account-sftp < 0.3.0
-Provides:   %{name}-account-smb = %{version}-%{release}
-Obsoletes:  %{name}-account-smb < 0.3.0
-Provides:   %{name}-account-webdav = %{version}-%{release}
-Obsoletes:  %{name}-account-webdav < 0.3.0
-Provides:   %{name}-account-ftp = %{version}-%{release}
-Obsoletes:  %{name}-account-ftp < 0.3.0
-Provides:   %{name}-cli = %{version}-%{release}
-Obsoletes:  %{name}-cli < 0.3.0
 
 %description
 Remote file access over SFTP and SMB for Sailfish OS: account
@@ -105,34 +76,23 @@ command line tool netvfs-cli.
 libnetvfs (accounts, credentials, sessions and errors over pluggable protocol
 backends) with its SFTP, SMB and local file system backends. SMB
 share enumeration runs in a helper process of its own (SPEC-v2 XM-7), so the
-DCE/RPC parser never runs inside the SMB backend. Since 0.2 libnetvfs also
-links QtNetwork, for the DNS-SD discovery of servers on the local network
+DCE/RPC parser never runs inside the SMB backend. libnetvfs also links
+QtNetwork, for the DNS-SD discovery of servers on the local network
 (SPEC-v2 XD-1).
 
 %package devel
 Summary:    Development files for libnetvfs
 Requires:   %{name} = %{version}-%{release}
-Provides:   %{name}-core-devel = %{version}-%{release}
-Obsoletes:  %{name}-core-devel < 0.3.0
 
 %description devel
 Headers and pkg-config file for building applications on libnetvfs.
 
 %package backup
-# SPEC-v2 XP-2: up to 0.1 netvfs-account-<p> contained the backup plugins,
-# in 0.2 netvfs-backup-<p>. The Obsoletes state that this package takes them
-# over; on update from 0.1 or 0.2 zypper and PackageKit install it because
-# the Recommends of netvfs is new to them: a weak dependency that is new in
-# an update is installed with it (tools/ci/check-upgrade.sh checks this).
 Summary:    SFTP and SMB backups
 Requires:   %{name} = %{version}-%{release}
 Requires:   buteo-syncfw-qt5-msyncd
 Requires:   jolla-vault
 Requires:   systemd
-Provides:   %{name}-backup-sftp = %{version}-%{release}
-Provides:   %{name}-backup-smb = %{version}-%{release}
-Obsoletes:  %{name}-backup-sftp < 0.3.0
-Obsoletes:  %{name}-backup-smb < 0.3.0
 
 %description backup
 SFTP and SMB accounts as storage targets in Settings > Backup: the
@@ -169,8 +129,7 @@ consumers over a socket in their data folder, without handing out secrets.
 
 # Script bodies, not "-p /sbin/ldconfig": rpm passes the count of
 # installed instances to a -p program as an argument, and ldconfig takes
-# "1" for a folder and fails (0.1.0 did this; its removal script fails
-# on update).
+# "1" for a folder and fails.
 %post
 /sbin/ldconfig
 

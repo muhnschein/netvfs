@@ -8,12 +8,6 @@
 pub const OBJECT_PATH: &str = "/org/netvfs/Bridge";
 /// The bridge interface (XB-8).
 pub const INTERFACE: &str = "org.netvfs.Bridge1";
-/// Protocol version that `Hello` announces and expects (XB-8).
-pub const PROTOCOL_VERSION: u32 = 1;
-/// Feature strings that `Hello` announces (XB-8: an additive change adds
-/// one). `error-details`: error replies carry a second argument `a{sv}` with
-/// `detail` and `retryAfterMs` (XC-24).
-pub const FEATURES: [&str; 1] = ["error-details"];
 /// Signature of the `Entry` struct (XB-9).
 pub const ENTRY_SIGNATURE: &str = "(ayyyxxxxixxssqays)";
 /// The introspection data the bridge serves, byte for byte (design §3.5). A
@@ -92,7 +86,7 @@ use Lane::{Bulk, Interactive, Stream};
 
 /// The methods, in the order of `args.cpp` and of the XML.
 pub const METHODS: [MethodInfo; 35] = [
-    method("Hello", "us", "usas", Interactive, false),
+    method("Hello", "s", "s", Interactive, false),
     method("GetConsent", "", "s", Interactive, false),
     method("RequestConsent", "", "", Interactive, false),
     // Without consent it returns nothing instead of failing (XB-6).

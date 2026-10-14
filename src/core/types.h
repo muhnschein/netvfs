@@ -34,7 +34,7 @@ struct NETVFS_EXPORT Entry {
     QString name;                    // XC-4 lossless (Names::decode)
     EntryType type = EntryType::Unknown;
     EntryType targetType = EntryType::Unknown;  // for Symlink, when resolved (XC-6)
-    qint64 size = -1;                // -1 unknown (v1 used 0)
+    qint64 size = -1;                // -1 unknown
     QDateTime modified;              // UTC; invalid if unknown
     QDateTime created;               // SMB, local (statx btime)
     QDateTime accessed;

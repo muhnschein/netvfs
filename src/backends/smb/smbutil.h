@@ -47,7 +47,7 @@ quint32 chunkSize(quint32 serverMaximum);
 // ------------------------------------------------------- profiles (XM-1)
 
 // SPEC-v2 XM-1 (amends M-1..M-3). The account option "security_profile"
-// selects one; "require_encryption=false" without it means Signed.
+// selects one; without it the profile is Strict.
 enum class Profile { Strict, Signed, Legacy, Guest };
 
 enum class Encryption {
