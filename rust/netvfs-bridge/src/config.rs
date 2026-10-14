@@ -611,7 +611,7 @@ mod tests {
         dir.write("Upper.conf", consumer("Upper", "X", "/x/y", "a"));
         assert_eq!(consumers(&env).iter().map(|c| c.id.as_str()).collect::<Vec<_>>(), ["y"]);
         let missing = Env::default().with("NETVFS_CONSUMERS_DIR", dir.join("missing"));
-        assert!(consumers(&missing).is_empty());
+        assert_eq!(consumers(&missing).len(), 0);
         assert_eq!(load_consumer(&missing, "y").unwrap_err().name, ErrorName::NotFound);
     }
 

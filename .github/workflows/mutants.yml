@@ -1,0 +1,70 @@
+name: Mutants (full crate)
+# cargo-mutants on all of one crate, not only on the lines a pull request
+# changes (doc/RUST.md "Tests"): run by hand before the pull request of a
+# new crate merges, results in that pull request. Every mutant must be
+# caught or be unviable; equivalent ones are listed with their reason in
+# rust/.cargo/mutants.toml.
+on:
+  workflow_dispatch:
+    inputs:
+      package:
+        description: Crate
+        required: true
+        type: choice
+        options:
+          - netvfs-vfs
+          - netvfs-backend
+          - netvfs-bridge
+          - netvfs-bridge-proto
+          - netvfs-accounts
+permissions:
+  contents: read
+concurrency:
+  group: mutants-${{ github.ref }}-${{ inputs.package }}
+  cancel-in-progress: true
+env:
+  NEXTEST_VERSION: 0.9.148
+  MUTANTS_VERSION: 27.1.0
+jobs:
+  mutants:
+    name: Mutants (${{ inputs.package }}, ${{ matrix.shard }}/12)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - name: Install dependencies
+        run: ./tools/ci/install-host-deps.sh
+      - name: Cache cargo-nextest
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.cargo/bin/cargo-nextest
+          key: cargo-nextest-${{ env.NEXTEST_VERSION }}-ubuntu-24.04
+      - name: Install cargo-nextest
+        run: ./tools/ci/cargo-tool.sh cargo-nextest "$NEXTEST_VERSION"
+      # netvfs-bridge's FFI test needs the C++ side (only those libraries).
+      - name: Build the FFI's C++ libraries
+        run: ./tools/ci/ffi-libs.sh build-ffi
+      - name: Cache cargo-mutants
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.cargo/bin/cargo-mutants
+          key: cargo-mutants-${{ env.MUTANTS_VERSION }}-ubuntu-24.04
+      - name: Install cargo-mutants
+        run: ./tools/ci/cargo-tool.sh cargo-mutants "$MUTANTS_VERSION"
+      - name: Mutants in the whole crate
+        env:
+          PACKAGE: ${{ inputs.package }}
+          SHARD: ${{ matrix.shard }}
+        run: ./tools/ci/rust-mutants.sh crate "$PACKAGE" build-ffi "$SHARD/12"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: mutants-${{ inputs.package }}-${{ matrix.shard }}
+          path: rust/mutants.out
+          if-no-files-found: ignore

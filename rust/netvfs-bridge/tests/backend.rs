@@ -567,14 +567,14 @@ fn ad_hoc_identity_question(env: &Env) {
     assert_eq!(rig.pins.pin(host_key), pin_for(b"k1"));
     rig.book.disconnect(&accepted);
     connect(&mut rig, &accepted).unwrap();
-    assert!(rig.core.asks().is_empty());
+    assert_eq!(rig.core.asks().len(), 0);
 
     // The server's key changed: no question, ServerIdentityChanged.
     f.set_identity_pin(&pin_for(b"k2"));
     rig.book.disconnect(&accepted);
     let failed = connect(&mut rig, &accepted);
     assert_eq!(name_of(&failed), Some(ErrorName::ServerIdentityChanged));
-    assert!(rig.core.asks().is_empty());
+    assert_eq!(rig.core.asks().len(), 0);
 
     // No answer at all (the session went away): declined as well.
     rig.pins.map.lock().unwrap().clear();
@@ -949,7 +949,7 @@ fn transfers_of_regular_files(env: &Env) {
     outcome.result.as_ref().unwrap();
     assert_eq!(bytes_of(&outcome), 299_000);
     assert_eq!(f.file_data(b"/up").unwrap(), data[1000..]);
-    assert!(!updates.is_empty());
+    assert_ne!(updates.len(), 0);
     // Create refuses an existing file; truncate replaces with 10 bytes.
     let (fd, info) = checked(File::open(&path).unwrap().into(), FdAccess::Read);
     let job =

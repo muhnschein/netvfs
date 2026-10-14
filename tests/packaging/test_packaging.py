@@ -3,8 +3,9 @@
 """Tests of the packaging checks (SPEC-v2 XP-1, XP-3): tools/ci/check-files.py
 against small specs and install trees, tools/ci/check-noshareenum.sh against
 shared objects built here with and without DCE/RPC code, and
-tools/ci/check-ffi-lib.sh against stand-ins for netvfs-bridge's C ABI built
-here (both need cc and readelf). Run from anywhere:
+tools/ci/check-ffi-lib.sh against stand-ins for netvfs-bridge's C ABI and
+tools/ci/check-rs-lib.sh against stand-ins for libnetvfs-rs.so, built here
+(they need cc and readelf). Run from anywhere:
 tests/packaging/test_packaging.py
 """
 import os
@@ -19,6 +20,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 CHECK_FILES = os.path.join(ROOT, "tools", "ci", "check-files.py")
 CHECK_NOSHAREENUM = os.path.join(ROOT, "tools", "ci", "check-noshareenum.sh")
 CHECK_FFI_LIB = os.path.join(ROOT, "tools", "ci", "check-ffi-lib.sh")
+CHECK_RS_LIB = os.path.join(ROOT, "tools", "ci", "check-rs-lib.sh")
 
 SPEC = """\
 %bcond_with extra
@@ -314,6 +316,98 @@ class CheckFfiLib(unittest.TestCase):
     def test_bridge_looking_elsewhere_fails(self):
         bridge = self.write("other-bridge", "\0loads /usr/lib/netvfs/libnetvfs-bridge-ffi.so\0")
         self.assert_fails("does not load it from " + FFI_INSTALLED, self.build(), bridge=bridge)
+
+
+RS_INSTALLED = "/usr/lib64/netvfs/libnetvfs-rs.so"
+
+
+class CheckRsLib(unittest.TestCase):
+    """A library that exports nvr_get only and links only the C runtime, and
+    plugins that name its installed path."""
+
+    def setUp(self):
+        self.work = tempfile.mkdtemp()
+        self.write("other.c", "int other_version(void) { return 1; }\n")
+        subprocess.run(["cc", "-shared", "-fPIC", "-Wl,-soname,libother.so.1", "-o",
+                        os.path.join(self.work, "libother.so.1"), os.path.join(self.work, "other.c")],
+                       check=True)
+        self.write("exports.map", "{ global: nvr_get; local: *; };\n")
+        self.plugin = self.write("libnetvfs-sftp.so", "\0loads " + RS_INSTALLED + "\0")
+
+    def tearDown(self):
+        shutil.rmtree(self.work)
+
+    def write(self, name, text):
+        path = os.path.join(self.work, name)
+        with open(path, "w", encoding="utf-8") as file:
+            file.write(text)
+        return path
+
+    def build(self, source=None, flags=("-Wl,-z,relro", "-Wl,-z,now", "-Wl,-z,noexecstack"),
+              exports=True, libs=("-lm",)):
+        source = source or """
+            #include <math.h>
+            #include <unistd.h>
+            const void *nvr_get(void) { return sqrt((double)getpid()) > 0 ? "" : 0; }
+            """
+        c_file = self.write("rs.c", textwrap.dedent(source))
+        so_file = os.path.join(self.work, "libnetvfs-rs.so")
+        command = ["cc", "-shared", "-fPIC", "-o", so_file, c_file, *flags, "-L" + self.work, "-Wl,--no-as-needed",
+                   *libs]
+        if exports:
+            command.append("-Wl,--version-script=" + os.path.join(self.work, "exports.map"))
+        subprocess.run(command, check=True)
+        return so_file
+
+    def run_check(self, so_file, max_glibc="99.0", plugins=None, installed=RS_INSTALLED):
+        plugins = [self.plugin] if plugins is None else plugins
+        result = subprocess.run([CHECK_RS_LIB, so_file, max_glibc, installed, *plugins],
+                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, check=False)
+        return result.returncode, result.stdout
+
+    def assert_fails(self, text, so_file, **kwargs):
+        code, output = self.run_check(so_file, **kwargs)
+        self.assertEqual(code, 1, output)
+        self.assertIn(text, output)
+
+    def test_hardened_library_passes(self):
+        code, output = self.run_check(self.build())
+        self.assertEqual(code, 0, output)
+        self.assertIn("exports nvr_get, links libm.so.6 libc.so.6", output)
+        self.assertIn("loaded from " + RS_INSTALLED + " by 1 plugin(s)", output)
+
+    def test_no_plugin_yet_passes(self):
+        code, output = self.run_check(self.build(), plugins=[])
+        self.assertEqual(code, 0, output)
+        self.assertIn("by 0 plugin(s)", output)
+
+    def test_second_export_fails(self):
+        so_file = self.build("""
+            int nvr_extra(void) { return 1; }
+            const void *nvr_get(void) { return nvr_extra() ? "" : 0; }
+            """, exports=False)
+        self.assert_fails('exports "nvr_extra nvr_get", expected only nvr_get', so_file)
+
+    def test_other_library_fails(self):
+        self.assert_fails("links libother.so.1", self.build(libs=("-l:libother.so.1",)))
+
+    def test_newer_glibc_fails(self):
+        self.assert_fails("needs GLIBC_", self.build(), max_glibc="2.0")
+
+    def test_lazy_binding_fails(self):
+        self.assert_fails("does not bind now", self.build(flags=("-Wl,-z,relro", "-Wl,-z,lazy")))
+
+    def test_no_relro_fails(self):
+        self.assert_fails("no RELRO", self.build(flags=("-Wl,-z,norelro", "-Wl,-z,now")))
+
+    def test_executable_stack_fails(self):
+        self.assert_fails("executable stack",
+                          self.build(flags=("-Wl,-z,relro", "-Wl,-z,now", "-Wl,-z,execstack")))
+
+    def test_plugin_looking_elsewhere_fails(self):
+        elsewhere = self.write("libnetvfs-smb.so", "\0loads /usr/lib/netvfs/libnetvfs-rs.so\0")
+        self.assert_fails("libnetvfs-smb.so does not load it from " + RS_INSTALLED, self.build(),
+                          plugins=[self.plugin, elsewhere])
 
 
 if __name__ == "__main__":

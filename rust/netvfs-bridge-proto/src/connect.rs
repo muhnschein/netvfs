@@ -55,6 +55,7 @@ impl Connection {
     }
 
     /// The underlying zbus connection.
+    #[must_use = "the connection is only borrowed"]
     pub fn zbus(&self) -> &zbus::Connection {
         &self.conn
     }

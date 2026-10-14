@@ -304,13 +304,13 @@ mod tests {
     fn slices_and_items_accept_null() {
         // SAFETY: NULL with any length is allowed.
         unsafe {
-            assert!(slice(NvbBytes { ptr: std::ptr::null(), len: 5 }).is_empty());
-            assert!(items::<u8>(std::ptr::null(), 3).is_empty());
+            assert_eq!(slice(NvbBytes { ptr: std::ptr::null(), len: 5 }), []);
+            assert_eq!(items::<u8>(std::ptr::null(), 3), []);
             let data = [7u8, 8];
-            assert!(slice(NvbBytes { ptr: data.as_ptr(), len: 0 }).is_empty());
+            assert_eq!(slice(NvbBytes { ptr: data.as_ptr(), len: 0 }), []);
             assert_eq!(slice(b(&data)), &data);
             assert_eq!(items(data.as_ptr(), 2), &data);
-            assert!(items(data.as_ptr(), 0).is_empty());
+            assert_eq!(items(data.as_ptr(), 0), []);
             assert_eq!(text(b(b"caf\xc3\xa9 \xff")), "café \u{fffd}");
         }
     }

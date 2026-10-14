@@ -442,6 +442,8 @@ mod tests {
         assert!(!EntryFlags::HIDDEN.contains(both));
         assert!(both.contains(EntryFlags::NONE));
         assert_eq!(EntryFlags::default(), EntryFlags::NONE);
+        // A flag set twice stays set.
+        assert_eq!(both.union(EntryFlags::HIDDEN), both);
     }
 
     // The 22 names of capabilityName() (src/core/types.cpp), in order.
@@ -490,7 +492,7 @@ mod tests {
         assert_eq!(caps.names(), ["AtomicPut", "ETags", "Symlinks"]);
         assert!(caps.has(Capability::ETags));
         assert!(!caps.has(Capability::Hardlinks));
-        assert!(Capabilities::default().names().is_empty());
+        assert_eq!(Capabilities::default().names(), Vec::<&str>::new());
     }
 
     #[test]

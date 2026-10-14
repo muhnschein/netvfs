@@ -254,16 +254,19 @@ impl Tree {
                 Err(_) => flags = flags.union(EntryFlags::TARGET_UNKNOWN),
             }
         }
+        // A symlink has no mode and only its modification time, as on
+        // servers that report no more (an entry's fields may be unknown).
+        let link = matches!(node.data, Data::Link(_));
         Ok(Entry {
             name: name.to_vec(),
             kind: node.kind(),
             target_kind,
             flags,
-            mode: Some(node.mode),
+            mode: (!link).then_some(node.mode),
             size: u64::try_from(size).ok(),
             mtime_ms: Some(node.mtime_ms),
-            ctime_ms: Some(node.ctime_ms),
-            atime_ms: Some(node.atime_ms),
+            ctime_ms: (!link).then_some(node.ctime_ms),
+            atime_ms: (!link).then_some(node.atime_ms),
             uid: Some(OWNER_ID),
             gid: Some(OWNER_ID),
             owner: OWNER.to_owned(),
@@ -597,7 +600,7 @@ mod tests {
             (&b"f"[..], EntryType::File, Some(4), Some(0o644))
         );
         assert_eq!((e.uid, e.owner.as_str(), e.flags), (Some(1000), "mem", EntryFlags::NONE));
-        assert!(!e.etag.is_empty());
+        assert_ne!(e.etag, Vec::<u8>::new());
         let root = t.stat(b"/", true).unwrap();
         assert_eq!((root.name.len(), root.kind), (0, EntryType::Directory));
         assert_eq!(err(t.stat(b"a/f/below", true)), ErrorName::NotADirectory);
@@ -620,7 +623,7 @@ mod tests {
         t.remove(b"d/f", false).unwrap();
         t.remove(b"d", true).unwrap();
         t.remove(b"f", false).unwrap();
-        assert!(names(&t, b"").is_empty());
+        assert_eq!(names(&t, b""), Vec::<Vec<u8>>::new());
         assert_eq!(t.nodes.len(), 1);
     }
 
@@ -791,7 +794,7 @@ mod tests {
             ..WriteOptions::default()
         };
         assert_eq!(t.open_write(b"f", &truncate).unwrap(), (id, 0));
-        assert!(read(&t, b"f").is_empty());
+        assert_eq!(read(&t, b"f"), Vec::<u8>::new());
         assert_eq!(t.stat(b"f", true).unwrap().mode, Some(0o600));
         t.make_dir(b"d", true).unwrap();
         assert_eq!(err(t.open_write(b"d", &truncate)), ErrorName::IsADirectory);

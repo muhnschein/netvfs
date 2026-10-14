@@ -874,7 +874,7 @@ fn ad_hoc_identity_question(h: &Harness) {
         let (id, kind, details) = question(&mut signals).await;
         assert_eq!(kind, "identity-unknown");
         assert_eq!(String::try_from(details["host"].clone()).unwrap(), "adhoc.example");
-        assert!(!String::try_from(details["fingerprint"].clone()).unwrap().is_empty());
+        assert_ne!(String::try_from(details["fingerprint"].clone()).unwrap().len(), 0);
         assert_eq!(
             error_name(&c.proxy().answer(&id, &OptsBuilder::new().bool("accept", false).build()).await),
             None
@@ -1096,7 +1096,7 @@ fn handoff(h: &Harness) {
             name(ErrorName::Unsupported)
         );
         assert_eq!(error_name(&c.proxy().add_account("smb").await), name(ErrorName::Unsupported));
-        assert!(f.launcher.calls().is_empty());
+        assert_eq!(f.launcher.calls().len(), 0);
     });
 }
 

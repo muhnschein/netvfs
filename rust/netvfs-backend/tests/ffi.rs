@@ -101,6 +101,7 @@ struct E {
     mode: i32,
     size: i64,
     mtime: i64,
+    ctime: i64,
     atime: i64,
     uid: i64,
     owner: Vec<u8>,
@@ -116,6 +117,7 @@ fn entry_of(r: &NvbEntry) -> E {
         mode: r.mode,
         size: r.size,
         mtime: r.mtime_ms,
+        ctime: r.ctime_ms,
         atime: r.atime_ms,
         uid: r.uid,
         owner: bytes(r.owner),
@@ -588,7 +590,13 @@ fn connect_and_authenticate() {
     let seen = c.connect(&[("store", "auth"), ("identity", "ssh-ed25519")]).unwrap().unwrap();
     assert_eq!(
         seen,
-        (NVB_IDENTITY_SSH, "ssh-ed25519".to_owned(), b"mem host key".to_vec(), String::new(), String::new())
+        (
+            NVB_IDENTITY_SSH,
+            "ssh-ed25519".to_owned(),
+            b"mem host key".to_vec(),
+            "alice@localhost:0 1000/1000 ms".to_owned(),
+            String::new()
+        )
     );
     assert_eq!(c.connect(&[("store", "auth"), ("secret", "pw")]).unwrap(), None);
     assert_eq!(name(c.auth(b"wrong", ptr::null())), "AuthFailed");
@@ -631,7 +639,7 @@ fn keyboard_interactive() {
     c.auth(b"", &raw const prompter).unwrap();
     assert_eq!(
         asker.asked,
-        [("mem".to_owned(), "Sign in as alice".to_owned(), vec![("Code?".to_owned(), 0)])]
+        [("mem".to_owned(), "Sign in as WORK\\alice".to_owned(), vec![("Code?".to_owned(), 0)])]
     );
     assert_eq!(asker.thread, Some(thread::current().id()));
     asker.answers = vec![b"41".to_vec()];
@@ -689,7 +697,7 @@ fn namespace() {
     let f = c.stat(b"d/f", true).unwrap();
     assert_eq!((f.name.as_slice(), f.kind, f.size, f.mode, f.uid), (&b"f"[..], FILE, 5, 0o644, 1000));
     assert_eq!(f.owner, b"mem");
-    assert!(!f.etag.is_empty());
+    assert_ne!(f.etag, Vec::<u8>::new());
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as i64;
     assert!((now - f.mtime).abs() < 60_000);
     assert_eq!(c.stat(b"d", false).unwrap().kind, DIR);
@@ -775,6 +783,9 @@ fn links_attributes_copies() {
     assert_eq!(name(blob(|out| unsafe { (t().read_link)(c.0, b(b"target"), out) })), "InvalidName");
     let link = c.stat(b"link", false).unwrap();
     assert_eq!((link.kind, link.target_kind), (LINK, FILE));
+    // An unknown mode or time crosses as -1.
+    assert!(link.mtime > 0);
+    assert_eq!((link.mode, link.ctime, link.atime), (-1, -1, -1));
     assert_eq!(c.stat(b"link", true).unwrap().size, 4);
     res(unsafe { (t().make_hardlink)(c.0, b(b"target"), b(b"hard")) }).unwrap();
     assert_eq!(name(res(unsafe { (t().make_hardlink)(c.0, b(b"target"), b(b"hard")) })), "AlreadyExists");
@@ -853,8 +864,8 @@ fn read_handles() {
     assert_eq!(live_objects(), 2);
     assert_eq!(read(h, 0, 1000).unwrap(), &data[..1000]);
     assert_eq!(read(h, 599_990, 100).unwrap(), &data[599_990..]);
-    assert!(read(h, 600_000, 10).unwrap().is_empty());
-    assert!(read(h, 700_000, 10).unwrap().is_empty());
+    assert_eq!(read(h, 600_000, 10).unwrap(), Vec::<u8>::new());
+    assert_eq!(read(h, 700_000, 10).unwrap(), Vec::<u8>::new());
     assert_eq!(read(h, 1, 599_999).unwrap(), &data[1..]);
     let mut len = 5;
     res(unsafe { (t().read)(h, 3, ptr::null_mut(), 0, &raw mut len) }).unwrap();
@@ -984,7 +995,7 @@ fn uploads_and_downloads() {
     for (offset, length) in [(700_000, -1), (800_000, 10), (7, 0)] {
         let (r, got) = c.download(b"big", offset, length, None);
         r.unwrap();
-        assert!(got.is_empty());
+        assert_eq!(got, Vec::<u8>::new());
     }
     assert_eq!(name(c.download(b"big", -1, 1, None).0), "ProtocolError");
     assert_eq!(name(c.download(b"big", 0, -2, None).0), "ProtocolError");
@@ -1090,6 +1101,10 @@ fn cancel_stays_until_reset() {
     c.cancel();
     assert_eq!(name(c.stat(b"f", true)), "Canceled");
     assert_eq!(name(c.keep_alive()), "Canceled");
+    // A refused call runs nothing of the backend, even where the backend
+    // does its work before it returns a future (mem's connect): the
+    // connection is still on its store below.
+    assert_eq!(name(c.connect(&[("store", "elsewhere")])), "Canceled");
     assert_eq!(name(read(r, 0, 4)), "Canceled");
     assert_eq!(name(write(w, b"x")), "Canceled");
     // A canceled commit aborts and frees the handle.
@@ -1253,13 +1268,23 @@ fn panics_become_internal() {
     assert_no_leaks();
 }
 
+/// The runtime's threads by name. A new thread names itself once it runs,
+/// which on a loaded machine can be after the call that made it returned:
+/// waits up to 10 s for all of them.
 fn runtime_threads() -> Vec<String> {
-    std::fs::read_dir("/proc/self/task")
-        .unwrap()
-        .filter_map(|task| std::fs::read_to_string(task.unwrap().path().join("comm")).ok())
-        .map(|comm| comm.trim().to_owned())
-        .filter(|comm| comm.starts_with(THREAD_PREFIX))
-        .collect()
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let names: Vec<String> = std::fs::read_dir("/proc/self/task")
+            .unwrap()
+            .filter_map(|task| std::fs::read_to_string(task.unwrap().path().join("comm")).ok())
+            .map(|comm| comm.trim().to_owned())
+            .filter(|comm| comm.starts_with(THREAD_PREFIX))
+            .collect();
+        if names.len() >= WORKERS || Instant::now() > deadline {
+            return names;
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
 }
 
 #[test]

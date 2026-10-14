@@ -2,6 +2,9 @@
 //! [`Backend`], [`ReadHandle`] and [`WriteHandle`] behind `dyn`: the C ABI
 //! picks the backend by provider name at run time. The traits' futures are
 //! boxed here and nowhere else; each method forwards to the backend's own.
+//! The backend's method is called only when its future is first polled,
+//! so a backend that does its work before it returns a future (`ready`)
+//! still does nothing for a call refused at once (a tripped cancel).
 //!
 //! The objects are `Send`, not `Sync`: a connection is used by one thread
 //! at a time, not always by the thread that made it (C-8; the QML code
@@ -170,7 +173,7 @@ impl<R: ReadHandle + Send + 'static> DynRead for R {
         buf: &'a mut [u8],
         cancel: &'a CancelToken,
     ) -> Call<'a, Result<usize, Status>> {
-        Box::pin(ReadHandle::read(self, offset, buf, cancel))
+        Box::pin(async move { ReadHandle::read(self, offset, buf, cancel).await })
     }
 
     fn read_ahead(&mut self, offset: u64, bytes: u64) {
@@ -178,13 +181,13 @@ impl<R: ReadHandle + Send + 'static> DynRead for R {
     }
 
     fn close(self: Box<Self>, cancel: &CancelToken) -> Call<'_, Result<(), Status>> {
-        Box::pin(ReadHandle::close(*self, cancel))
+        Box::pin(async move { ReadHandle::close(*self, cancel).await })
     }
 }
 
 impl<W: WriteHandle + Send + 'static> DynWrite for W {
     fn write<'a>(&'a mut self, data: &'a [u8], cancel: &'a CancelToken) -> Call<'a, Result<(), Status>> {
-        Box::pin(WriteHandle::write(self, data, cancel))
+        Box::pin(async move { WriteHandle::write(self, data, cancel).await })
     }
 
     fn position(&self) -> u64 {
@@ -192,11 +195,11 @@ impl<W: WriteHandle + Send + 'static> DynWrite for W {
     }
 
     fn commit(self: Box<Self>, cancel: &CancelToken) -> Call<'_, Result<(), Status>> {
-        Box::pin(WriteHandle::commit(*self, cancel))
+        Box::pin(async move { WriteHandle::commit(*self, cancel).await })
     }
 
     fn abort(self: Box<Self>) -> Call<'static, ()> {
-        Box::pin(WriteHandle::abort(*self))
+        Box::pin(async move { WriteHandle::abort(*self).await })
     }
 }
 
@@ -211,7 +214,7 @@ where
         params: &'a Params,
         cancel: &'a CancelToken,
     ) -> Call<'a, Result<Option<ServerIdentity>, Status>> {
-        Box::pin(Backend::connect(self, params, cancel))
+        Box::pin(async move { Backend::connect(self, params, cancel).await })
     }
 
     fn authenticate<'a>(
@@ -220,7 +223,7 @@ where
         prompter: Option<&'a mut dyn Prompter>,
         cancel: &'a CancelToken,
     ) -> Call<'a, Result<(), Status>> {
-        Box::pin(Backend::authenticate(self, credentials, prompter, cancel))
+        Box::pin(async move { Backend::authenticate(self, credentials, prompter, cancel).await })
     }
 
     fn capabilities(&self) -> Capabilities {
@@ -228,11 +231,11 @@ where
     }
 
     fn disconnect(&mut self) -> Call<'_, ()> {
-        Box::pin(Backend::disconnect(self))
+        Box::pin(async move { Backend::disconnect(self).await })
     }
 
     fn keep_alive<'a>(&'a mut self, cancel: &'a CancelToken) -> Call<'a, Result<(), Status>> {
-        Box::pin(Backend::keep_alive(self, cancel))
+        Box::pin(async move { Backend::keep_alive(self, cancel).await })
     }
 
     fn stat<'a>(
@@ -241,7 +244,7 @@ where
         follow: bool,
         cancel: &'a CancelToken,
     ) -> Call<'a, Result<Entry, Status>> {
-        Box::pin(Backend::stat(self, path, follow, cancel))
+        Box::pin(async move { Backend::stat(self, path, follow, cancel).await })
     }
 
     fn list<'a>(
@@ -251,7 +254,7 @@ where
         sink: &'a mut dyn ListSink,
         cancel: &'a CancelToken,
     ) -> Call<'a, Result<(), Status>> {
-        Box::pin(Backend::list(self, dir, options, sink, cancel))
+        Box::pin(async move { Backend::list(self, dir, options, sink, cancel).await })
     }
 
     fn make_dir<'a>(
@@ -260,7 +263,7 @@ where
         exclusive: bool,
         cancel: &'a CancelToken,
     ) -> Call<'a, Result<(), Status>> {
-        Box::pin(Backend::make_dir(self, path, exclusive, cancel))
+        Box::pin(async move { Backend::make_dir(self, path, exclusive, cancel).await })
     }
 
     fn remove_file<'a>(
@@ -268,11 +271,11 @@ where
         path: &'a [u8],
         cancel: &'a CancelToken,
     ) -> Call<'a, Result<(), Status>> {
-        Box::pin(Backend::remove_file(self, path, cancel))
+        Box::pin(async move { Backend::remove_file(self, path, cancel).await })
     }
 
     fn remove_dir<'a>(&'a mut self, path: &'a [u8], cancel: &'a CancelToken) -> Call<'a, Result<(), Status>> {
-        Box::pin(Backend::remove_dir(self, path, cancel))
+        Box::pin(async move { Backend::remove_dir(self, path, cancel).await })
     }
 
     fn rename<'a>(
@@ -282,7 +285,7 @@ where
         mode: RenameMode,
         cancel: &'a CancelToken,
     ) -> Call<'a, Result<(), Status>> {
-        Box::pin(Backend::rename(self, from, to, mode, cancel))
+        Box::pin(async move { Backend::rename(self, from, to, mode, cancel).await })
     }
 
     fn set_attributes<'a>(
@@ -291,7 +294,7 @@ where
         changes: &'a Attributes,
         cancel: &'a CancelToken,
     ) -> Call<'a, Result<(), Status>> {
-        Box::pin(Backend::set_attributes(self, path, changes, cancel))
+        Box::pin(async move { Backend::set_attributes(self, path, changes, cancel).await })
     }
 
     fn read_link<'a>(
@@ -299,7 +302,7 @@ where
         path: &'a [u8],
         cancel: &'a CancelToken,
     ) -> Call<'a, Result<Vec<u8>, Status>> {
-        Box::pin(Backend::read_link(self, path, cancel))
+        Box::pin(async move { Backend::read_link(self, path, cancel).await })
     }
 
     fn make_symlink<'a>(
@@ -308,7 +311,7 @@ where
         link: &'a [u8],
         cancel: &'a CancelToken,
     ) -> Call<'a, Result<(), Status>> {
-        Box::pin(Backend::make_symlink(self, target, link, cancel))
+        Box::pin(async move { Backend::make_symlink(self, target, link, cancel).await })
     }
 
     fn make_hardlink<'a>(
@@ -317,7 +320,7 @@ where
         link: &'a [u8],
         cancel: &'a CancelToken,
     ) -> Call<'a, Result<(), Status>> {
-        Box::pin(Backend::make_hardlink(self, existing, link, cancel))
+        Box::pin(async move { Backend::make_hardlink(self, existing, link, cancel).await })
     }
 
     fn copy<'a>(
@@ -328,7 +331,7 @@ where
         mode: RenameMode,
         cancel: &'a CancelToken,
     ) -> Call<'a, Result<(), Status>> {
-        Box::pin(Backend::copy(self, from, to, recursive, mode, cancel))
+        Box::pin(async move { Backend::copy(self, from, to, recursive, mode, cancel).await })
     }
 
     fn checksum<'a>(
@@ -337,7 +340,7 @@ where
         algorithm: &'a str,
         cancel: &'a CancelToken,
     ) -> Call<'a, Result<Vec<u8>, Status>> {
-        Box::pin(Backend::checksum(self, path, algorithm, cancel))
+        Box::pin(async move { Backend::checksum(self, path, algorithm, cancel).await })
     }
 
     fn space_info<'a>(
@@ -345,7 +348,7 @@ where
         dir: &'a [u8],
         cancel: &'a CancelToken,
     ) -> Call<'a, Result<SpaceInfo, Status>> {
-        Box::pin(Backend::space_info(self, dir, cancel))
+        Box::pin(async move { Backend::space_info(self, dir, cancel).await })
     }
 
     fn open_read<'a>(
@@ -379,7 +382,7 @@ where
         progress: &'a mut dyn Progress,
         cancel: &'a CancelToken,
     ) -> Call<'a, Result<(), Status>> {
-        Box::pin(Backend::upload(self, path, options, source, progress, cancel))
+        Box::pin(async move { Backend::upload(self, path, options, source, progress, cancel).await })
     }
 
     fn download<'a>(
@@ -391,6 +394,6 @@ where
         progress: &'a mut dyn Progress,
         cancel: &'a CancelToken,
     ) -> Call<'a, Result<(), Status>> {
-        Box::pin(Backend::download(self, path, offset, length, sink, progress, cancel))
+        Box::pin(async move { Backend::download(self, path, offset, length, sink, progress, cancel).await })
     }
 }

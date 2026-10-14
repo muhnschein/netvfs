@@ -160,7 +160,7 @@ async fn continues_from_the_handshake_bytes() {
     assert_eq!(carried.len(), 5);
     let got = receive(&mut reader, &mut carried).await.unwrap();
     assert_eq!(got.data()[..], second.data()[..]);
-    assert!(carried.is_empty());
+    assert_eq!(carried.len(), 0);
 
     // Carried descriptors belong to the next message.
     let file = std::fs::File::open("/dev/null").unwrap();

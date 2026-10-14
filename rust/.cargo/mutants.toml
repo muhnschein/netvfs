@@ -5,16 +5,22 @@
 
 # Test doubles, built only with the `fake` / `testing` features and never
 # shipped: the in-process FakeBridge (and its replay of the contract), the
-# loader of the fake control table, and the bridge fixture with its fake
-# accounts, prompt, discovery and launcher. They are the tests' oracle; a
-# mutant in them says nothing about the bridge.
+# loader of the fake control table, the bridge fixture with its fake
+# accounts, prompt, discovery and launcher, and the mem backend of
+# libnetvfs-rs.so. They are the tests' oracle; a mutant in them says nothing
+# about the bridge or the C ABI.
 exclude_globs = [
     "netvfs-bridge-proto/src/fake/**",
     "netvfs-bridge/src/ffi/fake.rs",
     "netvfs-bridge/src/testing.rs",
+    "netvfs-backend/src/mem/**",
 ]
 
 exclude_re = [
+    # netvfs-vfs NoHandle, the handle type of a backend without handles, is
+    # an empty enum: no value of it exists, so its methods (and no_future,
+    # which only they call) never run.
+    'netvfs-vfs/src/backend\.rs:\d+:\d+: replace (<impl (ReadHandle|WriteHandle) for NoHandle>::|no_future )',
     # Diagnostics only: the sole effect is a line on stderr for whoever runs
     # it by hand; the probe's result is its exit status and check count.
     'netvfs-accounts/src/bin/probe\.rs:.*: replace report with \(\)$',

@@ -11,9 +11,10 @@ QString SmbBackendFactory::provider() const
     return QStringLiteral("smb");
 }
 
-Backend *SmbBackendFactory::create()
+Result SmbBackendFactory::create(Backend **out)
 {
-    return std::make_unique<Smb::SmbBackend>().release();   // the caller owns it
+    *out = std::make_unique<Smb::SmbBackend>().release();   // the caller owns it
+    return Result::success();
 }
 
 } // namespace NetVfs

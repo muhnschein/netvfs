@@ -1,15 +1,16 @@
 #!/bin/sh
 # SPDX-License-Identifier: LGPL-2.1-or-later
-# Cross-builds the Rust binaries of netvfs for the Sailfish OS target with the
-# host's cargo (the pinned toolchain, rust/rust-toolchain.toml) and the SDK's
-# own gcc and sysroot, as lifted by lift-sdk.sh (doc/RUST.md "Cross build").
-# The binaries link against the target's glibc and SQLite, so their symbol
-# versions are those of the oldest SDK the phone runs.
+# Cross-builds the Rust binaries of netvfs and libnetvfs-rs.so for the
+# Sailfish OS target with the host's cargo (the pinned toolchain,
+# rust/rust-toolchain.toml) and the SDK's own gcc and sysroot, as lifted by
+# lift-sdk.sh (doc/RUST.md "Cross build"). They link against the target's
+# glibc and SQLite, so their symbol versions are those of the oldest SDK the
+# phone runs.
 #
 # Usage: cross-build.sh <sdk dir> <out dir> [test]
-#   builds the release binaries into <out dir>; with "test", runs the
-#   workspace tests for the target under qemu-aarch64-static instead,
-#   against the target's own glibc and SQLite.
+#   builds the release binaries and the library into <out dir>; with
+#   "test", runs the workspace tests for the target under qemu-aarch64-static
+#   instead, against the target's own glibc and SQLite.
 set -eu
 sdk=$(cd "$1" && pwd)
 mkdir -p "$2"
@@ -24,11 +25,13 @@ export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUNNER="qemu-aarch64-static -L $sd
 # bindgen (the crate's shipped bindings).
 export SQLITE3_LIB_DIR="$sdk/linklib"
 export SQLITE3_STATIC=0
-# Hardening (checked by check-linked-libs.sh): PIE and full RELRO are
-# rustc's defaults for this target; immediate binding and a non-executable
-# stack are spelled out so that a toolchain change cannot drop them.
-export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS="-C relocation-model=pie -C relro-level=full \
--C link-arg=-Wl,-z,now -C link-arg=-Wl,-z,noexecstack -C link-arg=-Wl,--as-needed"
+# Hardening (checked by check-linked-libs.sh and check-rs-lib.sh): PIE and
+# full RELRO are rustc's defaults for this target; immediate binding and a
+# non-executable stack are spelled out so that a toolchain change cannot drop
+# them. The binaries are built as PIEs explicitly; libnetvfs-rs.so (and so
+# every workspace build that links it, the tests too) cannot be one.
+hardening="-C relro-level=full -C link-arg=-Wl,-z,now -C link-arg=-Wl,-z,noexecstack -C link-arg=-Wl,--as-needed"
+export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS="$hardening"
 export CARGO_TARGET_DIR="$out/target"
 
 cd "$root/rust"
@@ -48,8 +51,13 @@ if [ "$mode" = test ]; then
     cargo test --locked -p netvfs-bridge --lib --target "$triple" -- --exact "$flow"
     exit 0
 fi
-cargo build --release --locked --workspace --target "$triple" --bins
+CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS="-C relocation-model=pie $hardening" \
+    cargo build --release --locked --workspace --target "$triple" --bins
 for bin in netvfs-bridge netvfs-accounts; do
     cp -f "$CARGO_TARGET_DIR/$triple/release/$bin" "$out/$bin"
 done
+# libnetvfs-rs.so with its own profile (rs-release: panics unwind to the
+# table, fat LTO; src/backends/rs/rs.pro).
+cargo build --profile rs-release --locked -p netvfs-backend --lib --target "$triple"
+cp -f "$CARGO_TARGET_DIR/$triple/rs-release/libnetvfs_rs.so" "$out/libnetvfs-rs.so"
 ls -l "$out"
