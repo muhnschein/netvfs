@@ -352,7 +352,7 @@ async fn stat_and_lstat() {
     assert_eq!(remote.stat(b"dangling", false, &c).await.unwrap().kind, EntryType::Symlink);
     assert_eq!(err(remote.stat(b"a/../b", true, &c).await).0, ErrorName::InvalidName);
     // No READLINK on a server whose LSTAT does not follow links.
-    assert!(fake.requests(FXP_READLINK).is_empty());
+    assert_eq!(fake.requests(FXP_READLINK), []);
 }
 
 #[tokio::test]
@@ -540,7 +540,7 @@ async fn list_failures() {
         ErrorName::ConnectionLost
     );
     assert_eq!(fake.requests(FXP_STAT).len(), stats);
-    assert!(sink.batches.is_empty());
+    assert_eq!(sink.batches.len(), 0);
 }
 
 struct CancelOnFirst(CancelToken);
@@ -711,7 +711,7 @@ async fn rename_without_replacing_elsewhere_checks_first() {
         err(remote.rename(b"a", b"b", RenameMode::NoReplace, &c).await),
         named(ErrorName::AlreadyExists, "/home/u/b exists")
     );
-    assert!(fake.requests(FXP_RENAME).is_empty());
+    assert_eq!(fake.requests(FXP_RENAME), []);
     remote.rename(b"a", b"c", RenameMode::NoReplace, &c).await.unwrap();
     assert_eq!(fake.data("/home/u/c"), Some(b"A".to_vec()));
     fake.rule(Rule::new(FXP_LSTAT, Action::Status(FX_PERMISSION_DENIED, "no")).once());
@@ -735,8 +735,8 @@ async fn rename_replacing_with_posix_rename() {
     let posix: Vec<_> =
         fake.requests(FXP_EXTENDED).into_iter().filter(|l| l.ext == "posix-rename@openssh.com").collect();
     assert_eq!(posix[0].strings, [b"/home/u/a".to_vec(), b"/home/u/b".to_vec()]);
-    assert!(fake.requests(FXP_REMOVE).is_empty());
-    assert!(fake.requests(FXP_RENAME).is_empty());
+    assert_eq!(fake.requests(FXP_REMOVE), []);
+    assert_eq!(fake.requests(FXP_RENAME), []);
     assert_eq!(
         err(remote.rename(b"b", b"d", RenameMode::Replace, &c).await),
         named(ErrorName::AlreadyExists, "/home/u/d is a folder")
@@ -802,7 +802,7 @@ async fn set_attributes() {
         err(remote.set_attributes(b"f", &bad, &c).await),
         named(ErrorName::Internal, "Invalid mode 170644")
     );
-    assert!(fake.kinds().is_empty());
+    assert_eq!(fake.kinds(), Vec::<String>::new());
     // Nothing to change: the entry must exist.
     remote.set_attributes(b"f", &Attributes::default(), &c).await.unwrap();
     assert_eq!(err(remote.set_attributes(b"g", &Attributes::default(), &c).await).0, ErrorName::NotFound);

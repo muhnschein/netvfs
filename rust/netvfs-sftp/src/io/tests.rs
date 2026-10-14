@@ -278,7 +278,7 @@ async fn upload_failures() {
         named(ErrorName::NoSpace, "The server has no space left for /home/u/e")
     );
     // The modification time is not set after a failure.
-    assert!(fake.requests(FXP_SETSTAT).is_empty());
+    assert_eq!(fake.requests(FXP_SETSTAT), []);
 }
 
 #[tokio::test]
@@ -366,12 +366,12 @@ async fn download_whole_and_ranges() {
     fake.take_log();
     let (data, _) = download(&remote, b"/home/u/f", 2, Some(0)).await.unwrap();
     assert_eq!(data, b"");
-    assert!(fake.requests(FXP_READ).is_empty());
+    assert_eq!(fake.requests(FXP_READ), []);
     assert_eq!(
         err(download(&remote, b"/home/u/f", u64::MAX, Some(1)).await),
         named(ErrorName::Internal, "Invalid range")
     );
-    assert!(fake.requests(FXP_OPEN).len() == 1);
+    assert_eq!(fake.requests(FXP_OPEN).len(), 1);
     eventually(|| fake.open_handles() == 0).await;
 }
 
@@ -613,7 +613,7 @@ async fn read_handle_at_the_end() {
     assert_eq!(read(&mut h, 0, 10).await.unwrap(), digits(10));
     fake.take_log();
     assert_eq!(read(&mut h, 3, 0).await.unwrap(), b"");
-    assert!(fake.requests(FXP_READ).is_empty());
+    assert_eq!(fake.requests(FXP_READ), []);
     let mut buf = [0; 2];
     assert_eq!(err(h.read(u64::MAX, &mut buf, &cancel()).await), named(ErrorName::Internal, "Invalid range"));
 }
@@ -629,7 +629,7 @@ async fn read_handle_with_short_answers() {
     while got.len() < 100 {
         let at = got.len() as u64;
         let part = read(&mut h, at, 10).await.unwrap();
-        assert!(!part.is_empty());
+        assert_ne!(part.len(), 0);
         got.extend(part);
     }
     assert_eq!(got, content);
@@ -737,7 +737,7 @@ async fn write_handle_resumes_at_the_offset() {
     h.commit(&cancel()).await.unwrap();
     assert_eq!(fake.data("/home/u/f"), Some(b"abcde".to_vec()));
     // No time asked for: none set.
-    assert!(fake.requests(FXP_SETSTAT).is_empty());
+    assert_eq!(fake.requests(FXP_SETSTAT), []);
 }
 
 #[tokio::test]
@@ -803,11 +803,11 @@ async fn write_handle_abort_closes_without_fsync() {
     h.write(b"0123456789", &cancel()).await.unwrap();
     h.abort().await;
     eventually(|| fake.requests(FXP_CLOSE).len() == 1).await;
-    assert!(fake.requests(FXP_EXTENDED).is_empty());
+    assert_eq!(fake.requests(FXP_EXTENDED), []);
     eventually(|| fake.open_handles() == 0).await;
     let c = cancel();
     c.cancel();
     let mut h = writer(&fake, &remote, b"/home/u/g", &WriteOptions::default(), 4).await;
     assert_eq!(err(h.write(b"x", &c).await).0, ErrorName::Canceled);
-    assert!(fake.requests(FXP_WRITE).is_empty());
+    assert_eq!(fake.requests(FXP_WRITE), []);
 }
