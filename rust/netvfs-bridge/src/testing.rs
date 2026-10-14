@@ -292,8 +292,8 @@ impl FakeAccounts {
 }
 
 impl AccountDirectory for FakeAccounts {
-    async fn list(&self) -> Vec<AccountLocation> {
-        self.state().accounts.clone()
+    fn list(&self) -> impl Future<Output = Vec<AccountLocation>> {
+        std::future::ready(self.state().accounts.clone())
     }
 
     async fn files(&self, id: i32) -> Result<FilesAccess, Status> {

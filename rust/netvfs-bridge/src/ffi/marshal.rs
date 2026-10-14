@@ -571,10 +571,10 @@ mod tests {
     fn readers_accept_null_with_a_length() {
         // A NULL pointer reads as empty, whatever the length says.
         let b = NvbBytes { ptr: ptr::null(), len: 5 };
-        assert!(unsafe { slice(b) }.is_empty());
+        assert_eq!(unsafe { slice(b) }.len(), 0);
         assert!(unsafe { items::<NvbKv>(ptr::null(), 3) }.is_empty());
         let data = [1u8];
-        assert!(unsafe { slice(NvbBytes { ptr: data.as_ptr(), len: 0 }) }.is_empty());
+        assert_eq!(unsafe { slice(NvbBytes { ptr: data.as_ptr(), len: 0 }) }.len(), 0);
     }
 
     #[test]
