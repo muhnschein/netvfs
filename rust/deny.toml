@@ -4,17 +4,29 @@
 
 [graph]
 all-features = true
+# The targets netvfs ships for (Sailfish OS aarch64) and builds and tests on
+# (x86_64 CI). This leaves out crates only other systems link: sspi's
+# macOS DNS-SD client (async-dnssd, on bitflags 1) and getrandom's UEFI
+# backend (r-efi, in two versions).
+targets = ["aarch64-unknown-linux-gnu", "x86_64-unknown-linux-gnu"]
 
 [advisories]
 version = 2
 yanked = "deny"
+ignore = [
+    # rsa (Marvin timing side channel, no fixed release), in sspi's tree
+    # through picky. netvfs-smb uses sspi for NTLM only (the Negotiate
+    # package is limited to "ntlm"): no Kerberos, no PKINIT, no certificate,
+    # so no RSA private-key operation runs.
+    { id = "RUSTSEC-2023-0071", reason = "netvfs-smb runs no RSA operation: sspi is limited to NTLM" },
+]
 
 [licenses]
 version = 2
 # netvfs is LGPL-2.1-or-later and links these statically into a setgid
 # binary: permissive licences only, so no GPL-only crate. The list holds
 # what the locked crates use; another licence is a decision to review.
-allow = ["Apache-2.0", "BSD-2-Clause", "MIT"]
+allow = ["Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "MIT"]
 confidence-threshold = 0.9
 # Named exceptions, each for one crate.
 exceptions = [
@@ -22,6 +34,10 @@ exceptions = [
     # proc-macro2): "(MIT OR Apache-2.0) AND Unicode-3.0". Build-time only,
     # nothing of it is linked; Unicode-3.0 is a permissive data licence.
     { crate = "unicode-ident", allow = ["Unicode-3.0"] },
+    # IDNA mapping tables (sspi -> url -> idna -> idna_adapter 1.1, pinned in
+    # Cargo.lock to keep the ICU4X crates out): "(Apache-2.0 OR MIT) AND
+    # Unicode-3.0", a permissive data licence.
+    { crate = "idna_mapping", allow = ["Unicode-3.0"] },
 ]
 
 # The workspace's own crates (publish = false) are netvfs.
@@ -39,6 +55,12 @@ skip = [
     # tracing-attributes (tokio, zbus) have no release on syn 3 yet, the rest
     # of the zbus tree is on syn 3.
     { crate = "syn@2", reason = "enumflags2_derive and tracing-attributes are still on syn 2" },
+    # sspi 0.23 (netvfs-smb) depends on getrandom 0.3 directly; RustCrypto's
+    # current releases are on 0.4.
+    { crate = "getrandom@0.3", reason = "sspi 0.23 depends on getrandom 0.3 directly" },
+    # sspi's picky 7.0.0-rc.26 is on base64 0.22, its picky-asn1-x509 0.15
+    # on 0.23.
+    { crate = "base64@0.22", reason = "picky 7.0.0-rc.26 (sspi) has no release on base64 0.23" },
 ]
 
 [sources]
