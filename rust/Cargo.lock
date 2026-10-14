@@ -351,6 +351,7 @@ dependencies = [
  "futures-lite",
  "libc",
  "netvfs-bridge-proto",
+ "netvfs-vfs",
  "tokio",
  "zbus",
  "zeroize",
@@ -361,11 +362,20 @@ name = "netvfs-bridge-proto"
 version = "0.5.0"
 dependencies = [
  "futures-lite",
+ "netvfs-vfs",
  "serde",
  "serde_json",
  "sha2",
  "tokio",
  "zbus",
+ "zeroize",
+]
+
+[[package]]
+name = "netvfs-vfs"
+version = "0.5.0"
+dependencies = [
+ "tokio",
  "zeroize",
 ]
 
