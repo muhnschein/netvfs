@@ -2,7 +2,8 @@
 #
 #   make               build everything (vendored libraries first)
 #   make check         Rust checks, unit tests, then the interop suite (needs docker)
-#   make check-rust    the Rust workspace (rust/): format, lint, tests (nextest), lockfile, MSRV
+#   make check-rust    the Rust workspace (rust/): format, lint, tests (nextest), lockfile, MSRV,
+#                      netvfs-smb's crypto fence
 #   make check-unit    unit tests only
 #   make check-rust-ffi the Rust side of the C ABI against the built libnetvfs-bridge-ffi.so
 #   make check-interop interop suite against containerised servers
@@ -83,6 +84,7 @@ check: check-rust check-unit check-rust-ffi check-interop
 
 check-rust:
 	./tools/ci/check-lockfile.sh rust/Cargo.lock
+	./tools/ci/check-crypto-fence.sh
 	cd rust && $(CARGO) fmt --all -- --check
 	cd rust && $(CARGO) clippy --locked --workspace --all-targets $(RUST_FEATURES) -- -D warnings
 	cd rust && $(RUST_ENV) $(CARGO) nextest run --locked --workspace $(RUST_FEATURES) --profile $(NEXTEST_PROFILE)
