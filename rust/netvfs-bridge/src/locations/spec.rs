@@ -381,8 +381,11 @@ mod tests {
         let copy = spec.clone();
         assert_eq!(copy.ad_hoc_secret.as_ref().unwrap().user(), "u");
         assert_eq!(copy.ad_hoc_secret.as_ref().unwrap().secret().as_slice(), b"pw");
+        // Not echoed on failure: a Debug output that fails the check is the
+        // one that shows the secret.
         let shown = format!("{secret:?}");
-        assert!(shown.contains("secret_bytes: 2") && !shown.contains("pw"), "{shown}");
+        assert!(shown.contains("secret_bytes: 2"), "the Debug output does not count the secret");
+        assert!(!shown.contains("pw"), "the Debug output shows the secret");
         spec.ad_hoc_secret.as_ref().unwrap().wipe();
         assert!(copy.ad_hoc_secret.as_ref().unwrap().secret().is_empty());
         assert!(format!("{secret:?}").contains("secret_bytes: 0"));

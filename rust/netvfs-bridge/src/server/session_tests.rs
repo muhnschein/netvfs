@@ -274,6 +274,10 @@ async fn flow_control_bounded() {
     assert!(last * bytes > FLOW_LIMIT, "{last} batches of {bytes} bytes");
     let in_flight = outbox.flow().in_flight();
     assert!(in_flight > FLOW_LIMIT && in_flight <= FLOW_LIMIT + bytes, "{in_flight}");
+    // The resident set is the whole process's: this test needs a process of
+    // its own, as cargo nextest gives every test (tools/ci/cross-build.sh
+    // runs it alone); next to the other tests of a plain `cargo test` their
+    // memory counts as well.
     // Under AddressSanitizer freed memory stays resident in its quarantine,
     // so the resident set says nothing there (rust-sanitize.sh sets the
     // variable); the budget above bounds what is queued all the same.

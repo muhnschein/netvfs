@@ -38,9 +38,14 @@ if [ "$mode" = test ]; then
     # qemu-user cannot run faithfully; they run natively on the host. So do
     # the bridge's tests of a helper that cannot be started: under qemu-user
     # posix_spawn reports a failed exec as a started child that exits 127.
+    # flow_control_bounded measures the resident set of the whole process,
+    # so it runs in a process of its own (as under cargo nextest, make
+    # check-rust): next to the other tests their memory counts as well.
+    flow=server::session::tests::flow_control_bounded
     cargo test --locked --workspace --target "$triple" -- --skip sandbox \
         --skip accounts::helper::tests::failures_list_nothing \
-        --skip accounts::helper::tests::files_are_fetched
+        --skip accounts::helper::tests::files_are_fetched --skip "$flow"
+    cargo test --locked -p netvfs-bridge --lib --target "$triple" -- --exact "$flow"
     exit 0
 fi
 cargo build --release --locked --workspace --target "$triple" --bins
