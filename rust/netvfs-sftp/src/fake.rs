@@ -235,6 +235,15 @@ impl Fake {
         tokio::spawn(async move { fake.run(stream).await })
     }
 
+    /// Serves one client on any stream (an SSH channel) until it closes.
+    pub fn serve_stream<S: AsyncRead + AsyncWrite + Unpin + Send + 'static>(
+        &self,
+        stream: S,
+    ) -> tokio::task::JoinHandle<()> {
+        let fake = self.clone();
+        tokio::spawn(async move { fake.run(stream).await })
+    }
+
     /// A connected pair: the client's end, and the server task.
     pub fn connect(&self) -> (DuplexStream, tokio::task::JoinHandle<()>) {
         let (client, server) = tokio::io::duplex(4 * MAX_PACKET);
