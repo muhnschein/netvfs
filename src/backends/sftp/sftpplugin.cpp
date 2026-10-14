@@ -15,7 +15,11 @@ class SftpPlugin : public QObject, public BackendFactory, public SshKeyTools
 
 public:
     QString provider() const override { return QStringLiteral("sftp"); }
-    Backend *create() override { return createSftpBackend(); }
+    Result create(Backend **out) override
+    {
+        *out = createSftpBackend();
+        return Result::success();
+    }
 
     Result generate(SshKeyMaterial *out) override { return generateSshKey(out); }
     Result importKey(const QByteArray &fileContents, const QByteArray &passphrase,

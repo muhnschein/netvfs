@@ -1,0 +1,11 @@
+{
+  "targets": [
+    {
+      "name": "mem",
+      "provider": "mem",
+      "options": { "store": "conformance" },
+      "baseDir": "conformance",
+      "stallProxy": { "options": { "stall": "true" }, "engage": "", "release": "" }
+    }
+  ]
+}

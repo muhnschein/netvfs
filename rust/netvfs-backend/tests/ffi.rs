@@ -588,7 +588,13 @@ fn connect_and_authenticate() {
     let seen = c.connect(&[("store", "auth"), ("identity", "ssh-ed25519")]).unwrap().unwrap();
     assert_eq!(
         seen,
-        (NVB_IDENTITY_SSH, "ssh-ed25519".to_owned(), b"mem host key".to_vec(), String::new(), String::new())
+        (
+            NVB_IDENTITY_SSH,
+            "ssh-ed25519".to_owned(),
+            b"mem host key".to_vec(),
+            "alice@localhost:0 1000/1000 ms".to_owned(),
+            String::new()
+        )
     );
     assert_eq!(c.connect(&[("store", "auth"), ("secret", "pw")]).unwrap(), None);
     assert_eq!(name(c.auth(b"wrong", ptr::null())), "AuthFailed");
@@ -631,7 +637,7 @@ fn keyboard_interactive() {
     c.auth(b"", &raw const prompter).unwrap();
     assert_eq!(
         asker.asked,
-        [("mem".to_owned(), "Sign in as alice".to_owned(), vec![("Code?".to_owned(), 0)])]
+        [("mem".to_owned(), "Sign in as WORK\\alice".to_owned(), vec![("Code?".to_owned(), 0)])]
     );
     assert_eq!(asker.thread, Some(thread::current().id()));
     asker.answers = vec![b"41".to_vec()];
@@ -775,6 +781,9 @@ fn links_attributes_copies() {
     assert_eq!(name(blob(|out| unsafe { (t().read_link)(c.0, b(b"target"), out) })), "InvalidName");
     let link = c.stat(b"link", false).unwrap();
     assert_eq!((link.kind, link.target_kind), (LINK, FILE));
+    // An unknown time crosses as -1.
+    assert!(link.mtime > 0);
+    assert_eq!(link.atime, -1);
     assert_eq!(c.stat(b"link", true).unwrap().size, 4);
     res(unsafe { (t().make_hardlink)(c.0, b(b"target"), b(b"hard")) }).unwrap();
     assert_eq!(name(res(unsafe { (t().make_hardlink)(c.0, b(b"target"), b(b"hard")) })), "AlreadyExists");
@@ -1253,13 +1262,23 @@ fn panics_become_internal() {
     assert_no_leaks();
 }
 
+/// The runtime's threads by name. A new thread names itself once it runs,
+/// which on a loaded machine can be after the call that made it returned:
+/// waits up to 10 s for all of them.
 fn runtime_threads() -> Vec<String> {
-    std::fs::read_dir("/proc/self/task")
-        .unwrap()
-        .filter_map(|task| std::fs::read_to_string(task.unwrap().path().join("comm")).ok())
-        .map(|comm| comm.trim().to_owned())
-        .filter(|comm| comm.starts_with(THREAD_PREFIX))
-        .collect()
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let names: Vec<String> = std::fs::read_dir("/proc/self/task")
+            .unwrap()
+            .filter_map(|task| std::fs::read_to_string(task.unwrap().path().join("comm")).ok())
+            .map(|comm| comm.trim().to_owned())
+            .filter(|comm| comm.starts_with(THREAD_PREFIX))
+            .collect();
+        if names.len() >= WORKERS || Instant::now() > deadline {
+            return names;
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
 }
 
 #[test]

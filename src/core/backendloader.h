@@ -15,7 +15,8 @@ class NETVFS_EXPORT BackendLoader
 {
 public:
     static QStringList searchPaths();
-    // Returns a new backend for `provider`, or nullptr with `*result` set.
+    // Returns a new backend for `provider`, or nullptr with `*result` set:
+    // Unsupported without a plugin, else the plugin's reason.
     static Backend *create(const QString &provider, Result *result = nullptr);
     static bool isAvailable(const QString &provider);
     // The SFTP plugin's key operations, or nullptr if it is not installed.

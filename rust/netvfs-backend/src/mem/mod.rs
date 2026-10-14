@@ -12,10 +12,14 @@
 //! |---|---|
 //! | `store` | the tree to use |
 //! | `secret` | `authenticate` wants this secret, else `AuthFailed` |
+//! | `throttle` | `authenticate` fails with `RateLimited`, retry after this many ms |
 //! | `interactive`, `answer` | `authenticate` asks the prompter this question and wants this answer |
-//! | `identity` | `connect` reports an SSH identity of this algorithm |
+//! | `identity` | `connect` reports an SSH identity of this algorithm; its fingerprint is `<user>@<host>:<port> <connect>/<request timeout> ms` |
 //! | `stall` | `true`: every call after `authenticate` waits for cancel; `ignore`: waits for ever, ignoring cancel |
 //! | `panic` | the call of this name (`stat`, `read`, `position`, …) panics |
+//!
+//! The prompt's instruction is `Sign in as <user>`, or with a domain
+//! `Sign in as <domain>\<user>`.
 
 mod tree;
 
@@ -142,10 +146,18 @@ impl Backend for Mem {
         session.hook("connect");
         self.session = Some(Arc::new(session));
         self.params = params.clone();
+        // The fingerprint repeats the parameters, so that a test sees them.
         Ok(params.option("identity").map(|algorithm| ServerIdentity {
             algorithm,
             public_key: b"mem host key".to_vec(),
-            fingerprint: String::new(),
+            fingerprint: format!(
+                "{}@{}:{} {}/{} ms",
+                params.username,
+                params.host,
+                params.port,
+                params.connect_timeout_ms,
+                params.request_timeout_ms
+            ),
         }))
     }
 
@@ -159,6 +171,10 @@ impl Backend for Mem {
         session.check()?;
         session.hook("authenticate");
         let refused = || Status::new(ErrorName::AuthFailed, "The credentials were refused");
+        if let Some(ms) = self.params.option("throttle") {
+            let ms = ms.parse().map_err(|e| Status::internal(format!("mem: throttle {ms}: {e}")))?;
+            return Err(Status::new(ErrorName::RateLimited, "Too many attempts").with_retry_after_ms(ms));
+        }
         if let Some(secret) = self.params.option("secret")
             && credentials.secret.as_slice() != secret.as_bytes()
         {
@@ -167,7 +183,11 @@ impl Backend for Mem {
         if let Some(question) = self.params.option("interactive") {
             let request = PromptRequest {
                 name: "mem".to_owned(),
-                instruction: format!("Sign in as {}", credentials.user),
+                instruction: if credentials.domain.is_empty() {
+                    format!("Sign in as {}", credentials.user)
+                } else {
+                    format!("Sign in as {}\\{}", credentials.domain, credentials.user)
+                },
                 prompts: vec![Prompt { text: question, echo: false }],
             };
             let answers = prompter.and_then(|p| p.answer(&request)).ok_or_else(refused)?;

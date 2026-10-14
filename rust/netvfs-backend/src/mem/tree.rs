@@ -254,6 +254,9 @@ impl Tree {
                 Err(_) => flags = flags.union(EntryFlags::TARGET_UNKNOWN),
             }
         }
+        // A symlink has only its modification time, as on servers that
+        // report no other (an entry's times may be unknown).
+        let link = matches!(node.data, Data::Link(_));
         Ok(Entry {
             name: name.to_vec(),
             kind: node.kind(),
@@ -262,8 +265,8 @@ impl Tree {
             mode: Some(node.mode),
             size: u64::try_from(size).ok(),
             mtime_ms: Some(node.mtime_ms),
-            ctime_ms: Some(node.ctime_ms),
-            atime_ms: Some(node.atime_ms),
+            ctime_ms: (!link).then_some(node.ctime_ms),
+            atime_ms: (!link).then_some(node.atime_ms),
             uid: Some(OWNER_ID),
             gid: Some(OWNER_ID),
             owner: OWNER.to_owned(),

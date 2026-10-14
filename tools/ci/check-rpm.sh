@@ -13,6 +13,9 @@
 #   - that C ABI, libnetvfs-bridge-ffi.so, exports one symbol, is hardened and
 #     sits where netvfs-bridge loads it from, next to the backend folder of
 #     libnetvfs's BackendLoader (check-ffi-lib.sh; doc/RUST.md);
+#   - libnetvfs-rs.so, the Rust backends, exports one symbol, links only the
+#     C runtime, needs no newer glibc than the target's, is hardened and sits
+#     where the plugins that load it look for it (check-rs-lib.sh);
 #   - libnetvfs-smb.so contains no share enumeration code (XP-3, SPEC 10.2
 #     G-SMB item 4; tools/ci/check-noshareenum.sh), and the check finds that
 #     code in the share helper when it is built;
@@ -151,6 +154,18 @@ if bridge_rpm=$(rpm_of netvfs-bridge); then
             fail "netvfs installs no backends in $backend_dir"
         fi
     fi
+fi
+
+# The Rust backends: the library in the main package, and every plugin of it
+# (a backend that looks up nvr_get) looks for it where the package puts it.
+rs_path=$(rpm -qpl "$main_rpm" | grep '/libnetvfs-rs\.so$' || true)
+if [ -z "$rs_path" ]; then
+    fail "netvfs contains no libnetvfs-rs.so"
+else
+    rs_plugins=$(grep -laF nvr_get "$work/main$(dirname "$rs_path")"/backends/libnetvfs-*.so || true)
+    # shellcheck disable=SC2086 # one word per file
+    sh tools/ci/check-rs-lib.sh "$work/main$rs_path" "$target_glibc" "$rs_path" $rs_plugins \
+        || fail "libnetvfs-rs.so: see above"
 fi
 
 # shellcheck disable=SC2086 # one word per file
