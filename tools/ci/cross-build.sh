@@ -38,9 +38,14 @@ if [ "$mode" = test ]; then
     # qemu-user cannot run faithfully; they run natively on the host. So do
     # the bridge's tests of a helper that cannot be started: under qemu-user
     # posix_spawn reports a failed exec as a started child that exits 127.
+    # The flow control test bounds the growth of the resident set, which is
+    # the whole process's: it runs alone, not beside tests in other threads
+    # (nextest gives every test its own process; cargo test does not).
+    flow=server::session::tests::flow_control_bounded
     cargo test --locked --workspace --target "$triple" -- --skip sandbox \
         --skip accounts::helper::tests::failures_list_nothing \
-        --skip accounts::helper::tests::files_are_fetched
+        --skip accounts::helper::tests::files_are_fetched --skip "$flow"
+    cargo test --locked --workspace --target "$triple" -- --exact "$flow"
     exit 0
 fi
 cargo build --release --locked --workspace --target "$triple" --bins
