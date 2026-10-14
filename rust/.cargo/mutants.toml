@@ -24,6 +24,10 @@ exclude_re = [
     # Diagnostics only: the sole effect is a line on stderr for whoever runs
     # it by hand; the probe's result is its exit status and check count.
     'netvfs-accounts/src/bin/probe\.rs:.*: replace report with \(\)$',
+    # Built only under --cfg netvfs_asan (tools/ci/rust-sanitize.sh):
+    # elsewhere the function does not exist, so its mutants change nothing.
+    # The weekly ASan run is its test (set_id_helper fails without it).
+    'netvfs-accounts/src/(main|bin/probe)\.rs:\d+:\d+: replace __asan_default_options ',
     # Diagnostics only: the sole effect is a line on stderr when the kernel
     # refuses Landlock or seccomp, which no test can make it do.
     'netvfs-accounts/src/sandbox\.rs:.*: replace warn with \(\)$',

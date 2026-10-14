@@ -16,6 +16,16 @@ use std::path::{Path, PathBuf};
 
 use netvfs_accounts::sandbox;
 
+/// The weekly ASan run only (`--cfg netvfs_asan`, tools/ci/rust-sanitize.sh):
+/// a set-id start cannot read `ASAN_OPTIONS` (its /proc/self/environ is not
+/// readable), and LeakSanitizer cannot stop the confined probe (no ptrace),
+/// so leak checking is off from the start.
+#[cfg(netvfs_asan)]
+#[unsafe(no_mangle)]
+extern "C" fn __asan_default_options() -> *const std::ffi::c_char {
+    c"detect_leaks=0".as_ptr()
+}
+
 const NO_LANDLOCK: i32 = 77;
 const NO_SECCOMP: i32 = 99;
 /// fchmodat2 (Linux 6.6), the same number on every architecture.

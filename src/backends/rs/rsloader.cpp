@@ -3,6 +3,7 @@
 
 #include <QtCore/QByteArray>
 
+#include <cstring>
 #include <dlfcn.h>
 #include <mutex>
 
@@ -32,7 +33,12 @@ const nvr_table *table(Result *result)
         if (path.isEmpty())
             path = QByteArrayLiteral(NETVFS_RS_LIB_PATH);
         void *handle = dlopen(path.constData(), RTLD_NOW | RTLD_LOCAL);
-        const auto get = handle ? reinterpret_cast<nvr_get_fn>(dlsym(handle, NVR_ENTRY)) : nullptr;
+        void *symbol = handle ? dlsym(handle, NVR_ENTRY) : nullptr;
+        // POSIX gives data and function pointers one representation; C++17
+        // has no cast between them but a copy of the bytes.
+        nvr_get_fn get = nullptr;
+        static_assert(sizeof get == sizeof symbol);
+        std::memcpy(&get, &symbol, sizeof get);
         if (!get) {
             *result = Result(Error::Internal, QStringLiteral("netvfs Rust backends not installed"),
                              QString::fromLocal8Bit(dlerror()));
