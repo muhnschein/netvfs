@@ -142,7 +142,10 @@ class NETVFS_EXPORT BackendFactory
 public:
     virtual ~BackendFactory();
     virtual QString provider() const = 0;
-    virtual Backend *create() = 0;
+    // A new backend in `*out`, which the caller owns; nullptr with the
+    // reason when the plugin cannot make one (a plugin of the Rust backends
+    // without libnetvfs-rs.so: Internal).
+    virtual Result create(Backend **out) = 0;
 };
 
 } // namespace NetVfs

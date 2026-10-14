@@ -18,7 +18,7 @@ class SmbBackendFactory : public QObject, public BackendFactory
 
 public:
     QString provider() const override;
-    Backend *create() override;
+    Result create(Backend **out) override;
 };
 
 } // namespace NetVfs

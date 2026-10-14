@@ -3,7 +3,8 @@
 # Packages of SPEC-v2 XP-1 (amends SPEC 4.1, P-4, P-6):
 #
 #   netvfs          libnetvfs, all protocol backends and the SMB share helper,
-#                   the account UI module, the account providers, the Files
+#                   libnetvfs-rs.so (the Rust backends the plugins load), the
+#                   account UI module, the account providers, the Files
 #                   services, netvfs-cli, translations
 #   netvfs-backup   SFTP and SMB backups: services, Buteo plugins and profiles
 #   netvfs-bridge   netvfs-bridge and its setgid accounts helper, for
@@ -51,11 +52,12 @@ BuildRequires: pkgconfig(accounts-qt5)
 BuildRequires: pkgconfig(libsignon-qt5)
 BuildRequires: pkgconfig(buteosyncfw5) >= 0.10.0
 # SPEC-v2 XB-2, XB-2a: netvfs-bridge and its accounts helper are Rust 1.95,
-# which no SDK target ships yet: CI cross-builds them with the SDK's own
-# compiler and sysroot before this build (tools/ci/cross-build.sh), and the
-# spec installs those binaries (doc/RUST.md "Cross build"). rpm still derives
-# their library dependencies. The bridge speaks peer-to-peer D-Bus with zbus,
-# so the package build no longer needs libdbus (the tests still do).
+# which no SDK target ships yet: CI cross-builds them, and libnetvfs-rs.so,
+# with the SDK's own compiler and sysroot before this build
+# (tools/ci/cross-build.sh), and the spec installs them (doc/RUST.md "Cross
+# build"). rpm still derives their library dependencies. The bridge speaks
+# peer-to-peer D-Bus with zbus, so the package build no longer needs libdbus
+# (the tests still do).
 
 Requires:   sailfish-version >= 5.2.0
 Requires:   sailfishsilica-qt5
@@ -119,7 +121,8 @@ consumers over a socket in their data folder, without handing out secrets.
 %build
 # SPEC P-1..P-3: vendored libraries first, static and position-independent.
 ./vendor/build-vendor.sh "$PWD/build-vendor"
-# The Rust binaries, cross-built by CI into rust/prebuilt (see above).
+# The Rust binaries and libnetvfs-rs.so, cross-built by CI into
+# rust/prebuilt (see above).
 %qmake5 -r VENDOR_PREFIX="$PWD/build-vendor" NETVFS_BUILD_TESTS=0 "VERSION=%{version}" \
     NETVFS_RUST_PREBUILT="$PWD/rust/prebuilt"
 %make_build
@@ -165,6 +168,9 @@ systemctl-user daemon-reload || :
 %{_libdir}/netvfs/backends/libnetvfs-sftp.so
 %{_libdir}/netvfs/backends/libnetvfs-smb.so
 %{_libdir}/netvfs/backends/libnetvfs-local.so
+# The Rust backends, loaded by their plugins with dlopen next to the backend
+# folder (doc/RUST.md).
+%{_libdir}/netvfs/libnetvfs-rs.so
 %dir %{_prefix}/libexec/netvfs
 %{_prefix}/libexec/netvfs/netvfs-smb-shares
 %dir %{_datadir}/netvfs

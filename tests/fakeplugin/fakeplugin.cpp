@@ -69,11 +69,12 @@ class FakeBackendFactory : public QObject, public NetVfs::BackendFactory
 
 public:
     QString provider() const override { return QStringLiteral("fake"); }
-    NetVfs::Backend *create() override
+    NetVfs::Result create(NetVfs::Backend **out) override
     {
         static std::once_flag seeded;
         std::call_once(seeded, seedFromEnvironment);
-        return new NetVfs::Test::FakeBackend;
+        *out = new NetVfs::Test::FakeBackend;
+        return NetVfs::Result::success();
     }
 };
 

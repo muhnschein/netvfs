@@ -66,12 +66,12 @@ QStringList BackendLoader::searchPaths()
 Backend *BackendLoader::create(const QString &provider, Result *result)
 {
     BackendFactory *factory = factoryFor(provider);
-    Backend *backend = factory ? factory->create() : nullptr;
-    if (result) {
-        *result = backend ? Result::success()
-                          : Result(Error::Unsupported,
-                                   QStringLiteral("No backend installed for provider \"%1\"").arg(provider));
-    }
+    Backend *backend = nullptr;
+    const Result r = factory ? factory->create(&backend)
+                             : Result(Error::Unsupported,
+                                      QStringLiteral("No backend installed for provider \"%1\"").arg(provider));
+    if (result)
+        *result = r;
     return backend;
 }
 
