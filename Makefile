@@ -45,7 +45,7 @@ TEST_ENV = QT_QPA_PLATFORM=offscreen
 CARGO ?= cargo
 # cargo nextest profile (rust/.config/nextest.toml); CI uses "ci".
 NEXTEST_PROFILE ?= default
-RUST_FEATURES = --features netvfs-accounts/probe,netvfs-bridge/testing,netvfs-bridge/test-bins
+RUST_FEATURES = --features netvfs-accounts/probe,netvfs-bridge/testing,netvfs-bridge/test-bins,netvfs-backend/testing
 # rust-toolchain.toml would override the toolchain a job installs, so the
 # oldest supported one (rust-version) is named explicitly.
 RUST_MSRV = $(shell sed -n -e 's/^rust-version = "\([0-9]*\.[0-9]*\)"/\1.0/p' \

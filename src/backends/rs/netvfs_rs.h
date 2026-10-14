@@ -32,10 +32,13 @@
  * Errors: a function returning nvb_error * returns NULL on success.
  *
  * Threads:
- *  S1 conn_* functions and the functions of a connection's handles: only the
- *     owner thread, the thread that called conn_new. The exception is
- *     cancel: any thread, also while an owner-thread call runs. It must never
- *     overlap or follow conn_free; the caller serialises the two.
+ *  S1 conn_* functions and the functions of a connection's handles: one call
+ *     at a time per connection, from any thread (C-8: a Backend is used by
+ *     one thread at a time, not always the one that made it). A call that
+ *     overlaps another of the same connection, or is made from inside one
+ *     of its callbacks, returns Internal. The exception is cancel: any
+ *     thread, also while a call runs. It must never overlap or follow
+ *     conn_free; the caller serialises the two.
  *  S2 free, reply_set and the key_* functions: any thread.
  *  S3 Each call blocks its thread until it is done (NetVfs::Backend is
  *     blocking, C-8). Rust runs its own runtime threads (nvr-io-*) for
@@ -98,7 +101,7 @@ typedef struct nvr_table {
     void (*free)(void *p);                                   /* also wipes nvr_key */
     void (*reply_set)(nvb_reply *r, const nvb_bytes *answers, size_t n);
 
-    /* Lifecycle (owner thread = the creating thread; cancel any thread). */
+    /* Lifecycle (one call at a time per connection; cancel any thread). */
     nvb_error *(*conn_new)(nvb_bytes provider, nvr_conn **out);   /* "sftp", "smb", "mem" (testing) */
     void (*conn_free)(nvr_conn *c);                                /* disconnects, frees handles */
     void (*cancel)(nvr_conn *c);

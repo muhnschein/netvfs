@@ -6,7 +6,7 @@
 # plugins). See doc/RUST.md.
 [workspace]
 resolver = "3"
-members = ["netvfs-accounts", "netvfs-bridge-proto", "netvfs-bridge", "netvfs-vfs"]
+members = ["netvfs-accounts", "netvfs-bridge-proto", "netvfs-bridge", "netvfs-vfs", "netvfs-backend"]
 # The fuzz targets build with a nightly toolchain of their own (doc/RUST.md).
 exclude = ["fuzz"]
 
@@ -96,6 +96,21 @@ codegen-units = 1
 opt-level = "s"
 debug = false
 strip = "symbols"
+
+# libnetvfs-rs.so (netvfs-backend): a panic must unwind to the table
+# function that catches it and reports Internal (design §1.4), while the
+# binaries keep aborting. Cargo sets `panic` per profile, not per package,
+# so the library has profiles of its own: `cargo build --profile rs-release
+# -p netvfs-backend` for the package, `rs-test` (with `--features testing`)
+# for the C++ tests that load it.
+[profile.rs-release]
+inherits = "release"
+panic = "unwind"
+lto = "fat"
+
+[profile.rs-test]
+inherits = "dev"
+panic = "unwind"
 
 # Tests start the helper many times; a fast build matters more than size.
 [profile.dev]

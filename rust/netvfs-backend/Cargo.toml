@@ -1,0 +1,38 @@
+[package]
+name = "netvfs-backend"
+description = "libnetvfs-rs.so: the Rust backends behind the C++ backend plugins (src/backends/rs/netvfs_rs.h)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+# The cdylib is libnetvfs_rs.so, installed as libnetvfs-rs.so; it exports
+# nvr_get only (rustc exports a cdylib's #[no_mangle] functions and nothing
+# else). Build it with `--profile rs-release` (rust/Cargo.toml): it must
+# unwind, so that a panic becomes Internal instead of crossing into C++.
+# The rlib is for tests/ffi.rs.
+[lib]
+name = "netvfs_rs"
+crate-type = ["cdylib", "rlib"]
+
+[features]
+# Test support: the in-memory backend `mem` (provider "mem") and its test
+# hooks. Never in a shipped build.
+testing = ["dep:sha2"]
+
+[dependencies]
+netvfs-vfs = { path = "../netvfs-vfs" }
+libc = "0.2"
+tokio = { version = "1", default-features = false, features = ["rt-multi-thread", "time", "sync"] }
+zeroize = "1"
+# mem's checksum (sha256); already in the tree (netvfs-bridge-proto's fake).
+sha2 = { version = "0.10", optional = true }
+
+# The table against `mem` from Rust, as the shim calls it.
+[[test]]
+name = "ffi"
+required-features = ["testing"]
