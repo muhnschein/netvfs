@@ -76,3 +76,13 @@ impl db::PrivilegedOwner for SystemOwner {
         sandbox::privileged_ids()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn system_owner_is_the_user_privileged() {
+        assert_eq!(db::PrivilegedOwner::privileged_ids(&SystemOwner), sandbox::privileged_ids());
+    }
+}

@@ -128,4 +128,14 @@ exclude_re = [
     # (netvfs 0.4's tst_bridgeserver skipped this as well).
     # needs_insecure_consent and insecure_details are unit-tested.
     'netvfs-bridge/src/core/admin\.rs:\d+:\d+: (replace Core::insecure_answered with \(\)|delete ! in Core::insecure_answered)$',
+    # ---- netvfs-accounts, except sandbox.rs and bin/probe.rs ----
+    # Equivalent: the open mode (SQLITE_OPEN_READ_ONLY or _READ_WRITE) and
+    # SQLITE_OPEN_NO_MUTEX are disjoint bits, so `^` is `|`.
+    'netvfs-accounts/src/db\.rs:\d+:\d+: replace \| with \^ in Database::open$',
+    # Equivalent where the tests run: SystemOwner hands on
+    # sandbox::privileged_ids, which is None without a user `privileged`
+    # (Sailfish OS only); system_owner_is_the_user_privileged catches the
+    # other values.
+    'netvfs-accounts/src/lib\.rs:\d+:\d+: replace <impl db::PrivilegedOwner for SystemOwner>::privileged_ids -> Option<\(u32, u32\)> with None$',
+    # ---- end netvfs-accounts ----
 ]
