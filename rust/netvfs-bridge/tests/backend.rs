@@ -553,7 +553,7 @@ fn ad_hoc_identity_question(env: &Env) {
     assert_eq!(*kind, IDENTITY_UNKNOWN);
     assert_eq!(text(&details["location"]), declined);
     assert_eq!(text(&details["host"]), "fake.example");
-    assert_eq!(text(&details["kind"]), "ssh");
+    assert_eq!(text(&details["provider"]), "fake");
     assert!(text(&details["fingerprint"]).starts_with("SHA256:"));
     assert!(rig.pins.map.lock().unwrap().is_empty());
     rig.book.abandon_ad_hoc(&declined);
