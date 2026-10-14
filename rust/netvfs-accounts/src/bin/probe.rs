@@ -8,8 +8,10 @@
 #![allow(unsafe_code)]
 
 use std::ffi::CString;
+use std::os::linux::net::SocketAddrExt;
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::MetadataExt;
+use std::os::unix::net::{SocketAddr, UnixStream};
 use std::path::{Path, PathBuf};
 
 use netvfs_accounts::sandbox;
@@ -42,6 +44,12 @@ impl Checks {
             report(&format!("check {} failed", self.count));
         }
     }
+
+    /// A check that a call failed (`result` -1) with errno `error`.
+    fn fails(&mut self, result: i64, error: i32) {
+        let actual = error_of(result);
+        self.check(actual == error);
+    }
 }
 
 /// Writes a check's failure to stderr. The exit status carries the result;
@@ -62,8 +70,9 @@ fn errno() -> i32 {
     std::io::Error::last_os_error().raw_os_error().unwrap_or(0)
 }
 
-fn fails_with(result: i64, error: i32) -> bool {
-    result == -1 && errno() == error
+/// The errno of a call that failed (`result` -1), 0 for one that did not.
+fn error_of(result: i64) -> i32 {
+    if result == -1 { errno() } else { 0 }
 }
 
 fn c(path: &Path) -> CString {
@@ -74,20 +83,19 @@ fn descriptors(check: &mut Checks, inherited: i32) {
     // SAFETY: querying a descriptor.
     check.check(unsafe { libc::fcntl(inherited, libc::F_GETFD) } != -1);
     sandbox::close_inherited_descriptors();
-    // Closed by the caller, /dev/null by now (Rust's runtime).
-    let null = std::fs::metadata("/dev/null").ok();
+    // Closed by the caller, /dev/null by now (Rust's runtime): the null
+    // device's type and number.
+    let null = std::fs::metadata("/dev/null").map(|m| (m.mode() & libc::S_IFMT, m.rdev())).ok();
     for fd in [0, 2] {
         // SAFETY: an all-zero stat is a valid value to overwrite.
         let mut st: libc::stat = unsafe { std::mem::zeroed() };
-        // SAFETY: `st` is writable.
-        let ok = unsafe { libc::fstat(fd, &raw mut st) } == 0;
-        check.check(
-            ok && st.st_mode & libc::S_IFMT == libc::S_IFCHR
-                && null.as_ref().is_some_and(|n| n.rdev() == st.st_rdev),
-        );
+        // SAFETY: `st` is writable. A descriptor that is not open leaves
+        // the zeros, which are no device.
+        unsafe { libc::fstat(fd, &raw mut st) };
+        check.check(Some((st.st_mode & libc::S_IFMT, st.st_rdev)) == null);
     }
     // SAFETY: querying a descriptor.
-    check.check(fails_with(i64::from(unsafe { libc::fcntl(inherited, libc::F_GETFD) }), libc::EBADF));
+    check.fails(i64::from(unsafe { libc::fcntl(inherited, libc::F_GETFD) }), libc::EBADF);
 }
 
 fn process_state(check: &mut Checks) {
@@ -125,6 +133,22 @@ fn process_state(check: &mut Checks) {
     }
 }
 
+/// clone(2) with the namespace `flags` and CLONE_SIGHAND without CLONE_VM,
+/// which the kernel refuses (EINVAL) before it makes anything, so only the
+/// filter's EPERM says that it saw the flags. A child, should the call go
+/// through after all, ends at once.
+fn clone_refused(flags: libc::c_int) -> i64 {
+    // SAFETY: a clone(2) with plain values; a child exits below.
+    let result = unsafe {
+        libc::syscall(libc::SYS_clone, libc::c_long::from(flags | libc::CLONE_SIGHAND), 0, 0, 0, 0)
+    };
+    if result == 0 {
+        // SAFETY: ends the child without running anything of the parent's.
+        unsafe { libc::_exit(0) };
+    }
+    result
+}
+
 fn syscalls(check: &mut Checks, dir: &Path) -> i32 {
     if !sandbox::restrict_syscalls() {
         return NO_SECCOMP;
@@ -138,29 +162,43 @@ fn syscalls(check: &mut Checks, dir: &Path) -> i32 {
     // SAFETY: syscalls on valid, NUL-terminated paths and plain values.
     unsafe {
         let argv = [c"false".as_ptr(), std::ptr::null()];
-        check.check(fails_with(i64::from(libc::execv(c"/bin/false".as_ptr(), argv.as_ptr())), libc::EPERM));
-        check.check(fails_with(i64::from(libc::socket(libc::AF_INET, libc::SOCK_STREAM, 0)), libc::EPERM));
-        check.check(fails_with(i64::from(libc::socket(libc::AF_INET6, libc::SOCK_DGRAM, 0)), libc::EPERM));
-        check.check(fails_with(i64::from(libc::socket(libc::AF_NETLINK, libc::SOCK_RAW, 0)), libc::EPERM));
+        check.fails(i64::from(libc::execv(c"/bin/false".as_ptr(), argv.as_ptr())), libc::EPERM);
+        check.fails(i64::from(libc::socket(libc::AF_INET, libc::SOCK_STREAM, 0)), libc::EPERM);
+        check.fails(i64::from(libc::socket(libc::AF_INET6, libc::SOCK_DGRAM, 0)), libc::EPERM);
+        check.fails(i64::from(libc::socket(libc::AF_NETLINK, libc::SOCK_RAW, 0)), libc::EPERM);
         check.check(libc::socket(libc::AF_UNIX, libc::SOCK_STREAM, 0) >= 0);
         let mut pair = [0; 2];
         check.check(libc::socketpair(libc::AF_UNIX, libc::SOCK_STREAM, 0, pair.as_mut_ptr()) == 0);
-        check.check(fails_with(i64::from(libc::unshare(libc::CLONE_NEWUSER)), libc::EPERM));
-        check.check(fails_with(libc::syscall(libc::SYS_bpf, 0, 0, 0), libc::EPERM));
+        check.fails(i64::from(libc::unshare(libc::CLONE_NEWUSER)), libc::EPERM);
+        check.fails(libc::syscall(libc::SYS_bpf, 0, 0, 0), libc::EPERM);
+    }
+    // No new namespace of any kind through clone either (clone3 below).
+    for namespace in [
+        libc::CLONE_NEWNS,
+        libc::CLONE_NEWUSER,
+        libc::CLONE_NEWPID,
+        libc::CLONE_NEWNET,
+        libc::CLONE_NEWIPC,
+        libc::CLONE_NEWUTS,
+        libc::CLONE_NEWCGROUP,
+    ] {
+        check.fails(clone_refused(namespace), libc::EPERM);
+    }
+    // Any other clone reaches the kernel.
+    check.fails(clone_refused(0), libc::EINVAL);
+    // SAFETY: as above.
+    unsafe {
         // No file with a setuid or setgid bit, however it is made.
         let fd = libc::open(file.as_ptr(), libc::O_CREAT | libc::O_WRONLY, 0o600);
         check.check(fd >= 0);
-        check.check(fails_with(i64::from(libc::fchmod(fd, 0o2755)), libc::EPERM));
-        check.check(fails_with(i64::from(libc::chmod(file.as_ptr(), 0o4755)), libc::EPERM));
-        check.check(fails_with(
-            i64::from(libc::fchmodat(libc::AT_FDCWD, file.as_ptr(), 0o2700, 0)),
-            libc::EPERM,
-        ));
+        check.fails(i64::from(libc::fchmod(fd, 0o2755)), libc::EPERM);
+        check.fails(i64::from(libc::chmod(file.as_ptr(), 0o4755)), libc::EPERM);
+        check.fails(i64::from(libc::fchmodat(libc::AT_FDCWD, file.as_ptr(), 0o2700, 0)), libc::EPERM);
         check.check(libc::chmod(file.as_ptr(), 0o640) == 0);
-        check.check(fails_with(
+        check.fails(
             i64::from(libc::open(other.as_ptr(), libc::O_CREAT | libc::O_WRONLY, 0o2755)),
             libc::EPERM,
-        ));
+        );
         // Without O_CREAT the mode is unused, whatever a raw syscall passes.
         check.check(
             libc::syscall(libc::SYS_openat, libc::AT_FDCWD, file.as_ptr(), libc::O_RDONLY, 0o6755) >= 0,
@@ -168,50 +206,62 @@ fn syscalls(check: &mut Checks, dir: &Path) -> i32 {
         check.check(
             libc::syscall(libc::SYS_openat, libc::AT_FDCWD, file.as_ptr(), libc::O_WRONLY, 0o6755) >= 0,
         );
-        check.check(fails_with(i64::from(libc::mkdir(folder.as_ptr(), 0o2755)), libc::EPERM));
+        check.fails(i64::from(libc::mkdir(folder.as_ptr(), 0o2755)), libc::EPERM);
         // The *at calls themselves (glibc uses the old ones where they exist).
-        check.check(fails_with(
-            libc::syscall(libc::SYS_mkdirat, libc::AT_FDCWD, folder.as_ptr(), 0o2755),
-            libc::EPERM,
-        ));
-        check.check(fails_with(
+        check.fails(libc::syscall(libc::SYS_mkdirat, libc::AT_FDCWD, folder.as_ptr(), 0o2755), libc::EPERM);
+        check.fails(
             libc::syscall(libc::SYS_mknodat, libc::AT_FDCWD, other.as_ptr(), libc::S_IFREG | 0o4644, 0),
             libc::EPERM,
-        ));
-        check.check(fails_with(
-            libc::syscall(FCHMODAT2, libc::AT_FDCWD, file.as_ptr(), 0o2700, 0),
-            libc::EPERM,
-        ));
-        check.check(fails_with(i64::from(libc::creat(other.as_ptr(), 0o2755)), libc::EPERM));
+        );
+        check.fails(libc::syscall(FCHMODAT2, libc::AT_FDCWD, file.as_ptr(), 0o2700, 0), libc::EPERM);
+        check.fails(i64::from(libc::creat(other.as_ptr(), 0o2755)), libc::EPERM);
         check.check(libc::mkdir(folder.as_ptr(), 0o700) == 0);
         // O_DIRECTORY is part of O_TMPFILE, but alone creates nothing.
         check.check(
             libc::syscall(libc::SYS_openat, libc::AT_FDCWD, folder.as_ptr(), libc::O_DIRECTORY, 0o6755) >= 0,
         );
-        check.check(fails_with(
+        check.fails(
             i64::from(libc::open(folder.as_ptr(), libc::O_TMPFILE | libc::O_WRONLY, 0o2755)),
             libc::EPERM,
-        ));
-        check.check(fails_with(libc::ptrace(libc::PTRACE_TRACEME, 0, 0, 0), libc::EPERM));
+        );
+        check.fails(libc::ptrace(libc::PTRACE_TRACEME, 0, 0, 0), libc::EPERM);
         // clone3 and openat2 fail with ENOSYS, so that glibc falls back.
-        check.check(fails_with(libc::syscall(435, 0, 0), libc::ENOSYS));
-        check.check(fails_with(libc::syscall(437, 0, 0, 0, 0), libc::ENOSYS));
+        check.fails(libc::syscall(435, 0, 0), libc::ENOSYS);
+        check.fails(libc::syscall(437, 0, 0, 0, 0), libc::ENOSYS);
     }
     // Threads still start.
     check.check(std::thread::spawn(|| true).join().unwrap_or(false));
     0
 }
 
-fn filesystem(check: &mut Checks, allowed: &Path, denied: &Path) -> i32 {
-    let restriction =
-        sandbox::restrict_filesystem(&[allowed.to_owned(), PathBuf::from("/nonexistent/accounts")], false);
+/// `allowed` is the database folder. `denied` holds what the test made
+/// there: the file `secret`, the empty folder `empty`, and `file` and the
+/// FIFO `fifo`, which are writable paths of their own. `bus` names an
+/// abstract socket the test listens on. `abstract_bus`: as the helper with a
+/// session bus on an abstract socket.
+fn filesystem(check: &mut Checks, allowed: &Path, denied: &Path, bus: &Path, abstract_bus: bool) -> i32 {
+    // With descriptor 0 free, the ruleset is descriptor 0: still one.
+    // SAFETY: closing stdin, which the probe does not read.
+    unsafe { libc::close(0) };
+    let writable = [
+        allowed.to_owned(),
+        PathBuf::from("/nonexistent/accounts"),
+        denied.join("file"),
+        denied.join("fifo"),
+    ];
+    let restriction = sandbox::restrict_filesystem(&writable, abstract_bus);
     if restriction.abi == 0 {
         return NO_LANDLOCK;
     }
     check.check(restriction.enforced);
     let created = c(&allowed.join("accounts.db-wal"));
-    let secret = c(&denied.join("secret"));
-    let outside = c(&denied.join("planted"));
+    let at = |name: &str| c(&denied.join(name));
+    let [secret, empty, file, fifo] = ["secret", "empty", "file", "fifo"].map(at);
+    // What the checks try to make there.
+    let [planted, folder, char_device, block_device, socket, pipe, link] =
+        ["planted", "folder", "char", "block", "socket", "pipe", "link"].map(at);
+    let denied = c(denied);
+    let argv = [c"false".as_ptr(), std::ptr::null()];
     // SAFETY: syscalls on valid, NUL-terminated paths and plain values.
     unsafe {
         // The database folder: create, write, truncate, remove.
@@ -220,19 +270,36 @@ fn filesystem(check: &mut Checks, allowed: &Path, denied: &Path) -> i32 {
         check.check(libc::write(fd, b"x".as_ptr().cast(), 1) == 1);
         check.check(libc::ftruncate(fd, 0) == 0);
         check.check(libc::unlink(created.as_ptr()) == 0);
-        // Anything else: read-only system folders, nothing beyond them.
+        // Read-only system folders, and /dev/null.
         check.check(libc::open(c"/etc/passwd".as_ptr(), libc::O_RDONLY) >= 0);
         let null = libc::open(c"/dev/null".as_ptr(), libc::O_WRONLY);
         check.check(libc::write(null, b"x".as_ptr().cast(), 1) == 1);
         // A file, not a folder, of the system ones.
         check.check(libc::open(c"/dev/urandom".as_ptr(), libc::O_RDONLY) >= 0);
-        check.check(fails_with(i64::from(libc::open(secret.as_ptr(), libc::O_RDONLY)), libc::EACCES));
-        check.check(fails_with(
-            i64::from(libc::open(outside.as_ptr(), libc::O_CREAT | libc::O_WRONLY, 0o600)),
+        // Nothing beyond them: each right of ABI 1 is refused there, a
+        // device also before the capability check (EPERM, as non-root).
+        check.fails(i64::from(libc::open(secret.as_ptr(), libc::O_RDONLY)), libc::EACCES);
+        check.fails(i64::from(libc::open(secret.as_ptr(), libc::O_WRONLY)), libc::EACCES);
+        check.fails(i64::from(libc::open(denied.as_ptr(), libc::O_DIRECTORY)), libc::EACCES);
+        check.fails(i64::from(libc::execv(c"/bin/false".as_ptr(), argv.as_ptr())), libc::EACCES);
+        check.fails(
+            i64::from(libc::open(planted.as_ptr(), libc::O_CREAT | libc::O_WRONLY, 0o600)),
             libc::EACCES,
-        ));
-        let argv = [c"false".as_ptr(), std::ptr::null()];
-        check.check(fails_with(i64::from(libc::execv(c"/bin/false".as_ptr(), argv.as_ptr())), libc::EACCES));
+        );
+        check.fails(i64::from(libc::mkdir(folder.as_ptr(), 0o700)), libc::EACCES);
+        check.fails(i64::from(libc::rmdir(empty.as_ptr())), libc::EACCES);
+        check.fails(i64::from(libc::unlink(secret.as_ptr())), libc::EACCES);
+        check.fails(i64::from(libc::mknod(char_device.as_ptr(), libc::S_IFCHR, 0)), libc::EACCES);
+        check.fails(i64::from(libc::mknod(block_device.as_ptr(), libc::S_IFBLK, 0)), libc::EACCES);
+        check.fails(i64::from(libc::mknod(socket.as_ptr(), libc::S_IFSOCK, 0)), libc::EACCES);
+        check.fails(i64::from(libc::mkfifo(pipe.as_ptr(), 0o600)), libc::EACCES);
+        check.fails(i64::from(libc::symlink(c"secret".as_ptr(), link.as_ptr())), libc::EACCES);
+        // Writable paths that are no folders have the file rights of a
+        // database folder: the FIFO's rule (its path is opened without
+        // waiting for a writer) lets it be read, the file's (from ABI 3)
+        // truncated.
+        check.check(libc::open(fifo.as_ptr(), libc::O_NONBLOCK) >= 0);
+        check.check(libc::truncate(file.as_ptr(), 0) == 0);
         if restriction.abi >= 4 {
             let tcp = libc::socket(libc::AF_INET, libc::SOCK_STREAM, 0);
             let local = libc::sockaddr_in {
@@ -242,21 +309,26 @@ fn filesystem(check: &mut Checks, allowed: &Path, denied: &Path) -> i32 {
                 sin_zero: [0; 8],
             };
             let size = libc::socklen_t::try_from(size_of::<libc::sockaddr_in>()).unwrap_or(16);
-            check.check(fails_with(
-                i64::from(libc::connect(tcp, std::ptr::addr_of!(local).cast(), size)),
-                libc::EACCES,
-            ));
+            check.fails(i64::from(libc::connect(tcp, std::ptr::addr_of!(local).cast(), size)), libc::EACCES);
         }
         if restriction.abi >= 6 {
-            check.check(fails_with(i64::from(libc::kill(libc::getppid(), 0)), libc::EPERM));
+            check.fails(i64::from(libc::kill(libc::getppid(), 0)), libc::EPERM);
         }
+    }
+    if restriction.abi >= 6 {
+        // The test's abstract socket is out of reach, unless the bus is one
+        // (the test sees whether the connection arrived).
+        let connected = SocketAddr::from_abstract_name(bus.as_os_str().as_bytes())
+            .and_then(|address| UnixStream::connect_addr(&address));
+        check.check(connected.err().and_then(|e| e.raw_os_error()) == (!abstract_bus).then_some(libc::EPERM));
     }
     0
 }
 
-/// `runtime`: the XDG_RUNTIME_DIR expected when the caller sets none, empty
-/// for none (the test knows whether /run/user/<uid> is the uid's folder).
-fn set_id_environment(check: &mut Checks, runtime: &Path) {
+/// `home`: the real uid's home folder in passwd. `runtime`: the
+/// XDG_RUNTIME_DIR expected when the caller sets none, empty for none (the
+/// test knows whether /run/user/<uid> is the uid's folder).
+fn set_id_environment(check: &mut Checks, home: &Path, runtime: &Path) {
     // SAFETY: the probe runs one check per process and has one thread.
     unsafe {
         std::env::set_var("HOME", "/tmp/someone-else");
@@ -275,13 +347,14 @@ fn set_id_environment(check: &mut Checks, runtime: &Path) {
     };
     check.check(before.rlim_max != 0);
     let removed = sandbox::prepare_set_id_process();
-    check.check(
-        removed.as_ref().is_some_and(|r| r.iter().any(|n| n == "ACCOUNTS") && !r.iter().any(|n| n == "LANG")),
-    );
+    check.check(removed.is_some());
+    // The caller's database and home go, the locale stays.
+    let removed = removed.unwrap_or_default();
+    check.check(removed.contains(&String::from("ACCOUNTS")));
+    check.check(removed.contains(&String::from("HOME")));
+    check.check(!removed.contains(&String::from("LANG")));
     // The real uid's home, not the caller's.
-    check.check(
-        std::env::var_os("HOME").is_some_and(|h| h != "/tmp/someone-else" && Path::new(&h).is_absolute()),
-    );
+    check.check(std::env::var_os("HOME").is_some_and(|h| h == home.as_os_str()));
     check.check(std::env::var_os("ACCOUNTS").is_none());
     check.check(std::env::var_os("LANG").is_some_and(|l| l == "fi_FI.UTF-8"));
     check.check(std::env::var_os("PATH").is_none());
@@ -291,7 +364,8 @@ fn set_id_environment(check: &mut Checks, runtime: &Path) {
         libc::getrlimit(libc::RLIMIT_CORE, &raw mut core);
         core
     };
-    check.check(after.rlim_cur == 0 && after.rlim_max == before.rlim_max);
+    check.check(after.rlim_cur == 0);
+    check.check(after.rlim_max == before.rlim_max);
     // The caller's runtime folder stays; without one, /run/user/<uid> when
     // that is the uid's.
     check.check(std::env::var_os("XDG_RUNTIME_DIR").is_some_and(|r| r == "/tmp/caller-runtime"));
@@ -305,8 +379,9 @@ fn set_id_environment(check: &mut Checks, runtime: &Path) {
 /// group to drop.
 fn group(check: &mut Checks, set_id: bool) {
     if set_id {
+        check.check(sandbox::running_set_id());
         // SAFETY: plain id calls.
-        check.check(sandbox::running_set_id() && unsafe { libc::getegid() != libc::getgid() });
+        check.check(unsafe { libc::getegid() != libc::getgid() });
     }
     check.check(sandbox::drop_set_id_group());
     // SAFETY: plain id calls.
@@ -359,9 +434,11 @@ fn main() {
             0
         }
         "syscalls" => syscalls(&mut checks, &path(1)),
-        "filesystem" => filesystem(&mut checks, &path(1), &path(2)),
+        "filesystem" => {
+            filesystem(&mut checks, &path(1), &path(2), &path(3), path(4) == Path::new("abstract-bus"))
+        }
         "set-id-environment" => {
-            set_id_environment(&mut checks, &path(1));
+            set_id_environment(&mut checks, &path(1), &path(2));
             0
         }
         "group" => {

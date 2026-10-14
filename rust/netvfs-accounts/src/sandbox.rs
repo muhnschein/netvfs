@@ -423,9 +423,10 @@ fn allow_beneath(ruleset: i32, handled: u64, path: &Path, label: &str, mut acces
     unsafe { libc::close(fd) };
 }
 
-/// Folders the build adds to the confinement: where coverage counters go.
-fn build_folders() -> Vec<PathBuf> {
-    option_env!("NETVFS_RUST_COVERAGE_DIR").map(PathBuf::from).into_iter().collect()
+/// Folders the build adds to the confinement: where coverage counters go,
+/// `coverage` (NETVFS_RUST_COVERAGE_DIR when it was built).
+fn build_folders(coverage: Option<&str>) -> Vec<PathBuf> {
+    coverage.map(PathBuf::from).into_iter().collect()
 }
 
 /// Landlock: reads only below the system folders (/usr, /etc, /lib*, /proc)
@@ -484,7 +485,7 @@ pub fn restrict_filesystem(writable: &[PathBuf], allow_abstract_sockets: bool) -
     for dir in writable {
         allow_beneath(ruleset, fs, dir, "database folder", landlock::READ_WRITE);
     }
-    for dir in build_folders() {
+    for dir in build_folders(option_env!("NETVFS_RUST_COVERAGE_DIR")) {
         allow_beneath(ruleset, fs, &dir, "coverage folder", landlock::READ_WRITE);
     }
     // SAFETY: prctl and the ruleset descriptor from above.
@@ -805,6 +806,46 @@ mod tests {
         assert_eq!(landlock_access(5, true), levels[5]);
         assert_eq!(levels[1].fs, landlock::ABI1_FS);
         assert_eq!(levels[6].net, landlock::NET_BIND_TCP | landlock::NET_CONNECT_TCP);
+        // Exactly: with an abstract bus only the signal scope is left.
+        let scopes = landlock::SCOPE_SIGNAL | landlock::SCOPE_ABSTRACT_UNIX_SOCKET;
+        assert_eq!(levels[6].scoped, scopes);
+        assert_eq!(abstract_bus, LandlockAccess { scoped: landlock::SCOPE_SIGNAL, ..levels[6] });
+        // <linux/landlock.h>: the rights of ABI 1 are bits 0 to 12, and a
+        // rule on a file (LANDLOCK_ACCESS_FS_FILE) may hold execute, write,
+        // read, truncate and device ioctl.
+        assert_eq!(landlock::ABI1_FS, 0x1fff);
+        assert_eq!(landlock::FILE_RIGHTS, 0xc007);
+        assert_eq!(levels[6].fs, 0xffff);
+    }
+
+    #[test]
+    fn uid_is_the_real_uid() {
+        // The first of real, effective, saved and file system uid.
+        let status = std::fs::read_to_string("/proc/self/status").unwrap();
+        let ids = status.lines().find_map(|l| l.strip_prefix("Uid:")).unwrap();
+        assert_eq!(Some(uid().to_string().as_str()), ids.split_whitespace().next());
+    }
+
+    #[test]
+    fn owned_directory_of_the_uid() {
+        let dir = std::env::temp_dir().join(format!("netvfs-accounts-owned-{}", std::process::id()));
+        std::fs::create_dir(&dir).unwrap();
+        let file = dir.join("file");
+        std::fs::write(&file, b"").unwrap();
+        let link = dir.join("link");
+        std::os::unix::fs::symlink(&dir, &link).unwrap();
+        assert!(owned_directory(&dir, uid()));
+        assert!(!owned_directory(&dir, uid().wrapping_add(1)));
+        assert!(!owned_directory(&file, uid())); // no folder
+        assert!(!owned_directory(&link, uid())); // a link to one
+        assert!(!owned_directory(&dir.join("missing"), uid()));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn coverage_folder() {
+        assert_eq!(build_folders(Some("/build/rust-coverage")), [PathBuf::from("/build/rust-coverage")]);
+        assert!(build_folders(None).is_empty());
     }
 
     #[test]

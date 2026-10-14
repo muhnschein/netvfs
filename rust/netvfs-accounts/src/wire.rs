@@ -220,6 +220,16 @@ mod tests {
     }
 
     #[test]
+    fn lengths_beyond_32_bits_are_cut() {
+        assert_eq!(bytes(|s| s.length(5)), [0, 0, 0, 5]);
+        // u32::MAX would be a null array or string; the cut stops below it.
+        // Only where a usize can hold 4 GiB.
+        if let Ok(n) = usize::try_from(1_u64 << 32) {
+            assert_eq!(bytes(|s| s.length(n)), [0xff, 0xff, 0xff, 0xfe]);
+        }
+    }
+
+    #[test]
     fn numbers_are_big_endian() {
         assert_eq!(bytes(|s| s.i32(-2)), [0xff, 0xff, 0xff, 0xfe]);
         assert_eq!(bytes(|s| s.u32(7)), [0, 0, 0, 7]);

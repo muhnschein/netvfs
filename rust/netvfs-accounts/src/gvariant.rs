@@ -545,6 +545,10 @@ mod tests {
             ("i", "uint32 5"),
             ("i", "5 6"),
             ("i", "--5"),
+            // A sign is taken once, before any 0x or 0.
+            ("i", "++5"),
+            ("i", "0x+5"),
+            ("i", "0+5"),
         ] {
             assert_eq!(parse(t, bad), Value::Invalid, "{t} {bad:?}");
         }
@@ -604,6 +608,49 @@ mod tests {
         }
         let deep = format!("{{'k': {}'x'{}}}", "<".repeat(40), ">".repeat(40));
         assert_eq!(parse("a{sv}", &deep), Value::Invalid);
+        // Depth 16 (the dictionary is 0, its value 1, each further variant
+        // one more) is the deepest that parses.
+        let nested = |n: usize| format!("{{'k': {}'x'{}}}", "<".repeat(n), ">".repeat(n));
+        assert_eq!(MAX_DEPTH, 16);
+        assert_eq!(parse("a{sv}", &nested(16)), Value::Map(vec![("k".into(), Value::Invalid)]));
+        assert_eq!(parse("a{sv}", &nested(17)), Value::Invalid);
+    }
+
+    #[test]
+    fn annotations_name_every_type() {
+        // A keyword or a type string makes the value that type; the types
+        // libaccounts-qt does not convert parse, then read as Invalid.
+        for (annotated, value) in [
+            ("string 'x'", s("x")),
+            ("@s 'x'", s("x")),
+            ("@b true", Value::Bool(true)),
+            ("@i 5", Value::Int(5)),
+            ("@u 5", Value::UInt(5)),
+            ("@x 5", Value::LongLong(5)),
+            ("@t 5", Value::ULongLong(5)),
+            ("@as ['x']", Value::StringList(vec!["x".into()])),
+            ("@a{sv} {}", Value::Map(Vec::new())),
+            ("@y 255", Value::Invalid),
+            ("@n -5", Value::Invalid),
+            ("@q 5", Value::Invalid),
+            ("@h 5", Value::Invalid),
+            ("@d 1.5", Value::Invalid),
+            ("@o '/a'", Value::Invalid),
+            ("@g 's'", Value::Invalid),
+            ("signature 's'", Value::Invalid),
+        ] {
+            assert_eq!(
+                parse("a{sv}", &format!("{{'k': <{annotated}>}}")),
+                Value::Map(vec![("k".into(), value)]),
+                "{annotated}"
+            );
+        }
+        // An annotation must match the value.
+        for bad in
+            ["@y 256", "@n 32768", "@q -1", "@h 2147483648", "@d 'x'", "@o 5", "@g 5", "@z 5", "string 5"]
+        {
+            assert_eq!(parse("a{sv}", &format!("{{'k': <{bad}>}}")), Value::Invalid, "{bad}");
+        }
     }
 
     #[test]

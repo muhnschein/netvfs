@@ -34,6 +34,28 @@ exclude_re = [
     # `privileged`; elsewhere the lookup is None anyway. The lookup itself
     # (user_ids) is tested with root and a missing user.
     'netvfs-accounts/src/sandbox\.rs:.*: replace privileged_ids -> Option<\(u32, u32\)> with None$',
+    # -- netvfs-accounts sandbox.rs and the probe: begin --
+    # Equivalent: `1 << 0` and `1 >> 0` are both 1, in the constants
+    # landlock::EXECUTE, NET_BIND_TCP, SCOPE_ABSTRACT_UNIX_SOCKET and
+    # CREATE_RULESET_VERSION. A constant has no function to name and the
+    # column alone is shared with SCOPE_SIGNAL (1 << 1), hence the positions:
+    # update them when the lines move (their mutants come back as missed).
+    'netvfs-accounts/src/sandbox\.rs:(230:32|263:37|268:51|299:47): replace << with >>$',
+    # Equivalent: distinct bits, where `^` is `|`: the TCP rights and the
+    # scopes in landlock_access, O_PATH | O_CLOEXEC in allow_beneath.
+    'netvfs-accounts/src/sandbox\.rs:\d+:\d+: replace \| with \^ in (landlock_access|allow_beneath)$',
+    # Equivalent: reset_process_state skips SIGKILL and SIGSTOP (&& -> ||
+    # does not), whose signal() fails with EINVAL and changes nothing.
+    'netvfs-accounts/src/sandbox\.rs:\d+:\d+: replace && with \|\| in reset_process_state$',
+    # Equivalent: allow_beneath runs while the ruleset is open, and that took
+    # the lowest free descriptor, so open(2) there never returns 0 and
+    # `fd < 0` is `fd <= 0`. (The probe makes the ruleset descriptor 0,
+    # which restrict_filesystem's own `< 0` must accept.)
+    'netvfs-accounts/src/sandbox\.rs:\d+:\d+: replace < with <= in allow_beneath$',
+    # Equivalent: the open flags, modes and clone flags the probe ORs are
+    # distinct bits, so `^` is `|`.
+    'netvfs-accounts/src/bin/probe\.rs:\d+:\d+: replace \| with \^ in (syscalls|filesystem|clone_refused)$',
+    # -- netvfs-accounts sandbox.rs and the probe: end --
     # RTLD_LOCAL is 0 on Linux: `RTLD_NOW | RTLD_LOCAL` and
     # `RTLD_NOW ^ RTLD_LOCAL` are the same flags.
     'ffi/loader\.rs:\d+:\d+: replace \| with \^ in entry_point',
@@ -128,4 +150,14 @@ exclude_re = [
     # (netvfs 0.4's tst_bridgeserver skipped this as well).
     # needs_insecure_consent and insecure_details are unit-tested.
     'netvfs-bridge/src/core/admin\.rs:\d+:\d+: (replace Core::insecure_answered with \(\)|delete ! in Core::insecure_answered)$',
+    # ---- netvfs-accounts, except sandbox.rs and bin/probe.rs ----
+    # Equivalent: the open mode (SQLITE_OPEN_READ_ONLY or _READ_WRITE) and
+    # SQLITE_OPEN_NO_MUTEX are disjoint bits, so `^` is `|`.
+    'netvfs-accounts/src/db\.rs:\d+:\d+: replace \| with \^ in Database::open$',
+    # Equivalent where the tests run: SystemOwner hands on
+    # sandbox::privileged_ids, which is None without a user `privileged`
+    # (Sailfish OS only); system_owner_is_the_user_privileged catches the
+    # other values.
+    'netvfs-accounts/src/lib\.rs:\d+:\d+: replace <impl db::PrivilegedOwner for SystemOwner>::privileged_ids -> Option<\(u32, u32\)> with None$',
+    # ---- end netvfs-accounts ----
 ]

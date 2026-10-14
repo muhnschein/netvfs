@@ -225,6 +225,7 @@ mod tests {
             &["list", "x"],
             &["files"],
             &["files", "1", "2"],
+            &["files", "1", "2", "3"],
             &["attention", "1"],
             &["attention", "1", "a", "b", "c"],
             &["secret", "1"],
@@ -257,6 +258,95 @@ mod tests {
             serve_with(&Command::Usage, empty()).answer,
             Stream::answer(&Outcome::failure(Error::Unsupported, USAGE)).into_bytes()
         );
+    }
+
+    /// A database with three listed accounts: 1 usable, 2 refused by the
+    /// policy, and 2^32, whose id reads as 0. Its path.
+    fn listed_accounts(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("netvfs-accounts-serve-{name}-{}", std::process::id()));
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("accounts.db");
+        let c = rusqlite::Connection::open(&path).unwrap();
+        c.execute_batch(crate::db::TEST_SCHEMA).unwrap();
+        c.execute_batch(
+            "INSERT INTO Services VALUES (1, 'smb-files', 'Files', 'smb', 'netvfs-files');
+             INSERT INTO Accounts VALUES (1, 'alice@nas', 'smb', 1), (2, 'b', 'smb', 1),
+                                         (4294967296, 'z', 'smb', 1);
+             INSERT INTO Settings VALUES (1, 0, 'netvfs/host', 's', '''nas'''),
+                                         (1, 0, 'netvfs/port', 'i', '445'),
+                                         (1, 0, 'netvfs/username', 's', '''alice'''),
+                                         (1, 0, 'CredentialsId', 'u', '7'),
+                                         (1, 0, 'netvfs/smb/security_profile', 's', '''signed'''),
+                                         (1, 1, 'enabled', 'b', 'true'),
+                                         (1, 1, 'files_root', 's', '''//photos/'''),
+                                         (2, 0, 'netvfs/host', 's', '''old'''),
+                                         (2, 0, 'netvfs/attention', 's', '''auth-failed'''),
+                                         (2, 0, 'netvfs/smb/security_profile', 's', '''bogus'''),
+                                         (2, 1, 'enabled', 'b', 'true'),
+                                         (4294967296, 0, 'netvfs/host', 's', '''zero'''),
+                                         (4294967296, 1, 'enabled', 'b', 'true');",
+        )
+        .unwrap();
+        drop(c);
+        path
+    }
+
+    fn read_only(path: &std::path::Path) -> Store {
+        Store::new(Database::open(path, false).unwrap())
+    }
+
+    /// The connection parameters of an smb account whose one option is
+    /// `security_profile`, as written.
+    fn write_params_of(s: &mut Stream, host: &str, port: i32, username: Option<&str>, profile: &str) {
+        s.string(Some("smb"));
+        s.string(Some(host));
+        s.i32(port);
+        s.string(username);
+        s.variant_map(&[("security_profile".into(), qvariant::Value::String(profile.into()))]);
+        s.i32(15_000);
+        s.i32(60_000);
+    }
+
+    #[test]
+    fn files_answers() {
+        let path = listed_accounts("files");
+        let files = |id: &str| serve_with(&Command::Files(id.into()), read_only(&path));
+        let mut expected = Stream::answer(&Outcome::success());
+        write_params_of(&mut expected, "nas", 445, Some("alice"), "signed");
+        expected.u32(7);
+        expected.bool(false);
+        assert_eq!(files("1"), Served::answer(expected.into_bytes()));
+        let refused = Outcome::failure(Error::SecurityPolicy, "Unknown SMB security profile \"bogus\"");
+        assert_eq!(files("2"), Served::failure(&refused));
+        // 0 is no account id, though a listed account reads as 0.
+        let not_found = Served::failure(&Outcome::failure(Error::NotFound, "No such account"));
+        assert_eq!(files("0"), not_found);
+        assert_eq!(files("3"), not_found);
+        assert_eq!(files("x"), not_found);
+        std::fs::remove_dir_all(path.parent().unwrap()).ok();
+    }
+
+    #[test]
+    fn list_answers() {
+        let path = listed_accounts("list");
+        let mut expected = Stream::answer(&Outcome::success());
+        // Account 0 is listed but cannot be loaded: left out.
+        expected.i32(2);
+        expected.i32(1);
+        expected.string(Some("smb"));
+        expected.string(Some("alice@nas"));
+        write_params_of(&mut expected, "nas", 445, Some("alice"), "signed");
+        expected.string(Some("/photos"));
+        expected.i32(Attention::None as i32);
+        expected.i32(2);
+        expected.string(Some("smb"));
+        expected.string(Some("b"));
+        write_params_of(&mut expected, "old", 0, None, "bogus");
+        expected.string(None);
+        expected.i32(Attention::AuthFailed as i32);
+        assert_eq!(serve_with(&Command::List, read_only(&path)), Served::answer(expected.into_bytes()));
+        std::fs::remove_dir_all(path.parent().unwrap()).ok();
     }
 
     struct NoOwner;
