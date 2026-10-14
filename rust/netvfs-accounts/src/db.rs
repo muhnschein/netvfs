@@ -353,6 +353,17 @@ impl Database {
     }
 }
 
+/// The tables as libaccounts-glib's `create_db` makes them, for tests.
+#[cfg(test)]
+pub(crate) const TEST_SCHEMA: &str =
+    "CREATE TABLE Accounts (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, provider TEXT, enabled INTEGER);
+     CREATE TABLE Services (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE,
+                            display TEXT NOT NULL, provider TEXT, type TEXT);
+     CREATE TABLE Settings (account INTEGER NOT NULL, service INTEGER, key TEXT NOT NULL,
+                            type TEXT NOT NULL, value BLOB);
+     CREATE UNIQUE INDEX idx_setting ON Settings (account, service, key);
+     PRAGMA user_version = 1;";
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -434,15 +445,9 @@ mod tests {
 
     fn create(path: &Path) -> Connection {
         let c = Connection::open(path).or_else(|_| Connection::open_in_memory()).unwrap();
+        c.execute_batch(TEST_SCHEMA).unwrap_or_default();
         c.execute_batch(
-            "CREATE TABLE Accounts (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, provider TEXT, enabled INTEGER);
-             CREATE TABLE Services (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE,
-                                    display TEXT NOT NULL, provider TEXT, type TEXT);
-             CREATE TABLE Settings (account INTEGER NOT NULL, service INTEGER, key TEXT NOT NULL,
-                                    type TEXT NOT NULL, value BLOB);
-             CREATE UNIQUE INDEX idx_setting ON Settings (account, service, key);
-             PRAGMA user_version = 1;
-             INSERT INTO Accounts VALUES (1, 'alice@nas', 'smb', 1), (2, NULL, 'smb', 0), (3, 'x', 'other', 1);
+            "INSERT INTO Accounts VALUES (1, 'alice@nas', 'smb', 1), (2, NULL, 'smb', 0), (3, 'x', 'other', 1);
              INSERT INTO Services VALUES (1, 'smb-files', 'Files', 'smb', 'netvfs-files');
              INSERT INTO Settings VALUES (1, 0, 'netvfs/host', 's', '''nas''');
              INSERT INTO Settings VALUES (1, 1, 'enabled', 'b', 'true');",

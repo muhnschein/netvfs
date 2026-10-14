@@ -377,15 +377,9 @@ mod tests {
     /// listed or not for each reason `files_accounts` has.
     fn create(path: &std::path::Path) {
         let c = rusqlite::Connection::open(path).unwrap();
+        c.execute_batch(crate::db::TEST_SCHEMA).unwrap();
         c.execute_batch(
-            "CREATE TABLE Accounts (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, provider TEXT, enabled INTEGER);
-             CREATE TABLE Services (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE,
-                                    display TEXT NOT NULL, provider TEXT, type TEXT);
-             CREATE TABLE Settings (account INTEGER NOT NULL, service INTEGER, key TEXT NOT NULL,
-                                    type TEXT NOT NULL, value BLOB);
-             CREATE UNIQUE INDEX idx_setting ON Settings (account, service, key);
-             PRAGMA user_version = 1;
-             INSERT INTO Services VALUES (1, 'smb-files', 'Files', 'smb', 'netvfs-files'),
+            "INSERT INTO Services VALUES (1, 'smb-files', 'Files', 'smb', 'netvfs-files'),
                                          (2, 'sftp-files', 'Files', 'sftp', 'netvfs-files'),
                                          (3, 'mail-email', 'Mail', 'mail', 'e-mail');
              -- 1, 5: listed; 2: account disabled; 3: no Files service type;
@@ -400,6 +394,63 @@ mod tests {
                                          (4294967298, 1, 'enabled', 'b', 'true');",
         )
         .unwrap();
+    }
+
+    #[test]
+    fn load_reads_the_account() {
+        let dir = tempdir("load");
+        let path = dir.join("accounts.db");
+        let c = rusqlite::Connection::open(&path).unwrap();
+        c.execute_batch(crate::db::TEST_SCHEMA).unwrap();
+        c.execute_batch(
+            "INSERT INTO Services VALUES (1, 'smb-files', 'Files', 'smb', 'netvfs-files');
+             INSERT INTO Accounts VALUES (1, 'alice@nas', 'smb', 1), (2, 'b', 'smb', 1),
+                                         (4294967295, 'c', 'smb', 1);
+             INSERT INTO Settings VALUES (1, 0, 'netvfs/host', 's', '''nas'''),
+                                         (1, 0, 'netvfs/port', 'i', '445'),
+                                         (1, 0, 'netvfs/username', 's', '''alice'''),
+                                         (1, 0, 'CredentialsId', 'u', '7'),
+                                         (1, 0, 'netvfs/attention', 's', '''server-identity-changed'''),
+                                         (1, 0, 'netvfs/smb/security_profile', 's', '''signed'''),
+                                         (1, 0, 'netvfs/sftp/tls', 's', '''x'''),
+                                         (1, 1, 'files_root', 's', ''' photos '''),
+                                         (1, 1, 'netvfs/smb/auth_mode', 's', '''x'''),
+                                         (2, 0, 'netvfs/host', 's', ''''''),
+                                         (4294967295, 0, 'netvfs/host', 's', '''h'''),
+                                         (4294967295, 0, 'CredentialsId', 'i', '-2');",
+        )
+        .unwrap();
+        drop(c);
+        let store = Store::new(Database::open(&path, false).unwrap());
+        assert_eq!(
+            store.load(1).unwrap(),
+            AccountConfig {
+                account_id: 1,
+                provider: Some("smb".into()),
+                display_name: Some("alice@nas".into()),
+                params: ConnectionParams {
+                    provider: Some("smb".into()),
+                    host: Some("nas".into()),
+                    port: 445,
+                    username: Some("alice".into()),
+                    // Only the provider's own global settings.
+                    options: vec![("security_profile".into(), Value::String("signed".into()))],
+                    ..ConnectionParams::default()
+                },
+                files_root: Some("photos".into()),
+                credentials_id: 7,
+                attention: Attention::ServerIdentityChanged,
+            }
+        );
+        assert_eq!(store.load(2).unwrap_err(), Outcome::failure(Error::Internal, "Account 2 has no server"));
+        assert_eq!(store.load(3).unwrap_err(), Outcome::failure(Error::NotFound, "Account 3 does not exist"));
+        // A negative id is the account's unsigned id; the credentials id is
+        // read as an int, then taken as unsigned.
+        let unsigned = store.load(-1).unwrap();
+        assert_eq!((unsigned.account_id, unsigned.params.port, unsigned.params.username), (-1, 0, None));
+        assert_eq!(unsigned.credentials_id, 4_294_967_294);
+        assert_eq!((unsigned.files_root, unsigned.attention), (None, Attention::None));
+        std::fs::remove_dir_all(dir).ok();
     }
 
     #[test]
