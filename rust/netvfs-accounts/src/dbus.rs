@@ -693,18 +693,17 @@ mod tests {
             input.extend(reply(kind::METHOD_RETURN, 2, 4, b'l'));
             run(input).0
         };
-        // A message up to MAX_MESSAGE long.
-        let largest = reply_with_body(kind::METHOD_RETURN, 1, 1, MAX_MESSAGE - reply(0, 0, 0, b'l').len());
-        assert_eq!(largest.len(), MAX_MESSAGE);
+        // Sizes as such, not from the constants: a message of 64 KiB is
+        // taken, a byte more is not.
+        let kib = 1024;
+        let largest = reply_with_body(kind::METHOD_RETURN, 1, 1, 64 * kib - reply(0, 0, 0, b'l').len());
+        assert_eq!(largest.len(), 64 * kib);
         assert!(matches!(ok(std::slice::from_ref(&largest)), Ok(())));
-        let too_large = reply_with_body(kind::METHOD_RETURN, 1, 1, MAX_MESSAGE + 1);
+        let too_large = reply_with_body(kind::METHOD_RETURN, 1, 1, 64 * kib + 1);
         assert!(ok(&[too_large]).is_err());
-        // Up to MAX_READ in all before the reply.
-        let filler = vec![largest; MAX_READ / MAX_MESSAGE - 1];
-        assert!(matches!(ok(&filler), Ok(())));
-        let more =
-            vec![reply_with_body(kind::METHOD_RETURN, 1, 1, MAX_MESSAGE / 2); 2 * MAX_READ / MAX_MESSAGE];
-        assert!(ok(&more).is_err());
+        // Up to 256 KiB in all before the reply: three of them, not four.
+        assert!(matches!(ok(&vec![largest.clone(); 3]), Ok(())));
+        assert!(ok(&vec![largest; 4]).is_err());
     }
 
     #[test]
