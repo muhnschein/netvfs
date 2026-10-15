@@ -15,6 +15,7 @@ pub mod msg;
 pub mod names;
 pub mod negotiate;
 pub mod profile;
+pub mod rpc;
 pub mod session;
 pub mod status;
 pub mod transport;
