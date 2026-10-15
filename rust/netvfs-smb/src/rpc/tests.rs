@@ -22,7 +22,7 @@ fn string(w: &mut Writer, s: &str) {
 }
 
 /// A NetrShareEnum level 1 response stub.
-fn enum_stub(entries: &[(Option<&str>, u32, Option<&str>)], werror: u32) -> Vec<u8> {
+pub(crate) fn enum_stub(entries: &[(Option<&str>, u32, Option<&str>)], werror: u32) -> Vec<u8> {
     let mut w = Writer::new();
     let n = u32::try_from(entries.len()).unwrap();
     w.u32(1).u32(1).u32(REFERENT).u32(n).u32(REFERENT).u32(n);
@@ -50,7 +50,7 @@ fn pdu(ptype: u8, flags: u8, call_id: u32, body: &[u8]) -> Vec<u8> {
 }
 
 /// Response fragments of `stub`, `per` stub bytes each.
-fn fragments(stub: &[u8], per: usize) -> Vec<u8> {
+pub(crate) fn fragments(stub: &[u8], per: usize) -> Vec<u8> {
     let parts: Vec<&[u8]> = stub.chunks(per).collect();
     let last = parts.len().saturating_sub(1);
     let mut out = Vec::new();
@@ -319,7 +319,7 @@ async fn started() -> (Conn, Peer) {
 
 /// Serves CREATE, bind and the request; the reply is split between the
 /// IOCTL (BUFFER_OVERFLOW) and READs of `per_read` bytes.
-async fn serve(peer: &mut Peer, reply: &[u8], per_read: usize) {
+pub(crate) async fn serve(peer: &mut Peer, reply: &[u8], per_read: usize) {
     let create = peer.recv_one().await;
     assert_eq!(create.command(), Command::Create);
     assert_eq!(create.header.tree_id, 9);

@@ -7,6 +7,7 @@
 use std::net::SocketAddr;
 use std::time::Duration;
 
+use netvfs_vfs::{ErrorName, Status};
 use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::net::TcpStream;
 
@@ -23,14 +24,18 @@ pub const DEFAULT_PORT: u16 = 445;
 /// The addresses of `host` (C-17: the reason names no host).
 ///
 /// # Errors
-/// [`Error::Unreachable`] when the name does not resolve.
+/// `NetworkUnreachable` when the name does not resolve.
 pub async fn resolve(host: &str, port: u16) -> Result<Vec<SocketAddr>> {
-    let found = tokio::net::lookup_host((host, port))
-        .await
-        .map_err(|e| Error::Unreachable(format!("Cannot resolve the server name: {}", e.kind())))?;
+    let unresolved = |why: &str| {
+        Error::Local(Status::new(
+            ErrorName::NetworkUnreachable,
+            format!("Cannot resolve the server name: {why}"),
+        ))
+    };
+    let found = tokio::net::lookup_host((host, port)).await.map_err(|e| unresolved(&e.kind().to_string()))?;
     let addrs: Vec<SocketAddr> = found.collect();
     if addrs.is_empty() {
-        return Err(Error::Unreachable("Cannot resolve the server name: no address".into()));
+        return Err(unresolved("no address"));
     }
     Ok(addrs)
 }
@@ -175,5 +180,10 @@ mod tests {
         let e = connect(&[], Duration::from_secs(5)).await.unwrap_err();
         assert_eq!(e, Error::Unreachable("no address".into()));
         assert_eq!(resolve("127.0.0.1", 445).await.unwrap(), ["127.0.0.1:445".parse().unwrap()]);
+        // RFC 6761: .invalid never resolves.
+        let e = resolve("netvfs-test.invalid", 445).await.unwrap_err().status("", crate::error::Phase::Setup);
+        assert_eq!(e.name, ErrorName::NetworkUnreachable);
+        assert!(e.message.starts_with("Cannot resolve the server name: "), "{e:?}");
+        assert!(!e.message.contains("netvfs-test"), "{e:?}");
     }
 }

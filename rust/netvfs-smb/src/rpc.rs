@@ -541,4 +541,4 @@ pub async fn list_shares(
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
