@@ -254,9 +254,9 @@ private:
     {
         int code = -1;
         exec(server, { QStringLiteral("sh"), QStringLiteral("-c"),
-                       QStringLiteral("rm -f /srv/work/capture.pcap; (tcpdump -Z root -i any -p -U --immediate-mode -B 65536 -w /srv/work/capture.pcap "
+                       QStringLiteral("rm -f /srv/work/capture.pcap /srv/work/tcpdump.log; (tcpdump -Z root -i any -p -U --immediate-mode -B 65536 -w /srv/work/capture.pcap "
                                       "tcp port 445 >/srv/work/tcpdump.log 2>&1 &); for i in $(seq 100); do "
-                                      "grep -q listening /srv/work/tcpdump.log && exit 0; sleep 0.1; done; exit 1") },
+                                      "grep -qs listening /srv/work/tcpdump.log && exit 0; sleep 0.1; done; exit 1") },
              &code);
         QCOMPARE(code, 0);
     }

@@ -185,6 +185,8 @@ expect_code() {
 }
 
 cli_round_trip() {
+    # The local folders of a previous run on reused servers.
+    rm -rf "$work/cpsrc" "$work/cpdst"
     cli verify "CLI run" >/dev/null
     cli put "$work/cli.bin" "CLI run/cli.bin"
     cli ls "CLI run" | grep -q " 3000000 cli.bin$"
