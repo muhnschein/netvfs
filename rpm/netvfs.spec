@@ -10,8 +10,7 @@
 #   netvfs-bridge   netvfs-bridge and its setgid accounts helper, for
 #                   sandboxed consumers, and libnetvfs-bridge-ffi.so, the
 #                   C ABI through which the bridge reaches the backends (both
-#                   binaries are Rust, the helper since 0.4 and the bridge
-#                   since 0.5: rust/, doc/RUST.md)
+#                   binaries are Rust: rust/, doc/RUST.md)
 #   netvfs-devel    headers, pkg-config
 #
 # The parts nobody installs on their own are one package; what stays
@@ -53,9 +52,9 @@ BuildRequires: pkgconfig(buteosyncfw5) >= 0.10.0
 # which no SDK target ships yet: CI cross-builds them, and libnetvfs-rs.so,
 # with the SDK's own compiler and sysroot before this build
 # (tools/ci/cross-build.sh), and the spec installs them (doc/RUST.md "Cross
-# build"). rpm still derives their library dependencies. The bridge speaks
-# peer-to-peer D-Bus with zbus, so the package build no longer needs libdbus
-# (the tests still do).
+# build"). rpm derives their library dependencies. The bridge speaks
+# peer-to-peer D-Bus with zbus, so the package build needs no libdbus (the
+# tests use it).
 
 Requires:   sailfish-version >= 5.2.0
 Requires:   sailfishsilica-qt5
