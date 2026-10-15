@@ -3,24 +3,22 @@
 Two programs of the package netvfs-bridge and one library of the package
 netvfs are written in Rust:
 
-- `netvfs-accounts`, the setgid accounts helper (SPEC-v2 XB-2a), since 0.4.0.
-  It is a drop-in replacement for the C++/Qt helper it replaced: the same
-  requests (`list`, `files <id>`, `attention <id> <state> [pin]`), the same
-  `QDataStream` answer on stdout, the same confinement. What it gains: the
-  process that holds the group `privileged` links libc, libgcc_s and
-  libsqlite3 only, no Qt, GLib, libaccounts or GIO modules, and every
-  `unsafe` call is in one module (`sandbox.rs`).
-- `netvfs-bridge` (SPEC-v2 §8a), since 0.5.0: the one netvfs process a
-  sandboxed consumer can reach. Everything a consumer sends is decoded and
+- `netvfs-accounts`, the setgid accounts helper (SPEC-v2 XB-2a): the
+  requests `list`, `files <id>` and `attention <id> <state> [pin]`, a
+  `QDataStream` answer on stdout, and the confinement of XB-2a. The process
+  that holds the group `privileged` links libc, libgcc_s and libsqlite3
+  only, no Qt, GLib, libaccounts or GIO modules, and every `unsafe` call is
+  in one module (`sandbox.rs`).
+- `netvfs-bridge` (SPEC-v2 §8a): the one netvfs process a sandboxed
+  consumer can reach. Everything a consumer sends is decoded and
   checked in Rust: zbus as the peer-to-peer D-Bus server with the bridge's
   own inbound limits, the peer check, the argument validation (XSEC-7),
-  consent, locations, questions and jobs. The C++ backends stay; the bridge
-  reaches them through `libnetvfs-bridge-ffi.so` (`src/bridge/ffi`, the C
+  consent, locations, questions and jobs. The bridge reaches the backends
+  through `libnetvfs-bridge-ffi.so` (`src/bridge/ffi`, the C
   ABI of `netvfs_bridge_ffi.h`), which it loads with `dlopen` from
   `/usr/lib64/netvfs` and which exports one symbol. The binary links libc,
   libgcc_s and libm only; Qt and libnetvfs come with that library. Its
-  protocol (`tests/bridge/contract`), command line and files are those of
-  the C++/Qt bridge of 0.4, which it replaces.
+  protocol is the contract of `tests/bridge/contract`.
 - `libnetvfs-rs.so`, the Rust backends (see "netvfs-backend"): C++ backend
   plugins load it with `dlopen` from `/usr/lib64/netvfs` and reach its
   backends through a C ABI of one table (`src/backends/rs/netvfs_rs.h`).
@@ -73,6 +71,7 @@ Everything else stays C++.
 | `rust/netvfs-smb/` | provider `smb` (see "netvfs-smb"): `transport`, `msg/` (the MS-SMB2 codecs), `negotiate`, `auth` (sspi glue), `crypto` (the only user of RustCrypto), `conn` (credits, compounding, the receive task), `session`, `fs`, `files` (handles), `rpc` (srvsvc), `names`, `status`, `error`, `profile`, `backend` |
 | `src/backends/rs/` | the C++ shim: `netvfs_rs.h`, the loader, `RsBackend`, `RsReadHandle`, `RsWriteHandle`, `RsKeyTools`, the conversions and callbacks; `rs.pro` builds the library with cargo |
 | `rust/fuzz/` | cargo-fuzz targets (nightly, not in the workspace) |
+| `rust/vendor/ssh-key/` | ssh-key 0.7.0-rc.11 with one change (see below; not in the workspace) |
 
 Dependencies: `libc` and `rusqlite` (without the bundled SQLite: the system
 libsqlite3 through pkg-config). The protocol crate: `netvfs-vfs` (for the
@@ -90,6 +89,25 @@ already in russh's tree). netvfs-smb: `netvfs-vfs`, `tokio` (`rt`, `net`,
 `io-util`, `time`, `sync`), `zeroize`, `sspi` 0.23 (default features off)
 and, in its `crypto` module only, `aes`, `aes-gcm`, `cmac`, `hmac`, `sha2`
 and `getrandom`; `md-5` and `rc4` for one test.
+
+russh reads and writes key files with `ssh-key` 0.7.0-rc.11, which netvfs
+builds from `rust/vendor/ssh-key` (`[patch.crates-io]` in `rust/Cargo.toml`
+and `rust/fuzz/Cargo.toml`). The copy is the crate as published plus one
+line: in `src/private/ecdsa.rs`, `EcdsaPrivateKey::decode` accepts a
+private scalar of at least 1 byte instead of 32, and the code after that
+check left-pads a shorter scalar to the field size. OpenSSH stores the
+scalar without leading zero bytes, so about one P-256 key in 256 that
+ssh-keygen makes has a 31-byte scalar; with the change such keys import
+(`rust/netvfs-sftp/testdata/keys/ecdsa256-short-scalar`, also
+passphrase-encrypted). `README.netvfs.md` there gives the published
+crate's checksum, the diff and the reason. The copy is excluded from the
+workspace (format, clippy, tests), from cargo-mutants, from Sonar and from
+Rust coverage.
+
+`rust/deny.toml` allows an older second version of `syn`, `getrandom`
+(0.2 and 0.3), `sha3`, `base64` and `generic-array`, each with its reason.
+`generic-array` 0.14 comes in through sspi's `crypto-mac` 0.11 and through
+the compat feature of `generic-array` 1, which russh uses.
 
 `unsafe` is allowed in the helper's `sandbox`, in netvfs-bridge's `ffi`
 and `sys` modules and in netvfs-backend's `ffi` module only (netvfs-smb
@@ -133,7 +151,7 @@ prebuilt server):
 The host needs the i386 C library and qemu (`libc6-i386`,
 `qemu-user-static`; `tools/ci/install-host-deps.sh`).
 `tools/ci/build-rpm.sh` cross-builds by itself when `rust/prebuilt` is
-empty, so a local RPM build is still one command.
+empty, so a local RPM build is one command.
 
 Since the spec only installs the binaries, OBS and Chum cannot rebuild
 netvfs from the spec; netvfs ships no recipe for either. Once an SDK target
@@ -219,9 +237,14 @@ token is dropped 1 s after the cancel (`GRACE`) and returns Canceled, so the
 convert both ways (`rsmarshal`) and wrap the C++ callback objects
 (`rshooks`): what a callback throws stays on the C++ side, ends the callback
 as a refusal and turns the call's result into Internal "A callback of the
-Rust backend failed". Names the server cannot store are InvalidName before
-they reach Rust; the capabilities are fixed once `authenticate` succeeds
-(XC-5).
+Rust backend failed". A name that `Names` cannot encode is InvalidName
+before it reaches Rust; the capabilities are fixed once `authenticate`
+succeeds (XC-5). The library's table maps a
+mistake of its caller to ProtocolError "Invalid <what> from the plugin" or
+"Missing <what> from the plugin": a negative count, offset or mode, an
+unknown option kind or disposition, a missing pointer or callback. A local
+sink that cannot be written to (the `nvb_io` write of a download fails) is
+NoSpace "Cannot write the local file".
 
 ## netvfs-sftp
 
@@ -245,7 +268,7 @@ cryptography of its own and links no OpenSSL. The lists (`policy.rs`):
 A server with nothing in common fails with SecurityPolicy "The server
 offers no <list> algorithm this app accepts (it offers <its names>)". A
 pinned key narrows the host-key list to its type (an RSA pin to both
-`rsa-sha2-*`); a server that no longer offers that type is connected to
+`rsa-sha2-*`); a server that does not offer that type is connected to
 once more without the restriction, so that the caller sees the key it
 presents now. The session opens the `sftp` subsystem and nothing else: no
 exec channel, and channels the server opens are refused.
@@ -261,8 +284,10 @@ sent as a password and a password never read as a key.
 **Keys** (`keys.rs`): `generate` makes Ed25519 keys; `importKey` accepts
 Ed25519 and ECDSA (P-256, P-384, P-521) in OpenSSH, PKCS#8 (also
 encrypted) and SEC1 files. RSA and DSA keys, security keys, certificates,
-public key lines, PuTTY files and keys encrypted in the legacy PEM format
-are Unsupported, each with what to do instead. Before a passphrase is
+public key lines, PuTTY files and PEM files encrypted with OpenSSL's
+`Proc-Type: 4,ENCRYPTED` scheme are Unsupported, each with what to do
+instead. ECDSA keys whose private scalar is shorter than the field size
+import (see the `ssh-key` change above). Before a passphrase is
 tried, the cost of the key derivation is bounded: bcrypt at most 1024
 rounds, PBKDF2 at most 1,000,000 iterations, scrypt at most 64 MiB and
 parallelism 4; a key beyond is Unsupported, whatever the passphrase.
@@ -279,7 +304,9 @@ server offers sets the capabilities: AtomicReplace
 ServerCopy (`copy-data`, files only); NativeNoReplace always (OpenSSH's
 plain RENAME fails on an existing target); never Checksums (computed
 locally), ServerCopyRecursive or AtomicPut. SYMLINK sends its arguments
-in OpenSSH's order (target, then link).
+in OpenSSH's order (target, then link). A listing leaves out names that
+are empty, `.`, `..`, or contain `/` or NUL (`paths::is_entry_name`, XC-6),
+and delivers the rest.
 
 **Tests.** Unit tests against an SFTP server in memory (`fake.rs`) and an
 SSH server in the test process (`testserver.rs`, russh's server with a
@@ -289,7 +316,9 @@ negotiates, read from its log; refusals; pins of each key type; sign-in
 methods; capabilities per server; cancel and timeouts). Those need
 `NETVFS_SFTP_INTEROP_CONFIG`, which `tests/interop/sftp/run.sh` sets (and
 prints with `NETVFS_SFTP_SERVERS_ONLY=1`); without it they pass at once and
-say they were skipped. The mutant jobs start the servers once per shard.
+say they were skipped. The CI mutant jobs start the servers once per
+shard; `tools/ci/rust-mutants.sh` starts them itself, and removes them at
+the end, when netvfs-sftp's mutants run without the settings.
 
 ## netvfs-smb
 
@@ -320,10 +349,14 @@ too) or not validly signed (`signed`; interim STATUS_PENDING responses
 excepted, MS-SMB2 3.2.5.1.3) ends the connection; so does one for another
 session, one that answers no outstanding request, a compressed frame or a
 request.
+Interim responses (STATUS_PENDING) are not verified on a signed,
+unencrypted connection; at most 8 are accepted per request.
 NTLMv2 and SPNEGO come from `sspi` (no Kerberos, no network of its own);
 sspi checks the server's mechListMIC, and the user name `/GUEST`, for which
 sspi skips that check, is refused, as is a password that sspi would take
-for an NT hash (`$NTLM$`).
+for an NT hash (`$NTLM$`). The exported session key of the NTLM key
+exchange (KEY_EXCH) is encrypted with sspi's own RC4; `tests/sspi_ntlm.rs`
+pins sspi's output against RustCrypto's RC4.
 
 **The crypto fence.** netvfs-smb implements no primitive: AES-GCM, CMAC,
 HMAC-SHA256 and SHA-512 come from RustCrypto, and they are imported by one
@@ -357,7 +390,9 @@ and SET_INFO (times; rename with ReplaceIfExists, so AtomicReplace; delete
 on close). Transfers and read handles keep up to 4 MiB in flight in chunks
 of the server's maximum, at most 1 MiB (64 KiB without multi-credit).
 Names are UTF-16LE on the wire and WTF-8 in netvfs (XC-4): a lone
-surrogate keeps its three-byte form both ways. A DFS link is Unsupported
+surrogate keeps its three-byte form both ways. A listing leaves out names
+that are empty, `.`, `..`, or contain `/` or NUL (`names::is_entry_name`,
+XC-6), and delivers the rest. A DFS link is Unsupported
 with the detail "DFS referral" (XM-9). NT statuses map to netvfs errors
 as SPEC-smb 5 says (`status.rs`); during sign-in a refusal that is about
 neither the credentials nor the share name is SecurityPolicy.
@@ -378,7 +413,8 @@ a fake server in the test process (`fake.rs`); `tests/sspi_ntlm.rs` pins
 sspi's NTLMv2 output against MS-NLMP 4.2.4 with RustCrypto's MD5 and RC4
 (test only). `tests/samba.rs` runs the crate against the Samba containers
 of `tests/interop/smb` (run.sh sets `NETVFS_INTEROP_SMB_*`; without them
-the tests pass at once, saying so): dialects, ciphers and profiles,
+the tests pass at once, saying so, and `tools/ci/rust-mutants.sh` starts
+the servers itself for netvfs-smb's mutants): dialects, ciphers and profiles,
 refusals, tampered replies through the flip proxy, stalls, a round trip
 and server mode. `tests/windows.rs` does the same against Windows's own
 server in the CI job "SMB against Windows" (M-T11). The C++ suites
@@ -418,7 +454,7 @@ name of its own, as Sailjail requires.
 | What | Where | Run by |
 |---|---|---|
 | Format, clippy (the lints above), tests with `cargo nextest`, doc tests, lockfile, Rust 1.95 | `rust/` | `make check-rust` (part of `make check`; CI: profile `ci` of `rust/.config/nextest.toml`, no retries) |
-| Golden tests: every answer byte for byte against the C++ helper, kept as a test-only reference (`referencehelper.cpp`), and read back with the C++ bridge's decoder of 0.4 (`referencedecoder.cpp`); about 95 stored values, account shapes, attention writes and refused writes | `tests/bridge/accounts` | `make check-unit` |
+| Golden tests: every answer byte for byte against the C++ helper, kept as a test-only reference (`referencehelper.cpp`), and read back with a C++ decoder (`referencedecoder.cpp`); about 95 stored values, account shapes, attention writes and refused writes | `tests/bridge/accounts` | `make check-unit` |
 | A live libaccounts-qt manager sees the attention write through the signal | `tests/bridge/accounts` (`attentionSignal`) | `make check-unit` |
 | Each part of the confinement in a fresh process, also from setgid copies | `rust/netvfs-accounts/tests/sandbox.rs` | `make check-rust` |
 | netvfs-bridge's `ffi` module against the built `libnetvfs-bridge-ffi.so` and the fake backend: loading, establish (identity verdicts, prompts, phases, signond on the Qt thread), listing, walk, remove tree, handles, transfers through `nvb_io`, a cancel from another thread, copy across, URLs, error mapping, post/quit, panics in callbacks, discovery, no block left unfreed (heap growth over many calls) | `rust/netvfs-bridge/tests/ffi.rs` (its own harness: `init` needs the main thread; a test hung for 30 s fails) | `make check-rust-ffi` (part of `make check`); without the libraries every case says it is skipped |
@@ -428,7 +464,7 @@ name of its own, as Sailjail requires.
 | netvfs-sftp against OpenSSH 10.3p1, 9.6p1 and 8.9p1: negotiated algorithms, refusals of weaker servers, pins, sign-in, capabilities, cancel and timeouts | `rust/netvfs-sftp/tests/openssh.rs` | `make check-interop` (the end of `tests/interop/sftp/run.sh`) |
 | The SFTP plugin: the key tools through it, connection failures without a server | `tests/unit/sftp` (`tst_sftp`) | `make check-unit` |
 | The shim against the `mem` backend: loading (`NETVFS_RS_LIB`, a missing library), the plugin, conversions both ways, the callbacks and what they throw, cancel and the prompter, one call at a time, panics, calls from other threads; and the conformance suite on `mem` through the shim (`tests/backends/rs/conformance/mem.json`) | `tests/backends/rs` (`tst_rsshim`, the test plugin `libnetvfs-mem.so`, the library from the `rs-test` profile) | `make check-unit`, also under `SANITIZE=1` (the library uninstrumented) |
-| The built `netvfs-bridge` as a black box from a libdbus client (`tests/bridge/common`, the consumer side of the C++ bridge of 0.4): the introspection XML byte for byte, the `Peer` interface, an unknown path, fd passing both ways, error details, and every golden sequence of the contract, with the fake backend seeded through `NETVFS_FAKE_SEED` and a scripted accounts helper | `tests/bridge/contract` (`tst_contract`) | `make check-unit` |
+| The built `netvfs-bridge` as a black box from a libdbus client (`tests/bridge/common`): the introspection XML byte for byte, the `Peer` interface, an unknown path, fd passing both ways, error details, and every golden sequence of the contract, with the fake backend seeded through `NETVFS_FAKE_SEED` and a scripted accounts helper | `tests/bridge/contract` (`tst_contract`) | `make check-unit` |
 | The built `netvfs-bridge` under socket activation (the test plays systemd), listing through the built `netvfs-accounts` against a libaccounts database; exit codes for an unknown consumer and a usage error | `tests/bridge/process` (`tst_bridgeprocess`) | `make check-unit` |
 | The target build: tests under qemu, smoke run, linked libraries | see "Cross build" | CI job "Sailfish OS 5.2 aarch64 RPMs" |
 | Mutations the tests must catch: curated lists, and cargo-mutants on every line a pull request changes (with the FFI's C++ libraries built by `tools/ci/ffi-libs.sh`, so `tests/ffi.rs` runs; exclusions with reasons in `rust/.cargo/mutants.toml`) | `tests/mutations/helper.json`, `bridge.json`, `ffi.json`, `rs.json` (the shim), `sftp.json` (netvfs-sftp, caught by `tst_sftp` and the interop driver), `smb.json` (netvfs-smb, through the interop suite and its own tests); `tools/ci/rust-mutants.sh diff <base> [<ffi-libs dir> [<k>/<n>]]` | CI matrix `helper`, `bridge`, `ffi`, `rs`, `sftp`, `smb` (with the SFTP or Samba servers started once); CI jobs "Tests bite (Rust, changed code, k/12)" |
@@ -480,16 +516,15 @@ so the C++ tests let it end with its idle exit instead of killing it.
 
 ## Choices
 
-- Since 0.4.1 written for Rust 1.95 and cross-built with a host cargo
-  against the SDK's compiler and sysroot (0.4.0 built in `mb2` with the
-  SDK's 1.75). The bridge (Phase 2) needs crates that 1.75 cannot build
-  (zbus 5), and both binaries should use one toolchain.
+- Written for Rust 1.95 and cross-built with a host cargo against the
+  SDK's compiler and sysroot. The bridge needs crates that the SDK's Rust
+  (1.75) cannot build (zbus 5), and all Rust code uses one toolchain.
 - The FFI bindings are written by hand from the frozen header rather than
   generated by bindgen (which needs libclang at build time); tests pin the
   sizes and offsets that gcc gives the header on LP64.
-- Landlock and seccomp through raw syscalls, as the C++ code did, rather than
-  crates: the code is small, handles Landlock ABI 1 to 7 itself and adds
-  nothing to vendor or review in the privileged process.
+- Landlock and seccomp through raw syscalls rather than crates: the code is
+  small, handles Landlock ABI 1 to 7 itself and adds no crate to review in
+  the privileged process.
 - A minimal D-Bus client (one signal, `Hello`, `RequestName`, `GetId`) rather
   than zbus, which would bring an async runtime and many crates into it.
 - A curated mutation list in the format `tools/mutation-check.py` already
