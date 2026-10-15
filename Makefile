@@ -131,12 +131,12 @@ check-interop: all
 
 # SPEC-v2 XP-1: every installed file in exactly one package of rpm/netvfs.spec
 # (the host has no sailfish-svg2png, so no icons; tests install to /usr/tests,
-# package builds skip them). XP-3: no share enumeration in the SMB plugin,
-# and the check does find it in the share helper. The C ABI of netvfs-bridge
+# package builds skip them). The C ABI of netvfs-bridge
 # is checked against the host's glibc, and the bridge must look for it where
 # the spec puts it (tools/ci/check-ffi-lib.sh). So is libnetvfs-rs.so, and a
 # plugin of the Rust backends (the test plugin of provider mem) must look for
-# it where qmake installs it (tools/ci/check-rs-lib.sh).
+# it where qmake installs it (tools/ci/check-rs-lib.sh), and so must the SMB
+# plugin.
 PACKAGE_ROOT := $(BUILD_DIR)/install-root
 PACKAGE_FILES = ./tools/ci/check-files.py --map "$$($(QMAKE) -query QT_INSTALL_LIBS)=/usr/lib64" \
     --allow-missing '/usr/share/themes/*'
@@ -145,13 +145,12 @@ check-packaging: all
 	$(MAKE) -s -C $(BUILD_DIR) install INSTALL_ROOT=$(PACKAGE_ROOT) >/dev/null
 	rm -rf $(PACKAGE_ROOT)/usr/tests
 	$(PACKAGE_FILES) $(PACKAGE_ROOT)
-	./tools/ci/check-noshareenum.sh $(BUILD_DIR)/lib/netvfs/backends/libnetvfs-smb.so
 	./tools/ci/check-ffi-lib.sh $(BUILD_DIR)/lib/netvfs/libnetvfs-bridge-ffi.so \
 	    "$$($(PACKAGE_FILES) --list $(PACKAGE_ROOT) | sed -n 's|^ *\(/.*/libnetvfs-bridge-ffi\.so\)$$|\1|p')" \
 	    $(BUILD_DIR)/libexec/netvfs/netvfs-bridge "$$(getconf GNU_LIBC_VERSION | cut -d ' ' -f 2)"
-	! ./tools/ci/check-noshareenum.sh $(BUILD_DIR)/libexec/netvfs/netvfs-smb-shares >/dev/null
 	./tools/ci/check-rs-lib.sh $(BUILD_DIR)/lib/netvfs/libnetvfs-rs.so "$$(getconf GNU_LIBC_VERSION | cut -d ' ' -f 2)" \
-	    "$$($(QMAKE) -query QT_INSTALL_LIBS)/netvfs/libnetvfs-rs.so" $(BUILD_DIR)/lib/netvfs/test-backends/libnetvfs-mem.so
+	    "$$($(QMAKE) -query QT_INSTALL_LIBS)/netvfs/libnetvfs-rs.so" $(BUILD_DIR)/lib/netvfs/test-backends/libnetvfs-mem.so \
+	    $(BUILD_DIR)/lib/netvfs/backends/libnetvfs-smb.so
 	./tests/packaging/test_packaging.py
 
 coverage:

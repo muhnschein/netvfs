@@ -39,7 +39,7 @@ jobs:
         run: ./tools/ci/cargo-tool.sh cargo-nextest "$NEXTEST_VERSION"
       - name: Build
         run: make -j"$(nproc)"
-      - name: Packaging checks (file lists, no share enumeration in the SMB plugin, the bridge's C ABI)
+      - name: Packaging checks (file lists, the Rust plugins, the bridge's C ABI)
         run: make check-packaging
       - name: Every mutation list is in the mutation matrix
         run: ./tools/ci/check-mutation-matrix.py

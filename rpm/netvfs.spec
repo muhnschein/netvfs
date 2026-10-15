@@ -2,8 +2,8 @@
 #
 # Packages of SPEC-v2 XP-1 (amends SPEC 4.1, P-4, P-6):
 #
-#   netvfs          libnetvfs, all protocol backends and the SMB share helper,
-#                   libnetvfs-rs.so (the Rust backends the plugins load), the
+#   netvfs          libnetvfs, all protocol backends, libnetvfs-rs.so (the
+#                   Rust backends the plugins load), the
 #                   account UI module, the account providers, the Files
 #                   services, netvfs-cli, translations
 #   netvfs-backup   SFTP and SMB backups: services, Buteo plugins and profiles
@@ -76,9 +76,8 @@ providers in Settings > Accounts, network locations for apps, and the
 command line tool netvfs-cli.
 
 libnetvfs (accounts, credentials, sessions and errors over pluggable protocol
-backends) with its SFTP, SMB and local file system backends. SMB
-share enumeration runs in a helper process of its own (SPEC-v2 XM-7), so the
-DCE/RPC parser never runs inside the SMB backend. libnetvfs also links
+backends) with its SFTP, SMB and local file system backends; the SMB
+backend is Rust (libnetvfs-rs.so, SMB 3.1.1 only). libnetvfs also links
 QtNetwork, for the DNS-SD discovery of servers on the local network
 (SPEC-v2 XD-1).
 
@@ -171,8 +170,8 @@ systemctl-user daemon-reload || :
 # The Rust backends, loaded by their plugins with dlopen next to the backend
 # folder (doc/RUST.md).
 %{_libdir}/netvfs/libnetvfs-rs.so
+# The bridge package's binaries live here.
 %dir %{_prefix}/libexec/netvfs
-%{_prefix}/libexec/netvfs/netvfs-smb-shares
 %dir %{_datadir}/netvfs
 %{_datadir}/netvfs/providers
 %dir %{_libdir}/qt5/qml/org/netvfs
