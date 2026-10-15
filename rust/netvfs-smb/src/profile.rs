@@ -26,8 +26,7 @@ impl Profile {
     /// `strict`).
     ///
     /// # Errors
-    /// `SecurityPolicy` for any other value, `legacy` included: no profile
-    /// below these exists.
+    /// `SecurityPolicy` for any other value: no profile below these exists.
     pub fn parse(value: Option<&str>) -> Result<Self, Status> {
         let name = value.unwrap_or_default().trim();
         if name.is_empty() {

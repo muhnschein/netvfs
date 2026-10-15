@@ -236,13 +236,15 @@ option `security_profile`):
 | `signed` | required | where the server marks the session or the share (ENCRYPT_DATA); marked without a cipher: refused | NTLMv2 |
 | `guest` | none | none; a server that wants it: refused | NTLMSSP anonymous |
 
-Any other value, `legacy` included, is SecurityPolicy. Outside `guest` a
-session the server marks IS_GUEST or IS_NULL is refused (XM-1), and the
-final SESSION_SETUP response must be signed with the new session's key
-(MS-SMB2 3.2.5.3.1), which also proves the server knows the password.
-After that, a response that is not signed (`signed`) or not encrypted
-(`strict`, or marked) ends the connection, also an error or an interim
-one; so does one for another session, a compressed frame or a request.
+Any other value is SecurityPolicy. Outside `guest` a session the server
+marks IS_GUEST or IS_NULL is refused (XM-1), and the final SESSION_SETUP
+response must be signed with the new session's key (MS-SMB2 3.2.5.3.1),
+which also proves the server knows the password. After that, a response
+that is not encrypted (`strict`, or marked; error and interim responses
+too) or not validly signed (`signed`; interim STATUS_PENDING responses
+excepted, MS-SMB2 3.2.5.1.3) ends the connection; so does one for another
+session, one that answers no outstanding request, a compressed frame or a
+request.
 NTLMv2 and SPNEGO come from `sspi` (no Kerberos, no network of its own);
 sspi checks the server's mechListMIC, and the user name `/GUEST`, for which
 sspi skips that check, is refused, as is a password that sspi would take
