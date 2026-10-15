@@ -273,7 +273,7 @@ Each provider also has the service `<p>-files` of type `netvfs-files` (SPEC-v2 X
 
 ### 6.2 Settings keys
 
-Connection settings are account-global so that a future second service can share them. Only `backups_path` is service-scoped, because the platform defines it that way.
+Connection settings are account-global, so that the `<p>-backup` and `<p>-files` services share them. Only `backups_path` is service-scoped, because the platform defines it that way.
 
 | Key | Scope | Type | Meaning |
 |---|---|---|---|

@@ -570,7 +570,7 @@ fast, container-free target), the CLI and in-process consumers.
 - XA-7: Interactive accounts (`auth_mode=interactive`) and SMB `guest` accounts may
   have no stored secret; `SignonSecretSource` returns an empty `Credentials` for them
   instead of `AuthFailed` (amends A-6 for these accounts only).
-- XA-8: Attention states gain no new values. Clearing attention still requires the
+- XA-8: The attention states are those of SPEC 6.4. Clearing attention requires the
   explicit review flow.
 
 ## 8a. Bridge for sandboxed consumers (`netvfs-bridge`)
