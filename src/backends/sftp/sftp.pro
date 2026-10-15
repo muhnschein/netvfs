@@ -6,4 +6,5 @@ NETVFS_PROVIDER = sftp
 include(../backend.pri)
 include(../rs/rs.pri)
 
+HEADERS += sftpplugin.h
 SOURCES += sftpplugin.cpp
