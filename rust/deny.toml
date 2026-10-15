@@ -74,6 +74,9 @@ skip = [
     # sspi's picky 7.0.0-rc.26 is on base64 0.22, its picky-asn1-x509 0.15
     # on 0.23.
     { crate = "base64@0.22", reason = "picky 7.0.0-rc.26 (sspi) has no release on base64 0.23" },
+    # Both trees together: sspi's crypto-mac 0.11 is on generic-array 0.14,
+    # russh on 1.x (whose compat-0_14 feature links 0.14 as well).
+    { crate = "generic-array@0.14", reason = "crypto-mac 0.11 (sspi) has no release on generic-array 1" },
 ]
 
 [sources]
