@@ -188,11 +188,11 @@ pub fn valid_share_name(name: &str) -> bool {
     !name.chars().any(|c| u32::from(c) < 0x20 || c == '\u{7f}' || SHARE_FORBIDDEN.contains(c))
 }
 
-/// Text cleaned of control characters, at most `max` characters (share
-/// remarks).
+/// Text cleaned of control characters (C0, DEL and C1), at most `max`
+/// characters (share remarks).
 #[must_use]
 pub fn clean_text(text: &str, max: usize) -> String {
-    text.chars().take(max).filter(|c| u32::from(*c) >= 0x20 && *c != '\u{7f}').collect()
+    text.chars().take(max).filter(|c| !c.is_control()).collect()
 }
 
 #[cfg(test)]
@@ -354,6 +354,7 @@ mod tests {
         assert_eq!(clean_text("Films\tand\u{7f} music\n", 256), "Filmsand music");
         assert_eq!(clean_text("abcdef", 3), "abc");
         assert_eq!(clean_text("\u{1}\u{1}abc", 3), "a");
+        assert_eq!(clean_text("a\u{85}b\u{9f}c\u{a0}", 256), "abc\u{a0}");
         assert_eq!(display(&[0x61, 0xFF]), "a\u{fffd}");
     }
 }
