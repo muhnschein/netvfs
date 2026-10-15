@@ -51,6 +51,7 @@ fn base_capabilities() -> BTreeSet<Capability> {
         Capability::SetModified,
         Capability::SetModifiedOnUpload,
         Capability::Symlinks,
+        Capability::NativeNoReplace,
     ]
     .into()
 }
@@ -101,17 +102,6 @@ fn extensions_need_their_version() {
         ("copy-data", "2"),
     ]));
     assert_eq!(wrong, Extensions::default());
-}
-
-#[test]
-fn quirks_follow_the_banner() {
-    assert_eq!(
-        Quirks::of(b"SSH-2.0-OpenSSH_9.9p1"),
-        Quirks { native_no_replace: true, lstat_follows: false }
-    );
-    assert_eq!(Quirks::of(b"SSH-2.0-mod_sftp/1.0"), Quirks { native_no_replace: false, lstat_follows: true });
-    assert_eq!(Quirks::of(b"SSH-2.0-OpenSSH"), Quirks::default());
-    assert_eq!(Quirks::of(b"SSH-2.0-dropbear"), Quirks::default());
 }
 
 #[test]
@@ -208,7 +198,6 @@ async fn new_learns_limits_home_and_owners() {
         Capability::Ownership,
         Capability::SpaceInfo,
         Capability::AtomicReplace,
-        Capability::NativeNoReplace,
         Capability::ServerCopy,
     ]);
     assert_eq!(remote.capabilities().flags, all);
@@ -223,7 +212,7 @@ async fn new_learns_limits_home_and_owners() {
 #[tokio::test]
 async fn without_extensions_only_the_base_capabilities() {
     let fake = Fake::new().with_extensions(&[]);
-    let remote = fake.remote_with(Quirks::default()).await;
+    let remote = fake.remote().await;
     assert_eq!(remote.chunks(), Chunks { read: FALLBACK_CHUNK, write: FALLBACK_CHUNK });
     assert_eq!(remote.capabilities().flags, base_capabilities());
     assert_eq!(fake.kinds(), ["REALPATH"]);
@@ -234,20 +223,20 @@ async fn new_fails_on_a_broken_limits_reply_and_a_lost_connection() {
     let fake = Fake::new();
     fake.rule(Rule::ext("limits@openssh.com", Action::Status(FX_FAILURE, "no")));
     let (client, v) = fake.client().await;
-    let e = Remote::new(client, &v, Quirks::default(), 0o755, &cancel()).await.unwrap_err();
+    let e = Remote::new(client, &v, 0o755, &cancel()).await.unwrap_err();
     assert_eq!((e.name, e.message.as_str()), (ErrorName::ProtocolError, "limits: no"));
 
     let fake = Fake::new();
     fake.rule(Rule::new(FXP_REALPATH, Action::Hangup));
     let (client, v) = fake.client().await;
-    let e = Remote::new(client, &v, Quirks::default(), 0o755, &cancel()).await.unwrap_err();
+    let e = Remote::new(client, &v, 0o755, &cancel()).await.unwrap_err();
     assert_eq!(e.name, ErrorName::ConnectionLost);
 
     let fake = Fake::new();
     let (client, v) = fake.client().await;
     let c = cancel();
     c.cancel();
-    let e = Remote::new(client, &v, Quirks::default(), 0o755, &c).await.unwrap_err();
+    let e = Remote::new(client, &v, 0o755, &c).await.unwrap_err();
     assert_eq!(e.name, ErrorName::Canceled);
 }
 
@@ -355,40 +344,8 @@ async fn stat_and_lstat() {
     );
     assert_eq!(remote.stat(b"dangling", false, &c).await.unwrap().kind, EntryType::Symlink);
     assert_eq!(err(remote.stat(b"a/../b", true, &c).await).0, ErrorName::InvalidName);
-    // No READLINK on a server whose LSTAT does not follow links.
+    // LSTAT alone tells a link.
     assert_eq!(fake.requests(FXP_READLINK), []);
-}
-
-#[tokio::test]
-async fn lstat_on_a_server_whose_lstat_follows_links() {
-    let fake = Fake::new();
-    fake.state().lstat_follows = true;
-    fake.file("/home/u/f", b"12345");
-    fake.link("/home/u/l", "f");
-    fake.link("/home/u/dangling", "nowhere/x");
-    let mut remote = fake.remote_with(Quirks::of(b"SSH-2.0-mod_sftp/1.3")).await;
-    let c = cancel();
-    let l = remote.stat(b"l", false, &c).await.unwrap();
-    assert_eq!(
-        (l.kind, l.target_kind, l.size, l.mode),
-        (EntryType::Symlink, EntryType::Unknown, Some(1), Some(0o777))
-    );
-    // Times and owner come from the target, as the server reported them.
-    assert_eq!((l.mtime_ms, l.owner.as_str()), (Some(2_000_000), "alice"));
-    let d = remote.stat(b"dangling", false, &c).await.unwrap();
-    assert_eq!((d.kind, d.size, d.mode, d.mtime_ms), (EntryType::Symlink, Some(9), Some(0o777), None));
-    let f = remote.stat(b"f", false, &c).await.unwrap();
-    assert_eq!(f.kind, EntryType::File);
-    assert_eq!(err(remote.stat(b"missing", false, &c).await).0, ErrorName::NotFound);
-    assert_eq!(fake.requests(FXP_READLINK).len(), 4);
-    // Following needs no READLINK.
-    remote.stat(b"l", true, &c).await.unwrap();
-    assert_eq!(fake.requests(FXP_READLINK).len(), 4);
-
-    // A failure other than "not found" is not hidden.
-    fake.rule(Rule::new(FXP_LSTAT, Action::Status(FX_PERMISSION_DENIED, "no")).once());
-    assert_eq!(err(remote.stat(b"l", false, &c).await).0, ErrorName::PermissionDenied);
-    assert_eq!(fake.requests(FXP_READLINK).len(), 4);
 }
 
 #[tokio::test]
@@ -639,8 +596,7 @@ async fn no_follow_up_request_after_a_timeout() {
     let (r, w) = tokio::io::split(stream);
     let (client, version) =
         Client::start(r, w, async {}, std::time::Duration::from_millis(100), &c).await.unwrap();
-    let mut remote =
-        Remote::new(client, &version, Quirks::of(b"SSH-2.0-OpenSSH_9.9"), 0o750, &c).await.unwrap();
+    let mut remote = Remote::new(client, &version, 0o750, &c).await.unwrap();
     fake.rule(Rule::new(FXP_REMOVE, Action::Delay(std::time::Duration::from_millis(300))).once());
     let before = fake.requests(FXP_LSTAT).len();
     assert_eq!(err(remote.remove_file(b"d", &c).await).0, ErrorName::Timeout);
@@ -690,7 +646,7 @@ async fn remove_dir() {
 }
 
 #[tokio::test]
-async fn rename_without_replacing_on_openssh() {
+async fn rename_without_replacing() {
     let fake = Fake::new();
     fake.file("/home/u/a", b"A");
     fake.file("/home/u/b", b"B");
@@ -719,28 +675,6 @@ async fn rename_without_replacing_on_openssh() {
         err(remote.rename(b"c", b"e", RenameMode::NoReplace, &c).await),
         named(ErrorName::ProtocolError, "/home/u/c: cross-device")
     );
-}
-
-#[tokio::test]
-async fn rename_without_replacing_elsewhere_checks_first() {
-    let fake = Fake::new();
-    fake.file("/home/u/a", b"A");
-    fake.file("/home/u/b", b"B");
-    let mut remote = fake.remote_with(Quirks::default()).await;
-    let c = cancel();
-    assert_eq!(
-        err(remote.rename(b"a", b"b", RenameMode::NoReplace, &c).await),
-        named(ErrorName::AlreadyExists, "/home/u/b exists")
-    );
-    assert_eq!(fake.requests(FXP_RENAME), []);
-    remote.rename(b"a", b"c", RenameMode::NoReplace, &c).await.unwrap();
-    assert_eq!(fake.data("/home/u/c"), Some(b"A".to_vec()));
-    fake.rule(Rule::new(FXP_LSTAT, Action::Status(FX_PERMISSION_DENIED, "no")).once());
-    assert_eq!(
-        err(remote.rename(b"c", b"d", RenameMode::NoReplace, &c).await).0,
-        ErrorName::PermissionDenied
-    );
-    assert_eq!(fake.requests(FXP_RENAME).len(), 1);
 }
 
 #[tokio::test]

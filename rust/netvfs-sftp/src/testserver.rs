@@ -131,18 +131,18 @@ pub fn host_key(file: &str) -> PrivateKey {
 }
 
 impl Server {
-    /// A server with an Ed25519 host key and `script`, banner OpenSSH's.
+    /// A server with an Ed25519 host key and `script`.
     pub async fn start(script: Script) -> Self {
-        Self::with_keys(script, vec![host_key("ed25519-openssh")], "SSH-2.0-OpenSSH_9.6").await
+        Self::with_keys(script, vec![host_key("ed25519-openssh")]).await
     }
 
-    /// A server with `keys` (in the server's order) and `banner`.
-    pub async fn with_keys(script: Script, keys: Vec<PrivateKey>, banner: &'static str) -> Self {
+    /// A server with `keys` (in the server's order), banner OpenSSH's.
+    pub async fn with_keys(script: Script, keys: Vec<PrivateKey>) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let public = keys.iter().map(|k| k.public_key().clone()).collect();
         let config = Arc::new(server::Config {
-            server_id: SshId::Standard(Cow::Borrowed(banner)),
+            server_id: SshId::Standard(Cow::Borrowed("SSH-2.0-OpenSSH_9.6")),
             auth_rejection_time: Duration::ZERO,
             auth_rejection_time_initial: Some(Duration::ZERO),
             keys,

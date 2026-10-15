@@ -13,7 +13,7 @@
 
 use crate::client::Client;
 use crate::proto::*;
-use crate::remote::{Quirks, Remote};
+use crate::remote::Remote;
 use crate::wire::{MAX_PACKET, Reader};
 use netvfs_vfs::CancelToken;
 use std::collections::BTreeMap;
@@ -115,8 +115,6 @@ pub struct State {
     pub gid: u32,
     /// READDIR names per reply.
     pub batch: usize,
-    /// LSTAT follows links (ProFTPD).
-    pub lstat_follows: bool,
     pub rules: Vec<Rule>,
     pub log: Vec<Logged>,
     handles: BTreeMap<Vec<u8>, Open>,
@@ -169,7 +167,6 @@ impl Fake {
             uid: 1000,
             gid: 100,
             batch: 100,
-            lstat_follows: false,
             rules: Vec::new(),
             log: Vec::new(),
             handles: BTreeMap::new(),
@@ -257,16 +254,10 @@ impl Fake {
         Client::start(r, w, async {}, Duration::from_secs(10), &CancelToken::new()).await.unwrap()
     }
 
-    /// The file operations of a server with `quirks`, folders made with
-    /// mode 0o750.
-    pub async fn remote_with(&self, quirks: Quirks) -> Remote {
-        let (client, version) = self.client().await;
-        Remote::new(client, &version, quirks, 0o750, &CancelToken::new()).await.unwrap()
-    }
-
-    /// The file operations of an OpenSSH server.
+    /// The file operations, folders made with mode 0o750.
     pub async fn remote(&self) -> Remote {
-        self.remote_with(Quirks::of(b"SSH-2.0-OpenSSH_9.9")).await
+        let (client, version) = self.client().await;
+        Remote::new(client, &version, 0o750, &CancelToken::new()).await.unwrap()
     }
 
     /// The log so far, then cleared.
@@ -586,9 +577,7 @@ impl State {
                 let attrs = Attrs::decode(r).unwrap();
                 let p = self.resolve(&path, true)?;
                 match self.nodes.get_mut(&p) {
-                    Some(Node::Dir { .. }) if flags & FXF_WRITE != 0 => {
-                        return Err((FX_FAILURE, "Is a directory"));
-                    }
+                    Some(Node::Dir { .. }) if flags & FXF_WRITE != 0 => return Err(FAILURE),
                     Some(_) if flags & FXF_CREAT != 0 && flags & FXF_EXCL != 0 => return Err(FAILURE),
                     Some(Node::File { data, .. }) if flags & FXF_TRUNC != 0 => data.clear(),
                     Some(_) => {}
@@ -676,7 +665,7 @@ impl State {
             }
             FXP_STAT | FXP_LSTAT => {
                 let path = s(r);
-                let attrs = self.stat(&path, kind == FXP_STAT || self.lstat_follows)?;
+                let attrs = self.stat(&path, kind == FXP_STAT)?;
                 Ok(packet(FXP_ATTRS, id, &encode_attrs(&attrs)))
             }
             FXP_FSTAT => {
@@ -828,10 +817,8 @@ impl State {
                 let to = self.resolve(&s(r), false)?;
                 match (self.nodes.get(&from), self.nodes.get(&to)) {
                     (None, _) => return Err(NO_SUCH_FILE),
-                    (Some(Node::Dir { .. }), Some(Node::File { .. } | Node::Link { .. })) => {
-                        return Err((FX_FAILURE, "Not a directory"));
-                    }
-                    (Some(_), Some(Node::Dir { .. })) => return Err((FX_FAILURE, "Is a directory")),
+                    (Some(Node::Dir { .. }), Some(Node::File { .. } | Node::Link { .. }))
+                    | (Some(_), Some(Node::Dir { .. })) => return Err(FAILURE),
                     _ => {}
                 }
                 if from != to {

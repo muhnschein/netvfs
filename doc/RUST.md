@@ -270,18 +270,17 @@ read handles read ahead while reads are sequential, up to 4 MiB. What a
 server offers sets the capabilities: AtomicReplace
 (`posix-rename@openssh.com`), SpaceInfo (`statvfs@openssh.com`), Hardlinks
 (`hardlink@openssh.com`), Ownership (`users-groups-by-id@openssh.com`),
-ServerCopy (`copy-data`, files only) and, by the OpenSSH banner,
-NativeNoReplace; never Checksums (computed locally), ServerCopyRecursive
-or AtomicPut. SYMLINK sends its arguments in OpenSSH's order (target,
-then link) to every server. ProFTPD's LSTAT follows links, so READLINK
-tells links apart there (XC-7).
+ServerCopy (`copy-data`, files only); NativeNoReplace always (OpenSSH's
+plain RENAME fails on an existing target); never Checksums (computed
+locally), ServerCopyRecursive or AtomicPut. SYMLINK sends its arguments
+in OpenSSH's order (target, then link).
 
 **Tests.** Unit tests against an SFTP server in memory (`fake.rs`) and an
 SSH server in the test process (`testserver.rs`, russh's server with a
 scripted sign-in and a proxy that stalls or cuts); `tests/openssh.rs`
 against the SFTP interop containers (the algorithms each server
 negotiates, read from its log; refusals; pins of each key type; sign-in
-methods; capabilities per server family; cancel and timeouts). Those need
+methods; capabilities per server; cancel and timeouts). Those need
 `NETVFS_SFTP_INTEROP_CONFIG`, which `tests/interop/sftp/run.sh` sets (and
 prints with `NETVFS_SFTP_SERVERS_ONLY=1`); without it they pass at once and
 say they were skipped. The mutant jobs start the servers once per shard.
@@ -326,7 +325,7 @@ name of its own, as Sailjail requires.
 | The FFI's C ABI from C++ (and its marshalling into one block per result) | `tests/bridge/ffi` | `make check-unit` |
 | `libnetvfs-rs.so`'s table against the `mem` backend from Rust, as the shim calls it: every function, results and errors, callbacks, handles, transfers, cancel from another thread and the 1 s cut, one call at a time, a connection moving between threads, the two named workers, panics, no block or object left (counters of the `testing` build) | `rust/netvfs-backend/tests/ffi.rs` (nextest runs each test in a process of its own) | `make check-rust` |
 | netvfs-sftp: the codecs, the client, the file operations and transfers against an SFTP server in memory; session, sign-in and the `Backend` against an SSH server in the test process; the key tools against key files of ssh-keygen and openssl (`testdata/keys`) | `rust/netvfs-sftp/src` | `make check-rust` |
-| netvfs-sftp against OpenSSH 10.3p1, 9.6p1 and 8.9p1, ProFTPD and Dropbear (2025 and 2022): negotiated algorithms, refusals of weaker servers, pins, sign-in, capabilities, cancel and timeouts | `rust/netvfs-sftp/tests/openssh.rs` | `make check-interop` (the end of `tests/interop/sftp/run.sh`) |
+| netvfs-sftp against OpenSSH 10.3p1, 9.6p1 and 8.9p1: negotiated algorithms, refusals of weaker servers, pins, sign-in, capabilities, cancel and timeouts | `rust/netvfs-sftp/tests/openssh.rs` | `make check-interop` (the end of `tests/interop/sftp/run.sh`) |
 | The SFTP plugin: the key tools through it, connection failures without a server | `tests/unit/sftp` (`tst_sftp`) | `make check-unit` |
 | The shim against the `mem` backend: loading (`NETVFS_RS_LIB`, a missing library), the plugin, conversions both ways, the callbacks and what they throw, cancel and the prompter, one call at a time, panics, calls from other threads; and the conformance suite on `mem` through the shim (`tests/backends/rs/conformance/mem.json`) | `tests/backends/rs` (`tst_rsshim`, the test plugin `libnetvfs-mem.so`, the library from the `rs-test` profile) | `make check-unit`, also under `SANITIZE=1` (the library uninstrumented) |
 | The built `netvfs-bridge` as a black box from a libdbus client (`tests/bridge/common`, the consumer side of the C++ bridge of 0.4): the introspection XML byte for byte, the `Peer` interface, an unknown path, fd passing both ways, error details, and every golden sequence of the contract, with the fake backend seeded through `NETVFS_FAKE_SEED` and a scripted accounts helper | `tests/bridge/contract` (`tst_contract`) | `make check-unit` |

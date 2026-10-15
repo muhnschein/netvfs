@@ -108,8 +108,7 @@ is non-zero if any target failed. Every run works in
   (`stall` mode), and the planned `httpstall.py` / `ftpstall.py`.
 
 `tests/interop/sftp/run.sh` runs the suite against OpenSSH 10.3p1 (copy
-through the `copy-data` extension, checksums computed locally) and ProFTPD
-mod_sftp (no server copy, no native NoReplace), each with a
+through the `copy-data` extension, checksums computed locally), with a
 `--relay` stall proxy, a restart command (`restart-instance.sh`) and a
 bind-mounted `hostPath`.
 

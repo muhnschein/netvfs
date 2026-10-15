@@ -12,7 +12,7 @@ use crate::auth::{Login, Mode};
 use crate::client::Client;
 use crate::errors::{connection_closed, connection_lost};
 use crate::io::{Download, SftpRead, SftpWrite, Upload, open_for_read, open_for_write};
-use crate::remote::{DEFAULT_DIR_MODE, MODE_BITS, Quirks, Remote};
+use crate::remote::{DEFAULT_DIR_MODE, MODE_BITS, Remote};
 use crate::session::{self, DEFAULT_PORT, Session, Target, sftp_not_enabled};
 use data_encoding::BASE64;
 use netvfs_vfs::{
@@ -182,7 +182,7 @@ async fn sign_in(
             // for this account (a forced command, for example).
             if e.name == ErrorName::ConnectionLost { sftp_not_enabled() } else { e }
         })?;
-    Remote::new(client, &version, Quirks::of(&session.banner()), settings.dir_mode, cancel).await
+    Remote::new(client, &version, settings.dir_mode, cancel).await
 }
 
 impl Sftp {

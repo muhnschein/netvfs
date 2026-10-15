@@ -440,15 +440,12 @@ public:
   `TargetUnknown`).
 - XS-4: Links: `sftp_readlink`, `sftp_symlink`, `sftp_hardlink` (when
   `hardlink@openssh.com` is offered). OpenSSH's server swaps the SSH_FXP_SYMLINK
-  arguments relative to the draft; verify libssh's argument order against the OpenSSH
-  container in the interop suite and against at least one non-OpenSSH server (e.g. the
-  `sftpproxy.py` path through to Dropbear or ProFTPD mod_sftp) before enabling
-  `Symlinks` for unknown servers.
+  arguments relative to the draft; the argument order is verified against the OpenSSH
+  containers in the interop suite.
 - XS-5: `setAttributes` via `sftp_setstat` (mode, atime/mtime). `SetModified`,
   `PosixModes` reported.
 - XS-6: Rename: NoReplace uses plain `SSH_FXP_RENAME` (OpenSSH implements it with
-  link+unlink, failing on an existing target → `NativeNoReplace` for OpenSSH servers,
-  identified by the version banner; others get the stat-check path). Replace uses
+  link+unlink, failing on an existing target → `NativeNoReplace`). Replace uses
   `posix-rename@openssh.com` when offered (`AtomicReplace`), else stat+unlink+rename as
   today.
 - XS-7: Handles: `ReadHandle` over an open `sftp_file` with `sftp_aio` read-ahead

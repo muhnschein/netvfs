@@ -13,7 +13,7 @@ use netvfs_sftp::proto::{
     self, Limits, MAX_EXTENSION_FIELD, MAX_EXTENSIONS, MAX_HANDLE, MAX_NAME, MAX_NAMES, MAX_OWNER_NAME, Reply,
     Statvfs,
 };
-use netvfs_sftp::remote::{Quirks, Remote};
+use netvfs_sftp::remote::Remote;
 use netvfs_sftp::wire::MAX_PACKET;
 use netvfs_vfs::{Attributes, CancelToken, Entry, ListOptions, ListSink, RenameMode};
 use std::time::Duration;
@@ -26,8 +26,6 @@ struct Input {
     /// Ids asked for by `decode_owner_names`.
     users: u8,
     groups: u8,
-    /// The server's banner decides the quirks.
-    openssh: bool,
     /// The server's packets: the first answers INIT (VERSION), each next
     /// one the next request. With `true` its request id is put in after
     /// the type byte.
@@ -108,8 +106,7 @@ async fn session(input: Input) {
     let Ok((client, version)) = Client::start(read, write, async {}, Duration::from_secs(5), &cancel).await else {
         return;
     };
-    let banner: &[u8] = if input.openssh { b"SSH-2.0-OpenSSH_9.6" } else { b"SSH-2.0-mod_sftp" };
-    let Ok(mut remote) = Remote::new(client, &version, Quirks::of(banner), 0o700, &cancel).await else {
+    let Ok(mut remote) = Remote::new(client, &version, 0o700, &cancel).await else {
         return;
     };
     let _ = remote.capabilities();

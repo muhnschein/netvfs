@@ -31,8 +31,6 @@ const MAX_CACHED_NAMES: usize = 4096;
 pub const DEFAULT_DIR_MODE: u32 = 0o777;
 /// Mode of a new file without a create mode.
 pub const DEFAULT_FILE_MODE: u32 = 0o666;
-/// What `lstat(2)` reports as a link's mode on Linux.
-const LINK_MODE: u32 = 0o777;
 /// The permission bits.
 pub const MODE_BITS: u32 = 0o7777;
 
@@ -68,27 +66,6 @@ impl Extensions {
             limits: version.offers("limits@openssh.com", "1"),
             users_groups: version.offers("users-groups-by-id@openssh.com", "1"),
             copy_data: version.offers("copy-data", "1"),
-        }
-    }
-}
-
-/// Behaviour that depends on the server's software (by banner).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct Quirks {
-    /// A plain RENAME fails on an existing target, atomically (OpenSSH,
-    /// XS-6): `NativeNoReplace`.
-    pub native_no_replace: bool,
-    /// LSTAT follows links (ProFTPD): READLINK tells links apart.
-    pub lstat_follows: bool,
-}
-
-impl Quirks {
-    /// The quirks of the server whose identification is `banner`.
-    #[must_use]
-    pub fn of(banner: &[u8]) -> Self {
-        Self {
-            native_no_replace: banner.starts_with(b"SSH-2.0-OpenSSH_"),
-            lstat_follows: banner.starts_with(b"SSH-2.0-mod_sftp"),
         }
     }
 }
@@ -277,7 +254,6 @@ pub struct Remote {
     client: Client,
     home: Vec<u8>,
     ext: Extensions,
-    quirks: Quirks,
     chunks: Chunks,
     dir_mode: u32,
     /// Owner names, when `users-groups-by-id@openssh.com` answered.
@@ -293,7 +269,6 @@ impl Remote {
     pub async fn new(
         client: Client,
         version: &ServerVersion,
-        quirks: Quirks,
         dir_mode: u32,
         cancel: &CancelToken,
     ) -> Result<Self, Status> {
@@ -313,7 +288,7 @@ impl Remote {
             Err(Failure::Local(s)) => return Err(s),
             Err(Failure::Server(_)) => Vec::new(),
         };
-        let mut remote = Self { client, home, ext, quirks, chunks, dir_mode, owners: None };
+        let mut remote = Self { client, home, ext, chunks, dir_mode, owners: None };
         remote.detect_owners(cancel).await;
         cancel.check()?;
         Ok(remote)
@@ -354,6 +329,7 @@ impl Remote {
             Capability::SetModified,
             Capability::SetModifiedOnUpload,
             Capability::Symlinks,
+            Capability::NativeNoReplace,
         ]
         .into();
         for (offered, capability) in [
@@ -361,7 +337,6 @@ impl Remote {
             (self.owners.is_some(), Capability::Ownership),
             (self.ext.statvfs, Capability::SpaceInfo),
             (self.ext.posix_rename, Capability::AtomicReplace),
-            (self.quirks.native_no_replace, Capability::NativeNoReplace),
             (self.ext.copy_data, Capability::ServerCopy),
         ] {
             if offered {
@@ -458,33 +433,13 @@ impl Remote {
         }
     }
 
-    /// STAT or LSTAT of `remote`, without owner names. On a server whose
-    /// LSTAT follows links, READLINK tells a link (XC-7).
+    /// STAT or LSTAT of `remote`, without owner names.
     async fn stat_remote(&self, remote: &[u8], follow: bool, cancel: &CancelToken) -> Result<Entry, Status> {
-        let name = last_component(remote);
-        let result = self
-            .client
+        self.client
             .stat(remote, follow, cancel)
             .await
-            .map(|a| entry_from(&a, name))
-            .map_err(|f| f.status(&display(remote)));
-        if follow || !self.quirks.lstat_follows {
-            return result;
-        }
-        match &result {
-            Ok(entry) if entry.kind == EntryType::Symlink => return result,
-            Err(s) if !matches!(s.name, ErrorName::NotFound | ErrorName::ProtocolError) => return result,
-            _ => {}
-        }
-        let Ok(target) = self.client.path_of(PathOf::Readlink(remote), cancel).await else {
-            return result;
-        };
-        let mut entry = result.unwrap_or_else(|_| entry_from(&Attrs::default(), name));
-        entry.kind = EntryType::Symlink;
-        entry.target_kind = EntryType::Unknown;
-        entry.size = Some(u64::try_from(target.len()).unwrap_or(u64::MAX));
-        entry.mode = Some(LINK_MODE);
-        Ok(entry)
+            .map(|a| entry_from(&a, last_component(remote)))
+            .map_err(|f| f.status(&display(remote)))
     }
 
     /// `stat` (`follow`) or `lstat`.
@@ -740,17 +695,7 @@ impl Remote {
         cancel: &CancelToken,
     ) -> Result<(), Status> {
         // XS-6: OpenSSH fails a plain RENAME on an existing target,
-        // atomically for files (NativeNoReplace). Other servers get a
-        // check first (a documented race).
-        if !self.quirks.native_no_replace {
-            match self.stat_remote(target, false, cancel).await {
-                Ok(_) => {
-                    return Err(Status::new(ErrorName::AlreadyExists, format!("{} exists", display(target))));
-                }
-                Err(s) if s.name != ErrorName::NotFound => return Err(s),
-                Err(_) => {}
-            }
-        }
+        // atomically for files (NativeNoReplace).
         let Err(f) = self.client.simple(Simple::Rename(source, target), cancel).await else {
             return Ok(());
         };

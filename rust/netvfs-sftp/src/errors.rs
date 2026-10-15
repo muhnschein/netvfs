@@ -47,14 +47,6 @@ impl Failure {
     }
 }
 
-/// Texts a server sends with `SSH_FX_FAILURE` for what SFTP v3 has no code
-/// for (ProFTPD sends `strerror()`).
-const FAILURE_TEXTS: [(&str, ErrorName); 3] = [
-    ("Not a directory", ErrorName::NotADirectory),
-    ("Is a directory", ErrorName::IsADirectory),
-    ("Directory not empty", ErrorName::DirectoryNotEmpty),
-];
-
 fn server_status(reply: &StatusReply, context: &str) -> Status {
     let simple = |name, what: &str| Status::new(name, format!("{context}: {what}"));
     match reply.code {
@@ -63,12 +55,6 @@ fn server_status(reply: &StatusReply, context: &str) -> Status {
         FX_FILE_ALREADY_EXISTS => simple(ErrorName::AlreadyExists, "already exists"),
         FX_OP_UNSUPPORTED => simple(ErrorName::Unsupported, "not supported by the server"),
         FX_NO_CONNECTION | FX_CONNECTION_LOST => simple(ErrorName::ConnectionLost, &message(reply)),
-        FX_FAILURE => {
-            if let Some((text, name)) = FAILURE_TEXTS.iter().find(|(text, _)| reply.message.ends_with(text)) {
-                return simple(*name, text);
-            }
-            simple(ErrorName::ProtocolError, &message(reply))
-        }
         _ => simple(ErrorName::ProtocolError, &message(reply)),
     }
 }
@@ -144,15 +130,6 @@ mod tests {
             (FX_CONNECTION_LOST, "", ErrorName::ConnectionLost, "/a: the server lost its connection"),
             (FX_FAILURE, "Failure", ErrorName::ProtocolError, "/a: Failure"),
             (FX_FAILURE, "", ErrorName::ProtocolError, "/a: the server reported a failure"),
-            (
-                FX_FAILURE,
-                "rmdir: Directory not empty",
-                ErrorName::DirectoryNotEmpty,
-                "/a: Directory not empty",
-            ),
-            (FX_FAILURE, "Not a directory", ErrorName::NotADirectory, "/a: Not a directory"),
-            (FX_FAILURE, "unlink: Is a directory", ErrorName::IsADirectory, "/a: Is a directory"),
-            (FX_FAILURE, "Is a directory, really?", ErrorName::ProtocolError, "/a: Is a directory, really?"),
             (FX_BAD_MESSAGE, "", ErrorName::ProtocolError, "/a: the server did not understand the request"),
             (FX_EOF, "", ErrorName::ProtocolError, "/a: end of file"),
             (99, "", ErrorName::ProtocolError, "/a: the server reported error 99"),
@@ -164,8 +141,6 @@ mod tests {
             let s = f.status("/a");
             assert_eq!((s.name, s.message.as_str()), (name, expected), "{code} {text}");
         }
-        // Only FAILURE carries those texts.
-        assert_eq!(server(FX_BAD_MESSAGE, "Is a directory").status("/a").name, ErrorName::ProtocolError);
     }
 
     #[test]

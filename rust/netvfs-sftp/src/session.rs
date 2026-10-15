@@ -78,11 +78,10 @@ impl End {
     }
 }
 
-/// What the handler saw: the host key, the banner, the end.
+/// What the handler saw: the host key, the end.
 #[derive(Debug, Default)]
 struct Seen {
     host_key: Option<PublicKey>,
-    banner: Vec<u8>,
     end: Option<End>,
 }
 
@@ -95,8 +94,8 @@ impl Shared {
     }
 }
 
-/// The russh handler of a [`Session`]: records the host key (the caller compares it with
-/// the pin, S-7), the banner and how the session ended; refuses every
+/// The russh handler of a [`Session`]: records the host key (the caller
+/// compares it with the pin, S-7) and how the session ended; refuses every
 /// channel the server wants to open (dropping the reply refuses it,
 /// administratively prohibited).
 #[derive(Debug)]
@@ -120,22 +119,6 @@ impl client::Handler for Recorder {
                 // Never negotiated: the lists hold no certificate algorithm.
                 PublicKeyOrCertificate::Certificate(_) => Ok(false),
             }
-        })
-    }
-
-    fn kex_done(
-        &mut self,
-        _: Option<&[u8]>,
-        _: &russh::Names,
-        session: &mut client::Session,
-    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
-        ready({
-            let mut seen = self.seen.lock();
-            if seen.banner.is_empty() {
-                seen.banner = session.remote_sshid().to_vec();
-            }
-            drop(seen);
-            Ok(())
         })
     }
 
@@ -563,12 +546,6 @@ impl Session {
     #[must_use]
     pub const fn identity(&self) -> &ServerIdentity {
         &self.identity
-    }
-
-    /// The server's identification string (`SSH-2.0-...`).
-    #[must_use]
-    pub fn banner(&self) -> Vec<u8> {
-        self.seen.lock().banner.clone()
     }
 
     /// Why the session ended, once it has.

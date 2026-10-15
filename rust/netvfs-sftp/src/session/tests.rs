@@ -48,7 +48,6 @@ async fn the_identity_is_the_host_key() {
     assert_eq!(id.fingerprint, ED25519_FINGERPRINT);
     assert_eq!(id.public_key, server.keys[0].to_bytes().unwrap());
     assert_eq!(*id, identity_of(&server.keys[0]));
-    assert_eq!(session.banner(), b"SSH-2.0-OpenSSH_9.6");
     assert!(!session.is_closed());
     assert_eq!(session.end(), None);
     let printed = format!("{session:?}");
@@ -66,7 +65,7 @@ async fn the_identity_is_the_host_key() {
 #[tokio::test]
 async fn a_pin_picks_the_host_key_of_its_type() {
     let keys = vec![host_key("rsa-openssh"), host_key("ecdsa384-openssh"), host_key("ed25519-openssh")];
-    let server = Server::with_keys(Script::password(), keys, "SSH-2.0-OpenSSH_9.6").await;
+    let server = Server::with_keys(Script::password(), keys).await;
     let c = CancelToken::new();
     // Unpinned, the client's order decides: Ed25519 first.
     assert_eq!(connect(&target(server.addr), &c).await.unwrap().identity().algorithm, "ssh-ed25519");

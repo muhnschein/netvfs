@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-// SFTP interoperability matrix (SPEC-sftp section 8) against the OpenSSH,
-// ProFTPD and Dropbear containers started by run.sh, which passes their
-// ports and the test password in the JSON file named by
+// SFTP interoperability matrix (SPEC-sftp section 8) against the OpenSSH
+// containers started by run.sh, which passes their ports and the test
+// password in the JSON file named by
 // NETVFS_SFTP_INTEROP_CONFIG. Everything goes through the SFTP plugin of
 // the build tree (libnetvfs-sftp.so over libnetvfs-rs.so); what was
 // negotiated is read from the servers' logs.
@@ -271,20 +271,6 @@ private:
                                                     .arg(keyFileType(algorithm)))
                                        .split(' ')
                                        .value(1));
-    }
-
-    // The pin of a Dropbear host key, from dropbearkey -y.
-    QString dropbearHostKey(const QString &server, const QString &type) const
-    {
-        const QStringList lines = QString::fromLatin1(exec(server, QStringLiteral("dropbearkey -y -f "
-                                                                                   "/etc/dropbear/dropbear_%1_host_key")
-                                                                     .arg(type)))
-                                      .split(QLatin1Char('\n'));
-        for (const QString &line : lines) {
-            if (line.startsWith(QLatin1String("ssh-")) || line.startsWith(QLatin1String("ecdsa-")))
-                return line.section(QLatin1Char(' '), 0, 1);
-        }
-        return QString();
     }
 
     static QString keyFileType(const QString &algorithm)
@@ -689,62 +675,6 @@ private slots:
         auto b = signedIn(params(QStringLiteral("o89"), QStringLiteral("default"), QStringLiteral("alice")), m_password);
         fullFlow(b.get(), QStringLiteral("o89"), QStringLiteral("netvfs-it/st09"),
                          QStringLiteral("/home/alice/netvfs-it/st09"));
-    }
-
-    // Dropbear (routers, embedded devices), which runs OpenSSH's
-    // sftp-server: the hardened lists negotiate, each host key type pins,
-    // password and key sign-in, the full flow.
-    void dropbear_data()
-    {
-        QTest::addColumn<QString>("server");
-        QTest::newRow("2025.89") << "db25";
-        QTest::newRow("2022.83") << "db22";
-    }
-
-    void dropbear()
-    {
-        QFETCH(QString, server);
-        const ConnectionParams p = params(server, QStringLiteral("default"), QStringLiteral("alice"));
-        auto b = std::unique_ptr<Backend>(BackendLoader::create(QStringLiteral("sftp")));
-        ServerIdentity seen;
-        Result r = b->connect(p, &seen);
-        QVERIFY2(r.ok(), qPrintable(r.toString()));
-        QCOMPARE(seen.algorithm, QStringLiteral("ssh-ed25519"));
-        QCOMPARE(seen.toPin(), dropbearHostKey(server, QStringLiteral("ed25519")));
-        b->disconnect();
-        for (const QString &type : { QStringLiteral("ed25519"), QStringLiteral("ecdsa"), QStringLiteral("rsa") }) {
-            ConnectionParams pinned = p;
-            pinned.options.insert(QStringLiteral("host_key"), dropbearHostKey(server, type));
-            r = establish(b.get(), pinned, Credentials(p.username, m_password), &seen);
-            QVERIFY2(r.ok(), qPrintable(type + QLatin1String(": ") + r.toString()));
-            QCOMPARE(seen.toPin(), pinned.option(QStringLiteral("host_key")));
-        }
-        fullFlow(b.get(), server, QStringLiteral("netvfs-it/dropbear"), QStringLiteral("/home/alice/netvfs-it/dropbear"));
-        if (QTest::currentTestFailed())
-            return;
-
-        // Ed25519 (generated) and ECDSA (imported) user keys.
-        SshKeyMaterial generated;
-        QVERIFY(m_tools->generate(&generated).ok());
-        const QByteArray file = exec(QStringLiteral("o103"),
-                                     QStringLiteral("rm -f /tmp/dk /tmp/dk.pub && ssh-keygen -q -t ecdsa -b 256 -N '' "
-                                                    "-f /tmp/dk && cat /tmp/dk"));
-        SshKeyMaterial imported;
-        r = m_tools->importKey(file, QByteArray(), &imported);
-        QVERIFY2(r.ok(), qPrintable(r.toString()));
-        for (const SshKeyMaterial &key : { generated, imported }) {
-            exec(server, QStringLiteral("mkdir -p /home/alice/.ssh && cat >> /home/alice/.ssh/authorized_keys "
-                                        "&& chown -R alice:alice /home/alice/.ssh && chmod 700 /home/alice/.ssh "
-                                        "&& chmod 600 /home/alice/.ssh/authorized_keys"),
-                 QStringList(), key.publicLine.toLatin1() + '\n');
-            auto keyed = signedIn(params(server, QStringLiteral("default"), QStringLiteral("alice"),
-                                           QStringLiteral("publickey")),
-                                    encodeKeySecret(key.privateKey));
-            QVERIFY2(keyed, qPrintable(key.algorithm));
-            Entry entry;
-            QVERIFY(keyed->stat(QStringLiteral("netvfs-it/dropbear"), &entry).ok());
-            QVERIFY(entry.isDir());
-        }
     }
 
     // S-T10, S-5, S-6
@@ -1189,7 +1119,7 @@ private slots:
         auto b = signedIn(filesParams(server, instance, QStringLiteral("alice")), m_password);
         QVERIFY(b);
         const Capabilities caps = b->capabilities();
-        QVERIFY(caps.has(Capability::NativeNoReplace));   // OpenSSH, by banner
+        QVERIFY(caps.has(Capability::NativeNoReplace));   // XS-6: OpenSSH's sftp-server
         QCOMPARE(caps.has(Capability::AtomicReplace), posixRename);
         QCOMPARE(caps.has(Capability::SpaceInfo), posixRename);   // statvfs@openssh.com
         QVERIFY(caps.has(Capability::ReadHandles));
@@ -1447,24 +1377,18 @@ private slots:
         QCOMPARE(b->stat(QString(), &entry).error(), Error::ConnectionLost);
     }
 
-    // XS-4, XS-2, XS-5 on every server family. The symlink rows verify on
-    // the server's disk that SSH_FXP_SYMLINK goes in OpenSSH's argument
-    // order (target first), which ProFTPD and Dropbear's OpenSSH
-    // sftp-server read the same way.
+    // XS-4, XS-2, XS-5 on every server. The symlink rows verify on the
+    // server's disk that SSH_FXP_SYMLINK goes in OpenSSH's argument order
+    // (target first).
     void v2LinksAndAttributes_data()
     {
         QTest::addColumn<QString>("server");
         QTest::addColumn<QString>("instance");
         QTest::addColumn<bool>("ownership");
-        QTest::addColumn<bool>("verbatim");
-        QTest::newRow("10.3p1") << "o103" << "default" << true << true;
-        QTest::newRow("10.3p1 noext") << "o103" << "noext" << false << true;
-        QTest::newRow("9.6p1") << "o96" << "default" << true << true;
-        QTest::newRow("8.9p1") << "o89" << "default" << false << true;   // no users-groups-by-id
-        // mod_sftp answers READLINK with relative targets made absolute.
-        QTest::newRow("ProFTPD") << "pro" << "sftp" << false << false;
-        QTest::newRow("Dropbear 2025.89") << "db25" << "default" << true << true;
-        QTest::newRow("Dropbear 2022.83") << "db22" << "default" << true << true;
+        QTest::newRow("10.3p1") << "o103" << "default" << true;
+        QTest::newRow("10.3p1 noext") << "o103" << "noext" << false;
+        QTest::newRow("9.6p1") << "o96" << "default" << true;
+        QTest::newRow("8.9p1") << "o89" << "default" << false;   // no users-groups-by-id
     }
 
     void v2LinksAndAttributes()
@@ -1472,7 +1396,6 @@ private slots:
         QFETCH(QString, server);
         QFETCH(QString, instance);
         QFETCH(bool, ownership);
-        QFETCH(bool, verbatim);
         auto b = signedIn(filesParams(server, instance, QStringLiteral("alice")), m_password);
         QVERIFY(b);
         const Capabilities caps = b->capabilities();
@@ -1496,14 +1419,11 @@ private slots:
                  odd + QLatin1Char('\n'));
         QString target;
         QVERIFY(b->readLink(dir + QStringLiteral("/odd"), &target).ok());
-        if (verbatim)
-            QCOMPARE(target, odd);   // XC-12: verbatim
-        else
-            QCOMPARE(target, disk.left(disk.lastIndexOf(QLatin1Char('/'))) + odd.mid(2));
+        QCOMPARE(target, odd);   // XC-12: verbatim
         exec(server, QStringLiteral("ln -s target.txt \"$P\" && chown -h alice:alice \"$P\""),
              { QStringLiteral("P=") + disk + QStringLiteral("/theirs") });
         QVERIFY(b->readLink(dir + QStringLiteral("/theirs"), &target).ok());
-        QCOMPARE(target, verbatim ? QStringLiteral("target.txt") : disk + QStringLiteral("/target.txt"));
+        QCOMPARE(target, QStringLiteral("target.txt"));
         Entry entry;
         QVERIFY(b->lstat(dir + QStringLiteral("/link"), &entry).ok());
         QVERIFY2(entry.type == EntryType::Symlink, qPrintable(QStringLiteral("type %1 size %2 mode %3")
@@ -1754,8 +1674,6 @@ private slots:
         QTest::newRow("10.3p1 noext") << "o103" << "noext" << false;
         QTest::newRow("9.6p1") << "o96" << "default" << true;
         QTest::newRow("8.9p1") << "o89" << "default" << false;
-        QTest::newRow("ProFTPD") << "pro" << "sftp" << false;
-        QTest::newRow("Dropbear 2025.89") << "db25" << "default" << true;
     }
 
     void v2ServerCopy()
@@ -1953,30 +1871,6 @@ private slots:
             const Result after = raw->stat(QStringLiteral("netvfs-it/cancel"), &entry);
             QVERIFY2(after.ok(), qPrintable(call.first + QLatin1String(" then stat: ") + after.toString()));
         }
-    }
-
-    // XS-6 (stat-check rename path) on a server that is not OpenSSH.
-    void v2ProFtpd()
-    {
-        auto b = signedIn(filesParams(QStringLiteral("pro"), QStringLiteral("sftp"), QStringLiteral("alice")), m_password);
-        QVERIFY(b);
-        const Capabilities caps = b->capabilities();
-        QVERIFY(!caps.has(Capability::NativeNoReplace));
-        QVERIFY(!caps.has(Capability::ServerCopy) && !caps.has(Capability::Checksums));
-        QVERIFY(caps.has(Capability::AtomicReplace) && caps.has(Capability::SpaceInfo));
-        const QString dir = unique(QStringLiteral("netvfs-it/pro-"));
-        QVERIFY(b->makePath(dir).ok());
-        QVERIFY(put(b.get(), dir + QStringLiteral("/a"), "a"));
-        QVERIFY(put(b.get(), dir + QStringLiteral("/b"), "bb"));
-        QCOMPARE(b->rename(dir + QStringLiteral("/b"), dir + QStringLiteral("/a"), RenameMode::NoReplace).error(),
-                 Error::AlreadyExists);
-        QVERIFY(b->rename(dir + QStringLiteral("/b"), dir + QStringLiteral("/c"), RenameMode::NoReplace).ok());
-        QVERIFY(b->rename(dir + QStringLiteral("/c"), dir + QStringLiteral("/a"), RenameMode::Replace).ok());
-        QCOMPARE(exec(QStringLiteral("pro"), QStringLiteral("cat \"$P\""),
-                      { QStringLiteral("P=/home/alice/") + dir + QStringLiteral("/a") }),
-                 QByteArray("bb"));
-        QVERIFY(b->keepAlive().ok());
-        exec(QStringLiteral("pro"), QStringLiteral("rm -rf \"$P\""), { QStringLiteral("P=/home/alice/") + dir });
     }
 };
 

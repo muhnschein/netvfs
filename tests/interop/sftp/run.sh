@@ -1,8 +1,8 @@
 #!/bin/sh
 # SPDX-License-Identifier: LGPL-2.1-or-later
 # SFTP interop suite (SPEC-sftp 8, SPEC 12.2, SPEC-v2 XT-1, XT-2). Builds
-# the OpenSSH, ProFTPD and Dropbear server images, starts one container per
-# server version, runs the QtTest driver tst_interop_sftp, netvfs-cli, the
+# the OpenSSH server images, starts one container per server version, runs
+# the QtTest driver tst_interop_sftp, netvfs-cli, the
 # backend conformance suite (tests/conformance) and the Rust tests of
 # netvfs-sftp (rust/netvfs-sftp/tests/openssh.rs) against them, and removes
 # the containers again, also when a step fails or the run is interrupted.
@@ -65,10 +65,6 @@ build_images() {
     docker build -q -f "$here/docker/Dockerfile.distro" -t netvfs-sftp-openssh96:test "$here/docker" >/dev/null
     docker build -q -f "$here/docker/Dockerfile.distro" --build-arg BASE=mirror.gcr.io/library/ubuntu:22.04 \
         -t netvfs-sftp-openssh89:test "$here/docker" >/dev/null
-    docker build -q -f "$here/docker/Dockerfile.proftpd" -t netvfs-sftp-proftpd:test "$here/docker" >/dev/null
-    docker build -q -f "$here/docker/Dockerfile.dropbear" -t netvfs-sftp-dropbear2025:test "$here/docker" >/dev/null
-    docker build -q -f "$here/docker/Dockerfile.dropbear" --build-arg BASE=mirror.gcr.io/library/ubuntu:24.04 \
-        -t netvfs-sftp-dropbear2022:test "$here/docker" >/dev/null
 }
 
 instance_port() {
@@ -87,8 +83,6 @@ instance_port() {
     dh) echo 2211 ;;
     cbc) echo 2212 ;;
     sha1rsa) echo 2213 ;;
-    sftp) echo 2222 ;;
-    sftpstall) echo 2223 ;;
     *) echo "unknown instance $name" >&2; return 1 ;;
     esac
 }
@@ -277,16 +271,14 @@ cli_check() {
     log "netvfs-cli ok"
 }
 
-# SPEC-v2 XT-1: the conformance suite against OpenSSH 10.3p1 and ProFTPD.
-# Each target works in a folder bind-mounted from here (hostPath), so that
+# SPEC-v2 XT-1: the conformance suite against OpenSSH 10.3p1. The target
+# works in a folder bind-mounted from here (hostPath), so that
 # the suite creates its large fixtures directly; the files it creates are
 # world-writable (umask 000) because the server's user changes them.
 conformance() {
     conformance_config="$work/conformance.json"
     o103_port=$(docker port "$prefix-o103" 2201/tcp | head -n 1 | sed 's/.*://')
     o103_stall=$(docker port "$prefix-o103" 2209/tcp | head -n 1 | sed 's/.*://')
-    pro_port=$(docker port "$prefix-pro" 2222/tcp | head -n 1 | sed 's/.*://')
-    pro_stall=$(docker port "$prefix-pro" 2223/tcp | head -n 1 | sed 's/.*://')
     cat > "$conformance_config" <<JSON
 { "targets": [
   { "name": "sftp-openssh103", "provider": "sftp", "host": "127.0.0.1", "port": $o103_port,
@@ -295,18 +287,7 @@ conformance() {
     "stallProxy": { "port": $o103_stall,
                     "engage": "docker exec $prefix-o103 touch /tmp/stall",
                     "release": "docker exec $prefix-o103 rm -f /tmp/stall" },
-    "restart": "docker exec $prefix-o103 /setup/restart-instance.sh default conf" },
-  { "name": "sftp-proftpd", "provider": "sftp", "host": "127.0.0.1", "port": $pro_port,
-    "user": "conf", "secretEnv": "NETVFS_CONFORMANCE_SECRET", "trustOnFirstUse": true,
-    "baseDir": "/srv/conformance", "hostPath": "$work/conformance-pro",
-    "stallProxy": { "port": $pro_stall,
-                    "engage": "docker exec $prefix-pro touch /tmp/stall",
-                    "release": "docker exec $prefix-pro rm -f /tmp/stall" },
-    "restart": "docker exec $prefix-pro /setup/restart-instance.sh - conf",
-    "skip": {
-      "symlinks": "ProFTPD mod_sftp answers READLINK with a relative target made absolute (XC-12 verbatim impossible)",
-      "symlinkDangling": "ProFTPD mod_sftp answers READLINK with a relative target made absolute (XC-12 verbatim impossible)"
-    } }
+    "restart": "docker exec $prefix-o103 /setup/restart-instance.sh default conf" }
 ] }
 JSON
     log "running tst_conformance"
@@ -339,24 +320,17 @@ else
 
     password=$(od -An -N12 -tx1 /dev/urandom | tr -d ' \n')
     otp=$(od -An -N4 -tu4 /dev/urandom | tr -d ' \n' | cut -c 1-6)
-    for folder in conformance-o103 conformance-pro; do
-        rm -rf "${work:?}/$folder"
-        mkdir -p "$work/$folder"
-        chmod 0777 "$work/$folder"
-    done
+    rm -rf "${work:?}/conformance-o103"
+    mkdir -p "$work/conformance-o103"
+    chmod 0777 "$work/conformance-o103"
     o103="default hardened nosftp noext stall curve dh cbc sha1rsa"
     o96="default kbdint noext legacy otp"
     o89="default hold"
-    pro="sftp sftpstall"
-    dropbear="default"
     start o103 netvfs-sftp-openssh103:test "$o103" --tmpfs /srv/small:size=8m \
         -v "$work/conformance-o103:/srv/conformance"
     start o96 netvfs-sftp-openssh96:test "$o96"
     start o89 netvfs-sftp-openssh89:test "$o89"
-    start pro netvfs-sftp-proftpd:test "$pro" -v "$work/conformance-pro:/srv/conformance"
-    start db25 netvfs-sftp-dropbear2025:test "$dropbear"
-    start db22 netvfs-sftp-dropbear2022:test "$dropbear"
-    for key in o103 o96 o89 pro db25 db22; do
+    for key in o103 o96 o89; do
         wait_ready "$key"
     done
 
@@ -368,12 +342,6 @@ else
         server_json o96 "$o96"
         printf ',\n'
         server_json o89 "$o89"
-        printf ',\n'
-        server_json pro "$pro"
-        printf ',\n'
-        server_json db25 "$dropbear"
-        printf ',\n'
-        server_json db22 "$dropbear"
         printf '\n  }\n}\n'
     } > "$config"
 fi

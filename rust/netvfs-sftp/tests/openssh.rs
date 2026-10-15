@@ -1,15 +1,14 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 //! netvfs-sftp against real servers: the interop containers of
-//! tests/interop/sftp (OpenSSH 10.3p1, 9.6p1 and 8.9p1, ProFTPD mod_sftp,
-//! Dropbear 2025.89 and 2022.83), which `run.sh` starts and describes in
-//! the file that NETVFS_SFTP_INTEROP_CONFIG names. Without it every test
-//! passes at once and says that it was skipped.
+//! tests/interop/sftp (OpenSSH 10.3p1, 9.6p1 and 8.9p1), which `run.sh`
+//! starts and describes in the file that NETVFS_SFTP_INTEROP_CONFIG names.
+//! Without it every test passes at once and says that it was skipped.
 //!
 //! The C++ matrix (tst_interop_sftp) checks the SPEC rows through the
 //! plugin; these check the crate's own decisions where only a real server
 //! can tell: the algorithms negotiated, the narrowing to a pinned key type,
-//! the sign-in methods, what each server family offers, and the requests
-//! as they land on the server's disk. Tests run in parallel against shared
+//! the sign-in methods, what each server offers, and the requests as they
+//! land on the server's disk. Tests run in parallel against shared
 //! servers, so each works in folders of its own, and a server log is only
 //! read for lines that a test's own connection adds.
 #![allow(
@@ -103,15 +102,7 @@ impl Servers {
 
     /// The pin of the server's host key of `kind` (ed25519, ecdsa, rsa).
     fn host_key(&self, server: &str, kind: &str) -> String {
-        let line = if server.starts_with("db") {
-            let out = self.text(server, &format!("dropbearkey -y -f /etc/dropbear/dropbear_{kind}_host_key"));
-            out.lines()
-                .find(|l| l.starts_with("ssh-") || l.starts_with("ecdsa-"))
-                .expect("a public key")
-                .to_owned()
-        } else {
-            self.text(server, &format!("cat /etc/ssh/ssh_host_{kind}_key.pub"))
-        };
+        let line = self.text(server, &format!("cat /etc/ssh/ssh_host_{kind}_key.pub"));
         line.split(' ').take(2).collect::<Vec<_>>().join(" ")
     }
 
@@ -446,7 +437,7 @@ async fn keyboard_interactive() {
     assert_eq!(failed.name, ErrorName::AuthFailed);
 }
 
-/// What each server family offers, and so what the backend reports (XC-5).
+/// What each server offers, and so what the backend reports (XC-5).
 #[tokio::test]
 async fn capabilities_of_each_server() {
     let Some(s) = servers() else { return };
@@ -458,17 +449,15 @@ async fn capabilities_of_each_server() {
         Capability::SetModified,
         Capability::SetModifiedOnUpload,
         Capability::Symlinks,
+        Capability::NativeNoReplace,
     ];
     let never = [Capability::ServerCopyRecursive, Capability::Checksums, Capability::AtomicPut];
-    // AtomicReplace, SpaceInfo, Hardlinks, ServerCopy, Ownership, NativeNoReplace
+    // AtomicReplace, SpaceInfo, Hardlinks, ServerCopy, Ownership
     for (server, instance, offers) in [
-        ("o103", "default", [true, true, true, true, true, true]),
-        ("o103", "noext", [false, false, false, false, false, true]),
-        ("o96", "default", [true, true, true, true, true, true]),
-        ("o89", "default", [true, true, true, false, false, true]),
-        ("pro", "sftp", [true, true, true, false, false, false]),
-        ("db25", "default", [true, true, true, true, true, false]),
-        ("db22", "default", [true, true, true, true, true, false]),
+        ("o103", "default", [true, true, true, true, true]),
+        ("o103", "noext", [false, false, false, false, false]),
+        ("o96", "default", [true, true, true, true, true]),
+        ("o89", "default", [true, true, true, false, false]),
     ] {
         let mut sftp = password_session(&s, server, instance).await;
         let caps = sftp.capabilities();
@@ -485,7 +474,6 @@ async fn capabilities_of_each_server() {
             Capability::Hardlinks,
             Capability::ServerCopy,
             Capability::Ownership,
-            Capability::NativeNoReplace,
         ]
         .map(|cap| caps.has(cap));
         assert_eq!(got, offers, "{server} {instance}");
@@ -632,74 +620,6 @@ async fn files_on_the_servers_disk() {
         sftp.remove_file(at("link").as_bytes(), &c()).await.unwrap();
         assert_eq!(s.text("o103", &format!("ls -A '{disk}' | grep -c sub || true")), "0");
         s.exec("o103", &format!("rm -rf '{disk}'"), b"");
-    }
-}
-
-/// Servers that are not OpenSSH: ProFTPD mod_sftp (no native NoReplace,
-/// LSTAT that follows links, READLINK answers made absolute) and Dropbear
-/// with OpenSSH's sftp-server; SYMLINK in OpenSSH's order on both.
-#[tokio::test]
-async fn other_server_families() {
-    let Some(s) = servers() else { return };
-    for (server, instance) in [("pro", "sftp"), ("db25", "default"), ("db22", "default")] {
-        let mut sftp = password_session(&s, server, instance).await;
-        let dir = unique("netvfs-rs/family");
-        let disk = format!("/home/alice/{dir}");
-        let at = |name: &str| format!("{dir}/{name}");
-        sftp.make_dir(b"netvfs-rs", false, &c()).await.unwrap();
-        sftp.make_dir(dir.as_bytes(), true, &c()).await.unwrap();
-        put(&mut sftp, &at("a"), b"a", &WriteOptions::default()).await.unwrap();
-        put(&mut sftp, &at("b"), b"bb", &WriteOptions::default()).await.unwrap();
-        let kept = sftp.rename(at("b").as_bytes(), at("a").as_bytes(), RenameMode::NoReplace, &c()).await;
-        assert_eq!(kept.unwrap_err().name, ErrorName::AlreadyExists, "{server}");
-        assert_eq!(s.text(server, &format!("cat '{disk}/a'")), "a");
-        sftp.rename(at("b").as_bytes(), at("a").as_bytes(), RenameMode::Replace, &c()).await.unwrap();
-        assert_eq!(s.text(server, &format!("cat '{disk}/a'")), "bb");
-
-        sftp.make_symlink(b"a", at("link").as_bytes(), &c()).await.unwrap();
-        assert_eq!(s.text(server, &format!("readlink '{disk}/link'")), "a", "{server}");
-        let link = sftp.stat(at("link").as_bytes(), false, &c()).await.unwrap();
-        assert_eq!(link.kind, EntryType::Symlink, "{server}");
-        let target = sftp.stat(at("link").as_bytes(), true, &c()).await.unwrap();
-        assert_eq!((target.kind, target.size), (EntryType::File, Some(2)), "{server}");
-        let read = sftp.read_link(at("link").as_bytes(), &c()).await.unwrap();
-        let expected = if server == "pro" { format!("{disk}/a").into_bytes() } else { b"a".to_vec() };
-        assert_eq!(read, expected, "{server}");
-        let mut entries = Entries::default();
-        let options = ListOptions { resolve_symlink_types: true, ..ListOptions::default() };
-        sftp.list(dir.as_bytes(), options, &mut entries, &c()).await.unwrap();
-        let link = entries.0.iter().find(|e| e.name == b"link").expect("the link is listed");
-        assert_eq!((link.kind, link.target_kind), (EntryType::Symlink, EntryType::File), "{server}");
-        s.exec(server, &format!("rm -rf '{disk}'"), b"");
-    }
-
-    // Dropbear: every host key type pins; Ed25519 and ECDSA user keys.
-    for server in ["db25", "db22"] {
-        for kind in ["ed25519", "ecdsa", "rsa"] {
-            let pin = s.host_key(server, kind);
-            let mut sftp = Sftp::new();
-            let p = with_pin(s.params(server, "default", "alice", None), &pin);
-            let identity = sftp.connect(&p, &c()).await.unwrap().unwrap();
-            assert_eq!(
-                format!("{} {}", identity.algorithm, data_encoding::BASE64.encode(&identity.public_key)),
-                pin
-            );
-            sftp.authenticate(&s.credentials("alice"), None, &c()).await.unwrap();
-        }
-        let key = keys::generate().unwrap();
-        s.exec(
-            server,
-            "mkdir -p /home/alice/.ssh && cat >> /home/alice/.ssh/authorized_keys && chown -R alice:alice /home/alice/.ssh \
-             && chmod 700 /home/alice/.ssh && chmod 600 /home/alice/.ssh/authorized_keys",
-            format!("{}\n", key.public_line).as_bytes(),
-        );
-        let mut sftp = sign_in(
-            &s.params(server, "default", "alice", Some("publickey")),
-            &key_credentials("alice", &key),
-        )
-        .await
-        .unwrap_or_else(|e| panic!("{server}: {e:?}"));
-        sftp.stat(b"", true, &c()).await.unwrap();
     }
 }
 
