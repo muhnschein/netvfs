@@ -234,7 +234,8 @@ async fn aes_256_gcm_only_server_passes() {
     s.conn.close(true).await;
 }
 
-/// M-T4: profile signed where the server has encryption off: signed only.
+/// M-T4: profile signed where the server has encryption off: signed only;
+/// M-T3: strict there is refused.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn signed_profile_without_encryption() {
     let Some(servers) = Servers::get() else { return };
@@ -244,10 +245,10 @@ async fn signed_profile_without_encryption() {
     assert!(!tree.encrypt);
     session::echo(&s.conn, &CancelToken::new()).await.unwrap();
     s.conn.close(true).await;
-    // M-T3: strict on the same server encrypts all the same.
-    let s = servers.sign_in("encoff", 445, Profile::Strict, &servers.account()).await.unwrap();
-    assert!(s.conn.encrypts());
-    s.conn.close(true).await;
+    // M-T3: strict needs encryption, which the server has off (no cipher
+    // in its NEGOTIATE response): refused before SESSION_SETUP.
+    let e = servers.sign_in("encoff", 445, Profile::Strict, &servers.account()).await.unwrap_err();
+    assert!(matches!(&e, Error::Policy(m) if m.contains("no cipher in common")), "{e}");
 }
 
 /// M-T7, M-T9, M-T20: servers limited to SMB 2.x or SMB 3.0 refuse the
@@ -383,7 +384,10 @@ async fn guest_mapping_and_the_guest_profile() {
 async fn a_tampered_session_setup_reply_is_refused() {
     let Some(servers) = Servers::get() else { return };
     let e = servers.sign_in("proxy", 4459, Profile::Strict, &servers.account()).await.unwrap_err();
-    assert_eq!(e, Error::Policy("message signature does not verify".into()));
+    assert_eq!(
+        e,
+        Error::Policy("the final SESSION_SETUP response: message signature does not verify".into())
+    );
 }
 
 /// M-T12: the first reply after sign-in altered, signed (4451) and sealed

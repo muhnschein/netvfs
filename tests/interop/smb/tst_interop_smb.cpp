@@ -830,9 +830,10 @@ private slots:
         QBuffer smallBuffer(&small);
         smallBuffer.open(QIODevice::ReadOnly);
         QVERIFY(backend->upload(&smallBuffer, QStringLiteral("ops/small"), UploadOptions(), nullptr).ok());
+        // A local sink that cannot be written: the shim reports it as a full disk.
         QBuffer readOnlySink(&small);
         readOnlySink.open(QIODevice::ReadOnly);
-        QCOMPARE(backend->download(QStringLiteral("ops/small"), &readOnlySink, DownloadOptions(), nullptr).error(), Error::Internal);
+        QCOMPARE(backend->download(QStringLiteral("ops/small"), &readOnlySink, DownloadOptions(), nullptr).error(), Error::NoSpace);
         // M-9 inside a session too: nothing is sent.
         QCOMPARE(backend->makePath(QStringLiteral("ops/bad|name")).error(), Error::Internal);
     }
@@ -1083,7 +1084,9 @@ private slots:
         QVERIFY(part.isEmpty());
         QVERIFY(handle->read(content.size() + 100, 100, &part).ok());
         QVERIFY(part.isEmpty());
-        QCOMPARE(handle->read(-1, 1, &part).error(), Error::Internal);
+        // A bad offset and a closed handle are the caller's mistakes, which
+        // the Rust backends' C ABI reports as ProtocolError.
+        QCOMPARE(handle->read(-1, 1, &part).error(), Error::ProtocolError);
         // XM-6: read-ahead, then reads elsewhere: the queued chunks are not
         // mistaken for the new position.
         handle->readAhead(0, 3 * 1024 * 1024);
@@ -1095,7 +1098,7 @@ private slots:
         QVERIFY(handle->read(1000, 1024 * 1024 + 1, &part).ok());
         QCOMPARE(part, content.mid(1000, 1024 * 1024 + 1));
         QVERIFY(handle->close().ok());
-        QCOMPARE(handle->read(0, 1, &part).error(), Error::Internal);
+        QCOMPARE(handle->read(0, 1, &part).error(), Error::ProtocolError);
         ReadHandle *missing = nullptr;
         QCOMPARE(backend->openRead(QStringLiteral("v2io/nope"), &missing).error(), Error::NotFound);
         QVERIFY(!missing);
@@ -1401,7 +1404,7 @@ private slots:
             QVERIFY(handles.at(static_cast<size_t>(i))->read(0, 100, &data).ok());
             QCOMPARE(data, shares.at(i).toUtf8());
         }
-        QCOMPARE(handles.at(1)->read(0, 1, &data).error(), Error::Internal);   // closed
+        QCOMPARE(handles.at(1)->read(0, 1, &data).error(), Error::ProtocolError);   // closed
         handles.clear();
         for (const QString &share : shares.mid(0, 4))
             QVERIFY(backend->removeFile(QStringLiteral("/%1/lru.txt").arg(share)).ok());
@@ -1607,7 +1610,7 @@ private slots:
         QCOMPARE(writer->position(), qint64(10) + tail.size());
         QVERIFY(writer->commit().ok());
         QCOMPARE(contentOf(backend.get(), QStringLiteral("resume.bin")), QByteArray("0123456789") + tail);
-        QCOMPARE(writer->write("x", 1).error(), Error::Internal);    // committed: closed
+        QCOMPARE(writer->write("x", 1).error(), Error::ProtocolError);    // committed: closed
         options.resumeOffset = 0;
         QCOMPARE(backend->openWrite(QStringLiteral("missing.bin"), options, &raw).error(), Error::NotFound);
         QVERIFY(backend->removeFile(QStringLiteral("resume.bin")).ok());

@@ -119,6 +119,14 @@ fi
 strict=$(address strict)
 conf=$(address conf)
 proxy=$(address proxy)
+if [ "$reuse" = 1 ]; then
+    # Servers of an earlier run: every run starts from empty shares, as with
+    # new containers, also after a run that stopped half-way.
+    for s in $servers; do
+        docker exec "$prefix-$s" sh -c 'find /srv/smb/backup /srv/smb/small /srv/smb/media /srv/smb/hidden \
+            /srv/smb/public -mindepth 1 -delete'
+    done
+fi
 
 # The servers for rust/netvfs-smb/tests/samba.rs (and a later run of this
 # script): one address per server, the proxy, the password, as NAME=value.
@@ -141,6 +149,8 @@ echo "Samba: $(docker exec "$prefix-strict" smbd --version), current: $(docker e
 # No effect on other builds.
 export UBSAN_OPTIONS="${UBSAN_OPTIONS:+$UBSAN_OPTIONS:}print_stacktrace=1:halt_on_error=1"
 export NETVFS_BACKEND_PATH="$build/lib/netvfs/backends"
+# The SMB plugin loads the Rust library of the same build.
+export NETVFS_RS_LIB="$build/lib/netvfs/libnetvfs-rs.so"
 export NETVFS_SMB_PREFIX="$prefix"
 export NETVFS_SMB_PASSWORD="$password"
 for setting in $(settings); do
