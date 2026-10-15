@@ -44,6 +44,14 @@ pub fn join(dir: &[u8], name: &[u8]) -> Vec<u8> {
     out
 }
 
+/// Whether a name a server lists (READDIR) names an entry of the folder:
+/// not `.` or `..`, not empty, without `/` and NUL. Joined to the folder's
+/// path, any other name would be a path elsewhere, or none.
+#[must_use]
+pub fn is_entry_name(name: &[u8]) -> bool {
+    !(name.is_empty() || name == b"." || name == b".." || name.contains(&b'/') || name.contains(&0))
+}
+
 /// What follows the last `/`.
 #[must_use]
 pub fn last_component(path: &[u8]) -> &[u8] {
@@ -134,6 +142,16 @@ mod tests {
         assert_eq!(last_component(b"b"), b"b");
         assert_eq!(last_component(b"/"), b"");
         assert_eq!(last_component(b""), b"");
+    }
+
+    #[test]
+    fn entry_names() {
+        for name in [&b"a"[..], b"...", b".a", b"a.", b"..a", b" ", b"\\", b"\xff"] {
+            assert!(is_entry_name(name), "{name:?}");
+        }
+        for name in [&b""[..], b".", b"..", b"/", b"a/b", b"/a", b"a/", b"\0", b"a\0b", b"a\0"] {
+            assert!(!is_entry_name(name), "{name:?}");
+        }
     }
 
     #[test]

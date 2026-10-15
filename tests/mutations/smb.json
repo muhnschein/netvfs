@@ -243,5 +243,19 @@
     "search": "        self.server_mode() && flag_or(&self.params, \"share_enumeration\", true)",
     "replace": "        self.server_mode()",
     "test": "timeout 1800 tests/interop/smb/run.sh build serverModeRoot"
+  },
+  {
+    "name": "XC-6 a listed name with a slash kept",
+    "file": "rust/netvfs-smb/src/names.rs",
+    "search": " || units.contains(&0x2F)",
+    "replace": "",
+    "test": "cd rust && timeout 900 cargo test -q --locked -p netvfs-smb --lib fs::"
+  },
+  {
+    "name": "XC-6 a listed name with a NUL kept",
+    "file": "rust/netvfs-smb/src/names.rs",
+    "search": " || units.contains(&0))",
+    "replace": ")",
+    "test": "cd rust && timeout 900 cargo test -q --locked -p netvfs-smb --lib fs::"
   }
 ]

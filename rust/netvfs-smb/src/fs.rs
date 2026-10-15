@@ -13,7 +13,7 @@ use crate::msg::file::{
     self, Create, Created, DirEntry, FileId, RELATED_FILE_ID, Times, access, attributes, close_request,
     disposition, ms_of_filetime, options,
 };
-use crate::names::wtf8_from_utf16;
+use crate::names::{is_entry_name, wtf8_from_utf16};
 use crate::status::NtStatus;
 
 /// OutputBufferLength of QUERY_DIRECTORY: one credit.
@@ -326,8 +326,9 @@ pub async fn space_info(
     })
 }
 
-/// XC-6: the entries of the folder `path` in batches of `batch` (`.` and
-/// `..` left out); `false` from the sink stops with `Canceled`.
+/// XC-6: the entries of the folder `path` in batches of `batch` (names that
+/// are no entry of it left out: [`is_entry_name`]); `false` from the sink
+/// stops with `Canceled`.
 ///
 /// # Errors
 /// A file is `NotADirectory`; the server's refusal, the connection's
@@ -396,11 +397,11 @@ async fn deliver(
         if response.expect(&[NtStatus::NO_MORE_FILES])? == NtStatus::NO_MORE_FILES {
             break;
         }
-        for d in file::query_directory_response(&response.msg, DIR_BUFFER)? {
-            if d.name == [u16::from(b'.')] || d.name == [u16::from(b'.'), u16::from(b'.')] {
-                continue;
-            }
-            pending.push(dir_entry(&d));
+        // A name that is no entry of this folder is left out; the rest of
+        // the listing stays.
+        let entries = file::query_directory_response(&response.msg, DIR_BUFFER)?;
+        for d in entries.iter().filter(|d| is_entry_name(&d.name)) {
+            pending.push(dir_entry(d));
             if pending.len() == batch {
                 give(sink, &mut pending)?;
             }

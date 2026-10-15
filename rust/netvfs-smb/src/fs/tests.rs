@@ -419,6 +419,49 @@ fn dir_body(names: &[&str]) -> Vec<u8> {
 }
 
 #[tokio::test]
+async fn list_leaves_out_names_that_are_no_entry_of_the_folder() {
+    // A server that lists paths, NULs and empty names among its entries:
+    // they are dropped, the entries around them stay.
+    let (conn, mut peer) = started().await;
+    let c = CancelToken::new();
+    let mut sink = Batches { got: vec![], stop_after: usize::MAX };
+    let names = [
+        "first",
+        ".",
+        "..",
+        "",
+        "../../etc/passwd",
+        "/etc/passwd",
+        "sub/name",
+        "trailing/",
+        "nul\0name",
+        "\0",
+        "...",
+        ".hidden",
+    ];
+    let (r, _peer) = tokio::join!(list(&conn, TREE, units("d"), 2, &mut sink, &c), async {
+        let reqs = peer.recv().await;
+        answer(
+            &mut peer,
+            &reqs,
+            vec![(NtStatus::SUCCESS, created_body(0x10, 0, FID)), (NtStatus::SUCCESS, dir_body(&names))],
+        )
+        .await;
+        let req = peer.recv_one().await;
+        answer(&mut peer, &[req], vec![(NtStatus::SUCCESS, dir_body(&["last"]))]).await;
+        let req = peer.recv_one().await;
+        answer(&mut peer, &[req], vec![(NtStatus::NO_MORE_FILES, vec![])]).await;
+        assert_eq!(peer.recv_one().await.command(), Command::Close);
+        peer
+    });
+    r.unwrap();
+    assert_eq!(
+        sink.got,
+        [vec![b"first".to_vec(), b"...".to_vec()], vec![b".hidden".to_vec(), b"last".to_vec()]]
+    );
+}
+
+#[tokio::test]
 async fn list_in_batches_and_close() {
     let (conn, mut peer) = started().await;
     let c = CancelToken::new();

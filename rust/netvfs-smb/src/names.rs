@@ -115,6 +115,19 @@ pub fn units_of(bytes: &[u8]) -> Option<Vec<u16>> {
     Some(bytes.chunks_exact(2).filter_map(|c| <[u8; 2]>::try_from(c).ok()).map(u16::from_le_bytes).collect())
 }
 
+/// Whether a name a server lists (QUERY_DIRECTORY) names an entry of the
+/// folder: not `.` or `..`, not empty, without `/` and NUL. Joined to the
+/// folder's path, any other name would be a path elsewhere, or none.
+#[must_use]
+pub fn is_entry_name(units: &[u16]) -> bool {
+    const DOT: u16 = 0x2E;
+    !(units.is_empty()
+        || units == [DOT]
+        || units == [DOT, DOT]
+        || units.contains(&0x2F)
+        || units.contains(&0))
+}
+
 /// Text of WTF-8 bytes for messages (lossy).
 #[must_use]
 pub fn display(bytes: &[u8]) -> String {
@@ -257,6 +270,18 @@ mod tests {
         assert_eq!(utf16_from_wtf8(&[0xE0, 0xA0, 0x80]).unwrap(), [0x800]);
         assert_eq!(utf16_from_wtf8(&[0xF0, 0x90, 0x80, 0x80]).unwrap(), [0xD800, 0xDC00]);
         assert_eq!(utf16_from_wtf8(&[0xF4, 0x8F, 0xBF, 0xBF]).unwrap(), [0xDBFF, 0xDFFF]);
+    }
+
+    #[test]
+    fn entry_names() {
+        let u = |s: &str| s.encode_utf16().collect::<Vec<u16>>();
+        for name in ["a", "...", ".a", "a.", "..a", " ", "a\\b", "\u{ff0f}"] {
+            assert!(is_entry_name(&u(name)), "{name:?}");
+        }
+        assert!(is_entry_name(&[0xD800]), "a lone surrogate");
+        for name in ["", ".", "..", "/", "a/b", "/a", "a/", "\0", "a\0b", "a\0"] {
+            assert!(!is_entry_name(&u(name)), "{name:?}");
+        }
     }
 
     #[test]
