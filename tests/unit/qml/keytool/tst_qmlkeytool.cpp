@@ -276,6 +276,8 @@ private slots:
             QSKIP("SFTP backend not built");
         const QByteArray saved = qgetenv("NETVFS_BACKEND_PATH");
         qputenv("NETVFS_BACKEND_PATH", NETVFS_TEST_BACKEND_DIR);
+        // The plugin loads the Rust library of this build on its first call.
+        qputenv("NETVFS_RS_LIB", NETVFS_TEST_RS_RELEASE_LIB);
         SshKeyTool tool;
         qputenv("NETVFS_BACKEND_PATH", saved);
         QVERIFY(tool.available());
