@@ -621,8 +621,11 @@ async fn abort_closes_the_socket_at_once() {
     assert!(read_frame_eof(&mut peer).await);
 }
 
+/// Whether the client closed its end (and sent nothing before).
 async fn read_frame_eof(peer: &mut Peer) -> bool {
-    transport::read_frame(&mut peer.stream, 1 << 16).await.is_err()
+    tokio::time::timeout(fake::WAIT, transport::read_frame(&mut peer.stream, 1 << 16))
+        .await
+        .is_ok_and(|r| r.is_err())
 }
 
 #[tokio::test]

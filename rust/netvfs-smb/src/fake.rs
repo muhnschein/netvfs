@@ -3,6 +3,8 @@
 //! the responses it wants, signed or sealed with the server's side of the
 //! session keys.
 
+use std::time::Duration;
+
 use tokio::io::AsyncWriteExt;
 use tokio::net::{TcpListener, TcpStream};
 
@@ -15,6 +17,8 @@ use crate::status::NtStatus;
 use crate::transport::{frame, read_frame};
 use crate::wire::Writer;
 
+/// How long the scripted server waits for a request.
+pub const WAIT: Duration = Duration::from_secs(30);
 /// The GSS key of the tests' sessions.
 pub const GSS_KEY: [u8; 16] = [0x5a; 16];
 /// Their SessionId.
@@ -85,9 +89,13 @@ pub struct Peer {
 }
 
 impl Peer {
-    /// The next frame, raw.
+    /// The next frame, raw. A client that sends nothing fails the test
+    /// within [`WAIT`] instead of hanging it.
     pub async fn frame(&mut self) -> Vec<u8> {
-        read_frame(&mut self.stream, 16 * 1024 * 1024).await.unwrap()
+        tokio::time::timeout(WAIT, read_frame(&mut self.stream, 16 * 1024 * 1024))
+            .await
+            .expect("no request in time")
+            .unwrap()
     }
 
     /// The requests of the next frame (opened when sealed, signatures

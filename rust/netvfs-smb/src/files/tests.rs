@@ -121,6 +121,8 @@ fn chunk_is_the_server_maximum_within_limits() {
     assert_eq!(chunk(8 << 20, false), crate::conn::CREDIT_UNIT);
     assert_eq!(chunk(1000, true), 1000);
     assert_eq!(chunk(MAX_CHUNK, true), MAX_CHUNK);
+    // M-11: never more than 1 MiB.
+    assert_eq!(chunk(16 << 20, true), 1 << 20);
     assert_eq!(chunk(0, true), 1);
 }
 
