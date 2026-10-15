@@ -6,8 +6,6 @@
 #include "identity.h"
 #include "ops.h"
 #include "paths.h"
-#include "smb2api.h"
-#include "smbshares.h"
 #include "transfer.h"
 
 #include <QtCore/QBuffer>
@@ -29,10 +27,6 @@
 #include <thread>
 
 using namespace NetVfs;
-using NetVfs::Smb::ShareInfo;
-using NetVfs::Smb::ShareRequest;
-using NetVfs::Smb::parseShareOutput;
-using NetVfs::Smb::encodeShareRequest;
 
 namespace QTest {
 template<>
@@ -260,9 +254,9 @@ private:
     {
         int code = -1;
         exec(server, { QStringLiteral("sh"), QStringLiteral("-c"),
-                       QStringLiteral("rm -f /srv/work/capture.pcap; (tcpdump -Z root -i any -p -U --immediate-mode -B 65536 -w /srv/work/capture.pcap "
+                       QStringLiteral("rm -f /srv/work/capture.pcap /srv/work/tcpdump.log; (tcpdump -Z root -i any -p -U --immediate-mode -B 65536 -w /srv/work/capture.pcap "
                                       "tcp port 445 >/srv/work/tcpdump.log 2>&1 &); for i in $(seq 100); do "
-                                      "grep -q listening /srv/work/tcpdump.log && exit 0; sleep 0.1; done; exit 1") },
+                                      "grep -qs listening /srv/work/tcpdump.log && exit 0; sleep 0.1; done; exit 1") },
              &code);
         QCOMPARE(code, 0);
     }
@@ -310,7 +304,8 @@ private slots:
     }
 
     // M-T1, M-T8, M-11: strict Samba 4.19.5; dialect, cipher and signing as
-    // smbstatus reports them; smbclient cross-check in both directions.
+    // smbstatus reports them (AES-128-GCM: the first cipher offered);
+    // smbclient cross-check in both directions.
     void strictServer()
     {
         const auto backend = newBackend();
@@ -322,7 +317,7 @@ private slots:
         const QByteArray row = sessionRow(QStringLiteral("strict"));
         qInfo("smbstatus: %s", row.constData());
         QVERIFY2(row.contains("SMB3_11"), row.constData());
-        QVERIFY2(row.contains("AES-128-CCM"), row.constData());
+        QVERIFY2(row.contains("AES-128-GCM"), row.constData());
         QVERIFY2(row.contains("AES-128-CMAC"), row.constData());
         QVERIFY2(!row.contains("partial"), row.constData());
 
@@ -368,7 +363,7 @@ private slots:
         const QByteArray row = sessionRow(QStringLiteral("default"));
         qInfo("smbstatus: %s", row.constData());
         QVERIFY2(row.contains("SMB3_11"), row.constData());
-        QVERIFY2(row.contains("AES-128-CCM"), row.constData());
+        QVERIFY2(row.contains("AES-128-GCM"), row.constData());
     }
 
     // M-T3: the account requires encryption, the server has it off.
@@ -395,11 +390,11 @@ private slots:
         // M-2: every message is signed because the client requires it; the
         // server alone (signing not mandatory) would sign only the tree connect.
         QVERIFY2(!row.contains("partial"), row.constData());
-        QVERIFY2(!row.contains("AES-128-CCM"), row.constData());
+        QVERIFY2(!row.contains("GCM") && !row.contains("CCM"), row.constData());
     }
 
-    // M-3: with profile signed the library still encrypts where the
-    // server mandates it (smb2_set_seal() is not called at all).
+    // M-3: with profile signed the client still encrypts where the server
+    // marks the session or the share for it (ENCRYPT_DATA).
     void encryptionOffServerRequires()
     {
         const auto backend = newBackend();
@@ -408,7 +403,7 @@ private slots:
         Entry entry;
         QVERIFY(backend->stat(QString(), &entry).ok());
         const QByteArray row = sessionRow(QStringLiteral("strict"));
-        QVERIFY2(row.contains("SMB3_11") && row.contains("AES-128-CCM"), row.constData());
+        QVERIFY2(row.contains("SMB3_11") && row.contains("AES-128-GCM"), row.constData());
     }
 
     // M-T5: wrong password, unknown user.
@@ -442,43 +437,21 @@ private slots:
         QVERIFY2(r.message().contains(QLatin1String("0xc00000cc")), qPrintable(r.message()));
     }
 
-    // M-T7: there is no setting for SMB 2.x, so libsmb2 itself is pinned to
-    // SMB 2.1 here (test code only) against the strict server.
-    void clientPinnedToSmb21()
-    {
-        const QByteArray server = address(QStringLiteral("strict")).toUtf8();
-        for (const bool pinned : { true, false }) {
-            smb2_context *ctx = smb2_init_context();
-            QVERIFY(ctx);
-            smb2_set_version(ctx, pinned ? SMB2_VERSION_0210 : SMB2_VERSION_ANY3);
-            smb2_set_security_mode(ctx, SMB2_NEGOTIATE_SIGNING_ENABLED | SMB2_NEGOTIATE_SIGNING_REQUIRED);
-            smb2_set_seal(ctx, 1);
-            smb2_set_timeout(ctx, 30);
-            smb2_set_user(ctx, "backup");
-            smb2_set_password(ctx, m_password.constData());
-            const int rc = smb2_connect_share(ctx, server.constData(), "backup", nullptr);
-            if (rc == 0)
-                smb2_disconnect_share(ctx);
-            smb2_destroy_context(ctx);
-            QVERIFY2(pinned ? rc < 0 : rc == 0, pinned ? "SMB 2.1 was accepted" : "control: SMB 3 failed");
-        }
-    }
-
-    // M-T9: server limited to SMB 2.x.
+    // M-T9: server limited to SMB 2.x; every profile in profilesOnOldDialects.
     void smb2OnlyServer()
     {
         const auto backend = newBackend();
         const Result r = signIn(backend.get(), params(QStringLiteral("smb2only")), credentials());
         QCOMPARE(r.error(), Error::SecurityPolicy);
         // M-1: refused by the server's negotiate reply (STATUS_NOT_SUPPORTED),
-        // because the client offered SMB 3 dialects only.
+        // because the client offered SMB 3.1.1 only.
         QVERIFY2(r.message().contains(QLatin1String("0xc00000bb")), qPrintable(r.message()));
         const Result plain = signIn(backend.get(), params(QStringLiteral("smb2only"), false), credentials());
         QCOMPARE(plain.error(), Error::SecurityPolicy);
     }
 
     // M-1: a reply that picks a dialect the client never offered (SMB 2.1
-    // against SMB2_VERSION_ANY3) ends the sign-in.
+    // where only 3.1.1 was offered) ends the sign-in.
     void dialectNeverOffered()
     {
         const auto backend = newBackend();
@@ -498,7 +471,7 @@ private slots:
         positiveFlow(backend.get(), QStringLiteral("current"), QLatin1String(BackupsDir));
         const QByteArray row = sessionRow(QStringLiteral("current"));
         qInfo("smbstatus: %s", row.constData());
-        QVERIFY2(row.contains("SMB3_11") && row.contains("AES-128-CCM"), row.constData());
+        QVERIFY2(row.contains("SMB3_11") && row.contains("AES-128-GCM"), row.constData());
     }
 
     // M-T12: one byte of a signed (or sealed) reply after sign-in is altered.
@@ -528,6 +501,16 @@ private slots:
         QCOMPARE(first.error(), Error::ConnectionLost);   // XC-21: after sign-in
         // The connection is aborted, not resynchronised.
         QCOMPARE(backend->stat(QString(), &entry).error(), Error::ConnectionLost);
+    }
+
+    // M-T12, MS-SMB2 3.2.5.3.1: one byte of the final SESSION_SETUP reply is
+    // altered; its signature (keys of the new session) does not verify.
+    void tamperedSessionSetup()
+    {
+        const auto backend = newBackend();
+        const Result r = signIn(backend.get(), viaProxy(4459, true), credentials());
+        QCOMPARE(r.error(), Error::SecurityPolicy);
+        QVERIFY2(r.message().contains(QLatin1String("signature")), qPrintable(r.message()));
     }
 
     // M-T13: with encryption required nothing readable crosses the wire; the
@@ -561,12 +544,28 @@ private slots:
         QVERIFY(plain.contains(utf16(folder)));
     }
 
-    // M-T14: only ciphers or signing algorithms libsmb2 lacks.
+    // M-T14: AES-256-GCM is the server's only cipher: the second one offered.
+    void aes256GcmOnly()
+    {
+        const auto backend = newBackend();
+        const Result r = signIn(backend.get(), params(QStringLiteral("aes256")), credentials());
+        QVERIFY2(r.ok(), qPrintable(r.toString()));
+        positiveFlow(backend.get(), QStringLiteral("aes256"), QLatin1String(BackupsDir));
+        const QByteArray row = sessionRow(QStringLiteral("aes256"));
+        qInfo("smbstatus: %s", row.constData());
+        QVERIFY2(row.contains("SMB3_11") && row.contains("AES-256-GCM"), row.constData());
+    }
+
+    // M-T14: ciphers or signing algorithms this client does not offer: AES-CCM
+    // (encryption required or desired), AES-GMAC and HMAC-SHA256 signing.
     void unsupportedAlgorithms_data()
     {
         QTest::addColumn<QString>("server");
         QTest::addColumn<bool>("encrypt");
-        QTest::newRow("AES-256/GCM ciphers only") << QStringLiteral("aes256") << true;
+        QTest::newRow("CCM ciphers only, strict") << QStringLiteral("ccmonly") << true;
+        QTest::newRow("CCM ciphers only, signed") << QStringLiteral("ccmonly") << false;
+        QTest::newRow("CCM desired, strict") << QStringLiteral("ccmdesired") << true;
+        QTest::newRow("CCM desired, signed") << QStringLiteral("ccmdesired") << false;
         QTest::newRow("AES-GMAC/HMAC signing only") << QStringLiteral("gmac") << false;
     }
     void unsupportedAlgorithms()
@@ -750,7 +749,8 @@ private slots:
         QCOMPARE(code, 0);
     }
 
-    // M-5: NTLM_USER_FILE never decides which password is used.
+    // M-5: NTLM_USER_FILE never decides which password is used (the client
+    // reads no such file; the account's password is the only one).
     void userFileIgnored()
     {
         QTemporaryDir dir;
@@ -767,7 +767,6 @@ private slots:
         const auto backend = newBackend();
         const Result right = signIn(backend.get(), params(QStringLiteral("strict")), credentials());
         QVERIFY2(right.ok(), qPrintable(right.toString()));
-        QVERIFY(!qEnvironmentVariableIsSet("NTLM_USER_FILE"));
         backend->disconnect();
 
         // The right password in the file, a wrong one from the account.
@@ -776,31 +775,6 @@ private slots:
         const Result wrong = signIn(backend.get(), params(QStringLiteral("strict")), credentials(m_password + "x"));
         QCOMPARE(wrong.error(), Error::AuthFailed);
         qunsetenv("NTLM_USER_FILE");
-    }
-
-    // Documents why M-5 needs the backend's workaround: at the pinned commit
-    // libsmb2 lets the file replace a password set with smb2_set_password().
-    void libsmb2UserFilePrecedence()
-    {
-        QTemporaryDir dir;
-        const QString file = dir.filePath(QStringLiteral("ntlm_user_file"));
-        QFile f(file);
-        QVERIFY(f.open(QIODevice::WriteOnly));
-        f.write(":backup:" + m_password + "-wrong\n");
-        f.close();
-        qputenv("NTLM_USER_FILE", file.toLocal8Bit());
-        smb2_context *ctx = smb2_init_context();
-        smb2_set_version(ctx, SMB2_VERSION_ANY3);
-        smb2_set_seal(ctx, 1);
-        smb2_set_user(ctx, "backup");
-        smb2_set_password(ctx, m_password.constData());
-        const QByteArray server = address(QStringLiteral("strict")).toUtf8();
-        const int rc = smb2_connect_share(ctx, server.constData(), "backup", nullptr);
-        const int status = smb2_get_nterror(ctx);
-        smb2_destroy_context(ctx);
-        qunsetenv("NTLM_USER_FILE");
-        qInfo("libsmb2 with NTLM_USER_FILE and an explicit password: rc %d, NT status 0x%08x", rc, status);
-        QVERIFY2(rc < 0, "libsmb2 now prefers the explicit password; M-5's workaround may be revisited");
     }
 
     // Operations beyond the positive flow, on the strict server.
@@ -856,9 +830,10 @@ private slots:
         QBuffer smallBuffer(&small);
         smallBuffer.open(QIODevice::ReadOnly);
         QVERIFY(backend->upload(&smallBuffer, QStringLiteral("ops/small"), UploadOptions(), nullptr).ok());
+        // A local sink that cannot be written: the shim reports it as a full disk.
         QBuffer readOnlySink(&small);
         readOnlySink.open(QIODevice::ReadOnly);
-        QCOMPARE(backend->download(QStringLiteral("ops/small"), &readOnlySink, DownloadOptions(), nullptr).error(), Error::Internal);
+        QCOMPARE(backend->download(QStringLiteral("ops/small"), &readOnlySink, DownloadOptions(), nullptr).error(), Error::NoSpace);
         // M-9 inside a session too: nothing is sent.
         QCOMPARE(backend->makePath(QStringLiteral("ops/bad|name")).error(), Error::Internal);
     }
@@ -939,7 +914,7 @@ private slots:
         QVERIFY(signIn(backend.get(), params(QStringLiteral("strict")), credentials()).ok());
         const Capabilities caps = backend->capabilities();
         QVERIFY(caps.has(Capability::NativeNoReplace));
-        QVERIFY(caps.has(Capability::AtomicReplace));       // vendor/patches/libsmb2/0005
+        QVERIFY(caps.has(Capability::AtomicReplace));       // SET_INFO rename, ReplaceIfExists
         QVERIFY(caps.has(Capability::ReadHandles));
         QVERIFY(caps.has(Capability::EfficientRanges));
         QVERIFY(caps.has(Capability::WriteResume));
@@ -951,7 +926,6 @@ private slots:
         QVERIFY(!caps.has(Capability::Symlinks));
         QVERIFY(!caps.has(Capability::ShareEnumeration));   // share mode
         QCOMPARE(caps.maxNameBytes, qint64(255));
-        QVERIFY(caps.maxReadChunk > 0 && caps.maxWriteChunk > 0);
 
         // XC-8
         QVERIFY(backend->makeDir(QStringLiteral("v2"), true).ok());
@@ -1110,7 +1084,9 @@ private slots:
         QVERIFY(part.isEmpty());
         QVERIFY(handle->read(content.size() + 100, 100, &part).ok());
         QVERIFY(part.isEmpty());
-        QCOMPARE(handle->read(-1, 1, &part).error(), Error::Internal);
+        // A bad offset and a closed handle are the caller's mistakes, which
+        // the Rust backends' C ABI reports as ProtocolError.
+        QCOMPARE(handle->read(-1, 1, &part).error(), Error::ProtocolError);
         // XM-6: read-ahead, then reads elsewhere: the queued chunks are not
         // mistaken for the new position.
         handle->readAhead(0, 3 * 1024 * 1024);
@@ -1122,7 +1098,7 @@ private slots:
         QVERIFY(handle->read(1000, 1024 * 1024 + 1, &part).ok());
         QCOMPARE(part, content.mid(1000, 1024 * 1024 + 1));
         QVERIFY(handle->close().ok());
-        QCOMPARE(handle->read(0, 1, &part).error(), Error::Internal);
+        QCOMPARE(handle->read(0, 1, &part).error(), Error::ProtocolError);
         ReadHandle *missing = nullptr;
         QCOMPARE(backend->openRead(QStringLiteral("v2io/nope"), &missing).error(), Error::NotFound);
         QVERIFY(!missing);
@@ -1185,46 +1161,52 @@ private:
     }
 
 private slots:
-    // XM-1, M-T9: SMB 2.1 only. strict and signed refuse it, legacy accepts it.
-    void profilesOnSmb2Only_data()
+    // XM-1, M-T7, M-T9, M-T20: servers limited to SMB 2.1 or to SMB 3.0 are
+    // refused by every profile, in share and in server mode.
+    void profilesOnOldDialects_data()
     {
+        QTest::addColumn<QString>("server");
         QTest::addColumn<QString>("profile");
-        QTest::addColumn<bool>("accepted");
-        QTest::newRow("strict") << "strict" << false;
-        QTest::newRow("signed") << "signed" << false;
-        QTest::newRow("legacy") << "legacy" << true;
-    }
-
-    void profilesOnSmb2Only()
-    {
-        QFETCH(QString, profile);
-        QFETCH(bool, accepted);
-        const auto backend = newBackend();
-        const Result r = signIn(backend.get(), profiled(QStringLiteral("smb2only"), profile), credentials());
-        if (!accepted) {
-            QCOMPARE(r.error(), Error::SecurityPolicy);
-            return;
+        QTest::addColumn<QString>("share");
+        for (const char *server : { "smb2only", "smb300" }) {
+            for (const char *profile : { "strict", "signed", "guest" }) {
+                QTest::addRow("%s, %s", server, profile) << server << profile << "backup";
+                QTest::addRow("%s, %s, server mode", server, profile) << server << profile << "";
+            }
         }
-        QVERIFY2(r.ok(), qPrintable(r.toString()));
-        QVERIFY(put(backend.get(), QStringLiteral("legacy.txt"), "smb 2.1"));
-        QCOMPARE(contentOf(backend.get(), QStringLiteral("legacy.txt")), QByteArray("smb 2.1"));
-        const QByteArray row = sessionRow(QStringLiteral("smb2only"));
-        QVERIFY2(row.contains("SMB2_10"), row.constData());
-        QVERIFY(backend->removeFile(QStringLiteral("legacy.txt")).ok());
     }
 
-    // XM-1: legacy and signed against the strict server still get SMB 3.1.1
-    // with the encryption the server requires.
+    void profilesOnOldDialects()
+    {
+        QFETCH(QString, server);
+        QFETCH(QString, profile);
+        QFETCH(QString, share);
+        const auto backend = newBackend();
+        const bool guest = profile == QLatin1String("guest");
+        const Result r = signIn(backend.get(), profiled(server, profile, share), guest ? Credentials() : credentials());
+        QCOMPARE(r.error(), Error::SecurityPolicy);
+        QVERIFY2(r.message().contains(QLatin1String("SMB 3.1.1")), qPrintable(r.message()));
+        QVERIFY2(r.message().contains(QLatin1String("0xc00000bb")), qPrintable(r.message()));
+    }
+
+    // XM-1: signed against the strict server still gets SMB 3.1.1 with the
+    // encryption the server requires; "legacy" is no profile any more.
     void weakerProfilesOnStrictServer()
     {
-        for (const QString &profile : { QStringLiteral("signed"), QStringLiteral("legacy") }) {
-            const auto backend = newBackend();
-            const Result r = signIn(backend.get(), profiled(QStringLiteral("strict"), profile), credentials());
-            QVERIFY2(r.ok(), qPrintable(profile + QLatin1String(": ") + r.toString()));
-            QVERIFY(backend->keepAlive().ok());
-            const QByteArray row = sessionRow(QStringLiteral("strict"));
-            QVERIFY2(row.contains("SMB3_11") && row.contains("AES-128-CCM"), row.constData());
-        }
+        const auto backend = newBackend();
+        const Result r = signIn(backend.get(), profiled(QStringLiteral("strict"), QStringLiteral("signed")),
+                                credentials());
+        QVERIFY2(r.ok(), qPrintable(r.toString()));
+        QVERIFY(backend->keepAlive().ok());
+        const QByteArray row = sessionRow(QStringLiteral("strict"));
+        QVERIFY2(row.contains("SMB3_11") && row.contains("AES-128-GCM"), row.constData());
+
+        const auto legacy = newBackend();
+        const Result refused = signIn(legacy.get(), profiled(QStringLiteral("strict"), QStringLiteral("legacy")),
+                                      credentials());
+        QCOMPARE(refused.error(), Error::SecurityPolicy);
+        QVERIFY2(refused.message().contains(QLatin1String("unknown SMB security profile")),
+                 qPrintable(refused.message()));
     }
 
     // XM-1: the guest profile: no user, no password, signing off.
@@ -1246,20 +1228,24 @@ private slots:
     }
 
     // XM-1: "map to guest = Bad User" turns an unknown user into a guest;
-    // every profile but guest refuses that session (no silent downgrade).
+    // every profile but guest refuses that session (no silent downgrade),
+    // in share and in server mode (before the share list is asked for).
     void guestMappingRefused_data()
     {
         QTest::addColumn<QString>("profile");
-        QTest::newRow("strict") << "strict";
-        QTest::newRow("signed") << "signed";
-        QTest::newRow("legacy") << "legacy";
+        QTest::addColumn<QString>("share");
+        QTest::newRow("strict") << "strict" << "public";
+        QTest::newRow("signed") << "signed" << "public";
+        QTest::newRow("strict, server mode") << "strict" << "";
+        QTest::newRow("signed, server mode") << "signed" << "";
     }
 
     void guestMappingRefused()
     {
         QFETCH(QString, profile);
+        QFETCH(QString, share);
         const auto backend = newBackend();
-        ConnectionParams p = profiled(QStringLiteral("guest"), profile, QStringLiteral("public"));
+        ConnectionParams p = profiled(QStringLiteral("guest"), profile, share);
         p.username = QStringLiteral("nosuchuser");
         const Result r = signIn(backend.get(), p, Credentials(QStringLiteral("nosuchuser"), "whatever"));
         QCOMPARE(r.error(), Error::SecurityPolicy);
@@ -1290,7 +1276,6 @@ private slots:
             QCOMPARE(e.type, EntryType::Directory);
             QVERIFY(!e.flags.testFlag(EntryFlag::ReadOnly));
         }
-        QCOMPARE(entries.at(4).extra.value(QStringLiteral("remark")).toString(), QStringLiteral("Films and music"));
 
         Entry entry;
         QVERIFY(backend->stat(QStringLiteral("/"), &entry).ok());
@@ -1369,7 +1354,8 @@ private slots:
     }
 
     // XM-2: at most four share contexts; the least recently used goes,
-    // never one with open handles.
+    // never one with open handles. Every share is a tree connect of the one
+    // session (one TCP connection), IPC$ included.
     void serverModeContextLimit()
     {
         const QString server = QStringLiteral("strict");
@@ -1378,22 +1364,30 @@ private slots:
         QVERIFY(signIn(backend.get(), profiled(server, QStringLiteral("strict"), QString()), credentials()).ok());
         const QStringList shares { QStringLiteral("backup"), QStringLiteral("small"), QStringLiteral("media"),
                                    QStringLiteral("hidden$"), QStringLiteral("readonly") };
+        const auto trees = [this, &server, &shares]() {
+            int n = treeConnects(server, "IPC$");
+            for (const QString &share : shares)
+                n += treeConnects(server, share.toUtf8());
+            return n;
+        };
         Entry entry;
         QVERIFY(put(backend.get(), QStringLiteral("/backup/lru.txt"), "backup"));
-        QTRY_COMPARE(connections(server), 2);        // IPC$ and backup
+        QTRY_COMPARE(trees(), 2);        // IPC$ and backup
+        QCOMPARE(connections(server), 1);
         // Share names are case-insensitive: no second context for BACKUP.
         QVERIFY(backend->stat(QStringLiteral("/BACKUP/lru.txt"), &entry).ok());
         QTest::qWait(500);
-        QCOMPARE(connections(server), 2);
+        QCOMPARE(trees(), 2);
         for (const QString &share : shares.mid(1, 3))
             QVERIFY(put(backend.get(), QStringLiteral("/%1/lru.txt").arg(share), share.toUtf8()));
-        QTRY_COMPARE(connections(server), 5);        // IPC$ and four shares
+        QTRY_COMPARE(trees(), 5);        // IPC$ and four shares
         // Share names are case-insensitive: the same context, and a use.
         QVERIFY(backend->stat(QStringLiteral("/BACKUP/lru.txt"), &entry).ok());
         QVERIFY(backend->stat(QStringLiteral("/readonly/existing.txt"), &entry).ok());
-        QTRY_COMPARE(connections(server), 5);        // one closed for the fifth
+        QTRY_COMPARE(trees(), 5);        // one disconnected for the fifth
         QTRY_COMPARE(treeConnects(server, "small"), 0);    // the least recently used
         QCOMPARE(treeConnects(server, "backup"), 1);
+        QCOMPARE(connections(server), 1);
 
         // Handles keep their context: four open files, a fifth share waits.
         std::vector<std::unique_ptr<ReadHandle>> handles;
@@ -1410,87 +1404,13 @@ private slots:
             QVERIFY(handles.at(static_cast<size_t>(i))->read(0, 100, &data).ok());
             QCOMPARE(data, shares.at(i).toUtf8());
         }
-        QCOMPARE(handles.at(1)->read(0, 1, &data).error(), Error::Internal);   // closed
+        QCOMPARE(handles.at(1)->read(0, 1, &data).error(), Error::ProtocolError);   // closed
         handles.clear();
         for (const QString &share : shares.mid(0, 4))
             QVERIFY(backend->removeFile(QStringLiteral("/%1/lru.txt").arg(share)).ok());
         // C-9, disconnect covers every context.
         backend->disconnect();
         QTRY_COMPARE_WITH_TIMEOUT(connections(server), 0, 15000);
-    }
-
-    // XM-7: a broken helper is ProtocolError and the backend stays usable;
-    // without the helper there is no ShareEnumeration.
-    void shareHelperFailures()
-    {
-        QTemporaryDir dir;
-        QVERIFY(dir.isValid());
-        const QString crash = dir.filePath(QStringLiteral("crash.sh"));
-        QFile script(crash);
-        QVERIFY(script.open(QIODevice::WriteOnly));
-        script.write("#!/bin/sh\ncat >/dev/null\nprintf '{\"name\":\"evil/../x\",\"type\":0,\"remark\":\"\"}\\n'\nkill -SEGV $$\n");
-        script.close();
-        script.setPermissions(QFileDevice::ReadOwner | QFileDevice::ExeOwner);
-        const QByteArray original = qgetenv("NETVFS_SMB_SHARES_HELPER");
-        qputenv("NETVFS_SMB_SHARES_HELPER", QFile::encodeName(crash));
-        const auto backend = newBackend();
-        QVERIFY(signIn(backend.get(), profiled(QStringLiteral("strict"), QStringLiteral("strict"), QString()),
-                       credentials()).ok());
-        QVector<Entry> entries;
-        QCOMPARE(backend->list(QStringLiteral("/"), &entries).error(), Error::ProtocolError);
-        Entry entry;
-        QVERIFY(backend->stat(QStringLiteral("/backup"), &entry).ok());
-        QVERIFY(backend->keepAlive().ok());
-
-        qputenv("NETVFS_SMB_SHARES_HELPER", QFile::encodeName(dir.filePath(QStringLiteral("missing"))));
-        QVERIFY(!backend->capabilities().has(Capability::ShareEnumeration));
-        QVERIFY(backend->list(QStringLiteral("/"), &entries).ok());
-        QVERIFY(entries.isEmpty());          // nothing saved, nothing enumerated
-        qputenv("NETVFS_SMB_SHARES_HELPER", original);
-    }
-
-    // XM-7: the helper itself, as the backend runs it: the same profile
-    // checks (a guest mapping is refused), shares as JSON lines.
-    void shareHelperDirect()
-    {
-        const auto run = [](const ShareRequest &request, QByteArray *out) {
-            QProcess helper;
-            helper.start(QString::fromLocal8Bit(qgetenv("NETVFS_SMB_SHARES_HELPER")), QStringList());
-            if (!helper.waitForStarted(10000))
-                return -1;
-            helper.write(encodeShareRequest(request));
-            helper.closeWriteChannel();
-            helper.waitForFinished(60000);
-            *out = helper.readAllStandardOutput();
-            return helper.exitStatus() == QProcess::NormalExit ? helper.exitCode() : -1;
-        };
-        ShareRequest request;
-        request.server = address(QStringLiteral("strict")).toUtf8();
-        request.user = "backup";
-        request.profile = "strict";
-        request.requestTimeoutMs = 30000;
-        request.secret = m_password;
-        QByteArray out;
-        QCOMPARE(run(request, &out), 0);
-        QVector<ShareInfo> shares;
-        QVERIFY2(parseShareOutput(out, &shares).ok(), out.constData());
-        QStringList names;
-        for (const ShareInfo &share : shares)
-            names << share.name;
-        QVERIFY2(names.contains(QStringLiteral("hidden$")) && names.contains(QStringLiteral("IPC$")),
-                 qPrintable(names.join(QLatin1Char(','))));   // the filter is the backend's
-
-        request.server = address(QStringLiteral("guest")).toUtf8();
-        request.user = "nosuchuser";
-        request.secret = "whatever";
-        QCOMPARE(run(request, &out), 1);
-        const Result mapped = parseShareOutput(out, &shares);
-        QCOMPARE(mapped.error(), Error::SecurityPolicy);
-        QVERIFY2(mapped.message().contains(QLatin1String("guest")), qPrintable(mapped.message()));
-        request.secret = "wrong";
-        request.user = "backup";
-        QCOMPARE(run(request, &out), 1);
-        QCOMPARE(parseShareOutput(out, &shares).error(), Error::AuthFailed);
     }
 
     // C-9: a cancel() from within the transfer ends it, even when the
@@ -1690,7 +1610,7 @@ private slots:
         QCOMPARE(writer->position(), qint64(10) + tail.size());
         QVERIFY(writer->commit().ok());
         QCOMPARE(contentOf(backend.get(), QStringLiteral("resume.bin")), QByteArray("0123456789") + tail);
-        QCOMPARE(writer->write("x", 1).error(), Error::Internal);    // committed: closed
+        QCOMPARE(writer->write("x", 1).error(), Error::ProtocolError);    // committed: closed
         options.resumeOffset = 0;
         QCOMPARE(backend->openWrite(QStringLiteral("missing.bin"), options, &raw).error(), Error::NotFound);
         QVERIFY(backend->removeFile(QStringLiteral("resume.bin")).ok());

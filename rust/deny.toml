@@ -5,18 +5,22 @@
 [graph]
 all-features = true
 # The targets netvfs ships for (Sailfish OS aarch64) and builds and tests on
-# (x86_64 CI): crates only other systems use (windows-sys, r-efi) are out of
-# every check.
+# (x86_64 CI). This leaves out crates only other systems link
+# (windows-sys), sspi's macOS DNS-SD client (async-dnssd, on bitflags 1) and
+# getrandom's UEFI backend (r-efi, in two versions).
 targets = ["aarch64-unknown-linux-gnu", "x86_64-unknown-linux-gnu"]
 
 [advisories]
 version = 2
 yanked = "deny"
 ignore = [
-    # rsa: Marvin timing side channel in RSA decryption and signing, unfixed
-    # upstream. netvfs-sftp refuses RSA user keys, so the only RSA operation
-    # is verifying a server's rsa-sha2 host signature.
-    { id = "RUSTSEC-2023-0071", reason = "no RSA private-key operation: RSA user keys refused" },
+    # rsa: Marvin timing side channel in RSA decryption and signing, no fixed
+    # release. Two paths into the tree, neither with an RSA private-key
+    # operation: netvfs-sftp refuses RSA user keys, so its only RSA operation
+    # is verifying a server's rsa-sha2 host signature; netvfs-smb uses sspi
+    # (through picky) for NTLM only (the Negotiate package is limited to
+    # "ntlm": no Kerberos, no PKINIT, no certificate).
+    { id = "RUSTSEC-2023-0071", reason = "no RSA private-key operation: RSA user keys refused, sspi limited to NTLM" },
 ]
 
 [licenses]
@@ -37,6 +41,10 @@ exceptions = [
     { crate = "ring", allow = ["ISC"] },
     # untrusted, ring's input parser: ISC.
     { crate = "untrusted", allow = ["ISC"] },
+    # IDNA mapping tables (sspi -> url -> idna -> idna_adapter 1.1, pinned in
+    # Cargo.lock to keep the ICU4X crates out): "(Apache-2.0 OR MIT) AND
+    # Unicode-3.0", a permissive data licence.
+    { crate = "idna_mapping", allow = ["Unicode-3.0"] },
 ]
 
 # The workspace's own crates (publish = false) are netvfs.
@@ -60,6 +68,12 @@ skip = [
     # ml-kem 0.3 (russh's mlkem768x25519-sha256) is on sha3 0.11, the rest
     # of russh's tree on 0.12.
     { crate = "sha3@0.11", reason = "ml-kem 0.3 has no release on sha3 0.12" },
+    # sspi 0.23 (netvfs-smb) depends on getrandom 0.3 directly; RustCrypto's
+    # current releases are on 0.4.
+    { crate = "getrandom@0.3", reason = "sspi 0.23 depends on getrandom 0.3 directly" },
+    # sspi's picky 7.0.0-rc.26 is on base64 0.22, its picky-asn1-x509 0.15
+    # on 0.23.
+    { crate = "base64@0.22", reason = "picky 7.0.0-rc.26 (sspi) has no release on base64 0.23" },
 ]
 
 [sources]

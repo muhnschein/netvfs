@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-2.1-or-later
 # Shared build settings. Variables that may be set on the qmake command line:
-#   VENDOR_PREFIX    prefix holding the static libsmb2 (vendor/build-vendor.sh)
+#   VENDOR_PREFIX    prefix of the vendored libraries (vendor/build-vendor.sh)
 #   NETVFS_SANITIZE  1: AddressSanitizer + UndefinedBehaviorSanitizer
 #   NETVFS_COVERAGE  1: gcov instrumentation
 #   NETVFS_WERROR    1: warnings are errors

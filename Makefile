@@ -2,7 +2,8 @@
 #
 #   make               build everything (vendored libraries first)
 #   make check         Rust checks, unit tests, then the interop suite (needs docker)
-#   make check-rust    the Rust workspace (rust/): format, lint, tests (nextest), lockfile, MSRV
+#   make check-rust    the Rust workspace (rust/): format, lint, tests (nextest), lockfile, MSRV,
+#                      netvfs-smb's crypto fence
 #   make check-unit    unit tests only
 #   make check-rust-ffi the Rust side of the C ABI against the built libnetvfs-bridge-ffi.so
 #   make check-interop interop suite against containerised servers
@@ -83,6 +84,7 @@ check: check-rust check-unit check-rust-ffi check-interop
 
 check-rust:
 	./tools/ci/check-lockfile.sh rust/Cargo.lock
+	./tools/ci/check-crypto-fence.sh
 	cd rust && $(CARGO) fmt --all -- --check
 	cd rust && $(CARGO) clippy --locked --workspace --all-targets $(RUST_FEATURES) -- -D warnings
 	cd rust && $(RUST_ENV) $(CARGO) nextest run --locked --workspace $(RUST_FEATURES) --profile $(NEXTEST_PROFILE)
@@ -129,12 +131,11 @@ check-interop: all
 
 # SPEC-v2 XP-1: every installed file in exactly one package of rpm/netvfs.spec
 # (the host has no sailfish-svg2png, so no icons; tests install to /usr/tests,
-# package builds skip them). XP-3: no share enumeration in the SMB plugin,
-# and the check does find it in the share helper. The C ABI of netvfs-bridge
+# package builds skip them). The C ABI of netvfs-bridge
 # is checked against the host's glibc, and the bridge must look for it where
 # the spec puts it (tools/ci/check-ffi-lib.sh). So is libnetvfs-rs.so, and
 # the plugins of the Rust backends (the test plugin of provider mem, the
-# SFTP plugin) must look for it where qmake installs it
+# SFTP plugin and the SMB plugin) must look for it where qmake installs it
 # (tools/ci/check-rs-lib.sh).
 PACKAGE_ROOT := $(BUILD_DIR)/install-root
 PACKAGE_FILES = ./tools/ci/check-files.py --map "$$($(QMAKE) -query QT_INSTALL_LIBS)=/usr/lib64" \
@@ -144,14 +145,12 @@ check-packaging: all
 	$(MAKE) -s -C $(BUILD_DIR) install INSTALL_ROOT=$(PACKAGE_ROOT) >/dev/null
 	rm -rf $(PACKAGE_ROOT)/usr/tests
 	$(PACKAGE_FILES) $(PACKAGE_ROOT)
-	./tools/ci/check-noshareenum.sh $(BUILD_DIR)/lib/netvfs/backends/libnetvfs-smb.so
 	./tools/ci/check-ffi-lib.sh $(BUILD_DIR)/lib/netvfs/libnetvfs-bridge-ffi.so \
 	    "$$($(PACKAGE_FILES) --list $(PACKAGE_ROOT) | sed -n 's|^ *\(/.*/libnetvfs-bridge-ffi\.so\)$$|\1|p')" \
 	    $(BUILD_DIR)/libexec/netvfs/netvfs-bridge "$$(getconf GNU_LIBC_VERSION | cut -d ' ' -f 2)"
-	! ./tools/ci/check-noshareenum.sh $(BUILD_DIR)/libexec/netvfs/netvfs-smb-shares >/dev/null
 	./tools/ci/check-rs-lib.sh $(BUILD_DIR)/lib/netvfs/libnetvfs-rs.so "$$(getconf GNU_LIBC_VERSION | cut -d ' ' -f 2)" \
 	    "$$($(QMAKE) -query QT_INSTALL_LIBS)/netvfs/libnetvfs-rs.so" $(BUILD_DIR)/lib/netvfs/test-backends/libnetvfs-mem.so \
-	    $(BUILD_DIR)/lib/netvfs/backends/libnetvfs-sftp.so
+	    $(BUILD_DIR)/lib/netvfs/backends/libnetvfs-sftp.so $(BUILD_DIR)/lib/netvfs/backends/libnetvfs-smb.so
 	./tests/packaging/test_packaging.py
 
 coverage:

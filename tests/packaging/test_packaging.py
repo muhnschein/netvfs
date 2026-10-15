@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: LGPL-2.1-or-later
-"""Tests of the packaging checks (SPEC-v2 XP-1, XP-3): tools/ci/check-files.py
-against small specs and install trees, tools/ci/check-noshareenum.sh against
-shared objects built here with and without DCE/RPC code, and
-tools/ci/check-ffi-lib.sh against stand-ins for netvfs-bridge's C ABI and
+"""Tests of the packaging checks (SPEC-v2 XP-1): tools/ci/check-files.py
+against small specs and install trees, and tools/ci/check-ffi-lib.sh against
+stand-ins for netvfs-bridge's C ABI and
 tools/ci/check-rs-lib.sh against stand-ins for libnetvfs-rs.so, built here
 (they need cc and readelf). Run from anywhere:
 tests/packaging/test_packaging.py
@@ -18,7 +17,6 @@ import unittest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 CHECK_FILES = os.path.join(ROOT, "tools", "ci", "check-files.py")
-CHECK_NOSHAREENUM = os.path.join(ROOT, "tools", "ci", "check-noshareenum.sh")
 CHECK_FFI_LIB = os.path.join(ROOT, "tools", "ci", "check-ffi-lib.sh")
 CHECK_RS_LIB = os.path.join(ROOT, "tools", "ci", "check-rs-lib.sh")
 
@@ -167,65 +165,6 @@ class CheckFiles(unittest.TestCase):
                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, check=False)
         self.assertIn("packages", result.stdout)
         self.assertNotEqual(result.returncode, 2, result.stdout)
-
-
-@unittest.skipUnless(shutil.which("cc") and shutil.which("readelf"), "needs cc and readelf")
-class CheckNoShareEnum(unittest.TestCase):
-    def setUp(self):
-        self.work = tempfile.mkdtemp()
-
-    def tearDown(self):
-        shutil.rmtree(self.work)
-
-    def build(self, name, source, strip):
-        c_file = os.path.join(self.work, name + ".c")
-        so_file = os.path.join(self.work, name + ".so")
-        with open(c_file, "w", encoding="utf-8") as file:
-            file.write(textwrap.dedent(source))
-        subprocess.run(["cc", "-shared", "-fPIC", "-o", so_file, c_file], check=True)
-        if strip:
-            subprocess.run(["strip", so_file], check=True)
-        return so_file
-
-    def run_check(self, so_file):
-        result = subprocess.run([CHECK_NOSHAREENUM, so_file], stdout=subprocess.PIPE,
-                                stderr=subprocess.STDOUT, text=True, check=False)
-        return result.returncode, result.stdout
-
-    def test_clean_plugin_passes(self):
-        so_file = self.build("clean", """
-            const char *smb_message(void) { return "Share enumeration is not available"; }
-            """, strip=True)
-        code, output = self.run_check(so_file)
-        self.assertEqual(code, 0, output)
-
-    def test_dcerpc_strings_fail(self):
-        so_file = self.build("strings", """
-            const char *smb_message(void) { return "DCERPC FAULT status=0x%08x"; }
-            """, strip=True)
-        code, output = self.run_check(so_file)
-        self.assertEqual(code, 1, output)
-        self.assertIn("share enumeration strings", output)
-
-    def test_srvsvc_pipe_name_fails(self):
-        so_file = self.build("pipe", """
-            const char *smb_pipe(void) { return "srvsvc"; }
-            """, strip=True)
-        code, output = self.run_check(so_file)
-        self.assertEqual(code, 1, output)
-
-    def test_dcerpc_symbols_fail(self):
-        so_file = self.build("symbols", """
-            __attribute__((visibility("hidden"))) int dcerpc_bind_cb(int x) { return x + 1; }
-            int smb_entry(int x) { return dcerpc_bind_cb(x); }
-            """, strip=False)
-        code, output = self.run_check(so_file)
-        self.assertEqual(code, 1, output)
-        self.assertIn("dcerpc_bind_cb", output)
-
-    def test_not_elf_fails(self):
-        code, output = self.run_check(os.path.join(ROOT, "LICENSE"))
-        self.assertEqual(code, 1, output)
 
 
 FFI_INSTALLED = "/usr/lib64/netvfs/libnetvfs-bridge-ffi.so"

@@ -54,18 +54,3 @@ build() {
     cmake --install "$work/$tag"
     printf '%s' "$want" > "$stamp"
 }
-
-# The backend plugin's copy: no Kerberos, no libdcerpc (G-SMB item 4; the
-# plugin also links src/backends/smb/noshareenum.c).
-build libsmb2 main \
-    -DENABLE_LIBKRB5=OFF -DENABLE_GSSAPI=OFF -DENABLE_EXAMPLES=OFF \
-    -DENABLE_LIBDCERPC=OFF \
-    "$@"
-
-# SPEC-v2 XM-7: a second build, with DCE/RPC, for the share enumeration
-# helper netvfs-smb-shares only. It runs as its own process, so the
-# plugin keeps G-SMB item 4. Same pin and patches.
-build libsmb2 dcerpc \
-    -DENABLE_LIBKRB5=OFF -DENABLE_GSSAPI=OFF -DENABLE_EXAMPLES=OFF \
-    -DENABLE_LIBDCERPC=ON \
-    "$@"

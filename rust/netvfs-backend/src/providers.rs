@@ -11,6 +11,7 @@ use netvfs_vfs::Status;
 pub fn create(provider: &[u8]) -> Result<Box<dyn DynBackend>, Status> {
     match provider {
         b"sftp" => Ok(Box::new(netvfs_sftp::backend::Sftp::new())),
+        b"smb" => Ok(Box::new(netvfs_smb::backend::Smb::new())),
         #[cfg(feature = "testing")]
         b"mem" => Ok(Box::new(crate::mem::Mem::new())),
         _ => Err(Status::unsupported(format!(
@@ -38,6 +39,11 @@ mod tests {
     #[test]
     fn sftp_is_a_provider() {
         create(b"sftp").unwrap();
+    }
+
+    #[test]
+    fn smb_is_a_provider() {
+        create(b"smb").unwrap();
     }
 
     #[cfg(feature = "testing")]

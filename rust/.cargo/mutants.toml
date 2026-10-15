@@ -175,4 +175,19 @@ exclude_re = [
     # `^` is `|`.
     'netvfs-sftp/src/(remote|io)\.rs:\d+:\d+: replace \| with \^ in (Remote::copy_data|open_for_write)$',
     # ---- end netvfs-sftp ----
+    # ---- netvfs-smb ----
+    # Equivalent: ORs of distinct single-bit flags, where `^` is `|`: the
+    # NTLMSSP flags of the anonymous messages, the CREATE access masks, the
+    # NEGOTIATE security mode and capabilities, PFC_FIRST_FRAG |
+    # PFC_LAST_FRAG of an RPC PDU, IS_GUEST | IS_NULL of SessionFlags.
+    'netvfs-smb/src/auth\.rs:\d+:\d+: replace \| with \^ in anonymous_(negotiate|authenticate)$',
+    'netvfs-smb/src/backend\.rs:\d+:\d+: replace \| with \^ in Smb::(open_file|open_writer)$',
+    'netvfs-smb/src/negotiate\.rs:\d+:\d+: replace \| with \^ in Offer::request$',
+    'netvfs-smb/src/rpc\.rs:\d+:\d+: replace \| with \^ in header$',
+    'netvfs-smb/src/session\.rs:\d+:\d+: replace \| with \^ in finish$',
+    # Equivalent: UTF-8 assembly ORs a lead or continuation marker with
+    # payload bits it does not overlap (the code point's range bounds them),
+    # so `^` is `|`.
+    'netvfs-smb/src/names\.rs:\d+:\d+: replace \| with \^ in (push_utf8|utf16_from_wtf8)$',
+    # ---- end netvfs-smb ----
 ]
