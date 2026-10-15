@@ -23,8 +23,8 @@
   {
     "name": "protocol without identity reported as matching",
     "file": "src/qml/netvfsprobe.cpp",
-    "search": "    if (outcome.identity.isEmpty())\n        return Status::NoIdentity;\n",
-    "replace": "",
+    "search": "        return outcome.identity.isEmpty() ? Status::NoIdentity : Status::IdentityMatches;",
+    "replace": "        return Status::IdentityMatches;",
     "test": "dbus-run-session -- build/tests/unit/qml/probe/tst_qmlprobe"
   },
   {

@@ -9,8 +9,8 @@
  * Loading:
  *   void *lib = dlopen(path, RTLD_NOW | RTLD_LOCAL);
  *   nvb_ffi_get_fn get = (nvb_ffi_get_fn)dlsym(lib, NVB_FFI_ENTRY);
- *   const nvb_ffi_v1 *t = get(NVB_FFI_VERSION);   NULL: version not offered
- * t->struct_size may exceed sizeof(nvb_ffi_v1): fields are only ever appended.
+ *   const nvb_ffi *t = get();
+ * Library and caller are built from the same source and ship together.
  *
  * Ownership:
  *  O1 nvb_bytes and structs passed in are borrowed for the call only; C++ copies.
@@ -50,7 +50,6 @@
 extern "C" {
 #endif
 
-#define NVB_FFI_VERSION 1u
 #define NVB_FFI_ENTRY "nvb_ffi_get"
 
 /* ------------------------------------------------------------- basics */
@@ -163,7 +162,7 @@ typedef struct nvb_attributes {
 
 /* ------------------------------------------------------------ establish */
 
-enum { NVB_IDENTITY_NONE = 0, NVB_IDENTITY_SSH = 1, NVB_IDENTITY_TLS = 2 };
+enum { NVB_IDENTITY_NONE = 0, NVB_IDENTITY_SSH = 1 };
 
 /* The ServerIdentity seen during connect (XC-16). */
 typedef struct nvb_identity {
@@ -173,10 +172,6 @@ typedef struct nvb_identity {
     nvb_bytes fingerprint;     /* filled by C++ when the backend left it empty
                                   ("SHA256:" + unpadded base64), as connector.cpp did */
     nvb_bytes pin;             /* ServerIdentity::toPin(); empty without identity */
-    uint8_t system_trusted;
-    int32_t problems;          /* ServerIdentity bits */
-    const nvb_kv *details;     /* wire-able values only; dates as ISO-8601 UTC */
-    size_t n_details;
 } nvb_identity;
 
 /* Where the credentials come from. */
@@ -286,7 +281,6 @@ typedef struct nvb_nearby {
     nvb_bytes provider;
     nvb_bytes host;
     uint16_t port;
-    nvb_bytes path;            /* Names::encode(path) */
 } nvb_nearby;
 
 typedef struct nvb_discovery_hooks {
@@ -297,10 +291,7 @@ typedef struct nvb_discovery_hooks {
 
 /* ------------------------------------------------------------ the table */
 
-typedef struct nvb_ffi_v1 {
-    uint32_t version;          /* NVB_FFI_VERSION */
-    uint32_t struct_size;      /* sizeof(nvb_ffi_v1) in the library */
-
+typedef struct nvb_ffi {
     /* Process and Qt event loop (T1, T2). */
     int32_t (*init)(nvb_bytes app_name);        /* QCoreApplication; 0 ok, -1 twice */
     int32_t (*run)(void);                       /* exec(); returns quit()'s code */
@@ -379,14 +370,14 @@ typedef struct nvb_ffi_v1 {
     int32_t (*discovery_set_running)(nvb_discovery *d, int32_t on);  /* idempotent; 1 if
                                                                          a socket is open */
     void (*discovery_free)(nvb_discovery *d);   /* no hook call after it returns */
-} nvb_ffi_v1;
+} nvb_ffi;
 
-typedef const nvb_ffi_v1 *(*nvb_ffi_get_fn)(uint32_t version);
+typedef const nvb_ffi *(*nvb_ffi_get_fn)(void);
 
 #if defined(__GNUC__)
 __attribute__((visibility("default")))
 #endif
-const nvb_ffi_v1 *nvb_ffi_get(uint32_t version);
+const nvb_ffi *nvb_ffi_get(void);
 
 #ifdef __cplusplus
 }

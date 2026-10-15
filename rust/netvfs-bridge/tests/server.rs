@@ -30,7 +30,7 @@ use netvfs_bridge::testutil::TempDir;
 use netvfs_bridge::{Deps, Services};
 use netvfs_bridge_proto::limits::{MAX_HANDLES, MAX_JOBS, MAX_LIST_BATCH, MAX_REQUESTS, POOL_PER_HOST};
 use netvfs_bridge_proto::zvariant::Fd;
-use netvfs_bridge_proto::{Connection, ErrorName, Opts, OptsBuilder, PROTOCOL_VERSION, Signal, SignalStream};
+use netvfs_bridge_proto::{Connection, ErrorName, Opts, OptsBuilder, Signal, SignalStream};
 use std::fs::{File, OpenOptions};
 use std::io::{Read as _, Seek as _, SeekFrom, Write as _};
 use std::os::fd::AsFd as _;
@@ -97,13 +97,10 @@ fn hello_first(h: &Harness) {
         let c = f.client().await;
         let early = c.proxy().get_consent().await;
         assert_eq!(error_name(&early), name(ErrorName::ProtocolError));
-        let (protocol, version, features) = c.proxy().hello(PROTOCOL_VERSION, "t").await.unwrap();
-        assert_eq!(protocol, PROTOCOL_VERSION);
-        assert!(!version.is_empty());
-        assert!(!features.is_empty());
+        assert_eq!(c.proxy().hello("t").await.unwrap(), env!("CARGO_PKG_VERSION"));
         assert_eq!(c.proxy().get_consent().await.unwrap(), "granted");
         // A second Hello is answered as well.
-        assert!(c.proxy().hello(PROTOCOL_VERSION, "t").await.is_ok());
+        assert!(c.proxy().hello("t").await.is_ok());
         assert_eq!(f.prompt.state().shown, 0);
     });
 }
@@ -137,7 +134,7 @@ fn consent_unknown_then_granted(h: &Harness) {
         let stat = c.proxy().stat(ACCOUNT_LOC, b"/x", true, "").await;
         assert_eq!(error_name(&stat), name(ErrorName::PermissionDenied));
         assert_eq!(error_name(&c.proxy().discover(true).await), name(ErrorName::PermissionDenied));
-        c.proxy().hello(PROTOCOL_VERSION, "t").await.unwrap();
+        c.proxy().hello("t").await.unwrap();
         assert_eq!(f.prompt.state().shown, 1); // not again while shown
         f.answer_prompt(true);
         let changed = wait_signal(&mut signals, WAIT, |s| matches!(s, Signal::ConsentChanged(_))).await;
@@ -877,7 +874,7 @@ fn ad_hoc_identity_question(h: &Harness) {
         let (id, kind, details) = question(&mut signals).await;
         assert_eq!(kind, "identity-unknown");
         assert_eq!(String::try_from(details["host"].clone()).unwrap(), "adhoc.example");
-        assert!(!String::try_from(details["fingerprint"].clone()).unwrap().is_empty());
+        assert_ne!(String::try_from(details["fingerprint"].clone()).unwrap().len(), 0);
         assert_eq!(
             error_name(&c.proxy().answer(&id, &OptsBuilder::new().bool("accept", false).build()).await),
             None
@@ -988,6 +985,19 @@ fn connect_ad_hoc_refusals(h: &Harness) {
         assert_eq!(error_name(&refused), name(ErrorName::SecurityPolicy)); // XH-6
         let local = p.connect_ad_hoc("file:///etc", b"", &no_opts()).await;
         assert_eq!(error_name(&local), name(ErrorName::PermissionDenied)); // XB-11: never local paths
+        // A scheme no backend has is refused before any backend.
+        for url in ["dav://host/", "davs://host/", "ftp://host/", "ftps://host/"] {
+            let unknown = p.connect_ad_hoc(url, b"", &no_opts()).await;
+            assert_eq!(error_name(&unknown), name(ErrorName::Unsupported), "{url}");
+        }
+        let unknown = p.connect_ad_hoc("davs://host/", b"", &no_opts()).await.unwrap_err();
+        assert_eq!(
+            netvfs_bridge_proto::BridgeError::from(unknown),
+            netvfs_bridge_proto::BridgeError::remote(
+                ErrorName::Unsupported,
+                "Unsupported URL scheme \"davs\""
+            )
+        );
         let missing = p.connect_ad_hoc("sftp://host/", b"", &no_opts()).await;
         assert_eq!(error_name(&missing), name(ErrorName::Unsupported)); // no sftp backend in the tests
         let bad =
@@ -1014,7 +1024,7 @@ fn peer_check_refuses(h: &Harness) {
     block_on(async {
         // Closed without a reply.
         if let Ok(c) = netvfs_bridge_proto::connect(&f.socket).await {
-            assert!(c.proxy().hello(PROTOCOL_VERSION, "x").await.is_err());
+            assert!(c.proxy().hello("x").await.is_err());
         }
         let counters = f.probe().counters().await.unwrap();
         assert_eq!(counters.sessions, 0);
@@ -1035,7 +1045,6 @@ fn discovery(h: &Harness) {
             provider: "smb".to_owned(),
             host: "nas.local".to_owned(),
             port: 445,
-            path: b"/".to_vec(),
         };
         assert!(f.link().nearby(vec![server.clone()]));
         let found = wait_signal(&mut signals, WAIT, |s| matches!(s, Signal::NearbyChanged(_))).await;
@@ -1069,14 +1078,14 @@ fn handoff(h: &Harness) {
     block_on(async {
         let c = f.hello_client().await;
         c.proxy().open_account_settings(ACCOUNT_LOC).await.unwrap();
-        c.proxy().add_account("webdav").await.unwrap();
+        c.proxy().add_account("smb").await.unwrap();
         let calls = f.launcher.calls();
         assert_eq!(calls.len(), 2);
         assert_eq!(
             (calls[0].method.as_str(), calls[0].arguments.as_slice()),
             ("show", &[HandoffArg::Int(1)][..])
         );
-        assert_eq!(calls[1].arguments, [HandoffArg::Str("webdav".to_owned())]);
+        assert_eq!(calls[1].arguments, [HandoffArg::Str("smb".to_owned())]);
         assert_eq!(error_name(&c.proxy().open_account_settings("adhoc:7").await), name(ErrorName::NotFound));
     });
     let f = Fixture::new(h, Consent::Granted);
@@ -1086,8 +1095,8 @@ fn handoff(h: &Harness) {
             error_name(&c.proxy().open_account_settings(ACCOUNT_LOC).await),
             name(ErrorName::Unsupported)
         );
-        assert_eq!(error_name(&c.proxy().add_account("webdav").await), name(ErrorName::Unsupported));
-        assert!(f.launcher.calls().is_empty());
+        assert_eq!(error_name(&c.proxy().add_account("smb").await), name(ErrorName::Unsupported));
+        assert_eq!(f.launcher.calls().len(), 0);
     });
 }
 

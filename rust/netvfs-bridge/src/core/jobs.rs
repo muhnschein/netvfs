@@ -7,7 +7,7 @@
 use super::{Core, Event, quota};
 use crate::ffi::Conn;
 use crate::jobs::JobOutcome;
-use crate::jobs::fd::{FdAccess, check_transfer_fd, check_upload_length};
+use crate::jobs::fd::{FdAccess, check_transfer_fd};
 use crate::jobs::progress::JobProgress;
 use crate::jobs::remove::remove_tree;
 use crate::jobs::transfer::{Transfer, transfer};
@@ -99,13 +99,7 @@ impl Core {
                 return;
             }
         };
-        let spec = match self.pool_for(call.loc.as_str()) {
-            Ok(spec) => spec,
-            Err(status) => return reply.fail(&status),
-        };
-        if call.upload
-            && let Err(status) = check_upload_length(&info, call.opts.size, &spec.provider)
-        {
+        if let Err(status) = self.pool_for(call.loc.as_str()) {
             reply.fail(&status);
             return;
         }

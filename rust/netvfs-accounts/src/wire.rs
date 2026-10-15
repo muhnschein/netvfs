@@ -1,13 +1,10 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 //! The answer on stdout in the format of a `QDataStream` of version
-//! `Qt_5_6`, which the C++ bridge of netvfs 0.4 read and netvfs-bridge's
-//! `accounts::qds` reads: big-endian, strings as UTF-16 with a byte length,
-//! a null string as length `0xffffffff`.
+//! `Qt_5_6`, which netvfs-bridge's `accounts::qds` reads: big-endian,
+//! strings as UTF-16 with a byte length, a null string as length
+//! `0xffffffff`.
 
 use crate::qvariant::{QString, Value};
-
-/// The first item of every answer.
-pub const ANSWER_MAGIC: &[u8] = b"netvfs-accounts/1";
 
 /// `NetVfs::Error` (src/core/error.h), as far as the helper reports it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -81,11 +78,10 @@ impl Stream {
         Self::default()
     }
 
-    /// The header of every answer: magic, error, message.
+    /// The header of every answer: error, message.
     #[must_use]
     pub fn answer(outcome: &Outcome) -> Self {
         let mut s = Self::new();
-        s.byte_array(ANSWER_MAGIC);
         s.i32(outcome.error as i32);
         s.string(outcome.message.as_deref());
         s
@@ -131,12 +127,6 @@ impl Stream {
     /// comes near 4 GiB; a longer one would be cut to what fits.
     fn length(&mut self, n: usize) {
         self.u32(u32::try_from(n).unwrap_or(u32::MAX - 1));
-    }
-
-    /// Appends a byte array: its length, then the bytes.
-    pub fn byte_array(&mut self, value: &[u8]) {
-        self.length(value.len());
-        self.bytes.extend_from_slice(value);
     }
 
     /// A `QString`; `None` is the null string.
@@ -268,15 +258,11 @@ mod tests {
     }
 
     #[test]
-    fn answers_start_with_magic_error_and_message() {
+    fn answers_start_with_error_and_message() {
         let ok = Stream::answer(&Outcome::success()).into_bytes();
-        let mut expected = vec![0, 0, 0, 17];
-        expected.extend_from_slice(ANSWER_MAGIC);
-        expected.extend([0, 0, 0, 0, 0xff, 0xff, 0xff, 0xff]);
-        assert_eq!(ok, expected);
+        assert_eq!(ok, [0, 0, 0, 0, 0xff, 0xff, 0xff, 0xff]);
         let failed = Stream::answer(&Outcome::failure(Error::NotFound, "x")).into_bytes();
-        assert_eq!(failed[21..25], [0, 0, 0, 9]);
-        assert_eq!(failed[25..], [0, 0, 0, 2, 0, b'x']);
+        assert_eq!(failed, [0, 0, 0, 9, 0, 0, 0, 2, 0, b'x']);
         assert!(Outcome::success().ok());
         assert!(!Outcome::failure(Error::Internal, "").ok());
     }

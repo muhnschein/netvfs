@@ -10,23 +10,12 @@ Result checkServerIdentity(const ServerIdentity &seen, const QString &pin)
             return Result::success();
         return Result(Error::ServerIdentityChanged, QStringLiteral("The server presented no identity"));
     }
-    const bool tls = seen.kind == ServerIdentity::Kind::TlsCertificate;
-    if (pin.isEmpty() && tls && seen.systemTrusted)
-        return Result::success();
     if (pin.isEmpty()) {
-        if (tls) {
-            return Result(Error::ServerIdentityUnknown,
-                          QStringLiteral("Untrusted server certificate %1").arg(seen.fingerprint));
-        }
         return Result(Error::ServerIdentityUnknown,
                       QStringLiteral("Unknown server key %1 %2").arg(seen.algorithm, seen.fingerprint));
     }
     if (ServerIdentity::fromPin(pin) == seen)
         return Result::success();
-    if (tls) {
-        return Result(Error::ServerIdentityChanged,
-                      QStringLiteral("The server certificate key changed; it is now %1").arg(seen.fingerprint));
-    }
     return Result(Error::ServerIdentityChanged,
                   QStringLiteral("The server key changed; it is now %1 %2").arg(seen.algorithm, seen.fingerprint));
 }

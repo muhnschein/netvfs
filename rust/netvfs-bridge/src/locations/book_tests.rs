@@ -151,7 +151,7 @@ fn ad_hoc_locations_appear_once_connected() {
     assert_eq!(first, "adhoc:1");
     // Connecting: the pool exists, nobody sees it.
     assert_eq!(pool_ids(&book), [first.as_str()]);
-    assert!(ids(&book).is_empty());
+    assert_eq!(ids(&book).len(), 0);
     assert!(book.find(&first).is_none());
     assert!(!book.has_pool(&first));
     assert_eq!(book.ensure_pool(&first, true, available).unwrap_err().name, ErrorName::NotFound);
@@ -197,7 +197,7 @@ fn a_location_revoked_while_connecting_is_not_added() {
     let (id, _) = ad_hoc(&mut book, "h", b"pw");
     assert!(book.pools_mut().remove(&id));
     assert!(!book.add_ad_hoc(&id));
-    assert!(ids(&book).is_empty());
+    assert_eq!(ids(&book).len(), 0);
 }
 
 #[test]

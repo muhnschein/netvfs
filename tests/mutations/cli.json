@@ -231,13 +231,6 @@
     "test": "build/tests/unit/cli/tst_cli"
   },
   {
-    "name": "tls_verify_peer advice wrong",
-    "file": "src/cli/cliformat.cpp",
-    "search": "add --option tls_verify_peer=true to keep",
-    "replace": "add --option tls_verify_peer=false to keep",
-    "test": "build/tests/unit/cli/tst_cli"
-  },
-  {
     "name": "setuid bit not shown",
     "file": "src/cli/cliformat.cpp",
     "search": "triplet(mode, 6, (mode & ModeSetUid) != 0, QLatin1Char('s'))",

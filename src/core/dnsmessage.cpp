@@ -583,33 +583,4 @@ QByteArray canonicalName(const QByteArray &name)
     return name.toLower();
 }
 
-namespace {
-
-bool findTxt(const QList<QByteArray> &txt, const QByteArray &key, QByteArray *value)
-{
-    const QByteArray wanted = key.toLower();
-    for (const QByteArray &s : txt) {
-        const int eq = s.indexOf('=');
-        if (const QByteArray k = (eq >= 0 ? s.left(eq) : s).toLower(); !k.isEmpty() && k == wanted) {
-            *value = eq >= 0 ? s.mid(eq + 1) : QByteArray();
-            return true;
-        }
-    }
-    return false;
-}
-
-} // namespace
-
-QByteArray txtValue(const QList<QByteArray> &txt, const QByteArray &key, const QByteArray &fallback)
-{
-    QByteArray value;
-    return findTxt(txt, key, &value) ? value : fallback;
-}
-
-bool txtHasKey(const QList<QByteArray> &txt, const QByteArray &key)
-{
-    QByteArray ignored;
-    return findTxt(txt, key, &ignored);
-}
-
 } // namespace NetVfs::Dns

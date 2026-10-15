@@ -2,8 +2,6 @@
 #include "types.h"
 #include "secure.h"
 
-#include <QtCore/QCryptographicHash>
-
 #include <algorithm>
 #include <array>
 
@@ -25,7 +23,7 @@ struct CapabilityName {
     const char *name;
 };
 
-const std::array<CapabilityName, 22> capabilityNames = { {
+constexpr std::array<CapabilityName, 21> capabilityNames = { {
     { Capability::Symlinks, "Symlinks" },
     { Capability::Hardlinks, "Hardlinks" },
     { Capability::PosixModes, "PosixModes" },
@@ -46,9 +44,12 @@ const std::array<CapabilityName, 22> capabilityNames = { {
     { Capability::CaseInsensitive, "CaseInsensitive" },
     { Capability::WindowsNames, "WindowsNames" },
     { Capability::ShareEnumeration, "ShareEnumeration" },
-    { Capability::ShellExec, "ShellExec" },
     { Capability::ETags, "ETags" },
 } };
+// One name per capability: a size left over would add a nameless entry.
+static_assert(capabilityNames.size() == static_cast<std::size_t>(Capability::ETags) + 1
+                  && capabilityNames.back().capability == Capability::ETags,
+              "one name per capability");
 } // namespace
 
 QString capabilityName(Capability c)
@@ -91,19 +92,6 @@ QStringList Capabilities::names() const
 
 AuthPrompter::~AuthPrompter() = default;
 
-ServerIdentity ServerIdentity::fromTlsSpki(const QByteArray &spkiDer)
-{
-    ServerIdentity identity;
-    if (spkiDer.isEmpty())
-        return identity;
-    identity.kind = Kind::TlsCertificate;
-    identity.algorithm = QLatin1String(TlsAlgorithm);
-    identity.publicKey = spkiDer;
-    identity.fingerprint = QString::fromLatin1(
-        QCryptographicHash::hash(spkiDer, QCryptographicHash::Sha256).toBase64());
-    return identity;
-}
-
 QString ServerIdentity::toPin() const
 {
     if (isEmpty())
@@ -120,8 +108,6 @@ ServerIdentity ServerIdentity::fromPin(const QString &pin)
     const QByteArray blob = QByteArray::fromBase64(parts.at(1).toLatin1());
     if (blob.isEmpty() || blob.toBase64() != parts.at(1).toLatin1())
         return identity;
-    if (parts.at(0) == QLatin1String(TlsAlgorithm))
-        return fromTlsSpki(blob);
     identity.kind = Kind::SshHostKey;
     identity.algorithm = parts.at(0);
     identity.publicKey = blob;

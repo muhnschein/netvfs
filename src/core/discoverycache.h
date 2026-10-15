@@ -20,10 +20,9 @@ namespace NetVfs {
 struct BrowseType {
     const char *type;        // "_sftp-ssh._tcp"
     const char *provider;    // "sftp"
-    const char *tls;         // "http"/"https" for webdav; "" otherwise
 };
 
-const std::array<BrowseType, 6> &browseTypeTable();
+const std::array<BrowseType, 3> &browseTypeTable();
 const BrowseType *findBrowseType(const QString &serviceType);
 
 class ServiceCache
@@ -41,7 +40,7 @@ public:
     static constexpr int MaxAddressesPerHost = 8;
     static constexpr int MaxTtlSeconds = 7200;          // longer TTLs are clamped
     // A record that is not answered after this many queries makes the service
-    // appear with what is known (host and port without addresses or TXT).
+    // appear with what is known (host and port without addresses).
     static constexpr int MaxResolveAttempts = 3;
     static constexpr int FirstResolveDelayMs = 1000;
     // RFC 6762 section 5.2: refresh queries at 80, 90 and 95 percent of the TTL.
@@ -55,7 +54,7 @@ public:
     // Earliest monotonic time at which expire() or dueQuestions() has work;
     // -1 if none.
     qint64 nextDeadline() const;
-    // Follow-up questions that are due (missing SRV/TXT/address records, TTL
+    // Follow-up questions that are due (missing SRV/address records, TTL
     // refresh at 80/90/95 percent). Advances the retry state.
     QVector<Dns::Question> dueQuestions(qint64 now);
     // PTR records for known-answer suppression (RFC 6762 section 7.1): those
@@ -100,9 +99,6 @@ private:
         QByteArray target;           // canonical SRV target
         QString host;
         int port = 0;
-        bool hasTxt = false;
-        Lifetime txt;
-        QList<QByteArray> txtStrings;
         int attempts = 0;
         qint64 nextResolve = -1;
         bool gaveUp = false;
@@ -129,7 +125,6 @@ private:
 
     void handlePtr(const Dns::Record &rec, Context *c);
     void handleSrv(const Dns::Record &rec, Context *c);
-    void handleTxt(const Dns::Record &rec, Context *c);
     void handleAddress(const Dns::Record &rec, Context *c);
     void flushFamily(const QByteArray &host, quint16 type, Context *c);
     void markHostDirty(const QByteArray &host, Context *c) const;

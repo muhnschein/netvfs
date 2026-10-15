@@ -74,12 +74,6 @@ pub mod option_keys {
     pub const AUTH_MODE: &str = "auth_mode";
     /// The SMB security profile, if one is set.
     pub const SECURITY_PROFILE: &str = "security_profile";
-    /// The older SMB switch for encryption, true by default.
-    pub const REQUIRE_ENCRYPTION: &str = "require_encryption";
-    /// WebDAV's TLS setting: `http` is insecure (the default is `https`).
-    pub const TLS: &str = "tls";
-    /// FTP's TLS mode: `none` is insecure (the default is `explicit`).
-    pub const TLS_MODE: &str = "tls_mode";
     /// The account's consent to an insecure setting.
     pub const ALLOW_INSECURE: &str = "allow_insecure";
 }
@@ -90,15 +84,11 @@ pub mod security_profiles {
     pub const STRICT: &str = "strict";
     /// SMB without required encryption.
     pub const SIGNED: &str = "signed";
-    /// Legacy SMB: insecure, needs `allow_insecure`.
-    pub const LEGACY: &str = "legacy";
     /// Guest SMB without credentials: insecure, needs `allow_insecure`, no secret needed.
     pub const GUEST: &str = "guest";
 }
 
 const PROVIDER_SMB: &str = "smb";
-const PROVIDER_WEBDAV: &str = "webdav";
-const PROVIDER_FTP: &str = "ftp";
 const AUTH_INTERACTIVE: &str = "interactive";
 
 /// `securityProfile()`: the SMB profile in effect, `None` for other providers.
@@ -111,28 +101,18 @@ pub fn security_profile(params: &ConnectionParams) -> QString {
     if profile.as_deref().is_some_and(|p| !p.is_empty()) {
         return profile;
     }
-    // M-3 (v1): require_encryption, default true.
-    let strict = params.flag(option_keys::REQUIRE_ENCRYPTION, true);
-    Some(if strict { security_profiles::STRICT } else { security_profiles::SIGNED }.to_owned())
+    Some(security_profiles::STRICT.to_owned())
 }
 
 fn is_known_profile(profile: Option<&str>) -> bool {
-    use security_profiles::{GUEST, LEGACY, SIGNED, STRICT};
-    matches!(profile, Some(STRICT | SIGNED | LEGACY | GUEST))
+    use security_profiles::{GUEST, SIGNED, STRICT};
+    matches!(profile, Some(STRICT | SIGNED | GUEST))
 }
 
 /// `isInsecureConfiguration()`.
 #[must_use]
 pub fn is_insecure_configuration(params: &ConnectionParams) -> bool {
-    match params.provider.as_deref() {
-        Some(PROVIDER_WEBDAV) => params.option(option_keys::TLS, "https").as_deref() == Some("http"),
-        Some(PROVIDER_FTP) => params.option(option_keys::TLS_MODE, "explicit").as_deref() == Some("none"),
-        Some(PROVIDER_SMB) => matches!(
-            security_profile(params).as_deref(),
-            Some(security_profiles::LEGACY | security_profiles::GUEST)
-        ),
-        _ => false,
-    }
+    security_profile(params).as_deref() == Some(security_profiles::GUEST)
 }
 
 /// `checkServicePolicy(params, Service::Files)`.
@@ -202,12 +182,9 @@ mod tests {
     fn smb_profiles() {
         assert_eq!(security_profile(&params("sftp", &[])), None);
         assert_eq!(security_profile(&params("smb", &[])).as_deref(), Some("strict"));
+        // No other option selects a profile.
         assert_eq!(
             security_profile(&params("smb", &[("require_encryption", Value::Bool(false))])).as_deref(),
-            Some("signed")
-        );
-        assert_eq!(
-            security_profile(&params("smb", &[("require_encryption", s("true"))])).as_deref(),
             Some("strict")
         );
         assert_eq!(
@@ -226,15 +203,10 @@ mod tests {
 
     #[test]
     fn insecure_configurations() {
-        assert!(is_insecure_configuration(&params("webdav", &[("tls", s("http"))])));
-        assert!(!is_insecure_configuration(&params("webdav", &[])));
-        assert!(!is_insecure_configuration(&params("webdav", &[("tls", s("https"))])));
-        assert!(is_insecure_configuration(&params("ftp", &[("tls_mode", s("none"))])));
-        assert!(!is_insecure_configuration(&params("ftp", &[])));
-        assert!(is_insecure_configuration(&params("smb", &[("security_profile", s("legacy"))])));
         assert!(is_insecure_configuration(&params("smb", &[("security_profile", s("guest"))])));
         assert!(!is_insecure_configuration(&params("smb", &[("security_profile", s("signed"))])));
-        assert!(!is_insecure_configuration(&params("sftp", &[("tls", s("http"))])));
+        assert!(!is_insecure_configuration(&params("smb", &[])));
+        assert!(!is_insecure_configuration(&params("sftp", &[("security_profile", s("guest"))])));
     }
 
     #[test]
@@ -244,10 +216,12 @@ mod tests {
         assert!(check_files_policy(&params("smb", &[])).ok());
         let bogus = check_files_policy(&params("smb", &[("security_profile", s("bogus"))]));
         assert_eq!(bogus, Outcome::failure(Error::SecurityPolicy, "Unknown SMB security profile \"bogus\""));
-        let http = check_files_policy(&params("webdav", &[("tls", s("http"))]));
-        assert_eq!(http.error, Error::SecurityPolicy);
         assert!(
-            check_files_policy(&params("webdav", &[("tls", s("http")), ("allow_insecure", s("1"))])).ok()
+            check_files_policy(&params(
+                "smb",
+                &[("security_profile", s("guest")), ("allow_insecure", s("1"))]
+            ))
+            .ok()
         );
         assert!(
             check_files_policy(&params(
@@ -257,7 +231,7 @@ mod tests {
             .ok()
         );
         assert_eq!(
-            check_files_policy(&params("smb", &[("security_profile", s("legacy"))])).error,
+            check_files_policy(&params("smb", &[("security_profile", s("guest"))])).error,
             Error::SecurityPolicy
         );
     }

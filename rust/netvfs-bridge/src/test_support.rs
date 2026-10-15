@@ -187,7 +187,7 @@ pub enum Seen {
     Refused(crate::Status),
 }
 
-/// A core for the server's tests: answers `Hello` (protocol 1 only),
+/// A core for the server's tests: answers `Hello` (not to client "old"),
 /// `GetConsent` ("unknown"), `RequestConsent`, `ListLocations` (empty),
 /// `Upload` (the number of bytes its descriptor holds); refuses other
 /// consent-gated calls with `PermissionDenied` and drops the rest
@@ -215,10 +215,10 @@ fn stub_answer(reply: crate::server::ReplyTo, call: crate::server::Call) {
     use crate::server::{Call, Reply};
     use netvfs_bridge_proto::ErrorName;
     match call {
-        Call::Hello { protocol: 1, .. } => reply.ok(&Reply::Hello),
-        Call::Hello { .. } => {
-            reply.fail(&crate::Status::new(ErrorName::ProtocolError, "Unsupported protocol"));
+        Call::Hello { client } if client == "old" => {
+            reply.fail(&crate::Status::new(ErrorName::ProtocolError, "Refused client"));
         }
+        Call::Hello { .. } => reply.ok(&Reply::Hello),
         Call::GetConsent => reply.ok(&Reply::Text("unknown".to_owned())),
         Call::RequestConsent => reply.ok(&Reply::Empty),
         Call::ListLocations => reply.ok(&Reply::Locations(Vec::new())),

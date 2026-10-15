@@ -5,8 +5,6 @@
 # then the listener starts again on the same port (the container and its
 # published ports stay). Used by the conformance suite's keepAlive case.
 # Usage: restart-instance.sh INSTANCE USER
-# INSTANCE "-": a server that is not one of start-sshd.sh's instances
-# (ProFTPD); only the sessions of USER end.
 set -eu
 
 instance=$1
@@ -14,7 +12,7 @@ user=$2
 conf="/etc/ssh/sshd-$instance.conf"
 log="/var/log/sshd-$instance.log"
 
-if [ "$instance" != - ] && [ -f "/run/sshd-$instance.pid" ]; then
+if [ -f "/run/sshd-$instance.pid" ]; then
     listener=$(cat "/run/sshd-$instance.pid")
     kill "$listener" 2>/dev/null || true
     # Gone, or a zombie (PID 1 of the container does not reap).
@@ -30,9 +28,6 @@ for p in /proc/[0-9]*; do
     fi
 done
 
-if [ "$instance" = - ]; then
-    exit 0
-fi
 port=$(sed -n 's/^Port //p' "$conf")
 : > "$log"
 setsid "$SSHD" -D -f "$conf" -E "$log" < /dev/null > /dev/null 2>&1 &

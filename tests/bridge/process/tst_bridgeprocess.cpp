@@ -138,11 +138,11 @@ void tst_BridgeProcess::socketActivation()
     QDir().mkpath(dir.path() + QStringLiteral("/home"));
     // XB-2a: one Files account in a private database, which the bridge reads
     // through the accounts helper (ACCOUNTS and AG_* are in the environment).
-    NetVfs::Test::AccountsFixture accounts({ QStringLiteral("fake") });
+    NetVfs::Test::AccountsFixture accounts({ QStringLiteral("sftp") });
     const int accountId = accounts.createAccount(
-        QStringLiteral("fake"), { { QStringLiteral("netvfs/host"), QStringLiteral("files.example") } });
+        QStringLiteral("sftp"), { { QStringLiteral("netvfs/host"), QStringLiteral("files.example") } });
     QVERIFY(accountId > 0);
-    QVERIFY(accounts.setService(accountId, QStringLiteral("fake-files"), true));
+    QVERIFY(accounts.setService(accountId, QStringLiteral("sftp-files"), true));
     QProcessEnvironment env = bridgeEnvironment();
     env.insert(QStringLiteral("HOME"), dir.path() + QStringLiteral("/home"));
     env.insert(QStringLiteral("XDG_CONFIG_HOME"), dir.path() + QStringLiteral("/config"));

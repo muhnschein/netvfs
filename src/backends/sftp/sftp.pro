@@ -1,12 +1,10 @@
 # SPDX-License-Identifier: LGPL-2.1-or-later
-# libnetvfs-sftp.so: SFTP backend and SSH key tools over a static libssh
-# (SPEC-sftp; P-2: OpenSSL backend, dynamic platform libcrypto).
+# libnetvfs-sftp.so: provider "sftp" of libnetvfs-rs.so (rust/netvfs-sftp)
+# through the shim (src/backends/rs), with the SSH key tools on its root
+# object (SPEC-sftp 5.1, doc/RUST.md).
 NETVFS_PROVIDER = sftp
 include(../backend.pri)
+include(../rs/rs.pri)
 
-include(sftp.pri)
-HEADERS += sftpentry.h
-SOURCES += sftpentry.cpp sftpplugin.cpp
-
-LIBS += $$VENDOR_PREFIX/lib/libssh.a -lcrypto -lpthread
-PRE_TARGETDEPS += $$VENDOR_PREFIX/lib/libssh.a
+HEADERS += sftpplugin.h
+SOURCES += sftpplugin.cpp

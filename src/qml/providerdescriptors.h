@@ -25,9 +25,9 @@ class InputRules;
 //   services     non-empty list of "backup" | "files" the provider offers
 //   defaultPort  integer 0..65535, prefilled port (0: none, the protocol default)
 //   authModes    non-empty list of
-//                  { id: "password"|"publickey"|"interactive"|"token",
+//                  { id: "password"|"publickey"|"interactive",
 //                    source (optional, publickey only): "generate"|"import",
-//                    label: text id, secret: "password"|"token"|"key"|"none" }
+//                    label: text id, secret: "password"|"key"|"none" }
 //   noSecretWhen (optional) condition under which no secret is asked (smb guest)
 //   fields       list of
 //                  { key: [a-z_]+, unique,
@@ -37,7 +37,7 @@ class InputRules;
 //                    default (optional): string (text, choice) or bool (switch),
 //                    choices (choice only): non-empty list of { value, label },
 //                    validation (optional): host | port | userName | share | folder
-//                                           | path | consent,
+//                                           | consent,
 //                    optional (optional bool): an empty text is acceptable,
 //                    input (optional): "url" | "digits" | "text",
 //                    service (optional): "backup" | "files" -- a setting of
@@ -87,7 +87,7 @@ public:
     Q_INVOKABLE bool offersService(const QString &provider, const QString &service);
     // The selected auth mode entry (by auth_mode and key_source); the first one by default.
     Q_INVOKABLE QVariantMap authMode(const QString &provider, const QVariantMap &values);
-    // "password", "token", "key" or "none" (XA-7: interactive, smb guest).
+    // "password", "key" or "none" (XA-7: interactive, smb guest).
     Q_INVOKABLE QString secretKind(const QString &provider, const QVariantMap &values);
     // Connection parameters (Helpers::makeParams shape) from the values:
     // host, port, user name and the visible option fields, auth_mode when the

@@ -111,6 +111,11 @@ fn string_of(settings: &[Setting], key: &str) -> QString {
     value_of(settings, key).and_then(Value::to_qstring)
 }
 
+/// The providers whose accounts the helper hands out. An account of any
+/// other provider (say of a removed backend, still in the database) is not
+/// listed.
+pub const PROVIDERS: [&str; 2] = ["sftp", "smb"];
+
 /// `serviceName(provider, Service::Files)`.
 #[must_use]
 pub fn files_service_name(provider: Option<&str>) -> String {
@@ -141,8 +146,8 @@ impl Store {
         Ok((settings, enabled))
     }
 
-    /// `filesAccounts()` (XA-1): enabled accounts whose Files service is
-    /// enabled, in ascending id order.
+    /// `filesAccounts()` (XA-1): enabled accounts of one of [`PROVIDERS`]
+    /// whose Files service is enabled, in ascending id order.
     ///
     /// # Errors
     /// When the database cannot be read.
@@ -150,7 +155,7 @@ impl Store {
         let mut ids = Vec::new();
         for id in self.db.accounts_with_service_type(FILES_SERVICE_TYPE)? {
             let Some(account) = self.db.account(id)? else { continue };
-            if !account.enabled {
+            if !account.enabled || !account.provider.as_deref().is_some_and(|p| PROVIDERS.contains(&p)) {
                 continue;
             }
             if self.files_service(id, account.provider.as_deref())?.1 {
@@ -381,16 +386,18 @@ mod tests {
         c.execute_batch(
             "INSERT INTO Services VALUES (1, 'smb-files', 'Files', 'smb', 'netvfs-files'),
                                          (2, 'sftp-files', 'Files', 'sftp', 'netvfs-files'),
-                                         (3, 'mail-email', 'Mail', 'mail', 'e-mail');
+                                         (3, 'mail-email', 'Mail', 'mail', 'e-mail'),
+                                         (4, 'webdav-files', 'Files', 'webdav', 'netvfs-files');
              -- 1, 5: listed; 2: account disabled; 3: no Files service type;
-             -- 4: service disabled; 6: no service setting; 2^32 + 2 reads as 2.
+             -- 4: service disabled; 6: no service setting; 2^32 + 2 reads as 2;
+             -- 7: a provider the helper does not hand out.
              INSERT INTO Accounts VALUES (5, 'e', 'sftp', 1), (1, 'a', 'smb', 1), (2, 'b', 'smb', 0),
                                          (3, 'c', 'mail', 1), (4, 'd', 'smb', 1), (6, 'f', 'smb', 1),
-                                         (4294967298, 'g', 'smb', 1);
+                                         (4294967298, 'g', 'smb', 1), (7, 'h', 'webdav', 1);
              INSERT INTO Settings VALUES (1, 0, 'netvfs/host', 's', '''nas'''),
                                          (1, 1, 'enabled', 'b', 'true'), (2, 1, 'enabled', 'b', 'true'),
                                          (3, 3, 'enabled', 'b', 'true'), (4, 1, 'enabled', 'b', 'false'),
-                                         (5, 2, 'enabled', 'b', 'true'),
+                                         (5, 2, 'enabled', 'b', 'true'), (7, 4, 'enabled', 'b', 'true'),
                                          (4294967298, 1, 'enabled', 'b', 'true');",
         )
         .unwrap();
@@ -412,7 +419,7 @@ mod tests {
                                          (1, 0, 'CredentialsId', 'u', '7'),
                                          (1, 0, 'netvfs/attention', 's', '''server-identity-changed'''),
                                          (1, 0, 'netvfs/smb/security_profile', 's', '''signed'''),
-                                         (1, 0, 'netvfs/sftp/tls', 's', '''x'''),
+                                         (1, 0, 'netvfs/sftp/auth_mode', 's', '''x'''),
                                          (1, 1, 'files_root', 's', ''' photos '''),
                                          (1, 1, 'netvfs/smb/auth_mode', 's', '''x'''),
                                          (2, 0, 'netvfs/host', 's', ''''''),

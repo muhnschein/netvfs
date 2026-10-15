@@ -31,8 +31,8 @@
 
 namespace {
 
-const nvb_ffi_v1 *t = nullptr;     // the table under test
-const nvb_fake_v1 *f = nullptr;    // the fake backend's controls
+const nvb_ffi *t = nullptr;     // the table under test
+const nvb_fake *f = nullptr;    // the fake backend's controls
 void *ffiLibrary = nullptr;
 
 // ------------------------------------------------------------ secret scan
@@ -292,7 +292,7 @@ private slots:
 
     // The first test that creates a backend: the seed is read on first use.
     void fakeSeed();
-    void version();
+    void entry();
     void onlyOneSymbol();
     void freeNull();
     void connLifecycle();
@@ -355,15 +355,11 @@ void tst_BridgeFfi::fakeSeed()
     QCOMPARE(e.phase, uint32_t(NVB_PHASE_DONE));
 }
 
-void tst_BridgeFfi::version()
+void tst_BridgeFfi::entry()
 {
     const auto get = reinterpret_cast<nvb_ffi_get_fn>(dlsym(ffiLibrary, NVB_FFI_ENTRY));
     QVERIFY(get);
-    QVERIFY(!get(0));
-    QVERIFY(!get(2));
-    QCOMPARE(get(NVB_FFI_VERSION), t);
-    QCOMPARE(t->version, NVB_FFI_VERSION);
-    QCOMPARE(t->struct_size, uint32_t(sizeof(nvb_ffi_v1)));
+    QCOMPARE(get(), t);
     // T1: a second init is refused.
     QCOMPARE(t->init(lit("again")), -1);
 }
@@ -1170,20 +1166,21 @@ void tst_BridgeFfi::errorBlockContents()
     QVERIFY(insideBlock(caps, nvb_bytes { reinterpret_cast<const uint8_t *>(caps->flags),
                                           caps->n_flags * sizeof(nvb_bytes) }));
     nvb_url *url = nullptr;
-    QVERIFY(!ErrorPtr(t->url_parse(lit("davs://dav.example/remote.php/files"), &url)));
+    QVERIFY(!ErrorPtr(t->url_parse(lit("smb://nas/share/dir"), &url)));
     const Owned<nvb_url> ownedUrl(url);
-    QVERIFY(url->params.n_options >= 2);
+    QCOMPARE(url->params.n_options, size_t(1));
     for (size_t i = 0; i < url->params.n_options; ++i) {
         QVERIFY(insideBlock(url, url->params.options[i].key));
         QVERIFY(insideBlock(url, url->params.options[i].value.bytes));
     }
-    QCOMPARE(optionsOf(url->params).value(QStringLiteral("base_path")), QStringLiteral("/remote.php/files"));
+    QVERIFY(insideBlock(url, url->path));
+    QCOMPARE(optionsOf(url->params).value(QStringLiteral("share")), QStringLiteral("share"));
 }
 
 void tst_BridgeFfi::mapValuesNotCarried()
 {
     // fillMap() leaves out the values the ABI cannot carry (no backend has
-    // such options or identity details yet) and keeps the key order of the
+    // such options yet) and keeps the key order of the
     // others. With none left the array is empty: never indexed, not null,
     // and in the block (O3).
     using namespace NetVfs::Ffi;
@@ -1342,10 +1339,12 @@ int main(int argc, char **argv)
         qCritical("Cannot load the libraries: %s", dlerror());
         return 1;
     }
-    t = reinterpret_cast<nvb_ffi_get_fn>(dlsym(ffiLibrary, NVB_FFI_ENTRY))(NVB_FFI_VERSION);
-    f = reinterpret_cast<nvb_fake_get_fn>(dlsym(fakeLibrary, NVB_FAKE_ENTRY))(NVB_FAKE_VERSION);
-    if (!t || !f || f->struct_size != sizeof(nvb_fake_v1))
+    const auto getTable = reinterpret_cast<nvb_ffi_get_fn>(dlsym(ffiLibrary, NVB_FFI_ENTRY));
+    const auto getFake = reinterpret_cast<nvb_fake_get_fn>(dlsym(fakeLibrary, NVB_FAKE_ENTRY));
+    if (!getTable || !getFake)
         return 1;
+    t = getTable();
+    f = getFake();
     qputenv("NETVFS_BACKEND_PATH", NETVFS_TEST_FAKE_BACKEND_DIR);
     // T1: init first, on this (the main) thread.
     if (t->init(lit("tst_bridgeffi")) != 0)

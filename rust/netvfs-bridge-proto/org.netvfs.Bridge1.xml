@@ -26,11 +26,8 @@
   <interface name="org.netvfs.Bridge1">
     <!-- Session -->
     <method name="Hello">
-      <arg name="protocol" type="u" direction="in"/>
       <arg name="client" type="s" direction="in"/>
-      <arg name="protocol" type="u" direction="out"/>
       <arg name="bridgeVersion" type="s" direction="out"/>
-      <arg name="features" type="as" direction="out"/>
     </method>
     <method name="GetConsent">
       <arg name="consent" type="s" direction="out"/>
@@ -69,7 +66,7 @@
       <arg name="on" type="b" direction="in"/>
     </method>
     <signal name="NearbyChanged">
-      <arg name="nearby" type="a(sssqay)"/>
+      <arg name="nearby" type="a(sssq)"/>
     </signal>
 
     <!-- Listing -->

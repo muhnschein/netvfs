@@ -20,8 +20,8 @@ namespace NetVfs {
 enum class EntryType : quint8 { Unknown, File, Directory, Symlink, Special };
 
 enum class EntryFlag : quint16 {
-    Hidden        = 0x0001,  // SMB/WebDAV hidden attribute; dot-names are NOT flagged here
-    ReadOnly      = 0x0002,  // SMB read-only attribute, WebDAV permissions lacking write
+    Hidden        = 0x0001,  // SMB hidden attribute; dot-names are NOT flagged here
+    ReadOnly      = 0x0002,  // SMB read-only attribute
     System        = 0x0004,  // SMB system attribute
     NameNotUtf8   = 0x0008,  // XC-4: name contains escaped bytes
     TargetUnknown = 0x0010   // symlink whose target type could not be determined
@@ -34,9 +34,9 @@ struct NETVFS_EXPORT Entry {
     QString name;                    // XC-4 lossless (Names::decode)
     EntryType type = EntryType::Unknown;
     EntryType targetType = EntryType::Unknown;  // for Symlink, when resolved (XC-6)
-    qint64 size = -1;                // -1 unknown (v1 used 0)
+    qint64 size = -1;                // -1 unknown
     QDateTime modified;              // UTC; invalid if unknown
-    QDateTime created;               // SMB, local (statx btime), WebDAV creationdate
+    QDateTime created;               // SMB, local (statx btime)
     QDateTime accessed;
     qint32 mode = -1;                // permission bits & 07777; -1 unknown
     qint64 uid = -1;
@@ -44,9 +44,9 @@ struct NETVFS_EXPORT Entry {
     QString owner;                   // names when the server provides them
     QString group;
     EntryFlags flags;
-    QByteArray etag;                 // opaque change token (WebDAV ETag); empty if none
+    QByteArray etag;                 // opaque change token; empty if none
     QString contentType;             // server-declared; advisory only, never trusted
-    QVariantMap extra;               // backend-specific (e.g. "oc:fileid"), documented per backend
+    QVariantMap extra;               // backend-specific; no backend fills it
 
     bool isDir() const;              // Directory, or Symlink whose targetType is Directory
     bool isFile() const;             // File, or Symlink whose targetType is File
@@ -66,7 +66,6 @@ enum class Capability : quint32 {
     SpaceInfo, Checksums,
     CaseInsensitive, WindowsNames,       // name rules of Paths::checkWindowsPath apply
     ShareEnumeration,                    // SMB server mode can list shares
-    ShellExec,                           // XS-9
     ETags
 };
 
@@ -94,31 +93,17 @@ struct NETVFS_EXPORT Capabilities {
 
 // Server identity as seen during connect(). Kind::None for protocols without one.
 struct NETVFS_EXPORT ServerIdentity {
-    enum class Kind { None, SshHostKey, TlsCertificate };
+    enum class Kind { None, SshHostKey };
     Kind kind = Kind::None;
-    QString algorithm;        // "ssh-ed25519" | "tls-spki-sha256"
-    QByteArray publicKey;     // SSH: key blob; TLS: DER SubjectPublicKeyInfo
-    QString fingerprint;      // SSH: "SHA256:..."; TLS: SHA-256 of SPKI, base64 (curl pin form)
-    bool systemTrusted = false;          // TLS chain + hostname verified against system CAs
-    // Bits of `problems`.
-    static constexpr int SelfSigned = 1;
-    static constexpr int UntrustedRoot = 2;
-    static constexpr int Expired = 4;
-    static constexpr int NotYetValid = 8;
-    static constexpr int HostnameMismatch = 16;
-    int problems = 0;
-    QVariantMap details;      // TLS: subject, issuer, notBefore, notAfter, sans, certSha256
-
-    static constexpr const char *TlsAlgorithm = "tls-spki-sha256";
+    QString algorithm;        // "ssh-ed25519"
+    QByteArray publicKey;     // key blob
+    QString fingerprint;      // "SHA256:..."
 
     bool isEmpty() const { return publicKey.isEmpty(); }
 
-    // Pin format stored in the account: "<algorithm> <base64 publicKey>"
-    // (unchanged for SSH; the algorithm prefix distinguishes kinds).
+    // Pin format stored in the account: "<algorithm> <base64 publicKey>".
     QString toPin() const;
     static ServerIdentity fromPin(const QString &pin);
-    // TLS: identity for a DER SubjectPublicKeyInfo (fills fingerprint).
-    static ServerIdentity fromTlsSpki(const QByteArray &spkiDer);
 
     friend bool operator==(const ServerIdentity &a, const ServerIdentity &b)
     {
@@ -132,7 +117,7 @@ struct NETVFS_EXPORT ServerIdentity {
 // Connection parameters. Provider-specific values live in `options`, keyed
 // without the "netvfs/<provider>/" prefix (for example "host_key", "share").
 struct ConnectionParams {
-    QString provider;       // "sftp", "smb", "webdav", "ftp", "local", ...
+    QString provider;       // "sftp", "smb", "local", ...
     QString host;
     int port = 0;           // 0: protocol default
     QString username;

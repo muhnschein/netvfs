@@ -24,13 +24,10 @@ struct ProbeOutcome {
     NetVfs::ServerIdentity identity;
     NetVfs::Result identityCheck;      // identityCheckFor() against the pin
     qint64 freeBytes = -1;
-    bool pinned = false;               // params carried a pin
     bool refusedByPolicy = false;      // checkServicePolicy() refused; nothing was sent
 };
 
-// checkServerIdentity() as the account UI applies it: with pin_trusted=true
-// (SPEC-v2 XA-3, XC-16) a system-trusted TLS certificate without a pin is
-// reported as unknown, so the user can pin it.
+// checkServerIdentity() against the pin in params.options["host_key"] (XC-16).
 NetVfs::Result identityCheckFor(const NetVfs::ServerIdentity &seen, const NetVfs::ConnectionParams &params);
 
 // Phase 1 (SPEC 7.3 step 2, C-7): connect and report the server identity.
@@ -73,10 +70,7 @@ public:
     Q_ENUM(ErrorCode)
 
     // Result of comparing the identity seen by identify() with params.options.host_key.
-    // IdentityTrusted: a TLS certificate the system trusts, no pin needed (XC-16).
-    enum class IdentityStatus {
-        IdentityNotChecked, NoIdentity, IdentityUnknown, IdentityMatches, IdentityChanged, IdentityTrusted
-    };
+    enum class IdentityStatus { IdentityNotChecked, NoIdentity, IdentityUnknown, IdentityMatches, IdentityChanged };
     Q_ENUM(IdentityStatus)
 
     using SessionFactory = std::function<NetVfs::AccountSession *(int accountId, NetVfs::Service service,

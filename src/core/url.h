@@ -8,8 +8,6 @@
 // SPEC-v2 XH-6: location URLs.
 //   sftp://, ssh://                  -> provider "sftp"
 //   smb://host[/share[/path]]        -> provider "smb", option "share"
-//   dav://, davs://, http://, https:// -> provider "webdav", options "tls", "base_path"
-//   ftp://, ftps://                  -> provider "ftp", option "tls_mode"
 //   file://                          -> provider "local"
 // User info may carry a user name; a password (any ':' in the user info, even
 // an empty password) is rejected with SecurityPolicy "passwords in URLs are
@@ -19,25 +17,17 @@
 // ConnectionParams::host.
 //
 // Decisions the spec leaves open:
-//  - Errors: an unknown scheme, or a "file://" URL naming a remote host, is
+//  - Errors: an unknown scheme, a dav://, davs://, ftp:// or ftps:// URL ("no
+//    longer supported"), or a "file://" URL naming a remote host, is
 //    Unsupported; a password is SecurityPolicy; every other malformed URL
 //    (no scheme or host, bad port, bad IPv6 literal, bad percent escape, a
 //    query or fragment, a control character, a "." or ".." path component, an
 //    encoded NUL) is InvalidName. On any error the outputs are untouched.
 //  - Ports: 1-65535. A port equal to the scheme's default (sftp/ssh 22,
-//    smb 445, dav/http 80, davs/https 443, ftp 21, ftps 990) is stored as 0.
-//  - dav:// is WebDAV over plain HTTP (tls = "http"), davs:// and https:// use
-//    tls = "https", http:// uses tls = "http" (the account's insecure consent
-//    still applies; parsing does not grant it).
-//  - ftp:// maps to tls_mode = "explicit" (FTPS explicit is the safe default,
-//    SPEC-v2 F-1) and ftps:// to tls_mode = "implicit". Plain FTP
-//    (tls_mode = "none") has no URL form: format() writes "ftp://" for it.
-//  - WebDAV: the whole URL path becomes the option "base_path" (decoded,
-//    absolute, normalised; omitted for an empty path or "/") and the location
-//    path is empty. format() appends the location path to base_path.
+//    smb 445) is stored as 0.
 //  - SMB: the first path component is the option "share" (omitted if there is
 //    none); the rest is the location path with a leading '/', or empty.
-//  - sftp, ftp, local: the location path is the decoded URL path ("" for no
+//  - sftp, local: the location path is the decoded URL path ("" for no
 //    path, "/" for the root, else absolute). A relative location path given to
 //    format() becomes absolute in the URL.
 //  - file://: provider "local", empty host ("localhost" is accepted).

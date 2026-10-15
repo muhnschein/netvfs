@@ -44,14 +44,7 @@ constexpr int WaitSliceMs = 50;          // C-9: a cancel ends the wait within t
 
 uint32_t identityKind(ServerIdentity::Kind kind)
 {
-    switch (kind) {
-    case ServerIdentity::Kind::SshHostKey:
-        return NVB_IDENTITY_SSH;
-    case ServerIdentity::Kind::TlsCertificate:
-        return NVB_IDENTITY_TLS;
-    default:
-        return NVB_IDENTITY_NONE;
-    }
+    return kind == ServerIdentity::Kind::SshHostKey ? NVB_IDENTITY_SSH : NVB_IDENTITY_NONE;
 }
 
 // XC-16 as connector.cpp showed it: OpenSSH form "SHA256:" + unpadded base64
@@ -72,9 +65,6 @@ void fillIdentity(HoldArena &arena, nvb_identity *out, const ServerIdentity &see
     out->public_key = arena.bytes(seen.publicKey);
     out->fingerprint = arena.bytes(fingerprintOf(seen).toUtf8());
     out->pin = arena.bytes(seen.toPin().toUtf8());
-    out->system_trusted = seen.systemTrusted ? 1 : 0;
-    out->problems = seen.problems;
-    out->details = fillMap(arena, seen.details, &out->n_details);
 }
 
 // The identity check and the hook's verdict on it.

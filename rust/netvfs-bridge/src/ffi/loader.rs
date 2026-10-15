@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! `dlopen` of a versioned function table (design §1): the library is
-//! opened with `RTLD_NOW | RTLD_LOCAL`, asked for one version through its
-//! one exported symbol, and never closed, so the table lives for the rest
-//! of the process.
+//! `dlopen` of a function table (design §1): the library is opened with
+//! `RTLD_NOW | RTLD_LOCAL`, asked for its table through its one exported
+//! symbol, and never closed, so the table lives for the rest of the
+//! process.
 
 use std::ffi::{CStr, CString, c_void};
 use std::fmt;
@@ -26,17 +26,10 @@ pub enum LoadError {
         /// The symbol.
         entry: String,
     },
-    /// The library does not offer the version.
-    VersionRefused {
-        /// The version asked for.
-        version: u32,
-    },
-    /// The table is not the one asked for, or smaller than this build's.
-    BadTable {
-        /// The table's `version`.
-        version: u32,
-        /// The table's `struct_size`.
-        struct_size: u32,
+    /// The entry symbol returned no table.
+    NoTable {
+        /// The library.
+        path: PathBuf,
     },
 }
 
@@ -45,10 +38,7 @@ impl fmt::Display for LoadError {
         match self {
             Self::Open { path, reason } => write!(f, "cannot load {}: {reason}", path.display()),
             Self::NoEntry { path, entry } => write!(f, "{} has no {entry}", path.display()),
-            Self::VersionRefused { version } => write!(f, "version {version} of the C ABI is not offered"),
-            Self::BadTable { version, struct_size } => {
-                write!(f, "unexpected table: version {version}, {struct_size} bytes")
-            }
+            Self::NoTable { path } => write!(f, "{} returned no table", path.display()),
         }
     }
 }
@@ -89,34 +79,19 @@ fn entry_point(path: &Path, entry: &CStr) -> Result<*mut c_void, LoadError> {
     Ok(symbol)
 }
 
-/// A table whose first two fields are `version` and `struct_size`.
-pub(super) trait Table {
-    /// Its header.
-    fn header(&self) -> (u32, u32);
-}
-
-/// Checks a table's header against the version asked for and this build's
-/// size of the table: a library may append fields, never remove them.
-pub(super) fn check_header(asked: u32, version: u32, struct_size: u32, size: usize) -> Result<(), LoadError> {
-    let big_enough = usize::try_from(struct_size).is_ok_and(|s| s >= size);
-    if version == asked && big_enough { Ok(()) } else { Err(LoadError::BadTable { version, struct_size }) }
-}
-
-/// Loads `path`, asks its `entry` (`const T *entry(uint32_t version)`) for
-/// `version` and checks what comes back.
-pub(super) fn load_table<T: Table>(path: &Path, entry: &CStr, version: u32) -> Result<&'static T, LoadError> {
+/// Loads `path` and asks its `entry` (`const T *entry(void)`) for the
+/// table. The library is built from the same source as this crate, so the
+/// table is this build's `T`.
+pub(super) fn load_table<T>(path: &Path, entry: &CStr) -> Result<&'static T, LoadError> {
     let symbol = entry_point(path, entry)?;
     // SAFETY: the entry point of these libraries has the C signature
-    // `const T *(uint32_t)` (netvfs_bridge_ffi.h, nvb_fake.h).
-    let get: unsafe extern "C" fn(u32) -> *const T = unsafe { std::mem::transmute(symbol) };
-    // SAFETY: calling the library's entry point; it only looks at its argument.
-    let table = unsafe { get(version) };
+    // `const T *(void)` (netvfs_bridge_ffi.h, nvb_fake.h).
+    let get: unsafe extern "C" fn() -> *const T = unsafe { std::mem::transmute(symbol) };
+    // SAFETY: calling the library's entry point, which takes nothing.
+    let table = unsafe { get() };
     // SAFETY: NULL or the library's static table, which lives as long as the
     // library: for the rest of the process, since it is never closed.
-    let table = unsafe { table.as_ref() }.ok_or(LoadError::VersionRefused { version })?;
-    let (got, struct_size) = table.header();
-    check_header(version, got, struct_size, size_of::<T>())?;
-    Ok(table)
+    unsafe { table.as_ref() }.ok_or_else(|| LoadError::NoTable { path: path.to_owned() })
 }
 
 #[cfg(test)]
@@ -134,11 +109,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn headers() {
-        assert_eq!(check_header(1, 1, 336, 336), Ok(()));
-        assert_eq!(check_header(1, 1, 400, 336), Ok(()));
-        assert_eq!(check_header(1, 1, 335, 336), Err(LoadError::BadTable { version: 1, struct_size: 335 }));
-        assert_eq!(check_header(1, 2, 336, 336), Err(LoadError::BadTable { version: 2, struct_size: 336 }));
+    fn tables() {
+        // sched_yield takes nothing and returns 0: an entry that gives NULL.
+        let libc = Path::new("libc.so.6");
+        let none = load_table::<u8>(libc, c"sched_yield").unwrap_err();
+        assert_eq!(none, LoadError::NoTable { path: libc.to_owned() });
+        assert_eq!(none.to_string(), "libc.so.6 returned no table");
+        // getpid takes nothing and returns a pid, read here as a non-NULL
+        // address that is never dereferenced.
+        load_table::<()>(libc, c"getpid").unwrap();
     }
 
     #[test]
@@ -159,15 +138,8 @@ mod tests {
 
     #[test]
     fn messages() {
-        assert_eq!(
-            LoadError::VersionRefused { version: 2 }.to_string(),
-            "version 2 of the C ABI is not offered"
-        );
-        assert_eq!(
-            LoadError::BadTable { version: 1, struct_size: 8 }.to_string(),
-            "unexpected table: version 1, 8 bytes"
-        );
-        let e: &dyn std::error::Error = &LoadError::VersionRefused { version: 0 };
+        let e: &dyn std::error::Error = &LoadError::NoTable { path: PathBuf::from("/x.so") };
+        assert_eq!(e.to_string(), "/x.so returned no table");
         assert!(e.source().is_none());
     }
 }

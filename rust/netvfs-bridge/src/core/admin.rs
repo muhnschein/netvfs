@@ -71,17 +71,10 @@ fn option_text(params: &Params, key: &str) -> Option<String> {
     }
 }
 
-/// W-2, XM-1: an ad-hoc location without transport security needs the
+/// XM-1: an ad-hoc SMB location with the `guest` profile needs the
 /// consumer's `insecure-consent` (`needsInsecureConsent`).
 pub(crate) fn needs_insecure_consent(params: &Params) -> bool {
-    let is =
-        |key: &str, values: &[&str]| option_text(params, key).is_some_and(|v| values.contains(&v.as_str()));
-    match params.provider.as_str() {
-        "webdav" => is("tls", &["http"]),
-        "ftp" => is("tls_mode", &["none"]),
-        "smb" => is("security_profile", &["legacy", "guest"]),
-        _ => false,
-    }
+    params.provider == "smb" && option_text(params, "security_profile").is_some_and(|v| v == "guest")
 }
 
 /// Checks a parsed ad-hoc URL (`parseAdHoc`): never local files (XB-11),
@@ -129,11 +122,11 @@ fn insecure_details(url: &str, params: &Params) -> HashMap<String, OwnedValue> {
 impl Core {
     // ----------------------------------------------------------- session
 
-    pub(super) fn on_hello(&mut self, sid: SessionId, reply: ReplyTo, protocol: u32, client: &str) {
+    pub(super) fn on_hello(&mut self, sid: SessionId, reply: ReplyTo, client: &str) {
         if let Some(session) = self.session(sid) {
             session.hello = true;
         }
-        crate::log::debug(format_args!("Hello from {client} protocol {protocol}"));
+        crate::log::debug(format_args!("Hello from {client}"));
         reply.ok(&Reply::Hello);
         if self.consent == Consent::Unknown {
             self.request_consent(); // XB-6: first Hello while unknown
@@ -443,18 +436,16 @@ mod tests {
 
     #[test]
     fn insecure_transports_need_consent() {
-        assert!(needs_insecure_consent(&params("webdav", &[("tls", s("http"))])));
-        assert!(!needs_insecure_consent(&params("webdav", &[("tls", s("https"))])));
-        assert!(!needs_insecure_consent(&params("webdav", &[])));
-        assert!(needs_insecure_consent(&params("ftp", &[("tls_mode", s("none"))])));
-        assert!(!needs_insecure_consent(&params("ftp", &[("tls_mode", s("explicit"))])));
-        assert!(needs_insecure_consent(&params("smb", &[("security_profile", s("legacy"))])));
         assert!(needs_insecure_consent(&params("smb", &[("security_profile", s("guest"))])));
         assert!(!needs_insecure_consent(&params("smb", &[("security_profile", s("signed"))])));
-        assert!(!needs_insecure_consent(&params("sftp", &[("tls", s("http"))])));
+        assert!(!needs_insecure_consent(&params("smb", &[])));
+        assert!(!needs_insecure_consent(&params("sftp", &[("security_profile", s("guest"))])));
         // Options of other types as the C++ QVariant::toString gave them.
-        assert!(!needs_insecure_consent(&params("webdav", &[("tls", Value::Bool(true))])));
-        assert!(!needs_insecure_consent(&params("ftp", &[("tls_mode", Value::Bytes(b"none".to_vec()))])));
+        assert!(!needs_insecure_consent(&params("smb", &[("security_profile", Value::Bool(true))])));
+        assert!(!needs_insecure_consent(&params(
+            "smb",
+            &[("security_profile", Value::Bytes(b"guest".to_vec()))]
+        )));
         assert_eq!(option_text(&params("x", &[("a", Value::Bool(false))]), "a").as_deref(), Some("false"));
         assert_eq!(option_text(&params("x", &[("a", Value::Int(-3))]), "a").as_deref(), Some("-3"));
         assert_eq!(option_text(&params("x", &[("a", Value::StrList(vec![]))]), "a"), None);
@@ -483,7 +474,7 @@ mod tests {
             Some(ErrorName::ProtocolError)
         );
         assert_eq!(
-            name(check_ad_hoc(&parsed("S/FTP", 22), &none, all)).map(|n| n.0),
+            name(check_ad_hoc(&parsed("sftp/x", 22), &none, all)).map(|n| n.0),
             Some(ErrorName::ProtocolError)
         );
         assert_eq!(
@@ -504,10 +495,10 @@ mod tests {
 
     #[test]
     fn insecure_questions_show_where() {
-        let d = insecure_details("ftp://h/", &params("ftp", &[]));
+        let d = insecure_details("smb://h/", &params("smb", &[]));
         assert_eq!(d.len(), 3);
-        assert_eq!(String::try_from(d["url"].clone()).unwrap(), "ftp://h/");
-        assert_eq!(String::try_from(d["provider"].clone()).unwrap(), "ftp");
+        assert_eq!(String::try_from(d["url"].clone()).unwrap(), "smb://h/");
+        assert_eq!(String::try_from(d["provider"].clone()).unwrap(), "smb");
         assert_eq!(String::try_from(d["host"].clone()).unwrap(), "h");
     }
 }

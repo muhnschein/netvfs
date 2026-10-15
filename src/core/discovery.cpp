@@ -35,15 +35,13 @@ QString DiscoveredService::endpointKey() const
     return provider + QLatin1Char('|') + host.toLower() + QLatin1Char('|') + QString::number(port);
 }
 
-bool providerForServiceType(const QString &serviceType, QString *provider, QString *tls)
+bool providerForServiceType(const QString &serviceType, QString *provider)
 {
     const BrowseType *t = findBrowseType(serviceType);
     if (!t)
         return false;
     if (provider)
         *provider = QString::fromLatin1(t->provider);
-    if (tls)
-        *tls = QString::fromLatin1(t->tls);
     return true;
 }
 
@@ -55,7 +53,7 @@ QStringList browsedServiceTypes()
     return out;
 }
 
-ConnectionParams toConnectionParams(const DiscoveredService &service, QString *locationPath)
+ConnectionParams toConnectionParams(const DiscoveredService &service)
 {
     ConnectionParams p;
     p.provider = service.provider;
@@ -63,16 +61,6 @@ ConnectionParams toConnectionParams(const DiscoveredService &service, QString *l
     if (p.host.isEmpty() && !service.addresses.isEmpty())
         p.host = service.addresses.first().toString();
     p.port = service.port;
-    p.username = service.user;
-    QString location = QStringLiteral("/");
-    if (service.provider == QLatin1String("webdav")) {
-        p.options.insert(QStringLiteral("tls"), service.tls.isEmpty() ? QStringLiteral("https") : service.tls);
-        p.options.insert(QStringLiteral("base_path"), service.path.isEmpty() ? QStringLiteral("/") : service.path);
-    } else if (service.provider == QLatin1String("ftp") && !service.path.isEmpty()) {
-        location = service.path;
-    }
-    if (locationPath)
-        *locationPath = location;
     return p;
 }
 

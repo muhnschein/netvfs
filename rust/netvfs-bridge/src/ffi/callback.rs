@@ -616,7 +616,7 @@ mod tests {
         assert_eq!(kept.len(), MAX_ORPHANS);
         assert_eq!(kept.first().map(String::as_str), Some("posted 4"));
         assert_eq!(kept.last().map(String::as_str), Some("posted 19"));
-        assert!(take_orphan_panics().is_empty());
+        assert_eq!(take_orphan_panics().len(), 0);
         let ran = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let flag = std::sync::Arc::clone(&ran);
         let posted: Box<Posted> =

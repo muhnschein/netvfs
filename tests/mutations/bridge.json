@@ -133,13 +133,6 @@
     "test": "cd rust && cargo test --locked -q -p netvfs-bridge --lib jobs::fd"
   },
   {
-    "name": "XB-11 FIFO upload without size accepted",
-    "file": "rust/netvfs-bridge/src/jobs/fd.rs",
-    "search": "    if info.fifo && size < 0 && provider == \"webdav\" {",
-    "replace": "    if false {",
-    "test": "cd rust && cargo test --locked -q -p netvfs-bridge --lib jobs::fd"
-  },
-  {
     "name": "XB-11 regular files read at the consumer's offset",
     "file": "rust/netvfs-bridge/src/jobs/fdio.rs",
     "search": "            fd::pread(self.fd, buf, self.offset.saturating_add(position))",

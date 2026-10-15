@@ -22,11 +22,8 @@
 //
 //     _sftp-ssh._tcp  _ssh._tcp  -> provider "sftp"
 //     _smb._tcp                  -> provider "smb"
-//     _webdav._tcp               -> provider "webdav", tls "http"
-//     _webdavs._tcp              -> provider "webdav", tls "https"
-//     _ftp._tcp                  -> provider "ftp"
 //
-// resolves every instance (SRV, TXT, A, AAAA) and reports it as a
+// resolves every instance (SRV, A, AAAA) and reports it as a
 // DiscoveredService.
 //
 // Usage (main thread only; the object lives on, and must be used from, the
@@ -49,10 +46,10 @@
 // datagrams and nothing else. What it hands out are templates:
 // toConnectionParams() turns a result into ConnectionParams for the user to
 // confirm and complete (password, host key); no secret is ever taken from the
-// network (a TXT "p=" key is ignored).
+// network.
 //
 // Everything received is untrusted input from the local network: records are
-// parsed defensively (dnsmessage.h), names and TXT values are sanitised, and
+// parsed defensively (dnsmessage.h), names are sanitised, and
 // the number of tracked instances and addresses is bounded.
 namespace NetVfs {
 
@@ -64,12 +61,9 @@ class DiscoveryTransport;
 struct NETVFS_EXPORT DiscoveredService {
     QString instanceName;               // "My NAS" (first label of the instance name, UTF-8)
     QString serviceType;                // "_smb._tcp"
-    QString provider;                   // "sftp" | "smb" | "webdav" | "ftp"
-    QString tls;                        // webdav: "https" (_webdavs) or "http" (_webdav); else empty
+    QString provider;                   // "sftp" | "smb"
     QString host;                       // SRV target without the trailing dot, e.g. "nas.local"
     int port = 0;
-    QString path;                       // TXT "path=" (webdav, ftp), starts with '/'; else empty
-    QString user;                       // TXT "u=" (webdav, ftp); else empty
     QList<QHostAddress> addresses;      // A and AAAA of `host`, IPv4 first, never link-local IPv6
     QDateTime lastSeen;                 // UTC, last time any record of this service arrived
 
@@ -82,27 +76,20 @@ struct NETVFS_EXPORT DiscoveredService {
     QString endpointKey() const;
 };
 
-// Mapping of a DNS-SD service type ("_webdavs._tcp") to provider and tls
-// option. Returns false for types Discovery does not browse.
-NETVFS_EXPORT bool providerForServiceType(const QString &serviceType, QString *provider,
-                                          QString *tls = nullptr);
-// The six service types in browse order.
+// Mapping of a DNS-SD service type ("_sftp-ssh._tcp") to provider. Returns
+// false for types Discovery does not browse.
+NETVFS_EXPORT bool providerForServiceType(const QString &serviceType, QString *provider);
+// The three service types in browse order.
 NETVFS_EXPORT QStringList browsedServiceTypes();
 
 // XD-3: connection template for a result.
 //   provider            as in the result
 //   host                SRV target; the first address when the target is empty
 //   port                the SRV port (explicit, even when it is the default)
-//   username            TXT "u=" or empty
-//   options             webdav: "tls" ("https"/"http"), "base_path" (TXT path, default "/");
-//                       "allow_insecure" is NOT set: plain http needs the user's consent
-//                       (SPEC-v2 W-2). smb: no "share" (server mode).
-// `*locationPath`, when not null, receives the location path below the
-// connection root to start browsing at: "/", or for ftp the TXT path.
-// No password, no host key: the caller must run the identity check (XC-16)
-// before any credential is sent.
-NETVFS_EXPORT ConnectionParams toConnectionParams(const DiscoveredService &service,
-                                                  QString *locationPath = nullptr);
+//   options             none; for smb no "share" (server mode)
+// No user name, password or host key: the caller must run the identity check
+// (XC-16) before any credential is sent.
+NETVFS_EXPORT ConnectionParams toConnectionParams(const DiscoveredService &service);
 
 // Time source, injectable for tests. Not owned by Discovery.
 class NETVFS_EXPORT DiscoveryClock

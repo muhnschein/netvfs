@@ -39,7 +39,7 @@ jobs:
         run: ./tools/ci/cargo-tool.sh cargo-nextest "$NEXTEST_VERSION"
       - name: Build
         run: make -j"$(nproc)"
-      - name: Packaging checks (file lists, no share enumeration in the SMB plugin, the bridge's C ABI)
+      - name: Packaging checks (file lists, the Rust plugins, the bridge's C ABI)
         run: make check-packaging
       - name: Every mutation list is in the mutation matrix
         run: ./tools/ci/check-mutation-matrix.py
@@ -83,7 +83,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        list: [accounts, bridge, buteo, cli, core, discovery, ffi, ftp, helper, local, ops, packaging, qml, sftp, smb, url, webdav]
+        list: [accounts, bridge, buteo, cli, core, discovery, ffi, helper, local, ops, packaging, qml, rs, sftp, smb, url]
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
@@ -93,6 +93,16 @@ jobs:
         run: ./tools/ci/install-host-deps.sh
       - name: Build
         run: make -j"$(nproc)"
+      # One set of SFTP interop servers for all the mutations of the list
+      # (tests/interop/sftp/run.sh uses the servers the variable names).
+      - name: Start the SFTP interop servers
+        if: matrix.list == 'sftp'
+        run: NETVFS_SFTP_SERVERS_ONLY=1 ./tests/interop/sftp/run.sh build | tail -n 1 >> "$GITHUB_ENV"
+      # One set of Samba servers for all the mutations of the list
+      # (tests/interop/smb/run.sh uses the servers the variables name).
+      - name: Start the SMB interop servers
+        if: matrix.list == 'smb'
+        run: NETVFS_SMB_SERVERS_ONLY=1 ./tests/interop/smb/run.sh build | grep '^NETVFS_INTEROP_SMB_' >> "$GITHUB_ENV"
       - name: Mutation check
         env:
           LIST: ${{ matrix.list }}
@@ -135,17 +145,92 @@ jobs:
           key: cargo-mutants-${{ env.MUTANTS_VERSION }}-ubuntu-24.04
       - name: Install cargo-mutants
         run: ./tools/ci/cargo-tool.sh cargo-mutants "$MUTANTS_VERSION"
+      # netvfs-sftp's tests need the SFTP interop servers
+      # (rust/netvfs-sftp/tests/openssh.rs): started once for the shard.
+      - name: Start the SFTP interop servers
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          if ! git diff --quiet "origin/$BASE_REF...HEAD" -- rust/netvfs-sftp; then
+              NETVFS_SFTP_SERVERS_ONLY=1 ./tests/interop/sftp/run.sh build-ffi | tail -n 1 >> "$GITHUB_ENV"
+          fi
+      # netvfs-smb's tests need the Samba servers
+      # (rust/netvfs-smb/tests/samba.rs): started once for the shard.
+      - name: Start the SMB interop servers
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          if ! git diff --quiet "origin/$BASE_REF...HEAD" -- rust/netvfs-smb; then
+              NETVFS_SMB_SERVERS_ONLY=1 ./tests/interop/smb/run.sh build-ffi | grep '^NETVFS_INTEROP_SMB_' >> "$GITHUB_ENV"
+          fi
       - name: Mutants in the diff
         env:
           BASE_REF: ${{ github.base_ref }}
           SHARD: ${{ matrix.shard }}
-        run: ./tools/ci/rust-mutants.sh "origin/$BASE_REF" build-ffi "$SHARD/12"
+        run: ./tools/ci/rust-mutants.sh diff "origin/$BASE_REF" build-ffi "$SHARD/12"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: failure()
         with:
           name: rust-mutants-${{ matrix.shard }}
           path: rust/mutants.out
           if-no-files-found: ignore
+
+  windows-smb:
+    # M-T11: netvfs-smb against Windows's own SMB server, a local account
+    # and a share on the runner over loopback (real SMB 3.1.1; Windows's own
+    # client shows the dialect first). rust/netvfs-smb/tests/windows.rs.
+    name: SMB against Windows (M-T11)
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - name: A local account and a share
+        shell: pwsh
+        run: |
+          $bytes = [byte[]]::new(18)
+          [System.Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
+          $password = 'Nv1-' + [Convert]::ToBase64String($bytes)
+          Write-Output "::add-mask::$password"
+          $secure = ConvertTo-SecureString $password -AsPlainText -Force
+          New-LocalUser -Name netvfs -Password $secure -PasswordNeverExpires | Out-Null
+          New-Item -ItemType Directory -Path C:\netvfs-share | Out-Null
+          icacls C:\netvfs-share /grant 'netvfs:(OI)(CI)F' | Out-Null
+          New-SmbShare -Name netvfs -Path C:\netvfs-share -FullAccess netvfs | Out-Null
+          Get-SmbServerConfiguration | Select-Object EnableSMB2Protocol, EncryptData, RejectUnencryptedAccess,
+              RequireSecuritySignature, EncryptionCiphers | Format-List
+          @(
+              'NETVFS_INTEROP_SMB_WINDOWS=127.0.0.1'
+              'NETVFS_INTEROP_SMB_WINDOWS_USER=netvfs'
+              "NETVFS_INTEROP_SMB_WINDOWS_PASSWORD=$password"
+              'NETVFS_INTEROP_SMB_WINDOWS_SHARE=netvfs'
+          ) | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Loopback is real SMB (Windows's own client)
+        shell: pwsh
+        run: |
+          $secure = ConvertTo-SecureString $env:NETVFS_INTEROP_SMB_WINDOWS_PASSWORD -AsPlainText -Force
+          $credential = [pscredential]::new('netvfs', $secure)
+          New-SmbMapping -RemotePath \\127.0.0.1\netvfs -UserName $credential.UserName `
+              -Password $credential.GetNetworkCredential().Password | Out-Null
+          Get-SmbConnection | Format-List ServerName, ShareName, UserName, Dialect, Encrypted, Signed
+          Remove-SmbMapping -RemotePath \\127.0.0.1\netvfs -Force
+      - name: Rust toolchain
+        working-directory: rust
+        run: |
+          rustup toolchain install
+          rustup show active-toolchain
+      - name: netvfs-smb against the local share
+        working-directory: rust
+        run: cargo test --locked -p netvfs-smb --test windows -- --nocapture
+      - name: The server's sessions and events
+        if: always()
+        shell: pwsh
+        run: |
+          Get-SmbConnection | Format-List ServerName, ShareName, UserName, Dialect, Encrypted, Signed
+          Get-SmbSession | Format-List ClientComputerName, ClientUserName, Dialect, Encrypted, Signed
+          Get-WinEvent -LogName Microsoft-Windows-SMBServer/Operational -MaxEvents 30 -ErrorAction SilentlyContinue |
+              Format-Table TimeCreated, Id, Message -Wrap
 
   workflows:
     name: Workflow audit (zizmor, offline)
@@ -202,55 +287,12 @@ jobs:
         working-directory: rust
         run: cargo +stable deny --locked check
 
-  ftp-curl820:
-    name: FTP against libcurl 8.20
-    # The Sailfish OS 5.2 target ships libcurl 8.20, the host job runs Ubuntu's
-    # 8.5.0 (a distribution build that cannot reuse a CURLUSESSL_ALL FTP
-    # connection). This job builds vanilla libcurl 8.20.0 and runs the FTP unit
-    # tests and the FTP interop suite with it, which exercises the
-    # CURLUSESSL_ALL path of explicit FTPS (plus the reply guard) and the
-    # 8.20 command sequences.
-    runs-on: ubuntu-24.04
-    env:
-      CURL_VERSION: 8.20.0
-      # SHA-256 of curl-8.20.0.tar.xz as published in the curl release on GitHub
-      CURL_SHA256: 63fe2dc148ba0ceae89922ef838f7e5c946272c2e78b7c59fab4b79d3ce2b896
-      CURL_PREFIX: ${{ github.workspace }}/curl-prefix
-    steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
-        with:
-          persist-credentials: false
-      - name: Install dependencies
-        run: |
-          sudo apt-get update -q
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends \
-              build-essential pkg-config python3 openssl \
-              qtbase5-dev qtbase5-dev-tools libaccounts-qt5-dev libsignon-qt5-dev \
-              libssl-dev zlib1g-dev
-      - name: Cache libcurl ${{ env.CURL_VERSION }}
-        id: curl-cache
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
-        with:
-          path: ${{ env.CURL_PREFIX }}
-          key: libcurl-${{ env.CURL_VERSION }}-${{ env.CURL_SHA256 }}-ubuntu-24.04
-      - name: Build libcurl ${{ env.CURL_VERSION }}
-        if: steps.curl-cache.outputs.cache-hit != 'true'
-        run: ./tools/ci/build-curl.sh "$CURL_VERSION" "$CURL_SHA256" "$CURL_PREFIX"
-      - name: FTP unit and interop tests against libcurl ${{ env.CURL_VERSION }}
-        run: ./tools/ci/ftp-against-curl.sh "$CURL_PREFIX"
-
   rpm:
     name: Sailfish OS 5.2 aarch64 RPMs
     runs-on: ubuntu-24.04
     env:
       SDK_IMAGE: mirror.gcr.io/coderus/sailfishos-platform-sdk-aarch64:5.2.0.15@sha256:e5f7596d14502746b308c3dde36f65fc25d7f76c45a01acaed56a1f55b76f592
       TARGET: SailfishOS-5.2.0.15-aarch64
-      # The SPEC-v2 XP-2/XP-6 update checks start from the RPMs of netvfs
-      # 0.1.0 (main after PR #1), the last release before the package split,
-      # and of 0.2.0 (main after PR #6), the last one with per-protocol
-      # packages.
-      UPGRADE_BASE_0_1: 599828d1ab59a981f3cbf26b310c0d25962b5b24
-      UPGRADE_BASE_0_2: 860dbecb378a97180997ab470ff02311dbee38a1
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
@@ -278,50 +320,6 @@ jobs:
         run: ./tools/ci/build-rpm.sh
       - name: Check dependencies and installability on the target
         run: ./tools/ci/check-rpm.sh
-      - name: Cache the 0.1.0 RPMs
-        id: base-rpms-0-1
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
-        with:
-          path: build-upgrade/base-rpms-0.1
-          key: netvfs-rpms-${{ env.UPGRADE_BASE_0_1 }}-${{ env.TARGET }}
-      - name: Check out 0.1.0
-        if: steps.base-rpms-0-1.outputs.cache-hit != 'true'
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
-        with:
-          ref: ${{ env.UPGRADE_BASE_0_1 }}
-          path: build-upgrade/base-0.1
-          submodules: recursive
-          persist-credentials: false
-      - name: Build the 0.1.0 RPMs
-        if: steps.base-rpms-0-1.outputs.cache-hit != 'true'
-        run: |
-          ./build-upgrade/base-0.1/tools/ci/build-rpm.sh
-          mkdir -p build-upgrade/base-rpms-0.1
-          cp build-upgrade/base-0.1/RPMS/*.rpm build-upgrade/base-rpms-0.1/
-      - name: Cache the 0.2.0 RPMs
-        id: base-rpms-0-2
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
-        with:
-          path: build-upgrade/base-rpms-0.2
-          key: netvfs-rpms-${{ env.UPGRADE_BASE_0_2 }}-${{ env.TARGET }}
-      - name: Check out 0.2.0
-        if: steps.base-rpms-0-2.outputs.cache-hit != 'true'
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
-        with:
-          ref: ${{ env.UPGRADE_BASE_0_2 }}
-          path: build-upgrade/base-0.2
-          submodules: recursive
-          persist-credentials: false
-      - name: Build the 0.2.0 RPMs
-        if: steps.base-rpms-0-2.outputs.cache-hit != 'true'
-        run: |
-          ./build-upgrade/base-0.2/tools/ci/build-rpm.sh
-          mkdir -p build-upgrade/base-rpms-0.2
-          cp build-upgrade/base-0.2/RPMS/*.rpm build-upgrade/base-rpms-0.2/
-      - name: Update from 0.1.0 keeps the accounts and backups (XP-2)
-        run: ./tools/ci/check-upgrade.sh build-upgrade/base-rpms-0.1 RPMS
-      - name: Update from 0.2.0 replaces the per-protocol packages (XP-6)
-        run: ./tools/ci/check-upgrade.sh build-upgrade/base-rpms-0.2 RPMS
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: netvfs-rpms-aarch64

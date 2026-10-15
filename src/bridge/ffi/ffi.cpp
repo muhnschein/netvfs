@@ -202,9 +202,7 @@ nvb_error *urlFormat(const nvb_params *params, nvb_bytes path, nvb_blob **out) n
 }
 
 // Field order as in the header.
-const nvb_ffi_v1 Table = {
-    NVB_FFI_VERSION,
-    sizeof(nvb_ffi_v1),
+const nvb_ffi Table = {
     init,
     run,
     quit,
@@ -293,7 +291,7 @@ bool onQtThread()
 
 } // namespace NetVfs::Ffi
 
-extern "C" __attribute__((visibility("default"))) const nvb_ffi_v1 *nvb_ffi_get(uint32_t version)
+extern "C" __attribute__((visibility("default"))) const nvb_ffi *nvb_ffi_get()
 {
-    return version == NVB_FFI_VERSION ? &NetVfs::Ffi::Table : nullptr;
+    return &NetVfs::Ffi::Table;
 }

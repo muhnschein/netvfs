@@ -65,16 +65,13 @@ fn entry(u: &mut Unstructured<'_>) -> Result<WireEntry> {
 }
 
 fn identity(u: &mut Unstructured<'_>) -> Result<Identity> {
-    let kind = [IdentityKind::None, IdentityKind::Ssh, IdentityKind::Tls][u.choose_index(3)?];
+    let kind = [IdentityKind::None, IdentityKind::Ssh][u.choose_index(2)?];
     Ok(Identity {
         kind,
         algorithm: u.arbitrary()?,
         public_key: u.arbitrary()?,
         fingerprint: u.arbitrary()?,
         pin: u.arbitrary()?,
-        system_trusted: u.arbitrary()?,
-        problems: u.arbitrary()?,
-        details: values(u)?,
     })
 }
 
@@ -105,7 +102,7 @@ fn check(data: &[u8]) -> Result<()> {
 
     let i = identity(&mut u)?;
     let buf = IdentityBuf::new(&i);
-    assert_eq!(buf.raw().n_details, i.details.len());
+    assert_eq!(buf.raw().public_key.len, i.public_key.len());
     assert_eq!(buf.read_back(), i);
     Ok(())
 }

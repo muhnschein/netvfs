@@ -201,7 +201,7 @@ void tst_Contract::unixFdPassing()
 void tst_Contract::errorDetails()
 {
     // XB-17, XC-24: an error reply carries the message and an a{sv} with
-    // retryAfterMs (feature "error-details"), as libdbus decodes it.
+    // retryAfterMs, as libdbus decodes it.
     BridgeProcess f;
     f.addFile("f.txt", "12345");
     QVERIFY(f.start());

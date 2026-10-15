@@ -418,11 +418,8 @@ Page {
 
             SectionHeader {
                 visible: page._identity["fingerprint"] !== undefined
-                text: page._identity["kind"] === "tls"
-                      ? //% "Server certificate"
-                        qsTrId("settings-accounts-netvfs-he-server_certificate")
-                      : //% "Server key"
-                        qsTrId("settings-accounts-netvfs-he-server_key")
+                //% "Server key"
+                text: qsTrId("settings-accounts-netvfs-he-server_key")
             }
 
             Label {

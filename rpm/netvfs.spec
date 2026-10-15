@@ -2,30 +2,30 @@
 #
 # Packages of SPEC-v2 XP-1 (amends SPEC 4.1, P-4, P-6):
 #
-#   netvfs          libnetvfs, all protocol backends and the SMB share helper,
-#                   the account UI module, the account providers, the Files
+#   netvfs          libnetvfs, all protocol backends, libnetvfs-rs.so (the
+#                   Rust backends the plugins load), the
+#                   account UI module, the account providers, the Files
 #                   services, netvfs-cli, translations
 #   netvfs-backup   SFTP and SMB backups: services, Buteo plugins and profiles
 #   netvfs-bridge   netvfs-bridge and its setgid accounts helper, for
 #                   sandboxed consumers, and libnetvfs-bridge-ffi.so, the
 #                   C ABI through which the bridge reaches the backends (both
-#                   binaries are Rust, the helper since 0.4 and the bridge
-#                   since 0.5: rust/, doc/RUST.md)
+#                   binaries are Rust: rust/, doc/RUST.md)
 #   netvfs-devel    headers, pkg-config
 #
-# Since 0.3 the parts nobody installs on their own are one package; what
-# stays separate pulls in something the rest does not need (Buteo, a setgid
-# binary) or is only for development (XP-6).
+# The parts nobody installs on their own are one package; what stays
+# separate pulls in something the rest does not need (Buteo, a setgid
+# binary) or is only for development.
 #
 # XC-1a: every package requires netvfs of the same build. Library
-# dependencies (Qt, libaccounts-qt5, libsignon-qt5, libcurl, libsqlite3,
+# dependencies (Qt, libaccounts-qt5, libsignon-qt5, libsqlite3,
 # libbuteosyncfw5) are added by rpm's automatic soname dependencies;
 # tools/ci/check-rpm.sh checks the ones the split relies on.
 # tools/ci/check-files.py checks that every installed file belongs to exactly
 # one package.
 
 Name:       netvfs
-Version:    0.5.0
+Version:    0.6.0
 Release:    1
 Summary:    Remote file access accounts for Sailfish OS
 License:    LGPL-2.1-or-later
@@ -37,8 +37,6 @@ ExclusiveArch: aarch64
 # SPEC P-5
 BuildRequires: qt5-qmake
 BuildRequires: qt5-qttools-linguist
-BuildRequires: cmake
-BuildRequires: openssl-devel
 BuildRequires: sailfish-svg2png
 BuildRequires: pkgconfig(Qt5Core)
 BuildRequires: pkgconfig(Qt5DBus)
@@ -50,14 +48,13 @@ BuildRequires: pkgconfig(Qt5Quick)
 BuildRequires: pkgconfig(accounts-qt5)
 BuildRequires: pkgconfig(libsignon-qt5)
 BuildRequires: pkgconfig(buteosyncfw5) >= 0.10.0
-# SPEC-v2 W-1, F-1: the WebDAV and FTP backends use the system libcurl.
-BuildRequires: pkgconfig(libcurl)
 # SPEC-v2 XB-2, XB-2a: netvfs-bridge and its accounts helper are Rust 1.95,
-# which no SDK target ships yet: CI cross-builds them with the SDK's own
-# compiler and sysroot before this build (tools/ci/cross-build.sh), and the
-# spec installs those binaries (doc/RUST.md "Cross build"). rpm still derives
-# their library dependencies. The bridge speaks peer-to-peer D-Bus with zbus,
-# so the package build no longer needs libdbus (the tests still do).
+# which no SDK target ships yet: CI cross-builds them, and libnetvfs-rs.so,
+# with the SDK's own compiler and sysroot before this build
+# (tools/ci/cross-build.sh), and the spec installs them (doc/RUST.md "Cross
+# build"). rpm derives their library dependencies. The bridge speaks
+# peer-to-peer D-Bus with zbus, so the package build needs no libdbus (the
+# tests use it).
 
 Requires:   sailfish-version >= 5.2.0
 Requires:   sailfishsilica-qt5
@@ -67,76 +64,33 @@ Requires:   sailfish-components-accounts-qt5
 # picker (SPEC-sftp; the page is part of the module, so every account UI
 # loads it).
 Requires:   sailfish-components-pickers-qt5
-# SPEC-v2 XSEC-4: CURLOPT_PROTOCOLS_STR (WebDAV and FTP backends)
-Requires:   libcurl >= 7.85.0
-# SPEC-v2 XP-2: updates keep the backups (see netvfs-backup).
+# SPEC-v2 XP-1: backups come along unless they are removed.
 Recommends: %{name}-backup = %{version}-%{release}
-# SPEC-v2 XP-6: the packages of 0.2 that this one replaces.
-Provides:   %{name}-core = %{version}-%{release}
-Obsoletes:  %{name}-core < 0.3.0
-Provides:   %{name}-ui = %{version}-%{release}
-Obsoletes:  %{name}-ui < 0.3.0
-Provides:   %{name}-backend-sftp = %{version}-%{release}
-Obsoletes:  %{name}-backend-sftp < 0.3.0
-Provides:   %{name}-backend-smb = %{version}-%{release}
-Obsoletes:  %{name}-backend-smb < 0.3.0
-Provides:   %{name}-backend-smb-shares = %{version}-%{release}
-Obsoletes:  %{name}-backend-smb-shares < 0.3.0
-Provides:   %{name}-backend-webdav = %{version}-%{release}
-Obsoletes:  %{name}-backend-webdav < 0.3.0
-Provides:   %{name}-backend-ftp = %{version}-%{release}
-Obsoletes:  %{name}-backend-ftp < 0.3.0
-Provides:   %{name}-backend-local = %{version}-%{release}
-Obsoletes:  %{name}-backend-local < 0.3.0
-Provides:   %{name}-files-services = %{version}-%{release}
-Obsoletes:  %{name}-files-services < 0.3.0
-Provides:   %{name}-account-sftp = %{version}-%{release}
-Obsoletes:  %{name}-account-sftp < 0.3.0
-Provides:   %{name}-account-smb = %{version}-%{release}
-Obsoletes:  %{name}-account-smb < 0.3.0
-Provides:   %{name}-account-webdav = %{version}-%{release}
-Obsoletes:  %{name}-account-webdav < 0.3.0
-Provides:   %{name}-account-ftp = %{version}-%{release}
-Obsoletes:  %{name}-account-ftp < 0.3.0
-Provides:   %{name}-cli = %{version}-%{release}
-Obsoletes:  %{name}-cli < 0.3.0
 
 %description
-Remote file access over SFTP, SMB, WebDAV and FTP for Sailfish OS: account
+Remote file access over SFTP and SMB for Sailfish OS: account
 providers in Settings > Accounts, network locations for apps, and the
 command line tool netvfs-cli.
 
 libnetvfs (accounts, credentials, sessions and errors over pluggable protocol
-backends) with its SFTP, SMB, WebDAV, FTP and local file system backends. SMB
-share enumeration runs in a helper process of its own (SPEC-v2 XM-7), so the
-DCE/RPC parser never runs inside the SMB backend. Since 0.2 libnetvfs also
-links QtNetwork, for the DNS-SD discovery of servers on the local network
+backends) with its SFTP, SMB and local file system backends; the SFTP and
+SMB backends are Rust (libnetvfs-rs.so; SMB 3.1.1 only). libnetvfs also links
+QtNetwork, for the DNS-SD discovery of servers on the local network
 (SPEC-v2 XD-1).
 
 %package devel
 Summary:    Development files for libnetvfs
 Requires:   %{name} = %{version}-%{release}
-Provides:   %{name}-core-devel = %{version}-%{release}
-Obsoletes:  %{name}-core-devel < 0.3.0
 
 %description devel
 Headers and pkg-config file for building applications on libnetvfs.
 
 %package backup
-# SPEC-v2 XP-2: up to 0.1 netvfs-account-<p> contained the backup plugins,
-# in 0.2 netvfs-backup-<p>. The Obsoletes state that this package takes them
-# over; on update from 0.1 or 0.2 zypper and PackageKit install it because
-# the Recommends of netvfs is new to them: a weak dependency that is new in
-# an update is installed with it (tools/ci/check-upgrade.sh checks this).
 Summary:    SFTP and SMB backups
 Requires:   %{name} = %{version}-%{release}
 Requires:   buteo-syncfw-qt5-msyncd
 Requires:   jolla-vault
 Requires:   systemd
-Provides:   %{name}-backup-sftp = %{version}-%{release}
-Provides:   %{name}-backup-smb = %{version}-%{release}
-Obsoletes:  %{name}-backup-sftp < 0.3.0
-Obsoletes:  %{name}-backup-smb < 0.3.0
 
 %description backup
 SFTP and SMB accounts as storage targets in Settings > Backup: the
@@ -161,10 +115,9 @@ consumers over a socket in their data folder, without handing out secrets.
 %setup -q -n %{name}-%{version}
 
 %build
-# SPEC P-1..P-3: vendored libraries first, static and position-independent.
-./vendor/build-vendor.sh "$PWD/build-vendor"
-# The Rust binaries, cross-built by CI into rust/prebuilt (see above).
-%qmake5 -r VENDOR_PREFIX="$PWD/build-vendor" NETVFS_BUILD_TESTS=0 "VERSION=%{version}" \
+# The Rust binaries and libnetvfs-rs.so, cross-built by CI into
+# rust/prebuilt (see above).
+%qmake5 -r NETVFS_BUILD_TESTS=0 "VERSION=%{version}" \
     NETVFS_RUST_PREBUILT="$PWD/rust/prebuilt"
 %make_build
 
@@ -173,8 +126,7 @@ consumers over a socket in their data folder, without handing out secrets.
 
 # Script bodies, not "-p /sbin/ldconfig": rpm passes the count of
 # installed instances to a -p program as an argument, and ldconfig takes
-# "1" for a folder and fails (0.1.0 did this; its removal script fails
-# on update).
+# "1" for a folder and fails.
 %post
 /sbin/ldconfig
 
@@ -209,11 +161,12 @@ systemctl-user daemon-reload || :
 %dir %{_libdir}/netvfs/backends
 %{_libdir}/netvfs/backends/libnetvfs-sftp.so
 %{_libdir}/netvfs/backends/libnetvfs-smb.so
-%{_libdir}/netvfs/backends/libnetvfs-webdav.so
-%{_libdir}/netvfs/backends/libnetvfs-ftp.so
 %{_libdir}/netvfs/backends/libnetvfs-local.so
+# The Rust backends, loaded by their plugins with dlopen next to the backend
+# folder (doc/RUST.md).
+%{_libdir}/netvfs/libnetvfs-rs.so
+# The bridge package's binaries live here.
 %dir %{_prefix}/libexec/netvfs
-%{_prefix}/libexec/netvfs/netvfs-smb-shares
 %dir %{_datadir}/netvfs
 %{_datadir}/netvfs/providers
 %dir %{_libdir}/qt5/qml/org/netvfs
@@ -221,28 +174,16 @@ systemctl-user daemon-reload || :
 %{_datadir}/accounts/service_types/netvfs-files.service-type
 %{_datadir}/accounts/services/sftp-files.service
 %{_datadir}/accounts/services/smb-files.service
-%{_datadir}/accounts/services/webdav-files.service
-%{_datadir}/accounts/services/ftp-files.service
 %{_datadir}/accounts/providers/sftp.provider
 %{_datadir}/accounts/providers/smb.provider
-%{_datadir}/accounts/providers/webdav.provider
-%{_datadir}/accounts/providers/ftp.provider
 %{_datadir}/accounts/ui/sftp.qml
 %{_datadir}/accounts/ui/sftp-settings.qml
 %{_datadir}/accounts/ui/sftp-update.qml
 %{_datadir}/accounts/ui/smb.qml
 %{_datadir}/accounts/ui/smb-settings.qml
 %{_datadir}/accounts/ui/smb-update.qml
-%{_datadir}/accounts/ui/webdav.qml
-%{_datadir}/accounts/ui/webdav-settings.qml
-%{_datadir}/accounts/ui/webdav-update.qml
-%{_datadir}/accounts/ui/ftp.qml
-%{_datadir}/accounts/ui/ftp-settings.qml
-%{_datadir}/accounts/ui/ftp-update.qml
 %{_datadir}/themes/sailfish-default/silica/*/icons/graphic-service-sftp.png
 %{_datadir}/themes/sailfish-default/silica/*/icons/graphic-service-smb.png
-%{_datadir}/themes/sailfish-default/silica/*/icons/graphic-service-webdav.png
-%{_datadir}/themes/sailfish-default/silica/*/icons/graphic-service-ftp.png
 %{_datadir}/translations/netvfs*.qm
 %{_bindir}/netvfs-cli
 

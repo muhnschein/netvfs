@@ -6,8 +6,8 @@
 //! - `identity-unknown`: ad-hoc first contact (XB-14); answer `{accept: b}`;
 //! - `keyboard-interactive`: a prompt of the server (XC-15); answer
 //!   `{accept: b, answers: aay}`;
-//! - `insecure-consent`: an ad-hoc location without transport security
-//!   (W-2, XM-1); answer `{accept: b}`.
+//! - `insecure-consent`: an ad-hoc SMB location with the `guest` profile
+//!   (XM-1); answer `{accept: b}`.
 //!
 //! A question ends unanswered when its session goes away, its request is
 //! canceled or the worker that asked stops waiting (the question timeout).
@@ -24,7 +24,7 @@ use std::fmt;
 pub use crate::locations::connector::IDENTITY_UNKNOWN;
 /// `Question` kind of a keyboard-interactive prompt.
 pub use crate::locations::connector::KEYBOARD_INTERACTIVE;
-/// `Question` kind of an ad-hoc location without transport security.
+/// `Question` kind of an ad-hoc SMB location with an insecure profile.
 pub const INSECURE_CONSENT: &str = "insecure-consent";
 
 /// The pending questions, by id (`q1`, `q2`, …).

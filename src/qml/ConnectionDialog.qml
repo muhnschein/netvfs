@@ -15,7 +15,7 @@ Dialog {
 
     property string provider
     property bool credentialsOnly
-    // Preselects the sign-in method ("password", "publickey", "interactive", "token")
+    // Preselects the sign-in method ("password", "publickey", "interactive")
     property string initialAuthMode: "password"
 
     // { <field key>: value, auth_mode, key_source } (NetVfsProviders.initialValues)
@@ -40,14 +40,13 @@ Dialog {
     readonly property string authMode: authModeEntry["id"] || "password"
     // "generate" or "import" (key mode only)
     readonly property string keySource: authModeEntry["source"] === "import" ? "import" : "generate"
-    // "password", "token", "key" or "none" (XA-7)
+    // "password", "key" or "none" (XA-7)
     readonly property string secretKind: NetVfsProviders.secretKind(provider, values)
     readonly property string password: passwordField.text
     readonly property string backupsPath: NetVfsProviders.serviceValue(provider, values, "backups_path")
     readonly property string filesRoot: NetVfsProviders.serviceValue(provider, values, "files_root")
 
-    readonly property bool passwordMissing: (secretKind === "password" || secretKind === "token")
-                                            && passwordField.text.length === 0
+    readonly property bool passwordMissing: secretKind === "password" && passwordField.text.length === 0
     readonly property bool connectionValid: services.length > 0
                                             && NetVfsProviders.isValid(provider, values, services)
 
@@ -273,13 +272,10 @@ Dialog {
             PasswordField {
                 id: passwordField
 
-                visible: dialog.secretKind === "password" || dialog.secretKind === "token"
+                visible: dialog.secretKind === "password"
                 width: parent.width
-                label: dialog.secretKind === "token"
-                       ? //% "Access token"
-                         qsTrId("settings-accounts-netvfs-la-token")
-                       : //% "Password"
-                         qsTrId("settings-accounts-netvfs-la-password")
+                //% "Password"
+                label: qsTrId("settings-accounts-netvfs-la-password")
                 EnterKey.iconSource: "image://theme/icon-m-enter-accept"
                 EnterKey.onClicked: {
                     if (dialog.canAccept) {

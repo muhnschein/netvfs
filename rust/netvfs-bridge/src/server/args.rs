@@ -46,7 +46,7 @@ const MAX_MODE: i64 = 0o7777;
 /// of 2 MiB would take 128 MiB).
 pub const MAX_CALL_BODY: usize = 128 * 1024;
 /// The SMB security profiles `ConnectAdHoc` accepts.
-const SECURITY_PROFILES: [&str; 4] = ["strict", "signed", "legacy", "guest"];
+const SECURITY_PROFILES: [&str; 3] = ["strict", "signed", "guest"];
 
 /// A validated location id (`account:12`, `adhoc:3`): `[a-z0-9:-]{1,64}`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -89,7 +89,7 @@ impl fmt::Debug for Secret {
 pub struct AdHocOpts {
     /// `user`: the user name instead of the URL's.
     pub user: Option<String>,
-    /// `security_profile` (SMB only): `strict`, `signed`, `legacy` or `guest`.
+    /// `security_profile` (SMB only): `strict`, `signed` or `guest`.
     pub security_profile: Option<String>,
 }
 
@@ -168,7 +168,6 @@ impl Default for WalkOpts {
 #[allow(missing_docs)] // the fields are the XB-10 arguments of the same names
 pub enum Call {
     Hello {
-        protocol: u32,
         client: String,
     },
     GetConsent,
@@ -553,11 +552,8 @@ fn loc_path(body: &Body) -> Result<(LocId, NPath), Status> {
 // --------------------------------------------------------------- the methods
 
 fn hello(body: &Body) -> Result<Call, Status> {
-    let (protocol, client): (u32, String) = deserialize(body)?;
-    if protocol == 0 {
-        return Err(Status::invalid_args("Protocol version 0 does not exist"));
-    }
-    Ok(Call::Hello { protocol, client: short_string(client, 2, MAX_SHORT)? })
+    let (client,): (String,) = deserialize(body)?;
+    Ok(Call::Hello { client: short_string(client, 1, MAX_SHORT)? })
 }
 
 fn connect_ad_hoc(body: &Body) -> Result<Call, Status> {

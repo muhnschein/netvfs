@@ -188,8 +188,8 @@ private:
     QProcess busDaemon;
     QStringList ownedNames;
     std::unique_ptr<AccountsFixture> fixture;
-    int listed = 0;      // fake, Files enabled
-    int unlisted = 0;    // fake, Files service disabled
+    int listed = 0;      // sftp, Files enabled
+    int unlisted = 0;    // sftp, Files service disabled
 };
 
 void tst_BridgeAccounts::onNameOwnerChanged(const QString &name, const QString &, const QString &newOwner)
@@ -224,12 +224,12 @@ void tst_BridgeAccounts::cleanupTestCase()
 void tst_BridgeAccounts::init()
 {
     fixture = std::make_unique<AccountsFixture>(
-        QStringList { QStringLiteral("fake"), QStringLiteral("smb") });
-    listed = fixture->createAccount(QStringLiteral("fake"), globals(QStringLiteral("files.example")), QString(), 7);
+        QStringList { QStringLiteral("sftp"), QStringLiteral("smb") });
+    listed = fixture->createAccount(QStringLiteral("sftp"), globals(QStringLiteral("files.example")), QString(), 7);
     QVERIFY(listed > 0);
-    QVERIFY(fixture->setService(listed, QStringLiteral("fake-files"), true,
+    QVERIFY(fixture->setService(listed, QStringLiteral("sftp-files"), true,
                                 { { QStringLiteral("files_root"), QStringLiteral("photos//2026/") } }));
-    unlisted = fixture->createAccount(QStringLiteral("fake"), globals(QStringLiteral("backup.example")));
+    unlisted = fixture->createAccount(QStringLiteral("sftp"), globals(QStringLiteral("backup.example")));
     QVERIFY(unlisted > 0);
 }
 
@@ -255,7 +255,7 @@ void tst_BridgeAccounts::list()
     QCOMPARE(accounts.size(), 1);
     const AccountLocation &a = accounts.at(0);
     QCOMPARE(a.accountId, listed);
-    QCOMPARE(a.provider, QStringLiteral("fake"));
+    QCOMPARE(a.provider, QStringLiteral("sftp"));
     QCOMPARE(a.displayName, QStringLiteral("alice@files.example"));
     QCOMPARE(a.params.host, QStringLiteral("files.example"));
     QCOMPARE(a.params.port, 2222);
@@ -274,7 +274,7 @@ void tst_BridgeAccounts::files()
     QVERIFY(decodeFiles(serve(fixture.get(), { QStringLiteral("files"), QString::number(listed) }),
                                         &access).ok());
     QCOMPARE(access.params.host, QStringLiteral("files.example"));
-    QCOMPARE(access.params.provider, QStringLiteral("fake"));
+    QCOMPARE(access.params.provider, QStringLiteral("sftp"));
     QCOMPARE(access.credentialsId, 7u);
     QVERIFY(!access.secretOptional);
     // Only listed accounts: not one whose Files service is off, nor ids that
@@ -317,9 +317,9 @@ void tst_BridgeAccounts::attention()
                 .ok());
     QCOMPARE(fixture->value(listed, QStringLiteral("netvfs/attention")).toString(),
              QStringLiteral("server-identity-changed"));
-    QCOMPARE(fixture->value(listed, QStringLiteral("netvfs/fake/host_key_seen")).toString(), QStringLiteral("SHA256:pin"));
+    QCOMPARE(fixture->value(listed, QStringLiteral("netvfs/sftp/host_key_seen")).toString(), QStringLiteral("SHA256:pin"));
     QCOMPARE(fixture->value(listed, QStringLiteral("CredentialsNeedUpdateFrom")).toString(),
-             QStringLiteral("fake-files"));
+             QStringLiteral("sftp-files"));
     QVERIFY(decodeStatus(serve(fixture.get(), { QStringLiteral("attention"), QString::number(listed),
                                                                 QStringLiteral("auth-failed") }))
                 .ok());
@@ -431,30 +431,29 @@ void tst_BridgeAccounts::goldenAnswers()
 {
     // The answers of the C++ helper, byte for byte, for what the accounts
     // UI writes and for what other writers of the database could.
-    for (const char *provider : { "sftp", "webdav", "ftp" })
-        fixture->installProvider(QLatin1String(provider));
+    fixture->installProvider(QStringLiteral("sftp"));
     QVariantMap typed = globals(QStringLiteral("types.example"), {
-        { QStringLiteral("netvfs/fake/string"), QStringLiteral("ünïcødé \U0001F600 \"'\\\n\t") },
-        { QStringLiteral("netvfs/fake/empty"), QLatin1String("") },
-        { QStringLiteral("netvfs/fake/int"), -5 },
-        { QStringLiteral("netvfs/fake/uint"), 7u },
-        { QStringLiteral("netvfs/fake/int64"), qint64(1) << 40 },
-        { QStringLiteral("netvfs/fake/uint64"), quint64(1) << 63 },
-        { QStringLiteral("netvfs/fake/true"), true },
-        { QStringLiteral("netvfs/fake/false"), false },
-        { QStringLiteral("netvfs/fake/list0"), QStringList() },
-        { QStringLiteral("netvfs/fake/list1"), QStringList { QStringLiteral("one") } },
-        { QStringLiteral("netvfs/fake/list2"), QStringList { QStringLiteral("a"), QStringLiteral("b") } },
-        { QStringLiteral("netvfs/fake/ä"), QStringLiteral("a Latin-1 key") },
-        { QStringLiteral("netvfs/fake/"), QStringLiteral("an empty option name") },
-        { QStringLiteral("netvfs/fake"), QStringLiteral("no option") },
-        { QStringLiteral("netvfs/fakeX/y"), QStringLiteral("another provider's") },
+        { QStringLiteral("netvfs/sftp/string"), QStringLiteral("ünïcødé \U0001F600 \"'\\\n\t") },
+        { QStringLiteral("netvfs/sftp/empty"), QLatin1String("") },
+        { QStringLiteral("netvfs/sftp/int"), -5 },
+        { QStringLiteral("netvfs/sftp/uint"), 7u },
+        { QStringLiteral("netvfs/sftp/int64"), qint64(1) << 40 },
+        { QStringLiteral("netvfs/sftp/uint64"), quint64(1) << 63 },
+        { QStringLiteral("netvfs/sftp/true"), true },
+        { QStringLiteral("netvfs/sftp/false"), false },
+        { QStringLiteral("netvfs/sftp/list0"), QStringList() },
+        { QStringLiteral("netvfs/sftp/list1"), QStringList { QStringLiteral("one") } },
+        { QStringLiteral("netvfs/sftp/list2"), QStringList { QStringLiteral("a"), QStringLiteral("b") } },
+        { QStringLiteral("netvfs/sftp/ä"), QStringLiteral("a Latin-1 key") },
+        { QStringLiteral("netvfs/sftp/"), QStringLiteral("an empty option name") },
+        { QStringLiteral("netvfs/sftp"), QStringLiteral("no option") },
+        { QStringLiteral("netvfs/sftpX/y"), QStringLiteral("another provider's") },
         { QStringLiteral("netvfs/smb/share"), QStringLiteral("another provider's") },
         { QStringLiteral("netvfs/port"), QStringLiteral(" 7 ") },
         { QStringLiteral("netvfs/attention"), QStringLiteral("auth-failed") },
     });
     typed.remove(QStringLiteral("netvfs/username"));
-    const int types = listedAccount(QStringLiteral("fake"), typed,
+    const int types = listedAccount(QStringLiteral("sftp"), typed,
                                     { { QStringLiteral("files_root"), QStringLiteral("/") } }, 4294967295u);
     QVERIFY(types > 0);
     const int guest = listedAccount(
@@ -473,31 +472,31 @@ void tst_BridgeAccounts::goldenAnswers()
     QVERIFY(bogus > 0);
     const int signedSmb = listedAccount(
         QStringLiteral("smb"),
-        globals(QStringLiteral("signed.example"), { { QStringLiteral("netvfs/smb/require_encryption"), QStringLiteral("false") },
+        globals(QStringLiteral("signed.example"), { { QStringLiteral("netvfs/smb/security_profile"), QStringLiteral("signed") },
                                                     { QStringLiteral("netvfs/port"), 70000u } }));
     QVERIFY(signedSmb > 0);
-    const int http = listedAccount(
-        QStringLiteral("webdav"), globals(QStringLiteral("dav.example"), { { QStringLiteral("netvfs/webdav/tls"), QStringLiteral("http") } }),
+    const int insecure = listedAccount(
+        QStringLiteral("smb"), globals(QStringLiteral("open.example"), { { QStringLiteral("netvfs/smb/security_profile"), QStringLiteral("guest") } }),
         { { QStringLiteral("files_root"), QStringLiteral("a/./b") } });
-    QVERIFY(http > 0);
-    const int ftp = listedAccount(
-        QStringLiteral("ftp"), globals(QStringLiteral("ftp.example"), { { QStringLiteral("netvfs/ftp/tls_mode"), QStringLiteral("none") },
-                                                                     { QStringLiteral("netvfs/ftp/allow_insecure"), QStringLiteral("1") } }),
-        { { QStringLiteral("files_root"), QStringLiteral("//srv//ftp//") } });
-    QVERIFY(ftp > 0);
+    QVERIFY(insecure > 0);
+    const int insecureAllowed = listedAccount(
+        QStringLiteral("smb"), globals(QStringLiteral("open.example"), { { QStringLiteral("netvfs/smb/security_profile"), QStringLiteral("guest") },
+                                                                      { QStringLiteral("netvfs/smb/allow_insecure"), QStringLiteral("1") } }),
+        { { QStringLiteral("files_root"), QStringLiteral("//srv//smb//") } });
+    QVERIFY(insecureAllowed > 0);
     const int sftp = listedAccount(
         QStringLiteral("sftp"), globals(QStringLiteral("ssh.example"), { { QStringLiteral("netvfs/sftp/auth_mode"), QStringLiteral("interactive") },
-                                                                      { QStringLiteral("netvfs/sftp/allow_shell"), true },
+                                                                      { QStringLiteral("netvfs/sftp/flag"), true },
                                                                       { QStringLiteral("netvfs/port"), qint64(22) } }),
         QVariantMap(), 12);
     QVERIFY(sftp > 0);
     QVariantMap withoutHost = globals(QString());
     withoutHost.remove(QStringLiteral("netvfs/host"));
-    const int noHost = listedAccount(QStringLiteral("fake"), withoutHost);
+    const int noHost = listedAccount(QStringLiteral("sftp"), withoutHost);
     QVERIFY(noHost > 0);
-    const int emptyHost = listedAccount(QStringLiteral("fake"), globals(QString()));
+    const int emptyHost = listedAccount(QStringLiteral("sftp"), globals(QString()));
     QVERIFY(emptyHost > 0);
-    const int off = listedAccount(QStringLiteral("fake"), globals(QStringLiteral("off.example")));
+    const int off = listedAccount(QStringLiteral("sftp"), globals(QStringLiteral("off.example")));
     QVERIFY(off > 0);
     QVERIFY(fixture->setService(off, QString(), false));
 
@@ -505,23 +504,23 @@ void tst_BridgeAccounts::goldenAnswers()
     const QString t = QString::number(types);
     QVERIFY(sql(database(), QStringLiteral(
         "INSERT OR REPLACE INTO Settings (account, service, key, type, value) VALUES "
-        "(%1, 0, 'netvfs/fake/double', 'd', '1.5'),"
-        "(%1, 0, 'netvfs/fake/byte', 'y', '7'),"
-        "(%1, 0, 'netvfs/fake/path', 'o', '''/x'''),"
-        "(%1, 0, 'netvfs/fake/badlist', 'as', '[''a'''),"
-        "(%1, 0, 'netvfs/fake/raw', 's', 'raw ''text'''),"
-        "(%1, 0, 'netvfs/fake/escapes', 's', '''a\\nb\\u00e9\\U0001F600\\x41'''),"
-        "(%1, 0, 'netvfs/fake/hex', 'i', '0x10'),"
-        "(%1, 0, 'netvfs/fake/annotated', 'x', 'int64 5'),"
-        "(%1, 0, 'netvfs/fake/badbool', 'b', 'yes'),"
-        "(%1, 0, 'netvfs/fake/null', 's', NULL),"
-        "(%1, 0, 'netvfs/fake/dict', 'a{sv}', '{''k'': <''v''>, ''n'': <int32 3>, ''l'': <[''x'']>}'),"
-        "(%1, 0, 'netvfs/fake/tuple', '(ss)', '(''a'', ''b'')'),"
-        "(%1, 0, 'netvfs/fake/variant', 'v', '<''x''>');"
+        "(%1, 0, 'netvfs/sftp/double', 'd', '1.5'),"
+        "(%1, 0, 'netvfs/sftp/byte', 'y', '7'),"
+        "(%1, 0, 'netvfs/sftp/path', 'o', '''/x'''),"
+        "(%1, 0, 'netvfs/sftp/badlist', 'as', '[''a'''),"
+        "(%1, 0, 'netvfs/sftp/raw', 's', 'raw ''text'''),"
+        "(%1, 0, 'netvfs/sftp/escapes', 's', '''a\\nb\\u00e9\\U0001F600\\x41'''),"
+        "(%1, 0, 'netvfs/sftp/hex', 'i', '0x10'),"
+        "(%1, 0, 'netvfs/sftp/annotated', 'x', 'int64 5'),"
+        "(%1, 0, 'netvfs/sftp/badbool', 'b', 'yes'),"
+        "(%1, 0, 'netvfs/sftp/null', 's', NULL),"
+        "(%1, 0, 'netvfs/sftp/dict', 'a{sv}', '{''k'': <''v''>, ''n'': <int32 3>, ''l'': <[''x'']>}'),"
+        "(%1, 0, 'netvfs/sftp/tuple', '(ss)', '(''a'', ''b'')'),"
+        "(%1, 0, 'netvfs/sftp/variant', 'v', '<''x''>');"
         "UPDATE Accounts SET name = NULL WHERE id = %2;").arg(t, QString::number(guest))));
 
     QList<QStringList> requests { { QStringLiteral("list") } };
-    for (const int id : { listed, unlisted, types, guest, bogus, signedSmb, http, ftp, sftp, noHost, emptyHost, off })
+    for (const int id : { listed, unlisted, types, guest, bogus, signedSmb, insecure, insecureAllowed, sftp, noHost, emptyHost, off })
         requests << QStringList { QStringLiteral("files"), QString::number(id) };
     for (const QString &id : { QStringLiteral("999"), QStringLiteral("0"), QStringLiteral("-1"), QStringLiteral("x"),
                                QString(), QStringLiteral(" ") + t, QStringLiteral("+") + t, QStringLiteral("0") + t,
@@ -566,20 +565,20 @@ void tst_BridgeAccounts::goldenStoredValues()
         { "(ss)", "('a', 'b')" }, { "ai", "[1]" }, { "ms", "just 'x'" }, { "h", "1" },
     };
     const QString global = QStringLiteral("0");
-    const QString files = QStringLiteral("(SELECT id FROM Services WHERE name = 'fake-files')");
+    const QString files = QStringLiteral("(SELECT id FROM Services WHERE name = 'sftp-files')");
     QList<int> ids;
     for (const auto &[type, text] : values) {
         // One account with the value as its settings, one with it as the
         // Files service's flag.
-        const int id = listedAccount(QStringLiteral("fake"), globals(QStringLiteral("values.example")));
-        const int flag = listedAccount(QStringLiteral("fake"), globals(QStringLiteral("flag.example")));
+        const int id = listedAccount(QStringLiteral("sftp"), globals(QStringLiteral("values.example")));
+        const int flag = listedAccount(QStringLiteral("sftp"), globals(QStringLiteral("flag.example")));
         QVERIFY(id > 0 && flag > 0);
         ids << id;
         QString quoted = text;
         quoted.replace(QLatin1Char('\''), QStringLiteral("''"));
         const QString row = QStringLiteral("(%1, %2, '%3', '%4', '%5')");
         QStringList rows;
-        for (const char *key : { "netvfs/fake/v", "netvfs/port", "CredentialsId", "netvfs/attention" })
+        for (const char *key : { "netvfs/sftp/v", "netvfs/port", "CredentialsId", "netvfs/attention" })
             rows << row.arg(QString::number(id), global, QLatin1String(key), type, quoted);
         rows << row.arg(QString::number(id), files, QStringLiteral("files_root"), type, quoted);
         rows << row.arg(QString::number(flag), files, QStringLiteral("enabled"), type, quoted);
@@ -597,7 +596,7 @@ void tst_BridgeAccounts::goldenAttention()
 {
     // The same request on two copies of the database: the same answer, and
     // the same settings afterwards, as libaccounts reads them.
-    QVERIFY(fixture->setService(unlisted, QStringLiteral("fake-files"), false));
+    QVERIFY(fixture->setService(unlisted, QStringLiteral("sftp-files"), false));
     const int other = listedAccount(QStringLiteral("smb"), globals(QStringLiteral("nas.example")));
     QVERIFY(other > 0);
     QTemporaryDir copy;
@@ -656,12 +655,12 @@ void tst_BridgeAccounts::attentionSignal()
                 .ok());
     QTRY_COMPARE_WITH_TIMEOUT(account->value(QStringLiteral("netvfs/attention")).toString(),
                               QStringLiteral("server-identity-changed"), 10000);
-    QCOMPARE(account->value(QStringLiteral("netvfs/fake/host_key_seen")).toString(), QStringLiteral("SHA256:it's"));
+    QCOMPARE(account->value(QStringLiteral("netvfs/sftp/host_key_seen")).toString(), QStringLiteral("SHA256:it's"));
     // A boolean, not the string "true" (QVariant's == would convert it).
     const QVariant needsUpdate = account->value(QStringLiteral("CredentialsNeedUpdate"));
     QCOMPARE(needsUpdate.userType(), int(QMetaType::Bool));
     QVERIFY(needsUpdate.toBool());
-    QCOMPARE(account->value(QStringLiteral("CredentialsNeedUpdateFrom")).toString(), QStringLiteral("fake-files"));
+    QCOMPARE(account->value(QStringLiteral("CredentialsNeedUpdateFrom")).toString(), QStringLiteral("sftp-files"));
     // Sailfish OS's libaccounts-glib owns such a name to send from.
     const QRegularExpression name(QStringLiteral("^com\\.google\\.code\\.AccountsSSO\\.Accounts\\.uuid_[0-9a-f]{32}$"));
     QTRY_VERIFY_WITH_TIMEOUT(std::any_of(ownedNames.cbegin(), ownedNames.cend(),

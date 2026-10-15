@@ -26,7 +26,7 @@ use crate::prompt::{ConsentPrompt, PromptEvent};
 use crate::server::ListenAddress;
 use crate::status::Status;
 use crate::testutil::TempDir;
-use netvfs_bridge_proto::{BridgeError, Connection, PROTOCOL_VERSION, Signal, SignalStream};
+use netvfs_bridge_proto::{BridgeError, Connection, Signal, SignalStream};
 use std::future::Future;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::PathBuf;
@@ -292,8 +292,8 @@ impl FakeAccounts {
 }
 
 impl AccountDirectory for FakeAccounts {
-    async fn list(&self) -> Vec<AccountLocation> {
-        self.state().accounts.clone()
+    fn list(&self) -> impl Future<Output = Vec<AccountLocation>> {
+        std::future::ready(self.state().accounts.clone())
     }
 
     async fn files(&self, id: i32) -> Result<FilesAccess, Status> {
@@ -641,7 +641,7 @@ impl Fixture {
     /// A connected client after `Hello`.
     pub async fn hello_client(&self) -> Connection {
         let c = self.client().await;
-        c.proxy().hello(PROTOCOL_VERSION, "fixture").await.expect("Hello");
+        c.proxy().hello("fixture").await.expect("Hello");
         c
     }
 

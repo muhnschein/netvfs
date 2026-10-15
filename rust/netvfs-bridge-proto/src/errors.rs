@@ -9,116 +9,12 @@ use std::fmt;
 use zbus::DBusError as _;
 use zbus::zvariant::OwnedValue;
 
-/// Prefix of the bridge's error names.
-pub const ERROR_PREFIX: &str = "org.netvfs.Error.";
+pub use netvfs_vfs::status::{ERROR_PREFIX, ErrorName};
+
 /// A malformed call (wrong signature, count, type or range).
 pub const INVALID_ARGS: &str = "org.freedesktop.DBus.Error.InvalidArgs";
 /// A call of a method the bridge does not have.
 pub const UNKNOWN_METHOD: &str = "org.freedesktop.DBus.Error.UnknownMethod";
-
-macro_rules! error_names {
-    ($($(#[$doc:meta])* $name:ident),* $(,)?) => {
-        /// An XC-21 error name. The values are only ever appended.
-        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-        pub enum ErrorName {
-            $($(#[$doc])* $name,)*
-        }
-
-        impl ErrorName {
-            /// Every name, in the order of `src/core/error.h`.
-            pub const ALL: [Self; error_names!(@count $($name)*)] = [$(Self::$name,)*];
-
-            /// The bare name, as `ListDone` and `JobFinished` carry it.
-            #[must_use]
-            pub const fn as_str(self) -> &'static str {
-                match self {
-                    $(Self::$name => stringify!($name),)*
-                }
-            }
-
-            /// The D-Bus error name, `org.netvfs.Error.<Name>`.
-            #[must_use]
-            pub const fn dbus_name(self) -> &'static str {
-                match self {
-                    $(Self::$name => concat!("org.netvfs.Error.", stringify!($name)),)*
-                }
-            }
-        }
-    };
-    (@count) => { 0 };
-    (@count $head:ident $($tail:ident)*) => { 1 + error_names!(@count $($tail)*) };
-}
-
-error_names! {
-    /// The operation was canceled.
-    Canceled,
-    /// The server could not be reached.
-    NetworkUnreachable,
-    /// The server did not answer in time.
-    Timeout,
-    /// The server's identity is not known yet.
-    ServerIdentityUnknown,
-    /// The server's identity differs from the pinned one.
-    ServerIdentityChanged,
-    /// The credentials were refused.
-    AuthFailed,
-    /// A mandatory security requirement could not be met.
-    SecurityPolicy,
-    /// Not allowed (also: no consent, XB-6).
-    PermissionDenied,
-    /// No such file, location, handle, job or question.
-    NotFound,
-    /// The target exists.
-    AlreadyExists,
-    /// The server has no space left.
-    NoSpace,
-    /// The backend or server cannot do this.
-    Unsupported,
-    /// The server or client broke the protocol.
-    ProtocolError,
-    /// A bug or an unexpected state.
-    Internal,
-    /// An established connection dropped.
-    ConnectionLost,
-    /// A path component is not a folder.
-    NotADirectory,
-    /// The path is a folder.
-    IsADirectory,
-    /// The folder is not empty.
-    DirectoryNotEmpty,
-    /// The path or name is not valid.
-    InvalidName,
-    /// The file system is read-only.
-    ReadOnlyFilesystem,
-    /// The file is locked (SMB sharing violation, WebDAV 423).
-    Locked,
-    /// Too many connections, requests, handles or jobs.
-    TooManyConnections,
-    /// The server asks to slow down (HTTP 429/503 with Retry-After).
-    RateLimited,
-    /// Internal to WebDAV conditional requests.
-    NotModified,
-}
-
-impl ErrorName {
-    /// The name for a bare name (`NotFound`), or `None` for an unknown one.
-    #[must_use]
-    pub fn parse(bare: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|n| n.as_str() == bare)
-    }
-
-    /// The name for a D-Bus error name (`org.netvfs.Error.NotFound`).
-    #[must_use]
-    pub fn from_dbus_name(name: &str) -> Option<Self> {
-        name.strip_prefix(ERROR_PREFIX).and_then(Self::parse)
-    }
-}
-
-impl fmt::Display for ErrorName {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
 
 /// Failure of a bridge call.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -271,49 +167,6 @@ mod tests {
 
     fn extra(pairs: Vec<(&str, Value<'static>)>) -> HashMap<String, OwnedValue> {
         pairs.into_iter().map(|(k, v)| (k.to_owned(), OwnedValue::try_from(v).unwrap())).collect()
-    }
-
-    // The 24 XC-21 names of src/core/error.cpp (all but `None`), in order.
-    #[test]
-    fn names_are_the_xc21_names() {
-        let names: Vec<&str> = ErrorName::ALL.iter().map(|n| n.as_str()).collect();
-        assert_eq!(
-            names,
-            [
-                "Canceled",
-                "NetworkUnreachable",
-                "Timeout",
-                "ServerIdentityUnknown",
-                "ServerIdentityChanged",
-                "AuthFailed",
-                "SecurityPolicy",
-                "PermissionDenied",
-                "NotFound",
-                "AlreadyExists",
-                "NoSpace",
-                "Unsupported",
-                "ProtocolError",
-                "Internal",
-                "ConnectionLost",
-                "NotADirectory",
-                "IsADirectory",
-                "DirectoryNotEmpty",
-                "InvalidName",
-                "ReadOnlyFilesystem",
-                "Locked",
-                "TooManyConnections",
-                "RateLimited",
-                "NotModified",
-            ]
-        );
-        for n in ErrorName::ALL {
-            assert_eq!(ErrorName::parse(n.as_str()), Some(n));
-            assert_eq!(ErrorName::from_dbus_name(n.dbus_name()), Some(n));
-            assert_eq!(n.dbus_name(), format!("{ERROR_PREFIX}{n}"));
-        }
-        assert_eq!(ErrorName::parse("None"), None);
-        assert_eq!(ErrorName::parse("notfound"), None);
-        assert_eq!(ErrorName::from_dbus_name("NotFound"), None);
     }
 
     #[test]

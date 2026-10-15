@@ -27,12 +27,12 @@ QVariantMap sftpParams()
     return params;
 }
 
-QVariantMap smbParams(const QVariant &requireEncryption)
+QVariantMap smbParams(const QString &profile = QString())
 {
     QVariantMap options;
     options.insert(QStringLiteral("share"), QStringLiteral("backup"));
-    if (requireEncryption.isValid())
-        options.insert(QStringLiteral("require_encryption"), requireEncryption);
+    if (!profile.isEmpty())
+        options.insert(QStringLiteral("security_profile"), profile);
     QVariantMap params;
     params.insert(QStringLiteral("provider"), QStringLiteral("smb"));
     params.insert(QStringLiteral("host"), QStringLiteral("nas"));
@@ -271,12 +271,12 @@ private slots:
         QVariantMap change;
         change.insert(QStringLiteral("host_key"), QStringLiteral("ssh-ed25519 NEW"));
         change.insert(QStringLiteral("public_key"), QString());
-        change.insert(QStringLiteral("require_encryption"), false);
+        change.insert(QStringLiteral("flag"), false);
         const QVariantMap merged = helpers.withOptions(sftpParams(), change);
         const QVariantMap options = merged.value(QStringLiteral("options")).toMap();
         QCOMPARE(options.value(QStringLiteral("host_key")).toString(), QStringLiteral("ssh-ed25519 NEW"));
         QVERIFY(!options.contains(QStringLiteral("public_key")));
-        QCOMPARE(options.value(QStringLiteral("require_encryption")), QVariant(false));
+        QCOMPARE(options.value(QStringLiteral("flag")), QVariant(false));
         QCOMPARE(options.value(QStringLiteral("auth_mode")).toString(), QStringLiteral("publickey"));
         QCOMPARE(merged.value(QStringLiteral("host")).toString(), QStringLiteral("nas.example"));
     }
@@ -328,10 +328,10 @@ private slots:
         QVariantMap services;
         services.insert(QStringLiteral("backup"), true);
         services.insert(QStringLiteral("backupsPath"), QStringLiteral("/Backups"));
-        const QVariantMap settings = helpers.creationSettings(smbParams(false), services);
+        const QVariantMap settings = helpers.creationSettings(smbParams(QStringLiteral("signed")), services);
         const QVariantMap global = settings.value(QStringLiteral("global")).toMap();
         QCOMPARE(global.value(QStringLiteral("netvfs/smb/share")).toString(), QStringLiteral("backup"));
-        QCOMPARE(global.value(QStringLiteral("netvfs/smb/require_encryption")), QVariant(false));
+        QCOMPARE(global.value(QStringLiteral("netvfs/smb/security_profile")), QVariant(QStringLiteral("signed")));
         QCOMPARE(global.value(QStringLiteral("netvfs/port")).toInt(), 0);
         QVERIFY(!global.contains(QStringLiteral("netvfs/smb/host_key")));
         QCOMPARE(settings.value(QStringLiteral("services")).toMap().value(QStringLiteral("smb-backup")).toMap()
@@ -411,6 +411,9 @@ private slots:
         QCOMPARE(identity.value(QStringLiteral("algorithm")).toString(), QStringLiteral("ssh-ed25519"));
         QCOMPARE(identity.value(QStringLiteral("fingerprint")).toString(), NetVfsUi::sha256Fingerprint(blob));
         QCOMPARE(identity.value(QStringLiteral("pin")).toString(), pin);
+        // XC-16: accepting stores the pin as host_key, nothing else.
+        QCOMPARE(identity.value(QStringLiteral("pinOptions")).toMap(), QVariantMap({ { QStringLiteral("host_key"), pin } }));
+        QCOMPARE(identity.size(), 4);
         QVERIFY(helpers.identityFromPin(QStringLiteral("garbage")).isEmpty());
         QVERIFY(helpers.identityFromPin(QString()).isEmpty());
 
@@ -448,66 +451,13 @@ private slots:
                  QStringLiteral("To compare, run this command on the server: ssh-keygen -lf /etc/ssh/") + file);
     }
 
-    void tlsIdentity()
-    {
-        // SPEC-v2 XA-5: what the identity dialog shows for a certificate.
-        ServerIdentity tls = ServerIdentity::fromTlsSpki(QByteArray("spki"));
-        tls.systemTrusted = false;
-        tls.problems = ServerIdentity::SelfSigned | ServerIdentity::Expired | ServerIdentity::HostnameMismatch;
-        tls.details.insert(QStringLiteral("subject"), QStringLiteral("CN=nas"));
-        tls.details.insert(QStringLiteral("issuer"), QStringLiteral("CN=nas"));
-        tls.details.insert(QStringLiteral("notBefore"), QDateTime(QDate(2025, 1, 2), QTime(3, 4, 5), Qt::UTC));
-        tls.details.insert(QStringLiteral("notAfter"), QDateTime());
-        tls.details.insert(QStringLiteral("sans"), QStringList({ QStringLiteral("nas"), QStringLiteral("nas.lan") }));
-        tls.details.insert(QStringLiteral("certSha256"), QStringLiteral("ab01ff"));
-        const QVariantMap map = NetVfsUi::identityToVariant(tls);
-        QCOMPARE(map.value(QStringLiteral("kind")).toString(), QStringLiteral("tls"));
-        QCOMPARE(map.value(QStringLiteral("fingerprint")).toString(), tls.fingerprint);
-        QCOMPARE(map.value(QStringLiteral("subject")).toString(), QStringLiteral("CN=nas"));
-        QCOMPARE(map.value(QStringLiteral("issuer")).toString(), QStringLiteral("CN=nas"));
-        QCOMPARE(map.value(QStringLiteral("notBefore")).toString(), QStringLiteral("2025-01-02T03:04:05Z"));
-        QCOMPARE(map.value(QStringLiteral("notAfter")).toString(), QString());
-        QCOMPARE(map.value(QStringLiteral("sans")).toStringList(), QStringList({ QStringLiteral("nas"), QStringLiteral("nas.lan") }));
-        QCOMPARE(map.value(QStringLiteral("certSha256")).toString(), QStringLiteral("AB:01:FF"));
-        QCOMPARE(map.value(QStringLiteral("systemTrusted")).toBool(), false);
-        QCOMPARE(map.value(QStringLiteral("problems")).toInt(), tls.problems);
-        QCOMPARE(map.value(QStringLiteral("problemTexts")).toStringList(),
-                 QStringList({ QStringLiteral("The certificate is self-signed: no certificate authority vouches for it."),
-                               QStringLiteral("The certificate has expired."),
-                               QStringLiteral("The certificate is issued for a different server name.") }));
-        // W-4: accepting stores the pin and whether the system trusted it.
-        const QVariantMap pin = map.value(QStringLiteral("pinOptions")).toMap();
-        QCOMPARE(pin.value(QStringLiteral("host_key")).toString(), tls.toPin());
-        QCOMPARE(pin.value(QStringLiteral("tls_verify_peer")), QVariant(false));
-        tls.systemTrusted = true;
-        QCOMPARE(NetVfsUi::identityToVariant(tls).value(QStringLiteral("pinOptions")).toMap()
-                         .value(QStringLiteral("tls_verify_peer")), QVariant(true));
-
-        QCOMPARE(NetVfsUi::tlsProblemTexts(0), QStringList());
-        QCOMPARE(NetVfsUi::tlsProblemTexts(ServerIdentity::UntrustedRoot | ServerIdentity::NotYetValid),
-                 QStringList({ QStringLiteral("The certificate is issued by an authority this device does not trust."),
-                               QStringLiteral("The certificate is not valid yet.") }));
-        QCOMPARE(NetVfsUi::colonHex(QStringLiteral("0a")), QStringLiteral("0A"));
-        QCOMPARE(NetVfsUi::colonHex(QString()), QString());
-
-        // A stored TLS pin shows as a certificate (no details).
-        const QVariantMap stored = helpers.identityFromPin(tls.toPin());
-        QCOMPARE(stored.value(QStringLiteral("kind")).toString(), QStringLiteral("tls"));
-        QCOMPARE(stored.value(QStringLiteral("fingerprint")).toString(), tls.fingerprint);
-        // SSH identities carry no TLS fields.
-        const QVariantMap ssh = helpers.identityFromPin(QStringLiteral("ssh-ed25519 AAAA"));
-        QCOMPARE(ssh.value(QStringLiteral("kind")).toString(), QStringLiteral("ssh"));
-        QVERIFY(!ssh.contains(QStringLiteral("problemTexts")));
-        QVERIFY(!ssh.value(QStringLiteral("pinOptions")).toMap().contains(QStringLiteral("tls_verify_peer")));
-    }
-
     void serviceRules()
     {
         // SPEC-v2 XA-4 in the UI: the backup switch follows the policy table.
-        QVERIFY(helpers.serviceAllowed(smbParams(true), QStringLiteral("backup")));
-        QVERIFY(helpers.serviceAllowed(smbParams(true), QStringLiteral("files")));
-        QVERIFY(helpers.serviceRefusalText(smbParams(true), QStringLiteral("backup")).isEmpty());
-        QVariantMap guest = helpers.withOptions(smbParams(true), { { QStringLiteral("security_profile"), QStringLiteral("guest") },
+        QVERIFY(helpers.serviceAllowed(smbParams(), QStringLiteral("backup")));
+        QVERIFY(helpers.serviceAllowed(smbParams(), QStringLiteral("files")));
+        QVERIFY(helpers.serviceRefusalText(smbParams(), QStringLiteral("backup")).isEmpty());
+        QVariantMap guest = helpers.withOptions(smbParams(), { { QStringLiteral("security_profile"), QStringLiteral("guest") },
                                                                     { QStringLiteral("allow_insecure"), true } });
         QVERIFY(!helpers.serviceAllowed(guest, QStringLiteral("backup")));
         QVERIFY(helpers.serviceAllowed(guest, QStringLiteral("files")));
@@ -516,26 +466,15 @@ private slots:
         QVERIFY(!helpers.serviceAllowed(guest, QStringLiteral("storage")));
         QVERIFY(!helpers.serviceRefusalText(guest, QStringLiteral("storage")).isEmpty());
         QVERIFY(helpers.secretOptional(guest));
-        QVERIFY(!helpers.secretOptional(smbParams(true)));
-        QCOMPARE(helpers.filesServiceName(QStringLiteral("webdav")), QStringLiteral("webdav-files"));
+        QVERIFY(!helpers.secretOptional(smbParams()));
+        QCOMPARE(helpers.filesServiceName(QStringLiteral("smb")), QStringLiteral("smb-files"));
         QCOMPARE(helpers.filesRootKey(), QStringLiteral("files_root"));
         QVERIFY(!helpers.isServiceInstalled(QStringLiteral("no-such-service")));
-    }
-
-    void serverPath()
-    {
-        QVERIFY(input.serverPathProblem(QStringLiteral("/")).isEmpty());
-        QVERIFY(input.serverPathProblem(QStringLiteral(" /remote.php/dav/files/me/ ")).isEmpty());
-        QVERIFY(!input.serverPathProblem(QStringLiteral("dav")).isEmpty());
-        QVERIFY(!input.serverPathProblem(QStringLiteral("/a/../b")).isEmpty());
-        QVERIFY(!input.serverPathProblem(QStringLiteral("/a\nb")).isEmpty());
-        QVERIFY(!input.serverPathProblem(QString()).isEmpty());
     }
 
     void labels()
     {
         QCOMPARE(helpers.authModeText(QStringLiteral("interactive")), QStringLiteral("Asked each time"));
-        QCOMPARE(helpers.authModeText(QStringLiteral("token")), QStringLiteral("Access token"));
         QCOMPARE(helpers.authModeText(QStringLiteral("publickey")), QStringLiteral("SSH key"));
         QCOMPARE(helpers.authModeText(QStringLiteral("password")), QStringLiteral("Password"));
         QCOMPARE(helpers.authModeText(QString()), QStringLiteral("Password"));
@@ -545,7 +484,7 @@ private slots:
     {
         // U-4: a specific text for every error.
         QSet<QString> texts;
-        const int last = static_cast<int>(Error::NotModified);
+        const int last = static_cast<int>(Error::RateLimited);
         for (int i = static_cast<int>(Error::Canceled); i <= last; ++i) {
             const QString text = NetVfsUi::userErrorText(static_cast<Error>(i));
             QVERIFY2(!text.isEmpty() && !text.startsWith(QStringLiteral("settings-accounts-")),
@@ -569,8 +508,8 @@ private slots:
         QCOMPARE(NetVfsUi::userErrorText(Error::AuthFailed, Activity::InstallKey),
                  QStringLiteral("The server did not accept the password, so the key could not be installed."));
         QCOMPARE(NetVfsUi::userErrorText(Error::Unsupported, Activity::KeyFile),
-                 QStringLiteral("This key type is not supported. Use an Ed25519, ECDSA or RSA (2048 bits or more) key "
-                                "without a certificate."));
+                 QStringLiteral("This key type is not supported. Use an Ed25519 or ECDSA key without a certificate, "
+                                "or generate a new key."));
         QCOMPARE(NetVfsUi::userErrorText(Error::AuthFailed, Activity::KeyFile), QStringLiteral("The passphrase is not correct."));
         QCOMPARE(NetVfsUi::userErrorText(Error::NotFound, Activity::KeyFile),
                  QStringLiteral("The file could not be read as a private key."));

@@ -85,7 +85,7 @@ pub struct LocationSpec {
     pub id: String,
     /// Account or ad hoc.
     pub kind: LocationKind,
-    /// The backend (`sftp`, `smb`, `webdav`, …).
+    /// The backend (`sftp`, `smb`, …).
     pub provider: String,
     /// The display name.
     pub name: String,

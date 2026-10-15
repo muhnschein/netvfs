@@ -8,11 +8,9 @@
 #include "probe.h"
 #include "prompter.h"
 #include "secure.h"
-#include "shellexec.h"
 #include "sshkeys.h"
 #include "types.h"
 
-#include <QtCore/QCryptographicHash>
 #include <QtCore/QScopedPointer>
 #include <QtTest/QtTest>
 
@@ -110,22 +108,6 @@ public:
     void disconnect() override {}
 };
 
-// MinimalBackend with the ShellExec interface (XS-9).
-class ShellBackend : public MinimalBackend, public ShellExec
-{
-public:
-    bool reported = false;
-    Capabilities capabilities() const override
-    {
-        Capabilities caps;
-        if (reported)
-            caps.flags << Capability::ShellExec;
-        return caps;
-    }
-    Result exec(const QStringList &, const ExecOptions &, ExecResult *) override { return Result(); }
-    Result find(const QString &, const QString &, int, QStringList *) override { return Result(); }
-};
-
 } // namespace
 
 class TestCore : public QObject
@@ -147,7 +129,7 @@ private slots:
 
     void errorNames()
     {
-        for (int i = 0; i <= static_cast<int>(Error::NotModified); ++i) {
+        for (int i = 0; i <= static_cast<int>(Error::RateLimited); ++i) {
             const Error e = static_cast<Error>(i);
             QCOMPARE(errorFromName(errorName(e)), e);
         }
@@ -173,7 +155,6 @@ private slots:
         QTest::newRow("Locked") << static_cast<int>(Error::Locked) << "Locked";
         QTest::newRow("TooManyConnections") << static_cast<int>(Error::TooManyConnections) << "TooManyConnections";
         QTest::newRow("RateLimited") << static_cast<int>(Error::RateLimited) << "RateLimited";
-        QTest::newRow("NotModified") << static_cast<int>(Error::NotModified) << "NotModified";
         QTest::newRow("Internal") << static_cast<int>(Error::Internal) << "Internal";
         QTest::newRow("None") << static_cast<int>(Error::None) << "None";
     }
@@ -334,7 +315,10 @@ private slots:
     {
         QFETCH(QString, path);
         QFETCH(bool, ok);
-        QCOMPARE(Paths::checkWindowsPath(path).ok(), ok);
+        const Result r = Paths::checkWindowsPath(path);
+        QCOMPARE(r.ok(), ok);
+        if (!ok)
+            QCOMPARE(r.error(), Error::InvalidName);
     }
 
     void pins()
@@ -350,63 +334,28 @@ private slots:
         QVERIFY(ed25519('a') != ed25519('b'));
     }
 
-    // XC-16: SSH pins keep their format; TLS pins carry the SPKI.
+    // XC-16: SSH pins keep their format.
     void pinsV2()
     {
         const ServerIdentity ssh = ServerIdentity::fromPin(ed25519('k').toPin());
         QCOMPARE(ssh.kind, ServerIdentity::Kind::SshHostKey);
         QCOMPARE(ssh.toPin(), QStringLiteral("ssh-ed25519 ") + QString::fromLatin1(QByteArray(51, 'k').toBase64()));
 
-        const QByteArray spki = QByteArrayLiteral("\x30\x59\x30\x13 not really DER");
-        const ServerIdentity tls = ServerIdentity::fromTlsSpki(spki);
-        QCOMPARE(tls.kind, ServerIdentity::Kind::TlsCertificate);
-        QCOMPARE(tls.algorithm, QStringLiteral("tls-spki-sha256"));
-        QCOMPARE(tls.publicKey, spki);
-        QCOMPARE(tls.fingerprint,
-                 QString::fromLatin1(QCryptographicHash::hash(spki, QCryptographicHash::Sha256).toBase64()));
-        QVERIFY(!tls.systemTrusted);
-        QCOMPARE(tls.toPin(), QStringLiteral("tls-spki-sha256 ") + QString::fromLatin1(spki.toBase64()));
-
-        const ServerIdentity back = ServerIdentity::fromPin(tls.toPin());
-        QCOMPARE(back.kind, ServerIdentity::Kind::TlsCertificate);
-        QCOMPARE(back, tls);
-        QCOMPARE(back.fingerprint, tls.fingerprint);
-        QVERIFY(ServerIdentity::fromTlsSpki(QByteArray()).isEmpty());
-        QCOMPARE(ServerIdentity::fromTlsSpki(QByteArray()).kind, ServerIdentity::Kind::None);
-
         // The same key bytes under another algorithm are another identity.
-        ServerIdentity sshWithSameBytes;
-        sshWithSameBytes.algorithm = QStringLiteral("ssh-ed25519");
-        sshWithSameBytes.publicKey = spki;
-        QVERIFY(sshWithSameBytes != tls);
+        ServerIdentity sameBytes = ssh;
+        sameBytes.algorithm = QStringLiteral("ecdsa-sha2-nistp256");
+        QVERIFY(sameBytes != ssh);
     }
 
-    // XC-16 amends S-7 for TLS.
-    void identityPolicyTls()
+    void identityMessagesNameTheKey()
     {
-        ServerIdentity seen = ServerIdentity::fromTlsSpki(QByteArrayLiteral("spki-one"));
-        const ServerIdentity other = ServerIdentity::fromTlsSpki(QByteArrayLiteral("spki-two"));
-
-        seen.systemTrusted = true;
-        QVERIFY(checkServerIdentity(seen, QString()).ok());                 // no prompt
-        QVERIFY(checkServerIdentity(seen, seen.toPin()).ok());
-        QCOMPARE(checkServerIdentity(seen, other.toPin()).error(), Error::ServerIdentityChanged);
-        QCOMPARE(checkServerIdentity(seen, ed25519('k').toPin()).error(), Error::ServerIdentityChanged);
-
-        seen.systemTrusted = false;
+        const ServerIdentity seen = ed25519('k');
         const Result unknown = checkServerIdentity(seen, QString());
         QCOMPARE(unknown.error(), Error::ServerIdentityUnknown);
         QVERIFY(unknown.message().contains(seen.fingerprint));
-        QVERIFY(checkServerIdentity(seen, seen.toPin()).ok());              // the pin decides
-        const Result changed = checkServerIdentity(seen, other.toPin());
+        const Result changed = checkServerIdentity(seen, ed25519('x').toPin());
         QCOMPARE(changed.error(), Error::ServerIdentityChanged);
         QVERIFY(changed.message().contains(seen.fingerprint));
-
-        // SSH is never accepted without a pin, whatever systemTrusted says.
-        ServerIdentity ssh = ed25519('k');
-        ssh.kind = ServerIdentity::Kind::SshHostKey;
-        ssh.systemTrusted = true;
-        QCOMPARE(checkServerIdentity(ssh, QString()).error(), Error::ServerIdentityUnknown);
     }
 
     void identityPolicy()
@@ -620,14 +569,6 @@ private slots:
         QVERIFY(!BackendLoader::isAvailable(QStringLiteral("bogus")));
         QTest::ignoreMessage(QtWarningMsg, QRegularExpression(QStringLiteral("reports provider")));
         QVERIFY(!BackendLoader::isAvailable(QStringLiteral("other")));
-        // XC-1: a plugin declaring another interface version is not loaded.
-        QVERIFY(QFile::copy(QStringLiteral(NETVFS_TEST_FAKE_BACKEND_DIR "/libnetvfs-oldiid.so"),
-                            dir.filePath(QStringLiteral("libnetvfs-oldiid.so"))));
-        QTest::ignoreMessage(QtWarningMsg,
-                             QRegularExpression(QStringLiteral("BackendFactory/1.0.*BackendFactory/2.0 is expected")));
-        QVERIFY(!BackendLoader::isAvailable(QStringLiteral("oldiid")));
-        QTest::ignoreMessage(QtWarningMsg, QRegularExpression(QStringLiteral("BackendFactory/2.0 is expected")));
-        QVERIFY(!BackendLoader::create(QStringLiteral("oldiid")));
         qunsetenv("NETVFS_BACKEND_PATH");
         QCOMPARE(BackendLoader::searchPaths().size(), 1);
     }
@@ -977,24 +918,6 @@ private slots:
         QVERIFY(prompter.answer(QString(), QString(), { AuthPrompt() }, &answers));
         answerer.join();
         QCOMPARE(answers, QVector<QByteArray>({ QByteArray("ok") }));
-    }
-
-    void shellExecOf()
-    {
-        // XS-9: the interface only when the capability is reported.
-        MinimalBackend plain;
-        QVERIFY(!ShellExec::of(&plain));
-        QVERIFY(!ShellExec::of(nullptr));
-        ShellBackend shell;
-        QVERIFY(!ShellExec::of(&shell));
-        shell.reported = true;
-        QCOMPARE(ShellExec::of(&shell), static_cast<ShellExec *>(&shell));
-        ExecOptions options;
-        QCOMPARE(options.maxOutput, qint64(1) << 20);
-        QCOMPARE(options.timeoutMs, -1);
-        const ExecResult result;
-        QCOMPARE(result.exitStatus, -1);
-        QVERIFY(!result.truncated);
     }
 };
 

@@ -3,7 +3,7 @@
     "consent": "granted",
     "files": { "v.bin": "0123456789", "tree/a": "a", "tree/sub/b": "b" },
     "steps": [
-        { "call": "Hello", "sig": "us", "args": [1, "contract"], "reply": [1, "*", "*"] },
+        { "call": "Hello", "sig": "s", "args": ["contract"], "reply": ["*"] },
         { "call": "OpenRead", "sig": "says", "args": ["account:1", { "bytes": "v.bin" }, "stream"], "reply": ["$h", 10] },
         { "call": "Read", "sig": "uxu", "args": ["$h", 3, 4], "reply": [{ "bytes": "3456" }] },
         { "call": "ReadAhead", "sig": "uxx", "args": ["$h", 4, 1024], "reply": [] },

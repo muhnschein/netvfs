@@ -113,7 +113,7 @@ pub struct WireLocation {
     pub info: HashMap<String, OwnedValue>,
 }
 
-/// `(sssqay)`: a discovered server.
+/// `(sssq)`: a discovered server.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 pub struct WireNearby {
     /// Announced name.
@@ -124,8 +124,6 @@ pub struct WireNearby {
     pub host: String,
     /// Port, 0 for the provider's default.
     pub port: u16,
-    /// Path on the server (protocol bytes).
-    pub path: Vec<u8>,
 }
 
 /// `(ay(ayyyxxxxixxssqays))` of `WalkBatch`.
@@ -277,7 +275,7 @@ mod tests {
         assert_eq!(WireEntry::SIGNATURE.to_string(), "(ayyyxxxxixxssqays)");
         assert_eq!(WireCapabilities::SIGNATURE.to_string(), "(asasx)");
         assert_eq!(WireLocation::SIGNATURE.to_string(), "(sssa{sv})");
-        assert_eq!(WireNearby::SIGNATURE.to_string(), "(sssqay)");
+        assert_eq!(WireNearby::SIGNATURE.to_string(), "(sssq)");
         assert_eq!(WireWalkItem::SIGNATURE.to_string(), "(ay(ayyyxxxxixxssqays))");
     }
 

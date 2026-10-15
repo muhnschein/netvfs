@@ -9,9 +9,8 @@ namespace NetVfs {
 // SPEC-sftp S-7, amended by SPEC-v2 XC-16: compare the identity seen during
 // connect() with the pin.
 //  - protocol without identity and no pin: success
-//  - TLS, no pin, systemTrusted: success (no prompt)
 //  - no pin: ServerIdentityUnknown (caller asks the user)
-//  - equal (TLS: same SPKI, regardless of systemTrusted): success
+//  - equal: success
 //  - otherwise: ServerIdentityChanged
 NETVFS_EXPORT Result checkServerIdentity(const ServerIdentity &seen, const QString &pin);
 

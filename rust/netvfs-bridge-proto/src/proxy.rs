@@ -17,8 +17,8 @@ use zbus::zvariant::Fd;
 /// [`crate::Connection::signals`], in order.
 pub trait Bridge1 {
     // Session
-    /// `Hello(protocol, client)` → (protocol, bridge version, features). The first call.
-    fn hello(&self, protocol: u32, client: &str) -> zbus::Result<(u32, String, Vec<String>)>;
+    /// `Hello(client)` → bridge version. The first call.
+    fn hello(&self, client: &str) -> zbus::Result<String>;
     /// `GetConsent` → `granted`, `denied` or `unknown`.
     fn get_consent(&self) -> zbus::Result<String>;
     /// `RequestConsent`: asks the user again.

@@ -18,10 +18,11 @@ budget)".
 | --- | --- |
 | `fuzz_names.cpp` | `Names::encode(Names::decode(x)) == x` for every byte string; UTF-16 input never crashes |
 | `fuzz_url.cpp` | `Url::parse` never crashes; what it accepts survives parse, format, parse unchanged |
-| `fuzz_smb_shares.cpp` | the SMB share helper's output parser (XM-7) never crashes; what it accepts obeys the limits, holds only valid unique share names and survives the helper's writers; the request codec is canonical |
 
-netvfs-bridge is Rust since 0.5: its argument validation, paths and FFI marshalling are fuzzed
-by the cargo-fuzz targets in `rust/fuzz` (`tools/ci/rust-fuzz.sh`, doc/RUST.md).
+netvfs-bridge and the SMB backend are Rust: the bridge's argument validation, paths and FFI
+marshalling and the SMB codecs (responses, TRANSFORM_HEADER, NTLM challenge, SPNEGO, the srvsvc
+share list) are fuzzed by the cargo-fuzz targets in `rust/fuzz` (`tools/ci/rust-fuzz.sh`,
+doc/RUST.md).
 
 ## Adding a harness: one file
 
@@ -29,9 +30,9 @@ by the cargo-fuzz targets in `rust/fuzz` (`tools/ci/rust-fuzz.sh`, doc/RUST.md).
    Make a violated property crash (`__builtin_trap()`); never print or exit.
 2. Name what it needs in comment directives near the top (all optional):
 
-       // fuzz-sources: src/core/names.cpp src/backends/webdav/multistatus.cpp
-       // fuzz-includes: src/backends/webdav
-       // fuzz-qt: Core Xml
+       // fuzz-sources: src/core/url.cpp src/core/names.cpp src/core/paths.cpp
+       // fuzz-includes: src/backends/local
+       // fuzz-qt: Core
 
    `fuzz-sources` are repository-relative `.cpp` files compiled into the harness (compile only what
    the parser needs, not whole plugins); `src/core` is always on the include path; `fuzz-qt` lists Qt

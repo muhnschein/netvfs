@@ -64,7 +64,7 @@ QtObject {
     }
 
     // params: connection parameters with the accepted pin options;
-    // secret: password, token, "netvfs-key-v1:..." (SshKeyTool.secret()), or
+    // secret: password, "netvfs-key-v1:..." (SshKeyTool.secret()), or
     // "" for accounts without a secret (XA-7: interactive, smb guest);
     // services: { backup: bool, files: bool, backupsPath, filesRoot }.
     function create(params, secret, services, name) {

@@ -120,13 +120,6 @@ NETVFS_EXPORT QByteArray joinName(const QList<QByteArray> &labels);
 // ASCII lower case; DNS compares names case-insensitively (RFC 1035 2.3.3).
 NETVFS_EXPORT QByteArray canonicalName(const QByteArray &name);
 
-// TXT strings "key=value" (RFC 6763 section 6): value of `key` (compared case
-// insensitively), or `fallback` if absent. A key without '=' yields an empty
-// value. The first occurrence wins.
-NETVFS_EXPORT QByteArray txtValue(const QList<QByteArray> &txt, const QByteArray &key,
-                                  const QByteArray &fallback = QByteArray());
-NETVFS_EXPORT bool txtHasKey(const QList<QByteArray> &txt, const QByteArray &key);
-
 } // namespace NetVfs::Dns
 
 #endif

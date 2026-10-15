@@ -77,27 +77,6 @@
     "test": "tests/packaging/test_packaging.py"
   },
   {
-    "name": "XP-3 DCE/RPC strings not checked",
-    "file": "tools/ci/check-noshareenum.sh",
-    "search": "strings_pattern='DCERPC|srvsvc|NetrShareEnum'",
-    "replace": "strings_pattern='NetrShareEnum'",
-    "test": "tests/packaging/test_packaging.py"
-  },
-  {
-    "name": "XP-3 symbols not checked",
-    "file": "tools/ci/check-noshareenum.sh",
-    "search": "    found=$(readelf -W -s \"$file\" 2>/dev/null",
-    "replace": "    found=$(readelf -W -S \"$file\" 2>/dev/null",
-    "test": "tests/packaging/test_packaging.py"
-  },
-  {
-    "name": "XP-3 non-ELF input accepted",
-    "file": "tools/ci/check-noshareenum.sh",
-    "search": "        echo \"$file: not an ELF file\"\n        return 1",
-    "replace": "        echo \"$file: not an ELF file\"\n        return 0",
-    "test": "tests/packaging/test_packaging.py"
-  },
-  {
     "name": "XB-2 C ABI: a second export accepted",
     "file": "tools/ci/check-ffi-lib.sh",
     "search": "[ \"$exports\" = nvb_ffi_get ] || fail",

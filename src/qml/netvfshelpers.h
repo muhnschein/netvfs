@@ -11,20 +11,14 @@
 namespace NetVfsUi {
 
 // Connection parameters as passed from QML: { provider, host, port, username,
-// options: { host_key, auth_mode, share, domain, require_encryption, ... } }.
+// options: { host_key, auth_mode, share, domain, security_profile, ... } }.
 NetVfs::ConnectionParams paramsFromVariant(const QVariantMap &map);
 QVariantMap paramsToVariant(const NetVfs::ConnectionParams &params);
 
 // Server identity as exposed to QML; empty map for protocols without one:
-// { kind: "ssh"|"tls", algorithm, fingerprint, pin, pinOptions: {host_key[,
-// tls_verify_peer]} } and for TLS also { subject, issuer, notBefore,
-// notAfter (ISO 8601 UTC), sans, certSha256 ("AB:CD:..."), systemTrusted,
-// problems, problemTexts } (SPEC-v2 XA-5, XC-16).
+// { algorithm, fingerprint, pin, pinOptions: {host_key} } (SPEC-v2 XA-5,
+// XC-16).
 QVariantMap identityToVariant(const NetVfs::ServerIdentity &identity);
-// Translated sentences for ServerIdentity::Problem bits, in bit order.
-QStringList tlsProblemTexts(int problems);
-// "ab12cd" -> "AB:12:CD".
-QString colonHex(const QString &hex);
 
 // "SHA256:<unpadded base64>" of a raw key blob, as printed by ssh-keygen -lf.
 QString sha256Fingerprint(const QByteArray &publicKeyBlob);
@@ -54,9 +48,6 @@ public:
     Q_INVOKABLE int portValue(const QString &port) const;
     Q_INVOKABLE QString userNameProblem(const QString &userName) const;
     Q_INVOKABLE QString shareProblem(const QString &share) const;
-    // A path on the server such as the WebDAV base path: absolute, no "."
-    // or ".." components.
-    Q_INVOKABLE QString serverPathProblem(const QString &path) const;
     Q_INVOKABLE QString backupsPathProblem(const QString &provider, const QString &path) const;
     Q_INVOKABLE QString cleanBackupsPath(const QString &provider, const QString &path) const;
 };

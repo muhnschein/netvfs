@@ -3,7 +3,7 @@
     "consent": "granted",
     "files": { "a.txt": "a" },
     "steps": [
-        { "call": "Hello", "sig": "us", "args": [1, "contract"], "reply": [1, "*", "*"] },
+        { "call": "Hello", "sig": "s", "args": ["contract"], "reply": ["*"] },
         { "call": "Stat", "sig": "saybs", "args": ["account:1", { "bytes": "missing" }, true, ""],
           "error": "org.netvfs.Error.NotFound" },
         { "call": "Stat", "sig": "saybs", "args": ["account:1", { "bytes": "a/../b" }, true, ""],

@@ -947,7 +947,7 @@ pub(crate) mod tests {
         assert_eq!(file.value("Consent/other"), None);
         assert_eq!(file.string_list("Consent/l"), ["a", "b"]);
         assert_eq!(file.string_list("Consent/lautta"), ["granted"]);
-        assert!(file.string_list("nothing").is_empty());
+        assert_eq!(file.string_list("nothing").len(), 0);
         assert_eq!(file.as_bytes(), b"[Consent]\nlautta=granted\nl=a, b\n");
     }
 
@@ -970,10 +970,10 @@ pub(crate) mod tests {
         );
         assert_eq!(IniValue::List(vec![s("a")]).to_string_lossy(), "");
         assert_eq!(IniValue::ByteArray(b"ok\0more".to_vec()).to_string_lossy(), "ok");
-        assert!(IniValue::ByteArray(b"ok".to_vec()).to_qstring_list().is_empty());
+        assert_eq!(IniValue::ByteArray(b"ok".to_vec()).to_qstring_list().len(), 0);
         for v in [IniValue::Invalid, IniValue::Other] {
             assert_eq!(v.to_string_lossy(), "");
-            assert!(v.to_qstring_list().is_empty());
+            assert_eq!(v.to_qstring_list().len(), 0);
         }
         assert_eq!(string_value(utf16("@ByteArray(\u{20ac}x)")), IniValue::ByteArray(b"?x".to_vec()));
         assert_eq!(string_value(utf16("@Foo(x)")), s("@Foo(x)"));

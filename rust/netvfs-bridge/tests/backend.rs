@@ -23,7 +23,7 @@
 use netvfs_bridge::Status;
 use netvfs_bridge::ffi::fake::{self, Fake};
 use netvfs_bridge::ffi::{Conn, Ffi, Handle, Params, Value};
-use netvfs_bridge::jobs::fd::{FdAccess, FdInfo, check_transfer_fd, check_upload_length};
+use netvfs_bridge::jobs::fd::{FdAccess, FdInfo, check_transfer_fd};
 use netvfs_bridge::jobs::{batch, remove, transfer, walk};
 use netvfs_bridge::locations::book::LocationBook;
 use netvfs_bridge::locations::connector::{
@@ -553,7 +553,7 @@ fn ad_hoc_identity_question(env: &Env) {
     assert_eq!(*kind, IDENTITY_UNKNOWN);
     assert_eq!(text(&details["location"]), declined);
     assert_eq!(text(&details["host"]), "fake.example");
-    assert_eq!(text(&details["kind"]), "ssh");
+    assert_eq!(text(&details["provider"]), "fake");
     assert!(text(&details["fingerprint"]).starts_with("SHA256:"));
     assert!(rig.pins.map.lock().unwrap().is_empty());
     rig.book.abandon_ad_hoc(&declined);
@@ -567,14 +567,14 @@ fn ad_hoc_identity_question(env: &Env) {
     assert_eq!(rig.pins.pin(host_key), pin_for(b"k1"));
     rig.book.disconnect(&accepted);
     connect(&mut rig, &accepted).unwrap();
-    assert!(rig.core.asks().is_empty());
+    assert_eq!(rig.core.asks().len(), 0);
 
     // The server's key changed: no question, ServerIdentityChanged.
     f.set_identity_pin(&pin_for(b"k2"));
     rig.book.disconnect(&accepted);
     let failed = connect(&mut rig, &accepted);
     assert_eq!(name_of(&failed), Some(ErrorName::ServerIdentityChanged));
-    assert!(rig.core.asks().is_empty());
+    assert_eq!(rig.core.asks().len(), 0);
 
     // No answer at all (the session went away): declined as well.
     rig.pins.map.lock().unwrap().clear();
@@ -943,14 +943,13 @@ fn transfers_of_regular_files(env: &Env) {
     std::fs::write(&path, &data).unwrap();
     let (fd, info) = checked(File::open(&path).unwrap().into(), FdAccess::Read);
     assert_eq!(info, FdInfo { fifo: false, size: 300_000 });
-    assert!(check_upload_length(&info, -1, "fake").is_ok());
     let opts = TransferOpts { offset: 1000, mtime_ms: Some(1_600_000_000_000), ..TransferOpts::default() };
     let job = transfer::Transfer { fd, info, path: b"/up".to_vec(), opts, upload: true };
     let (outcome, updates) = transfer_job(&mut rig, &id, job);
     outcome.result.as_ref().unwrap();
     assert_eq!(bytes_of(&outcome), 299_000);
     assert_eq!(f.file_data(b"/up").unwrap(), data[1000..]);
-    assert!(!updates.is_empty());
+    assert_ne!(updates.len(), 0);
     // Create refuses an existing file; truncate replaces with 10 bytes.
     let (fd, info) = checked(File::open(&path).unwrap().into(), FdAccess::Read);
     let job =
@@ -1018,8 +1017,6 @@ fn transfers_through_pipes(env: &Env) {
     let (r, mut w) = std::io::pipe().unwrap();
     let (fd, info) = checked(r.into(), FdAccess::Read);
     assert_eq!(info, FdInfo { fifo: true, size: -1 });
-    assert!(check_upload_length(&info, -1, "fake").is_ok());
-    assert_eq!(check_upload_length(&info, -1, "webdav").unwrap_err().name, ErrorName::Unsupported);
     let writer = {
         let data = data.clone();
         thread::spawn(move || w.write_all(&data).unwrap())

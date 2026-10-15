@@ -14,7 +14,7 @@
 // Output formatting of netvfs-cli (SPEC-v2 XC-CLI). Names are rendered with
 // Names::display() in text output; JSON carries the display name and, when
 // the name holds escaped bytes (XC-4), "nameBytes" with the raw bytes in
-// base64. Text coming from servers (certificates, service names) is stripped
+// base64. Text coming from servers (names, discovered services) is stripped
 // of control characters before it reaches the terminal.
 namespace NetVfs::Cli {
 
@@ -44,8 +44,7 @@ QString jsonText(const QJsonArray &array);
 QStringList capabilitiesLines(const Capabilities &capabilities);
 QJsonObject capabilitiesJson(const Capabilities &capabilities);
 
-// TLS and SSH identity as printed by `identify`; the first two lines are the
-// fingerprint and the pin for every kind.
+// The identity as printed by `identify`: the fingerprint and the pin.
 QStringList identityLines(const ServerIdentity &identity);
 
 // `discover`: services of one endpoint (provider, host, port) merged, so a

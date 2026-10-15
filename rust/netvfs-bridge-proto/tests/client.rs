@@ -8,9 +8,7 @@
 
 use futures_lite::StreamExt as _;
 use netvfs_bridge_proto::fake::{Failure, FakeBridge, RecordedAnswer};
-use netvfs_bridge_proto::{
-    BridgeError, OptsBuilder, PROTOCOL_VERSION, Signal, SignalStream, Zeroizing, connect,
-};
+use netvfs_bridge_proto::{BridgeError, OptsBuilder, Signal, SignalStream, Zeroizing, connect};
 use std::time::Duration;
 
 /// A fresh folder below the temporary one, removed on drop.
@@ -37,7 +35,7 @@ async fn fake_with_account() -> FakeBridge {
 }
 
 async fn hello(conn: &netvfs_bridge_proto::Connection) {
-    conn.proxy().hello(PROTOCOL_VERSION, "test").await.unwrap();
+    conn.proxy().hello("test").await.unwrap();
 }
 
 /// The next signal; fails after five seconds instead of waiting forever.
@@ -56,10 +54,8 @@ async fn connects_to_a_socket_path_without_a_bus() {
     let fake = fake_with_account().await;
     let _listener = fake.listen(&path).unwrap();
     let conn = connect(&path).await.unwrap();
-    let (protocol, version, features) = conn.proxy().hello(PROTOCOL_VERSION, "test").await.unwrap();
-    assert_eq!(protocol, 1);
+    let version = conn.proxy().hello("test").await.unwrap();
     assert_eq!(version, "0.2.0-fake");
-    assert_eq!(features, vec!["error-details".to_owned()]);
     let locations = conn.proxy().list_locations().await.unwrap();
     assert_eq!(locations.len(), 1);
     assert_eq!((locations[0].id.as_str(), locations[0].provider.as_str()), ("account:1", "fake"));

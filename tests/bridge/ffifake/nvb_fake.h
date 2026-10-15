@@ -21,13 +21,9 @@
 extern "C" {
 #endif
 
-#define NVB_FAKE_VERSION 1u
 #define NVB_FAKE_ENTRY "nvb_fake_get"
 
-typedef struct nvb_fake_v1 {
-    uint32_t version;          /* NVB_FAKE_VERSION */
-    uint32_t struct_size;      /* sizeof(nvb_fake_v1) in the library */
-
+typedef struct nvb_fake {
     void (*reset)(void);       /* FakeServer::reset(): empty, user "user", secret "secret" */
     void (*add_file)(nvb_bytes path, nvb_bytes data);        /* with missing parents */
     void (*add_dir)(nvb_bytes path, int32_t mode);           /* mode -1: 0755 */
@@ -47,14 +43,14 @@ typedef struct nvb_fake_v1 {
     int32_t (*log_count)(nvb_bytes prefix);
     int32_t (*live_backends)(void);          /* FakeBackend instances alive */
     void (*free)(void *p);
-} nvb_fake_v1;
+} nvb_fake;
 
-typedef const nvb_fake_v1 *(*nvb_fake_get_fn)(uint32_t version);
+typedef const nvb_fake *(*nvb_fake_get_fn)(void);
 
 #if defined(__GNUC__)
 __attribute__((visibility("default")))
 #endif
-const nvb_fake_v1 *nvb_fake_get(uint32_t version);
+const nvb_fake *nvb_fake_get(void);
 
 #ifdef __cplusplus
 }

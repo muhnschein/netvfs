@@ -6,12 +6,12 @@
 
 use super::{
     AccountAccess, AdHocIdentity, Answer, Arc, AskId, Asker, AtomicBool, Attention, Duration, ErrorName,
-    EstablishError, HashMap, IDENTITY_UNKNOWN, Identity, IdentityKind, Instant, KEYBOARD_INTERACTIVE,
-    LocationSpec, Ordering, OwnedValue, Params, Phase, PinStore, PromptRequest, QUESTION_TIMEOUT, Status,
-    TaskContext, Value, Verdict, WAIT_SLICE, Waited, WorkerEvent, WorkerEvents, Zeroizing, account_pin,
-    attention_for, identity_details, mpsc, prompt_answers, prompt_details, text, wait_for, zvariant,
+    EstablishError, HashMap, IDENTITY_UNKNOWN, Identity, Instant, KEYBOARD_INTERACTIVE, LocationSpec,
+    Ordering, OwnedValue, Params, Phase, PinStore, PromptRequest, QUESTION_TIMEOUT, Status, TaskContext,
+    Value, Verdict, WAIT_SLICE, Waited, WorkerEvent, WorkerEvents, Zeroizing, account_pin, attention_for,
+    identity_details, mpsc, prompt_answers, prompt_details, text, wait_for, zvariant,
 };
-use crate::ffi::Prompt;
+use crate::ffi::{IdentityKind, Prompt};
 use crate::server::SessionId;
 use std::sync::Mutex;
 use std::thread;
@@ -165,53 +165,30 @@ fn spec() -> LocationSpec {
     LocationSpec::ad_hoc("adhoc:3", "n", params, Vec::new(), None)
 }
 
-fn identity(kind: IdentityKind) -> Identity {
-    let mut details = crate::ffi::ValueMap::new();
-    details.insert("notAfter".into(), Value::Str("2030-01-01T00:00:00Z".into()));
-    details.insert("depth".into(), Value::Int(2));
-    details.insert("selfSigned".into(), Value::Bool(true));
-    details.insert("der".into(), Value::Bytes(vec![1, 2]));
-    details.insert("names".into(), Value::StrList(vec!["a".into(), "b".into()]));
-    details.insert("host".into(), Value::Str("from details".into()));
+fn identity() -> Identity {
     Identity {
-        kind,
+        kind: IdentityKind::Ssh,
         algorithm: "ssh-ed25519".into(),
         public_key: vec![9, 8, 7],
         fingerprint: "SHA256:abc".into(),
         pin: "ssh-ed25519 AAAA".into(),
-        system_trusted: true,
-        problems: 5,
-        details,
     }
 }
 
 #[test]
 fn identity_details_as_the_question_carries_them() {
-    let d = identity_details(&identity(IdentityKind::Ssh), &spec());
+    let d = identity_details(&identity(), &spec());
     assert_eq!(string(&d, "location"), "adhoc:3");
     assert_eq!(string(&d, "provider"), "sftp");
-    assert_eq!(string(&d, "kind"), "ssh");
+    assert_eq!(string(&d, "host"), "Srv");
     assert_eq!(string(&d, "algorithm"), "ssh-ed25519");
     assert_eq!(string(&d, "fingerprint"), "SHA256:abc");
     assert_eq!(i32::try_from(&d["port"]).unwrap(), 2222);
     assert_eq!(Vec::<u8>::try_from(d["publicKey"].try_clone().unwrap()).unwrap(), [9, 8, 7]);
-    assert!(bool::try_from(&d["systemTrusted"]).unwrap());
-    assert_eq!(i32::try_from(&d["problems"]).unwrap(), 5);
-    // The backend's details, typed, after the fixed ones (and over them).
-    assert_eq!(string(&d, "host"), "from details");
-    assert_eq!(string(&d, "notAfter"), "2030-01-01T00:00:00Z");
-    assert_eq!(i64::try_from(&d["depth"]).unwrap(), 2);
-    assert!(bool::try_from(&d["selfSigned"]).unwrap());
-    assert_eq!(sig(&d["der"]), "ay");
-    assert_eq!(sig(&d["names"]), "as");
     assert_eq!(sig(&d["port"]), "i");
-    assert_eq!(sig(&d["depth"]), "x");
-    assert_eq!(d.len(), 15);
-    let tls = identity_details(&identity(IdentityKind::Tls), &spec());
-    assert_eq!(string(&tls, "kind"), "tls");
+    assert_eq!(d.len(), 7);
     let none = identity_details(&Identity::default(), &spec());
-    assert_eq!(string(&none, "kind"), "ssh");
-    assert_eq!(string(&none, "host"), "Srv");
+    assert_eq!(string(&none, "fingerprint"), "");
 }
 
 fn request(n: usize) -> PromptRequest {
@@ -329,7 +306,7 @@ fn ad_hoc_identity_verdicts() {
     let pins = Pins::default();
     let t = task();
     let spec = spec();
-    let seen = identity(IdentityKind::Ssh);
+    let seen = identity();
     let unknown = Status::new(ErrorName::ServerIdentityUnknown, "unknown");
     let changed = Status::new(ErrorName::ServerIdentityChanged, "changed");
     let mut judge =

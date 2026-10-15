@@ -177,12 +177,9 @@ impl FakeBridge {
 
     // ---- bridge identity ------------------------------------------------
 
-    /// What `Hello` answers (protocol version, bridge version).
-    pub fn set_hello(&self, protocol: u32, version: &str) {
-        self.shared.with(|s| {
-            s.protocol = protocol;
-            version.clone_into(&mut s.bridge_version);
-        });
+    /// What `Hello` answers (the bridge version).
+    pub fn set_hello(&self, version: &str) {
+        self.shared.with(|s| version.clone_into(&mut s.bridge_version));
     }
 
     // ---- consent --------------------------------------------------------

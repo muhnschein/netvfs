@@ -1,0 +1,31 @@
+[package]
+name = "netvfs-sftp"
+description = "The SFTP backend of netvfs: an SSH session over russh with hardened algorithm lists, sign-in, key tools, and an own SFTP v3 client"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+netvfs-vfs = { path = "../netvfs-vfs" }
+# The SSH transport (doc/RUST.md "netvfs-sftp"). Exact version: russh pins
+# pre-releases of ssh-key and rsa, so it moves as one unit. `ring` is the
+# crypto provider (no aws-lc, no C build beyond ring's); `rsa` only to
+# verify rsa-sha2 host signatures (RSA user keys are refused).
+russh = { version = "=0.64.1", default-features = false, features = ["ring", "rsa"] }
+tokio = { version = "1", default-features = false, features = ["io-util", "macros", "net", "rt", "sync", "time"] }
+zeroize = "1"
+# Base64 of key secrets and public key lines; already in russh's tree.
+data-encoding = "2"
+# The key derivation parameters of an encrypted PKCS#8 key, read before
+# russh decrypts it (keys.rs); russh's own pkcs8.
+pkcs8 = { version = "0.11", default-features = false, features = ["encryption", "pem"] }
+
+[dev-dependencies]
+# The interop configuration of tests/openssh.rs.
+serde_json = "1"
+tokio = { version = "1", features = ["io-util", "macros", "net", "rt", "rt-multi-thread", "sync", "test-util", "time"] }

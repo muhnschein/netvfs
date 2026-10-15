@@ -7,7 +7,6 @@
 
 use crate::Status;
 use crate::sys::fd::{self, FileKind};
-use netvfs_bridge_proto::ErrorName;
 use std::os::fd::RawFd;
 
 /// What the transfer does with the descriptor.
@@ -74,27 +73,12 @@ pub fn check_transfer_fd(fd: RawFd, need: FdAccess) -> Result<FdInfo, Status> {
     Ok(FdInfo { fifo, size: if regular { st.size } else { -1 } })
 }
 
-/// `checkUploadLength`: a FIFO has no size, so an upload from one to a
-/// provider that must announce the length up front (WebDAV PUT with
-/// Content-Length) needs `opts.size`.
-///
-/// # Errors
-/// `Unsupported` for such an upload without a size.
-pub fn check_upload_length(info: &FdInfo, size: i64, provider: &str) -> Result<(), Status> {
-    if info.fifo && size < 0 && provider == "webdav" {
-        return Err(Status::new(
-            ErrorName::Unsupported,
-            "Uploading from a pipe to this location needs opts.size",
-        ));
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 #[allow(clippy::assertions_on_result_states, reason = "tests")]
 mod tests {
     use super::*;
     use crate::test_support::{TempDir, write_file};
+    use netvfs_bridge_proto::ErrorName;
     use std::fs::{File, OpenOptions};
     use std::os::fd::{AsRawFd as _, OwnedFd};
     use std::os::unix::fs::OpenOptionsExt as _;
@@ -188,20 +172,6 @@ mod tests {
 
         assert_eq!(name(check_transfer_fd(-1, FdAccess::Read)), denied("No file descriptor"));
         assert_eq!(name(check_transfer_fd(9999, FdAccess::Read)), denied("Invalid file descriptor"));
-    }
-
-    /// The port of `tst_BridgeUnits::uploadLength`.
-    #[test]
-    fn upload_length() {
-        let fifo = FdInfo { fifo: true, size: -1 };
-        let regular = FdInfo { fifo: false, size: 10 };
-        let refused = check_upload_length(&fifo, -1, "webdav").unwrap_err();
-        assert_eq!(refused.name, ErrorName::Unsupported);
-        assert_eq!(refused.message, "Uploading from a pipe to this location needs opts.size");
-        assert!(check_upload_length(&fifo, 10, "webdav").is_ok());
-        assert!(check_upload_length(&fifo, 0, "webdav").is_ok());
-        assert!(check_upload_length(&fifo, -1, "sftp").is_ok());
-        assert!(check_upload_length(&regular, -1, "webdav").is_ok());
     }
 
     #[test]

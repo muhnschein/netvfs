@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: LGPL-2.1-or-later
 TEMPLATE = subdirs
-SUBDIRS = common fakeplugin oldplugin unit interop conformance bridge
+SUBDIRS = common fakeplugin unit interop conformance bridge backends
 fakeplugin.depends = common
-oldplugin.depends = common
-unit.depends = common fakeplugin oldplugin
+unit.depends = common fakeplugin
 interop.depends = common
 bridge.depends = common fakeplugin
+backends.depends = common conformance

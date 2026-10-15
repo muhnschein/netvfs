@@ -16,6 +16,7 @@ workspace = true
 fake = ["dep:sha2", "dep:serde_json"]
 
 [dependencies]
+netvfs-vfs = { path = "../netvfs-vfs" }
 zbus = { version = "5", default-features = false, features = ["tokio", "p2p"] }
 # Already in the tree through zbus; named for Stream and StreamExt.
 futures-lite = { version = "2", default-features = false, features = ["std"] }
@@ -23,7 +24,7 @@ serde = { version = "1", features = ["derive"] }
 tokio = { version = "1", features = ["rt", "net", "sync", "time"] }
 zeroize = "1"
 serde_json = { version = "1", optional = true }
-sha2 = { version = "0.10", optional = true }
+sha2 = { version = "0.11", optional = true }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "test-util"] }

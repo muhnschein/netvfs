@@ -3,7 +3,7 @@
     "consent": "granted",
     "files": { "f.txt": "12345" },
     "steps": [
-        { "call": "Hello", "sig": "us", "args": [1, "contract"], "reply": [1, "*", "*"] },
+        { "call": "Hello", "sig": "s", "args": ["contract"], "reply": ["*"] },
         { "call": "MakeDir", "sig": "sayb", "args": ["account:1", { "bytes": "new" }, true], "reply": [] },
         { "call": "MakeDir", "sig": "sayb", "args": ["account:1", { "bytes": "new" }, true],
           "error": "org.netvfs.Error.AlreadyExists" },

@@ -1,0 +1,45 @@
+# What the libssh-based C++ SshKeyTools::importKey() (libnetvfs-sftp.so
+# before the Rust backend replaced it) made of each file here, with the
+# passphrase "-" (none), "right" (correct-horse) or "wrong" (wrong-pass).
+# file | passphrase | ok | algorithm | public line | fingerprint
+# file | passphrase | error | error name | message
+dsa-openssh | - | error | Unsupported | DSA keys are not supported; use an Ed25519, ECDSA or RSA key
+dsa-pem-openssl | - | error | Unsupported | DSA keys are not supported; use an Ed25519, ECDSA or RSA key
+ecdsa256-openssh-enc | - | error | AuthFailed | The key is protected by a passphrase
+ecdsa256-openssh-enc | right | ok | ecdsa-sha2-nistp256 | ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBBXiiKHHTow75y3TUlazpFhIiMaaW1QMwzVIBlvLJOonB6TuFcRAtiXQ7/Ct/87jQyYqb9lgzJRb7t2+9mDtCts= sailfish-backup | SHA256:SNWJ21BVWCzQsk85ZyyesWyjOtDfbrKuDgyWGZL230o
+ecdsa256-openssh-enc | wrong | error | AuthFailed | The passphrase is not correct
+ecdsa256-pem-legacyenc | - | error | AuthFailed | The key is protected by a passphrase
+ecdsa256-pem-legacyenc | right | ok | ecdsa-sha2-nistp256 | ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBDetl21bdUcwruUXrmnEFN1KVnFwur7XP5bnldiknJDiJY9t05ClsF/c89i5w4sgra13lQGtJewqxJFMMvDZRKQ= sailfish-backup | SHA256:5fHbN4NkNuBLws/FKXqTZelaJk0lU7v0LwASh/R8UtQ
+ecdsa256-pem-legacyenc | wrong | error | AuthFailed | The passphrase is not correct
+ecdsa256-pkcs8 | - | ok | ecdsa-sha2-nistp256 | ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBLMQnz51VYQAB4KrKjRSHnqFTOfIx/SO733i+q2XgYjZAL8zXb567JmqQVMrEis0xBN0YYQ/yTh61uXgHl3crH4= sailfish-backup | SHA256:pWre/J4xCEqz4Sug+7R22xl6gL093vNj/PmBYnWiE+Q
+ecdsa256-pkcs8-enc | - | error | AuthFailed | The key is protected by a passphrase
+ecdsa256-pkcs8-enc | right | ok | ecdsa-sha2-nistp256 | ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBOkhHhr8d219WyX8YvKKKWb90D5cIjfFMjVH33V813sjKs45NUGqhQFuy4IX8huzOza57IJ2IGPJdYWArSiXtFg= sailfish-backup | SHA256:zTzly0CmpuUxbn1GTWJLooirxac7YtHpHdR4Su2PLk0
+ecdsa256-pkcs8-enc | wrong | error | AuthFailed | The passphrase is not correct
+ecdsa256-pkcs8-scrypt | - | error | AuthFailed | The key is protected by a passphrase
+ecdsa256-pkcs8-scrypt | right | ok | ecdsa-sha2-nistp256 | ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBOkhHhr8d219WyX8YvKKKWb90D5cIjfFMjVH33V813sjKs45NUGqhQFuy4IX8huzOza57IJ2IGPJdYWArSiXtFg= sailfish-backup | SHA256:zTzly0CmpuUxbn1GTWJLooirxac7YtHpHdR4Su2PLk0
+ecdsa256-pkcs8-scrypt | wrong | error | AuthFailed | The passphrase is not correct
+ecdsa256-sec1 | - | ok | ecdsa-sha2-nistp256 | ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBOkhHhr8d219WyX8YvKKKWb90D5cIjfFMjVH33V813sjKs45NUGqhQFuy4IX8huzOza57IJ2IGPJdYWArSiXtFg= sailfish-backup | SHA256:zTzly0CmpuUxbn1GTWJLooirxac7YtHpHdR4Su2PLk0
+ecdsa384-openssh | - | ok | ecdsa-sha2-nistp384 | ecdsa-sha2-nistp384 AAAAE2VjZHNhLXNoYTItbmlzdHAzODQAAAAIbmlzdHAzODQAAABhBNQjJVVHrIOx/OR2fWLinzxJE3aXDiekdcCLJSgL5k3hYpvKET8IHvqyZSALqPXgD/xcDcJtthnrXHgnegaOr67FGBZkTTIWa3Am++LxOJsppWBGscGl6nZMIaChGdL6qQ== sailfish-backup | SHA256:a/xciQX6h6MjX1LfE2A3wscREIa1TDh2SEIot7+BZ0k
+ecdsa384-sec1-openssl | - | ok | ecdsa-sha2-nistp384 | ecdsa-sha2-nistp384 AAAAE2VjZHNhLXNoYTItbmlzdHAzODQAAAAIbmlzdHAzODQAAABhBOZ8kAzJLPQbJzSIpQETB0I1ihhsraDmn9FwJEHZ7wdeAAql6xa+CdNpeCdGHtlhmVsWkpGJnz3nt0xZVXAGA5PxoNuL0fQs5GUIoKmS8vZvDCU362G3qMcz5hoPJFvXlw== sailfish-backup | SHA256:VpjMi6eAN2yYsIrsVgoGERbD/+kG6Xmr0pLjsrGAtvs
+ecdsa521-openssh | - | ok | ecdsa-sha2-nistp521 | ecdsa-sha2-nistp521 AAAAE2VjZHNhLXNoYTItbmlzdHA1MjEAAAAIbmlzdHA1MjEAAACFBAGEoCWAahK3PW9rQ4wGPZpPUaoW95cLQjnHBCczwgn7RAjuB7h3+ipI83/OCBPK7rZhBJV00uy0Ydej4GhNQpdlpQCMXKfz6kUVzVBd9Hq2DpziECFjEpd7zevJz9vbIB8UVosTJyBsrnJe28kB23EEkMFu1wi/xncVsMVF0h/Mc4zd/A== sailfish-backup | SHA256:bBjqHz+u3v9oFDtTvN/rqfQvkJGXZgdKwAib0NUmqZk
+ed25519-cert | - | ok | ssh-ed25519 | ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBSCaUB0YoRmEeMJtmGFVr7cpQsKw0yZRUowmCSPc4He sailfish-backup | SHA256:ZGPW31uwJF+/lR0hhEstPwJCRwMYsx0C3T2YPcRL/3c
+ed25519-openssh | - | ok | ssh-ed25519 | ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBSCaUB0YoRmEeMJtmGFVr7cpQsKw0yZRUowmCSPc4He sailfish-backup | SHA256:ZGPW31uwJF+/lR0hhEstPwJCRwMYsx0C3T2YPcRL/3c
+ed25519-openssh-enc | - | error | AuthFailed | The key is protected by a passphrase
+ed25519-openssh-enc | right | ok | ssh-ed25519 | ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMgKDJYQglggx0VDkRPw2VLCbIwZG7X4Zzq6x/wVqLz6 sailfish-backup | SHA256:V3dDf1W0ahmN12EbuUrVqKGy5H6JjR9COfxe/qTnMXA
+ed25519-openssh-enc | wrong | error | AuthFailed | The passphrase is not correct
+ed25519-pkcs8-enc | - | error | AuthFailed | The key is protected by a passphrase
+ed25519-pkcs8-enc | right | ok | ssh-ed25519 | ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEszRqarkhZ1K0sNdOUzma1571wWppgr9yneo1Fv4njM sailfish-backup | SHA256:1Zs8H7Q0TSwJWsKKmXDkQwwhxeaVUMXkumh7u5dTqrQ
+ed25519-pkcs8-enc | wrong | error | AuthFailed | The passphrase is not correct
+ed25519-pkcs8-openssl | - | ok | ssh-ed25519 | ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEszRqarkhZ1K0sNdOUzma1571wWppgr9yneo1Fv4njM sailfish-backup | SHA256:1Zs8H7Q0TSwJWsKKmXDkQwwhxeaVUMXkumh7u5dTqrQ
+putty.ppk | - | error | Unsupported | The file is not a private key in OpenSSH or PEM format
+rsa-openssh | - | ok | ssh-rsa | ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQDUfBUt3F1tQkm/Ik0feb+IcfzgPdDnCN64V7HVz6CEhYytXCs5EwBGTjvmyttFTJ5uQEMQWz9VjC0tCepyCVkjs7TCJeWtSgMzNIxI46INbJTVeklLvO6PooJzjuCzBdu/zkBLaOOg7TU6eOeEIZWaX+TTom8ekeWEHGx/CbeH/ZUQV3/9ftdthe2JzMTzrO4U4Tje+rA2ykKZstvEAF+PTh3WXVJA8Y4tPTLmPwM0ui4Mx90X+7AwAv6jhzu+YNWEgvaUdhswNo5zCvFAQeMBujsSIPcp7fgwzqWNL8BlUKvaSqMg2gaHcFny+9E9hMGK/r4HbPBQH5WaLRmtWyOYVReyuJGsVbW9MIDrde5MadIIkI6J1dk9EjakKWsoTYROrobQPqLY2E1wMEqHuCpymD/OrsQePTm5HL1rJzGD2sbRe49Fl6ip5hcOTZR5IEL3auMNo1h6kKRMWPFCPTLQkAemktLvPvsLc99OrlZYQB4iPuEsh1fEhEUChYa/9MM= sailfish-backup | SHA256:SStDrLycgQb8/VDEl16VQwwVrM7kGYng6FeHRfztrRs
+rsa-openssh-enc | - | error | AuthFailed | The key is protected by a passphrase
+rsa-openssh-enc | right | ok | ssh-rsa | ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC7GweNPlizRCirdC4vtHO7HXIUrTJMYO8+Im6ELyRFdBL8PvDxx4S0l878Dv1lM+GzbLbfHzD6KlsR2pKc3MrRybdibw0vMfU1gEg/pmxgQ0vsvUMulPyG62kT9xcL5/no4j+yuZOBmpeKEd6qnMwtotTeqLEKkgLEVEdQHR8c6sB8hT2PWcT3wzg94AGAvi1XvBKvR0n4QGIkjo2AcbOeMQEvlijP1Edp5bd0k3aRC2dgkPOuag9bvtrjDsIu7kSmgbHzoVRSwZT9RcI7rtCP1ChVCQzY7/vA2yqaL9hgTHpGTCbKQtR6RZcRKEsT2ingpedP7dVm8cqsKeraQuih sailfish-backup | SHA256:R40mSPmyytEdhVKPZVLszvFns3o4Yrj5ZdQySRoa1lE
+rsa-openssh-enc | wrong | error | AuthFailed | The passphrase is not correct
+rsa-pem-legacyenc | - | error | AuthFailed | The key is protected by a passphrase
+rsa-pem-legacyenc | right | ok | ssh-rsa | ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC07oIFG0ki8nkwHJPIHlgJYZfXsA5ixqLY+Y/y9YXZBAOFbPa6XKkSbbmSa8T02xScLYzITQBkr0h0kcfzxJFmdD6iT4LVFcx3S0JK2kfMlkCLiYaYwUXN8Pvx6fbcSkdUysCo0q0kfTLUrdAHI3flCdWSmEjKjBOR79joMfSSRhPKGRXEAL6EyPPdF8QZrA1KfcSZlatfIsWB2f8NxWQSjsFWQyXWARtownjdU5PqunoB6kT5c1gccIbr6DLFsN14prvQ4M3NYZj3JfE2oQ1oBA6t1LFNhsXxPcFk7bWTDkYBZOGyBYEOnyXixWKp2/OHhxOxyGD74wOQ9799ihXH sailfish-backup | SHA256:sxBtcVdodpeMfNuAX2oo3vvrOs/rBbDuK6oBFVffDdM
+rsa-pem-legacyenc | wrong | error | AuthFailed | The passphrase is not correct
+rsa-pem-pkcs1 | - | ok | ssh-rsa | ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQCm1Smp9f+W9+OV4k/GiwS6kAJ0x6U3mitBp5lbs7gx2EP9pv/wPMpZ7NLn5OeBWtt2BE9bvtKBwnKHd6kmnKg3RjMdwoh7o5jsNJ/sYaVhv4moAsdf6TFQJBT8iKNnFlNqhKoX1sW2HIVQxfITnsmBjVd8T4/64JFzlOURLQeqN7s9XlTAPDvZuuS9yZaE5vSr1k2F23Jn6P7iOMjU0EkT+9aE1KWz/aaIS/dFDrtZRl0eCrYEAIVmVM07D+cuvf+B4JE00Jo0YHBiaXmsHb1pAEsv5iqTlJn82Jg7/y2DK0MoMd9uaQ9xjV11XVIEGVd5cx+aZTWT7OQk5qW6FgYn sailfish-backup | SHA256:RmuCrEeSzI77JsUBPOiJnR7S9XyIGJhrmHK1kcWJ1XQ
+rsa-pkcs8 | - | ok | ssh-rsa | ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDOe1LoSx4IzlRd3+gDaRJrVN4+JvxdNDvBzzZHUtdEE09eqSRC7Ulj6qEmJF94f8+nvlry1K0dRndUD32/rmjq+yqpYoH7Q9q3RYlNdp/5j8B9/7CvBa9gOd7J6ZlOvpWRMlyWaz2ZQg3Bjvlwu0x4j+M7y1jUdu/nA5YhvJzmcS960W2aLJkeyaYzDap+tJAhcKRl4jqhjHkw6fN/pTpV7lsbFFA4qxlHlgpp3wvjvHvSlPE54P2CkfqOTGNQFAhppAqvCCKMxS2ywgHE6cvMfHS8iXBU83PdHHgJdpxgklfTeSkZfTpl/Cw1gnNp5FW0lYD6RA0gREICW7M+FjUb sailfish-backup | SHA256:rda9OsGoiIZSB783lgtYVAFHUK3d9P+c48lsiNz0eig
+ed25519-openssh.pub | - | error | Unsupported | This is a public key; choose the private key file
+ed25519-cert-cert.pub | - | error | Unsupported | SSH certificates are not supported; choose a private key file

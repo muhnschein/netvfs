@@ -13,21 +13,16 @@ constexpr int MsPerSecond = 1000;
 constexpr int PercentDivisor = 100;
 constexpr std::array<int, ServiceCache::RefreshStages> RefreshPercent = {{80, 90, 95}};
 constexpr int MaxTextLength = 256;
-constexpr int MaxPathLength = 1024;
 constexpr int MaxHostLength = 253;
 constexpr int CacheFlushGraceMs = 1000;          // RFC 6762 section 10.2
-constexpr int GoodbyeGraceMs = 1000;             // RFC 6762 section 10.1 (TXT only, see handleTxt)
 constexpr int ControlLimit = 0x20;
 constexpr int C1First = 0x7F;
 constexpr int C1Last = 0x9F;
 
-const std::array<BrowseType, 6> Table = {{
-    {"_sftp-ssh._tcp", "sftp", ""},
-    {"_ssh._tcp", "sftp", ""},
-    {"_smb._tcp", "smb", ""},
-    {"_webdav._tcp", "webdav", "http"},
-    {"_webdavs._tcp", "webdav", "https"},
-    {"_ftp._tcp", "ftp", ""},
+const std::array<BrowseType, 3> Table = {{
+    {"_sftp-ssh._tcp", "sftp"},
+    {"_ssh._tcp", "sftp"},
+    {"_smb._tcp", "smb"},
 }};
 
 const QByteArray LocalSuffix = QByteArrayLiteral(".local");
@@ -44,16 +39,6 @@ QString cleanText(const QByteArray &bytes, int maxLength)
             out.append(ch);
     }
     return out.left(maxLength).trimmed();
-}
-
-QString cleanPath(const QByteArray &bytes)
-{
-    QString p = cleanText(bytes, MaxPathLength);
-    if (p.isEmpty())
-        return p;
-    if (!p.startsWith(QLatin1Char('/')))
-        p.prepend(QLatin1Char('/'));
-    return p;
 }
 
 bool hostByteAllowed(char c)
@@ -127,17 +112,10 @@ bool instanceLabel(const QByteArray &target, const QByteArray &typeName, QByteAr
     return true;
 }
 
-bool needsTxt(const BrowseType &t)
-{
-    const QByteArray p(t.provider);
-    return p == "webdav" || p == "ftp";
-}
-
 bool sameContent(const DiscoveredService &a, const DiscoveredService &b)
 {
     return a.instanceName == b.instanceName && a.serviceType == b.serviceType && a.provider == b.provider
-        && a.tls == b.tls && a.host == b.host && a.port == b.port && a.path == b.path && a.user == b.user
-        && a.addresses == b.addresses;
+        && a.host == b.host && a.port == b.port && a.addresses == b.addresses;
 }
 
 void consider(qint64 *best, qint64 t)
@@ -148,7 +126,7 @@ void consider(qint64 *best, qint64 t)
 
 } // namespace
 
-const std::array<BrowseType, 6> &browseTypeTable()
+const std::array<BrowseType, 3> &browseTypeTable()
 {
     return Table;
 }
@@ -205,7 +183,7 @@ void ServiceCache::ingest(const Dns::Message &message, qint64 now, const QDateTi
     for (const Dns::Record &r : message.additional)
         records.append(&r);
     // PTR first (creates instances), then what hangs off them.
-    const std::array<quint16, 5> order = {{Dns::TypePtr, Dns::TypeSrv, Dns::TypeTxt, Dns::TypeA, Dns::TypeAaaa}};
+    const std::array<quint16, 4> order = {{Dns::TypePtr, Dns::TypeSrv, Dns::TypeA, Dns::TypeAaaa}};
     for (const quint16 type : order) {
         for (const Dns::Record *r : records) {
             if (r->type != type || r->cls != Dns::ClassIn)
@@ -213,7 +191,6 @@ void ServiceCache::ingest(const Dns::Message &message, qint64 now, const QDateTi
             switch (type) {
             case Dns::TypePtr: handlePtr(*r, &c); break;
             case Dns::TypeSrv: handleSrv(*r, &c); break;
-            case Dns::TypeTxt: handleTxt(*r, &c); break;
             default: handleAddress(*r, &c); break;
             }
         }
@@ -277,29 +254,6 @@ void ServiceCache::handleSrv(const Dns::Record &rec, Context *c)
     inst.host = host;
     inst.port = rec.port;
     inst.lastSeen = c->wall;
-    c->dirty.insert(key);
-}
-
-void ServiceCache::handleTxt(const Dns::Record &rec, Context *c)
-{
-    const QByteArray key = Dns::canonicalName(rec.name);
-    auto it = m_instances.find(key);
-    if (it == m_instances.end())
-        return;
-    Instance &inst = it.value();
-    inst.hasTxt = true;
-    inst.lastSeen = c->wall;
-    if (rec.ttl == 0) {
-        // A goodbye of the TXT record alone empties it for a second (RFC 6762
-        // section 10.1); the service itself lives on with PTR and SRV.
-        inst.txtStrings.clear();
-        inst.txt.received = c->now;
-        inst.txt.ttlMs = GoodbyeGraceMs;
-        inst.txt.stage = RefreshStages;
-    } else {
-        inst.txtStrings = rec.txt;
-        inst.txt.set(c->now, rec.ttl);
-    }
     c->dirty.insert(key);
 }
 
@@ -378,7 +332,7 @@ bool ServiceCache::hasAddresses(const QByteArray &host) const
 
 bool ServiceCache::isComplete(const Instance &inst) const
 {
-    return inst.hasSrv && hasAddresses(inst.target) && (inst.hasTxt || !needsTxt(*inst.type));
+    return inst.hasSrv && hasAddresses(inst.target);
 }
 
 DiscoveredService ServiceCache::snapshot(const Instance &inst) const
@@ -389,13 +343,8 @@ DiscoveredService ServiceCache::snapshot(const Instance &inst) const
         s.instanceName = inst.host;
     s.serviceType = QString::fromLatin1(inst.type->type);
     s.provider = QString::fromLatin1(inst.type->provider);
-    s.tls = QString::fromLatin1(inst.type->tls);
     s.host = inst.host;
     s.port = inst.port;
-    if (needsTxt(*inst.type)) {
-        s.path = cleanPath(Dns::txtValue(inst.txtStrings, "path"));
-        s.user = cleanText(Dns::txtValue(inst.txtStrings, "u"), MaxTextLength);
-    }
     QList<QHostAddress> v4;
     QList<QHostAddress> v6;
     for (const AddressEntry &e : m_hosts.value(inst.target))
@@ -493,11 +442,6 @@ void ServiceCache::expireInstance(Instance *inst, Context *c)
         inst->nextResolve = -1;
         c->dirty.insert(inst->key);
     }
-    if (inst->hasTxt && inst->txt.expiresAt() <= c->now) {
-        inst->hasTxt = false;
-        inst->txtStrings.clear();
-        c->dirty.insert(inst->key);
-    }
     const bool retriesExhausted = inst->attempts >= MaxResolveAttempts && inst->nextResolve >= 0
         && c->now >= inst->nextResolve;
     if (retriesExhausted && !isComplete(*inst)) {
@@ -544,8 +488,6 @@ void ServiceCache::collectResolve(Instance *inst, qint64 now, Collector *col) co
         return;
     if (!inst->hasSrv)
         col->add(inst->key, Dns::TypeSrv);
-    if (needsTxt(*inst->type) && !inst->hasTxt)
-        col->add(inst->key, Dns::TypeTxt);
     if (inst->hasSrv && !hasAddresses(inst->target)) {
         col->add(inst->target, Dns::TypeA);
         col->add(inst->target, Dns::TypeAaaa);
@@ -559,10 +501,6 @@ void ServiceCache::collectRefresh(Instance *inst, qint64 now, Collector *col) co
     if (inst->hasSrv && inst->srv.refreshAt() >= 0 && now >= inst->srv.refreshAt()) {
         col->add(inst->key, Dns::TypeSrv);
         ++inst->srv.stage;
-    }
-    if (inst->hasTxt && inst->txt.refreshAt() >= 0 && now >= inst->txt.refreshAt()) {
-        col->add(inst->key, Dns::TypeTxt);
-        ++inst->txt.stage;
     }
 }
 
@@ -596,10 +534,6 @@ qint64 ServiceCache::instanceDeadline(const Instance &inst) const
     if (inst.hasSrv) {
         consider(&best, inst.srv.expiresAt());
         consider(&best, inst.srv.refreshAt());
-    }
-    if (inst.hasTxt) {
-        consider(&best, inst.txt.expiresAt());
-        consider(&best, inst.txt.refreshAt());
     }
     if (!isComplete(inst))
         consider(&best, inst.nextResolve);

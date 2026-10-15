@@ -13,9 +13,8 @@ class QTextStream;
 //              [--option KEY=VALUE]... [--host-key PIN] [--profile PROFILE]
 //              [--secret-env VAR] [--prompt] COMMAND [FLAGS] [ARGS]
 //
-// Location: either --url (sftp://, ssh://, smb://host[/share[/path]], dav(s)://,
-// http(s)://, ftp(s)://, file://; a user name is accepted, a password is
-// rejected with SecurityPolicy) or --provider/--host/--port/--user (the local
+// Location: either --url (sftp://, ssh://, smb://host[/share[/path]], file://;
+// a user name is accepted, a password is rejected with SecurityPolicy) or --provider/--host/--port/--user (the local
 // provider needs no host). The two forms cannot be mixed; --option, --host-key
 // and --profile apply to both and win over what the URL implies. Paths below a
 // URL's folder: a relative argument resolves against the URL's path.
@@ -25,12 +24,10 @@ class QTextStream;
 // typed on the terminal in answer to a server prompt (--prompt, echo off).
 //
 // Identity: `identify` connects without credentials and prints the identity:
-// the fingerprint, the pin (SSH "algorithm base64key" or TLS "tls-spki-sha256
-// base64spki") and, for TLS, the certificate details and tls_verify_peer
-// advice. Commands run only when the identity is pinned with --host-key PIN
-// (or --option host_key=PIN), or, for TLS, the certificate is trusted by the
-// system; otherwise they fail with ServerIdentityUnknown before any
-// credential is sent.
+// the fingerprint and the pin (SSH "algorithm base64key"). Commands run only
+// when the identity is pinned with --host-key PIN (or --option host_key=PIN);
+// otherwise they fail with ServerIdentityUnknown before any credential is
+// sent.
 //
 // Commands (flags follow the command name; "--" ends the flags):
 //   identify                     print the server identity (no sign-in)

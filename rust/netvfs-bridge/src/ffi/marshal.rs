@@ -5,51 +5,13 @@
 //! errors). Readers copy: nothing returned borrows C memory (O2, O3).
 
 use super::raw::{
-    NVB_IDENTITY_NONE, NVB_IDENTITY_SSH, NVB_IDENTITY_TLS, NVB_VALUE_BOOL, NVB_VALUE_BYTES, NVB_VALUE_INT,
-    NVB_VALUE_STRING, NVB_VALUE_STRING_LIST, NvbBytes, NvbCapabilities, NvbEntry, NvbError, NvbIdentity,
-    NvbKv, NvbNearby, NvbParams, NvbPrompt, NvbValue,
+    NVB_IDENTITY_NONE, NVB_IDENTITY_SSH, NVB_VALUE_BOOL, NVB_VALUE_BYTES, NVB_VALUE_INT, NVB_VALUE_STRING,
+    NVB_VALUE_STRING_LIST, NvbBytes, NvbCapabilities, NvbEntry, NvbError, NvbIdentity, NvbKv, NvbNearby,
+    NvbParams, NvbPrompt, NvbValue,
 };
 use crate::Status;
 use netvfs_bridge_proto::{ErrorName, WireCapabilities, WireEntry, WireNearby};
-use std::collections::BTreeMap;
-
-/// A typed value of `ConnectionParams::options` or
-/// `ServerIdentity::details` (`nvb_value`).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Value {
-    /// `QString`.
-    Str(String),
-    /// `bool`.
-    Bool(bool),
-    /// `qlonglong`.
-    Int(i64),
-    /// `QByteArray`.
-    Bytes(Vec<u8>),
-    /// `QStringList`.
-    StrList(Vec<String>),
-}
-
-/// Options and details: keys are unique and sorted.
-pub type ValueMap = BTreeMap<String, Value>;
-
-/// `NetVfs::ConnectionParams`.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct Params {
-    /// Backend provider (`sftp`, `smb`, …).
-    pub provider: String,
-    /// Host name or address.
-    pub host: String,
-    /// 0: the protocol's default.
-    pub port: i32,
-    /// User name.
-    pub username: String,
-    /// Provider options (`share`, `base_path`, …).
-    pub options: ValueMap,
-    /// Connect timeout.
-    pub connect_timeout_ms: i32,
-    /// Request timeout.
-    pub request_timeout_ms: i32,
-}
+pub use netvfs_vfs::{Params, Prompt, PromptRequest, Value, ValueMap};
 
 /// What `Url::parse` gives: parameters and the location's path.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -68,8 +30,6 @@ pub enum IdentityKind {
     None,
     /// An SSH host key.
     Ssh,
-    /// A TLS certificate.
-    Tls,
 }
 
 impl IdentityKind {
@@ -78,7 +38,6 @@ impl IdentityKind {
     pub const fn from_raw(kind: u32) -> Self {
         match kind {
             NVB_IDENTITY_SSH => Self::Ssh,
-            NVB_IDENTITY_TLS => Self::Tls,
             _ => Self::None,
         }
     }
@@ -89,7 +48,6 @@ impl IdentityKind {
         match self {
             Self::None => NVB_IDENTITY_NONE,
             Self::Ssh => NVB_IDENTITY_SSH,
-            Self::Tls => NVB_IDENTITY_TLS,
         }
     }
 }
@@ -103,36 +61,10 @@ pub struct Identity {
     pub algorithm: String,
     /// The key blob.
     pub public_key: Vec<u8>,
-    /// OpenSSH form (`SHA256:…`) or the certificate's.
+    /// OpenSSH form (`SHA256:…`).
     pub fingerprint: String,
     /// `ServerIdentity::toPin()`; empty without identity.
     pub pin: String,
-    /// Whether the system trusts it (TLS).
-    pub system_trusted: bool,
-    /// `ServerIdentity` problem bits.
-    pub problems: i32,
-    /// Further facts; dates as ISO-8601 UTC strings.
-    pub details: ValueMap,
-}
-
-/// One keyboard-interactive prompt (XC-15).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Prompt {
-    /// The question.
-    pub text: String,
-    /// Whether the answer may be shown.
-    pub echo: bool,
-}
-
-/// What the server asks for, keyboard-interactive (XC-15).
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct PromptRequest {
-    /// The method's name.
-    pub name: String,
-    /// The server's instruction.
-    pub instruction: String,
-    /// One per answer expected.
-    pub prompts: Vec<Prompt>,
 }
 
 // ----------------------------------------------------------- C -> Rust
@@ -303,9 +235,6 @@ pub unsafe fn identity(i: &NvbIdentity) -> Identity {
             public_key: bytes_of(i.public_key),
             fingerprint: text_of(i.fingerprint),
             pin: text_of(i.pin),
-            system_trusted: i.system_trusted != 0,
-            problems: i.problems,
-            details: value_map(i.details, i.n_details),
         }
     }
 }
@@ -339,7 +268,6 @@ pub unsafe fn nearby(n: &NvbNearby) -> WireNearby {
             provider: text_of(n.provider),
             host: text_of(n.host),
             port: n.port,
-            path: bytes_of(n.path),
         }
     }
 }
@@ -542,17 +470,12 @@ impl IdentityBuf {
     #[must_use]
     pub fn new(i: &Identity) -> Self {
         let mut a = Arena::default();
-        let (details, n_details) = a.map(&i.details);
         let raw = NvbIdentity {
             kind: i.kind.raw(),
             algorithm: a.bytes(i.algorithm.as_bytes()),
             public_key: a.bytes(&i.public_key),
             fingerprint: a.bytes(i.fingerprint.as_bytes()),
             pin: a.bytes(i.pin.as_bytes()),
-            system_trusted: u8::from(i.system_trusted),
-            problems: i.problems,
-            details,
-            n_details,
         };
         Self { _arena: a, raw }
     }
@@ -648,10 +571,10 @@ mod tests {
     fn readers_accept_null_with_a_length() {
         // A NULL pointer reads as empty, whatever the length says.
         let b = NvbBytes { ptr: ptr::null(), len: 5 };
-        assert!(unsafe { slice(b) }.is_empty());
+        assert_eq!(unsafe { slice(b) }.len(), 0);
         assert!(unsafe { items::<NvbKv>(ptr::null(), 3) }.is_empty());
         let data = [1u8];
-        assert!(unsafe { slice(NvbBytes { ptr: data.as_ptr(), len: 0 }) }.is_empty());
+        assert_eq!(unsafe { slice(NvbBytes { ptr: data.as_ptr(), len: 0 }) }.len(), 0);
     }
 
     #[test]
@@ -719,18 +642,13 @@ mod tests {
 
     #[test]
     fn identities_round_trip() {
-        let mut details = ValueMap::new();
-        details.insert("notAfter".into(), Value::Str("2030-01-01T00:00:00Z".into()));
-        for kind in [IdentityKind::None, IdentityKind::Ssh, IdentityKind::Tls] {
+        for kind in [IdentityKind::None, IdentityKind::Ssh] {
             let i = Identity {
                 kind,
                 algorithm: "ssh-ed25519".into(),
                 public_key: vec![1, 2, 3],
                 fingerprint: "SHA256:x".into(),
                 pin: "ssh-ed25519 AQID".into(),
-                system_trusted: kind == IdentityKind::Tls,
-                problems: 6,
-                details: details.clone(),
             };
             let buf = IdentityBuf::new(&i);
             assert_eq!(buf.raw().kind, kind.raw());
@@ -738,7 +656,6 @@ mod tests {
         }
         assert_eq!(IdentityKind::from_raw(9), IdentityKind::None);
         assert_eq!(IdentityKind::from_raw(NVB_IDENTITY_SSH), IdentityKind::Ssh);
-        assert_eq!(IdentityKind::from_raw(NVB_IDENTITY_TLS), IdentityKind::Tls);
     }
 
     #[test]
@@ -785,17 +702,10 @@ mod tests {
             provider: NvbBytes::of(b"smb"),
             host: NvbBytes::of(b"nas.local"),
             port: 445,
-            path: NvbBytes::of(b"/\xff"),
         };
         assert_eq!(
             unsafe { nearby(&n) },
-            WireNearby {
-                name: "NAS".into(),
-                provider: "smb".into(),
-                host: "nas.local".into(),
-                port: 445,
-                path: b"/\xff".to_vec()
-            }
+            WireNearby { name: "NAS".into(), provider: "smb".into(), host: "nas.local".into(), port: 445 }
         );
         let p = NvbPrompt { text: NvbBytes::of(b"Code: "), echo: 0 };
         assert_eq!(unsafe { prompt(&p) }, Prompt { text: "Code: ".into(), echo: false });

@@ -161,7 +161,7 @@ class TestDiscovery : public QObject
 private slots:
     // ------------------------------------------------------------ lifecycle
 
-    void browseQueryAsksForTheSixServiceTypes()
+    void browseQueryAsksForTheThreeServiceTypes()
     {
         Rig rig;
         QVERIFY(rig.discovery.start());
@@ -170,11 +170,10 @@ private slots:
         QVERIFY(!sent[0].isResponse());
         QCOMPARE(questionTexts(sent[0]),
                  (QStringList{QStringLiteral("PTR _sftp-ssh._tcp.local"), QStringLiteral("PTR _ssh._tcp.local"),
-                              QStringLiteral("PTR _smb._tcp.local"), QStringLiteral("PTR _webdav._tcp.local"),
-                              QStringLiteral("PTR _webdavs._tcp.local"), QStringLiteral("PTR _ftp._tcp.local")}));
+                              QStringLiteral("PTR _smb._tcp.local")}));
         for (const Dns::Question &q : sent[0].questions)
             QVERIFY(!q.unicastResponse);
-        QCOMPARE(browsedServiceTypes().size(), 6);
+        QCOMPARE(browsedServiceTypes().size(), 3);
         QVERIFY(sent[0].answers.isEmpty());
     }
 
@@ -321,8 +320,6 @@ private slots:
         QCOMPARE(s.host, QStringLiteral("host.local"));
         QCOMPARE(s.port, 22);
         QCOMPARE(s.addresses, addresses({QStringLiteral("192.0.2.10")}));
-        QVERIFY(s.path.isEmpty());
-        QVERIFY(s.user.isEmpty());
         QCOMPARE(s.lastSeen, rig.clock.wall);
         QCOMPARE(s.key(), QStringLiteral("_sftp-ssh._tcp/my host"));
         QCOMPARE(s.endpointKey(), QStringLiteral("sftp|host.local|22"));
@@ -338,11 +335,9 @@ private slots:
 
     void mapsEveryServiceTypeToAProvider()
     {
-        struct Row { const char *type; const char *provider; const char *tls; quint16 port; };
+        struct Row { const char *type; const char *provider; quint16 port; };
         const Row rows[] = {
-            {"_sftp-ssh._tcp", "sftp", "", 22},   {"_ssh._tcp", "sftp", "", 22},
-            {"_smb._tcp", "smb", "", 445},        {"_webdav._tcp", "webdav", "http", 80},
-            {"_webdavs._tcp", "webdav", "https", 443}, {"_ftp._tcp", "ftp", "", 21},
+            {"_sftp-ssh._tcp", "sftp", 22}, {"_ssh._tcp", "sftp", 22}, {"_smb._tcp", "smb", 445},
         };
         Rig rig;
         rig.discovery.start();
@@ -351,101 +346,89 @@ private slots:
             const DiscoveredService s = rig.found.last();
             QCOMPARE(s.serviceType, QString::fromLatin1(row.type));
             QCOMPARE(s.provider, QString::fromLatin1(row.provider));
-            QCOMPARE(s.tls, QString::fromLatin1(row.tls));
             QCOMPARE(s.port, int(row.port));
 
             QString provider;
-            QString tls;
-            QVERIFY(providerForServiceType(QString::fromLatin1(row.type).toUpper(), &provider, &tls));
+            QVERIFY(providerForServiceType(QString::fromLatin1(row.type).toUpper(), &provider));
             QCOMPARE(provider, QString::fromLatin1(row.provider));
-            QCOMPARE(tls, QString::fromLatin1(row.tls));
         }
-        QCOMPARE(rig.found.size(), 6);
+        QCOMPARE(rig.found.size(), 3);
         QVERIFY(!providerForServiceType(QStringLiteral("_http._tcp"), nullptr));
         QVERIFY(!providerForServiceType(QStringLiteral("_smb._udp"), nullptr));
         QVERIFY(!providerForServiceType(QString(), nullptr));
     }
 
-    void webdavAndFtpTakePathAndUserFromTxt()
+    void webdavAndFtpServersAreNotBrowsed()
     {
         Rig rig;
         rig.discovery.start();
-        rig.transport->deliver(announcement("_webdavs._tcp", "Cloud", "cloud.local", 443, QStringLiteral("192.0.2.30"),
-                                            {"txtvers=1", "path=/remote.php/dav", "u=alice", "p=hunter2"}));
-        rig.transport->deliver(announcement("_ftp._tcp", "Files", "files.local", 21, QStringLiteral("192.0.2.31"),
-                                            {"path=pub/data", "u=anonymous"}));
-        rig.transport->deliver(announcement("_smb._tcp", "Nas", "nas.local", 445, QStringLiteral("192.0.2.32"),
-                                            {"path=/ignored", "u=ignored"}));
-        QCOMPARE(rig.found.size(), 3);
-        QCOMPARE(rig.found[0].path, QStringLiteral("/remote.php/dav"));
-        QCOMPARE(rig.found[0].user, QStringLiteral("alice"));
-        QCOMPARE(rig.found[1].path, QStringLiteral("/pub/data"));       // always absolute
-        QCOMPARE(rig.found[1].user, QStringLiteral("anonymous"));
-        QVERIFY(rig.found[2].path.isEmpty());                            // only webdav and ftp read them
-        QVERIFY(rig.found[2].user.isEmpty());
+        for (const char *type : {"_webdav._tcp", "_webdavs._tcp", "_ftp._tcp"}) {
+            QVERIFY(!providerForServiceType(QString::fromLatin1(type), nullptr));
+            rig.transport->deliver(announcement(type, "Cloud", "cloud.local", 443, QStringLiteral("192.0.2.30")));
+        }
+        QVERIFY(rig.found.isEmpty());
+        QVERIFY(rig.discovery.services().isEmpty());
     }
 
-    void sanitisesNamesAndTxtValues()
-    {
-        Rig rig;
-        rig.discovery.start();
-        const QByteArray instance = "Ev\x01il\x1b[31m\\.Nas";
-        rig.transport->deliver(announcement("_webdav._tcp", instance, "box.local", 80, QStringLiteral("192.0.2.40"),
-                                            {"path=/a\x01" "b", "u=bo\x07" "b"}));
-        QCOMPARE(rig.found.size(), 1);
-        QCOMPARE(rig.found[0].instanceName, QStringLiteral("Evil[31m.Nas"));
-        QCOMPARE(rig.found[0].path, QStringLiteral("/ab"));
-        QCOMPARE(rig.found[0].user, QStringLiteral("bob"));
-
-    }
-
-    // ------------------------------------------------------------- resolution
-
-    void resolvesPtrSrvTxtAndAddressesStepByStep()
+    void txtRecordsAreIgnored()
     {
         Rig rig;
         rig.discovery.start();
         rig.transport->drain();
-        const QByteArray type = "_webdav._tcp";
-        const QByteArray inst = "Drive";
-        const QString instName = QStringLiteral("drive._webdav._tcp.local");
+        rig.transport->deliver(announcement("_smb._tcp", "Nas", "nas.local", 445, QStringLiteral("192.0.2.32"),
+                                            {"path=/x", "u=alice", "p=hunter2"}));
+        QCOMPARE(rig.found.size(), 1);
+        rig.transport->deliver(response({}, {txtRecord("_smb._tcp", "Nas", {"path=/y", "u=bob"})}));
+        QVERIFY(rig.updated.isEmpty());
+        const ConnectionParams p = toConnectionParams(rig.found[0]);
+        QVERIFY(p.username.isEmpty());
+        QVERIFY(p.options.isEmpty());
+        rig.advance(10 * 60 * 1000);
+        QCOMPARE(allQuestions(rig.transport->drain()).filter(QStringLiteral("TXT ")).size(), 0);
+    }
 
-        // PTR alone: nothing to report yet, SRV and TXT are asked for at once.
+    void sanitisesNames()
+    {
+        Rig rig;
+        rig.discovery.start();
+        const QByteArray instance = "Ev\x01il\x1b[31m\\.Nas";
+        rig.transport->deliver(announcement("_smb._tcp", instance, "box.local", 445, QStringLiteral("192.0.2.40")));
+        QCOMPARE(rig.found.size(), 1);
+        QCOMPARE(rig.found[0].instanceName, QStringLiteral("Evil[31m.Nas"));
+    }
+
+    // ------------------------------------------------------------- resolution
+
+    void resolvesPtrSrvAndAddressesStepByStep()
+    {
+        Rig rig;
+        rig.discovery.start();
+        rig.transport->drain();
+        const QByteArray type = "_smb._tcp";
+        const QByteArray inst = "Drive";
+        const QString instName = QStringLiteral("drive._smb._tcp.local");
+
+        // PTR alone: nothing to report yet, the SRV record is asked for.
         rig.transport->deliver(response({ptrRecord(type, inst)}));
         QVERIFY(rig.found.isEmpty());
         QStringList asked = allQuestions(rig.transport->drain());
-        QVERIFY(asked.contains(QStringLiteral("SRV ") + instName));
-        QVERIFY(asked.contains(QStringLiteral("TXT ") + instName));
-        QCOMPARE(asked.size(), 2);
+        QCOMPARE(asked, QStringList{QStringLiteral("SRV ") + instName});
 
         // SRV: the host's addresses are asked for.
-        rig.transport->deliver(response({}, {srvRecord(type, inst, "drive-host.local", 8080)}));
+        rig.transport->deliver(response({}, {srvRecord(type, inst, "drive-host.local", 4450)}));
         QVERIFY(rig.found.isEmpty());
         asked = allQuestions(rig.transport->drain());
         QVERIFY(asked.contains(QStringLiteral("A drive-host.local")));
         QVERIFY(asked.contains(QStringLiteral("AAAA drive-host.local")));
         QVERIFY(!asked.contains(QStringLiteral("SRV ") + instName));
 
-        // TXT and the address: now it is complete (webdav needs the TXT path).
-        rig.transport->deliver(response({}, {txtRecord(type, inst, {"path=/dav"})}));
-        QVERIFY(rig.found.isEmpty());
+        // The addresses: now it is complete.
         rig.transport->deliver(response({}, {addressRecord("drive-host.local", QStringLiteral("192.0.2.50")),
                                              addressRecord("drive-host.local", QStringLiteral("2001:db8::50"))}));
         QCOMPARE(rig.found.size(), 1);
-        QCOMPARE(rig.found[0].port, 8080);
-        QCOMPARE(rig.found[0].path, QStringLiteral("/dav"));
+        QCOMPARE(rig.found[0].port, 4450);
         QCOMPARE(rig.found[0].addresses, addresses({QStringLiteral("192.0.2.50"), QStringLiteral("2001:db8::50")}));
         QCOMPARE(allQuestions(rig.transport->drain()).size(), 0);        // nothing left to ask
-    }
-
-    void anSftpServiceDoesNotNeedItsTxtRecord()
-    {
-        Rig rig;
-        rig.discovery.start();
-        rig.transport->deliver(response({ptrRecord("_ssh._tcp", "box")},
-                                        {srvRecord("_ssh._tcp", "box", "box.local", 22),
-                                         addressRecord("box.local", QStringLiteral("192.0.2.60"))}));
-        QCOMPARE(rig.found.size(), 1);
     }
 
     void givesUpWaitingForAddressesAfterThreeQueries()
@@ -487,29 +470,23 @@ private slots:
     {
         Rig rig;
         rig.discovery.start();
-        rig.transport->deliver(announcement("_webdav._tcp", "dav", "dav.local", 80, QStringLiteral("192.0.2.70"),
-                                            {"path=/a"}));
+        rig.transport->deliver(announcement("_smb._tcp", "nas", "nas.local", 445, QStringLiteral("192.0.2.70")));
         QCOMPARE(rig.found.size(), 1);
 
-        rig.transport->deliver(response({}, {txtRecord("_webdav._tcp", "dav", {"path=/b", "u=carol"})}));
+        rig.transport->deliver(response({}, {srvRecord("_smb._tcp", "nas", "nas.local", 4450)}));
         QCOMPARE(rig.updated.size(), 1);
-        QCOMPARE(rig.updated.last().path, QStringLiteral("/b"));
-        QCOMPARE(rig.updated.last().user, QStringLiteral("carol"));
-
-        rig.transport->deliver(response({}, {srvRecord("_webdav._tcp", "dav", "dav.local", 8080)}));
-        QCOMPARE(rig.updated.size(), 2);
-        QCOMPARE(rig.updated.last().port, 8080);
+        QCOMPARE(rig.updated.last().port, 4450);
 
         // A second address, IPv6 sorts after IPv4.
-        rig.transport->deliver(response({}, {addressRecord("dav.local", QStringLiteral("2001:db8::7"), 120, false),
-                                             addressRecord("dav.local", QStringLiteral("192.0.2.71"), 120, false)}));
-        QCOMPARE(rig.updated.size(), 3);
+        rig.transport->deliver(response({}, {addressRecord("nas.local", QStringLiteral("2001:db8::7"), 120, false),
+                                             addressRecord("nas.local", QStringLiteral("192.0.2.71"), 120, false)}));
+        QCOMPARE(rig.updated.size(), 2);
         QCOMPARE(rig.updated.last().addresses,
                  addresses({QStringLiteral("192.0.2.70"), QStringLiteral("192.0.2.71"), QStringLiteral("2001:db8::7")}));
 
         // Re-announcing the same data changes nothing.
-        rig.transport->deliver(response({}, {txtRecord("_webdav._tcp", "dav", {"path=/b", "u=carol"})}));
-        QCOMPARE(rig.updated.size(), 3);
+        rig.transport->deliver(response({}, {srvRecord("_smb._tcp", "nas", "nas.local", 4450)}));
+        QCOMPARE(rig.updated.size(), 2);
         QCOMPARE(rig.found.size(), 1);
         QVERIFY(rig.lost.isEmpty());
     }
@@ -589,7 +566,6 @@ private slots:
         const quint32 ttl = 10;
         rig.transport->deliver(response({ptrRecord("_ssh._tcp", "box", ttl)},
                                         {srvRecord("_ssh._tcp", "box", "box.local", 22, ttl),
-                                         txtRecord("_ssh._tcp", "box", {}, ttl),
                                          addressRecord("box.local", QStringLiteral("192.0.2.92"), ttl)}));
         QCOMPARE(rig.found.size(), 1);
         rig.transport->drain();
@@ -600,7 +576,6 @@ private slots:
         rig.advance(1);
         QStringList asked = allQuestions(rig.transport->drain());
         QVERIFY(asked.contains(QStringLiteral("SRV box._ssh._tcp.local")));
-        QVERIFY(asked.contains(QStringLiteral("TXT box._ssh._tcp.local")));
         QVERIFY(asked.contains(QStringLiteral("A box.local")));
         rig.advance(1000);
         QVERIFY(allQuestions(rig.transport->drain()).contains(QStringLiteral("SRV box._ssh._tcp.local")));
@@ -623,7 +598,6 @@ private slots:
         rig.discovery.start();
         const Dns::Message shortLived =
             response({ptrRecord("_ssh._tcp", "box", 10)}, {srvRecord("_ssh._tcp", "box", "box.local", 22, 10),
-                                                           txtRecord("_ssh._tcp", "box", {}, 10),
                                                            addressRecord("box.local", QStringLiteral("192.0.2.93"), 10)});
         rig.transport->deliver(shortLived);
         for (int i = 0; i < 5; ++i) {
@@ -692,7 +666,7 @@ private slots:
         QVector<Dns::Message> sent = rig.transport->drain();
         const Dns::Message *browse = nullptr;
         for (const Dns::Message &m : sent) {
-            if (m.questions.size() == 6)
+            if (m.questions.size() == 3)
                 browse = &m;
         }
         QVERIFY(browse);
@@ -706,7 +680,7 @@ private slots:
         rig.advance(2300 * 1000);
         sent = rig.transport->drain();
         for (const Dns::Message &m : sent) {
-            if (m.questions.size() == 6)
+            if (m.questions.size() == 3)
                 QVERIFY(m.answers.isEmpty());
         }
     }
@@ -853,49 +827,15 @@ private slots:
 
     void buildsConnectionTemplatesWithoutSecrets()
     {
-        DiscoveredService dav;
-        dav.provider = QStringLiteral("webdav");
-        dav.tls = QStringLiteral("https");
-        dav.host = QStringLiteral("cloud.local");
-        dav.port = 8443;
-        dav.path = QStringLiteral("/remote.php/dav");
-        dav.user = QStringLiteral("alice");
-        QString path;
-        ConnectionParams p = toConnectionParams(dav, &path);
-        QCOMPARE(p.provider, QStringLiteral("webdav"));
-        QCOMPARE(p.host, QStringLiteral("cloud.local"));
-        QCOMPARE(p.port, 8443);
-        QCOMPARE(p.username, QStringLiteral("alice"));
-        QCOMPARE(p.option(QStringLiteral("tls")), QStringLiteral("https"));
-        QCOMPARE(p.option(QStringLiteral("base_path")), QStringLiteral("/remote.php/dav"));
-        QVERIFY(!p.options.contains(QStringLiteral("allow_insecure")));
-        QCOMPARE(path, QStringLiteral("/"));
-
-        dav.tls = QStringLiteral("http");
-        dav.path.clear();
-        p = toConnectionParams(dav, &path);
-        QCOMPARE(p.option(QStringLiteral("tls")), QStringLiteral("http"));
-        QCOMPARE(p.option(QStringLiteral("base_path")), QStringLiteral("/"));
-        QVERIFY(!p.flag(QStringLiteral("allow_insecure")));        // consent is the user's to give
-
-        DiscoveredService ftp;
-        ftp.provider = QStringLiteral("ftp");
-        ftp.host = QStringLiteral("files.local");
-        ftp.port = 21;
-        ftp.path = QStringLiteral("/pub");
-        p = toConnectionParams(ftp, &path);
-        QCOMPARE(p.provider, QStringLiteral("ftp"));
-        QCOMPARE(path, QStringLiteral("/pub"));
-        QVERIFY(p.options.isEmpty());
-
         DiscoveredService smb;
         smb.provider = QStringLiteral("smb");
         smb.host = QStringLiteral("nas.local");
         smb.port = 445;
-        p = toConnectionParams(smb, &path);
+        ConnectionParams p = toConnectionParams(smb);
         QCOMPARE(p.provider, QStringLiteral("smb"));
-        QVERIFY(!p.options.contains(QStringLiteral("share")));    // server mode
-        QCOMPARE(path, QStringLiteral("/"));
+        QCOMPARE(p.host, QStringLiteral("nas.local"));
+        QCOMPARE(p.port, 445);
+        QVERIFY(p.options.isEmpty());                               // server mode: no "share"
         QVERIFY(p.username.isEmpty());
 
         DiscoveredService sftp;
@@ -955,7 +895,7 @@ private slots:
         peer.readDatagram(query.data(), query.size());
         Dns::Message m;
         QVERIFY(Dns::decode(query, &m));
-        QCOMPARE(m.questions.size(), 6);
+        QCOMPARE(m.questions.size(), 3);
 
         // An announcement from the right port is found.
         const QByteArray wire = Dns::encode(announcement("_smb._tcp", "Loop Nas", "loop.local", 445, QStringLiteral("192.0.2.110")));

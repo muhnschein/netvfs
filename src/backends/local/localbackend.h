@@ -21,7 +21,7 @@ struct Context {
     Waiter waiter() const { return Waiter(&canceled, requestTimeoutMs); }
 };
 
-// SPEC-v2 section 6.5: the local file system through POSIX calls.
+// SPEC-v2 section 6.3: the local file system through POSIX calls.
 //
 // L-1: connect() succeeds without a network; the identity is Kind::None and
 // credentials are ignored. Option "root" (default "/") is the base of

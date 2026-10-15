@@ -18,7 +18,7 @@ use netvfs_bridge::accounts::watch;
 use netvfs_bridge::consent::Consent;
 use netvfs_bridge::testing::{BridgeRun, WAIT, wait_signal};
 use netvfs_bridge::testutil::{TestBus, TestChild};
-use netvfs_bridge_proto::{PROTOCOL_VERSION, Signal};
+use netvfs_bridge_proto::Signal;
 use std::io::{Read as _, Write as _};
 use std::path::Path;
 use std::process::Stdio;
@@ -119,7 +119,7 @@ fn serves_and_exits_when_idle() {
     let started = Instant::now();
     tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap().block_on(async {
         let c = run.client().await;
-        c.proxy().hello(PROTOCOL_VERSION, "process").await.unwrap();
+        c.proxy().hello("process").await.unwrap();
         assert_eq!(c.proxy().get_consent().await.unwrap(), "granted");
         // No helper: no accounts.
         assert!(c.proxy().list_locations().await.unwrap().is_empty());
@@ -184,7 +184,7 @@ fn exits_when_idle_after_a_client_vanished() {
     // while the bridge streams a listing to it.
     tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap().block_on(async {
         let c = run.client().await;
-        c.proxy().hello(PROTOCOL_VERSION, "process").await.unwrap();
+        c.proxy().hello("process").await.unwrap();
         let mut signals = c.signals();
         let req = c.proxy().list("account:1", b"/many", "", 1).await.unwrap();
         let batch =
@@ -208,8 +208,7 @@ fn socket_activation() {
     let started = Instant::now();
     tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap().block_on(async {
         let c = run.client().await;
-        let (protocol, _, _) = c.proxy().hello(PROTOCOL_VERSION, "process").await.unwrap();
-        assert_eq!(protocol, PROTOCOL_VERSION);
+        assert_eq!(c.proxy().hello("process").await.unwrap(), env!("CARGO_PKG_VERSION"));
         assert_eq!(c.proxy().get_consent().await.unwrap(), "granted");
         let locations = c.proxy().list_locations().await.unwrap();
         assert_eq!(locations.len(), 1, "{locations:?}");
@@ -249,7 +248,7 @@ fn account_changes_on_the_session_bus() {
     tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap().block_on(async {
         let writer = bus.connect().await;
         let c = run.client().await;
-        c.proxy().hello(PROTOCOL_VERSION, "process").await.unwrap();
+        c.proxy().hello("process").await.unwrap();
         let mut signals = c.signals();
         assert_eq!(c.proxy().list_locations().await.unwrap().len(), 1);
         for id in [2, 3] {

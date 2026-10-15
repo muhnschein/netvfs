@@ -33,15 +33,6 @@ QObject *pluginFor(const QString &provider)
         // The loader instance is intentionally kept loaded: the root object is
         // shared per process and plugins stay mapped until exit.
         QPluginLoader loader(path);
-        // XC-1: the metadata names the interface version; a plugin built for
-        // another API version is never instantiated (its classes may still
-        // cast to the current interface).
-        if (const QString iid = loader.metaData().value(QStringLiteral("IID")).toString();
-                !iid.isEmpty() && iid != QLatin1String(BackendFactoryIid)) {
-            qCWarning(lcNetVfsCore) << "Backend" << path << "has interface" << iid << "but"
-                                    << BackendFactoryIid << "is expected";
-            continue;
-        }
         QObject *root = loader.instance();
         const BackendFactory *factory = qobject_cast<BackendFactory *>(root);
         if (!factory) {
@@ -75,12 +66,12 @@ QStringList BackendLoader::searchPaths()
 Backend *BackendLoader::create(const QString &provider, Result *result)
 {
     BackendFactory *factory = factoryFor(provider);
-    Backend *backend = factory ? factory->create() : nullptr;
-    if (result) {
-        *result = backend ? Result::success()
-                          : Result(Error::Unsupported,
-                                   QStringLiteral("No backend installed for provider \"%1\"").arg(provider));
-    }
+    Backend *backend = nullptr;
+    const Result r = factory ? factory->create(&backend)
+                             : Result(Error::Unsupported,
+                                      QStringLiteral("No backend installed for provider \"%1\"").arg(provider));
+    if (result)
+        *result = r;
     return backend;
 }
 

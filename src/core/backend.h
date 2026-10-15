@@ -119,10 +119,10 @@ public:
     virtual void resetCancel() = 0;
     virtual void disconnect() = 0;
 
-    // ---- Non-virtual helpers kept for v1 callers (Buteo, CLI) ----
+    // ---- Non-virtual helpers (Buteo, CLI) ----
     // Collects a streamed listing.
     Result list(const QString &dir, QVector<Entry> *out);
-    // A file, else an empty folder (v1 semantics).
+    // A file, else an empty folder.
     Result remove(const QString &path);
     // One ranged read through openRead(). `length` -1: to EOF.
     Result read(const QString &path, qint64 offset, qint64 length, QByteArray *out);
@@ -135,20 +135,21 @@ public:
 };
 
 // Interface implemented by each backend plugin (libnetvfs-<provider>.so),
-// IID "org.netvfs.BackendFactory/2.0" (XC-1).
-constexpr const char BackendFactoryIid[] = "org.netvfs.BackendFactory/2.0";
+// IID "org.netvfs.BackendFactory".
 
 class NETVFS_EXPORT BackendFactory
 {
 public:
     virtual ~BackendFactory();
     virtual QString provider() const = 0;
-    virtual Backend *create() = 0;
+    // A new backend in `*out`, which the caller owns; nullptr with the
+    // reason when the plugin cannot make one (a plugin of the Rust backends
+    // without libnetvfs-rs.so: Internal).
+    virtual Result create(Backend **out) = 0;
 };
 
 } // namespace NetVfs
 
-// moc needs a literal here and in Q_PLUGIN_METADATA; both repeat BackendFactoryIid.
-Q_DECLARE_INTERFACE(NetVfs::BackendFactory, "org.netvfs.BackendFactory/2.0")
+Q_DECLARE_INTERFACE(NetVfs::BackendFactory, "org.netvfs.BackendFactory")
 
 #endif

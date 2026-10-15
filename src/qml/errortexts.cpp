@@ -43,7 +43,7 @@ QString activityText(Error error, Activity activity)
         return qtTrId("settings-accounts-netvfs-la-error_install_auth");
     }
     if (activity == Activity::KeyFile && error == Error::Unsupported) {
-        //% "This key type is not supported. Use an Ed25519, ECDSA or RSA (2048 bits or more) key without a certificate."
+        //% "This key type is not supported. Use an Ed25519 or ECDSA key without a certificate, or generate a new key."
         return qtTrId("settings-accounts-netvfs-la-error_key_unsupported");
     }
     if (activity == Activity::KeyFile && error == Error::AuthFailed) {
@@ -128,9 +128,6 @@ QString genericText(Error error)
     case Error::RateLimited:
         //% "The server asks to wait before trying again."
         return qtTrId("settings-accounts-netvfs-la-error_rate_limited");
-    case Error::NotModified:
-        //% "The server reported no change."
-        return qtTrId("settings-accounts-netvfs-la-error_not_modified");
     case Error::Internal:
         break;
     }

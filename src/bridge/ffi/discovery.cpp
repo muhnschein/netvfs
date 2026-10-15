@@ -31,7 +31,6 @@ void report(const nvb_discovery *d)
         item.provider = arena.bytes(s.provider.toUtf8());
         item.host = arena.bytes(s.host.toUtf8());
         item.port = static_cast<uint16_t>(s.port);
-        item.path = arena.bytes(Names::encode(s.path));
     }
     d->hooks.changed(d->hooks.ctx, items.data(), items.size());
 }

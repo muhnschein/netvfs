@@ -178,13 +178,7 @@ mod tests {
         }
         let locations = signal(INTERFACE, "LocationsChanged", &());
         assert!(matches!(decode_signal(&locations).unwrap(), Some(Signal::LocationsChanged)));
-        let server = WireNearby {
-            name: "NAS".into(),
-            provider: "smb".into(),
-            host: "nas".into(),
-            port: 445,
-            path: b"share".to_vec(),
-        };
+        let server = WireNearby { name: "NAS".into(), provider: "smb".into(), host: "nas".into(), port: 445 };
         let nearby = signal(INTERFACE, "NearbyChanged", &(vec![server.clone()],));
         match decode_signal(&nearby).unwrap() {
             Some(Signal::NearbyChanged(list)) => assert_eq!(list, vec![server]),
