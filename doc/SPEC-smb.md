@@ -114,7 +114,7 @@ What remains:
 - **M-12** `cancel()` makes the waiting call return `Canceled` at once. The client sends SMB2 CANCEL for the abandoned request and keeps the connection; a CREATE whose caller went away is closed when its response comes **[test]**.
 - **M-13** Each backend has its own TCP connection and session; backends share no state, so several run in parallel on different threads. A backend is used by one thread at a time (SPEC.md C-8) **[test]**.
 
-A listing skips entries named `""`, `.` or `..` and entries whose name contains `/` or NUL; the rest of the listing is delivered.
+A listing skips entries named `""`, `.` or `..` and entries whose name contains `/` or NUL; the rest of the listing is delivered without an error (SPEC-v2 XC-6).
 
 ### Error mapping
 

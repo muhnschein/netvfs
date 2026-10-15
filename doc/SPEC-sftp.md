@@ -119,7 +119,7 @@ The SFTP plugin's root object provides the key tools (`org.netvfs.SshKeyTools`, 
 | `publicKey` | `authorized_keys` line `<algorithm> <base64> sailfish-backup` |
 | `installWithPassword(params, password)` | signs in once with a password and appends the public line to `.ssh/authorized_keys` over SFTP |
 
-- **S-15** Import refuses, each with a message that says what to do instead: RSA and DSA keys, security-key (`sk-`) keys, certificates, public key lines, PuTTY files, and PEM files encrypted with OpenSSL's `Proc-Type: 4,ENCRYPTED` scheme **[test]**. Before a passphrase is tried, the cost of the key derivation is bounded: bcrypt at most 1024 rounds, PBKDF2 at most 1,000,000 iterations, scrypt at most 64 MiB and parallelism 4; a file beyond that is refused whatever the passphrase. ECDSA keys whose private scalar OpenSSH stored without its leading zero byte import (RUST.md "Dependencies").
+- **S-15** Import refuses, each with a message that says what to do instead: RSA and DSA keys, security-key (`sk-`) keys, certificates, public key lines, PuTTY files, and PEM files encrypted with OpenSSL's `Proc-Type: 4,ENCRYPTED` scheme **[test]**. Before a passphrase is tried, the cost of the key derivation is bounded: bcrypt at most 1024 rounds, PBKDF2 at most 1,000,000 iterations, scrypt at most 64 MiB and parallelism 4; a file beyond that is refused whatever the passphrase. ECDSA keys whose private scalar OpenSSH stored without its leading zero byte import, also when passphrase-encrypted (RUST.md "Dependencies") **[test]**.
 - **S-16** The key page shows the public line with *Copy to clipboard*, and offers *Install on server using password*. The password entered for that action is used once and is not stored.
 - **S-17** `installWithPassword` creates `.ssh` with mode 0700 and `authorized_keys` with mode 0600 if missing, and appends only if the line is not already present **[test]**.
 - **S-18** After a device restore the private key is gone (SPEC.md 3.5). The update flow offers the same choices as creation: generate, import, or switch to password.
@@ -154,7 +154,7 @@ The SFTP plugin's root object provides the key tools (`org.netvfs.SshKeyTools`, 
 - **S-21** READ and WRITE chunks are the server's `limits@openssh.com` read and write limits, each capped at 256 KiB, or 32 KiB if the server gives no limits. Up to 16 requests are in flight per transfer or handle. OpenSSH's `sftp-server` reports read and write limits of 261120 bytes.
 - **S-22** OpenSSH 8.9p1, 9.6p1 and 10.3p1 offer `posix-rename`, `statvfs` and `hardlink`; 9.6p1 and 10.3p1 also offer `copy-data` and `users-groups-by-id` **[test]**. The backend works, with the capabilities reduced accordingly, against an `sftp-server` that offers none of them **[test]**.
 
-A listing skips entries named `""`, `.` or `..` and entries whose name contains `/` or NUL; the rest of the listing is delivered. NativeNoReplace is always reported: OpenSSH's plain `RENAME` fails on an existing target.
+A listing skips entries named `""`, `.` or `..` and entries whose name contains `/` or NUL; the rest of the listing is delivered without an error (XC-6). When RMDIR fails, `removeDir` reports `DirectoryNotEmpty` if the folder lists any name other than `.` and `..`. NativeNoReplace is always reported: OpenSSH's plain `RENAME` fails on an existing target.
 
 ### Error mapping
 
