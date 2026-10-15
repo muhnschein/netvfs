@@ -170,4 +170,9 @@ exclude_re = [
     # other values.
     'netvfs-accounts/src/lib\.rs:\d+:\d+: replace <impl db::PrivilegedOwner for SystemOwner>::privileged_ids -> Option<\(u32, u32\)> with None$',
     # ---- end netvfs-accounts ----
+    # ---- netvfs-sftp ----
+    # Equivalent: the SFTP open flags (SSH_FXF_*) are distinct bits, so
+    # `^` is `|`.
+    'netvfs-sftp/src/(remote|io)\.rs:\d+:\d+: replace \| with \^ in (Remote::copy_data|open_for_write)$',
+    # ---- end netvfs-sftp ----
 ]
