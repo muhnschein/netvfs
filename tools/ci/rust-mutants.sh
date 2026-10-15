@@ -29,6 +29,15 @@
 # libraries `tools/ci/ffi-libs.sh <dir>` built there (else it is skipped
 # and catches nothing). With <k>/<n>, only shard k (from 0) of n runs,
 # every n-th mutant (CI runs the shards as parallel jobs).
+#
+# netvfs-sftp's tests/openssh.rs and netvfs-smb's tests/samba.rs run
+# against the interop containers, and pass at once (catching nothing)
+# without their settings: NETVFS_SFTP_INTEROP_CONFIG, NETVFS_INTEROP_SMB_*.
+# When the mutants include one of these crates (crate mode: it is the
+# package; diff mode: the diff touches it) and its settings are not in the
+# environment, its servers are started for the run (in the ffi-libs.sh dir
+# when given) and removed at its end. CI starts them once per job and hands
+# them in (ci.yml, mutants.yml).
 set -eu
 usage() {
     sed -n 's/^# rust-mutants\.sh /Usage: rust-mutants.sh /p' "$0" >&2
@@ -39,7 +48,19 @@ mode=$1
 shift
 root=$(cd "$(dirname "$0")/../.." && pwd)
 tmp=$(mktemp -d)
-trap 'rm -rf "$tmp"' EXIT
+# Container name prefixes of the servers this run started.
+started=""
+finish() {
+    for prefix in $started; do
+        ids=$(docker ps -aq --filter "name=^$prefix-")
+        # shellcheck disable=SC2086 # one word per container
+        [ -z "$ids" ] || docker rm -f $ids >/dev/null 2>&1 || true
+    done
+    [ -z "${smb_work:-}" ] || rm -rf "$smb_work"
+    rm -rf "$tmp"
+}
+trap finish EXIT
+trap 'exit 1' INT TERM
 
 # The diff since $1 of the workspace's Rust sources (not the fuzz targets,
 # not the crates.io copies in rust/vendor), in $tmp/diff with paths
@@ -62,6 +83,39 @@ use_ffi_libs() {
     export QT_QPA_PLATFORM=offscreen
 }
 
+# The interop servers of package $1 when its settings are missing (see
+# above); $2 holds their work files.
+interop_servers() {
+    case "$1" in
+    netvfs-sftp)
+        [ -z "${NETVFS_SFTP_INTEROP_CONFIG:-}" ] || return 0
+        echo "starting the SFTP interop servers for $1"
+        setting=$(NETVFS_SFTP_SERVERS_ONLY=1 "$root/tests/interop/sftp/run.sh" "$2" | tail -n 1)
+        case "$setting" in
+            NETVFS_SFTP_INTEROP_CONFIG=?*) export "${setting?}" ;;
+            *) echo "the SFTP interop servers did not start"; exit 1 ;;
+        esac
+        started="$started $(python3 -c 'import json, sys
+print(json.load(open(sys.argv[1]))["servers"]["o103"]["container"].rsplit("-", 1)[0])' "$NETVFS_SFTP_INTEROP_CONFIG")"
+        ;;
+    netvfs-smb)
+        [ -z "${NETVFS_INTEROP_SMB_PREFIX:-}" ] || return 0
+        echo "starting the SMB interop servers for $1"
+        NETVFS_SMB_SERVERS_ONLY=1 "$root/tests/interop/smb/run.sh" "$2" > "$tmp/smb-servers"
+        grep '^NETVFS_INTEROP_SMB_' "$tmp/smb-servers" > "$tmp/smb-settings" || true
+        while IFS= read -r setting; do
+            export "${setting?}"
+        done < "$tmp/smb-settings"
+        if [ -z "${NETVFS_INTEROP_SMB_PREFIX:-}" ]; then
+            echo "the SMB interop servers did not start"
+            exit 1
+        fi
+        started="$started $NETVFS_INTEROP_SMB_PREFIX"
+        smb_work=$NETVFS_INTEROP_SMB_WORK
+        ;;
+    esac
+}
+
 case "$mode" in
 diff | crate)
     target=$1
@@ -73,9 +127,16 @@ diff | crate)
         # All features: --in-diff selects the packages it touches, and
         # naming a feature of one it left out is an error.
         select="--in-diff $tmp/diff --workspace"
+        packages=$(sed -n 's|^+++ b/\(netvfs-[a-z-]*\)/.*|\1|p' "$tmp/diff" | sort -u)
     else
         select="--package $target"
+        packages=$target
     fi
+    work=$tmp
+    [ $# -lt 2 ] || work=$(cd "$2" && pwd)
+    for package in $packages; do
+        interop_servers "$package" "$work"
+    done
     cd "$root/rust"
     status=0
     # shellcheck disable=SC2086 # one word per argument
