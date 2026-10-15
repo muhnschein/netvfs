@@ -1035,6 +1035,7 @@ dependencies = [
  "data-encoding",
  "netvfs-vfs",
  "russh",
+ "serde_json",
  "tokio",
  "zeroize",
 ]

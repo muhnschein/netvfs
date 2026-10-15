@@ -23,4 +23,6 @@ zeroize = "1"
 data-encoding = "2"
 
 [dev-dependencies]
+# The interop configuration of tests/openssh.rs.
+serde_json = "1"
 tokio = { version = "1", features = ["io-util", "macros", "net", "rt", "rt-multi-thread", "sync", "test-util", "time"] }
