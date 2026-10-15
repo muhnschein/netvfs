@@ -464,11 +464,15 @@ impl Opening {
 #[must_use]
 pub fn handshake_failure(e: &russh::Error) -> Status {
     if let Some((list, offered)) = policy::no_common_algorithm(e) {
+        // What the server offers in the message itself: it tells the user
+        // what the server lacks (S-2).
         return Status::new(
             ErrorName::SecurityPolicy,
-            format!("The server offers no {list} algorithm this app accepts"),
-        )
-        .with_detail(format!("The server offers: {}", offered.join(", ")));
+            format!(
+                "The server offers no {list} algorithm this app accepts (it offers {})",
+                offer_text(&offered)
+            ),
+        );
     }
     match e {
         russh::Error::Disconnect | russh::Error::HUP | russh::Error::IO(_) => {
@@ -477,6 +481,25 @@ pub fn handshake_failure(e: &russh::Error) -> Status {
         }
         _ => Status::new(ErrorName::ProtocolError, "The SSH handshake failed").with_detail(e.to_string()),
     }
+}
+
+/// The longest list of the server's algorithm names a message quotes.
+const MAX_OFFER_TEXT: usize = 512;
+
+/// The server's names, comma-separated; whole names only, up to
+/// [`MAX_OFFER_TEXT`] bytes, and "…" when some are left out.
+fn offer_text(offered: &[String]) -> String {
+    let mut text = String::new();
+    for name in offered {
+        let separator = if text.is_empty() { "" } else { ", " };
+        if text.len().saturating_add(separator.len()).saturating_add(name.len()) > MAX_OFFER_TEXT {
+            text.push_str(if text.is_empty() { "…" } else { ", …" });
+            break;
+        }
+        text.push_str(separator);
+        text.push_str(name);
+    }
+    text
 }
 
 async fn open(

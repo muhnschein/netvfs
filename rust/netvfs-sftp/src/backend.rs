@@ -149,7 +149,7 @@ fn not_signed_in() -> Status {
 }
 
 /// The user to sign in as: the credentials', the account's, else the
-/// local user's (as libssh did).
+/// local user's (as ssh does).
 fn user_name(credentials: &Credentials, settings: &Settings) -> String {
     if !credentials.user.is_empty() {
         return credentials.user.clone();

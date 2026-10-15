@@ -107,11 +107,33 @@ async fn no_common_algorithm_is_a_security_policy_failure() {
         });
         let e = connect(&target(addr), &CancelToken::new()).await.unwrap_err();
         assert_eq!(e.name, ErrorName::SecurityPolicy, "{e:?}");
-        assert_eq!(e.message, format!("The server offers no {list} algorithm this app accepts"));
         let offered = if kind == "kex" { "diffie-hellman-group14-sha256" } else { "aes256-ctr" };
-        assert_eq!(e.detail, format!("The server offers: {offered}"));
+        assert_eq!(
+            e.message,
+            format!("The server offers no {list} algorithm this app accepts (it offers {offered})")
+        );
+        assert_eq!(e.detail, "");
         drop(server);
     }
+}
+
+#[test]
+fn quoted_offers_are_whole_names_up_to_a_cap() {
+    let names = |list: &[&str]| list.iter().map(|n| (*n).to_owned()).collect::<Vec<_>>();
+    assert_eq!(offer_text(&[]), "");
+    assert_eq!(offer_text(&names(&["a"])), "a");
+    assert_eq!(offer_text(&names(&["a", "b", "c"])), "a, b, c");
+    let long = "x".repeat(MAX_OFFER_TEXT);
+    assert_eq!(offer_text(&names(&[&long])), long);
+    assert_eq!(offer_text(&names(&[&long, "y"])), format!("{long}, …"));
+    let over = "x".repeat(MAX_OFFER_TEXT + 1);
+    assert_eq!(offer_text(&names(&[&over, "y"])), "…");
+    // Exactly the cap with the separator: kept; one byte more: cut.
+    let head = "h".repeat(MAX_OFFER_TEXT - 3);
+    assert_eq!(offer_text(&names(&[&head, "z"])), format!("{head}, z"));
+    assert_eq!(offer_text(&names(&[&head, "zz", "w"])), format!("{head}, …"));
+    let many = vec!["n".to_owned(); 1000];
+    assert!(offer_text(&many).len() <= MAX_OFFER_TEXT + ", …".len());
 }
 
 /// A server handler that takes nobody.
