@@ -241,9 +241,6 @@ fn parse_adhoc(url: &str, opts: &args::AdHocOpts) -> Result<AdHocUrl, Fail> {
         "sftp" | "ssh" => "sftp",
         "smb" => "smb",
         "fake" => "fake",
-        "dav" | "davs" | "ftp" | "ftps" => {
-            return Err(Fail::net(ErrorName::Unsupported, &format!("{scheme} URLs are no longer supported")));
-        }
         "file" | "local" => {
             return Err(Fail::net(ErrorName::PermissionDenied, "The bridge never accesses local files"));
         }
@@ -862,8 +859,8 @@ mod tests {
         for url in ["dav://h/", "davs://h/", "ftp://h/", "ftps://h/", "https://h/"] {
             assert_eq!(bare(url, &plain()).as_deref(), Some("Unsupported"), "{url}");
         }
-        let removed = parse_adhoc("davs://h/", &plain()).err();
-        assert_eq!(removed.as_ref().map(Fail::message), Some("davs URLs are no longer supported"));
+        let unknown = parse_adhoc("davs://h/", &plain()).err();
+        assert_eq!(unknown.as_ref().map(Fail::message), Some("No backend for this scheme is installed"));
         let guest = AdHocOpts { user: None, security_profile: Some("guest".into()) };
         assert!(bare("sftp://h/", &guest).is_some_and(|n| n.contains("InvalidArgs")));
         assert!(bare("smb://h/", &guest).is_none());
