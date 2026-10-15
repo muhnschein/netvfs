@@ -18,6 +18,13 @@ if [ -d /srv/conformance ]; then
     chown conf /srv/conformance
 fi
 
+# FSOptions IgnoreExtendedAttributes: ProFTPD 1.3.8b reads the xattr names
+# of a path with the length of the size query, not the length the list
+# call returns. On overlayfs (the image's own directories, such as /srv)
+# the size query also counts the overlay's private names, which the list
+# leaves out, so each ATTRS reply carried uninitialized heap memory as
+# extended attributes, and some request sequences made the session abort
+# in malloc. Without xattrs in ATTRS neither happens.
 cat > /etc/proftpd/netvfs.conf <<'EOF'
 Include /etc/proftpd/modules.conf
 LoadModule mod_sftp.c
@@ -36,6 +43,7 @@ WtmpLog off
 TransferLog none
 Umask 022 022
 AllowOverwrite on
+FSOptions IgnoreExtendedAttributes
 MaxInstances 64
 SFTPEngine on
 SFTPLog /var/log/proftpd/sftp.log
