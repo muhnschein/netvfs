@@ -203,8 +203,8 @@ private slots:
         QTest::addColumn<QString>("text");
         QTest::addColumn<QString>("detail");
         QTest::newRow("dsa") << "id_dsa" << QByteArray("DSA PRIVATE KEY")
-                             << "This key type is not supported. Use an Ed25519, ECDSA or RSA (2048 bits or more) key "
-                                "without a certificate." << "DSA keys are not supported";
+                             << "This key type is not supported. Use an Ed25519 or ECDSA key without a certificate, "
+                                "or generate a new key." << "DSA keys are not supported";
         QTest::newRow("not a key") << "notes.txt" << QByteArray("hello")
                                    << "The file could not be read as a private key." << "not a key";
         QTest::newRow("too large") << "huge" << QByteArray(70 * 1024, 'x')

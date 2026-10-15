@@ -1,17 +1,24 @@
 #!/bin/sh
 # SPDX-License-Identifier: LGPL-2.1-or-later
 # SFTP interop suite (SPEC-sftp 8, SPEC 12.2, SPEC-v2 XT-1, XT-2). Builds
-# the OpenSSH and ProFTPD server images, starts one container per server
-# version, runs the QtTest driver tst_interop_sftp, netvfs-cli and the
-# backend conformance suite (tests/conformance) against them, and removes
+# the OpenSSH, ProFTPD and Dropbear server images, starts one container per
+# server version, runs the QtTest driver tst_interop_sftp, netvfs-cli, the
+# backend conformance suite (tests/conformance) and the Rust tests of
+# netvfs-sftp (rust/netvfs-sftp/tests/openssh.rs) against them, and removes
 # the containers again, also when a step fails or the run is interrupted.
 #
 # Usage: run.sh <build dir> [tst_interop_sftp arguments]
 # With driver arguments (for example a list of test functions) only the
-# driver runs, not the CLI check and not the conformance suite. With
-# NETVFS_INTEROP_CLI_ONLY=1 only the CLI check runs.
-# NETVFS_SFTP_CONFORMANCE=0 skips the conformance suite; NETVFS_SFTP_KEEP=1
-# leaves the containers running for inspection.
+# driver runs, not the CLI check, the conformance suite or the Rust tests.
+# With NETVFS_INTEROP_CLI_ONLY=1 only the CLI check runs.
+# NETVFS_SFTP_CONFORMANCE=0 skips the conformance suite, NETVFS_SFTP_RUST=0
+# the Rust tests; NETVFS_SFTP_KEEP=1 leaves the containers running for
+# inspection. With NETVFS_SFTP_SERVERS_ONLY=1 nothing runs: the containers
+# stay, and the last line printed is NETVFS_SFTP_INTEROP_CONFIG=<file>, the
+# configuration of the servers. With NETVFS_SFTP_INTEROP_CONFIG set, run.sh
+# uses the servers it names instead of starting its own, and leaves them
+# running (cargo-mutants starts them once per shard this way; docker rm -f
+# the containers the configuration names to remove them).
 set -eu
 
 here=$(cd "$(dirname "$0")" && pwd)
@@ -59,6 +66,9 @@ build_images() {
     docker build -q -f "$here/docker/Dockerfile.distro" --build-arg BASE=mirror.gcr.io/library/ubuntu:22.04 \
         -t netvfs-sftp-openssh89:test "$here/docker" >/dev/null
     docker build -q -f "$here/docker/Dockerfile.proftpd" -t netvfs-sftp-proftpd:test "$here/docker" >/dev/null
+    docker build -q -f "$here/docker/Dockerfile.dropbear" -t netvfs-sftp-dropbear2025:test "$here/docker" >/dev/null
+    docker build -q -f "$here/docker/Dockerfile.dropbear" --build-arg BASE=mirror.gcr.io/library/ubuntu:24.04 \
+        -t netvfs-sftp-dropbear2022:test "$here/docker" >/dev/null
 }
 
 instance_port() {
@@ -73,6 +83,10 @@ instance_port() {
     hold) echo 2207 ;;
     otp) echo 2208 ;;
     stall) echo 2209 ;;
+    curve) echo 2210 ;;
+    dh) echo 2211 ;;
+    cbc) echo 2212 ;;
+    sha1rsa) echo 2213 ;;
     sftp) echo 2222 ;;
     sftpstall) echo 2223 ;;
     *) echo "unknown instance $name" >&2; return 1 ;;
@@ -277,7 +291,6 @@ conformance() {
 { "targets": [
   { "name": "sftp-openssh103", "provider": "sftp", "host": "127.0.0.1", "port": $o103_port,
     "user": "conf", "secretEnv": "NETVFS_CONFORMANCE_SECRET", "trustOnFirstUse": true,
-    "options": { "allow_shell": "true" },
     "baseDir": "/srv/conformance", "hostPath": "$work/conformance-o103",
     "stallProxy": { "port": $o103_stall,
                     "engage": "docker exec $prefix-o103 touch /tmp/stall",
@@ -285,7 +298,6 @@ conformance() {
     "restart": "docker exec $prefix-o103 /setup/restart-instance.sh default conf" },
   { "name": "sftp-proftpd", "provider": "sftp", "host": "127.0.0.1", "port": $pro_port,
     "user": "conf", "secretEnv": "NETVFS_CONFORMANCE_SECRET", "trustOnFirstUse": true,
-    "options": { "allow_shell": "true" },
     "baseDir": "/srv/conformance", "hostPath": "$work/conformance-pro",
     "stallProxy": { "port": $pro_stall,
                     "engage": "docker exec $prefix-pro touch /tmp/stall",
@@ -305,42 +317,76 @@ JSON
     )
 }
 
-build_images
+# One value of the configuration file $config: json <key>[.<key>...]
+json() {
+    python3 -c 'import json, sys
+value = json.load(open(sys.argv[1]))
+for key in sys.argv[2].split("."):
+    value = value[key]
+print(value)' "$config" "$1"
+}
 
-password=$(od -An -N12 -tx1 /dev/urandom | tr -d ' \n')
-otp=$(od -An -N4 -tu4 /dev/urandom | tr -d ' \n' | cut -c 1-6)
-for folder in conformance-o103 conformance-pro; do
-    rm -rf "${work:?}/$folder"
-    mkdir -p "$work/$folder"
-    chmod 0777 "$work/$folder"
-done
-o103="default hardened nosftp noext stall"
-o96="default kbdint noext legacy otp"
-o89="default hold"
-pro="sftp sftpstall"
-start o103 netvfs-sftp-openssh103:test "$o103" --tmpfs /srv/small:size=8m \
-    -v "$work/conformance-o103:/srv/conformance"
-start o96 netvfs-sftp-openssh96:test "$o96"
-start o89 netvfs-sftp-openssh89:test "$o89"
-start pro netvfs-sftp-proftpd:test "$pro" -v "$work/conformance-pro:/srv/conformance"
-for key in o103 o96 o89 pro; do
-    wait_ready "$key"
-done
+if [ -n "${NETVFS_SFTP_INTEROP_CONFIG:-}" ]; then
+    # The servers of an earlier NETVFS_SFTP_SERVERS_ONLY=1 run: they stay.
+    config=$(cd "$(dirname "$NETVFS_SFTP_INTEROP_CONFIG")" && pwd)/$(basename "$NETVFS_SFTP_INTEROP_CONFIG")
+    work=$(dirname "$config")
+    password=$(json password)
+    prefix=$(json servers.o103.container)
+    prefix=${prefix%-o103}
+    log "using the servers of $config"
+else
+    build_images
 
-config="$work/config.json"
-{
-    printf '{\n  "password": "%s",\n  "otp": "%s",\n  "servers": {\n' "$password" "$otp"
-    server_json o103 "$o103"
-    printf ',\n'
-    server_json o96 "$o96"
-    printf ',\n'
-    server_json o89 "$o89"
-    printf ',\n'
-    server_json pro "$pro"
-    printf '\n  }\n}\n'
-} > "$config"
+    password=$(od -An -N12 -tx1 /dev/urandom | tr -d ' \n')
+    otp=$(od -An -N4 -tu4 /dev/urandom | tr -d ' \n' | cut -c 1-6)
+    for folder in conformance-o103 conformance-pro; do
+        rm -rf "${work:?}/$folder"
+        mkdir -p "$work/$folder"
+        chmod 0777 "$work/$folder"
+    done
+    o103="default hardened nosftp noext stall curve dh cbc sha1rsa"
+    o96="default kbdint noext legacy otp"
+    o89="default hold"
+    pro="sftp sftpstall"
+    dropbear="default"
+    start o103 netvfs-sftp-openssh103:test "$o103" --tmpfs /srv/small:size=8m \
+        -v "$work/conformance-o103:/srv/conformance"
+    start o96 netvfs-sftp-openssh96:test "$o96"
+    start o89 netvfs-sftp-openssh89:test "$o89"
+    start pro netvfs-sftp-proftpd:test "$pro" -v "$work/conformance-pro:/srv/conformance"
+    start db25 netvfs-sftp-dropbear2025:test "$dropbear"
+    start db22 netvfs-sftp-dropbear2022:test "$dropbear"
+    for key in o103 o96 o89 pro db25 db22; do
+        wait_ready "$key"
+    done
 
+    config="$work/config.json"
+    {
+        printf '{\n  "password": "%s",\n  "otp": "%s",\n  "servers": {\n' "$password" "$otp"
+        server_json o103 "$o103"
+        printf ',\n'
+        server_json o96 "$o96"
+        printf ',\n'
+        server_json o89 "$o89"
+        printf ',\n'
+        server_json pro "$pro"
+        printf ',\n'
+        server_json db25 "$dropbear"
+        printf ',\n'
+        server_json db22 "$dropbear"
+        printf '\n  }\n}\n'
+    } > "$config"
+fi
+
+if [ "${NETVFS_SFTP_SERVERS_ONLY:-0}" = 1 ]; then
+    containers=""
+    echo "NETVFS_SFTP_INTEROP_CONFIG=$config"
+    exit 0
+fi
+
+# The SFTP plugin loads the Rust library of the same build.
 export NETVFS_BACKEND_PATH="$build/lib/netvfs/backends"
+export NETVFS_RS_LIB="$build/lib/netvfs/libnetvfs-rs.so"
 export NETVFS_SFTP_INTEROP_CONFIG="$config"
 status=0
 if [ -z "${NETVFS_INTEROP_CLI_ONLY:-}" ]; then
@@ -360,5 +406,11 @@ fi
 if [ $# -eq 0 ] && [ -z "${NETVFS_INTEROP_CLI_ONLY:-}" ] && [ "${NETVFS_SFTP_CONFORMANCE:-1}" != 0 ] \
         && ! conformance; then
     status=1
+fi
+if [ $# -eq 0 ] && [ -z "${NETVFS_INTEROP_CLI_ONLY:-}" ] && [ "${NETVFS_SFTP_RUST:-1}" != 0 ]; then
+    log "running the Rust tests of netvfs-sftp"
+    if ! (cd "$here/../../../rust" && cargo test --locked --package netvfs-sftp --test openssh); then
+        status=1
+    fi
 fi
 exit $status

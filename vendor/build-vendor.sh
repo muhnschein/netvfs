@@ -55,11 +55,6 @@ build() {
     printf '%s' "$want" > "$stamp"
 }
 
-build libssh main \
-    -DWITH_SERVER=OFF -DWITH_EXAMPLES=OFF -DWITH_GSSAPI=OFF -DWITH_PCAP=OFF \
-    -DUNIT_TESTING=OFF -DCLIENT_TESTING=OFF -DWITH_ZLIB=OFF -DWITH_NACL=OFF \
-    "$@"
-
 # The backend plugin's copy: no Kerberos, no libdcerpc (G-SMB item 4; the
 # plugin also links src/backends/smb/noshareenum.c).
 build libsmb2 main \

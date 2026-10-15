@@ -3,17 +3,18 @@
 # Container entry point for the SFTP interop servers (SPEC-sftp 8, 9).
 # Creates the test users and starts one sshd per instance named in
 # $INSTANCES, each on its own port and log file:
-#   default  2201  password and keys; user "twofactor" needs key + password
+#   default  2201  password and keys; user "twofactor" needs key + password,
+#                  user "nosession" may open no session (MaxSessions 0)
 #   hardened 2202  SPEC-sftp section 9 (OpenSSH 10.x only)
 #   kbdint   2203  keyboard-interactive only, via PAM (distribution sshd)
 #   nosftp   2204  no sftp subsystem
 #   noext    2205  sftp-server behind sftpproxy.py, which hides all extensions
 #   hold     2207  sftp-server behind sftpproxy.py, which holds replies back
 #                  while /tmp/hold exists
-#   legacy   2206  only a key exchange that libssh does not offer (SHA-1)
+#   legacy   2206  only finite-field Diffie-Hellman with SHA-1
 #   otp      2208  keyboard-interactive through PAM with the one-time
-#                  password stub (pam_netvfs_otp.c, code $TEST_OTP) and
-#                  MaxSessions 2 (distribution sshd only); users:
+#                  password stub (pam_netvfs_otp.c, code $TEST_OTP)
+#                  (distribution sshd only); users:
 #                    otp        password, then the code (two rounds)
 #                    keyotp     publickey, then the code (partial success)
 #                    pwotp      password, then the code (partial success)
@@ -21,6 +22,11 @@
 #                  others (alice) sign in with a password
 #   stall    2209  TCP relay to the default instance (sftpproxy.py --relay)
 #                  that forwards nothing while /tmp/stall exists
+#   curve    2210  only the curve25519 key exchange (no post-quantum hybrid)
+# What the client's hardened lists leave out, one list at a time:
+#   dh       2211  only finite-field Diffie-Hellman with SHA-2
+#   cbc      2212  only CBC ciphers
+#   sha1rsa  2213  only the SHA-1 RSA host key signature (ssh-rsa)
 # The password of every password user is $TEST_PASSWORD. /run/netvfs-ready
 # appears when all instances accept connections. User "conf" belongs to the
 # conformance suite; /srv/conformance is its folder when mounted.
@@ -29,7 +35,7 @@ set -eu
 : "${TEST_PASSWORD:?}"
 : "${INSTANCES:=default nosftp noext}"
 
-for user in alice carol twofactor conf otp keyotp pwotp twoprompt; do
+for user in alice carol twofactor conf otp keyotp pwotp twoprompt nosession; do
     id "$user" >/dev/null 2>&1 || useradd -m -s /bin/sh "$user"
     echo "$user:$TEST_PASSWORD" | chpasswd
 done
@@ -128,6 +134,8 @@ KbdInteractiveAuthentication no
 Subsystem sftp internal-sftp
 Match User twofactor
   AuthenticationMethods publickey,password
+Match User nosession
+  MaxSessions 0
 EOF
         ;;
     hardened)
@@ -181,7 +189,6 @@ EOF
 PasswordAuthentication yes
 KbdInteractiveAuthentication yes
 PubkeyAuthentication yes
-MaxSessions 2
 Subsystem sftp internal-sftp
 Match User otp,twoprompt
   AuthenticationMethods keyboard-interactive
@@ -194,6 +201,27 @@ EOF
     legacy)
         common 2206 legacy
         echo "KexAlgorithms diffie-hellman-group14-sha1"
+        echo "Subsystem sftp internal-sftp"
+        ;;
+    curve)
+        common 2210 curve
+        echo "PasswordAuthentication yes"
+        echo "KexAlgorithms curve25519-sha256"
+        echo "Subsystem sftp internal-sftp"
+        ;;
+    dh)
+        common 2211 dh
+        echo "KexAlgorithms diffie-hellman-group16-sha512,diffie-hellman-group14-sha256"
+        echo "Subsystem sftp internal-sftp"
+        ;;
+    cbc)
+        common 2212 cbc
+        echo "Ciphers aes256-cbc,aes128-cbc"
+        echo "Subsystem sftp internal-sftp"
+        ;;
+    sha1rsa)
+        common 2213 sha1rsa
+        echo "HostKeyAlgorithms ssh-rsa"
         echo "Subsystem sftp internal-sftp"
         ;;
     *)

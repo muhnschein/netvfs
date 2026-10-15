@@ -1,13 +1,15 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-#include "sftpentry.h"
+#include "rsbackend.h"
+#include "rskeytools.h"
 
 #include <QtCore/QObject>
 
 namespace NetVfs {
 
-// Root object of libnetvfs-sftp.so: the backend factory and, so that libssh
-// code lives only in the SFTP package, the SSH key tools (SPEC-sftp 5.1).
-class SftpPlugin : public QObject, public BackendFactory, public SshKeyTools
+// Root object of libnetvfs-sftp.so: provider "sftp" of the Rust backends
+// and, so that the SSH code lives only in the SFTP package, the SSH key
+// tools (SPEC-sftp 5.1).
+class SftpPlugin : public QObject, public BackendFactory, public Rs::RsKeyTools
 {
     Q_OBJECT
     Q_PLUGIN_METADATA(IID "org.netvfs.BackendFactory")
@@ -15,22 +17,7 @@ class SftpPlugin : public QObject, public BackendFactory, public SshKeyTools
 
 public:
     QString provider() const override { return QStringLiteral("sftp"); }
-    Result create(Backend **out) override
-    {
-        *out = createSftpBackend();
-        return Result::success();
-    }
-
-    Result generate(SshKeyMaterial *out) override { return generateSshKey(out); }
-    Result importKey(const QByteArray &fileContents, const QByteArray &passphrase,
-                     SshKeyMaterial *out) override
-    {
-        return importSshKey(fileContents, passphrase, out);
-    }
-    Result describe(const QByteArray &privateKey, SshKeyMaterial *out) override
-    {
-        return describeSshKey(privateKey, out);
-    }
+    Result create(Backend **out) override { return Rs::createBackend(provider(), out); }
 };
 
 } // namespace NetVfs

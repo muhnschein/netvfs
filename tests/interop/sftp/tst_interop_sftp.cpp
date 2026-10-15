@@ -1,15 +1,16 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-// SFTP interoperability matrix (SPEC-sftp section 8) against the OpenSSH
-// containers started by run.sh, which passes their ports and the test
-// password in the JSON file named by NETVFS_SFTP_INTEROP_CONFIG.
+// SFTP interoperability matrix (SPEC-sftp section 8) against the OpenSSH,
+// ProFTPD and Dropbear containers started by run.sh, which passes their
+// ports and the test password in the JSON file named by
+// NETVFS_SFTP_INTEROP_CONFIG. Everything goes through the SFTP plugin of
+// the build tree (libnetvfs-sftp.so over libnetvfs-rs.so); what was
+// negotiated is read from the servers' logs.
 #include "backendloader.h"
 #include "identity.h"
 #include "names.h"
 #include "paths.h"
 #include "probe.h"
 #include "prompter.h"
-#include "sftpbackend.h"
-#include "shellexec.h"
 #include "sshkeys.h"
 #include "transfer.h"
 
@@ -19,7 +20,6 @@
 #include <QtCore/QElapsedTimer>
 #include <QtCore/QJsonDocument>
 #include <QtCore/QJsonObject>
-#include <QtCore/QMutex>
 #include <QtCore/QProcess>
 #include <QtCore/QSemaphore>
 #include <QtCore/QTemporaryDir>
@@ -49,57 +49,6 @@ namespace {
 
 constexpr qint64 BigFileSize = 64 * 1024 * 1024;   // SPEC-sftp 8
 constexpr qint64 CancelBoundMs = 2000;              // C-9
-
-// S-T4: emulates a server without the hybrid post-quantum key exchanges by
-// narrowing the client's list through the test-only extension point.
-class Curve25519OnlyBackend : public Sftp::SftpBackend
-{
-protected:
-    void configureSession(ssh_session session) override
-    {
-        ssh_options_set(session, SSH_OPTIONS_KEY_EXCHANGE, "curve25519-sha256");
-    }
-};
-
-// Debug output of the backend (category netvfs.sftp), for the negotiated
-// key exchange.
-struct LogCapture {
-    QMutex mutex;
-    QStringList lines;
-    QtMessageHandler previous = nullptr;
-};
-
-LogCapture &logCapture()
-{
-    static LogCapture capture;
-    return capture;
-}
-
-void captureLog(QtMsgType type, const QMessageLogContext &context, const QString &message)
-{
-    LogCapture &capture = logCapture();
-    if (context.category && qstrcmp(context.category, "netvfs.sftp") == 0) {
-        const QMutexLocker lock(&capture.mutex);
-        capture.lines << message;
-        if (type == QtDebugMsg)
-            return;
-    }
-    capture.previous(type, context, message);
-}
-
-QString capturedLog()
-{
-    LogCapture &capture = logCapture();
-    const QMutexLocker lock(&capture.mutex);
-    return capture.lines.join(QLatin1Char('\n'));
-}
-
-void clearLog()
-{
-    LogCapture &capture = logCapture();
-    const QMutexLocker lock(&capture.mutex);
-    capture.lines.clear();
-}
 
 QByteArray sha256(QIODevice *device)
 {
@@ -147,36 +96,6 @@ class FailingSource : public QIODevice
 protected:
     qint64 readData(char *, qint64) override { return -1; }
     qint64 writeData(const char *, qint64) override { return -1; }
-};
-
-// XC-21: a backend that can hold a session channel of its own, so that the
-// next channel the backend opens is one too many for MaxSessions.
-class ChannelHog : public Sftp::SftpBackend
-{
-public:
-    ~ChannelHog() override { release(); }
-
-    bool occupy()
-    {
-        m_channel = ssh_channel_new(m_session);
-        return m_channel && ssh_channel_open_session(m_channel) == SSH_OK;
-    }
-    void release()
-    {
-        if (m_channel) {
-            if (ssh_channel_is_open(m_channel))
-                ssh_channel_close(m_channel);
-            ssh_channel_free(m_channel);
-            m_channel = nullptr;
-        }
-    }
-
-protected:
-    void configureSession(ssh_session session) override { m_session = session; }
-
-private:
-    ssh_session m_session = nullptr;
-    ssh_channel m_channel = nullptr;
 };
 
 // XS-11: answers by prompt text and records what it was asked.
@@ -353,6 +272,20 @@ private:
                                        .value(1));
     }
 
+    // The pin of a Dropbear host key, from dropbearkey -y.
+    QString dropbearHostKey(const QString &server, const QString &type) const
+    {
+        const QStringList lines = QString::fromLatin1(exec(server, QStringLiteral("dropbearkey -y -f "
+                                                                                   "/etc/dropbear/dropbear_%1_host_key")
+                                                                     .arg(type)))
+                                      .split(QLatin1Char('\n'));
+        for (const QString &line : lines) {
+            if (line.startsWith(QLatin1String("ssh-")) || line.startsWith(QLatin1String("ecdsa-")))
+                return line.section(QLatin1Char(' '), 0, 1);
+        }
+        return QString();
+    }
+
     static QString keyFileType(const QString &algorithm)
     {
         if (algorithm.startsWith(QLatin1String("ecdsa")))
@@ -526,15 +459,10 @@ private slots:
         }
         big.close();
         m_bigSha = fileSha256(m_bigFile);
-
-        logCapture().previous = qInstallMessageHandler(captureLog);
-        QLoggingCategory::setFilterRules(QStringLiteral("netvfs.sftp.debug=true"));
     }
 
     void cleanupTestCase()
     {
-        if (logCapture().previous)
-            qInstallMessageHandler(logCapture().previous);
         if (!m_servers.isEmpty()) {
             docker({ QStringLiteral("unpause"), container(QStringLiteral("o89")) });
             exec(QStringLiteral("o89"), QStringLiteral("rm -f /tmp/hold"));
@@ -558,10 +486,8 @@ private slots:
         QCOMPARE(r.error(), Error::ServerIdentityUnknown);
         QVERIFY(r.message().contains(seen.fingerprint));
 
-        clearLog();
         r = signIn(b.get(), p, m_password);
         QVERIFY2(r.ok(), qPrintable(r.toString()));
-        QVERIFY2(capturedLog().contains(QLatin1String("mlkem768x25519-sha256")), qPrintable(capturedLog()));
         QVERIFY(serverLog(QStringLiteral("o103"), QStringLiteral("default"))
                     .contains(QLatin1String("kex: algorithm: mlkem768x25519-sha256")));
         fullFlow(b.get(), QStringLiteral("o103"), QStringLiteral("netvfs-it/st01"),
@@ -576,10 +502,10 @@ private slots:
         authorizeKey(QStringLiteral("o103"), QStringLiteral("backup"), key.publicLine);
         const ConnectionParams p = params(QStringLiteral("o103"), QStringLiteral("hardened"), QStringLiteral("backup"),
                                           QStringLiteral("publickey"));
-        clearLog();
         auto b = signedIn(p, encodeKeySecret(key.privateKey));
         QVERIFY(b);
-        QVERIFY(capturedLog().contains(QLatin1String("mlkem768x25519-sha256")));
+        QVERIFY(serverLog(QStringLiteral("o103"), QStringLiteral("hardened"))
+                    .contains(QLatin1String("kex: algorithm: mlkem768x25519-sha256")));
         fullFlow(b.get(), QStringLiteral("o103"), QStringLiteral("/data/Sailfish OS/Backups"),
                          QStringLiteral("/srv/sftpjail/data/Sailfish OS/Backups"));
         if (QTest::currentTestFailed())
@@ -603,13 +529,15 @@ private slots:
                  QCryptographicHash::hash(data, QCryptographicHash::Sha256).toHex());
     }
 
-    // S-T3
+    // S-T3. 9.6p1 has no ML-KEM; of its hybrid exchanges the hardened
+    // list takes none, so curve25519 it is.
     void openssh96PasswordAndKey()
     {
-        clearLog();
         auto b = signedIn(params(QStringLiteral("o96"), QStringLiteral("default"), QStringLiteral("alice")), m_password);
         QVERIFY(b);
-        QVERIFY2(capturedLog().contains(QLatin1String("sntrup761x25519-sha512")), qPrintable(capturedLog()));
+        const QString log = serverLog(QStringLiteral("o96"), QStringLiteral("default"));
+        QVERIFY(log.contains(QLatin1String("kex: algorithm: curve25519-sha256")));
+        QVERIFY(!log.contains(QLatin1String("kex: algorithm: sntrup")));
         fullFlow(b.get(), QStringLiteral("o96"), QStringLiteral("netvfs-it/st03-password"),
                          QStringLiteral("/home/alice/netvfs-it/st03-password"));
         if (QTest::currentTestFailed())
@@ -626,19 +554,15 @@ private slots:
                          QStringLiteral("/home/alice/netvfs-it/st03-key"));
     }
 
-    // S-T4
+    // S-T4: a 10.3p1 server that offers only curve25519 ("curve").
     void curve25519Only()
     {
-        Curve25519OnlyBackend b;
-        clearLog();
-        const Result r = signIn(&b, params(QStringLiteral("o103"), QStringLiteral("default"), QStringLiteral("alice")),
-                                m_password);
-        QVERIFY2(r.ok(), qPrintable(r.toString()));
-        QVERIFY2(capturedLog().contains(QLatin1String("Key exchange curve25519-sha256")), qPrintable(capturedLog()));
-        QVERIFY(serverLog(QStringLiteral("o103"), QStringLiteral("default"))
+        auto b = signedIn(params(QStringLiteral("o103"), QStringLiteral("curve"), QStringLiteral("alice")), m_password);
+        QVERIFY(b);
+        QVERIFY(serverLog(QStringLiteral("o103"), QStringLiteral("curve"))
                     .contains(QLatin1String("kex: algorithm: curve25519-sha256")));
-        fullFlow(&b, QStringLiteral("o103"), QStringLiteral("netvfs-it/st04"),
-                         QStringLiteral("/home/alice/netvfs-it/st04"));
+        fullFlow(b.get(), QStringLiteral("o103"), QStringLiteral("netvfs-it/st04"),
+                 QStringLiteral("/home/alice/netvfs-it/st04"));
     }
 
     // S-T5, S-7, SEC-1: refused before authentication.
@@ -766,6 +690,62 @@ private slots:
                          QStringLiteral("/home/alice/netvfs-it/st09"));
     }
 
+    // Dropbear (routers, embedded devices), which runs OpenSSH's
+    // sftp-server: the hardened lists negotiate, each host key type pins,
+    // password and key sign-in, the full flow.
+    void dropbear_data()
+    {
+        QTest::addColumn<QString>("server");
+        QTest::newRow("2025.89") << "db25";
+        QTest::newRow("2022.83") << "db22";
+    }
+
+    void dropbear()
+    {
+        QFETCH(QString, server);
+        const ConnectionParams p = params(server, QStringLiteral("default"), QStringLiteral("alice"));
+        auto b = std::unique_ptr<Backend>(BackendLoader::create(QStringLiteral("sftp")));
+        ServerIdentity seen;
+        Result r = b->connect(p, &seen);
+        QVERIFY2(r.ok(), qPrintable(r.toString()));
+        QCOMPARE(seen.algorithm, QStringLiteral("ssh-ed25519"));
+        QCOMPARE(seen.toPin(), dropbearHostKey(server, QStringLiteral("ed25519")));
+        b->disconnect();
+        for (const QString &type : { QStringLiteral("ed25519"), QStringLiteral("ecdsa"), QStringLiteral("rsa") }) {
+            ConnectionParams pinned = p;
+            pinned.options.insert(QStringLiteral("host_key"), dropbearHostKey(server, type));
+            r = establish(b.get(), pinned, Credentials(p.username, m_password), &seen);
+            QVERIFY2(r.ok(), qPrintable(type + QLatin1String(": ") + r.toString()));
+            QCOMPARE(seen.toPin(), pinned.option(QStringLiteral("host_key")));
+        }
+        fullFlow(b.get(), server, QStringLiteral("netvfs-it/dropbear"), QStringLiteral("/home/alice/netvfs-it/dropbear"));
+        if (QTest::currentTestFailed())
+            return;
+
+        // Ed25519 (generated) and ECDSA (imported) user keys.
+        SshKeyMaterial generated;
+        QVERIFY(m_tools->generate(&generated).ok());
+        const QByteArray file = exec(QStringLiteral("o103"),
+                                     QStringLiteral("rm -f /tmp/dk /tmp/dk.pub && ssh-keygen -q -t ecdsa -b 256 -N '' "
+                                                    "-f /tmp/dk && cat /tmp/dk"));
+        SshKeyMaterial imported;
+        r = m_tools->importKey(file, QByteArray(), &imported);
+        QVERIFY2(r.ok(), qPrintable(r.toString()));
+        for (const SshKeyMaterial &key : { generated, imported }) {
+            exec(server, QStringLiteral("mkdir -p /home/alice/.ssh && cat >> /home/alice/.ssh/authorized_keys "
+                                        "&& chown -R alice:alice /home/alice/.ssh && chmod 700 /home/alice/.ssh "
+                                        "&& chmod 600 /home/alice/.ssh/authorized_keys"),
+                 QStringList(), key.publicLine.toLatin1() + '\n');
+            auto keyed = signedIn(params(server, QStringLiteral("default"), QStringLiteral("alice"),
+                                           QStringLiteral("publickey")),
+                                    encodeKeySecret(key.privateKey));
+            QVERIFY2(keyed, qPrintable(key.algorithm));
+            Entry entry;
+            QVERIFY(keyed->stat(QStringLiteral("netvfs-it/dropbear"), &entry).ok());
+            QVERIFY(entry.isDir());
+        }
+    }
+
     // S-T10, S-5, S-6
     void hostKeyTypes_data()
     {
@@ -810,15 +790,21 @@ private slots:
                          QStringLiteral("/home/alice/netvfs-it/st11"));
     }
 
-    // S-T12, S-12
+    // S-T12, S-12. RSA user keys are refused with what to do instead.
     void importedKeys_data()
     {
         QTest::addColumn<QString>("keygen");
         QTest::addColumn<QByteArray>("passphrase");
         QTest::addColumn<QString>("algorithm");
-        QTest::newRow("rsa 3072") << "-t rsa -b 3072 -m PEM" << QByteArray() << "ssh-rsa";
-        QTest::newRow("ecdsa p256") << "-t ecdsa -b 256" << QByteArray() << "ecdsa-sha2-nistp256";
-        QTest::newRow("ed25519 passphrase") << "-t ed25519" << QByteArray("open sesame") << "ssh-ed25519";
+        QTest::addColumn<QString>("refusal");
+        QTest::newRow("rsa 3072") << "-t rsa -b 3072 -m PEM" << QByteArray() << QString()
+                                  << "RSA keys are not supported; generate a new key, or use an Ed25519 or ECDSA key";
+        QTest::newRow("rsa 3072 openssh") << "-t rsa -b 3072" << QByteArray("open sesame") << QString()
+                                          << "RSA keys are not supported; generate a new key, or use an Ed25519 or ECDSA key";
+        QTest::newRow("ecdsa p256") << "-t ecdsa -b 256" << QByteArray() << "ecdsa-sha2-nistp256" << QString();
+        QTest::newRow("ecdsa p384 pem") << "-t ecdsa -b 384 -m PEM" << QByteArray() << "ecdsa-sha2-nistp384"
+                                        << QString();
+        QTest::newRow("ed25519 passphrase") << "-t ed25519" << QByteArray("open sesame") << "ssh-ed25519" << QString();
     }
 
     void importedKeys()
@@ -826,12 +812,19 @@ private slots:
         QFETCH(QString, keygen);
         QFETCH(QByteArray, passphrase);
         QFETCH(QString, algorithm);
+        QFETCH(QString, refusal);
         const QByteArray file = exec(QStringLiteral("o103"),
                                      QStringLiteral("rm -f /tmp/k /tmp/k.pub && ssh-keygen -q %1 -N \"$PASS\" -f /tmp/k "
                                                     "&& cat /tmp/k").arg(keygen),
                                      { QStringLiteral("PASS=") + QString::fromLatin1(passphrase) });
         SshKeyMaterial key;
         Result r = m_tools->importKey(file, passphrase, &key);
+        if (!refusal.isEmpty()) {
+            QCOMPARE(r.error(), Error::Unsupported);
+            QCOMPARE(r.message(), refusal);
+            QVERIFY(key.privateKey.isEmpty());
+            return;
+        }
         QVERIFY2(r.ok(), qPrintable(r.toString()));
         QCOMPARE(key.algorithm, algorithm);
         authorizeKey(QStringLiteral("o103"), QStringLiteral("alice"), key.publicLine);
@@ -1025,18 +1018,47 @@ private slots:
         QCOMPARE(r.message(), QStringLiteral("SFTP is not enabled for this user"));
     }
 
-    // S-2: libssh defaults are not widened; no common algorithm is SecurityPolicy.
+    // S-2: the hardened lists are never widened. A server that offers only
+    // what they leave out (finite-field Diffie-Hellman, CBC, SHA-1 RSA
+    // signatures) is refused with SecurityPolicy before any key is seen,
+    // and the message says what the server offers.
+    void noCommonAlgorithm_data()
+    {
+        QTest::addColumn<QString>("server");
+        QTest::addColumn<QString>("instance");
+        QTest::addColumn<QString>("list");
+        QTest::addColumn<QString>("offered");
+        QTest::newRow("9.6p1 DH SHA-1") << "o96" << "legacy" << "key exchange" << "diffie-hellman-group14-sha1";
+        QTest::newRow("10.3p1 DH only") << "o103" << "dh" << "key exchange"
+                                        << "diffie-hellman-group16-sha512, diffie-hellman-group14-sha256";
+        QTest::newRow("10.3p1 CBC only") << "o103" << "cbc" << "cipher" << "aes256-cbc, aes128-cbc";
+        QTest::newRow("10.3p1 ssh-rsa only") << "o103" << "sha1rsa" << "host key" << "ssh-rsa";
+    }
+
     void noCommonAlgorithm()
     {
+        QFETCH(QString, server);
+        QFETCH(QString, instance);
+        QFETCH(QString, list);
+        QFETCH(QString, offered);
+        const QString expected = QStringLiteral("The server offers no %1 algorithm this app accepts (it offers %2)")
+                                     .arg(list, offered);
         auto b = std::unique_ptr<Backend>(BackendLoader::create(QStringLiteral("sftp")));
         for (int attempt = 0; attempt < 5; ++attempt) {
             ServerIdentity seen;
-            const Result r = b->connect(params(QStringLiteral("o96"), QStringLiteral("legacy"), QStringLiteral("alice")),
-                                        &seen);
+            const Result r = b->connect(params(server, instance, QStringLiteral("alice")), &seen);
             QVERIFY2(r.error() == Error::SecurityPolicy, qPrintable(r.toString()));
-            QVERIFY(r.message().contains(QLatin1String("diffie-hellman-group14-sha1")));
+            QCOMPARE(r.message(), expected);
             QVERIFY(seen.isEmpty());
         }
+        // Pinned or not: a pin of a key the server has changes nothing.
+        ConnectionParams p = params(server, instance, QStringLiteral("alice"));
+        p.options.insert(QStringLiteral("host_key"),
+                         QString::fromLatin1(exec(server, QStringLiteral("cat /etc/ssh/ssh_host_rsa_key.pub")))
+                             .section(QLatin1Char(' '), 0, 1));
+        const Result r = establish(b.get(), p, Credentials(p.username, m_password));
+        QVERIFY2(r.error() == Error::SecurityPolicy, qPrintable(r.toString()));
+        QVERIFY(!serverLog(server, instance).contains(QLatin1String("Accepted")));
     }
 
     // S-13, S-14 with a server that wants a key and then a password.
@@ -1170,7 +1192,7 @@ private slots:
         QVERIFY(caps.has(Capability::ReadHandles));
         QVERIFY(caps.has(Capability::WriteResume));
         QVERIFY(caps.has(Capability::Symlinks));
-        QVERIFY(caps.maxReadChunk > 0);
+        QCOMPARE(caps.maxReadChunk, qint64(0));   // unknown: the backend sizes its requests itself
 
         const QString dir = unique(QStringLiteral("netvfs-it/v2-"));
         const QString disk = QStringLiteral("/home/alice/") + dir;
@@ -1381,9 +1403,11 @@ private slots:
         QVERIFY(part.isEmpty());
         QVERIFY(handle->read(0, 0, &part).ok());
         QVERIFY(part.isEmpty());
-        QCOMPARE(handle->read(-1, 1, &part).error(), Error::Internal);
+        // A bad offset and a closed handle are the caller's mistakes, which
+        // the Rust backends' C ABI reports as ProtocolError.
+        QCOMPARE(handle->read(-1, 1, &part).error(), Error::ProtocolError);
         QVERIFY(handle->close().ok());
-        QCOMPARE(handle->read(0, 1, &part).error(), Error::Internal);
+        QCOMPARE(handle->read(0, 1, &part).error(), Error::ProtocolError);
         ReadHandle *missing = nullptr;
         QCOMPARE(b->openRead(dir + QStringLiteral("/nope"), &missing).error(), Error::NotFound);
         QVERIFY(!missing);
@@ -1420,8 +1444,10 @@ private slots:
         QCOMPARE(b->stat(QString(), &entry).error(), Error::ConnectionLost);
     }
 
-    // XS-4, XS-2, XS-5 on every server family. The symlink rows verify
-    // libssh's SSH_FXP_SYMLINK argument order on the server's disk.
+    // XS-4, XS-2, XS-5 on every server family. The symlink rows verify on
+    // the server's disk that SSH_FXP_SYMLINK goes in OpenSSH's argument
+    // order (target first), which ProFTPD and Dropbear's OpenSSH
+    // sftp-server read the same way.
     void v2LinksAndAttributes_data()
     {
         QTest::addColumn<QString>("server");
@@ -1434,6 +1460,8 @@ private slots:
         QTest::newRow("8.9p1") << "o89" << "default" << false << true;   // no users-groups-by-id
         // mod_sftp answers READLINK with relative targets made absolute.
         QTest::newRow("ProFTPD") << "pro" << "sftp" << false << false;
+        QTest::newRow("Dropbear 2025.89") << "db25" << "default" << true << true;
+        QTest::newRow("Dropbear 2022.83") << "db22" << "default" << true << true;
     }
 
     void v2LinksAndAttributes()
@@ -1538,23 +1566,19 @@ private slots:
         for (const Entry &e : entries) {
             if (e.name == QLatin1String(".rootfile")) {
                 QCOMPARE(e.uid, qint64(0));
-                if (ownership || !e.owner.isEmpty())
-                    QCOMPARE(e.owner, QStringLiteral("root"));
+                QCOMPARE(e.owner, ownership ? QStringLiteral("root") : QString());
                 QVERIFY(!e.flags.testFlag(EntryFlag::Hidden));
                 continue;
             }
             QVERIFY(e.uid > 0 && e.gid > 0);
-            // Without the extension libssh may still take names from
-            // OpenSSH's "ls -l" style long names in listings.
-            if (ownership || !e.owner.isEmpty())
-                QCOMPARE(e.owner, QStringLiteral("alice"));
-            if (ownership || !e.group.isEmpty())
-                QCOMPARE(e.group, QStringLiteral("alice"));
+            // Names come from the extension only, never from the "ls -l"
+            // style long names of a listing.
+            QCOMPARE(e.owner, ownership ? QStringLiteral("alice") : QString());
+            QCOMPARE(e.group, ownership ? QStringLiteral("alice") : QString());
             QVERIFY(!e.flags.testFlag(EntryFlag::Hidden));
         }
         QVERIFY(b->stat(dir, &entry).ok());
         QCOMPARE(entry.owner, ownership ? QStringLiteral("alice") : QString());
-        // stat has no "ls -l" long name: only the extension names the owner.
         QVERIFY(b->stat(dir + QStringLiteral("/.rootfile"), &entry).ok());
         QCOMPARE(entry.owner, ownership ? QStringLiteral("root") : QString());
         QCOMPARE(entry.group, ownership ? QStringLiteral("root") : QString());
@@ -1685,7 +1709,7 @@ private slots:
         QCOMPARE(exec(QStringLiteral("o103"), QStringLiteral("stat -c %Y \"$P\""), { QStringLiteral("P=") + disk + QStringLiteral("/w0") })
                      .trimmed().toLongLong(),
                  resume.modified.toMSecsSinceEpoch() / 1000);
-        QCOMPARE(writer->write("x", 1).error(), Error::Internal);   // committed
+        QCOMPARE(writer->write("x", 1).error(), Error::ProtocolError);   // committed
 
         // upload() honours WriteOptions::modified too (SetModifiedOnUpload).
         UploadOptions upload;
@@ -1712,145 +1736,107 @@ private slots:
         exec(QStringLiteral("o103"), QStringLiteral("rm -rf \"$P\""), { QStringLiteral("P=") + disk });
     }
 
-    // XS-9: the exec channel with allow_shell=true, and its helpers.
-    void v2Shell()
+    // Server-side copy: copy-data where the server offers it (OpenSSH 9.0
+    // and later), nothing else; no exec channel, so no checksums and no
+    // folder copies (copying a folder is the caller's work, file by file).
+    void v2ServerCopy_data()
     {
-        ConnectionParams p = filesParams(QStringLiteral("o103"), QStringLiteral("default"), QStringLiteral("alice"));
-        auto plain = signedIn(p, m_password);
-        QVERIFY(plain);
-        QVERIFY(!plain->capabilities().has(Capability::ShellExec));   // S-3 without the option
-        QVERIFY(!ShellExec::of(plain.get()));
-        ExecResult result;
-        QCOMPARE(dynamic_cast<ShellExec *>(plain.get())->exec({ QStringLiteral("true") }, ExecOptions(), &result).error(),
-                 Error::Unsupported);
-        QCOMPARE(plain->copy(QStringLiteral("a"), QStringLiteral("b"), CopyOptions()).error(), Error::Unsupported);
-        plain.reset();
+        QTest::addColumn<QString>("server");
+        QTest::addColumn<QString>("instance");
+        QTest::addColumn<bool>("copyData");
+        QTest::newRow("10.3p1") << "o103" << "default" << true;
+        QTest::newRow("10.3p1 noext") << "o103" << "noext" << false;
+        QTest::newRow("9.6p1") << "o96" << "default" << true;
+        QTest::newRow("8.9p1") << "o89" << "default" << false;
+        QTest::newRow("ProFTPD") << "pro" << "sftp" << false;
+        QTest::newRow("Dropbear 2025.89") << "db25" << "default" << true;
+    }
 
-        p.options.insert(QStringLiteral("allow_shell"), QStringLiteral("true"));
-        auto b = signedIn(p, m_password);
+    void v2ServerCopy()
+    {
+        QFETCH(QString, server);
+        QFETCH(QString, instance);
+        QFETCH(bool, copyData);
+        auto b = signedIn(filesParams(server, instance, QStringLiteral("alice")), m_password);
         QVERIFY(b);
         const Capabilities caps = b->capabilities();
-        QVERIFY(caps.has(Capability::ShellExec) && caps.has(Capability::ServerCopy)
-                && caps.has(Capability::ServerCopyRecursive) && caps.has(Capability::Checksums));
-        QCOMPARE(caps.checksumAlgorithms, QStringList { QStringLiteral("sha256") });
-        ShellExec *shell = ShellExec::of(b.get());
-        QVERIFY(shell);
+        QCOMPARE(caps.has(Capability::ServerCopy), copyData);
+        QVERIFY(!caps.has(Capability::ServerCopyRecursive));
+        QVERIFY(!caps.has(Capability::Checksums));
+        QVERIFY(caps.checksumAlgorithms.isEmpty());
 
-        const QString tricky = QStringLiteral("a'b \"c\" $HOME `id` ; | & \\ * ü");
-        QVERIFY(shell->exec({ QStringLiteral("printf"), QStringLiteral("%s"), tricky }, ExecOptions(), &result).ok());
-        QCOMPARE(QString::fromUtf8(result.out), tricky);
-        QCOMPARE(result.exitStatus, 0);
-        QVERIFY(shell->exec({ QStringLiteral("sh"), QStringLiteral("-c"), QStringLiteral("echo oops >&2; exit 3") },
-                            ExecOptions(), &result).ok());
-        QCOMPARE(result.exitStatus, 3);
-        QCOMPARE(result.err, QByteArray("oops\n"));
-        ExecOptions small;
-        small.maxOutput = 1000;
-        QVERIFY(shell->exec({ QStringLiteral("head"), QStringLiteral("-c"), QStringLiteral("100000"), QStringLiteral("/dev/zero") },
-                            small, &result).ok());
-        QVERIFY(result.truncated);
-        QCOMPARE(result.out.size(), 1000);
-        ExecOptions quick;
-        quick.timeoutMs = 500;
-        QElapsedTimer timer;
-        timer.start();
-        QCOMPARE(shell->exec({ QStringLiteral("sleep"), QStringLiteral("10") }, quick, &result).error(), Error::Timeout);
-        QVERIFY(timer.elapsed() < 3000);
-        // cancel() closes the channel (C-9).
-        Result r;
-        qint64 ms = runCanceled(b.get(), [&shell, &result]() {
-            return shell->exec({ QStringLiteral("sleep"), QStringLiteral("30") }, ExecOptions(), &result);
-        }, &r);
-        QCOMPARE(r.error(), Error::Canceled);
-        QVERIFY2(ms <= CancelBoundMs, qPrintable(QString::number(ms)));
-        b->resetCancel();
-        Entry entry;
-        QVERIFY(b->stat(QString(), &entry).ok());
-
-        // copy() and checksum() over the fixed templates.
-        const QString dir = unique(QStringLiteral("netvfs-it/shell-"));
+        const QString dir = unique(QStringLiteral("netvfs-it/copy-"));
         const QString disk = QStringLiteral("/home/alice/") + dir;
         QVERIFY(b->makePath(dir + QStringLiteral("/tree/sub")).ok());
         QByteArray data(1234567, 'q');
         data[100] = 'x';
-        QVERIFY(put(b.get(), dir + QStringLiteral("/-dash file"), data));
-        QVERIFY(put(b.get(), dir + QStringLiteral("/tree/sub/inner.txt"), "inner"));
+        const QString source = dir + QStringLiteral("/-dash file");
+        QVERIFY(put(b.get(), source, data));
+        QVERIFY(put(b.get(), dir + QStringLiteral("/other"), "other"));
         QByteArray digest;
-        QVERIFY(b->checksum(dir + QStringLiteral("/-dash file"), QStringLiteral("sha256"), &digest).ok());
-        QCOMPARE(digest, QCryptographicHash::hash(data, QCryptographicHash::Sha256));
-        QCOMPARE(b->checksum(dir + QStringLiteral("/missing"), QStringLiteral("sha256"), &digest).error(), Error::NotFound);
-        QCOMPARE(b->checksum(dir + QStringLiteral("/-dash file"), QStringLiteral("md5"), &digest).error(), Error::Unsupported);
-        QVERIFY(b->copy(dir + QStringLiteral("/-dash file"), dir + QStringLiteral("/copy"), CopyOptions()).ok());
-        QCOMPARE(serverSha(QStringLiteral("o103"), disk + QStringLiteral("/copy")),
-                 QCryptographicHash::hash(data, QCryptographicHash::Sha256).toHex());
-        QCOMPARE(b->copy(dir + QStringLiteral("/-dash file"), dir + QStringLiteral("/copy"), CopyOptions()).error(),
-                 Error::AlreadyExists);
+        QCOMPARE(b->checksum(source, QStringLiteral("sha256"), &digest).error(), Error::Unsupported);
+        QVERIFY(digest.isEmpty());
+
+        Entry entry;
         CopyOptions recursive;
         recursive.recursive = true;
+        const Result copied = b->copy(source, dir + QStringLiteral("/copy"), CopyOptions());
+        if (!copyData) {
+            QCOMPARE(copied.error(), Error::Unsupported);
+            QCOMPARE(b->stat(dir + QStringLiteral("/copy"), &entry).error(), Error::NotFound);
+            QCOMPARE(b->copy(dir + QStringLiteral("/tree"), dir + QStringLiteral("/tree2"), recursive).error(),
+                     Error::Unsupported);
+            exec(server, QStringLiteral("rm -rf \"$P\""), { QStringLiteral("P=") + disk });
+            return;
+        }
+        QVERIFY2(copied.ok(), qPrintable(copied.toString()));
+        const QByteArray sha = QCryptographicHash::hash(data, QCryptographicHash::Sha256).toHex();
+        QCOMPARE(serverSha(server, disk + QStringLiteral("/copy")), sha);
+        // NoReplace by default; Replace overwrites, also a longer file.
+        QCOMPARE(b->copy(source, dir + QStringLiteral("/copy"), CopyOptions()).error(), Error::AlreadyExists);
+        QCOMPARE(b->copy(dir + QStringLiteral("/other"), dir + QStringLiteral("/copy"), CopyOptions()).error(),
+                 Error::AlreadyExists);
+        QCOMPARE(serverSha(server, disk + QStringLiteral("/copy")), sha);
+        CopyOptions replace;
+        replace.mode = RenameMode::Replace;
+        QVERIFY(b->copy(dir + QStringLiteral("/other"), dir + QStringLiteral("/copy"), replace).ok());
+        QCOMPARE(exec(server, QStringLiteral("cat \"$P\""), { QStringLiteral("P=") + disk + QStringLiteral("/copy") }),
+                 QByteArray("other"));
+        // Onto another name of the same file (a hard link) the content
+        // stays; onto its own name the server refuses, and nothing changes.
+        exec(server, QStringLiteral("ln \"$P/-dash file\" \"$P/hard\""), { QStringLiteral("P=") + disk });
+        const Result linked = b->copy(source, dir + QStringLiteral("/hard"), replace);
+        QVERIFY2(linked.ok(), qPrintable(linked.toString()));
+        QVERIFY(!b->copy(source, source, replace).ok());
+        QCOMPARE(serverSha(server, disk + QStringLiteral("/-dash file")), sha);
+        QCOMPARE(serverSha(server, disk + QStringLiteral("/hard")), sha);
+        // Folders: not copied, and never a target.
         QCOMPARE(b->copy(dir + QStringLiteral("/tree"), dir + QStringLiteral("/tree2"), CopyOptions()).error(),
                  Error::IsADirectory);
-        QVERIFY(b->copy(dir + QStringLiteral("/tree"), dir + QStringLiteral("/tree2"), recursive).ok());
-        QCOMPARE(exec(QStringLiteral("o103"), QStringLiteral("cat \"$P\""),
-                      { QStringLiteral("P=") + disk + QStringLiteral("/tree2/sub/inner.txt") }),
-                 QByteArray("inner"));
-
-        // serverFind
-        QStringList found;
-        QVERIFY(shell->find(dir, QStringLiteral("*.txt"), 10, &found).ok());
-        QCOMPARE(found.size(), 2);
-        for (const QString &path : found)
-            QVERIFY2(path.startsWith(dir + QStringLiteral("/tree")) && path.endsWith(QLatin1String("/sub/inner.txt")),
-                     qPrintable(path));
-        QVERIFY(shell->find(dir, QStringLiteral("*"), 3, &found).ok());
-        QCOMPARE(found.size(), 3);
-        QCOMPARE(shell->find(dir + QStringLiteral("/copy"), QStringLiteral("*"), 3, &found).error(), Error::NotADirectory);
-        exec(QStringLiteral("o103"), QStringLiteral("rm -rf \"$P\""), { QStringLiteral("P=") + disk });
-
-        // A forced internal-sftp account grants no usable exec channel.
-        SshKeyMaterial key;
-        QVERIFY(m_tools->generate(&key).ok());
-        authorizeKey(QStringLiteral("o103"), QStringLiteral("backup"), key.publicLine);
-        ConnectionParams jailed = params(QStringLiteral("o103"), QStringLiteral("hardened"), QStringLiteral("backup"),
-                                         QStringLiteral("publickey"));
-        jailed.options.insert(QStringLiteral("allow_shell"), QStringLiteral("true"));
-        b = signedIn(jailed, encodeKeySecret(key.privateKey));
-        QVERIFY(b);
-        QVERIFY(!b->capabilities().has(Capability::ShellExec));
-        QVERIFY(!b->capabilities().has(Capability::ServerCopy));
+        QCOMPARE(b->copy(dir + QStringLiteral("/tree"), dir + QStringLiteral("/tree2"), recursive).error(),
+                 Error::Unsupported);
+        QCOMPARE(b->stat(dir + QStringLiteral("/tree2"), &entry).error(), Error::NotFound);
+        QCOMPARE(b->copy(source, dir + QStringLiteral("/tree"), replace).error(), Error::AlreadyExists);
+        QCOMPARE(b->copy(dir + QStringLiteral("/missing"), dir + QStringLiteral("/x"), CopyOptions()).error(),
+                 Error::NotFound);
+        exec(server, QStringLiteral("rm -rf \"$P\""), { QStringLiteral("P=") + disk });
     }
 
-    // XC-21: OpenSSH refuses a session beyond MaxSessions (2 on "otp").
+    // XC-21: a server that allows no session on the connection (OpenSSH
+    // MaxSessions 0 for user "nosession") is TooManyConnections at sign-in.
     void v2MaxSessions()
     {
-        ConnectionParams p = filesParams(QStringLiteral("o96"), QStringLiteral("otp"), QStringLiteral("alice"));
-        p.options.insert(QStringLiteral("allow_shell"), QStringLiteral("true"));
-        ChannelHog b;
-        Result r = signIn(&b, p, m_password);
-        QVERIFY2(r.ok(), qPrintable(r.toString()));
-        QVERIFY(b.capabilities().has(Capability::ShellExec));   // sftp + the probe: two
-        ExecResult result;
-        Result first = b.exec({ QStringLiteral("true") }, ExecOptions(), &result);
-        QVERIFY2(first.ok(), qPrintable(first.toString()));
-        // The second session, as soon as the server let the exec's go.
-        bool occupied = false;
-        for (int attempt = 0; attempt < 20 && !occupied; ++attempt) {
-            b.release();
-            occupied = b.occupy();
-            if (!occupied)
-                QTest::qWait(100);
-        }
-        QVERIFY(occupied);
-        r = b.exec({ QStringLiteral("true") }, ExecOptions(), &result);
+        const ConnectionParams p = filesParams(QStringLiteral("o96"), QStringLiteral("default"),
+                                               QStringLiteral("nosession"));
+        auto b = std::unique_ptr<Backend>(BackendLoader::create(QStringLiteral("sftp")));
+        const Result r = signIn(b.get(), p, m_password);
         QCOMPARE(r.error(), Error::TooManyConnections);
-        b.release();
-        // The server frees the slot once it has handled the close.
-        for (int attempt = 0; attempt < 20 && !r.ok(); ++attempt) {
-            QTest::qWait(100);
-            r = b.exec({ QStringLiteral("true") }, ExecOptions(), &result);
-        }
-        QVERIFY2(r.ok(), qPrintable(r.toString()));
+        QCOMPARE(r.message(), QStringLiteral("The server allows no further session on this connection"));
+        // Signed in, so the refusal was the session's, not the password's.
+        QVERIFY(serverLog(QStringLiteral("o96"), QStringLiteral("default"))
+                    .contains(QLatin1String("Accepted password for nosession")));
         Entry entry;
-        QVERIFY(b.stat(QString(), &entry).ok());
+        QCOMPARE(b->stat(QString(), &entry).error(), Error::Internal);
     }
 
     // XS-11 against PAM with the one-time password stub.
@@ -1937,8 +1923,7 @@ private slots:
     }
 
     // C-9: cancel() ends blocking requests while the server holds its
-    // answers back (vendor/patches/libssh/0002), and the connection stays
-    // usable afterwards.
+    // answers back, and the connection stays usable afterwards.
     void v2CancelBlocking()
     {
         auto b = signedIn(filesParams(QStringLiteral("o89"), QStringLiteral("hold"), QStringLiteral("alice")), m_password);
@@ -1964,18 +1949,13 @@ private slots:
         }
     }
 
-    // XS-6 (stat-check rename path) and XS-9 on a server that is not OpenSSH.
+    // XS-6 (stat-check rename path) on a server that is not OpenSSH.
     void v2ProFtpd()
     {
-        ConnectionParams p = filesParams(QStringLiteral("pro"), QStringLiteral("sftp"), QStringLiteral("alice"));
-        p.options.insert(QStringLiteral("allow_shell"), QStringLiteral("true"));
-        clearLog();
-        auto b = signedIn(p, m_password);
+        auto b = signedIn(filesParams(QStringLiteral("pro"), QStringLiteral("sftp"), QStringLiteral("alice")), m_password);
         QVERIFY(b);
-        QVERIFY2(capturedLog().contains(QLatin1String("mod_sftp")), qPrintable(capturedLog()));
         const Capabilities caps = b->capabilities();
         QVERIFY(!caps.has(Capability::NativeNoReplace));
-        QVERIFY(!caps.has(Capability::ShellExec));   // mod_sftp runs no commands
         QVERIFY(!caps.has(Capability::ServerCopy) && !caps.has(Capability::Checksums));
         QVERIFY(caps.has(Capability::AtomicReplace) && caps.has(Capability::SpaceInfo));
         const QString dir = unique(QStringLiteral("netvfs-it/pro-"));

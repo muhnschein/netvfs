@@ -19,6 +19,8 @@
 #   - libnetvfs-smb.so contains no share enumeration code (XP-3, SPEC 10.2
 #     G-SMB item 4; tools/ci/check-noshareenum.sh), and the check finds that
 #     code in the share helper when it is built;
+#   - no file of the main package links libssh or libcrypto (SSH is in
+#     libnetvfs-rs.so);
 #   - all packages install into the SDK target (resolving Requires from the
 #     release repositories), every ELF file resolves its libraries and none
 #     carries a library search path from the build.
@@ -167,6 +169,15 @@ else
     sh tools/ci/check-rs-lib.sh "$work/main$rs_path" "$target_glibc" "$rs_path" $rs_plugins \
         || fail "libnetvfs-rs.so: see above"
 fi
+
+# SSH comes from libnetvfs-rs.so (russh over ring): no file of the main
+# package links libssh or the platform's libcrypto.
+for file in $(find "$work/main" -type f); do
+    [ "$(head -c 4 "$file" | od -An -c | tr -d ' ')" = '177ELF' ] || continue
+    if readelf -d "$file" | grep -E '\(NEEDED\).*\[lib(ssh|crypto)\.so'; then
+        fail "${file#"$work/main"} links libssh or libcrypto"
+    fi
+done
 
 # shellcheck disable=SC2086 # one word per file
 sb2 -t "$TARGET" -m sdk-install -R zypper --non-interactive in --allow-unsigned-rpm $rpms

@@ -39,7 +39,6 @@ ExclusiveArch: aarch64
 BuildRequires: qt5-qmake
 BuildRequires: qt5-qttools-linguist
 BuildRequires: cmake
-BuildRequires: openssl-devel
 BuildRequires: sailfish-svg2png
 BuildRequires: pkgconfig(Qt5Core)
 BuildRequires: pkgconfig(Qt5DBus)

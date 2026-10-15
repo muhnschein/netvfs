@@ -17,26 +17,26 @@ struct NETVFS_EXPORT SshKeyMaterial {
     ~SshKeyMaterial();
 
     QByteArray privateKey;   // unencrypted, OpenSSH format ("-----BEGIN OPENSSH PRIVATE KEY-----")
-    QString algorithm;       // "ssh-ed25519", "ecdsa-sha2-nistp256", "ssh-rsa", ...
+    QString algorithm;       // "ssh-ed25519", "ecdsa-sha2-nistp256", ...
     QString publicLine;      // authorized_keys line "<algorithm> <base64> sailfish-backup"
     QString fingerprint;     // "SHA256:..."
 
     void wipe();
 };
 
-// Key operations that need libssh. Implemented by the SFTP backend plugin's
-// root object, so that libssh code lives only in the SFTP package
-// (SPEC-sftp 5.1). Obtain with BackendLoader::sshKeyTools().
+// Key operations of the SSH code (rust/netvfs-sftp). Implemented by the
+// SFTP backend plugin's root object, so that the SSH code lives only in the
+// SFTP package (SPEC-sftp 5.1). Obtain with BackendLoader::sshKeyTools().
 class NETVFS_EXPORT SshKeyTools
 {
 public:
     virtual ~SshKeyTools();
 
-    // Ed25519 via ssh_pki_generate_key() (SPEC-sftp 5.1).
+    // A new Ed25519 key (SPEC-sftp 5.1).
     virtual Result generate(SshKeyMaterial *out) = 0;
-    // Accepts Ed25519, ECDSA and RSA in OpenSSH or PEM format. Returns
+    // Accepts Ed25519 and ECDSA in OpenSSH, PKCS#8 or SEC1 format. Returns
     // AuthFailed when the file is encrypted and `passphrase` is missing or
-    // wrong, Unsupported for key types rejected by S-15.
+    // wrong, Unsupported for key types and formats rejected by S-15.
     virtual Result importKey(const QByteArray &fileContents, const QByteArray &passphrase,
                              SshKeyMaterial *out) = 0;
     // Recomputes algorithm, public line and fingerprint from a private key.

@@ -132,9 +132,10 @@ check-interop: all
 # package builds skip them). XP-3: no share enumeration in the SMB plugin,
 # and the check does find it in the share helper. The C ABI of netvfs-bridge
 # is checked against the host's glibc, and the bridge must look for it where
-# the spec puts it (tools/ci/check-ffi-lib.sh). So is libnetvfs-rs.so, and a
-# plugin of the Rust backends (the test plugin of provider mem) must look for
-# it where qmake installs it (tools/ci/check-rs-lib.sh).
+# the spec puts it (tools/ci/check-ffi-lib.sh). So is libnetvfs-rs.so, and
+# the plugins of the Rust backends (the test plugin of provider mem, the
+# SFTP plugin) must look for it where qmake installs it
+# (tools/ci/check-rs-lib.sh).
 PACKAGE_ROOT := $(BUILD_DIR)/install-root
 PACKAGE_FILES = ./tools/ci/check-files.py --map "$$($(QMAKE) -query QT_INSTALL_LIBS)=/usr/lib64" \
     --allow-missing '/usr/share/themes/*'
@@ -149,7 +150,8 @@ check-packaging: all
 	    $(BUILD_DIR)/libexec/netvfs/netvfs-bridge "$$(getconf GNU_LIBC_VERSION | cut -d ' ' -f 2)"
 	! ./tools/ci/check-noshareenum.sh $(BUILD_DIR)/libexec/netvfs/netvfs-smb-shares >/dev/null
 	./tools/ci/check-rs-lib.sh $(BUILD_DIR)/lib/netvfs/libnetvfs-rs.so "$$(getconf GNU_LIBC_VERSION | cut -d ' ' -f 2)" \
-	    "$$($(QMAKE) -query QT_INSTALL_LIBS)/netvfs/libnetvfs-rs.so" $(BUILD_DIR)/lib/netvfs/test-backends/libnetvfs-mem.so
+	    "$$($(QMAKE) -query QT_INSTALL_LIBS)/netvfs/libnetvfs-rs.so" $(BUILD_DIR)/lib/netvfs/test-backends/libnetvfs-mem.so \
+	    $(BUILD_DIR)/lib/netvfs/backends/libnetvfs-sftp.so
 	./tests/packaging/test_packaging.py
 
 coverage:
