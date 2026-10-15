@@ -10,6 +10,10 @@
 # libnetvfs-rs.so. They are the tests' oracle; a mutant in them says nothing
 # about the bridge or the C ABI.
 exclude_globs = [
+    # crates.io crates built from a copy with a change of netvfs's
+    # (vendor/*/README.netvfs.md): not workspace members, and not netvfs's
+    # code to test.
+    "vendor/**",
     "netvfs-bridge-proto/src/fake/**",
     "netvfs-bridge/src/ffi/fake.rs",
     "netvfs-bridge/src/testing.rs",

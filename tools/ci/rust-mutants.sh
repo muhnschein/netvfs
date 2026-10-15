@@ -41,11 +41,11 @@ root=$(cd "$(dirname "$0")/../.." && pwd)
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
-# The diff since $1 of the workspace's Rust sources (not the fuzz targets),
-# in $tmp/diff with paths relative to rust/ as --in-diff takes them; fails
-# when nothing changed.
+# The diff since $1 of the workspace's Rust sources (not the fuzz targets,
+# not the crates.io copies in rust/vendor), in $tmp/diff with paths
+# relative to rust/ as --in-diff takes them; fails when nothing changed.
 changed_since() {
-    git -C "$root" diff "$1...HEAD" -- 'rust/*.rs' ':!rust/fuzz' > "$tmp/diff"
+    git -C "$root" diff "$1...HEAD" -- 'rust/*.rs' ':!rust/fuzz' ':!rust/vendor' > "$tmp/diff"
     if [ ! -s "$tmp/diff" ]; then
         echo "no Rust source changed since $1"
         return 1

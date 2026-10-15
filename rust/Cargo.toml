@@ -8,7 +8,14 @@
 resolver = "3"
 members = ["netvfs-accounts", "netvfs-bridge-proto", "netvfs-bridge", "netvfs-vfs", "netvfs-sftp", "netvfs-smb", "netvfs-backend"]
 # The fuzz targets build with a nightly toolchain of their own (doc/RUST.md).
-exclude = ["fuzz"]
+# vendor/ holds crates.io crates netvfs builds with a change of its own
+# ([patch.crates-io] below); they are not netvfs's code.
+exclude = ["fuzz", "vendor"]
+
+# vendor/ssh-key/README.netvfs.md: ssh-key 0.7.0-rc.11 (russh's key format
+# crate), with ECDSA private scalars shorter than the field size accepted.
+[patch.crates-io]
+ssh-key = { path = "vendor/ssh-key" }
 
 [workspace.package]
 version = "0.5.0"

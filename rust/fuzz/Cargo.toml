@@ -33,6 +33,10 @@ tokio = { version = "1", default-features = false, features = ["io-util", "rt", 
 
 [workspace]
 
+# As in ../Cargo.toml: ssh-key with the change of ../vendor/ssh-key.
+[patch.crates-io]
+ssh-key = { path = "../vendor/ssh-key" }
+
 [[bin]]
 name = "stored_value"
 path = "fuzz_targets/stored_value.rs"
