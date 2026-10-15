@@ -30,6 +30,7 @@ use netvfs_vfs::{
 };
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
+use std::future::{Future, ready};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock, Mutex, MutexGuard, PoisonError};
 use tree::Tree;
@@ -125,13 +126,10 @@ impl Mem {
         session.enter(call, cancel).await?;
         Ok(session)
     }
-}
 
-impl Backend for Mem {
-    type Read = MemRead;
-    type Write = MemWrite;
-
-    async fn connect(&mut self, params: &Params, _: &CancelToken) -> Result<Option<ServerIdentity>, Status> {
+    /// `connect`: a session on the `store` option's tree; the identity of
+    /// the `identity` option.
+    fn open(&mut self, params: &Params) -> Option<ServerIdentity> {
         let stall = match params.option("stall").as_deref() {
             Some("true") => Stall::UntilCancel,
             Some("ignore") => Stall::Forever,
@@ -147,7 +145,7 @@ impl Backend for Mem {
         self.session = Some(Arc::new(session));
         self.params = params.clone();
         // The fingerprint repeats the parameters, so that a test sees them.
-        Ok(params.option("identity").map(|algorithm| ServerIdentity {
+        params.option("identity").map(|algorithm| ServerIdentity {
             algorithm,
             public_key: b"mem host key".to_vec(),
             fingerprint: format!(
@@ -158,15 +156,12 @@ impl Backend for Mem {
                 params.connect_timeout_ms,
                 params.request_timeout_ms
             ),
-        }))
+        })
     }
 
-    async fn authenticate(
-        &mut self,
-        credentials: &Credentials,
-        prompter: Option<&mut dyn Prompter>,
-        _: &CancelToken,
-    ) -> Result<(), Status> {
+    /// `authenticate`: the `throttle`, `secret`, `interactive` and `answer`
+    /// options.
+    fn sign_in(&self, credentials: &Credentials, prompter: Option<&mut dyn Prompter>) -> Result<(), Status> {
         let session = self.session()?;
         session.check()?;
         session.hook("authenticate");
@@ -197,6 +192,28 @@ impl Backend for Mem {
             }
         }
         Ok(())
+    }
+}
+
+impl Backend for Mem {
+    type Read = MemRead;
+    type Write = MemWrite;
+
+    fn connect(
+        &mut self,
+        params: &Params,
+        _: &CancelToken,
+    ) -> impl Future<Output = Result<Option<ServerIdentity>, Status>> {
+        ready(Ok(self.open(params)))
+    }
+
+    fn authenticate(
+        &mut self,
+        credentials: &Credentials,
+        prompter: Option<&mut dyn Prompter>,
+        _: &CancelToken,
+    ) -> impl Future<Output = Result<(), Status>> {
+        ready(self.sign_in(credentials, prompter))
     }
 
     fn capabilities(&self) -> Capabilities {
@@ -233,11 +250,12 @@ impl Backend for Mem {
         }
     }
 
-    async fn disconnect(&mut self) {
+    fn disconnect(&mut self) -> impl Future<Output = ()> {
         if let Some(session) = &self.session {
             session.hook("disconnect");
             session.open.store(false, Ordering::SeqCst);
         }
+        ready(())
     }
 
     async fn keep_alive(&mut self, cancel: &CancelToken) -> Result<(), Status> {
@@ -447,9 +465,8 @@ impl ReadHandle for MemRead {
         self.size
     }
 
-    async fn read(&mut self, offset: u64, buf: &mut [u8], _: &CancelToken) -> Result<usize, Status> {
-        self.session.check()?;
-        self.session.hook("read");
+    async fn read(&mut self, offset: u64, buf: &mut [u8], cancel: &CancelToken) -> Result<usize, Status> {
+        self.session.enter("read", cancel).await?;
         let len = u64::try_from(buf.len()).unwrap_or(u64::MAX);
         let chunk = read_at(&self.session.tree(), self.id, offset, len)?;
         let place = buf.get_mut(..chunk.len()).ok_or_else(|| Status::internal("mem: short buffer"))?;
@@ -461,9 +478,8 @@ impl ReadHandle for MemRead {
         self.session.hook("read_ahead");
     }
 
-    async fn close(self, _: &CancelToken) -> Result<(), Status> {
-        self.session.hook("read_close");
-        self.session.check()
+    async fn close(self, cancel: &CancelToken) -> Result<(), Status> {
+        self.session.enter("read_close", cancel).await
     }
 }
 
@@ -477,9 +493,8 @@ pub struct MemWrite {
 }
 
 impl WriteHandle for MemWrite {
-    async fn write(&mut self, data: &[u8], _: &CancelToken) -> Result<(), Status> {
-        self.session.check()?;
-        self.session.hook("write");
+    async fn write(&mut self, data: &[u8], cancel: &CancelToken) -> Result<(), Status> {
+        self.session.enter("write", cancel).await?;
         self.session.tree().write_at(self.id, self.at, data)?;
         self.at = self.at.saturating_add(u64::try_from(data.len()).unwrap_or(u64::MAX));
         Ok(())
@@ -490,9 +505,8 @@ impl WriteHandle for MemWrite {
         self.at
     }
 
-    async fn commit(self, _: &CancelToken) -> Result<(), Status> {
-        self.session.check()?;
-        self.session.hook("commit");
+    async fn commit(self, cancel: &CancelToken) -> Result<(), Status> {
+        self.session.enter("commit", cancel).await?;
         if let Some(ms) = self.mtime_ms {
             self.session.tree().set_mtime(self.id, ms)?;
         }

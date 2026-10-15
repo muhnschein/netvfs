@@ -620,7 +620,7 @@ mod tests {
         let mut r = Reader::new(&twice.bytes);
         r.header().unwrap();
         assert_eq!(r.variant_map(0), Some(vec![("k".into(), Value::Int(2))]));
-        assert!(r.rest.is_empty());
+        assert_eq!(r.rest.len(), 0);
     }
 
     #[test]

@@ -2,7 +2,9 @@
 # SPDX-License-Identifier: LGPL-2.1-or-later
 # The Rust workspace's tests under AddressSanitizer with LeakSanitizer
 # (weekly, scheduled.yml): std rebuilt instrumented (-Zbuild-std), so the
-# sanitizer sees every allocation. With a second argument, the tests of
+# sanitizer sees every allocation. That includes netvfs-backend's
+# tests/ffi.rs, which drives libnetvfs-rs.so's C ABI (its code linked into
+# the test, instrumented) as the shim does. With a second argument, the tests of
 # netvfs-bridge that need the C ABI (rust/netvfs-bridge/tests: ffi, backend,
 # server, and through the instrumented netvfs-bridge binary process,
 # contract and notifications) run against the C++ libraries that
@@ -42,8 +44,10 @@ cd "$root/rust"
 host=$(rustc +"$toolchain" -vV | sed -n 's/^host: //p')
 # The test binaries carry ASan's runtime statically; --export-dynamic lets
 # the C++ libraries they load bind their __asan_* references to it.
+# --cfg netvfs_asan: the set-id binaries carry their ASan options
+# (netvfs-accounts' __asan_default_options), as they cannot read ASAN_OPTIONS.
 export RUSTFLAGS="${RUSTFLAGS:+$RUSTFLAGS }-Zsanitizer=address -Cforce-frame-pointers=yes \
--Clink-arg=-Wl,--export-dynamic"
+-Clink-arg=-Wl,--export-dynamic --cfg netvfs_asan"
 export RUSTDOCFLAGS="$RUSTFLAGS"
 # std rebuilt under the workspace's panic = "abort" fails ("panic_abort does
 # not have the panic strategy abort"); tests unwind anyway.

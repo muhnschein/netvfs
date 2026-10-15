@@ -17,7 +17,7 @@ use crate::types::{
     Attributes, Capabilities, Credentials, Entry, ListOptions, Params, PromptRequest, RenameMode,
     ServerIdentity, SpaceInfo, WriteOptions,
 };
-use std::future::Future;
+use std::future::{Future, Ready};
 use zeroize::Zeroizing;
 
 /// `NetVfs::ListSink` (XC-6).
@@ -103,35 +103,41 @@ impl ReadHandle for NoHandle {
         match *self {}
     }
 
-    async fn read(&mut self, _: u64, _: &mut [u8], _: &CancelToken) -> Result<usize, Status> {
-        match *self {}
+    fn read(&mut self, _: u64, _: &mut [u8], _: &CancelToken) -> impl Future<Output = Result<usize, Status>> {
+        no_future(self)
     }
 
     fn read_ahead(&mut self, _: u64, _: u64) {
         match *self {}
     }
 
-    async fn close(self, _: &CancelToken) -> Result<(), Status> {
-        match self {}
+    fn close(self, _: &CancelToken) -> impl Future<Output = Result<(), Status>> {
+        no_future(&self)
     }
 }
 
 impl WriteHandle for NoHandle {
-    async fn write(&mut self, _: &[u8], _: &CancelToken) -> Result<(), Status> {
-        match *self {}
+    fn write(&mut self, _: &[u8], _: &CancelToken) -> impl Future<Output = Result<(), Status>> {
+        no_future(self)
     }
 
     fn position(&self) -> u64 {
         match *self {}
     }
 
-    async fn commit(self, _: &CancelToken) -> Result<(), Status> {
-        match self {}
+    fn commit(self, _: &CancelToken) -> impl Future<Output = Result<(), Status>> {
+        no_future(&self)
     }
 
-    async fn abort(self) {
-        match self {}
+    fn abort(self) -> impl Future<Output = ()> {
+        no_future(&self)
     }
+}
+
+/// The future of a [`NoHandle`] method, which no one can call: there is no
+/// `NoHandle` value.
+fn no_future<T>(handle: &NoHandle) -> Ready<T> {
+    match *handle {}
 }
 
 /// `Unsupported` for an optional method (XC-5).
@@ -328,6 +334,7 @@ pub trait Backend {
 mod tests {
     use super::*;
     use crate::status::ErrorName;
+    use std::future::ready;
 
     /// Only what a backend must have; every optional method is the
     /// trait's default.
@@ -337,59 +344,81 @@ mod tests {
         type Read = NoHandle;
         type Write = NoHandle;
 
-        async fn connect(&mut self, _: &Params, _: &CancelToken) -> Result<Option<ServerIdentity>, Status> {
-            Ok(None)
+        fn connect(
+            &mut self,
+            _: &Params,
+            _: &CancelToken,
+        ) -> impl Future<Output = Result<Option<ServerIdentity>, Status>> {
+            ready(Ok(None))
         }
-        async fn authenticate(
+        fn authenticate(
             &mut self,
             _: &Credentials,
             _: Option<&mut dyn Prompter>,
             _: &CancelToken,
-        ) -> Result<(), Status> {
-            Ok(())
+        ) -> impl Future<Output = Result<(), Status>> {
+            ready(Ok(()))
         }
         fn capabilities(&self) -> Capabilities {
             Capabilities::default()
         }
-        async fn disconnect(&mut self) {}
-        async fn keep_alive(&mut self, _: &CancelToken) -> Result<(), Status> {
-            Ok(())
+        fn disconnect(&mut self) -> impl Future<Output = ()> {
+            ready(())
         }
-        async fn stat(&mut self, _: &[u8], _: bool, _: &CancelToken) -> Result<Entry, Status> {
-            Ok(Entry::default())
+        fn keep_alive(&mut self, _: &CancelToken) -> impl Future<Output = Result<(), Status>> {
+            ready(Ok(()))
         }
-        async fn list(
+        fn stat(
+            &mut self,
+            _: &[u8],
+            _: bool,
+            _: &CancelToken,
+        ) -> impl Future<Output = Result<Entry, Status>> {
+            ready(Ok(Entry::default()))
+        }
+        fn list(
             &mut self,
             _: &[u8],
             _: ListOptions,
             _: &mut dyn ListSink,
             _: &CancelToken,
-        ) -> Result<(), Status> {
-            Ok(())
+        ) -> impl Future<Output = Result<(), Status>> {
+            ready(Ok(()))
         }
-        async fn make_dir(&mut self, _: &[u8], _: bool, _: &CancelToken) -> Result<(), Status> {
-            Ok(())
+        fn make_dir(
+            &mut self,
+            _: &[u8],
+            _: bool,
+            _: &CancelToken,
+        ) -> impl Future<Output = Result<(), Status>> {
+            ready(Ok(()))
         }
-        async fn remove_file(&mut self, _: &[u8], _: &CancelToken) -> Result<(), Status> {
-            Ok(())
+        fn remove_file(&mut self, _: &[u8], _: &CancelToken) -> impl Future<Output = Result<(), Status>> {
+            ready(Ok(()))
         }
-        async fn remove_dir(&mut self, _: &[u8], _: &CancelToken) -> Result<(), Status> {
-            Ok(())
+        fn remove_dir(&mut self, _: &[u8], _: &CancelToken) -> impl Future<Output = Result<(), Status>> {
+            ready(Ok(()))
         }
-        async fn rename(&mut self, _: &[u8], _: &[u8], _: RenameMode, _: &CancelToken) -> Result<(), Status> {
-            Ok(())
+        fn rename(
+            &mut self,
+            _: &[u8],
+            _: &[u8],
+            _: RenameMode,
+            _: &CancelToken,
+        ) -> impl Future<Output = Result<(), Status>> {
+            ready(Ok(()))
         }
-        async fn upload(
+        fn upload(
             &mut self,
             _: &[u8],
             _: &WriteOptions,
             _: &mut dyn Source,
             _: &mut dyn Progress,
             _: &CancelToken,
-        ) -> Result<(), Status> {
-            Ok(())
+        ) -> impl Future<Output = Result<(), Status>> {
+            ready(Ok(()))
         }
-        async fn download(
+        fn download(
             &mut self,
             _: &[u8],
             _: u64,
@@ -397,8 +426,8 @@ mod tests {
             _: &mut dyn Sink,
             _: &mut dyn Progress,
             _: &CancelToken,
-        ) -> Result<(), Status> {
-            Ok(())
+        ) -> impl Future<Output = Result<(), Status>> {
+            ready(Ok(()))
         }
     }
 

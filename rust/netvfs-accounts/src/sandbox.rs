@@ -845,7 +845,7 @@ mod tests {
     #[test]
     fn coverage_folder() {
         assert_eq!(build_folders(Some("/build/rust-coverage")), [PathBuf::from("/build/rust-coverage")]);
-        assert!(build_folders(None).is_empty());
+        assert_eq!(build_folders(None), Vec::<PathBuf>::new());
     }
 
     #[test]

@@ -227,7 +227,7 @@ mod tests {
         let lock = LockFile::try_lock(&path).unwrap().unwrap();
         let content = fs::read_to_string(&path).unwrap();
         assert_eq!(content, format!("{}\n{}\n{}\n", std::process::id(), real_name(), real_host()));
-        assert!(!real_host().is_empty());
+        assert_ne!(real_host().len(), 0);
         assert_eq!(fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
         // Held and alive: neither taken nor stale, also when old (flock).
         assert!(LockFile::try_lock(&path).unwrap().is_none());

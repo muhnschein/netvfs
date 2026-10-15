@@ -142,8 +142,8 @@ mod tests {
         // A record cut short ends the list.
         let mut cut = record(1, 2, b"abc", 8);
         cut.truncate(20);
-        assert!(parse_events(&cut).is_empty());
-        assert!(parse_events(&cut[..10]).is_empty());
+        assert_eq!(parse_events(&cut).len(), 0);
+        assert_eq!(parse_events(&cut[..10]).len(), 0);
     }
 
     #[test]

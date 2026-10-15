@@ -28,6 +28,8 @@ publish = false
 # Allowed only in the modules that talk to C (`ffi`, `sys`, the helper's
 # `sandbox`), each with `#![allow(unsafe_code)]` and SAFETY comments.
 unsafe_code = "deny"
+# Set by tools/ci/rust-sanitize.sh only.
+unexpected_cfgs = { level = "deny", check-cfg = ["cfg(netvfs_asan)"] }
 missing_docs = "deny"
 missing_debug_implementations = "deny"
 unused_qualifications = "deny"

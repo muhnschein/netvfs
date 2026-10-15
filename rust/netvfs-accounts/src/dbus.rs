@@ -546,7 +546,7 @@ mod tests {
         let mut budget = MAX_READ;
         let kinds: Vec<_> = (0..4).map(|_| read_message(&mut input, &mut budget).unwrap().kind).collect();
         assert_eq!(kinds, [kind::METHOD_CALL, kind::METHOD_CALL, kind::SIGNAL, kind::METHOD_CALL]);
-        assert!(input.is_empty());
+        assert_eq!(input, []);
         assert_eq!(guid().len(), 32);
         assert_ne!(guid(), guid());
     }

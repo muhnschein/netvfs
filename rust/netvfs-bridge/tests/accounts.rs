@@ -81,9 +81,9 @@ async fn directory_lists() {
 async fn directory_failures() {
     // A table the fake cannot read: the helper's failure, nothing listed.
     let fixture = Fixture::new("account\tbad\n");
-    assert!(fixture.directory().list().await.is_empty());
+    assert_eq!(fixture.directory().list().await.len(), 0);
     assert_eq!(fixture.directory().files(1).await.unwrap_err().name, ErrorName::Internal);
-    assert!(HelperDirectory::new("/nonexistent/netvfs-accounts").list().await.is_empty());
+    assert_eq!(HelperDirectory::new("/nonexistent/netvfs-accounts").list().await.len(), 0);
 }
 
 #[tokio::test]

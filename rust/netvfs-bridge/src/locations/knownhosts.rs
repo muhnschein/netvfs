@@ -142,7 +142,7 @@ mod tests {
         let path = dir.join("b/known_hosts");
         {
             let hosts = KnownHosts::new(&path);
-            assert!(hosts.pin("sftp://h:0").is_empty());
+            assert_eq!(hosts.pin("sftp://h:0").len(), 0);
             assert!(hosts.set_pin("sftp://h:0", "ssh-ed25519 AAAA"));
             assert!(!hosts.set_pin("bad key", "x"));
         }
@@ -150,7 +150,7 @@ mod tests {
         assert_eq!(reread.pin("sftp://h:0"), "ssh-ed25519 AAAA");
         assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
         assert!(reread.remove("sftp://h:0"));
-        assert!(KnownHosts::new(&path).pin("sftp://h:0").is_empty());
+        assert_eq!(KnownHosts::new(&path).pin("sftp://h:0").len(), 0);
         assert_eq!(reread.path(), path);
     }
 
@@ -159,12 +159,12 @@ mod tests {
         use crate::locations::connector::PinStore;
         let dir = TempDir::new();
         let store: &dyn PinStore = &KnownHosts::new(dir.join("known_hosts"));
-        assert!(store.pin("fake://h:0").is_empty());
+        assert_eq!(store.pin("fake://h:0").len(), 0);
         assert!(store.set_pin("fake://h:0", "ssh-ed25519 AAAA"));
         assert!(!store.set_pin("bad key", "x"));
         assert_eq!(store.pin("fake://h:0"), "ssh-ed25519 AAAA");
         assert!(store.remove("fake://h:0"));
-        assert!(store.pin("fake://h:0").is_empty());
+        assert_eq!(store.pin("fake://h:0").len(), 0);
         std::fs::remove_file(dir.join("known_hosts")).unwrap();
         std::fs::create_dir(dir.join("known_hosts")).unwrap();
         let blocked: &dyn PinStore = &KnownHosts::new(dir.join("known_hosts"));

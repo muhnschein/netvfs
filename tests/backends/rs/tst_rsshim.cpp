@@ -571,10 +571,12 @@ void tst_RsShim::entries()
     QCOMPARE(backend->lstat(QStringLiteral("link"), &entry), Result::success());
     QCOMPARE(entry.type, EntryType::Symlink);
     QCOMPARE(entry.size, qint64(8));
-    // mem knows only a link's modification time: the others are unknown.
+    // mem knows only a link's modification time, and no mode: the others
+    // are unknown.
     QVERIFY(entry.modified.isValid());
     QVERIFY(!entry.created.isValid());
     QVERIFY(!entry.accessed.isValid());
+    QCOMPARE(entry.mode, -1);
     QCOMPARE(backend->stat(QStringLiteral("link"), &entry), Result::success());
     QCOMPARE(entry.type, EntryType::File);
     QCOMPARE(entry.name, QStringLiteral("link"));
