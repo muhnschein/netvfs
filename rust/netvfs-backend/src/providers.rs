@@ -10,6 +10,7 @@ use netvfs_vfs::Status;
 /// `Unsupported` for a provider this build has no backend for.
 pub fn create(provider: &[u8]) -> Result<Box<dyn DynBackend>, Status> {
     match provider {
+        b"smb" => Ok(Box::new(netvfs_smb::backend::Smb::new())),
         #[cfg(feature = "testing")]
         b"mem" => Ok(Box::new(crate::mem::Mem::new())),
         _ => Err(Status::unsupported(format!(
@@ -32,6 +33,11 @@ mod tests {
         }
         let e = create(b"webdav").err().unwrap();
         assert_eq!(e.message, "No Rust backend for provider \"webdav\"");
+    }
+
+    #[test]
+    fn smb_is_a_provider() {
+        create(b"smb").unwrap();
     }
 
     #[cfg(feature = "testing")]
