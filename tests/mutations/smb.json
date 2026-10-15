@@ -4,244 +4,244 @@
     "file": "rust/netvfs-smb/src/profile.rs",
     "search": "        if name.is_empty() {\n            return Ok(Self::Strict);\n        }",
     "replace": "        if name.is_empty() {\n            return Ok(Self::Signed);\n        }",
-    "test": "tests/interop/smb/run.sh build encryptionRequiredServerOff"
+    "test": "timeout 1800 tests/interop/smb/run.sh build encryptionRequiredServerOff"
   },
   {
     "name": "XM-1 profile legacy accepted",
     "file": "rust/netvfs-smb/src/profile.rs",
     "search": "Self::ALL.into_iter().find(|p| p.name() == name)",
     "replace": "Self::ALL.into_iter().find(|p| p.name() == name || (name == \"legacy\" && *p == Self::Signed))",
-    "test": "tests/interop/smb/run.sh build weakerProfilesOnStrictServer"
+    "test": "timeout 1800 tests/interop/smb/run.sh build weakerProfilesOnStrictServer"
   },
   {
     "name": "M-T9 dialect refusal not named",
     "file": "rust/netvfs-smb/src/session.rs",
     "search": "    if resp.status() == NtStatus::NOT_SUPPORTED {\n        return Err(policy(NO_SMB311));\n    }",
     "replace": "",
-    "test": "cd rust && cargo test -q --locked -p netvfs-smb --lib session::"
+    "test": "cd rust && timeout 900 cargo test -q --locked -p netvfs-smb --lib session::"
   },
   {
     "name": "M-1 a dialect other than 3.1.1 accepted",
     "file": "rust/netvfs-smb/src/negotiate.rs",
     "search": "    if resp.dialect != DIALECT_311 {",
     "replace": "    if resp.dialect != DIALECT_311 && resp.dialect != 0x0210 {",
-    "test": "cd rust && cargo test -q --locked -p netvfs-smb --test samba a_dialect_never_offered_is_refused"
+    "test": "cd rust && timeout 900 cargo test -q --locked -p netvfs-smb --test samba a_dialect_never_offered_is_refused"
   },
   {
     "name": "M-T14 AES-256-GCM not offered",
     "file": "rust/netvfs-smb/src/session.rs",
     "search": "pub const CIPHERS: [Cipher; 2] = [Cipher::Aes128Gcm, Cipher::Aes256Gcm];",
     "replace": "pub const CIPHERS: [Cipher; 2] = [Cipher::Aes128Gcm, Cipher::Aes128Gcm];",
-    "test": "tests/interop/smb/run.sh build aes256GcmOnly"
+    "test": "timeout 1800 tests/interop/smb/run.sh build aes256GcmOnly"
   },
   {
     "name": "M-T3 strict without a common cipher reaches SESSION_SETUP",
     "file": "rust/netvfs-smb/src/session.rs",
     "search": "    if profile.encrypts() && negotiated.cipher.is_none() {",
     "replace": "    if false && negotiated.cipher.is_none() {",
-    "test": "cd rust && cargo test -q --locked -p netvfs-smb --lib session::"
+    "test": "cd rust && timeout 900 cargo test -q --locked -p netvfs-smb --lib session::"
   },
   {
     "name": "M-2 strict does not encrypt unless the server asks",
     "file": "rust/netvfs-smb/src/session.rs",
     "search": "    let encrypt = profile.encrypts() || wants_encryption;",
     "replace": "    let encrypt = wants_encryption;",
-    "test": "tests/interop/smb/run.sh build noCleartextOnWire"
+    "test": "timeout 1800 tests/interop/smb/run.sh build noCleartextOnWire"
   },
   {
     "name": "M-3 the session's ENCRYPT_DATA ignored",
     "file": "rust/netvfs-smb/src/session.rs",
     "search": "    let encrypt = profile.encrypts() || wants_encryption;",
     "replace": "    let encrypt = profile.encrypts();",
-    "test": "tests/interop/smb/run.sh build encryptionOffServerRequires"
+    "test": "timeout 1800 tests/interop/smb/run.sh build encryptionOffServerRequires"
   },
   {
     "name": "ENCRYPT_DATA without a cipher accepted",
     "file": "rust/netvfs-smb/src/session.rs",
     "search": "    if encrypt && keys.seal.is_none() {",
     "replace": "    if false && keys.seal.is_none() {",
-    "test": "cd rust && cargo test -q --locked -p netvfs-smb --lib session::"
+    "test": "cd rust && timeout 900 cargo test -q --locked -p netvfs-smb --lib session::"
   },
   {
     "name": "XM-1 a guest mapping accepted",
     "file": "rust/netvfs-smb/src/session.rs",
     "search": "    if flags & (session_flags::IS_GUEST | session_flags::IS_NULL) != 0 {",
     "replace": "    if false {",
-    "test": "tests/interop/smb/run.sh build guestMappingRefused"
+    "test": "timeout 1800 tests/interop/smb/run.sh build guestMappingRefused"
   },
   {
     "name": "final SESSION_SETUP signature not verified",
     "file": "rust/netvfs-smb/src/session.rs",
     "search": "    keys.signing.verify(&resp.msg).map_err(|e| policy(format!(\"the final SESSION_SETUP response: {e}\")))?;\n",
     "replace": "",
-    "test": "cd rust && cargo test -q --locked -p netvfs-smb --test samba a_tampered_session_setup_reply_is_refused"
+    "test": "cd rust && timeout 900 cargo test -q --locked -p netvfs-smb --test samba a_tampered_session_setup_reply_is_refused"
   },
   {
     "name": "final SESSION_SETUP may be unsigned",
     "file": "rust/netvfs-smb/src/session.rs",
     "search": "    if !resp.header.is_signed() {\n        return Err(policy(\"the final SESSION_SETUP response is not signed\"));\n    }",
     "replace": "",
-    "test": "cd rust && cargo test -q --locked -p netvfs-smb --lib session::"
+    "test": "cd rust && timeout 900 cargo test -q --locked -p netvfs-smb --lib session::"
   },
   {
     "name": "the share's ENCRYPT_DATA ignored",
     "file": "rust/netvfs-smb/src/session.rs",
     "search": "    let encrypt = tc.share_flags & share_flags::ENCRYPT_DATA != 0;",
     "replace": "    let encrypt = false;",
-    "test": "cd rust && cargo test -q --locked -p netvfs-smb --lib session::"
+    "test": "cd rust && timeout 900 cargo test -q --locked -p netvfs-smb --lib session::"
   },
   {
     "name": "sspi's /GUEST user name passed on",
     "file": "rust/netvfs-smb/src/auth.rs",
     "search": "        if username.account_name().eq_ignore_ascii_case(SSPI_GUEST_USER) {",
     "replace": "        if false {",
-    "test": "cd rust && cargo test -q --locked -p netvfs-smb --lib auth::"
+    "test": "cd rust && timeout 900 cargo test -q --locked -p netvfs-smb --lib auth::"
   },
   {
     "name": "an $NTLM$ password taken as a hash",
     "file": "rust/netvfs-smb/src/auth.rs",
     "search": "        if password.starts_with(sspi::NTLM_HASH_PREFIX) {",
     "replace": "        if false {",
-    "test": "cd rust && cargo test -q --locked -p netvfs-smb --lib auth::"
+    "test": "cd rust && timeout 900 cargo test -q --locked -p netvfs-smb --lib auth::"
   },
   {
     "name": "M-T12 signatures not checked after sign-in",
     "file": "rust/netvfs-smb/src/conn.rs",
     "search": "        Protect::Sign if header.is_interim() => Ok(()),",
     "replace": "        Protect::Sign if true => Ok(()),",
-    "test": "tests/interop/smb/run.sh build tamperedResponse"
+    "test": "timeout 1800 tests/interop/smb/run.sh build tamperedResponse"
   },
   {
     "name": "plaintext accepted on an encrypted connection",
     "file": "rust/netvfs-smb/src/conn.rs",
     "search": "    if encrypted {\n        return Ok(());\n    }",
     "replace": "    if encrypted || protect == Protect::Encrypt {\n        return Ok(());\n    }",
-    "test": "cd rust && cargo test -q --locked -p netvfs-smb --lib conn::"
+    "test": "cd rust && timeout 900 cargo test -q --locked -p netvfs-smb --lib conn::"
   },
   {
     "name": "a response for another session accepted",
     "file": "rust/netvfs-smb/src/conn.rs",
     "search": "    if protect != Protect::None && header.session_id != session_id {",
     "replace": "    if false {",
-    "test": "cd rust && cargo test -q --locked -p netvfs-smb --lib conn::"
+    "test": "cd rust && timeout 900 cargo test -q --locked -p netvfs-smb --lib conn::"
   },
   {
     "name": "TRANSFORM_HEADER AAD shortened",
     "file": "rust/netvfs-smb/src/crypto.rs",
     "search": "const TH_AAD: Range<usize> = 20..52;",
     "replace": "const TH_AAD: Range<usize> = 20..36;",
-    "test": "tests/interop/smb/run.sh build strictServer"
+    "test": "timeout 1800 tests/interop/smb/run.sh build strictServer"
   },
   {
     "name": "M-T5 LOGON_FAILURE not AuthFailed",
     "file": "rust/netvfs-smb/src/status.rs",
     "search": "    (NtStatus::LOGON_FAILURE, ErrorName::AuthFailed, \"the server rejected the user name or password\"),",
     "replace": "    (NtStatus::LOGON_FAILURE, ErrorName::PermissionDenied, \"the server rejected the user name or password\"),",
-    "test": "tests/interop/smb/run.sh build wrongCredentials"
+    "test": "timeout 1800 tests/interop/smb/run.sh build wrongCredentials"
   },
   {
     "name": "M-T6 BAD_NETWORK_NAME not NotFound",
     "file": "rust/netvfs-smb/src/status.rs",
     "search": "    (NtStatus::BAD_NETWORK_NAME, ErrorName::NotFound, \"share not found\"),",
     "replace": "    (NtStatus::BAD_NETWORK_NAME, ErrorName::ProtocolError, \"share not found\"),",
-    "test": "tests/interop/smb/run.sh build unknownShare"
+    "test": "timeout 1800 tests/interop/smb/run.sh build unknownShare"
   },
   {
     "name": "M-T16 DISK_FULL not NoSpace",
     "file": "rust/netvfs-smb/src/status.rs",
     "search": "    (NtStatus::DISK_FULL, ErrorName::NoSpace, \"the share is full\"),",
     "replace": "    (NtStatus::DISK_FULL, ErrorName::ProtocolError, \"the share is full\"),",
-    "test": "tests/interop/smb/run.sh build fullShare"
+    "test": "timeout 1800 tests/interop/smb/run.sh build fullShare"
   },
   {
     "name": "XM-9 DFS detail missing",
     "file": "rust/netvfs-smb/src/status.rs",
     "search": "        .with_detail(DFS_DETAIL);",
     "replace": "        .with_detail(\"DFS\");",
-    "test": "tests/interop/smb/run.sh build dfsReferral"
+    "test": "timeout 1800 tests/interop/smb/run.sh build dfsReferral"
   },
   {
     "name": "XC-21 a drop during sign-in not SecurityPolicy",
     "file": "rust/netvfs-smb/src/error.rs",
     "search": "                Phase::Setup => Status::new(ErrorName::SecurityPolicy, SERVER_CLOSED).with_detail(m),",
     "replace": "                Phase::Setup => Status::new(ErrorName::ConnectionLost, SERVER_CLOSED).with_detail(m),",
-    "test": "tests/interop/smb/run.sh build connectionDropped"
+    "test": "timeout 1800 tests/interop/smb/run.sh build connectionDropped"
   },
   {
     "name": "M-9 Windows-invalid names sent",
     "file": "rust/netvfs-smb/src/names.rs",
     "search": "        if WINDOWS_FORBIDDEN.contains(c) {",
     "replace": "        if false {",
-    "test": "tests/interop/smb/run.sh build operations"
+    "test": "timeout 1800 tests/interop/smb/run.sh build operations"
   },
   {
     "name": "XC-10 Replace does not replace",
     "file": "rust/netvfs-smb/src/backend.rs",
     "search": "        let replace = mode == RenameMode::Replace;",
     "replace": "        let replace = false;",
-    "test": "tests/interop/smb/run.sh build v2Namespace"
+    "test": "timeout 1800 tests/interop/smb/run.sh build v2Namespace"
   },
   {
     "name": "XC-10 Replace onto a folder left to the server",
     "file": "rust/netvfs-smb/src/fs.rs",
     "search": "            Ok(info) if info.is_dir() => {",
     "replace": "            Ok(info) if false && info.is_dir() => {",
-    "test": "tests/interop/smb/run.sh build v2Namespace"
+    "test": "timeout 1800 tests/interop/smb/run.sh build v2Namespace"
   },
   {
     "name": "XC-11 modes ignored",
     "file": "rust/netvfs-smb/src/backend.rs",
     "search": "        if changes.mode.is_some() {\n            return Err(Status::unsupported(\"SMB has no permission bits\"));\n        }",
     "replace": "",
-    "test": "tests/interop/smb/run.sh build attributes"
+    "test": "timeout 1800 tests/interop/smb/run.sh build attributes"
   },
   {
     "name": "XM-6 resume at the wrong offset",
     "file": "rust/netvfs-smb/src/backend.rs",
     "search": "        if options.disposition == Disposition::Resume && created.end_of_file != options.resume_offset {",
     "replace": "        if false {",
-    "test": "tests/interop/smb/run.sh build writeResume"
+    "test": "timeout 1800 tests/interop/smb/run.sh build writeResume"
   },
   {
     "name": "M-11 chunk not capped at 1 MiB",
     "file": "rust/netvfs-smb/src/files.rs",
     "search": "pub const MAX_CHUNK: usize = 1024 * 1024;",
     "replace": "pub const MAX_CHUNK: usize = 8 * 1024 * 1024;",
-    "test": "cd rust && cargo test -q --locked -p netvfs-smb --lib files::"
+    "test": "cd rust && timeout 900 cargo test -q --locked -p netvfs-smb --lib files::"
   },
   {
     "name": "XM-2 a fifth share context",
     "file": "rust/netvfs-smb/src/backend.rs",
     "search": "pub const MAX_SHARE_TREES: usize = 4;",
     "replace": "pub const MAX_SHARE_TREES: usize = 5;",
-    "test": "tests/interop/smb/run.sh build serverModeContextLimit"
+    "test": "timeout 1800 tests/interop/smb/run.sh build serverModeContextLimit"
   },
   {
     "name": "XM-2 a share with open files evicted",
     "file": "rust/netvfs-smb/src/backend.rs",
     "search": "                .filter(|(_, t)| Arc::strong_count(&t.tree) == 1)\n",
     "replace": "",
-    "test": "tests/interop/smb/run.sh build serverModeContextLimit"
+    "test": "timeout 1800 tests/interop/smb/run.sh build serverModeContextLimit"
   },
   {
     "name": "XM-7 admin shares shown",
     "file": "rust/netvfs-smb/src/rpc.rs",
     "search": "(show_admin || !self.name.ends_with('$'))",
     "replace": "(true || !self.name.ends_with('$'))",
-    "test": "tests/interop/smb/run.sh build serverModeRoot"
+    "test": "timeout 1800 tests/interop/smb/run.sh build serverModeRoot"
   },
   {
     "name": "XM-7 IPC$ and printers listed",
     "file": "rust/netvfs-smb/src/rpc.rs",
     "search": "        self.share_type & SHARE_TYPE_MASK == SHARE_TYPE_DISK && (show_admin",
     "replace": "        (show_admin",
-    "test": "tests/interop/smb/run.sh build serverModeRoot"
+    "test": "timeout 1800 tests/interop/smb/run.sh build serverModeRoot"
   },
   {
     "name": "XM-3 share_enumeration off ignored",
     "file": "rust/netvfs-smb/src/backend.rs",
     "search": "        self.server_mode() && flag_or(&self.params, \"share_enumeration\", true)",
     "replace": "        self.server_mode()",
-    "test": "tests/interop/smb/run.sh build serverModeRoot"
+    "test": "timeout 1800 tests/interop/smb/run.sh build serverModeRoot"
   }
 ]
