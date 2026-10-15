@@ -473,12 +473,8 @@ impl WriteHandle for SmbWrite {
         Ok(())
     }
 
-    async fn abort(mut self) {
-        self.drop_in_flight();
-        if let Some(open) = self.open.take() {
-            open.conn.close_detached(open.target(), &open.file_id);
-        }
-    }
+    /// Dropping the handle is the abort: see `Drop` below.
+    async fn abort(self) {}
 }
 
 impl Drop for SmbWrite {

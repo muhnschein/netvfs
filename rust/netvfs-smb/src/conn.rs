@@ -322,10 +322,9 @@ impl State {
             return Err(protocol(format!("{total} credits needed, {} granted", self.credits)));
         }
         let first_mid = self.next_mid;
-        let end = first_mid
-            .checked_add(u64::from(total))
-            .filter(|m| *m < NOTIFICATION_MID)
-            .ok_or_else(|| protocol("message ids used up"))?;
+        // `end` is one past the last id this chain takes, so that one is
+        // below u64::MAX, NOTIFICATION_MID, which no request may use.
+        let end = first_mid.checked_add(u64::from(total)).ok_or_else(|| protocol("message ids used up"))?;
         let left = self.credits.saturating_sub(total);
         let top_up = CREDIT_TARGET.saturating_sub(left);
         let keys = self.keys.clone();
@@ -617,6 +616,12 @@ impl Conn {
         self.0.lock().credits
     }
 
+    /// The largest frame the receive task accepts.
+    #[cfg(test)]
+    pub(crate) fn max_frame(&self) -> usize {
+        self.0.lock().max_frame
+    }
+
     /// Sets the credits in hand (tests of other modules).
     #[cfg(test)]
     pub(crate) fn grant(&self, credits: u32) {
@@ -775,9 +780,10 @@ impl Conn {
     pub async fn close(&self, logoff: bool) {
         let writer = {
             let mut st = self.0.lock();
-            if logoff && st.broken.is_none() && st.established && st.credits > 0 {
+            if logoff && st.established {
                 let protect = st.protect(Target::SESSION);
-                // Best effort: the session ends with the socket anyway.
+                // Best effort: the session ends with the socket anyway (and
+                // dispatch refuses on a broken connection or without credits).
                 drop(st.dispatch(0, protect, &[Element::new(Command::Logoff, four_byte_request())], true));
             }
             st.fail(Error::Lost(CLOSED.into()));
@@ -838,8 +844,15 @@ impl Ticket {
         let shared = Arc::clone(&self.shared);
         let mut canceled = pin!(cancel.canceled());
         loop {
+            // No entry: the response or the failure is in `rx` already, or
+            // is about to be.
             let deadline = shared.lock().pending.get(&self.mid).map(|p| p.deadline);
-            let mut sleep = pin!(tokio::time::sleep_until(deadline.unwrap_or_else(far_future)));
+            let mut sleep = pin!(async move {
+                match deadline {
+                    Some(d) => tokio::time::sleep_until(d).await,
+                    None => std::future::pending().await,
+                }
+            });
             let rx = &mut self.rx;
             let woke = poll_fn(|cx| {
                 if let Poll::Ready(r) = Pin::new(&mut *rx).poll(cx) {
@@ -878,6 +891,9 @@ impl Ticket {
     }
 }
 
+// `dispatch` relies on it.
+const _: () = assert!(NOTIFICATION_MID == u64::MAX);
+
 /// Why a wait for a response woke.
 enum Woke {
     /// The response, or the connection's failure.
@@ -894,11 +910,6 @@ enum Woke {
 fn after(d: Duration) -> Instant {
     let now = Instant::now();
     now.checked_add(d).unwrap_or(now)
-}
-
-/// An instant no request waits for (a request without a deadline).
-fn far_future() -> Instant {
-    after(Duration::from_hours(24 * 365))
 }
 
 impl Drop for Ticket {

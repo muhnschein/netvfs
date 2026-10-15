@@ -12,6 +12,7 @@ use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::net::TcpStream;
 
 use crate::error::{Error, Result, protocol};
+use crate::wire::from_u32;
 
 /// Largest frame the format can express.
 pub const MAX_FRAME_FORMAT: usize = 0x00FF_FFFF;
@@ -87,11 +88,11 @@ pub fn frame(msg: &[u8]) -> Result<Vec<u8>> {
 pub async fn read_frame<R: AsyncRead + Unpin>(stream: &mut R, max: usize) -> Result<Vec<u8>> {
     let mut head = [0u8; 4];
     stream.read_exact(&mut head).await.map_err(|e| lost(&e))?;
-    let [zero, a, b, c] = head;
-    if zero != 0 {
+    if head[0] != 0 {
         return Err(protocol("transport header: the first byte is not zero"));
     }
-    let len = usize::from(a) << 16 | usize::from(b) << 8 | usize::from(c);
+    // The other three bytes: the length, big-endian.
+    let len = from_u32(u32::from_be_bytes(head))?;
     if len > max {
         return Err(protocol(format!("a frame of {len} bytes, above the cap of {max}")));
     }

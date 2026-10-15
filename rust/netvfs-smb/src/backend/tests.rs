@@ -41,7 +41,6 @@ async fn signed(options: &[(&str, Value)], max_io: usize) -> (Smb, Peer) {
         max_write: max_io,
         max_transact: 65_536,
         multi_credit: true,
-        server_signing_required: false,
         server_guid: [0; 16],
     };
     let session = Session { conn, negotiated, flags: 0 };
@@ -247,6 +246,13 @@ fn helpers() {
     assert_eq!(timeout_of(0, 7), Duration::from_millis(7));
     assert_eq!(timeout_of(-5, 7), Duration::from_millis(7));
     assert_eq!(timeout_of(250, 7), Duration::from_millis(250));
+    for (port, expected) in [(-1, 445), (0, 445), (1, 1), (65_535, 65_535)] {
+        assert_eq!(port_of(port), Ok(expected));
+    }
+    assert_eq!(
+        port_of(65_536).unwrap_err().message,
+        "Cannot connect to the server: port 65536 is out of range"
+    );
     let p = params(&[("a", s("1")), ("b", s("no"))]);
     assert!(flag_or(&p, "a", false));
     assert!(!flag_or(&p, "b", true));
@@ -509,6 +515,16 @@ async fn refused_shares() {
     let (r, ()) =
         tokio::join!(smb.make_dir(b"/nope", false, &c), tree_refused(&mut peer, NtStatus::BAD_NETWORK_NAME));
     assert_eq!(r, Err(Status::permission_denied("create folder: the server root holds only the shares")));
+    // Other refusals of the share, and a missing share below it, are what
+    // they are.
+    let (r, ()) =
+        tokio::join!(smb.make_dir(b"/secret", false, &c), tree_refused(&mut peer, NtStatus::ACCESS_DENIED));
+    assert_eq!(r.unwrap_err().name, ErrorName::SecurityPolicy);
+    let (r, ()) = tokio::join!(
+        smb.make_dir(b"/nope/d", false, &c),
+        tree_refused(&mut peer, NtStatus::BAD_NETWORK_NAME)
+    );
+    assert_eq!(r.unwrap_err().name, ErrorName::NotFound);
     let (r, _) = tokio::join!(smb.make_dir(b"/data", true, &c), tree_connect(&mut peer, 30));
     assert_eq!(r.unwrap_err().message, "create folder: the share root exists");
     assert_eq!(smb.make_dir(b"/data", false, &c).await, Ok(()));
@@ -601,6 +617,16 @@ async fn download_reads_ahead_in_chunks_and_closes() {
     r.unwrap();
     assert_eq!(sink.0, content(500, 1200));
     assert_eq!(progress.updates, [(700, Some(700))]);
+    // A stop asked for after the last byte comes too late.
+    let mut sink = Collected::default();
+    let mut progress = Moves { cancel_after: Some(1), ..Moves::default() };
+    let (r, ()) = tokio::join!(smb.download(b"/f", 500, Some(700), &mut sink, &mut progress, &c), async {
+        create(&mut peer, NtStatus::SUCCESS, 0x20, 2500).await;
+        assert_eq!(serve_reads(&mut peer, 2500, 1).await, [(500, 700)]);
+        answer_close(&mut peer).await;
+    });
+    r.unwrap();
+    assert_eq!(sink.0, content(500, 1200));
     // Stopped by the progress: the file is closed without waiting.
     let mut progress = Moves { cancel_after: Some(0), ..Moves::default() };
     let mut sink = Collected::default();
@@ -730,6 +756,39 @@ async fn open_write_refusals() {
     assert_eq!(w.position(), 5);
     w.abort().await;
     assert_eq!(peer.recv_one().await.command(), Command::Close);
+    // A resumed upload: the total counts what is there already.
+    let mut source = Bytes { data: b"abc".to_vec(), at: 0, fail: false };
+    let mut progress = Moves::default();
+    let (r, ()) = tokio::join!(smb.upload(b"/f", &resume, &mut source, &mut progress, &c), async {
+        create(&mut peer, NtStatus::SUCCESS, 0x20, 5).await;
+        let write = peer.recv_one().await;
+        assert_eq!(write.command(), Command::Write);
+        assert_eq!(le64(&write.body()[8..16]), 5);
+        peer.send(&[fake::response(&write, NtStatus::SUCCESS, &write_body(3), 1)], false).await;
+        let flush = peer.recv_one().await;
+        assert_eq!(flush.command(), Command::Flush);
+        peer.send(&[fake::response(&flush, NtStatus::SUCCESS, &four(), 1)], false).await;
+        answer_close(&mut peer).await;
+    });
+    r.unwrap();
+    assert_eq!(progress.updates, [(8, Some(8))]);
+}
+
+#[tokio::test]
+async fn dropping_the_backend_closes_the_connection() {
+    let (smb, mut peer) = signed(&[], 1 << 20).await;
+    drop(smb);
+    let eof = tokio::time::timeout(T, transport::read_frame(&mut peer.stream, 1 << 16)).await;
+    assert!(matches!(eof, Ok(Err(_))), "{eof:?}");
+}
+
+#[tokio::test]
+async fn the_share_root_cannot_be_renamed_in_share_mode() {
+    let (mut smb, _peer) = signed(&share_mode(), 1000).await;
+    let c = CancelToken::new();
+    let denied = Status::permission_denied("rename: a share cannot be removed or renamed");
+    assert_eq!(smb.rename(b"/", b"/a", RenameMode::Replace, &c).await, Err(denied.clone()));
+    assert_eq!(smb.rename(b"/a", b"/", RenameMode::Replace, &c).await, Err(denied));
 }
 
 #[tokio::test]

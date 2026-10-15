@@ -218,3 +218,58 @@ pub fn close_body() -> Vec<u8> {
     b[0] = 60;
     b
 }
+
+/// sspi's SPNEGO/NTLM acceptor for one account: the server's side of the
+/// exchange, which yields the session key the client derives too.
+pub struct Acceptor {
+    ctx: sspi::Negotiate,
+    creds: Option<sspi::CredentialsBuffers>,
+}
+
+impl Acceptor {
+    /// An acceptor that knows `user` (in `domain`, may be empty) with
+    /// `password`.
+    pub fn new(user: &str, domain: &str, password: &str) -> Self {
+        use sspi::Sspi;
+        let identity = sspi::AuthIdentity {
+            username: sspi::Username::new(user, (!domain.is_empty()).then_some(domain)).unwrap(),
+            password: password.to_owned().into(),
+        };
+        let config = sspi::NegotiateConfig::new(
+            Box::new(sspi::ntlm::NtlmConfig::default()),
+            Some("ntlm".to_owned()),
+            String::new(),
+        );
+        let mut ctx = sspi::Negotiate::new_server(config, vec![identity.clone()]).unwrap();
+        let acquired = ctx
+            .acquire_credentials_handle()
+            .with_credential_use(sspi::CredentialUse::Inbound)
+            .with_auth_data(&sspi::Credentials::AuthIdentity(identity))
+            .execute(&mut ctx)
+            .unwrap();
+        Self { ctx, creds: acquired.credentials_handle }
+    }
+
+    /// The client's token in, the server's out.
+    pub fn step(&mut self, token: &[u8]) -> Vec<u8> {
+        use sspi::{Sspi, SspiImpl};
+        let mut input = vec![sspi::SecurityBuffer::new(token.to_vec(), sspi::BufferType::Token)];
+        let mut output = vec![sspi::SecurityBuffer::new(Vec::new(), sspi::BufferType::Token)];
+        let builder = self
+            .ctx
+            .accept_security_context()
+            .with_credentials_handle(&mut self.creds)
+            .with_context_requirements(sspi::ServerRequestFlags::empty())
+            .with_target_data_representation(sspi::DataRepresentation::Native)
+            .with_input(&mut input)
+            .with_output(&mut output);
+        self.ctx.accept_security_context_impl(builder).unwrap().resolve_to_result().unwrap();
+        output.remove(0).buffer
+    }
+
+    /// The exported session key, once the exchange is complete.
+    pub fn session_key(&mut self) -> Vec<u8> {
+        use sspi::Sspi;
+        self.ctx.query_context_session_key().unwrap().session_key.as_ref().clone()
+    }
+}

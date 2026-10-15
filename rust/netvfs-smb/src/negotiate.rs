@@ -103,8 +103,6 @@ pub struct Negotiated {
     pub max_transact: usize,
     /// Multi-credit requests allowed (LARGE_MTU).
     pub multi_credit: bool,
-    /// The server requires signing.
-    pub server_signing_required: bool,
     /// ServerGuid.
     pub server_guid: [u8; 16],
 }
@@ -178,7 +176,6 @@ pub fn check_response(offer: &Offer, resp: &NegotiateResponse) -> Result<Negotia
         max_write: size(resp.max_write, "MaxWriteSize")?,
         max_transact: size(resp.max_transact, "MaxTransactSize")?,
         multi_credit: resp.capabilities & caps::LARGE_MTU != 0,
-        server_signing_required: resp.security_mode & security_mode::SIGNING_REQUIRED != 0,
         server_guid: resp.server_guid,
     })
 }
@@ -241,9 +238,13 @@ mod tests {
 
     #[test]
     fn refuses_ciphers_not_offered() {
-        for c in [ciphers::AES128_CCM, ciphers::AES256_CCM, 0x0009] {
+        for (c, name) in [
+            (ciphers::AES128_CCM, "AES-128-CCM"),
+            (ciphers::AES256_CCM, "AES-256-CCM"),
+            (0x0009, "cipher 0x0009"),
+        ] {
             let e = check(DIALECT_311, &[preauth_context(&[0; 32]), enc(&[c])]).unwrap_err();
-            assert!(matches!(e, Error::Policy(ref m) if m.contains("not offered")), "{e}");
+            assert_eq!(e, policy(format!("the server selected {name} which was not offered")));
         }
         // AES-256-GCM when only AES-128-GCM was offered
         let only128 = Offer { ciphers: vec![Cipher::Aes128Gcm], ..offer() };
@@ -253,8 +254,38 @@ mod tests {
         ))
         .unwrap();
         assert!(matches!(check_response(&only128, &resp), Err(Error::Policy(_))));
+        assert_eq!(
+            check_response(&only128, &resp).unwrap_err(),
+            policy("the server selected AES-256-GCM which was not offered")
+        );
         // two ciphers in the response
         check(DIALECT_311, &[preauth_context(&[0; 32]), enc(&[2, 4])]).unwrap_err();
+    }
+
+    /// `check` of a response with these capabilities and sizes.
+    fn check_sizes(capabilities: u32, transact: u32, read: u32, write: u32) -> Result<Negotiated> {
+        let mut msg = response(DIALECT_311, &[preauth_context(&[0; 32])]);
+        for (at, v) in [(88, capabilities), (92, transact), (96, read), (100, write)] {
+            msg[at..][..4].copy_from_slice(&v.to_le_bytes());
+        }
+        check_response(&offer(), &NegotiateResponse::decode(&msg)?)
+    }
+
+    #[test]
+    fn sizes_are_bounded_and_large_mtu_is_read() {
+        let n = check_sizes(caps::LARGE_MTU, 65_536, 16 << 20, u32::MAX).unwrap();
+        assert_eq!((n.max_transact, n.max_read, n.max_write), (65_536, 8_388_608, 8_388_608));
+        assert!(n.multi_credit);
+        let n = check_sizes(0, 65_536, 65_536, 65_536).unwrap();
+        assert!(!n.multi_credit);
+        for (t, r, w, what) in [
+            (65_535, 65_536, 65_536, "MaxTransactSize of 65535"),
+            (65_536, 65_535, 65_536, "MaxReadSize of 65535"),
+            (65_536, 65_536, 0, "MaxWriteSize of 0"),
+        ] {
+            let e = check_sizes(caps::LARGE_MTU, t, r, w).unwrap_err();
+            assert_eq!(e, protocol(format!("server {what} bytes is below 64 KiB")));
+        }
     }
 
     #[test]

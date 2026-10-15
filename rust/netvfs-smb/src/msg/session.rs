@@ -114,8 +114,14 @@ mod tests {
         assert!(SetupResponse::decode(&empty).unwrap().token.is_empty());
         // token runs past the end
         SetupResponse::decode(&resp(&[9, 0, 0, 0, 72, 0, 9, 0, 1])).unwrap_err();
-        // token above the cap
+        // token above the cap, and at it
         SetupResponse::decode(&resp(&[9, 0, 0, 0, 72, 0, 0xff, 0xff])).unwrap_err();
+        let mut at_cap = vec![9, 0, 0, 0, 72, 0];
+        at_cap.extend_from_slice(&u16::try_from(MAX_TOKEN).unwrap().to_le_bytes());
+        at_cap.resize(8 + MAX_TOKEN + 1, 7);
+        assert_eq!(SetupResponse::decode(&resp(&at_cap)).unwrap().token.len(), MAX_TOKEN);
+        at_cap[6..8].copy_from_slice(&u16::try_from(MAX_TOKEN + 1).unwrap().to_le_bytes());
+        assert_eq!(SetupResponse::decode(&resp(&at_cap)), Err(protocol("security token too long")));
         // wrong structure size
         SetupResponse::decode(&resp(&[8, 0, 0, 0, 0, 0, 0, 0])).unwrap_err();
     }

@@ -641,6 +641,8 @@ mod tests {
         assert_eq!(r.times, Times { creation: 11, last_access: 12, last_write: 13, change: 14 });
         assert_eq!((r.end_of_file, r.attributes, r.file_id), (1234, 0x20, [0xAB; 16]));
         Created::decode(&resp(Command::Create, &body(152, 400))).unwrap_err();
+        // No contexts: the offset does not matter.
+        Created::decode(&resp(Command::Create, &body(0xffff, 0))).unwrap();
         let mut with_ctx = resp(Command::Create, &body(152, 4));
         with_ctx.extend_from_slice(&[0; 4]);
         Created::decode(&with_ctx).unwrap();
@@ -764,6 +766,11 @@ mod tests {
         parse_id_both_directory(&entry("x", 1, 0, 8)).unwrap_err();
         parse_id_both_directory(&entry("x", 1, 0, 107)).unwrap_err();
         parse_id_both_directory(&entry("x", 1, 0, 4096)).unwrap_err();
+        // Unaligned, though past the entry and with an entry there.
+        let mut unaligned = entry("x", 1, 0, 108);
+        unaligned.resize(108, 0);
+        unaligned.extend_from_slice(&entry("y", 1, 0, 0));
+        parse_id_both_directory(&unaligned).unwrap_err();
         // The smallest forward offset (fixed part and name, aligned) is fine.
         let mut tight = entry("xyzw", 1, 0, 112);
         tight.extend_from_slice(&entry("y", 1, 0, 0));
@@ -826,6 +833,11 @@ mod tests {
         let mut short = msg.clone();
         short[68] = 31;
         fs_full_size_response(&short).unwrap_err();
+        // More than the structure: the rest is ignored.
+        let mut long = msg.clone();
+        long[68] = 40;
+        long.extend_from_slice(&[0; 8]);
+        assert_eq!(fs_full_size_response(&long).unwrap().total_units, 1000);
         fs_full_size_response(&msg[..msg.len() - 1]).unwrap_err();
     }
 
@@ -851,6 +863,7 @@ mod tests {
         assert_eq!(&r[20..], &utf16le(&u("a\\b"))[..]);
         assert_eq!(rename_information(&u("a"), false).unwrap()[0], 0);
         rename_information(&vec![0x61; MAX_PATH_UNITS + 1], false).unwrap_err();
+        rename_information(&vec![0x61; MAX_PATH_UNITS], false).unwrap();
         assert_eq!(delete_on_close(), [1]);
         assert_eq!((BASIC_INFORMATION, DISPOSITION_INFORMATION), (4, 13));
     }

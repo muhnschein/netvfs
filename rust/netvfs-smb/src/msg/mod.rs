@@ -472,6 +472,13 @@ mod tests {
             bad[20..24].copy_from_slice(&next.to_le_bytes());
             split_chain(&bad).unwrap_err();
         }
+        // Inside the header, or unaligned, even with a header there.
+        for next in [32usize, 68] {
+            let mut bad = response(Command::Echo, 1, u32::try_from(next).unwrap(), &[]);
+            bad.resize(next, 0);
+            bad.extend_from_slice(&response(Command::Echo, 2, 0, &[]));
+            split_chain(&bad).unwrap_err();
+        }
         // NextCommand 64 is a header without a body: allowed.
         let mut bare = response(Command::Echo, 1, 64, &[]);
         bare.extend_from_slice(&response(Command::Echo, 2, 0, &[]));

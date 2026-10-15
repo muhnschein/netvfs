@@ -109,8 +109,41 @@ fn the_bind_and_the_request_are_c706_pdus() {
     }
     w.u32(1).u32(1).u32(REFERENT).u32(0).u32(0).u32(u32::MAX).u32(REFERENT).u32(0);
     assert_eq!(stub, w.into_vec().as_slice());
-    // A name the request cannot carry.
+    // A name the request cannot carry; the longest that fits fills the
+    // fragment.
     share_enum_request(&"x".repeat(3000)).unwrap_err();
+    assert_eq!(share_enum_request(&"x".repeat(2101)).unwrap().len(), MAX_FRAG);
+    share_enum_request(&"x".repeat(2102)).unwrap_err();
+}
+
+#[test]
+fn a_fragment_is_at_least_its_header() {
+    let mut p = pdu(PTYPE_RESPONSE, 3, ENUM_CALL, &[]);
+    assert_eq!(common(&p).unwrap().frag_len, COMMON_LEN);
+    p[8] = 15;
+    assert_eq!(common(&p), Err(protocol("an RPC fragment shorter than its header")));
+}
+
+#[test]
+fn the_bind_reply_is_read_up_to_its_fragment() {
+    let with_len = |len: usize, frag_len: u16| {
+        let mut p = pdu(PTYPE_BIND_ACK, 3, BIND_CALL, &[]);
+        p[8..10].copy_from_slice(&frag_len.to_le_bytes());
+        p.resize(len, 0);
+        p
+    };
+    assert!(bind_reply_wants_more(&[]).unwrap());
+    assert!(bind_reply_wants_more(&with_len(16, 72)[..15]).unwrap());
+    assert!(!bind_reply_wants_more(&with_len(16, 16)).unwrap());
+    assert!(bind_reply_wants_more(&with_len(71, 72)).unwrap());
+    assert!(!bind_reply_wants_more(&with_len(72, 72)).unwrap());
+    assert!(!bind_reply_wants_more(&with_len(80, 72)).unwrap());
+    // Up to a whole fragment; beyond it the check reports what is there.
+    assert!(bind_reply_wants_more(&with_len(MAX_FRAG, 5000)).unwrap());
+    assert!(!bind_reply_wants_more(&with_len(MAX_FRAG + 1, 5000)).unwrap());
+    let mut v4 = with_len(16, 72);
+    v4[0] = 4;
+    bind_reply_wants_more(&v4).unwrap_err();
 }
 
 #[test]
@@ -136,7 +169,15 @@ fn a_bind_ack_must_accept_srvsvc_with_ndr() {
     let mut none = bind_ack(0, &NDR);
     none[40] = 0;
     let full = bind_ack(0, &NDR);
-    for bad in [other, big_endian, v4, auth, none, full[..full.len() - 1].to_vec(), full[..10].to_vec()] {
+    // The bind_ack must be its call's last fragment.
+    let mut not_last = bind_ack(0, &NDR);
+    not_last[3] = PFC_FIRST_FRAG;
+    let mut last = bind_ack(0, &NDR);
+    last[3] = PFC_LAST_FRAG;
+    check_bind_ack(&last).unwrap();
+    for bad in
+        [other, big_endian, v4, auth, none, not_last, full[..full.len() - 1].to_vec(), full[..10].to_vec()]
+    {
         assert!(matches!(check_bind_ack(&bad), Err(Error::Protocol(_))), "{bad:?}");
     }
     // A fault in reply to the bind.
@@ -208,10 +249,16 @@ fn malformed_share_lists_are_refused() {
     for (i, bad) in cases.iter().enumerate() {
         assert!(matches!(decode_share_enum(bad), Err(Error::Protocol(_))), "case {i}");
     }
-    // A count far beyond the bytes there are is refused before allocating.
+    // A count far beyond the bytes there are is refused before allocating;
+    // one whose entries are all there passes that check.
+    let short = protocol("the share list is shorter than its count");
     let mut w = Writer::new();
     w.u32(1).u32(1).u32(REFERENT).u32(4000).u32(REFERENT).u32(4000);
-    decode_share_enum(&w.into_vec()).unwrap_err();
+    assert_eq!(decode_share_enum(&w.into_vec()), Err(short.clone()));
+    let mut w = Writer::new();
+    w.u32(1).u32(1).u32(REFERENT).u32(1).u32(REFERENT).u32(1).u32(0).u32(0).u32(0);
+    let e = decode_share_enum(&w.into_vec()).unwrap_err();
+    assert!(e != short && matches!(e, Error::Protocol(_)), "{e:?}");
     // A null buffer with entries.
     let mut w = Writer::new();
     w.u32(1).u32(1).u32(REFERENT).u32(1).u32(0).u32(0).u32(0).u32(0);
@@ -281,10 +328,33 @@ fn bad_fragments_are_refused() {
     let mut r = Reassembly::new();
     r.feed(&header_only).unwrap();
     assert!(!r.done());
-    // A stub above the cap.
+    // A stub above the cap, and one at it.
     let big = vec![0u8; MAX_STUB + 1];
     let wire = fragments(&big, 60_000);
     assert!(matches!(Reassembly::new().feed(&wire), Err(Error::Protocol(m)) if m.contains("too long")));
+    let mut r = Reassembly::new();
+    r.feed(&fragments(&big[..MAX_STUB], 32_768)).unwrap();
+    assert!(r.done());
+    assert_eq!(r.stub().len(), MAX_STUB);
+}
+
+#[test]
+fn fragments_with_little_stub_are_capped_in_bytes() {
+    // 144-byte fragments: MAX_READ_TOTAL bytes are 8192 of them, which
+    // carry less than MAX_STUB.
+    let fragment = |first: bool| {
+        let mut body = Writer::new();
+        body.u32(0).u16(0).u8(0).u8(0).bytes(&[0; 120]);
+        pdu(PTYPE_RESPONSE, if first { PFC_FIRST_FRAG } else { 0 }, ENUM_CALL, &body.into_vec())
+    };
+    assert_eq!(fragment(true).len() * 8192, MAX_READ_TOTAL);
+    let mut r = Reassembly::new();
+    r.feed(&fragment(true)).unwrap();
+    for _ in 1..8192 {
+        r.feed(&fragment(false)).unwrap();
+    }
+    assert!(!r.done());
+    assert_eq!(r.feed(&[5]), Err(protocol("the share list is too long")));
 }
 
 fn ioctl_body(output: &[u8]) -> Vec<u8> {
@@ -323,6 +393,7 @@ pub(crate) async fn serve(peer: &mut Peer, reply: &[u8], per_read: usize) {
     let create = peer.recv_one().await;
     assert_eq!(create.command(), Command::Create);
     assert_eq!(create.header.tree_id, 9);
+    assert_eq!(&create.body()[24..28], &0x0012_019F_u32.to_le_bytes(), "DesiredAccess");
     peer.send(&[fake::response(&create, NtStatus::SUCCESS, &created_body(0x80, 0, FID), 1)], false).await;
     let bind = peer.recv_one().await;
     assert_eq!(ioctl_input(&bind), bind_request().unwrap());

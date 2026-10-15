@@ -205,11 +205,10 @@ impl NegotiateResponse {
             }
             let mut cr = Reader::new(msg);
             cr.seek(ctx_offset)?;
-            for i in 0..context_count {
-                if i > 0 {
-                    let aligned = cr.pos().checked_next_multiple_of(8).ok_or_else(|| protocol("overflow"))?;
-                    cr.seek(aligned)?;
-                }
+            for _ in 0..context_count {
+                // Each context starts 8-aligned (the first: checked above).
+                let aligned = cr.pos().checked_next_multiple_of(8).ok_or_else(|| protocol("overflow"))?;
+                cr.seek(aligned)?;
                 let kind = cr.u16()?;
                 let len = usize::from(cr.u16()?);
                 cr.skip(4)?;
@@ -295,6 +294,8 @@ pub(crate) mod tests {
         // third at 104
         assert_eq!(&body[104..112], &[8, 0, 4, 0, 0, 0, 0, 0]);
         NegotiateRequest { dialects: vec![], ..request() }.encode().unwrap_err();
+        NegotiateRequest { dialects: vec![DIALECT_311; MAX_DIALECTS], ..request() }.encode().unwrap();
+        NegotiateRequest { dialects: vec![DIALECT_311; MAX_DIALECTS + 1], ..request() }.encode().unwrap_err();
     }
 
     /// A response message like Samba's, built by our own encoder for the request contexts.
@@ -353,15 +354,28 @@ pub(crate) mod tests {
         // security buffer outside
         msg[64 + 56..64 + 58].copy_from_slice(&2000u16.to_le_bytes());
         NegotiateResponse::decode(&msg).unwrap_err();
+        // no security buffer: its offset does not matter
+        msg[64 + 58..64 + 60].copy_from_slice(&0u16.to_le_bytes());
+        NegotiateResponse::decode(&msg).unwrap();
         // truncated
         let msg = response(DIALECT_311, &ctxs);
         NegotiateResponse::decode(&msg[..100]).unwrap_err();
+        // up to MAX_CONTEXTS contexts
+        let max = vec![signing_context(); MAX_CONTEXTS];
+        assert_eq!(NegotiateResponse::decode(&response(DIALECT_311, &max)).unwrap().contexts, max);
+        let more = vec![signing_context(); MAX_CONTEXTS + 1];
+        NegotiateResponse::decode(&response(DIALECT_311, &more)).unwrap_err();
     }
 
     #[test]
     fn list_counts_are_bounded_by_the_data() {
         u16_list(&[0xff, 0xff, 1, 0]).unwrap_err();
+        assert_eq!(u16_list(&[2, 0, 1, 0]), Err(protocol("list count beyond the context")));
+        // Data after the list is no error.
+        assert_eq!(u16_list(&[1, 0, 1, 0, 9, 9]).unwrap(), [1]);
         parse_preauth(&[1, 0, 32, 0, 1, 0]).unwrap_err();
         parse_preauth(&[0xff, 0x7f, 0, 0]).unwrap_err();
+        assert_eq!(parse_preauth(&[2, 0, 0, 0, 1, 0]), Err(protocol("hash count beyond the context")));
+        assert_eq!(parse_preauth(&[1, 0, 1, 0, 1, 0, 7, 9]).unwrap(), (vec![1], 1));
     }
 }

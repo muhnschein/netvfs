@@ -228,6 +228,66 @@ async fn too_many_interim_responses_end_the_connection() {
 }
 
 #[tokio::test]
+async fn before_negotiate_frames_up_to_64_kib_are_taken() {
+    for (len, ok) in [(65_536, true), (65_537, false)] {
+        let (conn, mut peer) = started().await;
+        let c = CancelToken::new();
+        let (r, ()) = tokio::join!(conn.call(Target::SESSION, echo(), &c), async {
+            let req = peer.recv_one().await;
+            let mut msg = fake::response(&req, NtStatus::SUCCESS, &four(), 1);
+            msg.resize(len, 0);
+            peer.send(&[msg], false).await;
+        });
+        assert_eq!(r.is_ok(), ok, "{len}: {r:?}");
+    }
+}
+
+#[tokio::test]
+async fn up_to_max_interim_responses_are_fine() {
+    let (conn, mut peer) = started().await;
+    let c = CancelToken::new();
+    let (r, ()) = tokio::join!(conn.call(Target::SESSION, echo(), &c), async {
+        let req = peer.recv_one().await;
+        for _ in 0..MAX_INTERIM {
+            peer.send(&[interim(&req, 5, 0)], false).await;
+        }
+        let mut msg = fake::response(&req, NtStatus::SUCCESS, &four(), 1);
+        msg[16..20].copy_from_slice(&(flags::SERVER_TO_REDIR | flags::ASYNC_COMMAND).to_le_bytes());
+        msg[32..40].copy_from_slice(&5u64.to_le_bytes());
+        peer.send(&[msg], false).await;
+    });
+    r.unwrap().ok().unwrap();
+}
+
+#[tokio::test]
+async fn message_ids_run_up_to_the_notification_id() {
+    let (conn, mut peer) = established(None, false, 8).await;
+    let c = CancelToken::new();
+    conn.0.lock().next_mid = NOTIFICATION_MID - 1;
+    let (r, ()) = tokio::join!(conn.call(Target::SESSION, echo(), &c), async {
+        let req = peer.recv_one().await;
+        assert_eq!(req.header.message_id, NOTIFICATION_MID - 1);
+        let mut msg = fake::response(&req, NtStatus::SUCCESS, &four(), 1);
+        peer.sign(&mut msg);
+        peer.send(&[msg], false).await;
+    });
+    r.unwrap().ok().unwrap();
+    let e = conn.call(Target::SESSION, echo(), &c).await.unwrap_err();
+    assert_eq!(e, Error::Protocol("message ids used up".into()));
+}
+
+#[tokio::test]
+async fn send_now_goes_only_with_enough_credits() {
+    let (conn, mut peer) = established(None, false, 1).await;
+    let tickets = conn.send_now(Target::SESSION, &[echo()]).unwrap().unwrap();
+    assert_eq!(tickets.len(), 1);
+    assert_eq!(peer.recv_one().await.command(), Command::Echo);
+    // No credit left: nothing goes, and that is no error.
+    assert!(conn.send_now(Target::SESSION, &[echo()]).unwrap().is_none());
+    assert_eq!(conn.0.lock().next_mid, 1);
+}
+
+#[tokio::test]
 async fn encrypted_requests_need_encrypted_responses() {
     for cipher in [Cipher::Aes128Gcm, Cipher::Aes256Gcm] {
         let (conn, mut peer) = established(Some(cipher), true, 8).await;
@@ -542,8 +602,27 @@ async fn close_logs_off_and_later_calls_fail() {
     conn.abort();
 }
 
+#[tokio::test]
+async fn close_logs_off_only_an_established_session_when_asked() {
+    let (conn, mut peer) = established(None, false, 8).await;
+    conn.close(false).await;
+    assert!(read_frame_eof(&mut peer).await);
+    let (conn, mut peer) = started().await;
+    conn.close(true).await;
+    assert!(read_frame_eof(&mut peer).await);
+}
+
+#[tokio::test]
+async fn abort_closes_the_socket_at_once() {
+    let (conn, mut peer) = established(None, false, 8).await;
+    conn.abort();
+    let c = CancelToken::new();
+    assert_eq!(conn.call(Target::SESSION, echo(), &c).await, Err(Error::Lost(CLOSED.into())));
+    assert!(read_frame_eof(&mut peer).await);
+}
+
 async fn read_frame_eof(peer: &mut Peer) -> bool {
-    transport::read_frame(&mut peer.stream, 100).await.is_err()
+    transport::read_frame(&mut peer.stream, 1 << 16).await.is_err()
 }
 
 #[tokio::test]

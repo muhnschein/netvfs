@@ -9,7 +9,7 @@ use std::time::Duration;
 use super::*;
 use crate::crypto::server_side_keys;
 use crate::error::Error;
-use crate::fake::{self, Peer, Req, SESSION_ID, ServerKeys, error, four, pair};
+use crate::fake::{self, Acceptor, Peer, Req, SESSION_ID, ServerKeys, error, four, pair};
 use crate::msg::negotiate::tests::response as negotiate_message;
 use crate::msg::negotiate::{DIALECT_311, ciphers, encryption_context, preauth_context, signing_context};
 use crate::wire::Writer;
@@ -78,6 +78,9 @@ async fn the_guest_profile_signs_in_anonymously_and_protects_nothing() {
     let s = r.unwrap();
     assert_eq!(s.flags, 3);
     assert_eq!(s.conn.session_id(), SESSION_ID);
+    // The largest READ the server offers (8 MiB), and room for headers,
+    // the rest of a compound and the transform header.
+    assert_eq!(s.conn.max_frame(), 8 * 1024 * 1024 + 65_536 + 52);
     assert!(!s.conn.can_encrypt() && !s.conn.encrypts());
     let c = CancelToken::new();
     let (r, ()) = tokio::join!(echo(&s.conn, &c), async {
@@ -225,58 +228,6 @@ fn user() -> Account {
     Account::User { user: USER.into(), domain: String::new(), password: PASSWORD.to_owned().into() }
 }
 
-/// sspi's SPNEGO/NTLM acceptor for `USER` and `PASSWORD`: the server's side
-/// of the exchange, which yields the session key the client derives too.
-struct Acceptor {
-    ctx: sspi::Negotiate,
-    creds: Option<sspi::CredentialsBuffers>,
-}
-
-impl Acceptor {
-    fn new() -> Self {
-        use sspi::Sspi;
-        let identity = sspi::AuthIdentity {
-            username: sspi::Username::new(USER, None).unwrap(),
-            password: PASSWORD.to_owned().into(),
-        };
-        let config = sspi::NegotiateConfig::new(
-            Box::new(sspi::ntlm::NtlmConfig::default()),
-            Some("ntlm".to_owned()),
-            String::new(),
-        );
-        let mut ctx = sspi::Negotiate::new_server(config, vec![identity.clone()]).unwrap();
-        let acquired = ctx
-            .acquire_credentials_handle()
-            .with_credential_use(sspi::CredentialUse::Inbound)
-            .with_auth_data(&sspi::Credentials::AuthIdentity(identity))
-            .execute(&mut ctx)
-            .unwrap();
-        Self { ctx, creds: acquired.credentials_handle }
-    }
-
-    /// The client's token in, the server's out.
-    fn step(&mut self, token: &[u8]) -> Vec<u8> {
-        use sspi::{Sspi, SspiImpl};
-        let mut input = vec![sspi::SecurityBuffer::new(token.to_vec(), sspi::BufferType::Token)];
-        let mut output = vec![sspi::SecurityBuffer::new(Vec::new(), sspi::BufferType::Token)];
-        let builder = self
-            .ctx
-            .accept_security_context()
-            .with_credentials_handle(&mut self.creds)
-            .with_context_requirements(sspi::ServerRequestFlags::empty())
-            .with_target_data_representation(sspi::DataRepresentation::Native)
-            .with_input(&mut input)
-            .with_output(&mut output);
-        self.ctx.accept_security_context_impl(builder).unwrap().resolve_to_result().unwrap();
-        output.remove(0).buffer
-    }
-
-    fn session_key(&mut self) -> Vec<u8> {
-        use sspi::Sspi;
-        self.ctx.query_context_session_key().unwrap().session_key.as_ref().clone()
-    }
-}
-
 /// The security token of a SESSION_SETUP request.
 fn setup_token(req: &Req) -> Vec<u8> {
     let body = req.body();
@@ -312,7 +263,7 @@ async fn ntlm_session(profile: Profile, cipher: u16, flags: u16, how: Final) -> 
         hash.update(&req.msg);
         hash.update(&resp);
         peer.send(&[resp], false).await;
-        let mut acceptor = Acceptor::new();
+        let mut acceptor = Acceptor::new(USER, "", PASSWORD);
         let req = peer.recv_one().await;
         assert_eq!(req.body()[3], 0x02, "signing required");
         let challenge = acceptor.step(&setup_token(&req));

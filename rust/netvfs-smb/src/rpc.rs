@@ -14,7 +14,7 @@ use crate::conn::{Conn, Element};
 use crate::error::{Error, Result, protocol};
 use crate::msg::Command;
 use crate::msg::file::{
-    self, Create, FSCTL_PIPE_TRANSCEIVE, FileId, access, disposition, ioctl_request, ioctl_response,
+    self, Create, FSCTL_PIPE_TRANSCEIVE, FileId, disposition, ioctl_request, ioctl_response,
 };
 use crate::names::{clean_text, valid_share_name};
 use crate::session::Tree;
@@ -59,7 +59,8 @@ const BIND_CALL: u32 = 1;
 const ENUM_CALL: u32 = 2;
 /// A non-null unique pointer.
 const REFERENT: u32 = 0x0002_0000;
-/// The pipe's DesiredAccess: read, write, attributes, synchronize.
+/// The pipe's DesiredAccess: read, write, attributes, read control,
+/// synchronize.
 const PIPE_ACCESS: u32 = 0x0012_019F;
 /// What one pipe READ asks for.
 const READ_LEN: usize = MAX_FRAG;
@@ -270,6 +271,8 @@ pub struct Reassembly {
     pending: Vec<u8>,
     stub: Vec<u8>,
     fragments: usize,
+    /// Bytes fed, headers included: at most [`MAX_READ_TOTAL`].
+    fed: usize,
     done: bool,
 }
 
@@ -296,10 +299,15 @@ impl Reassembly {
     ///
     /// # Errors
     /// Bytes after the last fragment, a fault, a fragment of another call
-    /// or out of order, a stub above [`MAX_STUB`].
+    /// or out of order, a stub above [`MAX_STUB`], more than
+    /// [`MAX_READ_TOTAL`] bytes in all (fragments with little stub each).
     pub fn feed(&mut self, data: &[u8]) -> Result<()> {
         if self.done && !data.is_empty() {
             return Err(protocol("data after the last RPC fragment"));
+        }
+        self.fed = self.fed.saturating_add(data.len());
+        if self.fed > MAX_READ_TOTAL {
+            return Err(protocol("the share list is too long"));
         }
         self.pending.extend_from_slice(data);
         while !self.done && self.pending.len() >= COMMON_LEN {
@@ -479,31 +487,30 @@ impl Pipe<'_> {
     /// A whole call: `pdu` out, the reply's fragments in.
     async fn call(&self, pdu: &[u8], cancel: &CancelToken) -> Result<Vec<u8>> {
         let mut reply = Reassembly::new();
-        let first = self.transceive(pdu, cancel).await?;
-        let mut total = first.len();
-        reply.feed(&first)?;
+        reply.feed(&self.transceive(pdu, cancel).await?)?;
         while !reply.done() {
-            let more = self.read(cancel).await?;
-            total = total.saturating_add(more.len());
-            if total > MAX_READ_TOTAL {
-                return Err(protocol("the share list is too long"));
-            }
-            reply.feed(&more)?;
+            reply.feed(&self.read(cancel).await?)?;
         }
         Ok(reply.stub().to_vec())
     }
 
     async fn bind(&self, cancel: &CancelToken) -> Result<()> {
         let mut pdu = self.transceive(&bind_request()?, cancel).await?;
-        // A bind_ack fits one fragment; more is read only to report it.
-        while pdu.len() < COMMON_LEN || common(&pdu)?.frag_len > pdu.len() {
-            if pdu.len() > MAX_FRAG {
-                break;
-            }
+        while bind_reply_wants_more(&pdu)? {
             pdu.extend(self.read(cancel).await?);
         }
         check_bind_ack(&pdu)
     }
+}
+
+/// Whether the reply to the bind in `pdu` is still short of its fragment.
+/// A bind_ack fits one fragment: beyond [`MAX_FRAG`] nothing more is read,
+/// and [`check_bind_ack`] reports what is there.
+fn bind_reply_wants_more(pdu: &[u8]) -> Result<bool> {
+    if pdu.len() > MAX_FRAG {
+        return Ok(false);
+    }
+    Ok(pdu.len() < COMMON_LEN || common(pdu)?.frag_len > pdu.len())
 }
 
 /// The shares of the server (XM-7), over `ipc`, a tree of IPC$.
@@ -519,7 +526,7 @@ pub async fn list_shares(
     let name: Vec<u16> = PIPE.encode_utf16().collect();
     let create = Create {
         name: &name,
-        access: PIPE_ACCESS | access::SYNCHRONIZE,
+        access: PIPE_ACCESS,
         attributes: 0,
         disposition: disposition::OPEN,
         options: 0,

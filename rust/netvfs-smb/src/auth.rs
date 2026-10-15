@@ -359,6 +359,73 @@ mod tests {
     }
 
     #[test]
+    fn anonymous_flags_are_exact() {
+        let n = anonymous_negotiate();
+        assert_eq!(u32::from_le_bytes(n[12..16].try_into().unwrap()), 0x0008_8205);
+        let a = anonymous_authenticate();
+        assert_eq!(u32::from_le_bytes(a[60..64].try_into().unwrap()), 0x0008_0a05);
+    }
+
+    #[test]
+    fn a_challenge_needs_the_signature_and_the_type() {
+        let mut chal = b"NTLMSSP\0".to_vec();
+        chal.extend_from_slice(&3u32.to_le_bytes());
+        check_challenge(&chal).unwrap_err();
+        chal[8] = 2;
+        chal[6] = b'X';
+        check_challenge(&chal).unwrap_err();
+        chal[6] = b'P';
+        check_challenge(&chal).unwrap();
+    }
+
+    #[test]
+    fn anonymous_finish_needs_the_authenticate_message() {
+        let (mut a, _) = Authenticator::start(&Account::Anonymous, "h").unwrap();
+        let e = a.finish(&[]).unwrap_err();
+        assert_eq!(e, policy("anonymous sign-in: the exchange is incomplete"));
+    }
+
+    #[test]
+    fn debug_output_has_no_password() {
+        let account = Account::User {
+            user: "backup".into(),
+            domain: "CORP".into(),
+            password: Zeroizing::new("hunter2".into()),
+        };
+        assert_eq!(format!("{account:?}"), r#"User { user: "backup", domain: "CORP", .. }"#);
+        assert_eq!(format!("{:?}", Account::Anonymous), "Anonymous");
+        let (a, _) = Authenticator::start(&account, "server").unwrap();
+        assert_eq!(format!("{a:?}"), "Authenticator::Ntlm");
+        assert!(matches!(&a, Authenticator::Ntlm(n)
+            if format!("{n:?}") == r#"NtlmSpnego { target: "cifs/server", complete: false, .. }"#));
+        let (a, _) = Authenticator::start(&Account::Anonymous, "h").unwrap();
+        assert_eq!(format!("{a:?}"), "Authenticator::Anonymous(SentNegotiate)");
+    }
+
+    #[test]
+    fn the_domain_goes_into_the_authenticate_message() {
+        let account = Account::User {
+            user: "alice".into(),
+            domain: "CORP".into(),
+            password: Zeroizing::new("pw".into()),
+        };
+        let (mut a, first) = Authenticator::start(&account, "server").unwrap();
+        let challenge = crate::fake::Acceptor::new("alice", "CORP", "pw").step(&first);
+        let token = match a.step(&challenge).unwrap() {
+            Step::Continue(token) => token,
+            Step::Done => panic!("no AUTHENTICATE_MESSAGE"),
+        };
+        let at = token.windows(12).position(|w| w == b"NTLMSSP\0\x03\0\0\0").unwrap();
+        let m = &token[at..];
+        // DomainNameFields: length, maximum length, offset.
+        let len = usize::from(u16::from_le_bytes([m[28], m[29]]));
+        let offset = usize::try_from(u32::from_le_bytes(m[32..36].try_into().unwrap())).unwrap();
+        let units: Vec<u16> =
+            m[offset..][..len].chunks(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
+        assert_eq!(String::from_utf16(&units).unwrap(), "CORP");
+    }
+
+    #[test]
     fn anonymous_flow_checks_the_challenge() {
         let (mut a, first) = Authenticator::start(&Account::Anonymous, "h").unwrap();
         assert_eq!(first, anonymous_negotiate());

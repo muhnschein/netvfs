@@ -85,6 +85,19 @@ fn timeout_of(ms: i32, default_ms: u64) -> Duration {
     Duration::from_millis(u64::try_from(ms).ok().filter(|ms| *ms > 0).unwrap_or(default_ms))
 }
 
+/// The TCP port of `port` (0 or less: the default).
+fn port_of(port: i32) -> std::result::Result<u16, Status> {
+    if port <= 0 {
+        return Ok(transport::DEFAULT_PORT);
+    }
+    u16::try_from(port).map_err(|_range| {
+        Status::new(
+            ErrorName::NetworkUnreachable,
+            format!("Cannot connect to the server: port {port} is out of range"),
+        )
+    })
+}
+
 /// `ConnectionParams::flag(key, fallback)`.
 fn flag_or(params: &Params, key: &str, fallback: bool) -> bool {
     if params.options.contains_key(key) { params.flag(key) } else { fallback }
@@ -439,15 +452,7 @@ impl Backend for Smb {
     ) -> std::result::Result<Option<ServerIdentity>, Status> {
         self.disconnect().await;
         params.clone_into(&mut self.params);
-        let port = match params.port {
-            p if p <= 0 => transport::DEFAULT_PORT,
-            p => u16::try_from(p).map_err(|_range| {
-                Status::new(
-                    ErrorName::NetworkUnreachable,
-                    format!("Cannot connect to the server: port {p} is out of range"),
-                )
-            })?,
-        };
+        let port = port_of(params.port)?;
         let timeout = timeout_of(params.connect_timeout_ms, DEFAULT_CONNECT_TIMEOUT_MS);
         let host = self.host();
         // M-10: resolve and check that the port answers; the session needs

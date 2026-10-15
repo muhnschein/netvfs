@@ -220,6 +220,77 @@ async fn reading_elsewhere_drops_what_was_asked_ahead() {
 }
 
 #[tokio::test]
+async fn at_most_the_window_is_on_the_way() {
+    const N: usize = MAX_IN_FLIGHT / MAX_CHUNK;
+    let (conn, mut peer) = started().await;
+    conn.grant(512);
+    let c = CancelToken::new();
+    let size = u64::try_from((N + 2) * MAX_CHUNK).unwrap();
+    let mut h = SmbRead::new(open_of(&conn), size, MAX_CHUNK);
+    let mut buf = vec![0u8; (N + 2) * MAX_CHUNK];
+    let (r, ()) = tokio::join!(h.read(0, &mut buf, &c), async {
+        let mut reqs = Vec::new();
+        for i in 0..N + 2 {
+            // The window is full: the next READ waits for an answer.
+            while reqs.len() < (N + i).min(N + 2) {
+                reqs.push(next(&mut peer).await.0);
+            }
+            let quiet = tokio::time::timeout(Duration::from_millis(100), peer.frame()).await;
+            assert!(quiet.is_err(), "a READ beyond the window");
+            answer_read(&mut peer, &reqs[i], size).await;
+        }
+        let offsets: Vec<u64> = reqs.iter().map(|r| read_of(r).0).collect();
+        let expected: Vec<u64> = (0..N + 2).map(|i| u64::try_from(i * MAX_CHUNK).unwrap()).collect();
+        assert_eq!(offsets, expected);
+    });
+    assert_eq!(r, Ok((N + 2) * MAX_CHUNK));
+    assert!(buf == content(0, size));
+}
+
+#[tokio::test]
+async fn a_chunk_is_handed_out_in_pieces() {
+    let (conn, mut peer) = started().await;
+    let c = CancelToken::new();
+    let mut h = SmbRead::new(open_of(&conn), 10_000, 1000);
+    h.read_ahead(0, 1000);
+    assert_eq!(serve_reads(&mut peer, 10_000, 1).await, [(0, 1000)]);
+    let mut buf = vec![0u8; 400];
+    assert_eq!(h.read(0, &mut buf, &c).await, Ok(400));
+    assert_eq!(buf, content(0, 400));
+    let mut buf = vec![0u8; 600];
+    assert_eq!(h.read(400, &mut buf, &c).await, Ok(600));
+    assert_eq!(buf, content(400, 1000));
+    // Both came from the one READ: the next request is the CLOSE.
+    let (r, ()) = tokio::join!(h.close(&c), answer_close(&mut peer));
+    assert_eq!(r, Ok(()));
+}
+
+#[tokio::test]
+async fn a_hint_of_nothing_or_where_the_queue_ends_keeps_the_queue() {
+    let (conn, mut peer) = started().await;
+    let c = CancelToken::new();
+    let mut h = SmbRead::new(open_of(&conn), 10_000, 1000);
+    h.read_ahead(0, 1000);
+    h.read_ahead(5000, 0);
+    h.read_ahead(1000, 1000);
+    let mut reqs = Vec::new();
+    for _ in 0..2 {
+        let (req, cancels) = next(&mut peer).await;
+        assert_eq!(cancels, 0);
+        reqs.push(req);
+    }
+    assert_eq!(reqs.iter().map(read_of).collect::<Vec<_>>(), [(0, 1000), (1000, 1000)]);
+    for req in &reqs {
+        answer_read(&mut peer, req, 10_000).await;
+    }
+    let mut buf = vec![0u8; 2000];
+    assert_eq!(h.read(0, &mut buf, &c).await, Ok(2000));
+    assert_eq!(buf, content(0, 2000));
+    let (r, ()) = tokio::join!(h.close(&c), answer_close(&mut peer));
+    assert_eq!(r, Ok(()));
+}
+
+#[tokio::test]
 async fn a_tripped_token_fails_the_read_even_with_data_queued() {
     let (conn, mut peer) = started().await;
     let c = CancelToken::new();
