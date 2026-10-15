@@ -821,6 +821,7 @@ void tst_RsShim::writeHandles()
     QCOMPARE(handle->commit(), Result::success());
     // Committed: the handle is gone (R4).
     QCOMPARE(handle->position(), qint64(-1));
+    QCOMPARE(handle->write("x", 1), Result(Error::ProtocolError));
     QCOMPARE(handle->commit(), Result(Error::ProtocolError));
     handle->abort();
     handle.reset();
