@@ -21,9 +21,11 @@ sspi = { version = "0.23", default-features = false }
 # `crypto` module only (tools/ci/check-crypto-fence.sh).
 aes = { version = "0.9", features = ["zeroize"] }
 aes-gcm = { version = "0.11", default-features = false, features = ["aes", "zeroize"] }
-cmac = "0.8"
-hmac = "0.13"
-sha2 = "0.11"
+# `zeroize`: the MAC and hash states derived from key material are wiped
+# when dropped, as the AES key schedules are.
+cmac = { version = "0.8", features = ["zeroize"] }
+hmac = { version = "0.13", features = ["zeroize"] }
+sha2 = { version = "0.11", features = ["zeroize"] }
 getrandom = "0.4"
 
 [dev-dependencies]
