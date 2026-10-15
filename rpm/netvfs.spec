@@ -26,7 +26,7 @@
 # one package.
 
 Name:       netvfs
-Version:    0.5.0
+Version:    0.6.0
 Release:    1
 Summary:    Remote file access accounts for Sailfish OS
 License:    LGPL-2.1-or-later
