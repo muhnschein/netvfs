@@ -93,6 +93,11 @@ jobs:
         run: ./tools/ci/install-host-deps.sh
       - name: Build
         run: make -j"$(nproc)"
+      # One set of SFTP interop servers for all the mutations of the list
+      # (tests/interop/sftp/run.sh uses the servers the variable names).
+      - name: Start the SFTP interop servers
+        if: matrix.list == 'sftp'
+        run: NETVFS_SFTP_SERVERS_ONLY=1 ./tests/interop/sftp/run.sh build | tail -n 1 >> "$GITHUB_ENV"
       - name: Mutation check
         env:
           LIST: ${{ matrix.list }}
@@ -135,6 +140,15 @@ jobs:
           key: cargo-mutants-${{ env.MUTANTS_VERSION }}-ubuntu-24.04
       - name: Install cargo-mutants
         run: ./tools/ci/cargo-tool.sh cargo-mutants "$MUTANTS_VERSION"
+      # netvfs-sftp's tests need the SFTP interop servers
+      # (rust/netvfs-sftp/tests/openssh.rs): started once for the shard.
+      - name: Start the SFTP interop servers
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          if ! git diff --quiet "origin/$BASE_REF...HEAD" -- rust/netvfs-sftp; then
+              NETVFS_SFTP_SERVERS_ONLY=1 ./tests/interop/sftp/run.sh build-ffi | tail -n 1 >> "$GITHUB_ENV"
+          fi
       - name: Mutants in the diff
         env:
           BASE_REF: ${{ github.base_ref }}

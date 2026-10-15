@@ -17,6 +17,7 @@ on:
           - netvfs-bridge
           - netvfs-bridge-proto
           - netvfs-accounts
+          - netvfs-sftp
 permissions:
   contents: read
 concurrency:
@@ -57,6 +58,11 @@ jobs:
           key: cargo-mutants-${{ env.MUTANTS_VERSION }}-ubuntu-24.04
       - name: Install cargo-mutants
         run: ./tools/ci/cargo-tool.sh cargo-mutants "$MUTANTS_VERSION"
+      # netvfs-sftp's tests need the SFTP interop servers
+      # (rust/netvfs-sftp/tests/openssh.rs): started once for the shard.
+      - name: Start the SFTP interop servers
+        if: inputs.package == 'netvfs-sftp'
+        run: NETVFS_SFTP_SERVERS_ONLY=1 ./tests/interop/sftp/run.sh build-ffi | tail -n 1 >> "$GITHUB_ENV"
       - name: Mutants in the whole crate
         env:
           PACKAGE: ${{ inputs.package }}
