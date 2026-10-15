@@ -168,7 +168,13 @@ private:
         return true;
     }
 
-    // A new key file of ssh-keygen (and its .pub); false without ssh-keygen.
+    static bool installed(const char *program)
+    {
+        return !QStandardPaths::findExecutable(QString::fromLatin1(program)).isEmpty();
+    }
+
+    // A new key file of ssh-keygen (and its .pub); false when ssh-keygen
+    // fails (callers skip only when it is not installed).
     bool keygen(const QString &name, const QStringList &arguments, const QByteArray &passphrase)
     {
         QFile::remove(m_dir.filePath(name));
@@ -258,10 +264,9 @@ private slots:
         // the exported private key, which is not encrypted (stored in signond).
         writeFile(QStringLiteral("generated.pub"), first.publicLine.toLatin1() + '\n');
         writeFile(QStringLiteral("generated"), first.privateKey);
-        const QString expected = keygenFingerprint(QStringLiteral("generated.pub"));
-        if (expected.isEmpty())
+        if (!installed("ssh-keygen"))
             QSKIP("ssh-keygen is not installed");
-        QCOMPARE(first.fingerprint, expected);
+        QCOMPARE(first.fingerprint, keygenFingerprint(QStringLiteral("generated.pub")));
         QCOMPARE(keygenPublic(QStringLiteral("generated")), first.publicLine.toLatin1().split(' ').mid(0, 2).join(' '));
     }
 
@@ -289,8 +294,9 @@ private slots:
         QFETCH(QString, algorithm);
         QFETCH(QByteArray, passphrase);
         const QString name = QStringLiteral("key-%1").arg(QString::fromLatin1(QTest::currentDataTag()).replace(' ', '-'));
-        if (!this->keygen(name, keygen, passphrase))
+        if (!installed("ssh-keygen"))
             QSKIP("ssh-keygen is not installed");
+        QVERIFY(this->keygen(name, keygen, passphrase));
         const QByteArray contents = file(name);
 
         SshKeyMaterial key;
@@ -332,10 +338,11 @@ private slots:
         QTest::newRow("rsa 2048 openssh") << QStringList { "-t", "rsa", "-b", "2048" } << QByteArray() << RsaRefused;
         QTest::newRow("rsa pkcs8") << QStringList { "-t", "rsa", "-b", "2048", "-m", "PKCS8" } << QByteArray()
                                    << RsaRefused;
-        QTest::newRow("rsa openssh passphrase") << QStringList { "-t", "rsa", "-b", "2048" } << QByteArray("pass")
+        // ssh-keygen wants five characters at least.
+        QTest::newRow("rsa openssh passphrase") << QStringList { "-t", "rsa", "-b", "2048" } << QByteArray("passphrase")
                                                 << RsaRefused;
         QTest::newRow("ecdsa legacy pem passphrase") << QStringList { "-t", "ecdsa", "-b", "256", "-m", "PEM" }
-                                                     << QByteArray("pass") << LegacyRefused;
+                                                     << QByteArray("passphrase") << LegacyRefused;
     }
 
     void refusedKeyFiles()
@@ -344,8 +351,9 @@ private slots:
         QFETCH(QByteArray, passphrase);
         QFETCH(QString, message);
         const QString name = QStringLiteral("refused-%1").arg(QString::fromLatin1(QTest::currentDataTag()).replace(' ', '-'));
-        if (!this->keygen(name, keygen, passphrase))
+        if (!installed("ssh-keygen"))
             QSKIP("ssh-keygen is not installed");
+        QVERIFY(this->keygen(name, keygen, passphrase));
         const QByteArray contents = file(name);
         // Refused before (and without) the passphrase, and with it.
         for (const QByteArray &given : { QByteArray(), passphrase, QByteArray("wrong") }) {

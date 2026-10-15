@@ -49,6 +49,7 @@ namespace {
 
 constexpr qint64 BigFileSize = 64 * 1024 * 1024;   // SPEC-sftp 8
 constexpr qint64 CancelBoundMs = 2000;              // C-9
+constexpr qint64 OwnCancelBoundMs = 500;            // below the Rust library's 1 s cut
 
 QByteArray sha256(QIODevice *device)
 {
@@ -959,7 +960,9 @@ private slots:
             &r);
         exec(QStringLiteral("o89"), QStringLiteral("rm -f /tmp/hold"));
         QCOMPARE(r.error(), Error::Canceled);
-        QVERIFY2(ms >= 0 && ms <= CancelBoundMs, qPrintable(QString::number(ms)));
+        // The backend answers the cancel itself, well before the Rust
+        // library's cut of a call 1 s after a cancel (doc/RUST.md, GRACE).
+        QVERIFY2(ms >= 0 && ms <= OwnCancelBoundMs, qPrintable(QString::number(ms)));
         QVERIFY(sink.size() < BigFileSize);
 
         // C-14: the whole container stops, also in the middle of a packet.
@@ -1690,13 +1693,16 @@ private slots:
         QCOMPARE(part, content.right(100));
         QVERIFY(reader->close().ok());
 
-        // Resume: only at the remote size (ProtocolError, as Transfer reports).
+        // Resume: only at the remote size (ProtocolError, as Transfer reports),
+        // neither past it nor before it.
         WriteOptions resume;
         resume.disposition = WriteOptions::Disposition::Resume;
-        resume.resumeOffset = 3 * piece + 1;
         WriteHandle *w = nullptr;
-        QCOMPARE(b->openWrite(dir + QStringLiteral("/w0"), resume, &w).error(), Error::ProtocolError);
-        QVERIFY(!w);
+        for (const qint64 offset : { qint64(3 * piece + 1), qint64(3 * piece - 1) }) {
+            resume.resumeOffset = offset;
+            QCOMPARE(b->openWrite(dir + QStringLiteral("/w0"), resume, &w).error(), Error::ProtocolError);
+            QVERIFY(!w);
+        }
         resume.resumeOffset = 3 * piece;
         resume.modified = QDateTime(QDate(2010, 1, 2), QTime(3, 4, 5), Qt::UTC);
         QVERIFY(b->openWrite(dir + QStringLiteral("/w0"), resume, &w).ok());
