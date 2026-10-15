@@ -17,6 +17,7 @@ on:
           - netvfs-bridge
           - netvfs-bridge-proto
           - netvfs-accounts
+          - netvfs-smb
 permissions:
   contents: read
 concurrency:
@@ -57,6 +58,11 @@ jobs:
           key: cargo-mutants-${{ env.MUTANTS_VERSION }}-ubuntu-24.04
       - name: Install cargo-mutants
         run: ./tools/ci/cargo-tool.sh cargo-mutants "$MUTANTS_VERSION"
+      # netvfs-smb's tests need the Samba servers
+      # (rust/netvfs-smb/tests/samba.rs): started once for the shard.
+      - name: Start the SMB interop servers
+        if: inputs.package == 'netvfs-smb'
+        run: NETVFS_SMB_SERVERS_ONLY=1 ./tests/interop/smb/run.sh build-ffi | grep '^NETVFS_INTEROP_SMB_' >> "$GITHUB_ENV"
       - name: Mutants in the whole crate
         env:
           PACKAGE: ${{ inputs.package }}

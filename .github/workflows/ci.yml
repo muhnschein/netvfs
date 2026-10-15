@@ -93,6 +93,11 @@ jobs:
         run: ./tools/ci/install-host-deps.sh
       - name: Build
         run: make -j"$(nproc)"
+      # One set of Samba servers for all the mutations of the list
+      # (tests/interop/smb/run.sh uses the servers the variables name).
+      - name: Start the SMB interop servers
+        if: matrix.list == 'smb'
+        run: NETVFS_SMB_SERVERS_ONLY=1 ./tests/interop/smb/run.sh build | grep '^NETVFS_INTEROP_SMB_' >> "$GITHUB_ENV"
       - name: Mutation check
         env:
           LIST: ${{ matrix.list }}
@@ -135,6 +140,15 @@ jobs:
           key: cargo-mutants-${{ env.MUTANTS_VERSION }}-ubuntu-24.04
       - name: Install cargo-mutants
         run: ./tools/ci/cargo-tool.sh cargo-mutants "$MUTANTS_VERSION"
+      # netvfs-smb's tests need the Samba servers
+      # (rust/netvfs-smb/tests/samba.rs): started once for the shard.
+      - name: Start the SMB interop servers
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          if ! git diff --quiet "origin/$BASE_REF...HEAD" -- rust/netvfs-smb; then
+              NETVFS_SMB_SERVERS_ONLY=1 ./tests/interop/smb/run.sh build-ffi | grep '^NETVFS_INTEROP_SMB_' >> "$GITHUB_ENV"
+          fi
       - name: Mutants in the diff
         env:
           BASE_REF: ${{ github.base_ref }}
@@ -146,6 +160,61 @@ jobs:
           name: rust-mutants-${{ matrix.shard }}
           path: rust/mutants.out
           if-no-files-found: ignore
+
+  windows-smb:
+    # M-T11: netvfs-smb against Windows's own SMB server, a local account
+    # and a share on the runner over loopback (real SMB 3.1.1; Windows's own
+    # client shows the dialect first). rust/netvfs-smb/tests/windows.rs.
+    name: SMB against Windows (M-T11)
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - name: A local account and a share
+        shell: pwsh
+        run: |
+          $bytes = [byte[]]::new(18)
+          [System.Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
+          $password = 'Nv1-' + [Convert]::ToBase64String($bytes)
+          Write-Output "::add-mask::$password"
+          $secure = ConvertTo-SecureString $password -AsPlainText -Force
+          New-LocalUser -Name netvfs -Password $secure -PasswordNeverExpires | Out-Null
+          New-Item -ItemType Directory -Path C:\netvfs-share | Out-Null
+          icacls C:\netvfs-share /grant 'netvfs:(OI)(CI)F' | Out-Null
+          New-SmbShare -Name netvfs -Path C:\netvfs-share -FullAccess netvfs | Out-Null
+          Get-SmbServerConfiguration | Select-Object EnableSMB2Protocol, EncryptData, RejectUnencryptedAccess,
+              RequireSecuritySignature, EncryptionCiphers | Format-List
+          @(
+              'NETVFS_INTEROP_SMB_WINDOWS=127.0.0.1'
+              'NETVFS_INTEROP_SMB_WINDOWS_USER=netvfs'
+              "NETVFS_INTEROP_SMB_WINDOWS_PASSWORD=$password"
+              'NETVFS_INTEROP_SMB_WINDOWS_SHARE=netvfs'
+          ) | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Loopback is real SMB (Windows's own client)
+        shell: pwsh
+        run: |
+          $secure = ConvertTo-SecureString $env:NETVFS_INTEROP_SMB_WINDOWS_PASSWORD -AsPlainText -Force
+          $credential = [pscredential]::new('netvfs', $secure)
+          New-SmbMapping -RemotePath \\127.0.0.1\netvfs -UserName $credential.UserName `
+              -Password $credential.GetNetworkCredential().Password | Out-Null
+          Get-SmbConnection | Format-List ServerName, ShareName, UserName, Dialect, Encrypted, Signed
+          Remove-SmbMapping -RemotePath \\127.0.0.1\netvfs -Force
+      - name: Rust toolchain
+        working-directory: rust
+        run: rustup show active-toolchain
+      - name: netvfs-smb against the local share
+        working-directory: rust
+        run: cargo test --locked -p netvfs-smb --test windows -- --nocapture
+      - name: The server's sessions and events
+        if: always()
+        shell: pwsh
+        run: |
+          Get-SmbConnection | Format-List ServerName, ShareName, UserName, Dialect, Encrypted, Signed
+          Get-SmbSession | Format-List ClientComputerName, ClientUserName, Dialect, Encrypted, Signed
+          Get-WinEvent -LogName Microsoft-Windows-SMBServer/Operational -MaxEvents 30 -ErrorAction SilentlyContinue |
+              Format-Table TimeCreated, Id, Message -Wrap
 
   workflows:
     name: Workflow audit (zizmor, offline)
