@@ -23,9 +23,8 @@ class SecretSource;
 //
 // A configuration that is not allowed for the service (checkServicePolicy(),
 // e.g. an SMB guest profile or allow_insecure for Backup) fails with
-// SecurityPolicy before any secret is read. params() are those of the
-// service (paramsForService()). Whether the service is enabled is reported
-// in config().serviceEnabled; consumers list accounts with
+// SecurityPolicy before any secret is read. Whether the service is enabled
+// is reported in config().serviceEnabled; consumers list accounts with
 // AccountStore::filesAccounts() (Files) or through the platform (Backup).
 class NETVFS_EXPORT AccountSession : public QObject
 {

@@ -34,7 +34,7 @@ jobs:
         # gcovr writes build-coverage/coverage.xml (generic coverage format),
         # llvm-cov build-coverage/rust-lcov.info (the Rust workspace).
         run: |
-          make COVERAGE=1 vendor
+          mkdir -p build-coverage
           bear --output build-coverage/compile_commands.json -- make COVERAGE=1 -j"$(nproc)"
           make coverage
           make COVERAGE=1 clippy-report

@@ -874,7 +874,7 @@ fn ad_hoc_identity_question(h: &Harness) {
         let (id, kind, details) = question(&mut signals).await;
         assert_eq!(kind, "identity-unknown");
         assert_eq!(String::try_from(details["host"].clone()).unwrap(), "adhoc.example");
-        assert!(!String::try_from(details["fingerprint"].clone()).unwrap().is_empty());
+        assert_ne!(String::try_from(details["fingerprint"].clone()).unwrap().len(), 0);
         assert_eq!(
             error_name(&c.proxy().answer(&id, &OptsBuilder::new().bool("accept", false).build()).await),
             None
@@ -985,17 +985,17 @@ fn connect_ad_hoc_refusals(h: &Harness) {
         assert_eq!(error_name(&refused), name(ErrorName::SecurityPolicy)); // XH-6
         let local = p.connect_ad_hoc("file:///etc", b"", &no_opts()).await;
         assert_eq!(error_name(&local), name(ErrorName::PermissionDenied)); // XB-11: never local paths
-        // WebDAV and FTP are gone; their schemes are refused before any backend.
+        // A scheme no backend has is refused before any backend.
         for url in ["dav://host/", "davs://host/", "ftp://host/", "ftps://host/"] {
-            let removed = p.connect_ad_hoc(url, b"", &no_opts()).await;
-            assert_eq!(error_name(&removed), name(ErrorName::Unsupported), "{url}");
+            let unknown = p.connect_ad_hoc(url, b"", &no_opts()).await;
+            assert_eq!(error_name(&unknown), name(ErrorName::Unsupported), "{url}");
         }
-        let removed = p.connect_ad_hoc("davs://host/", b"", &no_opts()).await.unwrap_err();
+        let unknown = p.connect_ad_hoc("davs://host/", b"", &no_opts()).await.unwrap_err();
         assert_eq!(
-            netvfs_bridge_proto::BridgeError::from(removed),
+            netvfs_bridge_proto::BridgeError::from(unknown),
             netvfs_bridge_proto::BridgeError::remote(
                 ErrorName::Unsupported,
-                "davs URLs are no longer supported"
+                "Unsupported URL scheme \"davs\""
             )
         );
         let missing = p.connect_ad_hoc("sftp://host/", b"", &no_opts()).await;
@@ -1096,7 +1096,7 @@ fn handoff(h: &Harness) {
             name(ErrorName::Unsupported)
         );
         assert_eq!(error_name(&c.proxy().add_account("smb").await), name(ErrorName::Unsupported));
-        assert!(f.launcher.calls().is_empty());
+        assert_eq!(f.launcher.calls().len(), 0);
     });
 }
 

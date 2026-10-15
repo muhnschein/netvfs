@@ -1,6 +1,6 @@
 #!/bin/sh
 # SPDX-License-Identifier: LGPL-2.1-or-later
-# Installs clang-<major> from apt.llvm.org on the Ubuntu 24.04 runner, for
+# Installs clang-<major> and its sanitizer runtimes from apt.llvm.org on the Ubuntu 24.04 runner, for
 # the C++ side of the weekly ASan run, which must be built by a clang of
 # rustc's LLVM major (rust-sanitize.sh; design §6.6). The repository's
 # signing key is pinned by fingerprint; the suite is the release branch of
@@ -32,5 +32,6 @@ fi
 sudo install -m 0644 "$work/key.gpg" "$keyring"
 echo "deb [signed-by=$keyring] $base/ $suite main" | sudo tee /etc/apt/sources.list.d/apt-llvm-org.list >/dev/null
 sudo apt-get update -q
-sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends "clang-$major"
+sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends \
+    "clang-$major" "libclang-rt-$major-dev"
 "clang-$major" --version

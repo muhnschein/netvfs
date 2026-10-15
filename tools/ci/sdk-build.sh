@@ -39,6 +39,9 @@ for attempt in 1 2 3 4 5; do
     if [[ "$status" -eq 0 ]]; then
         exit 0
     fi
+    # With -j the failing step has usually scrolled out of the tail.
+    echo "== errors in build.log"
+    grep -n -E -B 2 -A 4 '(error|Error):|Error [0-9]+$|undefined reference|\*\*\* ' build.log | head -n 150
     [[ "$stalled" = yes ]] || exit "$status"
 done
 echo "cargo kept stalling under scratchbox2"

@@ -475,18 +475,18 @@ void tst_BridgeAccounts::goldenAnswers()
         globals(QStringLiteral("signed.example"), { { QStringLiteral("netvfs/smb/security_profile"), QStringLiteral("signed") },
                                                     { QStringLiteral("netvfs/port"), 70000u } }));
     QVERIFY(signedSmb > 0);
-    const int legacy = listedAccount(
-        QStringLiteral("smb"), globals(QStringLiteral("old.example"), { { QStringLiteral("netvfs/smb/security_profile"), QStringLiteral("legacy") } }),
+    const int insecure = listedAccount(
+        QStringLiteral("smb"), globals(QStringLiteral("open.example"), { { QStringLiteral("netvfs/smb/security_profile"), QStringLiteral("guest") } }),
         { { QStringLiteral("files_root"), QStringLiteral("a/./b") } });
-    QVERIFY(legacy > 0);
-    const int legacyAllowed = listedAccount(
-        QStringLiteral("smb"), globals(QStringLiteral("old.example"), { { QStringLiteral("netvfs/smb/security_profile"), QStringLiteral("legacy") },
-                                                                     { QStringLiteral("netvfs/smb/allow_insecure"), QStringLiteral("1") } }),
+    QVERIFY(insecure > 0);
+    const int insecureAllowed = listedAccount(
+        QStringLiteral("smb"), globals(QStringLiteral("open.example"), { { QStringLiteral("netvfs/smb/security_profile"), QStringLiteral("guest") },
+                                                                      { QStringLiteral("netvfs/smb/allow_insecure"), QStringLiteral("1") } }),
         { { QStringLiteral("files_root"), QStringLiteral("//srv//smb//") } });
-    QVERIFY(legacyAllowed > 0);
+    QVERIFY(insecureAllowed > 0);
     const int sftp = listedAccount(
         QStringLiteral("sftp"), globals(QStringLiteral("ssh.example"), { { QStringLiteral("netvfs/sftp/auth_mode"), QStringLiteral("interactive") },
-                                                                      { QStringLiteral("netvfs/sftp/allow_shell"), true },
+                                                                      { QStringLiteral("netvfs/sftp/flag"), true },
                                                                       { QStringLiteral("netvfs/port"), qint64(22) } }),
         QVariantMap(), 12);
     QVERIFY(sftp > 0);
@@ -520,7 +520,7 @@ void tst_BridgeAccounts::goldenAnswers()
         "UPDATE Accounts SET name = NULL WHERE id = %2;").arg(t, QString::number(guest))));
 
     QList<QStringList> requests { { QStringLiteral("list") } };
-    for (const int id : { listed, unlisted, types, guest, bogus, signedSmb, legacy, legacyAllowed, sftp, noHost, emptyHost, off })
+    for (const int id : { listed, unlisted, types, guest, bogus, signedSmb, insecure, insecureAllowed, sftp, noHost, emptyHost, off })
         requests << QStringList { QStringLiteral("files"), QString::number(id) };
     for (const QString &id : { QStringLiteral("999"), QStringLiteral("0"), QStringLiteral("-1"), QStringLiteral("x"),
                                QString(), QStringLiteral(" ") + t, QStringLiteral("+") + t, QStringLiteral("0") + t,

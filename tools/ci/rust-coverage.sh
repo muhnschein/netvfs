@@ -2,9 +2,11 @@
 # SPDX-License-Identifier: LGPL-2.1-or-later
 # The Rust coverage of `make coverage` as lcov for SonarQube: the counters
 # that the instrumented netvfs-accounts and netvfs-bridge (built by qmake)
-# wrote while the C++ tests ran them, and those of the workspace's own tests
-# (netvfs-bridge's ffi test against the C++ library included:
-# `make check-rust-ffi`), merged with the llvm-tools of the pinned toolchain.
+# wrote while the C++ tests ran them, those of libnetvfs-rs.so with the mem
+# backend that the shim's tests load (tests/backends/rs/lib), and those of
+# the workspace's own tests (netvfs-bridge's ffi test against the C++ library
+# included: `make check-rust-ffi`), merged with the llvm-tools of the pinned
+# toolchain.
 # Usage: rust-coverage.sh <build-coverage dir>; writes <dir>/rust-lcov.info.
 set -eu
 build=$1
@@ -14,14 +16,16 @@ host=$(rustc -vV | sed -n 's/^host: //p')
 tools=$(rustc --print sysroot)/lib/rustlib/$host/bin
 [ -x "$tools/llvm-cov" ] || { echo "rust-coverage.sh: no llvm-cov; rustup component add llvm-tools"; exit 1; }
 
-# The binaries the counters belong to: the helper and the bridge as qmake
-# built them, and the workspace's test and probe binaries (as
-# `make check-rust` and `make check-rust-ffi` built them: the same features
-# as RUST_FEATURES).
+# The binaries the counters belong to: the helper, the bridge and the test
+# build of libnetvfs-rs.so as qmake built them, and the workspace's test and
+# probe binaries (as `make check-rust` and `make check-rust-ffi` built them:
+# the same features as RUST_FEATURES).
 objects="$build/rust-target/release/netvfs-accounts $build/rust-target/release/netvfs-bridge"
+objects="$objects $build/rust-target/rs-test/libnetvfs_rs.so"
 objects="$objects $(RUSTFLAGS="-C instrument-coverage" NETVFS_RUST_COVERAGE_DIR="$build/rust-coverage" \
     CARGO_TARGET_DIR="$build/rust-test-target" \
-    cargo test --locked --workspace --features netvfs-accounts/probe,netvfs-bridge/testing,netvfs-bridge/test-bins --no-run --message-format=json 2>/dev/null \
+    cargo test --locked --workspace --features netvfs-accounts/probe,netvfs-bridge/testing,netvfs-bridge/test-bins,netvfs-backend/testing \
+    --no-run --message-format=json 2>/dev/null \
     | python3 -c '
 import json, sys
 for line in sys.stdin:

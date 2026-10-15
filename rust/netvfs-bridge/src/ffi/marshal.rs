@@ -11,44 +11,7 @@ use super::raw::{
 };
 use crate::Status;
 use netvfs_bridge_proto::{ErrorName, WireCapabilities, WireEntry, WireNearby};
-use std::collections::BTreeMap;
-
-/// A typed value of `ConnectionParams::options` (`nvb_value`).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Value {
-    /// `QString`.
-    Str(String),
-    /// `bool`.
-    Bool(bool),
-    /// `qlonglong`.
-    Int(i64),
-    /// `QByteArray`.
-    Bytes(Vec<u8>),
-    /// `QStringList`.
-    StrList(Vec<String>),
-}
-
-/// Options: keys are unique and sorted.
-pub type ValueMap = BTreeMap<String, Value>;
-
-/// `NetVfs::ConnectionParams`.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct Params {
-    /// Backend provider (`sftp`, `smb`, …).
-    pub provider: String,
-    /// Host name or address.
-    pub host: String,
-    /// 0: the protocol's default.
-    pub port: i32,
-    /// User name.
-    pub username: String,
-    /// Provider options (`share`, `host_key`, …).
-    pub options: ValueMap,
-    /// Connect timeout.
-    pub connect_timeout_ms: i32,
-    /// Request timeout.
-    pub request_timeout_ms: i32,
-}
+pub use netvfs_vfs::{Params, Prompt, PromptRequest, Value, ValueMap};
 
 /// What `Url::parse` gives: parameters and the location's path.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -102,26 +65,6 @@ pub struct Identity {
     pub fingerprint: String,
     /// `ServerIdentity::toPin()`; empty without identity.
     pub pin: String,
-}
-
-/// One keyboard-interactive prompt (XC-15).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Prompt {
-    /// The question.
-    pub text: String,
-    /// Whether the answer may be shown.
-    pub echo: bool,
-}
-
-/// What the server asks for, keyboard-interactive (XC-15).
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct PromptRequest {
-    /// The method's name.
-    pub name: String,
-    /// The server's instruction.
-    pub instruction: String,
-    /// One per answer expected.
-    pub prompts: Vec<Prompt>,
 }
 
 // ----------------------------------------------------------- C -> Rust
@@ -628,10 +571,10 @@ mod tests {
     fn readers_accept_null_with_a_length() {
         // A NULL pointer reads as empty, whatever the length says.
         let b = NvbBytes { ptr: ptr::null(), len: 5 };
-        assert!(unsafe { slice(b) }.is_empty());
+        assert_eq!(unsafe { slice(b) }.len(), 0);
         assert!(unsafe { items::<NvbKv>(ptr::null(), 3) }.is_empty());
         let data = [1u8];
-        assert!(unsafe { slice(NvbBytes { ptr: data.as_ptr(), len: 0 }) }.is_empty());
+        assert_eq!(unsafe { slice(NvbBytes { ptr: data.as_ptr(), len: 0 }) }.len(), 0);
     }
 
     #[test]

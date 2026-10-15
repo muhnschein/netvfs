@@ -157,8 +157,8 @@ private slots:
 
     void profileAndHostKeyOptions()
     {
-        QCOMPARE(run({ S("--profile"), S("legacy"), S("ls"), QString() }), 0);
-        QCOMPARE(FakeServer::instance()->lastParams.option(S("security_profile")), S("legacy"));
+        QCOMPARE(run({ S("--profile"), S("signed"), S("ls"), QString() }), 0);
+        QCOMPARE(FakeServer::instance()->lastParams.option(S("security_profile")), S("signed"));
         QCOMPARE(run({ S("--profile"), S("bogus"), S("ls"), QString() }), 2);
         QCOMPARE(run({ S("--host-key"), S("garbage"), S("ls"), QString() }), 2);
 
@@ -194,7 +194,7 @@ private slots:
     {
         QCOMPARE(runArgs({ S("--url"), S("gopher://h/"), S("ls"), QString() }), code(Error::Unsupported));
         QCOMPARE(runArgs({ S("--url"), S("davs://h/x"), S("ls"), QString() }), code(Error::Unsupported));
-        QVERIFY(err.contains(S("davs URLs are no longer supported")));
+        QVERIFY(err.contains(S("Unsupported URL scheme \"davs\"")));
         QCOMPARE(runArgs({ S("--url"), S("ftp://h/"), S("ls"), QString() }), code(Error::Unsupported));
         QVERIFY(FakeServer::instance()->log.isEmpty());
         QCOMPARE(runArgs({ S("--url"), S("sftp:///nohost"), S("ls"), QString() }), code(Error::InvalidName));

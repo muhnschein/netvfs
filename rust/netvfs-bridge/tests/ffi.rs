@@ -825,7 +825,7 @@ fn copy_across_two_conns(env: &Env) {
     let mut ticks = Ticks::default();
     source.copy_across(b"/src/big", &mut destination, b"/dst/big", (false, false), Some(&mut ticks)).unwrap();
     assert_eq!(f.file_data(b"/dst/big").unwrap(), data);
-    assert!(!ticks.updates.is_empty());
+    assert_ne!(ticks.updates.len(), 0);
     let again = source.copy_across(b"/src/big", &mut destination, b"/dst/big", (false, false), None);
     assert_eq!(name_of(&again), Some(ErrorName::AlreadyExists));
     source.copy_across(b"/src/big", &mut destination, b"/dst/big", (false, true), None).unwrap();
@@ -855,10 +855,7 @@ fn url_parse_format(env: &Env) {
     assert_eq!(ffi.url_parse("file:///tmp/x").unwrap().params.provider, "local");
     assert_eq!(name_of(&ffi.url_parse("gopher://h/")), Some(ErrorName::Unsupported));
     let dav = ffi.url_parse("davs://dav.example/remote.php/files").unwrap_err();
-    assert_eq!(
-        (dav.name, dav.message.as_str()),
-        (ErrorName::Unsupported, "davs URLs are no longer supported")
-    );
+    assert_eq!((dav.name, dav.message.as_str()), (ErrorName::Unsupported, "Unsupported URL scheme \"davs\""));
     let unknown = Params { provider: "fake".into(), ..Params::default() };
     assert_eq!(name_of(&ffi.url_format(&unknown, b"/")), Some(ErrorName::Unsupported));
     // Options of every kind reach C++ (an unknown one is not carried).
@@ -1055,7 +1052,7 @@ fn discovery_start_stop(env: &Env) {
     });
     // Whatever was reported, nothing panicked and nothing is left behind.
     println!("discovery socket open: {opened}, reports: {free_calls}");
-    assert!(take_orphan_panics().is_empty());
+    assert_eq!(take_orphan_panics().len(), 0);
 }
 
 /// Heap growth allowed over [`ROUNDS`] calls: far below one leaked block

@@ -51,7 +51,6 @@ void AccountSession::start(int accountId, Service service)
         emit failed(r);
         return;
     }
-    m_config.params = paramsForService(m_config.params, service);
     m_secrets->setSecretOptional(secretOptional(m_config.params));   // XA-7
     m_secrets->fetch(m_config.credentialsId);
 }

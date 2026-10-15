@@ -1,0 +1,19 @@
+[package]
+name = "netvfs-vfs"
+description = "The Rust side of netvfs's backend types: entries, capabilities, errors, the async Backend traits, cancel tokens, and the C data types shared by the C ABIs"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# CancelToken's wake-up (sync only: no runtime, timer or I/O).
+tokio = { version = "1", default-features = false, features = ["sync"] }
+zeroize = "1"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }

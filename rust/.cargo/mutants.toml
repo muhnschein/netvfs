@@ -5,19 +5,33 @@
 
 # Test doubles, built only with the `fake` / `testing` features and never
 # shipped: the in-process FakeBridge (and its replay of the contract), the
-# loader of the fake control table, and the bridge fixture with its fake
-# accounts, prompt, discovery and launcher. They are the tests' oracle; a
-# mutant in them says nothing about the bridge.
+# loader of the fake control table, the bridge fixture with its fake
+# accounts, prompt, discovery and launcher, and the mem backend of
+# libnetvfs-rs.so. They are the tests' oracle; a mutant in them says nothing
+# about the bridge or the C ABI.
 exclude_globs = [
+    # crates.io crates built from a copy with a change of netvfs's
+    # (vendor/*/README.netvfs.md): not workspace members, and not netvfs's
+    # code to test.
+    "vendor/**",
     "netvfs-bridge-proto/src/fake/**",
     "netvfs-bridge/src/ffi/fake.rs",
     "netvfs-bridge/src/testing.rs",
+    "netvfs-backend/src/mem/**",
 ]
 
 exclude_re = [
+    # netvfs-vfs NoHandle, the handle type of a backend without handles, is
+    # an empty enum: no value of it exists, so its methods (and no_future,
+    # which only they call) never run.
+    'netvfs-vfs/src/backend\.rs:\d+:\d+: replace (<impl (ReadHandle|WriteHandle) for NoHandle>::|no_future )',
     # Diagnostics only: the sole effect is a line on stderr for whoever runs
     # it by hand; the probe's result is its exit status and check count.
     'netvfs-accounts/src/bin/probe\.rs:.*: replace report with \(\)$',
+    # Built only under --cfg netvfs_asan (tools/ci/rust-sanitize.sh):
+    # elsewhere the function does not exist, so its mutants change nothing.
+    # The weekly ASan run is its test (set_id_helper fails without it).
+    'netvfs-accounts/src/(main|bin/probe)\.rs:\d+:\d+: replace __asan_default_options ',
     # Diagnostics only: the sole effect is a line on stderr when the kernel
     # refuses Landlock or seccomp, which no test can make it do.
     'netvfs-accounts/src/sandbox\.rs:.*: replace warn with \(\)$',
@@ -145,8 +159,8 @@ exclude_re = [
     # application quits, which ends the test harness's loop as well.
     'netvfs-bridge/src/core/nearby\.rs:\d+:\d+: delete ! in <impl NearbySource for FfiNearby>::set_running$',
     # netvfs-bridge core/admin.rs insecure_answered: reached only through
-    # insecure-consent, i.e. an smb ad-hoc URL with the legacy or guest
-    # profile and the smb backend installed; test-backends has only the fake one
+    # insecure-consent, i.e. an smb ad-hoc URL with the guest profile and
+    # the smb backend installed; test-backends has only the fake one
     # (netvfs 0.4's tst_bridgeserver skipped this as well).
     # needs_insecure_consent and insecure_details are unit-tested.
     'netvfs-bridge/src/core/admin\.rs:\d+:\d+: (replace Core::insecure_answered with \(\)|delete ! in Core::insecure_answered)$',
@@ -160,4 +174,24 @@ exclude_re = [
     # other values.
     'netvfs-accounts/src/lib\.rs:\d+:\d+: replace <impl db::PrivilegedOwner for SystemOwner>::privileged_ids -> Option<\(u32, u32\)> with None$',
     # ---- end netvfs-accounts ----
+    # ---- netvfs-sftp ----
+    # Equivalent: the SFTP open flags (SSH_FXF_*) are distinct bits, so
+    # `^` is `|`.
+    'netvfs-sftp/src/(remote|io)\.rs:\d+:\d+: replace \| with \^ in (Remote::copy_data|open_for_write)$',
+    # ---- end netvfs-sftp ----
+    # ---- netvfs-smb ----
+    # Equivalent: ORs of distinct single-bit flags, where `^` is `|`: the
+    # NTLMSSP flags of the anonymous messages, the CREATE access masks, the
+    # NEGOTIATE security mode and capabilities, PFC_FIRST_FRAG |
+    # PFC_LAST_FRAG of an RPC PDU, IS_GUEST | IS_NULL of SessionFlags.
+    'netvfs-smb/src/auth\.rs:\d+:\d+: replace \| with \^ in anonymous_(negotiate|authenticate)$',
+    'netvfs-smb/src/backend\.rs:\d+:\d+: replace \| with \^ in Smb::(open_file|open_writer)$',
+    'netvfs-smb/src/negotiate\.rs:\d+:\d+: replace \| with \^ in Offer::request$',
+    'netvfs-smb/src/rpc\.rs:\d+:\d+: replace \| with \^ in header$',
+    'netvfs-smb/src/session\.rs:\d+:\d+: replace \| with \^ in finish$',
+    # Equivalent: UTF-8 assembly ORs a lead or continuation marker with
+    # payload bits it does not overlap (the code point's range bounds them),
+    # so `^` is `|`.
+    'netvfs-smb/src/names\.rs:\d+:\d+: replace \| with \^ in (push_utf8|utf16_from_wtf8)$',
+    # ---- end netvfs-smb ----
 ]

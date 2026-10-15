@@ -106,10 +106,9 @@ QByteArray serveFiles(const AccountStore &store, const QString &id)
     // XA-4: refused before the secret is read.
     if (const Result r = checkServicePolicy(config.params, Service::Files); !r.ok())
         return failure(r);
-    const ConnectionParams params = paramsForService(config.params, Service::Files);
     Answer answer(Result::success());
-    writeParams(answer.stream(), params);
-    answer.stream() << quint32(config.credentialsId) << secretOptional(params);
+    writeParams(answer.stream(), config.params);
+    answer.stream() << quint32(config.credentialsId) << secretOptional(config.params);
     return answer.bytes();
 }
 

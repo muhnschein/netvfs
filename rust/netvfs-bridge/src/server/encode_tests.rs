@@ -128,7 +128,7 @@ fn error_reply_name_message_extra() {
     assert_eq!(value_str(&extra["detail"]).as_deref(), Some("d"));
     // Without details: the message only; an empty message is the bare name.
     let plain = error_reply(&call(8).header(), INVALID_ARGS, &Status::invalid_args("")).unwrap();
-    assert!(*plain.body().signature() == "s");
+    assert_eq!(*plain.body().signature(), "s");
     assert_eq!(plain.body().deserialize::<(String,)>().unwrap().0, "InvalidArgs");
     let retry_only = error_reply(
         &call(8).header(),

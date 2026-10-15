@@ -23,19 +23,17 @@ NETVFS_EXPORT bool serviceFromId(const QString &id, Service *service);
 namespace OptionKeys {
 NETVFS_EXPORT extern const char HostKey[];          // SSH host key pin (XC-16)
 NETVFS_EXPORT extern const char AuthMode[];         // password | publickey | interactive (sftp)
-NETVFS_EXPORT extern const char SecurityProfile[];  // smb: strict | signed | legacy | guest (XM-1)
+NETVFS_EXPORT extern const char SecurityProfile[];  // smb: strict | signed | guest (XM-1)
 NETVFS_EXPORT extern const char Share[];            // smb; empty: server mode (XM-2)
 NETVFS_EXPORT extern const char Shares[];           // smb: string list of saved shares (XM-3)
 NETVFS_EXPORT extern const char ShowAdminShares[];  // smb (XM-7)
 NETVFS_EXPORT extern const char AllowInsecure[];    // consent to an unprotected or weakened transport
-NETVFS_EXPORT extern const char AllowShell[];       // sftp: exec channel (XS-9), never for backups
 } // namespace OptionKeys
 
 // SMB security profiles (XM-1).
 namespace SecurityProfiles {
 NETVFS_EXPORT extern const char Strict[];
 NETVFS_EXPORT extern const char Signed[];
-NETVFS_EXPORT extern const char Legacy[];
 NETVFS_EXPORT extern const char Guest[];
 } // namespace SecurityProfiles
 
@@ -45,16 +43,16 @@ NETVFS_EXPORT extern const char Guest[];
 NETVFS_EXPORT QString securityProfile(const ConnectionParams &params);
 
 // A configuration whose transport is unprotected or weakened and so needs
-// the account's consent (allow_insecure=true): SMB profiles legacy and guest.
+// the account's consent (allow_insecure=true): the SMB profile guest.
 NETVFS_EXPORT bool isInsecureConfiguration(const ConnectionParams &params);
 
 // SPEC-v2 XA-4, the "allowed for service" column of XM-1 (amends SEC-2, M-4,
-// M-8, S-3 as in SPEC-v2-review 2.1, 2.5, 2.9):
+// M-8 as in SPEC-v2-review 2.1, 2.9):
 //
 //  | Configuration                                | Backup | Files                  |
 //  |----------------------------------------------|--------|------------------------|
 //  | smb strict, signed                           | yes    | yes                    |
-//  | smb legacy, guest                            | no     | with allow_insecure    |
+//  | smb guest                                    | no     | with allow_insecure    |
 //  | smb unknown profile                          | no     | no                     |
 //  | smb without a share (server mode)            | no     | yes                    |
 //  | allow_insecure=true (any provider)           | no     | yes                    |
@@ -63,10 +61,6 @@ NETVFS_EXPORT bool isInsecureConfiguration(const ConnectionParams &params);
 //
 // A refused configuration is SecurityPolicy with a message naming the reason.
 NETVFS_EXPORT Result checkServicePolicy(const ConnectionParams &params, Service service);
-
-// The parameters a service gets: for Backup, allow_shell is removed (S-3 as
-// amended: the exec channel is never used for backups).
-NETVFS_EXPORT ConnectionParams paramsForService(const ConnectionParams &params, Service service);
 
 // SPEC-v2 XA-7 (and SPEC-v2-review 2.15): accounts that legitimately have no
 // stored secret: auth_mode=interactive (the person answers the prompts) and

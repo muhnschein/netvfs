@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 #include "smbplugin.h"
-#include "smbbackend.h"
-
-#include <memory>
+#include "rsbackend.h"
 
 namespace NetVfs {
 
@@ -11,9 +9,10 @@ QString SmbBackendFactory::provider() const
     return QStringLiteral("smb");
 }
 
-Backend *SmbBackendFactory::create()
+Result SmbBackendFactory::create(Backend **out)
 {
-    return std::make_unique<Smb::SmbBackend>().release();   // the caller owns it
+    // rust/netvfs-smb through libnetvfs-rs.so; the caller owns the backend.
+    return Rs::createBackend(provider(), out);
 }
 
 } // namespace NetVfs

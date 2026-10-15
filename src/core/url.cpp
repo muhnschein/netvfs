@@ -32,9 +32,6 @@ constexpr std::array<SchemeInfo, 4> Schemes = {{
     { "file", Kind::Local, 0 },
 }};
 
-// WebDAV and FTP are gone; their URLs get a clearer refusal than an unknown scheme.
-constexpr std::array<const char *, 4> RemovedSchemes = { "dav", "davs", "ftp", "ftps" };
-
 const SchemeInfo *findScheme(const QString &scheme)
 {
     for (const SchemeInfo &info : Schemes) {
@@ -42,12 +39,6 @@ const SchemeInfo *findScheme(const QString &scheme)
             return &info;
     }
     return nullptr;
-}
-
-bool isRemovedScheme(const QString &scheme)
-{
-    return std::any_of(RemovedSchemes.begin(), RemovedSchemes.end(),
-                       [&scheme](const char *removed) { return scheme == QLatin1String(removed); });
 }
 
 Result invalid(const char *what)
@@ -373,8 +364,6 @@ Result parse(const QString &url, ConnectionParams *params, QString *path)
     Result r = parseScheme(url, &scheme, &rest);
     if (!r.ok())
         return r;
-    if (isRemovedScheme(scheme))
-        return Result(Error::Unsupported, QStringLiteral("%1 URLs are no longer supported").arg(scheme));
     const SchemeInfo *info = findScheme(scheme);
     if (!info)
         return Result(Error::Unsupported, QStringLiteral("Unsupported URL scheme \"%1\"").arg(scheme));

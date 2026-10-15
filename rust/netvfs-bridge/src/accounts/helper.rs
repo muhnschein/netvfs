@@ -226,7 +226,7 @@ mod tests {
         // A failure of the helper lists nothing.
         dir.write("answer", golden("not-found.bin"));
         assert_eq!(directory.try_list().await.unwrap_err().to_string(), "NotFound: No such account");
-        assert!(directory.list().await.is_empty());
+        assert_eq!(directory.list().await.len(), 0);
     }
 
     #[tokio::test]
@@ -236,11 +236,11 @@ mod tests {
         let status = missing.try_list().await.unwrap_err();
         assert_eq!(status.name, ErrorName::Unsupported);
         assert!(status.message.starts_with("Cannot start /nonexistent/netvfs-accounts: "), "{status}");
-        assert!(missing.list().await.is_empty());
+        assert_eq!(missing.list().await.len(), 0);
         let failing = HelperDirectory::new("/bin/false");
         assert_eq!(failing.try_list().await.unwrap_err().to_string(), "ProtocolError: /bin/false failed");
         capture::start();
-        assert!(failing.list().await.is_empty());
+        assert_eq!(failing.list().await.len(), 0);
         let warning = "Cannot list the accounts, none is listed: ProtocolError: /bin/false failed";
         assert_eq!(capture::take(), [(Level::Warning, warning.to_owned())]);
         let silent = HelperDirectory::new("/bin/true");

@@ -1,15 +1,25 @@
 # SPDX-License-Identifier: LGPL-2.1-or-later
 # The Rust parts of netvfs: netvfs-accounts, the setgid accounts helper
-# (SPEC-v2 XB-2a), and netvfs-bridge-proto, the org.netvfs.Bridge1 protocol
-# crate. See doc/RUST.md.
+# (SPEC-v2 XB-2a), netvfs-bridge-proto, the org.netvfs.Bridge1 protocol
+# crate, netvfs-bridge, netvfs-vfs, the Rust side of the backend interface,
+# netvfs-sftp and netvfs-smb, the SFTP and SMB backends, and netvfs-backend,
+# libnetvfs-rs.so (the Rust backends behind the C++ plugins). See
+# doc/RUST.md.
 [workspace]
 resolver = "3"
-members = ["netvfs-accounts", "netvfs-bridge-proto", "netvfs-bridge"]
+members = ["netvfs-accounts", "netvfs-bridge-proto", "netvfs-bridge", "netvfs-vfs", "netvfs-sftp", "netvfs-smb", "netvfs-backend"]
 # The fuzz targets build with a nightly toolchain of their own (doc/RUST.md).
-exclude = ["fuzz"]
+# vendor/ holds crates.io crates netvfs builds with a change of its own
+# ([patch.crates-io] below); they are not netvfs's code.
+exclude = ["fuzz", "vendor"]
+
+# vendor/ssh-key/README.netvfs.md: ssh-key 0.7.0-rc.11 (russh's key format
+# crate), with ECDSA private scalars shorter than the field size accepted.
+[patch.crates-io]
+ssh-key = { path = "vendor/ssh-key" }
 
 [workspace.package]
-version = "0.5.0"
+version = "0.6.0"
 edition = "2024"
 # The rustc that sailfishos/rust ships next (JB#64166). Until an SDK target
 # has it, CI cross-builds with host cargo against the SDK's compiler and
@@ -26,6 +36,8 @@ publish = false
 # Allowed only in the modules that talk to C (`ffi`, `sys`, the helper's
 # `sandbox`), each with `#![allow(unsafe_code)]` and SAFETY comments.
 unsafe_code = "deny"
+# Set by tools/ci/rust-sanitize.sh only.
+unexpected_cfgs = { level = "deny", check-cfg = ["cfg(netvfs_asan)"] }
 missing_docs = "deny"
 missing_debug_implementations = "deny"
 unused_qualifications = "deny"
@@ -94,6 +106,21 @@ codegen-units = 1
 opt-level = "s"
 debug = false
 strip = "symbols"
+
+# libnetvfs-rs.so (netvfs-backend): a panic must unwind to the table
+# function that catches it and reports Internal (design §1.4), while the
+# binaries keep aborting. Cargo sets `panic` per profile, not per package,
+# so the library has profiles of its own: `cargo build --profile rs-release
+# -p netvfs-backend` for the package, `rs-test` (with `--features testing`)
+# for the C++ tests that load it.
+[profile.rs-release]
+inherits = "release"
+panic = "unwind"
+lto = "fat"
+
+[profile.rs-test]
+inherits = "dev"
+panic = "unwind"
 
 # Tests start the helper many times; a fast build matters more than size.
 [profile.dev]

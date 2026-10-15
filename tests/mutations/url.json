@@ -21,13 +21,6 @@
     "test": "build/tests/unit/url/tst_url"
   },
   {
-    "name": "XH-6 removed schemes parsed as unknown ones",
-    "file": "src/core/url.cpp",
-    "search": "    if (isRemovedScheme(scheme))\n",
-    "replace": "    if (false)\n",
-    "test": "build/tests/unit/url/tst_url"
-  },
-  {
     "name": "XH-6 SMB location keeps leading slashes below the share",
     "file": "src/core/url.cpp",
     "search": "    while (trimmed.startsWith(QLatin1Char('/')))\n",

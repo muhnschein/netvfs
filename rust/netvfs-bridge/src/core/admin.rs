@@ -71,11 +71,10 @@ fn option_text(params: &Params, key: &str) -> Option<String> {
     }
 }
 
-/// XM-1: an ad-hoc SMB location with the `legacy` or `guest` profile needs
-/// the consumer's `insecure-consent` (`needsInsecureConsent`).
+/// XM-1: an ad-hoc SMB location with the `guest` profile needs the
+/// consumer's `insecure-consent` (`needsInsecureConsent`).
 pub(crate) fn needs_insecure_consent(params: &Params) -> bool {
-    params.provider == "smb"
-        && option_text(params, "security_profile").is_some_and(|v| matches!(v.as_str(), "legacy" | "guest"))
+    params.provider == "smb" && option_text(params, "security_profile").is_some_and(|v| v == "guest")
 }
 
 /// Checks a parsed ad-hoc URL (`parseAdHoc`): never local files (XB-11),
@@ -437,7 +436,6 @@ mod tests {
 
     #[test]
     fn insecure_transports_need_consent() {
-        assert!(needs_insecure_consent(&params("smb", &[("security_profile", s("legacy"))])));
         assert!(needs_insecure_consent(&params("smb", &[("security_profile", s("guest"))])));
         assert!(!needs_insecure_consent(&params("smb", &[("security_profile", s("signed"))])));
         assert!(!needs_insecure_consent(&params("smb", &[])));

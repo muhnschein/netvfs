@@ -37,7 +37,8 @@ pub mod peer;
 pub mod prompt;
 pub mod savefile;
 pub mod server;
-pub mod status;
+/// [`Status`], shared with the backends ([`netvfs_vfs::status`]).
+pub use netvfs_vfs::status;
 mod sys;
 #[cfg(test)]
 mod test_support;
