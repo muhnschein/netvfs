@@ -208,7 +208,7 @@ async fn connect_sign_in_and_work() {
     ] {
         assert!(caps.has(cap), "{cap:?}");
     }
-    assert!(!caps.has(Capability::ShellExec) && !caps.has(Capability::Checksums));
+    assert!(!caps.has(Capability::Checksums) && !caps.has(Capability::ServerCopyRecursive));
     // Relative paths are relative to the start folder (S-19).
     assert_eq!(sftp.stat(b"", true, &c()).await.unwrap().kind, EntryType::Directory);
     sftp.make_dir(b"Backups", true, &c()).await.unwrap();
