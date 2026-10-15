@@ -5,8 +5,8 @@
 //!
 //! Protocol bytes are WTF-8: UTF-8, with a lone surrogate of a UTF-16 name
 //! in its three-byte form, so that every name a server sends maps to bytes
-//! and back without loss (patch 0006 of the libsmb2 era). A name that is not
-//! well-formed UTF-8 is flagged `NAME_NOT_UTF8` in entries.
+//! and back without loss. A name that is not well-formed UTF-8 is flagged
+//! `NAME_NOT_UTF8` in entries.
 
 use netvfs_vfs::Status;
 

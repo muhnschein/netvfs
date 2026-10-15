@@ -65,9 +65,10 @@ fn established(e: Error, context: &str) -> Status {
     e.status(context, Phase::Established)
 }
 
-/// A refused TREE_CONNECT reads like the sign-in it was in libsmb2 (one
-/// sign-in per share): the share's statuses and policies with the setup
-/// texts, the connection's failures as they are.
+/// A refused TREE_CONNECT (a share of server mode) is reported like a
+/// refused sign-in, because the share is part of what the user signs in to
+/// (SPEC-smb 5): its statuses and policies with the setup texts, the
+/// connection's failures as they are.
 fn tree_refused(e: Error) -> Status {
     let phase =
         if matches!(e, Error::Status(_) | Error::Policy(_)) { Phase::Setup } else { Phase::Established };

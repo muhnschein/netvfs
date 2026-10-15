@@ -37,8 +37,8 @@ const FRAME_SLACK: usize = 65_536 + TRANSFORM_HEADER_LEN;
 pub const GUEST_MAPPED: &str = "the server signed this account in as a guest instead of checking the password; \
      the security profile does not allow that";
 /// NEGOTIATE refused: no SMB 3.1.1 (M-T7, M-T9, M-T20).
-pub const NO_SMB311: &str = "the server does not support SMB 3.1.1 (NEGOTIATE: STATUS_NOT_SUPPORTED, no common \
-     dialect); servers limited to SMB 2.x or 3.0.x are refused";
+pub const NO_SMB311: &str = "the server does not support SMB 3.1.1 (NEGOTIATE: NT status 0xc00000bb, \
+     STATUS_NOT_SUPPORTED: no common dialect); servers limited to SMB 2.x or 3.0.x are refused";
 
 /// A signed-in connection.
 #[derive(Debug)]
