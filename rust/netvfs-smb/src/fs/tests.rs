@@ -2,15 +2,14 @@
 use std::time::Duration;
 
 use super::*;
-use crate::fake::{self, Peer, Req, chain as link, error, pair};
+use crate::fake::{self, FT, Peer, Req, chain as link, close_body, created_body, error, pair};
 use crate::msg::flags;
 use crate::wire::Writer;
 
 const T: Duration = Duration::from_secs(5);
 const TREE: Target = Target { tree_id: 3, encrypt: false };
 const FID: FileId = [0x11; 16];
-/// 2021-01-01T00:00:00Z as FILETIME and in ms.
-const FT: u64 = 132_539_328_000_000_000;
+/// [`FT`] in ms.
 const MS: i64 = 1_609_459_200_000;
 
 async fn started() -> (Conn, Peer) {
@@ -24,20 +23,6 @@ async fn started() -> (Conn, Peer) {
 /// The UTF-16 of `s`, for the life of the test process.
 fn units(s: &str) -> &'static [u16] {
     Box::leak(s.encode_utf16().collect::<Vec<u16>>().into_boxed_slice())
-}
-
-pub fn created_body(attributes: u32, size: u64, file_id: FileId) -> Vec<u8> {
-    let mut w = Writer::new();
-    w.u16(89).u8(0).u8(0).u32(1);
-    w.u64(FT + 10_000).u64(FT + 20_000).u64(FT).u64(FT);
-    w.u64(size).u64(size).u32(attributes).u32(0).bytes(&file_id).u32(0).u32(0);
-    w.into_vec()
-}
-
-fn close_body() -> Vec<u8> {
-    let mut b = vec![0u8; 60];
-    b[0] = 60;
-    b
 }
 
 fn set_info_body() -> Vec<u8> {

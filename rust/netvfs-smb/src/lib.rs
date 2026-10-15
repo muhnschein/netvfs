@@ -9,6 +9,7 @@ pub mod crypto;
 pub mod error;
 #[cfg(test)]
 mod fake;
+pub mod files;
 pub mod fs;
 pub mod msg;
 pub mod names;

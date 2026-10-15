@@ -9,9 +9,11 @@ use tokio::net::{TcpListener, TcpStream};
 use crate::crypto::{
     Cipher, OpenKey, PreauthHash, SealKey, SessionKeys, SigningKey, derive_session_keys, server_side_keys,
 };
+use crate::msg::file::FileId;
 use crate::msg::{Command, HEADER_LEN, Header, build, flags, split_chain};
 use crate::status::NtStatus;
 use crate::transport::{frame, read_frame};
+use crate::wire::Writer;
 
 /// The GSS key of the tests' sessions.
 pub const GSS_KEY: [u8; 16] = [0x5a; 16];
@@ -195,4 +197,24 @@ pub fn chain(mut msgs: Vec<Vec<u8>>) -> Vec<Vec<u8>> {
 /// An ECHO response body.
 pub fn four() -> Vec<u8> {
     vec![4, 0, 0, 0]
+}
+
+/// 2021-01-01T00:00:00Z as FILETIME.
+pub const FT: u64 = 132_539_328_000_000_000;
+
+/// A CREATE response body: times around [`FT`], `size`, `attributes` and
+/// `file_id`.
+pub fn created_body(attributes: u32, size: u64, file_id: FileId) -> Vec<u8> {
+    let mut w = Writer::new();
+    w.u16(89).u8(0).u8(0).u32(1);
+    w.u64(FT + 10_000).u64(FT + 20_000).u64(FT).u64(FT);
+    w.u64(size).u64(size).u32(attributes).u32(0).bytes(&file_id).u32(0).u32(0);
+    w.into_vec()
+}
+
+/// A CLOSE response body without attributes.
+pub fn close_body() -> Vec<u8> {
+    let mut b = vec![0u8; 60];
+    b[0] = 60;
+    b
 }
