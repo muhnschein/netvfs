@@ -5,11 +5,14 @@
 //! RSA and DSA keys, security keys, certificates, PuTTY files and PEM
 //! files with the legacy (MD5) encryption are refused, by their armour
 //! where it names them, else right after decoding; no private-key
-//! operation runs on a refused key.
+//! operation runs on a refused key. So is a key whose passphrase
+//! protection would take minutes (or more memory than a phone has) to
+//! open, before the passphrase is asked for.
 
 use data_encoding::BASE64;
 use netvfs_vfs::{ErrorName, Status};
-use russh::keys::ssh_key::LineEnding;
+use pkcs8::pkcs5::{EncryptionScheme, pbes2};
+use russh::keys::ssh_key::{Kdf, LineEnding};
 use russh::keys::{Algorithm, EcdsaCurve, HashAlg, PrivateKey, PublicKey};
 use zeroize::Zeroizing;
 
@@ -29,6 +32,17 @@ const RSA_BEGIN: &str = "-----BEGIN RSA PRIVATE KEY-----";
 const DSA_BEGIN: &str = "-----BEGIN DSA PRIVATE KEY-----";
 /// The OID of DSA (1.2.840.10040.4.1), which PKCS#8 names only inside.
 const DSA_OID: &str = "1.2.840.10040.4.1";
+
+/// Most bcrypt rounds of an encrypted OpenSSH key (`ssh-keygen -a`; 24
+/// unless asked for more).
+pub const MAX_BCRYPT_ROUNDS: u32 = 1024;
+/// Most PBKDF2 iterations of an encrypted PKCS#8 key (openssl: 2048).
+pub const MAX_PBKDF2_ITERATIONS: u32 = 1_000_000;
+/// Most memory of scrypt for an encrypted PKCS#8 key, 128 · r · N bytes
+/// (openssl: 16 MiB).
+pub const MAX_SCRYPT_MEMORY: u64 = 64 * 1024 * 1024;
+/// Most scrypt parallelism p (openssl: 1); each multiplies the time.
+pub const MAX_SCRYPT_PARALLELISM: u16 = 4;
 
 /// `SshKeyMaterial`: the private key unencrypted in OpenSSH format, its
 /// algorithm, the public line and the fingerprint.
@@ -85,6 +99,44 @@ fn type_refused(key_type: &str) -> Status {
     Status::unsupported(format!(
         "Key type {key_type} is not supported; generate a new key, or use an Ed25519 or ECDSA key"
     ))
+}
+
+fn too_costly() -> Status {
+    Status::unsupported(
+        "Opening this key would take too long; protect it with fewer rounds, or generate a new key",
+    )
+}
+
+/// The bcrypt rounds of an encrypted OpenSSH key, within the bound.
+fn check_bcrypt_cost(kdf: &Kdf) -> Result<(), Status> {
+    match kdf {
+        Kdf::Bcrypt { rounds, .. } if *rounds > MAX_BCRYPT_ROUNDS => Err(too_costly()),
+        _ => Ok(()),
+    }
+}
+
+/// The key derivation of an encrypted PKCS#8 key, within the bounds. A
+/// file that does not decode this far is left to the decoder to refuse.
+fn check_pkcs8_cost(text: &str) -> Result<(), Status> {
+    let Ok((_label, document)) = pkcs8::SecretDocument::from_pem(text) else {
+        return Ok(());
+    };
+    let Ok(info) = document.decode_msg::<pkcs8::EncryptedPrivateKeyInfoRef<'_>>() else {
+        return Ok(());
+    };
+    let EncryptionScheme::Pbes2(parameters) = info.encryption_algorithm else {
+        return Ok(());
+    };
+    let within = match parameters.kdf {
+        pbes2::Kdf::Pbkdf2(p) => p.iteration_count <= MAX_PBKDF2_ITERATIONS,
+        pbes2::Kdf::Scrypt(p) => {
+            let memory = 128u64.saturating_mul(u64::from(p.block_size)).saturating_mul(p.cost_parameter);
+            memory <= MAX_SCRYPT_MEMORY && p.parallelization <= MAX_SCRYPT_PARALLELISM
+        }
+        // None that the decoder knows: it refuses the key.
+        _ => true,
+    };
+    if within { Ok(()) } else { Err(too_costly()) }
 }
 
 fn passphrase_needed() -> Status {
@@ -177,6 +229,7 @@ pub fn read_private_key(file: &[u8], passphrase: &[u8]) -> Result<PrivateKey, St
             // passphrase is asked for.
             check_algorithm(&key.algorithm())?;
             if key.is_encrypted() {
+                check_bcrypt_cost(key.kdf())?;
                 if passphrase.is_empty() {
                     return Err(passphrase_needed());
                 }
@@ -189,6 +242,7 @@ pub fn read_private_key(file: &[u8], passphrase: &[u8]) -> Result<PrivateKey, St
             }
         }
         Armour::Pkcs8Encrypted => {
+            check_pkcs8_cost(text)?;
             if passphrase.is_empty() {
                 return Err(passphrase_needed());
             }

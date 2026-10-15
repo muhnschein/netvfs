@@ -1034,6 +1034,7 @@ version = "0.5.0"
 dependencies = [
  "data-encoding",
  "netvfs-vfs",
+ "pkcs8",
  "russh",
  "serde_json",
  "tokio",

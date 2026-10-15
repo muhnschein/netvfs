@@ -162,6 +162,91 @@ fn encrypted_keys_need_the_right_passphrase() {
     import(&fixture("ecdsa256-pkcs8"), WRONG).unwrap();
 }
 
+const TOO_COSTLY: &str =
+    "Opening this key would take too long; protect it with fewer rounds, or generate a new key";
+
+/// `file` (an encrypted OpenSSH key) with its bcrypt rounds set to
+/// `rounds`: the field after the kdf name and the salt, a fixed-width
+/// `uint32`, so nothing else moves.
+fn with_bcrypt_rounds(file: &str, rounds: u32) -> Vec<u8> {
+    let text = String::from_utf8(fixture(file)).unwrap();
+    let body: String = text.lines().filter(|l| !l.starts_with("-----")).collect();
+    let mut blob = BASE64.decode(body.as_bytes()).unwrap();
+    let plus = |a: usize, b: usize| a.checked_add(b).unwrap();
+    let kdf = plus(blob.windows(6).position(|w| w == b"bcrypt").unwrap(), 6);
+    // uint32 length of the options, then the salt (uint32 length + bytes).
+    let salt_len = u32::from_be_bytes(blob[plus(kdf, 4)..plus(kdf, 8)].try_into().unwrap());
+    let at = plus(plus(kdf, 8), usize::try_from(salt_len).unwrap());
+    let field = at..plus(at, 4);
+    assert_eq!(
+        u32::from_be_bytes(blob[field.clone()].try_into().unwrap()),
+        24,
+        "ssh-keygen's default rounds"
+    );
+    blob[field].copy_from_slice(&rounds.to_be_bytes());
+    let encoded = BASE64.encode(&blob);
+    let lines: Vec<&str> = encoded.as_bytes().chunks(70).map(|c| std::str::from_utf8(c).unwrap()).collect();
+    format!("{OPENSSH_BEGIN}\n{}\n-----END OPENSSH PRIVATE KEY-----\n", lines.join("\n")).into_bytes()
+}
+
+/// `file` (an encrypted PKCS#8 key) with its PBES2 parameters changed.
+fn with_pbes2(file: &str, change: impl FnOnce(&mut pbes2::Parameters)) -> Vec<u8> {
+    use pkcs8::der::EncodePem;
+    let text = String::from_utf8(fixture(file)).unwrap();
+    let (_label, document) = pkcs8::SecretDocument::from_pem(&text).unwrap();
+    let mut info = document.decode_msg::<pkcs8::EncryptedPrivateKeyInfoRef<'_>>().unwrap();
+    let EncryptionScheme::Pbes2(parameters) = &mut info.encryption_algorithm else {
+        panic!("{file} is not PBES2");
+    };
+    change(parameters);
+    info.to_pem(LineEnding::LF).unwrap().into_bytes()
+}
+
+#[test]
+fn keys_too_costly_to_open_are_refused_before_the_passphrase() {
+    // Made by ssh-keygen -a 1025, and by openssl with 1000001 PBKDF2
+    // iterations and with scrypt p = 5: refused whatever the passphrase.
+    for file in ["ed25519-openssh-rounds1025", "ecdsa256-pkcs8-iter1000001", "ecdsa256-pkcs8-scrypt-p5"] {
+        for passphrase in [PASSPHRASE, b"", WRONG] {
+            assert_eq!(refusal(import(&fixture(file), passphrase)), unsupported(TOO_COSTLY), "{file}");
+        }
+    }
+    // At the bound the passphrase is asked for (none given: no key
+    // derivation runs), past it the key is refused.
+    let bcrypt = |rounds| refusal(import(&with_bcrypt_rounds("ed25519-openssh-enc", rounds), b""));
+    assert_eq!(bcrypt(MAX_BCRYPT_ROUNDS), auth(PROTECTED));
+    assert_eq!(bcrypt(MAX_BCRYPT_ROUNDS + 1), unsupported(TOO_COSTLY));
+    assert_eq!(bcrypt(u32::MAX), unsupported(TOO_COSTLY));
+    let pbkdf2 = |iterations| {
+        let file = with_pbes2("ecdsa256-pkcs8-enc", |p| {
+            let pbes2::Kdf::Pbkdf2(kdf) = &mut p.kdf else { panic!("not PBKDF2") };
+            kdf.iteration_count = iterations;
+        });
+        refusal(import(&file, b""))
+    };
+    assert_eq!(pbkdf2(MAX_PBKDF2_ITERATIONS), auth(PROTECTED));
+    assert_eq!(pbkdf2(MAX_PBKDF2_ITERATIONS + 1), unsupported(TOO_COSTLY));
+    let scrypt = |n: u64, r: u16, p: u16| {
+        let file = with_pbes2("ecdsa256-pkcs8-scrypt", |params| {
+            let pbes2::Kdf::Scrypt(kdf) = &mut params.kdf else { panic!("not scrypt") };
+            (kdf.cost_parameter, kdf.block_size, kdf.parallelization) = (n, r, p);
+        });
+        refusal(import(&file, b""))
+    };
+    // 128 · r · N bytes: 64 MiB is the bound, by N or by r.
+    assert_eq!(scrypt(1 << 16, 8, 1), auth(PROTECTED));
+    assert_eq!(scrypt(1 << 17, 8, 1), unsupported(TOO_COSTLY));
+    assert_eq!(scrypt(1 << 14, 32, 1), auth(PROTECTED));
+    assert_eq!(scrypt(1 << 14, 33, 1), unsupported(TOO_COSTLY));
+    assert_eq!(scrypt(u64::MAX, u16::MAX, 1), unsupported(TOO_COSTLY));
+    assert_eq!(scrypt(1 << 14, 8, MAX_SCRYPT_PARALLELISM), auth(PROTECTED));
+    assert_eq!(scrypt(1 << 14, 8, MAX_SCRYPT_PARALLELISM + 1), unsupported(TOO_COSTLY));
+    // The files themselves are within the bounds (openssl's defaults).
+    for file in ["ed25519-openssh-enc", "ecdsa256-pkcs8-enc", "ecdsa256-pkcs8-scrypt"] {
+        assert_eq!(refusal(import(&fixture(file), b"")), auth(PROTECTED), "{file}");
+    }
+}
+
 #[test]
 fn refused_keys_name_the_fix() {
     for (file, passphrase, expected) in [
