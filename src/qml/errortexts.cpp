@@ -43,7 +43,7 @@ QString activityText(Error error, Activity activity)
         return qtTrId("settings-accounts-netvfs-la-error_install_auth");
     }
     if (activity == Activity::KeyFile && error == Error::Unsupported) {
-        //% "This key type is not supported. Use an Ed25519, ECDSA or RSA (2048 bits or more) key without a certificate."
+        //% "This key type is not supported. Use an Ed25519 or ECDSA key without a certificate, or generate a new key."
         return qtTrId("settings-accounts-netvfs-la-error_key_unsupported");
     }
     if (activity == Activity::KeyFile && error == Error::AuthFailed) {

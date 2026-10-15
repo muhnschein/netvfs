@@ -15,7 +15,8 @@
 use super::callback::{IoSink, IoSource, ListAdapter, ProgressAdapter, PromptAdapter};
 use super::marshal::{
     RawWriteOptions, attributes, blob, capabilities as caps_block, credentials as read_credentials, entry,
-    error, identity, no_memory, optional, params as read_params, slice, space, text, unsigned, write_options,
+    error, identity, key, no_memory, optional, params as read_params, slice, space, text, unsigned,
+    write_options,
 };
 use super::raw::{
     NvbAttributes, NvbBlob, NvbBytes, NvbCapabilities, NvbEntry, NvbError, NvbIdentity, NvbIo, NvbListSinkFn,
@@ -859,40 +860,53 @@ pub unsafe extern "C" fn download(
 
 // ------------------------------------------------------------- keys
 
-fn no_keys() -> Status {
-    Status::unsupported("SSH keys are not supported by the Rust backends")
-}
-
-/// `SshKeyTools::generate`: the SSH backend brings key support.
+/// Runs a key tool and hands its key to C++ through `out_key`.
 ///
 /// # Safety
-/// `out_key` is writable.
-pub unsafe extern "C" fn key_generate(out_key: *mut *mut NvrKey) -> *mut NvbError {
+/// `out_key` is NULL or writable.
+unsafe fn give_key(
+    out_key: *mut *mut NvrKey,
+    tool: impl FnOnce() -> Result<netvfs_sftp::keys::KeyMaterial, Status>,
+) -> *mut NvbError {
     status(|| {
         // SAFETY: the caller's contract.
-        unsafe { out(out_key) }?;
-        Err(no_keys())
+        let slot = unsafe { out(out_key) }?;
+        give(slot, key(&tool()?))
     })
 }
 
-/// `SshKeyTools::importKey`.
+/// `SshKeyTools::generate`: a new Ed25519 key.
 ///
 /// # Safety
-/// `out_key` is writable.
-pub unsafe extern "C" fn key_import(
-    _file: NvbBytes,
-    _passphrase: NvbBytes,
-    out_key: *mut *mut NvrKey,
-) -> *mut NvbError {
+/// `out_key` is NULL or writable.
+pub unsafe extern "C" fn key_generate(out_key: *mut *mut NvrKey) -> *mut NvbError {
     // SAFETY: forwarded.
-    unsafe { key_generate(out_key) }
+    unsafe { give_key(out_key, netvfs_sftp::keys::generate) }
 }
 
-/// `SshKeyTools::describe`.
+/// `SshKeyTools::importKey`: a private key file, decrypted with
+/// `passphrase` when it is encrypted.
 ///
 /// # Safety
-/// `out_key` is writable.
-pub unsafe extern "C" fn key_describe(_private_key: NvbBytes, out_key: *mut *mut NvrKey) -> *mut NvbError {
+/// `file` and `passphrase` are readable; `out_key` is NULL or writable.
+pub unsafe extern "C" fn key_import(
+    file: NvbBytes,
+    passphrase: NvbBytes,
+    out_key: *mut *mut NvrKey,
+) -> *mut NvbError {
+    // SAFETY: the caller's contract.
+    let (file, passphrase) = unsafe { (slice(file), slice(passphrase)) };
     // SAFETY: forwarded.
-    unsafe { key_generate(out_key) }
+    unsafe { give_key(out_key, || netvfs_sftp::keys::import(file, passphrase)) }
+}
+
+/// `SshKeyTools::describe`: the public parts of a stored private key.
+///
+/// # Safety
+/// `private_key` is readable; `out_key` is NULL or writable.
+pub unsafe extern "C" fn key_describe(private_key: NvbBytes, out_key: *mut *mut NvrKey) -> *mut NvbError {
+    // SAFETY: the caller's contract.
+    let private_key = unsafe { slice(private_key) };
+    // SAFETY: forwarded.
+    unsafe { give_key(out_key, || netvfs_sftp::keys::describe(private_key)) }
 }

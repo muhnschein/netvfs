@@ -10,6 +10,8 @@ use netvfs_vfs::Status;
 /// `Unsupported` for a provider this build has no backend for.
 pub fn create(provider: &[u8]) -> Result<Box<dyn DynBackend>, Status> {
     match provider {
+        b"sftp" => Ok(Box::new(netvfs_sftp::backend::Sftp::new())),
+        b"smb" => Ok(Box::new(netvfs_smb::backend::Smb::new())),
         #[cfg(feature = "testing")]
         b"mem" => Ok(Box::new(crate::mem::Mem::new())),
         _ => Err(Status::unsupported(format!(
@@ -26,12 +28,22 @@ mod tests {
 
     #[test]
     fn unknown_providers_are_unsupported() {
-        for provider in [&b"sftp"[..], b"", b"m\xffm"] {
+        for provider in [&b"ftp"[..], b"", b"m\xffm", b"SFTP", b"sftp\0"] {
             let e = create(provider).err().unwrap();
             assert_eq!(e.name, ErrorName::Unsupported);
         }
         let e = create(b"webdav").err().unwrap();
         assert_eq!(e.message, "No Rust backend for provider \"webdav\"");
+    }
+
+    #[test]
+    fn sftp_is_a_provider() {
+        create(b"sftp").unwrap();
+    }
+
+    #[test]
+    fn smb_is_a_provider() {
+        create(b"smb").unwrap();
     }
 
     #[cfg(feature = "testing")]

@@ -297,7 +297,6 @@ private slots:
         QVariantMap values = d.initialValues(p);
         QCOMPARE(values.value(QStringLiteral("port")).toString(), QStringLiteral("22"));
         QCOMPARE(values.value(QStringLiteral("backups_path")).toString(), QStringLiteral("Sailfish OS/Backups"));
-        QCOMPARE(values.value(QStringLiteral("allow_shell")), QVariant(false));
         QCOMPARE(values.value(QStringLiteral("auth_mode")).toString(), QStringLiteral("password"));
         QVERIFY(!values.contains(QStringLiteral("key_mode_hint")));   // notes carry no value
         QCOMPARE(d.secretKind(p, values), QStringLiteral("password"));
@@ -340,7 +339,7 @@ private slots:
         QCOMPARE(params.username, QStringLiteral("alice"));
         QCOMPARE(params.option(QStringLiteral("auth_mode")), QStringLiteral("interactive"));
         QCOMPARE(params.option(QStringLiteral("host_key")), QStringLiteral("ssh-ed25519 AAAA"));
-        QCOMPARE(params.options.value(QStringLiteral("allow_shell")), QVariant(false));
+        QCOMPARE(params.options.keys(), QStringList({ QStringLiteral("auth_mode"), QStringLiteral("host_key") }));
         // Connection keys, notes and service settings are not options.
         for (const QString &key : { QStringLiteral("host"), QStringLiteral("port"), QStringLiteral("username"),
                                     QStringLiteral("key_mode_hint"), QStringLiteral("backups_path"),

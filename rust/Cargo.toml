@@ -2,16 +2,24 @@
 # The Rust parts of netvfs: netvfs-accounts, the setgid accounts helper
 # (SPEC-v2 XB-2a), netvfs-bridge-proto, the org.netvfs.Bridge1 protocol
 # crate, netvfs-bridge, netvfs-vfs, the Rust side of the backend interface,
-# and netvfs-backend, libnetvfs-rs.so (the Rust backends behind the C++
-# plugins). See doc/RUST.md.
+# netvfs-sftp and netvfs-smb, the SFTP and SMB backends, and netvfs-backend,
+# libnetvfs-rs.so (the Rust backends behind the C++ plugins). See
+# doc/RUST.md.
 [workspace]
 resolver = "3"
-members = ["netvfs-accounts", "netvfs-bridge-proto", "netvfs-bridge", "netvfs-vfs", "netvfs-backend"]
+members = ["netvfs-accounts", "netvfs-bridge-proto", "netvfs-bridge", "netvfs-vfs", "netvfs-sftp", "netvfs-smb", "netvfs-backend"]
 # The fuzz targets build with a nightly toolchain of their own (doc/RUST.md).
-exclude = ["fuzz"]
+# vendor/ holds crates.io crates netvfs builds with a change of its own
+# ([patch.crates-io] below); they are not netvfs's code.
+exclude = ["fuzz", "vendor"]
+
+# vendor/ssh-key/README.netvfs.md: ssh-key 0.7.0-rc.11 (russh's key format
+# crate), with ECDSA private scalars shorter than the field size accepted.
+[patch.crates-io]
+ssh-key = { path = "vendor/ssh-key" }
 
 [workspace.package]
-version = "0.5.0"
+version = "0.6.0"
 edition = "2024"
 # The rustc that sailfishos/rust ships next (JB#64166). Until an SDK target
 # has it, CI cross-builds with host cargo against the SDK's compiler and

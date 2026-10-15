@@ -237,14 +237,15 @@ private slots:
         QVERIFY(params.host.isEmpty());
     }
 
-    void removedSchemesSayNoLongerSupported()
+    void unsupportedSchemes()
     {
         ConnectionParams params;
         Result r = Url::parse(QStringLiteral("DAVS://h/x"), &params, nullptr);
         QCOMPARE(r.error(), Error::Unsupported);
-        QCOMPARE(r.message(), QStringLiteral("davs URLs are no longer supported"));
+        QCOMPARE(r.message(), QStringLiteral("Unsupported URL scheme \"davs\""));
         r = Url::parse(QStringLiteral("ftp://u:p@h/"), &params, nullptr);   // before the password check
-        QCOMPARE(r.message(), QStringLiteral("ftp URLs are no longer supported"));
+        QCOMPARE(r.error(), Error::Unsupported);
+        QCOMPARE(r.message(), QStringLiteral("Unsupported URL scheme \"ftp\""));
         r = Url::parse(QStringLiteral("gopher://h/"), &params, nullptr);
         QCOMPARE(r.message(), QStringLiteral("Unsupported URL scheme \"gopher\""));
         QVERIFY(params.provider.isEmpty());

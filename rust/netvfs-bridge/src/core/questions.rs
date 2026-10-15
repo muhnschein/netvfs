@@ -6,8 +6,8 @@
 //! - `identity-unknown`: ad-hoc first contact (XB-14); answer `{accept: b}`;
 //! - `keyboard-interactive`: a prompt of the server (XC-15); answer
 //!   `{accept: b, answers: aay}`;
-//! - `insecure-consent`: an ad-hoc SMB location with the `legacy` or
-//!   `guest` profile (XM-1); answer `{accept: b}`.
+//! - `insecure-consent`: an ad-hoc SMB location with the `guest` profile
+//!   (XM-1); answer `{accept: b}`.
 //!
 //! A question ends unanswered when its session goes away, its request is
 //! canceled or the worker that asked stops waiting (the question timeout).

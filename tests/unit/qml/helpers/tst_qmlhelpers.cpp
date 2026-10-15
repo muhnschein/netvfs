@@ -271,12 +271,12 @@ private slots:
         QVariantMap change;
         change.insert(QStringLiteral("host_key"), QStringLiteral("ssh-ed25519 NEW"));
         change.insert(QStringLiteral("public_key"), QString());
-        change.insert(QStringLiteral("allow_shell"), false);
+        change.insert(QStringLiteral("flag"), false);
         const QVariantMap merged = helpers.withOptions(sftpParams(), change);
         const QVariantMap options = merged.value(QStringLiteral("options")).toMap();
         QCOMPARE(options.value(QStringLiteral("host_key")).toString(), QStringLiteral("ssh-ed25519 NEW"));
         QVERIFY(!options.contains(QStringLiteral("public_key")));
-        QCOMPARE(options.value(QStringLiteral("allow_shell")), QVariant(false));
+        QCOMPARE(options.value(QStringLiteral("flag")), QVariant(false));
         QCOMPARE(options.value(QStringLiteral("auth_mode")).toString(), QStringLiteral("publickey"));
         QCOMPARE(merged.value(QStringLiteral("host")).toString(), QStringLiteral("nas.example"));
     }
@@ -508,8 +508,8 @@ private slots:
         QCOMPARE(NetVfsUi::userErrorText(Error::AuthFailed, Activity::InstallKey),
                  QStringLiteral("The server did not accept the password, so the key could not be installed."));
         QCOMPARE(NetVfsUi::userErrorText(Error::Unsupported, Activity::KeyFile),
-                 QStringLiteral("This key type is not supported. Use an Ed25519, ECDSA or RSA (2048 bits or more) key "
-                                "without a certificate."));
+                 QStringLiteral("This key type is not supported. Use an Ed25519 or ECDSA key without a certificate, "
+                                "or generate a new key."));
         QCOMPARE(NetVfsUi::userErrorText(Error::AuthFailed, Activity::KeyFile), QStringLiteral("The passphrase is not correct."));
         QCOMPARE(NetVfsUi::userErrorText(Error::NotFound, Activity::KeyFile),
                  QStringLiteral("The file could not be read as a private key."));

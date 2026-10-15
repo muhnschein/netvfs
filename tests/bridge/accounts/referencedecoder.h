@@ -31,7 +31,7 @@ struct AccountLocation {
 
 // What `files <id>` answers, ready for the secret lookup.
 struct FilesAccess {
-    ConnectionParams params;       // paramsForService(Files)
+    ConnectionParams params;       // the account's, for Files
     quint32 credentialsId = 0;
     bool secretOptional = false;   // XA-7
 };

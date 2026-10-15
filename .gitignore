@@ -15,7 +15,6 @@ coverage*.xml
 /.claude/
 __pycache__/
 /rust/target/
-/rust/vendor/
 /rust/.cargo-home/
 /build.log
 /rust/prebuilt/

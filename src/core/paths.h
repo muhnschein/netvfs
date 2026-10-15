@@ -25,6 +25,7 @@ NETVFS_EXPORT QString fileName(const QString &normalizedPath);
 // SPEC-smb M-9: a component must not contain \ : * ? " < > | or end in a
 // space or a dot. Returns an empty string when acceptable, else the reason.
 NETVFS_EXPORT QString windowsComponentProblem(const QString &component);
+// InvalidName with the reason of the first component that breaks M-9.
 NETVFS_EXPORT Result checkWindowsPath(const QString &normalizedPath);
 
 // SPEC-v2 XH-7: proposes a name that is safe to create on a destination with

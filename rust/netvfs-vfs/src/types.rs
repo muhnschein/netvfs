@@ -172,8 +172,6 @@ capabilities! {
     WindowsNames,
     /// SMB server mode can list shares.
     ShareEnumeration,
-    /// XS-9.
-    ShellExec,
     /// Entries carry an etag.
     ETags,
 }
@@ -446,7 +444,7 @@ mod tests {
         assert_eq!(both.union(EntryFlags::HIDDEN), both);
     }
 
-    // The 22 names of capabilityName() (src/core/types.cpp), in order.
+    // The 21 names of capabilityName() (src/core/types.cpp), in order.
     #[test]
     fn capabilities_are_the_cpp_names() {
         let names: Vec<&str> = Capability::ALL.iter().map(|c| c.as_str()).collect();
@@ -473,7 +471,6 @@ mod tests {
                 "CaseInsensitive",
                 "WindowsNames",
                 "ShareEnumeration",
-                "ShellExec",
                 "ETags",
             ]
         );

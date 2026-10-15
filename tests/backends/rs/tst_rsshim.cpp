@@ -365,26 +365,39 @@ void tst_RsShim::plugin()
     QCOMPARE(backend->stat(QString(), &root), Result::success());
     QCOMPARE(root.type, EntryType::Directory);
 
-    // The key tools come with the Rust SSH backend.
+    // The key tools of the library, through the shim.
     SshKeyTools *keys = memKeyTools();
     QVERIFY(keys);
     SshKeyMaterial key;
-    for (const Result &refused : { keys->generate(&key), keys->importKey("file", "secret", &key),
-                                   keys->describe("key", &key) }) {
+    QCOMPARE(keys->generate(&key), Result::success());
+    QVERIFY(key.privateKey.startsWith("-----BEGIN OPENSSH PRIVATE KEY-----\n"));
+    QCOMPARE(key.algorithm, QStringLiteral("ssh-ed25519"));
+    QVERIFY2(key.publicLine.startsWith(QLatin1String("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI")),
+             qPrintable(key.publicLine));
+    QVERIFY2(key.publicLine.endsWith(QLatin1String(" sailfish-backup")), qPrintable(key.publicLine));
+    QVERIFY2(key.fingerprint.startsWith(QLatin1String("SHA256:")), qPrintable(key.fingerprint));
+    SshKeyMaterial described;
+    QCOMPARE(keys->describe(key.privateKey, &described), Result::success());
+    QCOMPARE(described.privateKey, key.privateKey);
+    QCOMPARE(described.algorithm, key.algorithm);
+    QCOMPARE(described.publicLine, key.publicLine);
+    QCOMPARE(described.fingerprint, key.fingerprint);
+    SshKeyMaterial imported;
+    QCOMPARE(keys->importKey(key.privateKey, "unused", &imported), Result::success());
+    QCOMPARE(imported.fingerprint, key.fingerprint);
+    for (const Result &refused : { keys->importKey("file", "secret", &imported), keys->describe("key", &imported) }) {
         QCOMPARE(refused, Result(Error::Unsupported));
-        QCOMPARE(refused.message(), QStringLiteral("SSH keys are not supported by the Rust backends"));
+        QCOMPARE(refused.message(), QStringLiteral("The file is not a private key in OpenSSH or PEM format"));
     }
-    QVERIFY(key.privateKey.isEmpty());
-    QVERIFY(key.algorithm.isEmpty());
 }
 
 void tst_RsShim::unknownProvider()
 {
     Backend *raw = reinterpret_cast<Backend *>(this);
-    const Result r = Rs::createBackend(QStringLiteral("sftp"), &raw);
+    const Result r = Rs::createBackend(QStringLiteral("ftp"), &raw);
     QVERIFY(!raw);
     QCOMPARE(r, Result(Error::Unsupported));
-    QCOMPARE(r.message(), QStringLiteral("No Rust backend for provider \"sftp\""));
+    QCOMPARE(r.message(), QStringLiteral("No Rust backend for provider \"ftp\""));
 }
 
 void tst_RsShim::establish()
@@ -808,6 +821,7 @@ void tst_RsShim::writeHandles()
     QCOMPARE(handle->commit(), Result::success());
     // Committed: the handle is gone (R4).
     QCOMPARE(handle->position(), qint64(-1));
+    QCOMPARE(handle->write("x", 1), Result(Error::ProtocolError));
     QCOMPARE(handle->commit(), Result(Error::ProtocolError));
     handle->abort();
     handle.reset();

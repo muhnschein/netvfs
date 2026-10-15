@@ -2,7 +2,10 @@
 # cargo-fuzz targets for untrusted inputs (doc/RUST.md): of netvfs-accounts,
 # stored setting values from the accounts database, the session bus's replies
 # and its arguments; of netvfs-bridge, a consumer's call arguments and byte
-# paths, and the FFI marshalling.
+# paths, and the FFI marshalling; of netvfs-sftp, an SFTP server's packets
+# and attribute blocks, and key files; of netvfs-smb, what an SMB server sends
+# (responses, TRANSFORM_HEADER frames, the NTLM challenge, SPNEGO, the srvsvc
+# share list).
 # Not part of the workspace: libFuzzer needs a nightly toolchain, the helper
 # builds with the SDK's 1.75. Run: cargo +nightly fuzz run <target>.
 [package]
@@ -20,9 +23,19 @@ libfuzzer-sys = "0.4"
 netvfs-accounts = { path = "../netvfs-accounts" }
 netvfs-bridge = { path = "../netvfs-bridge", features = ["testing"] }
 netvfs-bridge-proto = { path = "../netvfs-bridge-proto" }
+netvfs-smb = { path = "../netvfs-smb" }
+zeroize = "1"
 zbus = { version = "5", default-features = false, features = ["tokio", "p2p"] }
+netvfs-sftp = { path = "../netvfs-sftp" }
+netvfs-vfs = { path = "../netvfs-vfs" }
+arbitrary = { version = "1", features = ["derive"] }
+tokio = { version = "1", default-features = false, features = ["io-util", "rt", "time"] }
 
 [workspace]
+
+# As in ../Cargo.toml: ssh-key with the change of ../vendor/ssh-key.
+[patch.crates-io]
+ssh-key = { path = "../vendor/ssh-key" }
 
 [[bin]]
 name = "stored_value"
@@ -62,6 +75,62 @@ bench = false
 [[bin]]
 name = "ffi_marshal"
 path = "fuzz_targets/ffi_marshal.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "sftp_packet"
+path = "fuzz_targets/sftp_packet.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "sftp_attrs"
+path = "fuzz_targets/sftp_attrs.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "ssh_key_import"
+path = "fuzz_targets/ssh_key_import.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "smb_response"
+path = "fuzz_targets/smb_response.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "smb_transform"
+path = "fuzz_targets/smb_transform.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "ntlm_challenge"
+path = "fuzz_targets/ntlm_challenge.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "spnego"
+path = "fuzz_targets/spnego.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "ndr_share_enum"
+path = "fuzz_targets/ndr_share_enum.rs"
 test = false
 doc = false
 bench = false

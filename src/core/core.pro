@@ -35,7 +35,6 @@ PUBLIC_HEADERS = \
     secretsource.h \
     secure.h \
     servicepolicy.h \
-    shellexec.h \
     sshkeys.h \
     transfer.h \
     types.h \
@@ -68,7 +67,6 @@ SOURCES = \
     secretsource.cpp \
     secure.cpp \
     servicepolicy.cpp \
-    shellexec.cpp \
     sshkeys.cpp \
     transfer.cpp \
     types.cpp \

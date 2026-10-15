@@ -15,10 +15,10 @@
 #     libnetvfs's BackendLoader (check-ffi-lib.sh; doc/RUST.md);
 #   - libnetvfs-rs.so, the Rust backends, exports one symbol, links only the
 #     C runtime, needs no newer glibc than the target's, is hardened and sits
-#     where the plugins that load it look for it (check-rs-lib.sh);
-#   - libnetvfs-smb.so contains no share enumeration code (XP-3, SPEC 10.2
-#     G-SMB item 4; tools/ci/check-noshareenum.sh), and the check finds that
-#     code in the share helper when it is built;
+#     where the plugins that load it look for it (check-rs-lib.sh), the SMB
+#     plugin among them;
+#   - no file of the main package links libssh or libcrypto (SSH is in
+#     libnetvfs-rs.so);
 #   - all packages install into the SDK target (resolving Requires from the
 #     release repositories), every ELF file resolves its libraries and none
 #     carries a library search path from the build.
@@ -101,7 +101,6 @@ if ! rpm -qp --requires "$main_rpm" | grep -q '^libQt5Network\.so\.5'; then
     fail "netvfs does not require libQt5Network.so.5"
 fi
 
-# XP-3 on the packaged plugin, and on its debug file (full symbol table).
 extract() {
     package_file=$1
     destination=$2
@@ -109,20 +108,6 @@ extract() {
     (cd "$destination" && rpm2cpio "$OLDPWD/$package_file" | cpio -idm --quiet)
 }
 extract "$main_rpm" "$work/main"
-smb_files=$(find "$work/main" -name 'libnetvfs-smb.so')
-for debuginfo in $(ls RPMS/*.rpm | grep -e '-debuginfo-'); do
-    extract "$debuginfo" "$work/debuginfo"
-done
-smb_files="$smb_files $(find "$work/main" "$work/debuginfo" -name 'libnetvfs-smb.so*.debug' 2>/dev/null || true)"
-# shellcheck disable=SC2086 # one word per file
-sh tools/ci/check-noshareenum.sh $smb_files || fail "libnetvfs-smb.so contains share enumeration code"
-# The positive control: the helper links libsmb2 with DCE/RPC (XM-7).
-shares_helper=$(find "$work/main" -name netvfs-smb-shares)
-if [ -z "$shares_helper" ]; then
-    fail "netvfs contains no netvfs-smb-shares"
-elif sh tools/ci/check-noshareenum.sh "$shares_helper" >/dev/null; then
-    fail "check-noshareenum.sh finds no share enumeration code in netvfs-smb-shares"
-fi
 
 # SPEC-v2 XB-2a: the setgid helper links only libc, libgcc_s and the
 # system SQLite (no Qt, GLib or libaccounts); netvfs-bridge only libc,
@@ -163,10 +148,23 @@ if [ -z "$rs_path" ]; then
     fail "netvfs contains no libnetvfs-rs.so"
 else
     rs_plugins=$(grep -laF nvr_get "$work/main$(dirname "$rs_path")"/backends/libnetvfs-*.so || true)
+    case "$rs_plugins" in
+        *libnetvfs-smb.so*) ;;
+        *) fail "libnetvfs-smb.so is not a plugin of libnetvfs-rs.so" ;;
+    esac
     # shellcheck disable=SC2086 # one word per file
     sh tools/ci/check-rs-lib.sh "$work/main$rs_path" "$target_glibc" "$rs_path" $rs_plugins \
         || fail "libnetvfs-rs.so: see above"
 fi
+
+# SSH comes from libnetvfs-rs.so (russh over ring): no file of the main
+# package links libssh or the platform's libcrypto.
+for file in $(find "$work/main" -type f); do
+    [ "$(head -c 4 "$file" | od -An -c | tr -d ' ')" = '177ELF' ] || continue
+    if readelf -d "$file" | grep -E '\(NEEDED\).*\[lib(ssh|crypto)\.so'; then
+        fail "${file#"$work/main"} links libssh or libcrypto"
+    fi
+done
 
 # shellcheck disable=SC2086 # one word per file
 sb2 -t "$TARGET" -m sdk-install -R zypper --non-interactive in --allow-unsigned-rpm $rpms

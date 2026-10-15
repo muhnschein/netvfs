@@ -10,8 +10,9 @@ use super::raw::{
     NVB_DISPOSITION_CREATE_NEW, NVB_DISPOSITION_RESUME, NVB_DISPOSITION_TRUNCATE, NVB_IDENTITY_SSH,
     NVB_VALUE_BOOL, NVB_VALUE_BYTES, NVB_VALUE_INT, NVB_VALUE_STRING, NVB_VALUE_STRING_LIST, NvbAttributes,
     NvbBlob, NvbBytes, NvbCapabilities, NvbEntry, NvbError, NvbIdentity, NvbKv, NvbParams, NvbSpace,
-    NvbValue, NvrCredentials,
+    NvbValue, NvrCredentials, NvrKey,
 };
+use netvfs_sftp::keys::KeyMaterial;
 use netvfs_vfs::{
     Attributes, Capabilities, Credentials, Disposition, Entry, Params, ServerIdentity, SpaceInfo, Status,
     Value, ValueMap, WriteOptions, Zeroizing,
@@ -258,6 +259,17 @@ pub fn identity(id: &ServerIdentity) -> Option<*mut NvbIdentity> {
         public_key: out.bytes(&id.public_key),
         fingerprint: out.bytes(id.fingerprint.as_bytes()),
         pin: out.bytes(&[]),
+    })
+}
+
+/// A key block (`SshKeyMaterial`); the table's `free` wipes the private
+/// key with the rest of the block.
+pub fn key(k: &KeyMaterial) -> Option<*mut NvrKey> {
+    pack(|out| NvrKey {
+        private_key: out.bytes(&k.private_key),
+        algorithm: out.bytes(k.algorithm.as_bytes()),
+        public_line: out.bytes(k.public_line.as_bytes()),
+        fingerprint: out.bytes(k.fingerprint.as_bytes()),
     })
 }
 
@@ -543,5 +555,29 @@ mod tests {
 
         let s = space(&SpaceInfo { free: Some(1), total: None, used: Some(3) });
         assert_eq!(s, NvbSpace { free_bytes: 1, total_bytes: -1, used_bytes: 3 });
+    }
+
+    #[test]
+    fn key_blocks() {
+        let material = KeyMaterial {
+            private_key: Zeroizing::new(b"private".to_vec()),
+            algorithm: "ssh-ed25519".to_owned(),
+            public_line: "ssh-ed25519 AAAA c".to_owned(),
+            fingerprint: "SHA256:x".to_owned(),
+        };
+        let p = key(&material).unwrap();
+        // SAFETY: test: a live block.
+        let raw = unsafe { p.read() };
+        let fields = [raw.private_key, raw.algorithm, raw.public_line, raw.fingerprint].map(read);
+        assert_eq!(
+            fields,
+            [
+                b"private".to_vec(),
+                b"ssh-ed25519".to_vec(),
+                b"ssh-ed25519 AAAA c".to_vec(),
+                b"SHA256:x".to_vec()
+            ]
+        );
+        release(p);
     }
 }

@@ -107,9 +107,8 @@ is non-zero if any target failed. Every run works in
   keep-alive replies included), `tests/interop/smb/server/flipproxy.py`
   (`stall` mode), and the planned `httpstall.py` / `ftpstall.py`.
 
-`tests/interop/sftp/run.sh` runs the suite against OpenSSH 10.3p1 (with
-`allow_shell=true`, so copy and checksum go through the exec channel) and
-ProFTPD mod_sftp (no exec channel, no native NoReplace), each with a
+`tests/interop/sftp/run.sh` runs the suite against OpenSSH 10.3p1 (copy
+through the `copy-data` extension, checksums computed locally), with a
 `--relay` stall proxy, a restart command (`restart-instance.sh`) and a
 bind-mounted `hostPath`.
 

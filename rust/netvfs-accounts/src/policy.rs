@@ -84,8 +84,6 @@ pub mod security_profiles {
     pub const STRICT: &str = "strict";
     /// SMB without required encryption.
     pub const SIGNED: &str = "signed";
-    /// Legacy SMB: insecure, needs `allow_insecure`.
-    pub const LEGACY: &str = "legacy";
     /// Guest SMB without credentials: insecure, needs `allow_insecure`, no secret needed.
     pub const GUEST: &str = "guest";
 }
@@ -107,14 +105,14 @@ pub fn security_profile(params: &ConnectionParams) -> QString {
 }
 
 fn is_known_profile(profile: Option<&str>) -> bool {
-    use security_profiles::{GUEST, LEGACY, SIGNED, STRICT};
-    matches!(profile, Some(STRICT | SIGNED | LEGACY | GUEST))
+    use security_profiles::{GUEST, SIGNED, STRICT};
+    matches!(profile, Some(STRICT | SIGNED | GUEST))
 }
 
 /// `isInsecureConfiguration()`.
 #[must_use]
 pub fn is_insecure_configuration(params: &ConnectionParams) -> bool {
-    matches!(security_profile(params).as_deref(), Some(security_profiles::LEGACY | security_profiles::GUEST))
+    security_profile(params).as_deref() == Some(security_profiles::GUEST)
 }
 
 /// `checkServicePolicy(params, Service::Files)`.
@@ -205,7 +203,6 @@ mod tests {
 
     #[test]
     fn insecure_configurations() {
-        assert!(is_insecure_configuration(&params("smb", &[("security_profile", s("legacy"))])));
         assert!(is_insecure_configuration(&params("smb", &[("security_profile", s("guest"))])));
         assert!(!is_insecure_configuration(&params("smb", &[("security_profile", s("signed"))])));
         assert!(!is_insecure_configuration(&params("smb", &[])));
@@ -222,7 +219,7 @@ mod tests {
         assert!(
             check_files_policy(&params(
                 "smb",
-                &[("security_profile", s("legacy")), ("allow_insecure", s("1"))]
+                &[("security_profile", s("guest")), ("allow_insecure", s("1"))]
             ))
             .ok()
         );
@@ -234,7 +231,7 @@ mod tests {
             .ok()
         );
         assert_eq!(
-            check_files_policy(&params("smb", &[("security_profile", s("legacy"))])).error,
+            check_files_policy(&params("smb", &[("security_profile", s("guest"))])).error,
             Error::SecurityPolicy
         );
     }
