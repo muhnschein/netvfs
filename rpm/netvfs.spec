@@ -38,7 +38,6 @@ ExclusiveArch: aarch64
 # SPEC P-5
 BuildRequires: qt5-qmake
 BuildRequires: qt5-qttools-linguist
-BuildRequires: cmake
 BuildRequires: sailfish-svg2png
 BuildRequires: pkgconfig(Qt5Core)
 BuildRequires: pkgconfig(Qt5DBus)
@@ -75,8 +74,8 @@ providers in Settings > Accounts, network locations for apps, and the
 command line tool netvfs-cli.
 
 libnetvfs (accounts, credentials, sessions and errors over pluggable protocol
-backends) with its SFTP, SMB and local file system backends; the SMB
-backend is Rust (libnetvfs-rs.so, SMB 3.1.1 only). libnetvfs also links
+backends) with its SFTP, SMB and local file system backends; the SFTP and
+SMB backends are Rust (libnetvfs-rs.so; SMB 3.1.1 only). libnetvfs also links
 QtNetwork, for the DNS-SD discovery of servers on the local network
 (SPEC-v2 XD-1).
 
@@ -117,11 +116,9 @@ consumers over a socket in their data folder, without handing out secrets.
 %setup -q -n %{name}-%{version}
 
 %build
-# SPEC P-1..P-3: vendored libraries first, static and position-independent.
-./vendor/build-vendor.sh "$PWD/build-vendor"
 # The Rust binaries and libnetvfs-rs.so, cross-built by CI into
 # rust/prebuilt (see above).
-%qmake5 -r VENDOR_PREFIX="$PWD/build-vendor" NETVFS_BUILD_TESTS=0 "VERSION=%{version}" \
+%qmake5 -r NETVFS_BUILD_TESTS=0 "VERSION=%{version}" \
     NETVFS_RUST_PREBUILT="$PWD/rust/prebuilt"
 %make_build
 

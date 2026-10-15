@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-2.1-or-later
 #
-#   make               build everything (vendored libraries first)
+#   make               build everything
 #   make check         Rust checks, unit tests, then the interop suite (needs docker)
 #   make check-rust    the Rust workspace (rust/): format, lint, tests (nextest), lockfile, MSRV,
 #                      netvfs-smb's crypto fence
@@ -11,7 +11,7 @@
 #   make coverage      unit + interop tests instrumented, writes build-coverage/coverage.xml
 #                      (C++, gcovr) and build-coverage/rust-lcov.info (Rust, llvm-cov)
 #   make clippy-report clippy findings as JSON for SonarQube, build-coverage/clippy.json
-#   make SANITIZE=1 check   the same under ASan + UBSan (vendored libraries included)
+#   make SANITIZE=1 check   the same under ASan + UBSan
 #   make HOST_BUTEO=0  use the system buteosyncfw5 (pkg-config) instead of
 #                      building the pinned vendor/host/buteo-syncfw
 
@@ -22,15 +22,12 @@ QMAKE_ARGS ?=
 ifeq ($(SANITIZE),1)
 BUILD ?= build-asan
 QMAKE_ARGS += NETVFS_SANITIZE=1
-VENDOR_CFLAGS = -fsanitize=address,undefined -fno-omit-frame-pointer
 export LSAN_OPTIONS := suppressions=$(CURDIR)/tools/sanitizer/lsan.supp:print_suppressions=0
 else ifeq ($(COVERAGE),1)
 BUILD ?= build-coverage
 QMAKE_ARGS += NETVFS_COVERAGE=1
-VENDOR_CFLAGS =
 else
 BUILD ?= build
-VENDOR_CFLAGS =
 endif
 
 BUILD_DIR := $(abspath $(BUILD))
@@ -61,14 +58,11 @@ else
 RUST_ENV =
 endif
 
-.PHONY: all vendor host-buteo configure check check-rust check-rust-ffi check-unit check-interop check-packaging \
+.PHONY: all host-buteo configure check check-rust check-rust-ffi check-unit check-interop check-packaging \
     coverage clippy-report clean distclean
 
 all: configure
 	$(MAKE) -C $(BUILD_DIR) $(if $(findstring -j,$(MAKEFLAGS)),,-j$(JOBS))
-
-vendor:
-	CFLAGS="$(VENDOR_CFLAGS)" LDFLAGS="$(VENDOR_CFLAGS)" ./vendor/build-vendor.sh $(BUILD_DIR)/vendor
 
 # The host has no buteo packages; the Sailfish SDK build never runs this.
 host-buteo:
@@ -76,9 +70,9 @@ ifeq ($(HOST_BUTEO),1)
 	./vendor/host/build-host-buteo.sh $(BUILD_DIR)/host-buteo
 endif
 
-configure: vendor host-buteo
+configure: host-buteo
 	mkdir -p $(BUILD_DIR)
-	cd $(BUILD_DIR) && $(QMAKE) -r $(CURDIR)/netvfs.pro VENDOR_PREFIX=$(BUILD_DIR)/vendor $(QMAKE_ARGS)
+	cd $(BUILD_DIR) && $(QMAKE) -r $(CURDIR)/netvfs.pro $(QMAKE_ARGS)
 
 check: check-rust check-unit check-rust-ffi check-interop
 
