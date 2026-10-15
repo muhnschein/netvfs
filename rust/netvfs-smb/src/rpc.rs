@@ -417,8 +417,8 @@ pub fn decode_share_enum(stub: &[u8]) -> Result<Vec<ShareInfo>> {
                 fixed.push((r.u32()? != 0, r.u32()?, r.u32()? != 0));
             }
             for (has_name, share_type, has_remark) in fixed {
-                let name = if has_name { Some(r.string()?) } else { None };
-                let remark = if has_remark { Some(r.string()?) } else { None };
+                let name = has_name.then(|| r.string()).transpose()?;
+                let remark = has_remark.then(|| r.string()).transpose()?;
                 raw.push((name, share_type, remark));
             }
         } else if entries != 0 {
