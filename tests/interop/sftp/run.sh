@@ -300,11 +300,12 @@ JSON
 
 # One value of the configuration file $config: json <key>[.<key>...]
 json() {
+    json_key=$1
     python3 -c 'import json, sys
 value = json.load(open(sys.argv[1]))
 for key in sys.argv[2].split("."):
     value = value[key]
-print(value)' "$config" "$1"
+print(value)' "$config" "$json_key"
 }
 
 if [ -n "${NETVFS_SFTP_INTEROP_CONFIG:-}" ]; then

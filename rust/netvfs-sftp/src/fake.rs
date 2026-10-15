@@ -12,7 +12,13 @@
 )]
 
 use crate::client::Client;
-use crate::proto::*;
+use crate::proto::{
+    Attrs, FX_BAD_MESSAGE, FX_EOF, FX_FAILURE, FX_NO_SUCH_FILE, FX_OK, FX_OP_UNSUPPORTED, FXF_CREAT,
+    FXF_EXCL, FXF_TRUNC, FXF_WRITE, FXP_ATTRS, FXP_CLOSE, FXP_DATA, FXP_EXTENDED, FXP_EXTENDED_REPLY,
+    FXP_FSTAT, FXP_HANDLE, FXP_INIT, FXP_LSTAT, FXP_MKDIR, FXP_NAME, FXP_OPEN, FXP_OPENDIR, FXP_READ,
+    FXP_READDIR, FXP_READLINK, FXP_REALPATH, FXP_REMOVE, FXP_RENAME, FXP_RMDIR, FXP_SETSTAT, FXP_STAT,
+    FXP_STATUS, FXP_SYMLINK, FXP_VERSION, FXP_WRITE, Limits, ServerVersion,
+};
 use crate::remote::Remote;
 use crate::wire::{MAX_PACKET, Reader};
 use netvfs_vfs::CancelToken;
@@ -409,6 +415,35 @@ fn normalize(path: &[u8]) -> Vec<u8> {
 
 const NO_SUCH_FILE: (u32, &str) = (FX_NO_SUCH_FILE, "No such file");
 const FAILURE: (u32, &str) = (FX_FAILURE, "Failure");
+const EOF: (u32, &str) = (FX_EOF, "End of file");
+const BAD_HANDLE: (u32, &str) = (FX_FAILURE, "bad handle");
+const UNSUPPORTED: (u32, &str) = (FX_OP_UNSUPPORTED, "Operation unsupported");
+
+/// The next string argument of a request.
+fn arg(r: &mut Reader<'_>) -> Vec<u8> {
+    r.string(MAX_PACKET, "").unwrap().to_vec()
+}
+
+fn ok(id: u32) -> Vec<u8> {
+    status(id, FX_OK, "Success")
+}
+
+/// A NAME reply with one name (and the same long name, no attributes).
+fn one_name(id: u32, name: &[u8]) -> Vec<u8> {
+    let mut rest = 1u32.to_be_bytes().to_vec();
+    rest.extend(string(name));
+    rest.extend(string(name));
+    rest.extend(0u32.to_be_bytes());
+    packet(FXP_NAME, id, &rest)
+}
+
+/// Writes `chunk` into `data` at `offset`, growing it with zeros.
+fn put_at(data: &mut Vec<u8>, offset: usize, chunk: &[u8]) {
+    if data.len() < offset + chunk.len() {
+        data.resize(offset + chunk.len(), 0);
+    }
+    data[offset..offset + chunk.len()].copy_from_slice(chunk);
+}
 
 impl State {
     fn absolute(&self, path: &[u8]) -> Vec<u8> {
@@ -489,7 +524,7 @@ impl State {
     fn file_of(&self, handle: &[u8]) -> Result<Vec<u8>, (u32, &'static str)> {
         match self.handles.get(handle) {
             Some(Open::File(p)) => Ok(p.clone()),
-            _ => Err((FX_FAILURE, "bad handle")),
+            _ => Err(BAD_HANDLE),
         }
     }
 
@@ -560,7 +595,6 @@ impl State {
         (Answer::Bytes(reply), delay)
     }
 
-    #[allow(clippy::too_many_lines, reason = "one arm per request type")]
     fn handle(
         &mut self,
         kind: u8,
@@ -568,229 +602,227 @@ impl State {
         r: &mut Reader<'_>,
         short: Option<u32>,
     ) -> Result<Vec<u8>, (u32, &'static str)> {
-        let ok = |id| status(id, FX_OK, "Success");
-        let s = |r: &mut Reader<'_>| r.string(MAX_PACKET, "").unwrap().to_vec();
         match kind {
-            FXP_OPEN => {
-                let path = s(r);
-                let flags = r.u32().unwrap();
-                let attrs = Attrs::decode(r).unwrap();
-                let p = self.resolve(&path, true)?;
-                match self.nodes.get_mut(&p) {
-                    Some(Node::Dir { .. }) if flags & FXF_WRITE != 0 => return Err(FAILURE),
-                    Some(_) if flags & FXF_CREAT != 0 && flags & FXF_EXCL != 0 => return Err(FAILURE),
-                    Some(Node::File { data, .. }) if flags & FXF_TRUNC != 0 => data.clear(),
-                    Some(_) => {}
-                    None if flags & FXF_CREAT != 0 => {
-                        self.check_parent(&p)?;
-                        let mode = attrs.permissions.unwrap_or(0o666) & 0o7777;
-                        self.nodes.insert(
-                            p.clone(),
-                            Node::File { data: Vec::new(), mode, mtime: 5000, atime: 5000 },
-                        );
-                    }
-                    None => return Err(NO_SUCH_FILE),
-                }
-                let h = self.new_handle(Open::File(p));
-                Ok(packet(FXP_HANDLE, id, &string(&h)))
-            }
-            FXP_OPENDIR => {
-                let path = s(r);
-                let p = self.resolve(&path, true)?;
-                match self.nodes.get(&p) {
-                    Some(Node::Dir { .. }) => {}
-                    _ => return Err(NO_SUCH_FILE),
-                }
-                let dot = self.attrs_of(&Node::Dir { mode: 0o755, mtime: 0 });
-                let mut listing = vec![(b".".to_vec(), dot), (b"..".to_vec(), dot)];
-                let prefix = if p == b"/" { b"/".to_vec() } else { [&p[..], b"/"].concat() };
-                for (name, node) in &self.nodes {
-                    if name.starts_with(&prefix)
-                        && name.len() > prefix.len()
-                        && !name[prefix.len()..].contains(&b'/')
-                    {
-                        listing.push((name[prefix.len()..].to_vec(), self.attrs_of(node)));
-                    }
-                }
-                let h = self.new_handle(Open::Dir { listing, at: 0 });
-                Ok(packet(FXP_HANDLE, id, &string(&h)))
-            }
-            FXP_READDIR => {
-                let h = s(r);
-                let batch = self.batch;
-                let Some(Open::Dir { listing, at }) = self.handles.get_mut(&h) else {
-                    return Err((FX_FAILURE, "bad handle"));
-                };
-                if *at >= listing.len() {
-                    return Err((FX_EOF, "End of file"));
-                }
-                let end = (*at + batch).min(listing.len());
-                let mut rest = ((end - *at) as u32).to_be_bytes().to_vec();
-                for (name, attrs) in &listing[*at..end] {
-                    rest.extend(string(name));
-                    rest.extend(string(b"long name"));
-                    rest.extend(encode_attrs(attrs));
-                }
-                *at = end;
-                Ok(packet(FXP_NAME, id, &rest))
-            }
+            FXP_OPEN => self.open(id, r),
+            FXP_OPENDIR => self.open_dir(id, r),
+            FXP_READDIR => self.read_dir(id, r),
             FXP_CLOSE => {
-                let h = s(r);
-                self.handles.remove(&h).ok_or((FX_FAILURE, "bad handle"))?;
+                self.handles.remove(&arg(r)).ok_or(BAD_HANDLE)?;
                 Ok(ok(id))
             }
-            FXP_READ => {
-                let h = s(r);
-                let offset = r.u64().unwrap() as usize;
-                let len = r.u32().unwrap().min(short.unwrap_or(u32::MAX)) as usize;
-                let len = len.min(self.limits.max_read as usize);
-                let (data, _) = self.data_mut(&h)?;
-                if offset >= data.len() {
-                    return Err((FX_EOF, "End of file"));
-                }
-                let end = (offset + len).min(data.len());
-                Ok(packet(FXP_DATA, id, &string(&data[offset..end])))
-            }
-            FXP_WRITE => {
-                let h = s(r);
-                let offset = r.u64().unwrap() as usize;
-                let chunk = s(r);
-                let (data, mtime) = self.data_mut(&h)?;
-                if data.len() < offset + chunk.len() {
-                    data.resize(offset + chunk.len(), 0);
-                }
-                data[offset..offset + chunk.len()].copy_from_slice(&chunk);
-                *mtime = 6000;
-                Ok(ok(id))
-            }
+            FXP_READ => self.read(id, r, short),
+            FXP_WRITE => self.write(id, r),
             FXP_STAT | FXP_LSTAT => {
-                let path = s(r);
-                let attrs = self.stat(&path, kind == FXP_STAT)?;
+                let attrs = self.stat(&arg(r), kind == FXP_STAT)?;
                 Ok(packet(FXP_ATTRS, id, &encode_attrs(&attrs)))
             }
             FXP_FSTAT => {
-                let h = s(r);
-                let p = self.file_of(&h)?;
+                let p = self.file_of(&arg(r))?;
                 let attrs = self.stat(&p, true)?;
                 Ok(packet(FXP_ATTRS, id, &encode_attrs(&attrs)))
             }
-            FXP_SETSTAT => {
-                let path = s(r);
-                let attrs = Attrs::decode(r).unwrap();
-                let p = self.resolve(&path, true)?;
-                match self.nodes.get_mut(&p) {
-                    Some(Node::File { data, mode, mtime, atime }) => {
-                        if let Some(size) = attrs.size {
-                            data.resize(size as usize, 0);
-                        }
-                        if let Some(m) = attrs.permissions {
-                            *mode = m & 0o7777;
-                        }
-                        if let Some((a, m)) = attrs.times {
-                            *atime = a;
-                            *mtime = m;
-                        }
-                    }
-                    Some(Node::Dir { mode, mtime }) => {
-                        if let Some(m) = attrs.permissions {
-                            *mode = m & 0o7777;
-                        }
-                        if let Some((_, m)) = attrs.times {
-                            *mtime = m;
-                        }
-                    }
-                    Some(Node::Link { .. }) => {}
-                    None => return Err(NO_SUCH_FILE),
-                }
-                Ok(ok(id))
-            }
-            FXP_REMOVE => {
-                let path = s(r);
-                let p = self.resolve(&path, false)?;
-                match self.nodes.get(&p) {
-                    Some(Node::Dir { .. }) => Err(FAILURE),
-                    Some(_) => {
-                        self.nodes.remove(&p);
-                        Ok(ok(id))
-                    }
-                    None => Err(NO_SUCH_FILE),
-                }
-            }
-            FXP_MKDIR => {
-                let path = s(r);
-                let attrs = Attrs::decode(r).unwrap();
-                let p = self.resolve(&path, false)?;
-                if self.nodes.contains_key(&p) {
-                    return Err(FAILURE);
-                }
+            FXP_SETSTAT => self.set_stat(id, r),
+            FXP_REMOVE => self.remove(id, r),
+            FXP_MKDIR => self.make_dir(id, r),
+            FXP_RMDIR => self.remove_dir(id, r),
+            FXP_REALPATH => Ok(one_name(id, &self.absolute(&arg(r)))),
+            FXP_RENAME => self.rename(id, r),
+            FXP_READLINK => self.read_link(id, r),
+            FXP_SYMLINK => self.symlink(id, r),
+            FXP_EXTENDED => self.extended(id, r),
+            _ => Err(UNSUPPORTED),
+        }
+    }
+
+    fn open(&mut self, id: u32, r: &mut Reader<'_>) -> Result<Vec<u8>, (u32, &'static str)> {
+        let path = arg(r);
+        let flags = r.u32().unwrap();
+        let attrs = Attrs::decode(r).unwrap();
+        let p = self.resolve(&path, true)?;
+        match self.nodes.get_mut(&p) {
+            Some(Node::Dir { .. }) if flags & FXF_WRITE != 0 => return Err(FAILURE),
+            Some(_) if flags & FXF_CREAT != 0 && flags & FXF_EXCL != 0 => return Err(FAILURE),
+            Some(Node::File { data, .. }) if flags & FXF_TRUNC != 0 => data.clear(),
+            Some(_) => {}
+            None if flags & FXF_CREAT != 0 => {
                 self.check_parent(&p)?;
-                let mode = attrs.permissions.unwrap_or(0o777) & 0o7777;
-                self.nodes.insert(p, Node::Dir { mode, mtime: 7000 });
-                Ok(ok(id))
+                let mode = attrs.permissions.unwrap_or(0o666) & 0o7777;
+                self.nodes.insert(p.clone(), Node::File { data: Vec::new(), mode, mtime: 5000, atime: 5000 });
             }
-            FXP_RMDIR => {
-                let path = s(r);
-                let p = self.resolve(&path, false)?;
-                match self.nodes.get(&p) {
-                    Some(Node::Dir { .. }) => {}
-                    _ => return Err(NO_SUCH_FILE),
+            None => return Err(NO_SUCH_FILE),
+        }
+        let h = self.new_handle(Open::File(p));
+        Ok(packet(FXP_HANDLE, id, &string(&h)))
+    }
+
+    fn open_dir(&mut self, id: u32, r: &mut Reader<'_>) -> Result<Vec<u8>, (u32, &'static str)> {
+        let p = self.resolve(&arg(r), true)?;
+        if !matches!(self.nodes.get(&p), Some(Node::Dir { .. })) {
+            return Err(NO_SUCH_FILE);
+        }
+        let dot = self.attrs_of(&Node::Dir { mode: 0o755, mtime: 0 });
+        let mut listing = vec![(b".".to_vec(), dot), (b"..".to_vec(), dot)];
+        let prefix = if p == b"/" { b"/".to_vec() } else { [&p[..], b"/"].concat() };
+        for (name, node) in &self.nodes {
+            let child = name.strip_prefix(prefix.as_slice()).unwrap_or_default();
+            if !child.is_empty() && !child.contains(&b'/') {
+                listing.push((child.to_vec(), self.attrs_of(node)));
+            }
+        }
+        let h = self.new_handle(Open::Dir { listing, at: 0 });
+        Ok(packet(FXP_HANDLE, id, &string(&h)))
+    }
+
+    fn read_dir(&mut self, id: u32, r: &mut Reader<'_>) -> Result<Vec<u8>, (u32, &'static str)> {
+        let h = arg(r);
+        let batch = self.batch;
+        let Some(Open::Dir { listing, at }) = self.handles.get_mut(&h) else {
+            return Err(BAD_HANDLE);
+        };
+        if *at >= listing.len() {
+            return Err(EOF);
+        }
+        let end = (*at + batch).min(listing.len());
+        let mut rest = ((end - *at) as u32).to_be_bytes().to_vec();
+        for (name, attrs) in &listing[*at..end] {
+            rest.extend(string(name));
+            rest.extend(string(b"long name"));
+            rest.extend(encode_attrs(attrs));
+        }
+        *at = end;
+        Ok(packet(FXP_NAME, id, &rest))
+    }
+
+    fn read(
+        &mut self,
+        id: u32,
+        r: &mut Reader<'_>,
+        short: Option<u32>,
+    ) -> Result<Vec<u8>, (u32, &'static str)> {
+        let h = arg(r);
+        let offset = r.u64().unwrap() as usize;
+        let len = r.u32().unwrap().min(short.unwrap_or(u32::MAX)) as usize;
+        let len = len.min(self.limits.max_read as usize);
+        let (data, _) = self.data_mut(&h)?;
+        if offset >= data.len() {
+            return Err(EOF);
+        }
+        let end = (offset + len).min(data.len());
+        Ok(packet(FXP_DATA, id, &string(&data[offset..end])))
+    }
+
+    fn write(&mut self, id: u32, r: &mut Reader<'_>) -> Result<Vec<u8>, (u32, &'static str)> {
+        let h = arg(r);
+        let offset = r.u64().unwrap() as usize;
+        let chunk = arg(r);
+        let (data, mtime) = self.data_mut(&h)?;
+        put_at(data, offset, &chunk);
+        *mtime = 6000;
+        Ok(ok(id))
+    }
+
+    fn set_stat(&mut self, id: u32, r: &mut Reader<'_>) -> Result<Vec<u8>, (u32, &'static str)> {
+        let path = arg(r);
+        let attrs = Attrs::decode(r).unwrap();
+        let p = self.resolve(&path, true)?;
+        let mode_of = |mode: &mut u32| {
+            if let Some(m) = attrs.permissions {
+                *mode = m & 0o7777;
+            }
+        };
+        match self.nodes.get_mut(&p) {
+            Some(Node::File { data, mode, mtime, atime }) => {
+                if let Some(size) = attrs.size {
+                    data.resize(size as usize, 0);
                 }
-                let prefix = [&p[..], b"/"].concat();
-                if self.nodes.keys().any(|k| k.starts_with(&prefix)) {
-                    return Err(FAILURE);
+                mode_of(mode);
+                if let Some((a, m)) = attrs.times {
+                    *atime = a;
+                    *mtime = m;
                 }
+            }
+            Some(Node::Dir { mode, mtime }) => {
+                mode_of(mode);
+                if let Some((_, m)) = attrs.times {
+                    *mtime = m;
+                }
+            }
+            Some(Node::Link { .. }) => {}
+            None => return Err(NO_SUCH_FILE),
+        }
+        Ok(ok(id))
+    }
+
+    fn remove(&mut self, id: u32, r: &mut Reader<'_>) -> Result<Vec<u8>, (u32, &'static str)> {
+        let p = self.resolve(&arg(r), false)?;
+        match self.nodes.get(&p) {
+            Some(Node::Dir { .. }) => Err(FAILURE),
+            Some(_) => {
                 self.nodes.remove(&p);
                 Ok(ok(id))
             }
-            FXP_REALPATH => {
-                let path = s(r);
-                let p = self.absolute(&path);
-                let mut rest = 1u32.to_be_bytes().to_vec();
-                rest.extend(string(&p));
-                rest.extend(string(&p));
-                rest.extend(0u32.to_be_bytes());
-                Ok(packet(FXP_NAME, id, &rest))
-            }
-            FXP_RENAME => {
-                let from = self.resolve(&s(r), false)?;
-                let to = self.resolve(&s(r), false)?;
-                if !self.nodes.contains_key(&from) {
-                    return Err(NO_SUCH_FILE);
-                }
-                if self.nodes.contains_key(&to) {
-                    return Err(FAILURE);
-                }
-                self.check_parent(&to)?;
-                self.move_tree(&from, &to);
-                Ok(ok(id))
-            }
-            FXP_READLINK => {
-                let p = self.resolve(&s(r), false)?;
-                match self.nodes.get(&p) {
-                    Some(Node::Link { target }) => {
-                        let mut rest = 1u32.to_be_bytes().to_vec();
-                        rest.extend(string(target));
-                        rest.extend(string(target));
-                        rest.extend(0u32.to_be_bytes());
-                        Ok(packet(FXP_NAME, id, &rest))
-                    }
-                    Some(_) => Err((FX_BAD_MESSAGE, "Invalid argument")),
-                    None => Err(NO_SUCH_FILE),
-                }
-            }
-            FXP_SYMLINK => {
-                let target = s(r);
-                let link = self.resolve(&s(r), false)?;
-                if self.nodes.contains_key(&link) {
-                    return Err(FAILURE);
-                }
-                self.check_parent(&link)?;
-                self.nodes.insert(link, Node::Link { target });
-                Ok(ok(id))
-            }
-            FXP_EXTENDED => self.extended(id, r),
-            _ => Err((FX_OP_UNSUPPORTED, "Operation unsupported")),
+            None => Err(NO_SUCH_FILE),
         }
+    }
+
+    fn make_dir(&mut self, id: u32, r: &mut Reader<'_>) -> Result<Vec<u8>, (u32, &'static str)> {
+        let path = arg(r);
+        let attrs = Attrs::decode(r).unwrap();
+        let p = self.resolve(&path, false)?;
+        if self.nodes.contains_key(&p) {
+            return Err(FAILURE);
+        }
+        self.check_parent(&p)?;
+        let mode = attrs.permissions.unwrap_or(0o777) & 0o7777;
+        self.nodes.insert(p, Node::Dir { mode, mtime: 7000 });
+        Ok(ok(id))
+    }
+
+    fn remove_dir(&mut self, id: u32, r: &mut Reader<'_>) -> Result<Vec<u8>, (u32, &'static str)> {
+        let p = self.resolve(&arg(r), false)?;
+        if !matches!(self.nodes.get(&p), Some(Node::Dir { .. })) {
+            return Err(NO_SUCH_FILE);
+        }
+        let prefix = [&p[..], b"/"].concat();
+        if self.nodes.keys().any(|k| k.starts_with(&prefix)) {
+            return Err(FAILURE);
+        }
+        self.nodes.remove(&p);
+        Ok(ok(id))
+    }
+
+    fn rename(&mut self, id: u32, r: &mut Reader<'_>) -> Result<Vec<u8>, (u32, &'static str)> {
+        let from = self.resolve(&arg(r), false)?;
+        let to = self.resolve(&arg(r), false)?;
+        if !self.nodes.contains_key(&from) {
+            return Err(NO_SUCH_FILE);
+        }
+        if self.nodes.contains_key(&to) {
+            return Err(FAILURE);
+        }
+        self.check_parent(&to)?;
+        self.move_tree(&from, &to);
+        Ok(ok(id))
+    }
+
+    fn read_link(&self, id: u32, r: &mut Reader<'_>) -> Result<Vec<u8>, (u32, &'static str)> {
+        let p = self.resolve(&arg(r), false)?;
+        match self.nodes.get(&p) {
+            Some(Node::Link { target }) => Ok(one_name(id, target)),
+            Some(_) => Err((FX_BAD_MESSAGE, "Invalid argument")),
+            None => Err(NO_SUCH_FILE),
+        }
+    }
+
+    fn symlink(&mut self, id: u32, r: &mut Reader<'_>) -> Result<Vec<u8>, (u32, &'static str)> {
+        let target = arg(r);
+        let link = self.resolve(&arg(r), false)?;
+        if self.nodes.contains_key(&link) {
+            return Err(FAILURE);
+        }
+        self.check_parent(&link)?;
+        self.nodes.insert(link, Node::Link { target });
+        Ok(ok(id))
     }
 
     fn move_tree(&mut self, from: &[u8], to: &[u8]) {
@@ -805,16 +837,14 @@ impl State {
     }
 
     fn extended(&mut self, id: u32, r: &mut Reader<'_>) -> Result<Vec<u8>, (u32, &'static str)> {
-        let s = |r: &mut Reader<'_>| r.string(MAX_PACKET, "").unwrap().to_vec();
-        let name = String::from_utf8(s(r)).unwrap();
+        let name = String::from_utf8(arg(r)).unwrap();
         if !self.extensions.iter().any(|(n, _)| *n == name) {
-            return Err((FX_OP_UNSUPPORTED, "Operation unsupported"));
+            return Err(UNSUPPORTED);
         }
-        let ok = status(id, FX_OK, "Success");
         match name.as_str() {
             "posix-rename@openssh.com" => {
-                let from = self.resolve(&s(r), false)?;
-                let to = self.resolve(&s(r), false)?;
+                let from = self.resolve(&arg(r), false)?;
+                let to = self.resolve(&arg(r), false)?;
                 match (self.nodes.get(&from), self.nodes.get(&to)) {
                     (None, _) => return Err(NO_SUCH_FILE),
                     (Some(Node::Dir { .. }), Some(Node::File { .. } | Node::Link { .. }))
@@ -825,26 +855,26 @@ impl State {
                     self.nodes.remove(&to);
                     self.move_tree(&from, &to);
                 }
-                Ok(ok)
+                Ok(ok(id))
             }
             "statvfs@openssh.com" => {
-                self.stat(&s(r), true)?;
+                self.stat(&arg(r), true)?;
                 let rest: Vec<u8> = self.statvfs.iter().flat_map(|v| v.to_be_bytes()).collect();
                 Ok(packet(FXP_EXTENDED_REPLY, id, &rest))
             }
             "fsync@openssh.com" => {
-                self.file_of(&s(r))?;
-                Ok(ok)
+                self.file_of(&arg(r))?;
+                Ok(ok(id))
             }
             "hardlink@openssh.com" => {
-                let from = self.resolve(&s(r), false)?;
-                let to = self.resolve(&s(r), false)?;
+                let from = self.resolve(&arg(r), false)?;
+                let to = self.resolve(&arg(r), false)?;
                 let node = self.nodes.get(&from).cloned().ok_or(NO_SUCH_FILE)?;
                 if self.nodes.contains_key(&to) {
                     return Err(FAILURE);
                 }
                 self.nodes.insert(to, node);
-                Ok(ok)
+                Ok(ok(id))
             }
             "limits@openssh.com" => {
                 let l = self.limits;
@@ -858,7 +888,7 @@ impl State {
                 let ids = |blob: Vec<u8>| -> Vec<u32> {
                     blob.chunks(4).map(|c| u32::from_be_bytes(c.try_into().unwrap())).collect()
                 };
-                let (uids, gids) = (ids(s(r)), ids(s(r)));
+                let (uids, gids) = (ids(arg(r)), ids(arg(r)));
                 let names = |ids: &[u32], map: &BTreeMap<u32, &str>| -> Vec<u8> {
                     ids.iter().flat_map(|i| string(map.get(i).copied().unwrap_or("").as_bytes())).collect()
                 };
@@ -866,22 +896,19 @@ impl State {
                 Ok(packet(FXP_EXTENDED_REPLY, id, &rest))
             }
             "copy-data" => {
-                let rh = s(r);
+                let rh = arg(r);
                 let roff = r.u64().unwrap() as usize;
                 let len = r.u64().unwrap() as usize;
-                let wh = s(r);
+                let wh = arg(r);
                 let woff = r.u64().unwrap() as usize;
                 let (src, _) = self.data_mut(&rh)?;
                 let end = if len == 0 { src.len() } else { (roff + len).min(src.len()) };
                 let chunk = src.get(roff..end).unwrap_or_default().to_vec();
                 let (dst, _) = self.data_mut(&wh)?;
-                if dst.len() < woff + chunk.len() {
-                    dst.resize(woff + chunk.len(), 0);
-                }
-                dst[woff..woff + chunk.len()].copy_from_slice(&chunk);
-                Ok(ok)
+                put_at(dst, woff, &chunk);
+                Ok(ok(id))
             }
-            _ => Err((FX_OP_UNSUPPORTED, "Operation unsupported")),
+            _ => Err(UNSUPPORTED),
         }
     }
 }
