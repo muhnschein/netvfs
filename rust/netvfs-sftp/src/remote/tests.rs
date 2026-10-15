@@ -106,6 +106,8 @@ fn extensions_need_their_version() {
 
 #[test]
 fn chunks_follow_the_limits() {
+    // S-21: 32 KiB without a limit, at most 256 KiB.
+    assert_eq!((FALLBACK_CHUNK, MAX_CHUNK), (32 * 1024, 256 * 1024));
     assert_eq!(chunk(None), FALLBACK_CHUNK);
     assert_eq!(chunk(Some(0)), FALLBACK_CHUNK);
     assert_eq!(chunk(Some(1)), 1);
@@ -213,7 +215,7 @@ async fn new_learns_limits_home_and_owners() {
 async fn without_extensions_only_the_base_capabilities() {
     let fake = Fake::new().with_extensions(&[]);
     let remote = fake.remote().await;
-    assert_eq!(remote.chunks(), Chunks { read: FALLBACK_CHUNK, write: FALLBACK_CHUNK });
+    assert_eq!(remote.chunks(), Chunks { read: 32 * 1024, write: 32 * 1024 });
     assert_eq!(remote.capabilities().flags, base_capabilities());
     assert_eq!(fake.kinds(), ["REALPATH"]);
 }
