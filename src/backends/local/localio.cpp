@@ -189,7 +189,7 @@ Result copyInto(int source, const QByteArray &target, const NativeStat &st, int 
         return errnoResult(errno, display(target));
     Result r = copyData(source, output.get(), waiter);
     if (r.ok()) {
-        // Server-side copies keep the modification time (as cp -p, XS-9).
+        // Server-side copies keep the modification time (as cp -p, L-4).
         if (const std::array<struct timespec, 2> times = { toTimespec(fromMsecs(st.accessedMs)),
                                                            toTimespec(fromMsecs(st.modifiedMs)) };
                 ::futimens(output.get(), times.data()) != 0)
