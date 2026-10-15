@@ -23,7 +23,7 @@ struct CapabilityName {
     const char *name;
 };
 
-const std::array<CapabilityName, 22> capabilityNames = { {
+constexpr std::array<CapabilityName, 21> capabilityNames = { {
     { Capability::Symlinks, "Symlinks" },
     { Capability::Hardlinks, "Hardlinks" },
     { Capability::PosixModes, "PosixModes" },
@@ -46,6 +46,10 @@ const std::array<CapabilityName, 22> capabilityNames = { {
     { Capability::ShareEnumeration, "ShareEnumeration" },
     { Capability::ETags, "ETags" },
 } };
+// One name per capability: a size left over would add a nameless entry.
+static_assert(capabilityNames.size() == static_cast<std::size_t>(Capability::ETags) + 1
+                  && capabilityNames.back().capability == Capability::ETags,
+              "one name per capability");
 } // namespace
 
 QString capabilityName(Capability c)
