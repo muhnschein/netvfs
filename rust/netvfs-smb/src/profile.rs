@@ -84,7 +84,7 @@ mod tests {
         ] {
             assert_eq!(Profile::parse(value), Ok(profile), "{value:?}");
         }
-        for value in ["legacy", "Strict", "none", "signed,guest"] {
+        for value in ["Strict", "none", "signed,guest", "ntlm"] {
             let e = Profile::parse(Some(value)).unwrap_err();
             assert_eq!(e.name, ErrorName::SecurityPolicy);
             assert_eq!(e.message, format!("unknown SMB security profile \"{value}\""));

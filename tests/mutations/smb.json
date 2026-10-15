@@ -7,10 +7,10 @@
     "test": "timeout 1800 tests/interop/smb/run.sh build encryptionRequiredServerOff"
   },
   {
-    "name": "XM-1 profile legacy accepted",
+    "name": "XM-1 an unknown profile taken as signed",
     "file": "rust/netvfs-smb/src/profile.rs",
     "search": "Self::ALL.into_iter().find(|p| p.name() == name)",
-    "replace": "Self::ALL.into_iter().find(|p| p.name() == name || (name == \"legacy\" && *p == Self::Signed))",
+    "replace": "Self::ALL.into_iter().find(|p| p.name() == name).or(Some(Self::Signed))",
     "test": "timeout 1800 tests/interop/smb/run.sh build weakerProfilesOnStrictServer"
   },
   {

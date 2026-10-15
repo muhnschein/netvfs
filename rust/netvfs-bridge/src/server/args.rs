@@ -46,7 +46,7 @@ const MAX_MODE: i64 = 0o7777;
 /// of 2 MiB would take 128 MiB).
 pub const MAX_CALL_BODY: usize = 128 * 1024;
 /// The SMB security profiles `ConnectAdHoc` accepts.
-const SECURITY_PROFILES: [&str; 4] = ["strict", "signed", "legacy", "guest"];
+const SECURITY_PROFILES: [&str; 3] = ["strict", "signed", "guest"];
 
 /// A validated location id (`account:12`, `adhoc:3`): `[a-z0-9:-]{1,64}`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -89,7 +89,7 @@ impl fmt::Debug for Secret {
 pub struct AdHocOpts {
     /// `user`: the user name instead of the URL's.
     pub user: Option<String>,
-    /// `security_profile` (SMB only): `strict`, `signed`, `legacy` or `guest`.
+    /// `security_profile` (SMB only): `strict`, `signed` or `guest`.
     pub security_profile: Option<String>,
 }
 

@@ -316,7 +316,7 @@ async fn nothing_works_before_sign_in() {
     }
     let e = smb.authenticate(&user("u", b"\xff"), None, &c).await.unwrap_err();
     assert_eq!((e.name, e.message.as_str()), (ErrorName::AuthFailed, "The password is not valid UTF-8"));
-    p.options.insert("security_profile".into(), s("legacy"));
+    p.options.insert("security_profile".into(), s("none"));
     smb.connect(&p, &c).await.unwrap();
     let e = smb.authenticate(&user("u", b"pw"), None, &c).await.unwrap_err();
     assert_eq!(e.name, ErrorName::SecurityPolicy);

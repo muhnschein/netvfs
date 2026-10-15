@@ -1190,7 +1190,8 @@ private slots:
     }
 
     // XM-1: signed against the strict server still gets SMB 3.1.1 with the
-    // encryption the server requires; "legacy" is no profile any more.
+    // encryption the server requires; a profile netvfs does not know is
+    // refused.
     void weakerProfilesOnStrictServer()
     {
         const auto backend = newBackend();
@@ -1201,8 +1202,8 @@ private slots:
         const QByteArray row = sessionRow(QStringLiteral("strict"));
         QVERIFY2(row.contains("SMB3_11") && row.contains("AES-128-GCM"), row.constData());
 
-        const auto legacy = newBackend();
-        const Result refused = signIn(legacy.get(), profiled(QStringLiteral("strict"), QStringLiteral("legacy")),
+        const auto unknown = newBackend();
+        const Result refused = signIn(unknown.get(), profiled(QStringLiteral("strict"), QStringLiteral("none")),
                                       credentials());
         QCOMPARE(refused.error(), Error::SecurityPolicy);
         QVERIFY2(refused.message().contains(QLatin1String("unknown SMB security profile")),

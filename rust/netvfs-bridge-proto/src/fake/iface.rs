@@ -864,9 +864,9 @@ mod tests {
         }
         let removed = parse_adhoc("davs://h/", &plain()).err();
         assert_eq!(removed.as_ref().map(Fail::message), Some("davs URLs are no longer supported"));
-        let legacy = AdHocOpts { user: None, security_profile: Some("legacy".into()) };
-        assert!(bare("sftp://h/", &legacy).is_some_and(|n| n.contains("InvalidArgs")));
-        assert!(bare("smb://h/", &legacy).is_none());
+        let guest = AdHocOpts { user: None, security_profile: Some("guest".into()) };
+        assert!(bare("sftp://h/", &guest).is_some_and(|n| n.contains("InvalidArgs")));
+        assert!(bare("smb://h/", &guest).is_none());
         assert!(bare("nonsense", &plain()).is_some());
         assert!(bare("sftp:///x", &plain()).is_some());
         assert!(bare("sftp://h:notaport/", &plain()).is_some());

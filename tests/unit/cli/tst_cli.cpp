@@ -157,8 +157,8 @@ private slots:
 
     void profileAndHostKeyOptions()
     {
-        QCOMPARE(run({ S("--profile"), S("legacy"), S("ls"), QString() }), 0);
-        QCOMPARE(FakeServer::instance()->lastParams.option(S("security_profile")), S("legacy"));
+        QCOMPARE(run({ S("--profile"), S("signed"), S("ls"), QString() }), 0);
+        QCOMPARE(FakeServer::instance()->lastParams.option(S("security_profile")), S("signed"));
         QCOMPARE(run({ S("--profile"), S("bogus"), S("ls"), QString() }), 2);
         QCOMPARE(run({ S("--host-key"), S("garbage"), S("ls"), QString() }), 2);
 
