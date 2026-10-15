@@ -11,7 +11,7 @@
 namespace NetVfsUi {
 
 namespace {
-const std::array<const char *, 34> TextIds = { {
+constexpr std::array<const char *, 32> TextIds = { {
     //% "Server"
     QT_TRID_NOOP("settings-accounts-netvfs-la-server"),
     //% "Server name or IP address"
@@ -77,6 +77,8 @@ const std::array<const char *, 34> TextIds = { {
     //% "Encrypted and signed connections are used by default. Change this only if the server cannot do better."
     QT_TRID_NOOP("settings-accounts-netvfs-la-security_profile_description"),
 } };
+// A size left over would add empty ids after the last one.
+static_assert(TextIds.back() != nullptr, "one entry per text id");
 } // namespace
 
 QStringList ProviderDescriptors::knownTextIds()
