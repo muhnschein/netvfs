@@ -7,5 +7,7 @@
 include(../../test.pri)
 TARGET = tst_sftp
 DEFINES += NETVFS_TEST_RS_RELEASE_LIB=\\\"$$NETVFS_LIB_OUT/netvfs/libnetvfs-rs.so\\\"
+# Key files of the Rust tests (rust/netvfs-sftp/testdata/keys).
+DEFINES += NETVFS_TEST_KEY_FIXTURES=\\\"$$PWD/../../../rust/netvfs-sftp/testdata/keys\\\"
 SOURCES = tst_sftp.cpp
 QT += network

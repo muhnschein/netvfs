@@ -34,6 +34,7 @@ const char RsaRefused[] = "RSA keys are not supported; generate a new key, or us
 const char LegacyRefused[] = "Keys encrypted in the legacy PEM format are not supported; generate a new key";
 const char DsaRefused[] = "DSA keys are not supported; generate a new key, or use an Ed25519 or ECDSA key";
 const char NotAKey[] = "The file is not a private key in OpenSSH or PEM format";
+const char TooCostly[] = "Opening this key would take too long; protect it with fewer rounds, or generate a new key";
 
 QByteArray wireUint32(quint32 n)
 {
@@ -356,6 +357,32 @@ private slots:
             QVERIFY(key.algorithm.isEmpty());
         }
         QCOMPARE(m_tools->describe(contents, nullptr).message(), message);
+    }
+
+    // A key whose passphrase protection would take too long to open is
+    // refused before any key derivation runs, whatever the passphrase (the
+    // right one is correct-horse).
+    void costlyKeys_data()
+    {
+        QTest::addColumn<QString>("fixture");
+        QTest::newRow("bcrypt 1025 rounds") << "ed25519-openssh-rounds1025";
+        QTest::newRow("pbkdf2 1000001 iterations") << "ecdsa256-pkcs8-iter1000001";
+        QTest::newRow("scrypt p 5") << "ecdsa256-pkcs8-scrypt-p5";
+    }
+
+    void costlyKeys()
+    {
+        QFETCH(QString, fixture);
+        QFile f(QStringLiteral(NETVFS_TEST_KEY_FIXTURES "/") + fixture);
+        QVERIFY(f.open(QIODevice::ReadOnly));
+        const QByteArray contents = f.readAll();
+        for (const QByteArray &given : { QByteArray("correct-horse"), QByteArray(), QByteArray("wrong") }) {
+            SshKeyMaterial key;
+            const Result r = m_tools->importKey(contents, given, &key);
+            QCOMPARE(r.error(), Error::Unsupported);
+            QCOMPARE(r.message(), QString::fromLatin1(TooCostly));
+            QVERIFY(key.privateKey.isEmpty());
+        }
     }
 
     void rejectedKeys()
