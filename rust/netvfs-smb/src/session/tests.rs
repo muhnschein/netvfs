@@ -1,13 +1,15 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 //! Sign-in against the scripted server: NEGOTIATE refusals, the guest
-//! profile's anonymous exchange, TREE_CONNECT. The NTLM exchange runs
-//! against Samba (tests/samba.rs).
+//! profile's anonymous exchange, the NTLM exchange with sspi's own acceptor
+//! as the server's side (so the final response is signed with the session's
+//! real key), TREE_CONNECT. tests/samba.rs runs the same against Samba.
 
 use std::time::Duration;
 
 use super::*;
+use crate::crypto::server_side_keys;
 use crate::error::Error;
-use crate::fake::{self, Peer, Req, SESSION_ID, error, four, pair};
+use crate::fake::{self, Peer, Req, SESSION_ID, ServerKeys, error, four, pair};
 use crate::msg::negotiate::tests::response as negotiate_message;
 use crate::msg::negotiate::{DIALECT_311, ciphers, encryption_context, preauth_context, signing_context};
 use crate::wire::Writer;
@@ -214,6 +216,196 @@ async fn session_setup_ids_and_rounds() {
         peer.send(&[msg], false).await;
     });
     assert_eq!(r.unwrap_err(), Error::Status(NtStatus::LOGON_FAILURE));
+}
+
+const USER: &str = "alice";
+const PASSWORD: &str = "correct horse";
+
+fn user() -> Account {
+    Account::User { user: USER.into(), domain: String::new(), password: PASSWORD.to_owned().into() }
+}
+
+/// sspi's SPNEGO/NTLM acceptor for `USER` and `PASSWORD`: the server's side
+/// of the exchange, which yields the session key the client derives too.
+struct Acceptor {
+    ctx: sspi::Negotiate,
+    creds: Option<sspi::CredentialsBuffers>,
+}
+
+impl Acceptor {
+    fn new() -> Self {
+        use sspi::Sspi;
+        let identity = sspi::AuthIdentity {
+            username: sspi::Username::new(USER, None).unwrap(),
+            password: PASSWORD.to_owned().into(),
+        };
+        let config = sspi::NegotiateConfig::new(
+            Box::new(sspi::ntlm::NtlmConfig::default()),
+            Some("ntlm".to_owned()),
+            String::new(),
+        );
+        let mut ctx = sspi::Negotiate::new_server(config, vec![identity.clone()]).unwrap();
+        let acquired = ctx
+            .acquire_credentials_handle()
+            .with_credential_use(sspi::CredentialUse::Inbound)
+            .with_auth_data(&sspi::Credentials::AuthIdentity(identity))
+            .execute(&mut ctx)
+            .unwrap();
+        Self { ctx, creds: acquired.credentials_handle }
+    }
+
+    /// The client's token in, the server's out.
+    fn step(&mut self, token: &[u8]) -> Vec<u8> {
+        use sspi::{Sspi, SspiImpl};
+        let mut input = vec![sspi::SecurityBuffer::new(token.to_vec(), sspi::BufferType::Token)];
+        let mut output = vec![sspi::SecurityBuffer::new(Vec::new(), sspi::BufferType::Token)];
+        let builder = self
+            .ctx
+            .accept_security_context()
+            .with_credentials_handle(&mut self.creds)
+            .with_context_requirements(sspi::ServerRequestFlags::empty())
+            .with_target_data_representation(sspi::DataRepresentation::Native)
+            .with_input(&mut input)
+            .with_output(&mut output);
+        self.ctx.accept_security_context_impl(builder).unwrap().resolve_to_result().unwrap();
+        output.remove(0).buffer
+    }
+
+    fn session_key(&mut self) -> Vec<u8> {
+        use sspi::Sspi;
+        self.ctx.query_context_session_key().unwrap().session_key.as_ref().clone()
+    }
+}
+
+/// The security token of a SESSION_SETUP request.
+fn setup_token(req: &Req) -> Vec<u8> {
+    let body = req.body();
+    let offset = usize::from(u16::from_le_bytes([body[12], body[13]]));
+    let len = usize::from(u16::from_le_bytes([body[14], body[15]]));
+    req.msg[offset..][..len].to_vec()
+}
+
+/// How the server sends the final SESSION_SETUP response.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Final {
+    /// Signed with the session's signing key.
+    Signed,
+    /// Neither flagged nor signed.
+    Unsigned,
+    /// Flagged signed, one signature bit flipped.
+    BadSignature,
+    /// Signed, but without the SPNEGO token (no mechListMIC).
+    NoToken,
+}
+
+/// NTLM sign-in with `profile` against a server that negotiates `cipher`
+/// (0: none) and ends SESSION_SETUP with session `flags`, sent as `how`. The
+/// server keeps the preauth hash and derives the keys on its side.
+async fn ntlm_session(profile: Profile, cipher: u16, flags: u16, how: Final) -> (Result<Session>, Peer) {
+    let (client, mut peer) = pair().await;
+    let c = CancelToken::new();
+    let account = user();
+    let (r, ()) = tokio::join!(sign_in(client, profile, &account, "srv", T, &c), async {
+        let mut hash = PreauthHash::default();
+        let req = peer.recv_one().await;
+        let resp = fake::response(&req, NtStatus::SUCCESS, &negotiate_body(DIALECT_311, cipher), 1);
+        hash.update(&req.msg);
+        hash.update(&resp);
+        peer.send(&[resp], false).await;
+        let mut acceptor = Acceptor::new();
+        let req = peer.recv_one().await;
+        assert_eq!(req.body()[3], 0x02, "signing required");
+        let challenge = acceptor.step(&setup_token(&req));
+        let resp = fake::response(&req, NtStatus::MORE_PROCESSING_REQUIRED, &setup_body(0, &challenge), 8);
+        hash.update(&req.msg);
+        hash.update(&resp);
+        peer.send(&[resp], false).await;
+        let req = peer.recv_one().await;
+        assert_eq!(req.header.session_id, SESSION_ID);
+        hash.update(&req.msg);
+        let accepted = acceptor.step(&setup_token(&req));
+        let token = if how == Final::NoToken { Vec::new() } else { accepted };
+        let mut resp = fake::response(&req, NtStatus::SUCCESS, &setup_body(flags, &token), 8);
+        let key = acceptor.session_key();
+        let cipher = match cipher {
+            ciphers::AES128_GCM => Some(Cipher::Aes128Gcm),
+            ciphers::AES256_GCM => Some(Cipher::Aes256Gcm),
+            _ => None,
+        };
+        let signing = derive_session_keys(&key, &hash, None, SESSION_ID).unwrap().signing;
+        let (seal, open) = cipher.map(|c| server_side_keys(&key, &hash, c, SESSION_ID).unwrap()).unzip();
+        peer.keys = Some(ServerKeys { signing, seal, open });
+        match how {
+            Final::Unsigned => {}
+            Final::Signed | Final::NoToken => peer.sign(&mut resp),
+            Final::BadSignature => {
+                peer.sign(&mut resp);
+                resp[63] ^= 0x80;
+            }
+        }
+        peer.send(&[resp], false).await;
+    });
+    (r, peer)
+}
+
+/// One ECHO on `s`, answered as the session's protection requires.
+async fn echo_round_trip(s: &Session, peer: &mut Peer, encrypted: bool) {
+    let c = CancelToken::new();
+    let (r, ()) = tokio::join!(echo(&s.conn, &c), async {
+        let req = peer.recv_one().await;
+        assert_eq!(req.encrypted, encrypted);
+        assert_eq!(req.header.is_signed(), !encrypted);
+        let mut resp = fake::response(&req, NtStatus::SUCCESS, &four(), 1);
+        if !encrypted {
+            peer.sign(&mut resp);
+        }
+        peer.send(&[resp], encrypted).await;
+    });
+    r.unwrap();
+}
+
+#[tokio::test]
+async fn ntlm_sign_in_signs_or_seals_as_the_profile_says() {
+    // signed: signing only; strict: sealing with either cipher; signed on a
+    // session the server marks ENCRYPT_DATA: sealing.
+    for (profile, cipher, flags, encrypted) in [
+        (Profile::Signed, ciphers::AES128_GCM, 0, false),
+        (Profile::Strict, ciphers::AES128_GCM, 0, true),
+        (Profile::Strict, ciphers::AES256_GCM, 0, true),
+        (Profile::Signed, ciphers::AES256_GCM, session_flags::ENCRYPT_DATA, true),
+    ] {
+        let (r, mut peer) = ntlm_session(profile, cipher, flags, Final::Signed).await;
+        let s = r.unwrap();
+        assert_eq!(s.flags, flags);
+        assert_eq!(s.conn.session_id(), SESSION_ID);
+        assert_eq!(s.conn.encrypts(), encrypted, "{profile:?} {cipher}");
+        echo_round_trip(&s, &mut peer, encrypted).await;
+    }
+}
+
+#[tokio::test]
+async fn ntlm_final_response_refusals() {
+    let policy_error = |r: Result<Session>| match r {
+        Err(Error::Policy(m)) => m,
+        other => panic!("{other:?}"),
+    };
+    // XM-1: a guest or anonymous session for an account.
+    for flags in [session_flags::IS_GUEST, session_flags::IS_NULL] {
+        let (r, _peer) = ntlm_session(Profile::Signed, ciphers::AES128_GCM, flags, Final::Signed).await;
+        assert_eq!(policy_error(r), GUEST_MAPPED);
+    }
+    for (how, what) in [
+        (Final::Unsigned, "the final SESSION_SETUP response is not signed"),
+        (Final::BadSignature, "the final SESSION_SETUP response: message signature does not verify"),
+        (Final::NoToken, "the server's final SPNEGO token is missing (no mechListMIC)"),
+    ] {
+        let (r, _peer) = ntlm_session(Profile::Strict, ciphers::AES128_GCM, 0, how).await;
+        assert_eq!(policy_error(r), what, "{how:?}");
+    }
+    // A session marked for encryption without a common cipher.
+    let (r, _peer) = ntlm_session(Profile::Signed, 0, session_flags::ENCRYPT_DATA, Final::Signed).await;
+    let m = policy_error(r);
+    assert!(m.contains("marks the session for encryption") && m.contains("0x0004"), "{m}");
 }
 
 fn tree_body(share_type: u8, flags: u32) -> Vec<u8> {
