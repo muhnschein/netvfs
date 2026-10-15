@@ -81,8 +81,6 @@ pub fn config(pin: Option<&Algorithm>) -> client::Config {
     client::Config {
         client_id: SshId::Standard(Cow::Borrowed(concat!("SSH-2.0-netvfs_", env!("CARGO_PKG_VERSION")))),
         preferred: preferred(pin),
-        inactivity_timeout: None,
-        keepalive_interval: None,
         nodelay: true,
         ..client::Config::default()
     }

@@ -276,14 +276,10 @@ impl Backend for Sftp {
         };
         let Connected { mut session, settings, .. } = *connected;
         match sign_in(&mut session, &settings, mode, credentials, prompter, cancel).await {
-            Ok(remote) if !cancel.is_canceled() => {
+            // A cancel that comes after the last step finds the next call.
+            Ok(remote) => {
                 self.state = State::Ready(Box::new(Ready { session, remote, settings }));
                 Ok(())
-            }
-            Ok(remote) => {
-                remote.client().end(connection_closed());
-                session.close().await;
-                Err(Status::canceled())
             }
             Err(e) => {
                 session.close().await;

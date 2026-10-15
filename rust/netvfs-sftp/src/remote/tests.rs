@@ -300,7 +300,11 @@ async fn owners_are_named_once_per_id() {
 async fn the_owner_cache_is_bounded() {
     let mut cache = HashMap::new();
     let ids: Vec<u32> = (0..u32::try_from(MAX_CACHED_NAMES).unwrap()).collect();
-    remember(&mut cache, &ids, ids.iter().map(|i| i.to_string().into_bytes()).collect());
+    let (last, ids) = ids.split_last().unwrap();
+    remember(&mut cache, ids, ids.iter().map(|i| i.to_string().into_bytes()).collect());
+    assert_eq!(cache.len(), ids.len());
+    // The one that fills it to the bound joins the others.
+    remember(&mut cache, &[*last], vec![last.to_string().into_bytes()]);
     assert_eq!(cache.len(), MAX_CACHED_NAMES);
     assert_eq!(cache[&7], "7");
     remember(&mut cache, &[99_999], vec![b"x\xff".to_vec()]);
@@ -627,6 +631,23 @@ async fn remove_file() {
 }
 
 #[tokio::test]
+async fn no_follow_up_request_after_a_timeout() {
+    let fake = Fake::new();
+    fake.dir("/home/u/d");
+    let c = cancel();
+    let (stream, _task) = fake.connect();
+    let (r, w) = tokio::io::split(stream);
+    let (client, version) =
+        Client::start(r, w, async {}, std::time::Duration::from_millis(100), &c).await.unwrap();
+    let mut remote =
+        Remote::new(client, &version, Quirks::of(b"SSH-2.0-OpenSSH_9.9"), 0o750, &c).await.unwrap();
+    fake.rule(Rule::new(FXP_REMOVE, Action::Delay(std::time::Duration::from_millis(300))).once());
+    let before = fake.requests(FXP_LSTAT).len();
+    assert_eq!(err(remote.remove_file(b"d", &c).await).0, ErrorName::Timeout);
+    assert_eq!(fake.requests(FXP_LSTAT).len(), before);
+}
+
+#[tokio::test]
 async fn remove_dir() {
     let fake = Fake::new();
     fake.dir("/home/u/empty");
@@ -751,6 +772,14 @@ async fn rename_replacing_with_posix_rename() {
         err(remote.rename(b"b", b"n", RenameMode::Replace, &c).await),
         named(ErrorName::NotFound, "/home/u/b: not found")
     );
+    // A target the server will not show: its answer, nothing renamed.
+    fake.rule(Rule::new(FXP_LSTAT, Action::Status(FX_PERMISSION_DENIED, "no")).on("/home/u/x").once());
+    assert_eq!(
+        err(remote.rename(b"n", b"x", RenameMode::Replace, &c).await),
+        named(ErrorName::PermissionDenied, "/home/u/x: permission denied")
+    );
+    assert_eq!(fake.data("/home/u/n"), Some(b"A".to_vec()));
+    assert_eq!(fake.node("/home/u/x"), None);
 }
 
 #[tokio::test]
@@ -1097,6 +1126,12 @@ async fn copy_refusals() {
         err(remote.copy(b"f", b"no/x", false, RenameMode::Replace, &c).await),
         named(ErrorName::NotFound, "/home/u/no/x: not found")
     );
+    fake.rule(Rule::new(FXP_LSTAT, Action::Status(FX_PERMISSION_DENIED, "no")).on("/home/u/y").once());
+    assert_eq!(
+        err(remote.copy(b"f", b"y", false, RenameMode::Replace, &c).await),
+        named(ErrorName::PermissionDenied, "/home/u/y: permission denied")
+    );
+    assert_eq!(fake.node("/home/u/y"), None);
     assert!(fake.requests(FXP_EXTENDED).iter().all(|l| l.ext != "copy-data"));
     no_open_handles(&fake).await;
 

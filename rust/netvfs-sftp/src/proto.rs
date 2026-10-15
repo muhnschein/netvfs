@@ -566,7 +566,12 @@ mod tests {
             Err(WireError("too many names in one reply"))
         );
         // A count larger than what follows is a short packet, not an allocation.
-        decode_reply(&body(FXP_NAME, 6, &[&be(MAX_NAMES)])).unwrap_err();
+        let short = decode_reply(&body(FXP_NAME, 6, &[&be(MAX_NAMES)])).unwrap_err();
+        assert_ne!(short, WireError("too many names in one reply"));
+        // At the cap: read.
+        let full: Vec<u8> = (0..MAX_NAMES).flat_map(|_| two.clone()).collect();
+        let r = decode_reply(&body(FXP_NAME, 6, &[&be(MAX_NAMES), &full])).unwrap();
+        assert!(matches!(r.1, Reply::Name(n) if n.len() == usize::try_from(MAX_NAMES).unwrap()));
         let long = vec![b'a'; MAX_NAME + 1];
         let entry = [s(&long), s(b""), be(0)].concat();
         assert_eq!(decode_reply(&body(FXP_NAME, 6, &[&be(1), &entry])), Err(WireError("a name is too long")));

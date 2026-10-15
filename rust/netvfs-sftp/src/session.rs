@@ -97,7 +97,8 @@ impl Shared {
 
 /// The russh handler of a [`Session`]: records the host key (the caller compares it with
 /// the pin, S-7), the banner and how the session ended; refuses every
-/// channel the server wants to open.
+/// channel the server wants to open (dropping the reply refuses it,
+/// administratively prohibited).
 #[derive(Debug)]
 pub struct Recorder {
     seen: Shared,
@@ -162,7 +163,7 @@ impl client::Handler for Recorder {
         _: &mut client::Session,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send {
         ready({
-            refuse(reply);
+            drop(reply);
             Ok(())
         })
     }
@@ -174,7 +175,7 @@ impl client::Handler for Recorder {
         _: &mut client::Session,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send {
         ready({
-            refuse(reply);
+            drop(reply);
             Ok(())
         })
     }
@@ -188,7 +189,7 @@ impl client::Handler for Recorder {
         _: &mut client::Session,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send {
         ready({
-            refuse(reply);
+            drop(reply);
             Ok(())
         })
     }
@@ -204,7 +205,7 @@ impl client::Handler for Recorder {
         _: &mut client::Session,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send {
         ready({
-            refuse(reply);
+            drop(reply);
             Ok(())
         })
     }
@@ -217,7 +218,7 @@ impl client::Handler for Recorder {
         _: &mut client::Session,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send {
         ready({
-            refuse(reply);
+            drop(reply);
             Ok(())
         })
     }
@@ -233,7 +234,7 @@ impl client::Handler for Recorder {
         _: &mut client::Session,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send {
         ready({
-            refuse(reply);
+            drop(reply);
             Ok(())
         })
     }
@@ -246,15 +247,10 @@ impl client::Handler for Recorder {
         _: &mut client::Session,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send {
         ready({
-            refuse(reply);
+            drop(reply);
             Ok(())
         })
     }
-}
-
-/// Dropping the reply refuses the channel (administratively prohibited).
-fn refuse(reply: ChannelOpenHandle) {
-    drop(reply);
 }
 
 /// Ends a [`Cuttable`] stream: its reads and writes fail from then on,

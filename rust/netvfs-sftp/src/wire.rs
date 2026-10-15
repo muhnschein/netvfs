@@ -14,12 +14,6 @@ pub const MAX_PACKET: usize = 256 * 1024 + 1024;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct WireError(pub &'static str);
 
-impl fmt::Display for WireError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.0)
-    }
-}
-
 /// A cursor over a received packet.
 #[derive(Debug, Clone)]
 pub struct Reader<'a> {
@@ -243,6 +237,8 @@ mod tests {
 
     #[test]
     fn packets_over_the_cap_are_refused() {
+        // OpenSSH's 256 KiB and 1 KiB for the header.
+        assert_eq!(MAX_PACKET, 263_168);
         // Header 9 bytes + string 4 + data: exactly MAX_PACKET body is fine.
         let fits = vec![0; MAX_PACKET - 4 - 4 - 1];
         let p = Packet::request(6).string(&fits).finish(1).unwrap();

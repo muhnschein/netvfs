@@ -51,6 +51,13 @@ async fn the_identity_is_the_host_key() {
     assert_eq!(session.banner(), b"SSH-2.0-OpenSSH_9.6");
     assert!(!session.is_closed());
     assert_eq!(session.end(), None);
+    let printed = format!("{session:?}");
+    assert!(
+        printed.starts_with(r#"Session { identity: ServerIdentity { algorithm: "ssh-ed25519""#),
+        "{printed}"
+    );
+    assert!(printed.contains(ED25519_FINGERPRINT), "{printed}");
+    assert!(printed.ends_with(", closed: false, .. }"), "{printed}");
     // Nothing was sent for signing in.
     assert_eq!(server.take_log(), Vec::<String>::new());
     session.close().await;
@@ -105,7 +112,11 @@ async fn no_common_algorithm_is_a_security_policy_failure() {
             let (socket, _) = listener.accept().await.unwrap();
             drop(russh::server::run_stream(config, socket, NoAuth).await);
         });
-        let e = connect(&target(addr), &CancelToken::new()).await.unwrap_err();
+        // With a pin of a type the server lacks, too: the key exchange
+        // fails first, and only a host key mismatch is tried again (the
+        // listener takes one connection).
+        let t = if kind == "kex" { pinned(addr, "ecdsa-sha2-nistp256") } else { target(addr) };
+        let e = connect(&t, &CancelToken::new()).await.unwrap_err();
         assert_eq!(e.name, ErrorName::SecurityPolicy, "{e:?}");
         let offered = if kind == "kex" { "diffie-hellman-group14-sha256" } else { "aes256-ctr" };
         assert_eq!(
@@ -227,6 +238,31 @@ async fn a_dropped_connect_leaves_nothing_running() {
 }
 
 #[tokio::test]
+async fn a_handshake_stalled_after_the_version_lines_leaves_nothing_running() {
+    // The server's version line, then nothing: russh's session task holds
+    // the stream by then.
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        socket
+            .write_all(
+                b"SSH-2.0-Stalled
+",
+            )
+            .await
+            .unwrap();
+        let mut sink = Vec::new();
+        socket.read_to_end(&mut sink).await
+    });
+    let t = Target { connect_timeout: Duration::from_millis(300), ..target(addr) };
+    assert_eq!(connect(&t, &CancelToken::new()).await.unwrap_err().name, ErrorName::Timeout);
+    // The client end closed.
+    let read = tokio::time::timeout(Duration::from_secs(5), server).await.expect("still open").unwrap();
+    read.unwrap();
+}
+
+#[tokio::test]
 async fn dropping_or_closing_a_session_closes_the_connection() {
     let server = Server::start(Script::password()).await;
     let (session, proxy) = through_proxy(&server).await;
@@ -235,6 +271,15 @@ async fn dropping_or_closing_a_session_closes_the_connection() {
     let (session, proxy) = through_proxy(&server).await;
     session.close().await;
     assert!(proxy.all_closed().await);
+    // Also while its SFTP channel is still held, which keeps russh's
+    // session task going.
+    let server = Server::start(open_script()).await;
+    let (mut session, proxy) = through_proxy(&server).await;
+    assert!(session.handle().authenticate_none("u").await.unwrap().success());
+    let channel = session.open_sftp(Duration::from_secs(5), &CancelToken::new()).await.unwrap();
+    drop(session);
+    assert!(proxy.all_closed().await);
+    drop(channel);
 }
 
 #[tokio::test]
@@ -399,6 +444,19 @@ fn handshake_failures() {
 }
 
 #[tokio::test]
+async fn failed_calls_on_a_session_without_an_end() {
+    let server = Server::start(Script::password()).await;
+    let session = connect(&target(server.addr), &CancelToken::new()).await.unwrap();
+    assert_eq!(session.end(), None);
+    for e in [russh::Error::SendError, russh::Error::RecvError, russh::Error::Disconnect, russh::Error::HUP] {
+        let s = session.failure(&e);
+        assert_eq!((s.name, s.detail), (ErrorName::ConnectionLost, e.to_string()));
+    }
+    let s = session.failure(&russh::Error::WrongServerSig);
+    assert_eq!((s.name, s.message.as_str()), (ErrorName::ProtocolError, "The SSH session failed"));
+}
+
+#[tokio::test]
 async fn a_cut_stream_fails_waiting_reads_and_writes() {
     let (a, mut b) = tokio::io::duplex(16);
     let (mut a, cut) = Cuttable::new(a);
@@ -425,6 +483,19 @@ async fn a_cut_stream_fails_waiting_reads_and_writes() {
     cut.cut();
     let written = tokio::time::timeout(Duration::from_secs(5), writer).await.unwrap().unwrap();
     assert_eq!(written, Err(io::ErrorKind::ConnectionAborted));
+}
+
+#[tokio::test]
+async fn an_uncut_stream_passes_the_shutdown_on() {
+    let (a, mut b) = tokio::io::duplex(16);
+    let (mut a, _cut) = Cuttable::new(a);
+    a.write_all(b"hi").await.unwrap();
+    a.shutdown().await.unwrap();
+    // The end of the stream, while `a` is still there.
+    let mut all = Vec::new();
+    tokio::time::timeout(Duration::from_secs(5), b.read_to_end(&mut all)).await.unwrap().unwrap();
+    assert_eq!(all, b"hi");
+    drop(a);
 }
 
 #[tokio::test]

@@ -557,7 +557,9 @@ impl ReadHandle for SftpRead {
         }
         while position < end {
             cancel.check()?;
-            let hinted = self.hint.0 <= end && self.hint.1 > position;
+            // A hint that starts by the end of this read carries it on to
+            // the hint's end (one that ends before adds nothing).
+            let hinted = self.hint.0 <= end;
             let wanted = end.saturating_add(self.ahead).max(if hinted { self.hint.1 } else { end });
             // Nothing is read ahead beyond the size the file had at open.
             let known = self.size.map_or(u64::MAX, |s| s.max(end));

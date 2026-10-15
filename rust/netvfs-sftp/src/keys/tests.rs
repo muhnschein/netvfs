@@ -169,21 +169,28 @@ const TOO_COSTLY: &str =
 /// `rounds`: the field after the kdf name and the salt, a fixed-width
 /// `uint32`, so nothing else moves.
 fn with_bcrypt_rounds(file: &str, rounds: u32) -> Vec<u8> {
+    with_openssh_blob(file, |blob| {
+        let plus = |a: usize, b: usize| a.checked_add(b).unwrap();
+        let kdf = plus(blob.windows(6).position(|w| w == b"bcrypt").unwrap(), 6);
+        // uint32 length of the options, then the salt (uint32 length + bytes).
+        let salt_len = u32::from_be_bytes(blob[plus(kdf, 4)..plus(kdf, 8)].try_into().unwrap());
+        let at = plus(plus(kdf, 8), usize::try_from(salt_len).unwrap());
+        let field = at..plus(at, 4);
+        assert_eq!(
+            u32::from_be_bytes(blob[field.clone()].try_into().unwrap()),
+            24,
+            "ssh-keygen's default rounds"
+        );
+        blob[field].copy_from_slice(&rounds.to_be_bytes());
+    })
+}
+
+/// `file` (an OpenSSH key) with its binary form changed by `change`.
+fn with_openssh_blob(file: &str, change: impl FnOnce(&mut Vec<u8>)) -> Vec<u8> {
     let text = String::from_utf8(fixture(file)).unwrap();
     let body: String = text.lines().filter(|l| !l.starts_with("-----")).collect();
     let mut blob = BASE64.decode(body.as_bytes()).unwrap();
-    let plus = |a: usize, b: usize| a.checked_add(b).unwrap();
-    let kdf = plus(blob.windows(6).position(|w| w == b"bcrypt").unwrap(), 6);
-    // uint32 length of the options, then the salt (uint32 length + bytes).
-    let salt_len = u32::from_be_bytes(blob[plus(kdf, 4)..plus(kdf, 8)].try_into().unwrap());
-    let at = plus(plus(kdf, 8), usize::try_from(salt_len).unwrap());
-    let field = at..plus(at, 4);
-    assert_eq!(
-        u32::from_be_bytes(blob[field.clone()].try_into().unwrap()),
-        24,
-        "ssh-keygen's default rounds"
-    );
-    blob[field].copy_from_slice(&rounds.to_be_bytes());
+    change(&mut blob);
     let encoded = BASE64.encode(&blob);
     let lines: Vec<&str> = encoded.as_bytes().chunks(70).map(|c| std::str::from_utf8(c).unwrap()).collect();
     format!("{OPENSSH_BEGIN}\n{}\n-----END OPENSSH PRIVATE KEY-----\n", lines.join("\n")).into_bytes()
@@ -259,6 +266,14 @@ fn refused_keys_name_the_fix() {
         ("rsa-pem-legacyenc", PASSPHRASE, unsupported(RSA)),
         ("dsa-openssh", b"", unsupported(DSA)),
         ("dsa-pem-openssl", b"", unsupported(DSA)),
+        ("dsa-pem-traditional", b"", unsupported(DSA)),
+        (
+            "ed448-pkcs8-openssl",
+            b"",
+            unsupported(
+                "Key type 1.3.101.113 is not supported; generate a new key, or use an Ed25519 or ECDSA key",
+            ),
+        ),
         ("ecdsa256-pem-legacyenc", b"", unsupported(LEGACY)),
         ("ecdsa256-pem-legacyenc", PASSPHRASE, unsupported(LEGACY)),
         ("putty.ppk", b"", unsupported(NOT_A_KEY)),
@@ -303,6 +318,20 @@ fn files_that_are_no_keys() {
     assert_eq!(refusal(import(&large, b"")), unsupported(NOT_A_KEY));
     large.truncate(MAX_KEY_FILE);
     import(&large, b"").unwrap();
+}
+
+#[test]
+fn ecdsa_keys_whose_curve_is_not_their_points_are_unusable() {
+    // The curve names (length-prefixed) in the public key and the private
+    // section; the point stays a P-384 one.
+    let p256 = with_openssh_blob("ecdsa384-openssh", |blob| {
+        let (from, to) = (b"\0\0\0\x08nistp384", b"\0\0\0\x08nistp256");
+        assert_eq!(blob.windows(from.len()).filter(|w| *w == from).count(), 2);
+        while let Some(at) = blob.windows(from.len()).position(|w| w == from) {
+            blob[at..at.checked_add(from.len()).unwrap()].copy_from_slice(to);
+        }
+    });
+    assert_eq!(refusal(import(&p256, b"")), unsupported(UNUSABLE));
 }
 
 #[test]

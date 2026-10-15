@@ -765,4 +765,20 @@ async fn sessions_and_lost_connections() {
     tokio::time::sleep(Duration::from_millis(500)).await;
     assert_eq!(sftp.keep_alive(&c()).await.unwrap_err().name, ErrorName::ConnectionLost);
     assert_eq!(sftp.stat(b"", true, &c()).await.unwrap_err().name, ErrorName::ConnectionLost);
+
+    // A session that ends says so (DISCONNECT, as ssh does) before the
+    // connection closes.
+    let line = "Received disconnect from";
+    let before = s.log_count("o96", "default", line);
+    let mut sftp = password_session(&s, "o96", "default").await;
+    sftp.disconnect().await;
+    let mut seen = before;
+    for _ in 0..50 {
+        seen = s.log_count("o96", "default", line);
+        if seen > before {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert!(seen > before, "the server saw no DISCONNECT");
 }

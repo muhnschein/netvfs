@@ -221,10 +221,9 @@ pub fn read_private_key(file: &[u8], passphrase: &[u8]) -> Result<PrivateKey, St
     let text = std::str::from_utf8(file).map_err(|_not_text| not_a_key())?.trim();
     let key = match armour(text)? {
         Armour::OpenSsh => {
-            let key = PrivateKey::from_openssh(text).map_err(|e| match e {
-                russh::keys::ssh_key::Error::AlgorithmUnknown => type_refused("(unknown)"),
-                _ => unusable(),
-            })?;
+            // An unknown key type of the `name@domain` form decodes and is
+            // refused by name below.
+            let key = PrivateKey::from_openssh(text).map_err(|_undecodable| unusable())?;
             // The public half is not encrypted: refused before the
             // passphrase is asked for.
             check_algorithm(&key.algorithm())?;

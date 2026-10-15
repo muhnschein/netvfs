@@ -59,11 +59,20 @@ struct Bytes {
     /// Reading past this offset fails.
     fail_at: Option<usize>,
     size: Option<u64>,
+    /// Reads that found the end.
+    ends: usize,
 }
 
 impl Bytes {
     fn new(data: &[u8]) -> Self {
-        Self { data: data.to_vec(), at: 0, step: usize::MAX, fail_at: None, size: Some(data.len() as u64) }
+        Self {
+            data: data.to_vec(),
+            at: 0,
+            step: usize::MAX,
+            fail_at: None,
+            size: Some(data.len() as u64),
+            ends: 0,
+        }
     }
 }
 
@@ -75,6 +84,9 @@ impl Source for Bytes {
         let n = buf.len().min(self.step).min(self.data.len() - self.at);
         buf[..n].copy_from_slice(&self.data[self.at..self.at + n]);
         self.at += n;
+        if n == 0 {
+            self.ends += 1;
+        }
         Ok(n)
     }
 
@@ -160,6 +172,8 @@ async fn upload_reads_the_source_until_its_end() {
     assert_eq!(fake.data("/home/u/new"), Some(b"abcdefghij".to_vec()));
     assert_eq!(progress.updates, [(4, None), (8, None), (10, None)]);
     assert_eq!(fake.requests(FXP_WRITE).len(), 3);
+    // A short block is the end: the source is not read again.
+    assert_eq!(source.ends, 1);
     // An empty source makes an empty file.
     upload(&remote, b"/home/u/empty", &create_new(), &mut Bytes::new(b"")).await.unwrap();
     assert_eq!(fake.data("/home/u/empty"), Some(Vec::new()));
@@ -186,6 +200,12 @@ async fn upload_dispositions() {
     upload(&remote, b"/home/u/f", &with(Disposition::Truncate), &mut Bytes::new(b"new")).await.unwrap();
     assert_eq!(fake.data("/home/u/f"), Some(b"new".to_vec()));
     assert_eq!(fake.requests(FXP_OPEN).last().unwrap().pflags, Some(FXF_WRITE | FXF_CREAT | FXF_TRUNC));
+    // An existing file the server will not open: what the server said.
+    fake.rule(Rule::new(FXP_OPEN, Action::Status(FX_PERMISSION_DENIED, "no")).once());
+    assert_eq!(
+        err(upload(&remote, b"/home/u/f", &with(Disposition::Truncate), &mut Bytes::new(b"x")).await),
+        named(ErrorName::PermissionDenied, "/home/u/f: permission denied")
+    );
 
     let resume =
         WriteOptions { disposition: Disposition::Resume, resume_offset: 3, ..WriteOptions::default() };
@@ -428,6 +448,24 @@ async fn download_keeps_sixteen_reads_in_flight() {
 }
 
 #[tokio::test]
+async fn download_finds_the_end_once_the_rest_has_come() {
+    let (fake, remote) = setup().await;
+    fake.file("/home/u/f", b"01234567");
+    // The first READ is held back; the READ past the size waits for it.
+    fake.rule(Rule::new(FXP_READ, Action::Delay(Duration::from_millis(200))).once());
+    let watcher = fake.clone();
+    let seen = tokio::spawn(async move {
+        eventually(|| watcher.requests(FXP_READ).len() >= 2).await;
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        watcher.requests(FXP_READ).len()
+    });
+    let (data, _) = download(&remote, b"/home/u/f", 0, None).await.unwrap();
+    assert_eq!(data, b"01234567");
+    assert_eq!(seen.await.unwrap(), 2);
+    assert_eq!(reads(&fake), [(0, 4), (4, 4), (8, 4)]);
+}
+
+#[tokio::test]
 async fn download_survives_short_reads() {
     let (fake, remote) = setup().await;
     fake.file("/home/u/f", &digits(50));
@@ -626,6 +664,91 @@ async fn read_handle_keeps_what_a_reply_brought_beyond_the_read() {
 }
 
 #[tokio::test]
+async fn read_handle_hands_out_kept_data_in_parts() {
+    let (fake, remote) = setup().await;
+    let content = digits(40);
+    fake.file("/home/u/f", &content);
+    let mut h = reader(&fake, &remote, b"/home/u/f", 8).await;
+    assert_eq!(read(&mut h, 0, 3).await.unwrap(), content[..3]);
+    assert_eq!(read(&mut h, 3, 3).await.unwrap(), content[3..6]);
+    reads_become(&fake, &[(0, 3), (3, 8), (11, 3)]).await;
+    // 6..11 came with the second reply: two reads take it, no request.
+    assert_eq!(read(&mut h, 6, 2).await.unwrap(), content[6..8]);
+    assert_eq!(read(&mut h, 8, 3).await.unwrap(), content[8..11]);
+    tokio::time::sleep(Duration::from_millis(20)).await;
+    assert_eq!(reads(&fake), [(0, 3), (3, 8), (11, 3)]);
+}
+
+#[tokio::test]
+async fn read_ahead_hints_and_the_kept_data() {
+    let (fake, remote) = setup().await;
+    let content = digits(40);
+    fake.file("/home/u/f", &content);
+    // A hint of one chunk, then a read of its start: 3..8 is kept and
+    // nothing is on its way.
+    let kept = || async {
+        let mut h = reader(&fake, &remote, b"/home/u/f", 8).await;
+        h.read_ahead(0, 8);
+        assert_eq!(read(&mut h, 0, 3).await.unwrap(), content[..3]);
+        assert_eq!(reads(&fake), [(0, 8)]);
+        h
+    };
+    // Before the kept data: its range is asked for.
+    let mut h = kept().await;
+    h.read_ahead(1, 4);
+    reads_become(&fake, &[(0, 8), (1, 4)]).await;
+    assert_eq!(read(&mut h, 1, 4).await.unwrap(), content[1..5]);
+    // Where it ends: what follows is asked for, the kept data stays.
+    let mut h = kept().await;
+    h.read_ahead(8, 4);
+    reads_become(&fake, &[(0, 8), (8, 4)]).await;
+    assert_eq!(read(&mut h, 3, 9).await.unwrap(), content[3..12]);
+    reads_become(&fake, &[(0, 8), (8, 4), (12, 8)]).await;
+    // At its start: what follows it is asked for.
+    let mut h = kept().await;
+    h.read_ahead(3, 9);
+    reads_become(&fake, &[(0, 8), (8, 4)]).await;
+    assert_eq!(read(&mut h, 3, 9).await.unwrap(), content[3..12]);
+    reads_become(&fake, &[(0, 8), (8, 4), (12, 8)]).await;
+    // Beyond it: from the hint on, not from the end of the kept data.
+    let mut h = kept().await;
+    h.read_ahead(20, 4);
+    reads_become(&fake, &[(0, 8), (20, 4)]).await;
+    tokio::time::sleep(Duration::from_millis(20)).await;
+    assert_eq!(reads(&fake), [(0, 8), (20, 4)]);
+    assert_eq!(read(&mut h, 20, 4).await.unwrap(), content[20..24]);
+}
+
+#[tokio::test]
+async fn reads_the_kept_data_answers_leave_the_requests_on_their_way() {
+    let (fake, remote) = setup().await;
+    let content = digits(40);
+    fake.file("/home/u/f", &content);
+    let mut h = reader(&fake, &remote, b"/home/u/f", 8).await;
+    h.read_ahead(0, 16);
+    reads_become(&fake, &[(0, 8), (8, 8)]).await;
+    assert_eq!(read(&mut h, 0, 3).await.unwrap(), content[..3]);
+    // 3..8 kept, 8..16 on its way.
+    assert_eq!(read(&mut h, 3, 2).await.unwrap(), content[3..5]);
+    assert_eq!(read(&mut h, 5, 3).await.unwrap(), content[5..8]);
+    assert_eq!(read(&mut h, 8, 8).await.unwrap(), content[8..16]);
+    assert_eq!(reads(&fake).iter().filter(|&&(offset, _)| offset == 8).count(), 1, "{:?}", reads(&fake));
+}
+
+#[tokio::test]
+async fn a_hint_beyond_a_read_does_not_stretch_it() {
+    let (fake, remote) = setup().await;
+    let content = digits(40);
+    fake.file("/home/u/f", &content);
+    let mut h = reader(&fake, &remote, b"/home/u/f", 8).await;
+    h.read_ahead(20, 4);
+    reads_become(&fake, &[(20, 4)]).await;
+    assert_eq!(read(&mut h, 0, 3).await.unwrap(), content[..3]);
+    tokio::time::sleep(Duration::from_millis(20)).await;
+    assert_eq!(reads(&fake), [(20, 4), (0, 3)]);
+}
+
+#[tokio::test]
 async fn read_handle_at_the_end() {
     let (fake, remote) = setup().await;
     fake.file("/home/u/f", &digits(10));
@@ -675,6 +798,8 @@ async fn read_ahead_hints() {
     eventually(|| fake.requests(FXP_READ).len() == 6).await;
     // A hint elsewhere while requests are on their way is ignored.
     h.read_ahead(80, 8);
+    // So is one that starts before them, also when it reaches beyond.
+    h.read_ahead(30, 20);
     tokio::time::sleep(Duration::from_millis(20)).await;
     assert_eq!(read_offsets(&fake), [20, 24, 28, 32, 36, 40]);
     h.read_ahead(0, 0);
@@ -686,6 +811,13 @@ async fn read_ahead_hints() {
     eventually(|| fake.requests(FXP_READ).len() == 4).await;
     assert_eq!(read_offsets(&fake), [60, 64, 68, 72]);
     assert_eq!(read(&mut h, 60, 16).await.unwrap(), content[60..76]);
+    // So does a longer hint from where they start.
+    let mut h = reader(&fake, &remote, b"/home/u/f", 4).await;
+    h.read_ahead(80, 8);
+    h.read_ahead(80, 16);
+    eventually(|| fake.requests(FXP_READ).len() == 4).await;
+    assert_eq!(read_offsets(&fake), [80, 84, 88, 92]);
+    assert_eq!(read(&mut h, 80, 16).await.unwrap(), content[80..96]);
     // A hint is capped at 4 MiB.
     let big = digits(5 << 20);
     fake.file("/home/u/big", &big);
