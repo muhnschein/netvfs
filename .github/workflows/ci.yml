@@ -203,7 +203,9 @@ jobs:
           Remove-SmbMapping -RemotePath \\127.0.0.1\netvfs -Force
       - name: Rust toolchain
         working-directory: rust
-        run: rustup show active-toolchain
+        run: |
+          rustup toolchain install
+          rustup show active-toolchain
       - name: netvfs-smb against the local share
         working-directory: rust
         run: cargo test --locked -p netvfs-smb --test windows -- --nocapture
