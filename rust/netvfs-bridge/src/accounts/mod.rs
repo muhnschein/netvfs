@@ -117,7 +117,7 @@ pub struct AccountLocation {
 /// What `files <id>` answers, ready for the secret lookup.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct FilesAccess {
-    /// `paramsForService(Files)`.
+    /// The account's parameters, for Files.
     pub params: ConnectionParams,
     /// The signond identity holding the secret.
     pub credentials_id: u32,

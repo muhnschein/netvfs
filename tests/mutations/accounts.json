@@ -45,7 +45,7 @@
     "name": "XA-4 files check also applies backup rules",
     "file": "src/core/servicepolicy.cpp",
     "search": "    if (service == Service::Backup)\n        return checkBackup(params, insecure);",
-    "replace": "    if (service == Service::Backup || params.flag(str(OptionKeys::AllowShell)))\n        return checkBackup(params, insecure);",
+    "replace": "    if (service == Service::Backup || params.flag(str(OptionKeys::AllowInsecure)))\n        return checkBackup(params, insecure);",
     "test": "dbus-run-session -- build/tests/unit/accounts/tst_accounts"
   },
   {
@@ -74,13 +74,6 @@
     "file": "src/core/servicepolicy.cpp",
     "search": "    if (const QString profile = params.option(str(OptionKeys::SecurityProfile)).trimmed(); !profile.isEmpty())",
     "replace": "    if (const QString profile = params.option(str(OptionKeys::SecurityProfile)).trimmed(); false)",
-    "test": "dbus-run-session -- build/tests/unit/accounts/tst_accounts"
-  },
-  {
-    "name": "S-3 allow_shell kept for backup",
-    "file": "src/core/servicepolicy.cpp",
-    "search": "        result.options.remove(str(OptionKeys::AllowShell));",
-    "replace": "        Q_UNUSED(service)",
     "test": "dbus-run-session -- build/tests/unit/accounts/tst_accounts"
   },
   {
@@ -123,13 +116,6 @@
     "file": "src/core/accountsession.cpp",
     "search": "    if (const Result r = checkServicePolicy(m_config.params, service); !r.ok()) {",
     "replace": "    if (const Result r = checkServicePolicy(m_config.params, service); false) {",
-    "test": "dbus-run-session -- build/tests/unit/accounts/tst_accounts"
-  },
-  {
-    "name": "XA-4 session hands out unfiltered params",
-    "file": "src/core/accountsession.cpp",
-    "search": "    m_config.params = paramsForService(m_config.params, service);",
-    "replace": "",
     "test": "dbus-run-session -- build/tests/unit/accounts/tst_accounts"
   },
   {

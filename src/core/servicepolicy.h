@@ -28,7 +28,6 @@ NETVFS_EXPORT extern const char Share[];            // smb; empty: server mode (
 NETVFS_EXPORT extern const char Shares[];           // smb: string list of saved shares (XM-3)
 NETVFS_EXPORT extern const char ShowAdminShares[];  // smb (XM-7)
 NETVFS_EXPORT extern const char AllowInsecure[];    // consent to an unprotected or weakened transport
-NETVFS_EXPORT extern const char AllowShell[];       // sftp: exec channel (XS-9), never for backups
 } // namespace OptionKeys
 
 // SMB security profiles (XM-1).
@@ -49,7 +48,7 @@ NETVFS_EXPORT QString securityProfile(const ConnectionParams &params);
 NETVFS_EXPORT bool isInsecureConfiguration(const ConnectionParams &params);
 
 // SPEC-v2 XA-4, the "allowed for service" column of XM-1 (amends SEC-2, M-4,
-// M-8, S-3 as in SPEC-v2-review 2.1, 2.5, 2.9):
+// M-8 as in SPEC-v2-review 2.1, 2.9):
 //
 //  | Configuration                                | Backup | Files                  |
 //  |----------------------------------------------|--------|------------------------|
@@ -63,10 +62,6 @@ NETVFS_EXPORT bool isInsecureConfiguration(const ConnectionParams &params);
 //
 // A refused configuration is SecurityPolicy with a message naming the reason.
 NETVFS_EXPORT Result checkServicePolicy(const ConnectionParams &params, Service service);
-
-// The parameters a service gets: for Backup, allow_shell is removed (S-3 as
-// amended: the exec channel is never used for backups).
-NETVFS_EXPORT ConnectionParams paramsForService(const ConnectionParams &params, Service service);
 
 // SPEC-v2 XA-7 (and SPEC-v2-review 2.15): accounts that legitimately have no
 // stored secret: auth_mode=interactive (the person answers the prompts) and

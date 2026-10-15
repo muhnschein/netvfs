@@ -8,7 +8,6 @@
 #include "probe.h"
 #include "prompter.h"
 #include "secure.h"
-#include "shellexec.h"
 #include "sshkeys.h"
 #include "types.h"
 
@@ -107,22 +106,6 @@ public:
     void cancel() override {}
     void resetCancel() override {}
     void disconnect() override {}
-};
-
-// MinimalBackend with the ShellExec interface (XS-9).
-class ShellBackend : public MinimalBackend, public ShellExec
-{
-public:
-    bool reported = false;
-    Capabilities capabilities() const override
-    {
-        Capabilities caps;
-        if (reported)
-            caps.flags << Capability::ShellExec;
-        return caps;
-    }
-    Result exec(const QStringList &, const ExecOptions &, ExecResult *) override { return Result(); }
-    Result find(const QString &, const QString &, int, QStringList *) override { return Result(); }
 };
 
 } // namespace
@@ -932,24 +915,6 @@ private slots:
         QVERIFY(prompter.answer(QString(), QString(), { AuthPrompt() }, &answers));
         answerer.join();
         QCOMPARE(answers, QVector<QByteArray>({ QByteArray("ok") }));
-    }
-
-    void shellExecOf()
-    {
-        // XS-9: the interface only when the capability is reported.
-        MinimalBackend plain;
-        QVERIFY(!ShellExec::of(&plain));
-        QVERIFY(!ShellExec::of(nullptr));
-        ShellBackend shell;
-        QVERIFY(!ShellExec::of(&shell));
-        shell.reported = true;
-        QCOMPARE(ShellExec::of(&shell), static_cast<ShellExec *>(&shell));
-        ExecOptions options;
-        QCOMPARE(options.maxOutput, qint64(1) << 20);
-        QCOMPARE(options.timeoutMs, -1);
-        const ExecResult result;
-        QCOMPARE(result.exitStatus, -1);
-        QVERIFY(!result.truncated);
     }
 };
 

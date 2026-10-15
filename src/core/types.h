@@ -66,7 +66,6 @@ enum class Capability : quint32 {
     SpaceInfo, Checksums,
     CaseInsensitive, WindowsNames,       // name rules of Paths::checkWindowsPath apply
     ShareEnumeration,                    // SMB server mode can list shares
-    ShellExec,                           // XS-9
     ETags
 };
 

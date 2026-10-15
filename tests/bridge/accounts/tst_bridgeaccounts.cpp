@@ -486,7 +486,7 @@ void tst_BridgeAccounts::goldenAnswers()
     QVERIFY(legacyAllowed > 0);
     const int sftp = listedAccount(
         QStringLiteral("sftp"), globals(QStringLiteral("ssh.example"), { { QStringLiteral("netvfs/sftp/auth_mode"), QStringLiteral("interactive") },
-                                                                      { QStringLiteral("netvfs/sftp/allow_shell"), true },
+                                                                      { QStringLiteral("netvfs/sftp/flag"), true },
                                                                       { QStringLiteral("netvfs/port"), qint64(22) } }),
         QVariantMap(), 12);
     QVERIFY(sftp > 0);

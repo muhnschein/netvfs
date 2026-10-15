@@ -70,7 +70,7 @@ pub trait PinStore: Send + Sync {
 /// where signond keeps the secret.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct AccountAccess {
-    /// `paramsForService(Files)`.
+    /// The account's parameters, for Files.
     pub params: Params,
     /// The signond identity holding the secret.
     pub credentials_id: u32,

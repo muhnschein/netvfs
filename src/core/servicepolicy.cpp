@@ -11,7 +11,6 @@ const char Share[] = "share";
 const char Shares[] = "shares";
 const char ShowAdminShares[] = "show_admin_shares";
 const char AllowInsecure[] = "allow_insecure";
-const char AllowShell[] = "allow_shell";
 } // namespace OptionKeys
 
 namespace SecurityProfiles {
@@ -112,14 +111,6 @@ Result checkServicePolicy(const ConnectionParams &params, Service service)
     if (insecure && !params.flag(str(OptionKeys::AllowInsecure)))
         return refused(QStringLiteral("This connection security setting needs the account's consent (allow_insecure)"));
     return Result::success();
-}
-
-ConnectionParams paramsForService(const ConnectionParams &params, Service service)
-{
-    ConnectionParams result = params;
-    if (service == Service::Backup)
-        result.options.remove(str(OptionKeys::AllowShell));
-    return result;
 }
 
 bool secretOptional(const ConnectionParams &params)

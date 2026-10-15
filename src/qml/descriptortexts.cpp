@@ -68,10 +68,6 @@ const std::array<const char *, 34> TextIds = { {
     QT_TRID_NOOP("settings-accounts-netvfs-la-allow_insecure"),
     //% "Older SMB servers are not encrypted, and guest connections are not signed either: others on the network can read or change files. Never used for backups."
     QT_TRID_NOOP("settings-accounts-netvfs-la-allow_insecure_smb"),
-    //% "Allow commands on the server"
-    QT_TRID_NOOP("settings-accounts-netvfs-la-allow_shell"),
-    //% "Lets file browsing copy files on the server and compute checksums with shell commands. Never used for backups."
-    QT_TRID_NOOP("settings-accounts-netvfs-la-allow_shell_description"),
     //% "Inside the share, or /share/folder when no share is set."
     QT_TRID_NOOP("settings-accounts-netvfs-la-files_root_smb"),
     //% "Leave empty for the home folder."

@@ -44,7 +44,6 @@ const std::array<CapabilityName, 22> capabilityNames = { {
     { Capability::CaseInsensitive, "CaseInsensitive" },
     { Capability::WindowsNames, "WindowsNames" },
     { Capability::ShareEnumeration, "ShareEnumeration" },
-    { Capability::ShellExec, "ShellExec" },
     { Capability::ETags, "ETags" },
 } };
 } // namespace

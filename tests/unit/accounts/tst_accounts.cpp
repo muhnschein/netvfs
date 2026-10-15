@@ -381,7 +381,6 @@ private slots:
         QTest::newRow("sftp consent false") << "sftp" << with(QVariantMap(), consent, false) << true << true << "" << false;
         QTest::newRow("sftp interactive") << "sftp" << with(QVariantMap(), "auth_mode", "interactive")
                                           << false << true << "" << false;
-        QTest::newRow("sftp shell") << "sftp" << with(QVariantMap(), "allow_shell", true) << true << true << "" << false;
         QTest::newRow("sftp profile ignored") << "sftp" << with(QVariantMap(), profile, "guest") << true << true << "" << false;
         QTest::newRow("sftp consent") << "sftp" << with(QVariantMap(), consent, true) << false << true << "" << false;
     }
@@ -410,20 +409,6 @@ private slots:
             QCOMPARE(forFiles.error(), Error::SecurityPolicy);
         QCOMPARE(securityProfile(params), profile);
         QCOMPARE(isInsecureConfiguration(params), insecure);
-    }
-
-    void paramsPerService()
-    {
-        // S-3 as amended: the exec channel is never used for backups.
-        ConnectionParams params;
-        params.provider = QStringLiteral("sftp");
-        params.options.insert(QStringLiteral("allow_shell"), true);
-        params.options.insert(QStringLiteral("host_key"), QStringLiteral("ssh-ed25519 AAAA"));
-        const ConnectionParams backup = paramsForService(params, Service::Backup);
-        QVERIFY(!backup.options.contains(QStringLiteral("allow_shell")));
-        QCOMPARE(backup.option(QStringLiteral("host_key")), QStringLiteral("ssh-ed25519 AAAA"));
-        const ConnectionParams files = paramsForService(params, Service::Files);
-        QVERIFY(files.flag(QStringLiteral("allow_shell")));
     }
 
     // SPEC-v2 XA-7 and SPEC-v2-review 2.15.
@@ -505,7 +490,6 @@ private slots:
     {
         QVariantMap globals = sftpGlobals();
         globals.insert(QStringLiteral("netvfs/fake/allow_insecure"), true);
-        globals.insert(QStringLiteral("netvfs/fake/allow_shell"), true);
         const int id = fixture->createAccount(QStringLiteral("fake"), globals, QString(), 9);
 
         auto *refusedSecrets = new StaticSecretSource(Result(), Credentials(QString(), "pw"));
@@ -527,18 +511,18 @@ private slots:
         QVERIFY(!secrets->secretOptional());
         QCOMPARE(files.service(), Service::Files);
         QVERIFY(files.config().insecureAllowed);
-        QVERIFY(files.params().flag(QStringLiteral("allow_shell")));
+        QVERIFY(files.params().flag(QStringLiteral("allow_insecure")));
         QVERIFY(files.filesRoot().isEmpty());
 
-        // Backup on an allowed account: allow_shell is not handed out.
-        QVariantMap shell = sftpGlobals();
-        shell.insert(QStringLiteral("netvfs/fake/allow_shell"), true);
-        const int shellId = fixture->createAccount(QStringLiteral("fake"), shell);
+        // Backup on an allowed account gets the account's parameters.
+        QVariantMap pinned = sftpGlobals();
+        pinned.insert(QStringLiteral("netvfs/fake/host_key"), QStringLiteral("ssh-ed25519 BBBB"));
+        const int allowedId = fixture->createAccount(QStringLiteral("fake"), pinned);
         AccountSession backup(fixture->manager(), new StaticSecretSource(Result(), Credentials(QString(), "pw")));
         QSignalSpy backupReady(&backup, &AccountSession::ready);
-        backup.start(shellId, Service::Backup);
+        backup.start(allowedId, Service::Backup);
         QCOMPARE(backupReady.count(), 1);
-        QVERIFY(!backup.params().options.contains(QStringLiteral("allow_shell")));
+        QCOMPARE(backup.params().option(QStringLiteral("host_key")), QStringLiteral("ssh-ed25519 BBBB"));
         QCOMPARE(backup.service(), Service::Backup);
     }
 
