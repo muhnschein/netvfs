@@ -303,9 +303,9 @@ private slots:
         QVERIFY(BackendLoader::isAvailable(QStringLiteral("smb")));
     }
 
-    // M-T1, M-T8, M-11: strict Samba 4.19.5; dialect, cipher and signing as
-    // smbstatus reports them (AES-128-GCM: the first cipher offered);
-    // smbclient cross-check in both directions.
+    // M-T1, M-T8, M-11: strict Samba 4.19.5. Dialect, cipher and signing as
+    // smbstatus reports them (AES-128-GCM, the first cipher offered), and
+    // the smbclient cross-check in both directions.
     void strictServer()
     {
         const auto backend = newBackend();
