@@ -13,9 +13,10 @@
 #   NETVFS_SMB_CONFORMANCE_ONLY  1: run only the conformance suite
 #   NETVFS_SMB_RUST          0: skip the Rust tests (rust/netvfs-smb/tests/samba.rs)
 #   NETVFS_SMB_SERVERS_ONLY  1: start the servers and the proxy, run nothing,
-#                            and leave them running; the last lines printed are
-#                            their NETVFS_INTEROP_SMB_*=... settings (for
-#                            $GITHUB_ENV: cargo-mutants starts them once per shard)
+#                            and leave them running; the lines printed that
+#                            start with NETVFS_INTEROP_SMB_ are their settings
+#                            (for $GITHUB_ENV: cargo-mutants and the mutation
+#                            lists start them once per job)
 #   NETVFS_INTEROP_SMB_PREFIX  with the other settings of such a run: use those
 #                            servers instead of starting new ones, and leave them
 #                            running (docker rm -f "$NETVFS_INTEROP_SMB_PREFIX-..."
@@ -35,7 +36,7 @@ reuse=0
 keep=$reuse
 [ "${NETVFS_SMB_SERVERS_ONLY:-0}" != 1 ] || keep=1
 
-if [ $reuse = 1 ]; then
+if [ "$reuse" = 1 ]; then
     prefix=$NETVFS_INTEROP_SMB_PREFIX
     work=${NETVFS_INTEROP_SMB_WORK:?}
     password=${NETVFS_INTEROP_SMB_PASSWORD:?}
@@ -47,7 +48,7 @@ else
 fi
 
 cleanup() {
-    [ $keep = 0 ] || return 0
+    [ "$keep" = 0 ] || return 0
     ids=$(docker ps -aq --filter "name=^${prefix}-")
     [ -z "$ids" ] || docker rm -f $ids >/dev/null 2>&1 || true
     rm -rf "$work"
@@ -82,7 +83,7 @@ ready() {
     done
 }
 
-if [ $reuse = 0 ]; then
+if [ "$reuse" = 0 ]; then
     docker build -q -t "$image" "$here/server" >/dev/null
     docker build -q --build-arg BASE="$current_base" -t "$current_image" "$here/server" >/dev/null
     # M-T16: "small" is a 16 MiB tmpfs on the strict server.
@@ -119,10 +120,18 @@ strict=$(address strict)
 conf=$(address conf)
 proxy=$(address proxy)
 
-if [ "${NETVFS_SMB_SERVERS_ONLY:-0}" = 1 ]; then
+# The servers for rust/netvfs-smb/tests/samba.rs (and a later run of this
+# script): one address per server, the proxy, the password, as NAME=value.
+settings() {
     echo "NETVFS_INTEROP_SMB_PREFIX=$prefix"
     echo "NETVFS_INTEROP_SMB_WORK=$work"
     echo "NETVFS_INTEROP_SMB_PASSWORD=$password"
+    for s in $servers proxy; do
+        echo "NETVFS_INTEROP_SMB_$(echo "$s" | tr '[:lower:]' '[:upper:]')=$(address "$s")"
+    done
+}
+if [ "${NETVFS_SMB_SERVERS_ONLY:-0}" = 1 ]; then
+    settings
     exit 0
 fi
 
@@ -134,12 +143,8 @@ export UBSAN_OPTIONS="${UBSAN_OPTIONS:+$UBSAN_OPTIONS:}print_stacktrace=1:halt_o
 export NETVFS_BACKEND_PATH="$build/lib/netvfs/backends"
 export NETVFS_SMB_PREFIX="$prefix"
 export NETVFS_SMB_PASSWORD="$password"
-# rust/netvfs-smb/tests/samba.rs: the servers by name, the proxy, the password.
-export NETVFS_INTEROP_SMB_PREFIX="$prefix"
-export NETVFS_INTEROP_SMB_WORK="$work"
-export NETVFS_INTEROP_SMB_PASSWORD="$password"
-for s in $servers proxy; do
-    export "NETVFS_INTEROP_SMB_$(echo "$s" | tr '[:lower:]' '[:upper:]')=$(address "$s")"
+for setting in $(settings); do
+    export "${setting?}"
 done
 # SPEC 12.2, SPEC-v2 XC-CLI: the command-line tool end to end.
 cli() {
