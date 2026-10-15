@@ -15,6 +15,6 @@ LIBS += $$netvfsCoreLibs()
 include(cli.pri)
 SOURCES += main.cpp
 
-# SPEC-v2 XP-1: package netvfs-cli
+# SPEC-v2 XP-1: in the netvfs package
 target.path = /usr/bin
 INSTALLS += target

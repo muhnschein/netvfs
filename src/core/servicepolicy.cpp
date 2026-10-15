@@ -16,7 +16,6 @@ const char AllowInsecure[] = "allow_insecure";
 namespace SecurityProfiles {
 const char Strict[] = "strict";
 const char Signed[] = "signed";
-const char Legacy[] = "legacy";
 const char Guest[] = "guest";
 } // namespace SecurityProfiles
 
@@ -39,7 +38,7 @@ bool isSmb(const ConnectionParams &params)
 bool isKnownProfile(const QString &profile)
 {
     return profile == QLatin1String(SecurityProfiles::Strict) || profile == QLatin1String(SecurityProfiles::Signed)
-            || profile == QLatin1String(SecurityProfiles::Legacy) || profile == QLatin1String(SecurityProfiles::Guest);
+            || profile == QLatin1String(SecurityProfiles::Guest);
 }
 
 Result refused(const QString &reason)
@@ -94,11 +93,7 @@ QString securityProfile(const ConnectionParams &params)
 
 bool isInsecureConfiguration(const ConnectionParams &params)
 {
-    if (isSmb(params)) {
-        const QString profile = securityProfile(params);
-        return profile == QLatin1String(SecurityProfiles::Legacy) || profile == QLatin1String(SecurityProfiles::Guest);
-    }
-    return false;
+    return securityProfile(params) == QLatin1String(SecurityProfiles::Guest);
 }
 
 Result checkServicePolicy(const ConnectionParams &params, Service service)

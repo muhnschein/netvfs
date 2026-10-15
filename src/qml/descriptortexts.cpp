@@ -11,7 +11,7 @@
 namespace NetVfsUi {
 
 namespace {
-constexpr std::array<const char *, 32> TextIds = { {
+constexpr std::array<const char *, 31> TextIds = { {
     //% "Server"
     QT_TRID_NOOP("settings-accounts-netvfs-la-server"),
     //% "Server name or IP address"
@@ -56,8 +56,6 @@ constexpr std::array<const char *, 32> TextIds = { {
     QT_TRID_NOOP("settings-accounts-netvfs-me-profile_strict"),
     //% "Signed, encrypted when the server offers it (SMB 3)"
     QT_TRID_NOOP("settings-accounts-netvfs-me-profile_signed"),
-    //% "Signed, older servers (SMB 2)"
-    QT_TRID_NOOP("settings-accounts-netvfs-me-profile_legacy"),
     //% "Guest, without signing in"
     QT_TRID_NOOP("settings-accounts-netvfs-me-profile_guest"),
     //% "Show administrative shares"
@@ -66,7 +64,7 @@ constexpr std::array<const char *, 32> TextIds = { {
     QT_TRID_NOOP("settings-accounts-netvfs-la-show_admin_shares_description"),
     //% "Allow an insecure connection"
     QT_TRID_NOOP("settings-accounts-netvfs-la-allow_insecure"),
-    //% "Older SMB servers are not encrypted, and guest connections are not signed either: others on the network can read or change files. Never used for backups."
+    //% "Guest connections are neither signed nor encrypted: others on the network can read or change files. Never used for backups."
     QT_TRID_NOOP("settings-accounts-netvfs-la-allow_insecure_smb"),
     //% "Inside the share, or /share/folder when no share is set."
     QT_TRID_NOOP("settings-accounts-netvfs-la-files_root_smb"),

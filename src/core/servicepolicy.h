@@ -23,7 +23,7 @@ NETVFS_EXPORT bool serviceFromId(const QString &id, Service *service);
 namespace OptionKeys {
 NETVFS_EXPORT extern const char HostKey[];          // SSH host key pin (XC-16)
 NETVFS_EXPORT extern const char AuthMode[];         // password | publickey | interactive (sftp)
-NETVFS_EXPORT extern const char SecurityProfile[];  // smb: strict | signed | legacy | guest (XM-1)
+NETVFS_EXPORT extern const char SecurityProfile[];  // smb: strict | signed | guest (XM-1)
 NETVFS_EXPORT extern const char Share[];            // smb; empty: server mode (XM-2)
 NETVFS_EXPORT extern const char Shares[];           // smb: string list of saved shares (XM-3)
 NETVFS_EXPORT extern const char ShowAdminShares[];  // smb (XM-7)
@@ -34,7 +34,6 @@ NETVFS_EXPORT extern const char AllowInsecure[];    // consent to an unprotected
 namespace SecurityProfiles {
 NETVFS_EXPORT extern const char Strict[];
 NETVFS_EXPORT extern const char Signed[];
-NETVFS_EXPORT extern const char Legacy[];
 NETVFS_EXPORT extern const char Guest[];
 } // namespace SecurityProfiles
 
@@ -44,7 +43,7 @@ NETVFS_EXPORT extern const char Guest[];
 NETVFS_EXPORT QString securityProfile(const ConnectionParams &params);
 
 // A configuration whose transport is unprotected or weakened and so needs
-// the account's consent (allow_insecure=true): SMB profiles legacy and guest.
+// the account's consent (allow_insecure=true): the SMB profile guest.
 NETVFS_EXPORT bool isInsecureConfiguration(const ConnectionParams &params);
 
 // SPEC-v2 XA-4, the "allowed for service" column of XM-1 (amends SEC-2, M-4,
@@ -53,7 +52,7 @@ NETVFS_EXPORT bool isInsecureConfiguration(const ConnectionParams &params);
 //  | Configuration                                | Backup | Files                  |
 //  |----------------------------------------------|--------|------------------------|
 //  | smb strict, signed                           | yes    | yes                    |
-//  | smb legacy, guest                            | no     | with allow_insecure    |
+//  | smb guest                                    | no     | with allow_insecure    |
 //  | smb unknown profile                          | no     | no                     |
 //  | smb without a share (server mode)            | no     | yes                    |
 //  | allow_insecure=true (any provider)           | no     | yes                    |

@@ -238,7 +238,7 @@ pub fn adhoc_opts(opts: &Dict) -> Result<AdHocOpts, Fail> {
             .ok_or_else(|| Fail::args(&format!("Option \"{key}\" must be a short string")))?;
         match key.as_str() {
             "user" if !s.contains('\0') => out.user = Some(s),
-            "security_profile" if ["strict", "signed", "legacy", "guest"].contains(&s.as_str()) => {
+            "security_profile" if ["strict", "signed", "guest"].contains(&s.as_str()) => {
                 out.security_profile = Some(s);
             }
             "user" | "security_profile" => return Err(Fail::args("Invalid option value")),

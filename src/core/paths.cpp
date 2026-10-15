@@ -79,7 +79,7 @@ Result checkWindowsPath(const QString &normalizedPath)
 {
     for (const QString &component : components(normalizedPath)) {
         if (const QString problem = windowsComponentProblem(component); !problem.isEmpty())
-            return Result(Error::Internal, problem);
+            return Result(Error::InvalidName, problem);
     }
     return Result::success();
 }

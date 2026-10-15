@@ -49,17 +49,10 @@
     "test": "dbus-run-session -- build/tests/unit/accounts/tst_accounts"
   },
   {
-    "name": "XM-1 legacy profile counted as secure",
-    "file": "src/core/servicepolicy.cpp",
-    "search": "        return profile == QLatin1String(SecurityProfiles::Legacy) || profile == QLatin1String(SecurityProfiles::Guest);",
-    "replace": "        return profile == QLatin1String(SecurityProfiles::Guest);",
-    "test": "dbus-run-session -- build/tests/unit/accounts/tst_accounts"
-  },
-  {
     "name": "XM-1 guest profile counted as secure",
     "file": "src/core/servicepolicy.cpp",
-    "search": "QLatin1String(SecurityProfiles::Legacy) || profile == QLatin1String(SecurityProfiles::Guest);\n    }",
-    "replace": "QLatin1String(SecurityProfiles::Legacy);\n    }",
+    "search": "    return securityProfile(params) == QLatin1String(SecurityProfiles::Guest);\n}",
+    "replace": "    return false;\n}",
     "test": "dbus-run-session -- build/tests/unit/accounts/tst_accounts"
   },
   {

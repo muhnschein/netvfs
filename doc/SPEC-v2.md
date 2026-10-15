@@ -1,31 +1,19 @@
 # netvfs — SPEC, API v2 (file-browser extensions)
 
-Status: draft 2, against branch `foundations` at `f49242b` (PR #1), libssh pin
-`07430deb` (0.12.2), libsmb2 pin `e80c1a48`.
+This document extends [SPEC.md](SPEC.md), [SPEC-sftp.md](SPEC-sftp.md) and
+[SPEC-smb.md](SPEC-smb.md) for consumers other than backups: an interactive file
+browser, which is a sandboxed Harbour app (`lautta/SPEC.md`) and reaches netvfs through
+`netvfs-bridge` (§8a, `XB-*`), and the command line tool.
 
-Changes since draft 1: the file browser (`lautta/SPEC.md`) is now a sandboxed Harbour app
-that cannot link libnetvfs (Harbour does not allow accounts-qt5, libsignon-qt5 or netvfs
-itself). It reaches netvfs through a new component, `netvfs-bridge` (§8a, `XB-*`).
-Consequences: the bridge is the only file-browser-side reader of secrets (XA-6), the
-local backend is no longer needed by that consumer (§6.3), discovery and account UI
-handoff are served through the bridge (XD-5, XB-15), and packaging gains the bridge
-(XP-1).
+## 0. How this document relates to the other specs
 
-## 0. How this document relates to the existing spec
-
-The code cites an existing specification (`SPEC 5.4`, `C-8`, `C-15`, `SPEC-sftp S-19`,
-`SPEC-smb M-3`, `SEC-5`, gate `G-SMB`, …), but those documents are not in the repository
-(`.gitignore` excludes `/.claude/`, which is the likely home). This document was written
-from the code and its comments, so:
-
-- Existing IDs keep their meaning. Where this document changes one, it says
-  "amends C-n" and gives the new text.
-- New requirements use prefixes that do not occur in the code today: `XC` core API, `XH`
-  core helpers, `XS` SFTP, `XM` SMB, `L` local, `XD` discovery, `XA` accounts, `XP`
-  packaging, `XT` tests, `XSEC` security.
-- First action item: commit the existing SPEC, SPEC-sftp and SPEC-smb under `doc/`, and
-  merge this file next to them as `doc/SPEC-v2.md`. The interpretations in §2 should be
-  checked against the originals.
+- IDs of SPEC, SPEC-sftp and SPEC-smb keep their meaning. Where a requirement here
+  says "amends X", its text replaces X for the case it names.
+- The prefixes of this document are `XC` core API, `XH` core helpers, `XS` SFTP, `XM`
+  SMB, `L` local, `XD` discovery, `XA` accounts, `XB` bridge, `XP` packaging, `XT`
+  tests, `XSEC` security.
+- [SPEC-v2-review.md](SPEC-v2-review.md) records review points this document resolved;
+  code cites some of them.
 
 ## 1. Goals and non-goals
 
@@ -37,9 +25,9 @@ from the code and its comments, so:
 2. Give backends the operations and metadata a file manager needs: full entry metadata,
    lossless names, streaming listings, rename/remove semantics a user can reason about,
    attributes, symlinks, random-access handles, resume, server-side copy, space info.
-3. Add a local backend; prepare S3 and NFS.
+3. Add a local backend.
 4. Make SMB usable for browsing: server mode (shares as top-level folders), share
-   enumeration, and explicit security profiles beyond "SMB 3 with encryption".
+   enumeration, and explicit security profiles.
 5. Split packaging so installing the bridge does not pull in Buteo, and installing backups
    does not pull in browser-only pieces.
 6. Let sandboxed apps use netvfs locations without ever giving them secrets, pins or
@@ -53,37 +41,23 @@ from the code and its comments, so:
   pool backends on threads. This keeps backends simple and the C-9 cancel guarantee
   testable.
 
-## 2. Current state (summary of `foundations`)
+## 2. Rules of SPEC that apply unchanged
 
-| Area | Today | Gap for a file browser |
-|---|---|---|
-| `Backend` | blocking, thread-confined; connect/authenticate; stat, list, makePath, remove, rename, freeSpace, upload, download, read; cancel/resetCancel/disconnect | no handles, no attributes, no symlinks, no copy, no exclusive create, list is all-at-once |
-| `Entry` | name, size, modified, isDir | no type (symlink/special), mode, owner, created, hidden/readonly, etag |
-| Names | `QString::fromUtf8` on SFTP bytes | non-UTF-8 names are lossy; such files cannot be renamed or deleted |
-| `rename` | always replaces (SFTP via posix-rename or stat+unlink; SMB stat+unlink) | browser needs no-replace by default; SMB replace is non-atomic |
-| `remove` | file, or empty directory (SFTP falls back to rmdir) | fine as primitive; no tree removal helper; no distinction for UX |
-| `read` | opens and closes the file per call (SMB, SFTP) | too slow for streaming, previews and archives |
-| Upload | always `.part` + rename, files created 0600 (S-20) | browser needs resume, normal modes, atomic-put awareness, mtime |
-| SMB policy | SMB 3.x only, signing required, encryption default on (M-1..M-3), one share per connection, share enumeration linked out (`noshareenum.c`, G-SMB 4) | no share browsing; many home NAS need SMB 2.1 or guest |
-| SFTP auth | password, public key; keyboard-interactive refused | 2FA/OTP servers unusable |
-| Accounts | providers `sftp`, `smb`, one service `<p>-backup` of type `storage` | no "files" service; account UI hard-codes SFTP/SMB fields |
-| Packaging | backend `.so` shipped inside `netvfs-account-<p>` together with Buteo plugins; QML module in `netvfs-core` | browser would drag in Buteo, jolla-vault, msyncd |
-
-What stays exactly as is: error-taxonomy approach (C-5.4), C-7 (no credentials before
-identity check), C-9 (cancel within 2 s), C-10 (bounded memory), C-14 timeouts, C-15 path
-normalisation, C-16/C-17 logging rules, SEC-5 secret wiping, the vendoring approach
-(D-1, P-1..P-6), the test culture (unit, interop containers, sanitizers, mutation lists,
-SonarCloud with zero open issues).
+The error taxonomy (SPEC 5.4), C-7 (no credentials before the identity check), C-9
+(cancel within 2 s), C-10 (bounded memory), C-14 timeouts, C-15 path normalisation,
+C-16/C-17 logging rules, SEC-5 secret wiping, and the test culture (unit tests, interop
+containers, sanitizers, mutation lists, SonarQube with no open issues).
 
 ## 3. Versions
 
-- XC-1: Plugin IID `org.netvfs.BackendFactory`; the extension interfaces are
-  `org.netvfs.SshKeyTools` and `org.netvfs.ShellExec`. libnetvfs, its backends and every
-  caller are built from one source tree and ship together.
+- XC-1: Plugin IID `org.netvfs.BackendFactory`; the one extension interface is
+  `org.netvfs.SshKeyTools`. libnetvfs, its backends and every caller are built from one
+  source tree and ship together.
 - XC-1a: Library version `1.0.0` (qmake derives soname `libnetvfs.so.1`); package
-  version `0.5.0`. All netvfs subpackages require the exact same `%{version}-%{release}`
+  version `0.6.0`, which is also the version of the Rust workspace (the bridge's `Hello`
+  answer, the SSH client id `SSH-2.0-netvfs_0.6.0`). All netvfs subpackages require the exact same `%{version}-%{release}`
   of `netvfs` so mixed installs cannot happen.
-- XC-1c: Qt 5.6 and C++17 remain the baseline. No exceptions cross the API; `Result` is
+- XC-1c: Qt 5.6 and C++17 are the baseline. No exceptions cross the API; `Result` is
   the only error channel. No `std::optional` in exported structs (ABI and QVariant
   friction); sentinels are documented per field.
 
@@ -91,7 +65,7 @@ SonarCloud with zero open issues).
 
 ### 4.1 Entries
 
-- XC-2: `Entry` becomes:
+- XC-2: `Entry`:
 
 ```cpp
 enum class EntryType : quint8 { Unknown, File, Directory, Symlink, Special };
@@ -109,7 +83,7 @@ struct NETVFS_EXPORT Entry {
     QString name;                    // XC-4 lossless
     EntryType type = EntryType::Unknown;
     EntryType targetType = EntryType::Unknown;  // for Symlink, when resolved (XC-6)
-    qint64 size = -1;                // -1 unknown (v1 used 0)
+    qint64 size = -1;                // -1 unknown
     QDateTime modified;              // UTC; invalid if unknown
     QDateTime created;               // SMB, local (statx btime)
     QDateTime accessed;
@@ -119,15 +93,14 @@ struct NETVFS_EXPORT Entry {
     EntryFlags flags;
     QByteArray etag;                 // opaque change token; empty if none
     QString contentType;             // server-declared; advisory only, never trusted
-    QVariantMap extra;               // backend-specific (SMB "remark"), documented per backend
+    QVariantMap extra;               // backend-specific; no backend fills it
 
     bool isDir() const;              // Directory, or Symlink whose targetType is Directory
     bool isFile() const;             // File, or Symlink whose targetType is File
 };
 ```
 
-- XC-3: Callers that need "is this a folder" use `isDir()`. Backup code that relied on
-  `size == 0` for unknown sizes is updated to check `size < 0`.
+- XC-3: Callers that need "is this a folder" use `isDir()`. A size below 0 is unknown.
 
 ### 4.2 Lossless names
 
@@ -135,13 +108,13 @@ struct NETVFS_EXPORT Entry {
   well-formed UTF-8 decodes normally; every byte of an ill-formed sequence `b` (0x80–0xFF)
   becomes the lone surrogate `U+DC00 + b`. Encoding reverses this exactly. Entries with
   escaped bytes carry `NameNotUtf8`. `Paths::normalize` accepts lone surrogates; it still
-  rejects NUL, `.` and `..` (C-15 unchanged otherwise). Applies to SFTP and local. SMB
-  names arrive as UTF-16; unpaired UTF-16
-  surrogates (possible on Windows servers) are passed through as-is if libsmb2 preserves
-  them, otherwise the entry is flagged and operations on it return `InvalidName`.
+  rejects NUL, `.` and `..` (C-15 unchanged otherwise). SFTP and local names are the
+  file system's bytes. SMB names arrive as UTF-16; netvfs-smb turns them into WTF-8, so
+  an unpaired surrogate (possible on Windows servers) becomes its three-byte form, which
+  `Names::decode` escapes and flags, and which maps back to the same UTF-16 unit.
 - XC-4a: New helpers `Names::decode(QByteArray) -> QString`, `Names::encode(QString) ->
   QByteArray`, `Names::display(QString) -> QString` (escapes rendered as U+FFFD) in
-  `names.h`. No backend calls `QString::fromUtf8` on remote names any more.
+  `names.h`. No backend decodes remote names with `QString::fromUtf8`.
 - XC-4b: Normalisation forms are not touched (no NFC/NFD conversion). Consumers compare
   names byte-exact unless the location reports `CaseInsensitive` (XC-5).
 
@@ -163,17 +136,19 @@ enum class Capability : quint32 {
     SpaceInfo, Checksums,
     CaseInsensitive, WindowsNames,       // name rules of Paths::checkWindowsPath apply
     ShareEnumeration,                    // SMB server mode can list shares
-    ShellExec,                           // XS-9
     ETags
 };
 struct Capabilities {
     QSet<Capability> flags;                // QSet keeps the enum open for growth
     QStringList checksumAlgorithms;        // "sha256", "md5", ...
     qint64 maxNameBytes = -1;              // -1 unknown
-    qint64 maxReadChunk = 0, maxWriteChunk = 0;
+    qint64 maxReadChunk = 0, maxWriteChunk = 0;  // 0 unknown
     bool has(Capability c) const { return flags.contains(c); }
 };
 ```
+
+  The SFTP and SMB backends leave `maxReadChunk` and `maxWriteChunk` at 0; their chunk
+  sizes are in S-21 and M-11.
 
 ### 4.4 Listing, stat
 
@@ -196,7 +171,8 @@ Result list(const QString &dir, QVector<Entry> *out);
 ```
 
   Batches are delivered as the protocol produces them (SFTP READDIR replies, SMB
-  QUERY_DIRECTORY responses). `.` and `..` never appear.
+  QUERY_DIRECTORY responses). An entry named `.`, `..` or the empty name, or whose name
+  contains `/` or NUL, is left out; the rest of the listing is delivered.
   `cancel()` is honoured between batches and within the protocol wait (C-9).
 - XC-7: `stat(path, Entry*)` keeps following symlinks; new `lstat(path, Entry*)`
   returns the link itself. Backends without symlinks implement `lstat` as `stat`.
@@ -205,19 +181,18 @@ Result list(const QString &dir, QVector<Entry> *out);
 
 - XC-8: `makeDir(path, bool exclusive)`: creates one folder; with `exclusive`, an
   existing entry is `AlreadyExists`; without, an existing folder is success.
-  `makePath` (mkdir -p) remains a core helper built on `makeDir` (no longer virtual).
+  `makePath` (mkdir -p) is a non-virtual core helper built on `makeDir`.
 - XC-9: `removeFile(path)` removes a non-directory (a symlink is removed, not its
   target); on a directory it returns `IsADirectory`. `removeDir(path)` removes an empty
   folder; non-empty is `DirectoryNotEmpty`. `remove(path)` stays as a non-virtual
-  helper with today's semantics (file, else empty dir) for Buteo. Native recursive
+  helper (file, else empty dir) for Buteo. Native recursive
   deletes are reachable only through
   `removeTreeNative(path)` and only when `RecursiveDelete` is reported; the core helper
   `removeTree` (XH-2) is what consumers normally use.
 - XC-10: `rename(from, to, RenameMode mode)` with `enum class RenameMode { NoReplace,
   Replace }`. NoReplace returns `AlreadyExists` if `to` exists — atomically when
-  `NativeNoReplace`, otherwise via a stat check (documented race). Replace keeps today's
-  behaviour (amends S-22 and the SMB rename note: still "replaces `to`" when Replace is
-  requested; atomic only with `AtomicReplace`). Replacing a folder with anything is
+  `NativeNoReplace`, otherwise via a stat check (documented race). Replace replaces
+  `to`, atomically only with `AtomicReplace`. Replacing a folder with anything is
   `AlreadyExists` in both modes. `Transfer::upload` and Buteo pass `Replace`.
 - XC-11: `setAttributes(path, const AttributeChanges &)`:
   `struct AttributeChanges { qint32 mode = -1; QDateTime modified; QDateTime accessed; }`.
@@ -264,8 +239,7 @@ virtual Result openWrite(const QString &path, const WriteOptions &, WriteHandle 
   (documented per backend, at least 4). `cancel()` interrupts handle calls with the same
   C-9 guarantee. Memory stays bounded (C-10): `read()` never buffers more than `maxBytes`
   plus one protocol chunk; read-ahead is capped per backend.
-- XC-14: Streaming `upload`/`download` gain options and keep their tuned
-  implementations:
+- XC-14: Streaming `upload`/`download` with options:
 
 ```cpp
 struct UploadOptions  { WriteOptions write; };
@@ -274,13 +248,13 @@ virtual Result upload(QIODevice *source, const QString &path, const UploadOption
 virtual Result download(const QString &path, QIODevice *sink, const DownloadOptions &, Progress *);
 ```
 
-  `read(path, offset, length, out)` becomes a non-virtual helper over `openRead`.
-  `Progress::update(done, total)` additionally gets `bool Progress::canceled() const`
-  (default false) so sinks can stop without a cross-thread `cancel()`.
-- XC-23: Create modes (amends S-20): the backend default for new files is `0644 & ~umask`
-  semantics as the server applies them (SFTP sends no mode → server umask; local uses
-  the process umask). Backup code passes `createMode = 0600` explicitly, preserving S-20
-  for backups. Folders: default server/umask behaviour; backups keep their current mode.
+  `read(path, offset, length, out)` is a non-virtual helper over `openRead`.
+  Besides `Progress::update(done, total)`, `bool Progress::canceled() const` (default
+  false) lets sinks stop without a cross-thread `cancel()`.
+- XC-23: Create modes: the backend default is 0666 for new files and 0777 for new
+  folders, less the umask (SFTP sends these modes and the server applies its umask;
+  local uses the process umask). Backups pass `createMode = 0600` and the account option
+  `dir_mode` 0700 (S-20).
 
 ### 4.7 Server-side work
 
@@ -290,11 +264,10 @@ virtual Result download(const QString &path, QIODevice *sink, const DownloadOpti
 - XC-18: `checksum(path, const QString &algorithm, QByteArray *digest)` — `Unsupported`
   unless listed in `checksumAlgorithms`. Digests are raw bytes.
 - XC-19: `spaceInfo(dir, SpaceInfo *)` with `struct SpaceInfo { qint64 free = -1, total
-  = -1, used = -1; }`. `freeSpace` becomes a helper over it (C-12's free-space check
-  unchanged).
+  = -1, used = -1; }`. `freeSpace` is a helper over it (C-13).
 - XC-20: `keepAlive()` — one cheap round trip that proves the connection is alive
-  (SFTP `keepalive@openssh.com` or SSH_MSG_IGNORE + reply wait, SMB ECHO, local:
-  success). Returns `ConnectionLost` on a dead transport.
+  (SFTP `keepalive@openssh.com`, XS-12; SMB ECHO; local: success). Returns
+  `ConnectionLost` on a dead transport.
 
 ### 4.8 Authentication and identity
 
@@ -315,8 +288,8 @@ virtual Result authenticate(const Credentials &credentials, AuthPrompter *prompt
 
   Answers are wiped after use (SEC-5). A backend may call the prompter several times
   (multi-round keyboard-interactive). With `prompter == nullptr`, interactive methods are
-  not attempted (backup behaviour unchanged).
-- XC-16: `ServerIdentity` v2 (amends the struct in `types.h`):
+  not attempted (backups).
+- XC-16: `ServerIdentity`:
 
 ```cpp
 struct NETVFS_EXPORT ServerIdentity {
@@ -330,26 +303,25 @@ struct NETVFS_EXPORT ServerIdentity {
 ```
 
   `checkServerIdentity` (amends S-7): no pin → `ServerIdentityUnknown`; pin present →
-  the key must match, else `ServerIdentityChanged`. Pins stay in the existing `host_key`
-  account key.
+  the key must match, else `ServerIdentityChanged`. Pins are in the account key
+  `host_key`.
 
 ### 4.9 Errors
 
-- XC-21: New `Error` values (`errorName()` strings documented): `ConnectionLost`,
+- XC-21: `Error` values besides those of SPEC 5.4 (`errorName()` strings documented): `ConnectionLost`,
   `NotADirectory`, `IsADirectory`, `DirectoryNotEmpty`, `InvalidName`,
   `ReadOnlyFilesystem`, `Locked` (SMB sharing violation), `TooManyConnections` (SFTP
   channel open refused by MaxSessions, SMB limits), `RateLimited` (the server asks to
-  wait, Retry-After). `NetworkUnreachable` keeps meaning "could not reach"; dropping an
-  established connection becomes `ConnectionLost` (amends the SMB `connectionLost()`
-  mapping after session setup; Buteo maps both to the same attention-free retryable
-  failure).
-- XC-24: `Result` gains `qint64 retryAfterMs() const` (−1 none) and `QString detail()
+  wait, Retry-After). `NetworkUnreachable` means "could not reach"; dropping an
+  established connection is `ConnectionLost`. Buteo maps both to the same
+  attention-free, retryable failure.
+- XC-24: `Result` has `qint64 retryAfterMs() const` (−1 none) and `QString detail()
   const` (protocol status for logs and the "Details" view, never secrets, debug-level
   rules of C-17 apply to paths in it).
 - XC-22: Cancellation (C-9) and timeouts (C-14) apply to every new method, including
   `AuthPrompter` waits (cancel ends the wait) and handle calls.
 
-### 4.10 Full v2 `Backend`
+### 4.10 The `Backend` class
 
 ```cpp
 class NETVFS_EXPORT Backend {
@@ -397,7 +369,7 @@ public:
 
 ## 5. Core helpers
 
-- XH-1: `Transfer` (amends C-12, C-13, 8.6): `upload` takes a `TransferPolicy`:
+- XH-1: `Transfer` (amends C-12, C-13, SPEC 8.6): `upload` takes a `TransferPolicy`:
   `{ QString tempName (default "<name>.part" — backup), bool useTempName (default true;
   consumers pass false when AtomicPut), bool verifySize (true), RenameMode commitMode
   (Replace for backup), qint32 createMode, QDateTime modified, bool resume }`. Resume
@@ -427,117 +399,101 @@ public:
 
 ## 6. Backends
 
-### 6.1 SFTP (amends SPEC-sftp)
+### 6.1 SFTP
 
-- XS-1: Lossless names via `Names` in list, stat, readLink and path translation.
-- XS-2: Entry mapping: `type` from attribute type (symlink, special for socket/fifo/
-  device), `mode`, `uid`/`gid`, `accessed`, `owner`/`group` from
-  `users-groups-by-id@openssh.com` (libssh `sftp_get_users_groups_by_id`, batched per
-  listing, cached per connection) when supported, else empty. Hidden flag is never set
-  (dot-names are a consumer convention).
+The SFTP backend is `netvfs-sftp` in `libnetvfs-rs.so` (SPEC-sftp).
+
+- XS-1: Names are the server's bytes; the shim decodes them with `Names` (XC-4) in
+  list, stat, readLink and path translation.
+- XS-2: Entry mapping: `type` from the attribute type (symlink; special for socket,
+  fifo and device), `mode`, `uid`/`gid`, `accessed`, and `owner`/`group` from
+  `users-groups-by-id@openssh.com` when the server offers it (one request per listing
+  batch for the ids not yet known, cached per connection), else empty. The hidden flag
+  is never set (dot-names are a consumer convention).
 - XS-3: `list` uses `lstat` semantics (as READDIR does); with `resolveSymlinkTypes`,
   targets are `stat`ed with a per-listing cap of 512 resolutions (beyond that
   `TargetUnknown`).
-- XS-4: Links: `sftp_readlink`, `sftp_symlink`, `sftp_hardlink` (when
-  `hardlink@openssh.com` is offered). OpenSSH's server swaps the SSH_FXP_SYMLINK
-  arguments relative to the draft; the argument order is verified against the OpenSSH
-  containers in the interop suite.
-- XS-5: `setAttributes` via `sftp_setstat` (mode, atime/mtime). `SetModified`,
-  `PosixModes` reported.
-- XS-6: Rename: NoReplace uses plain `SSH_FXP_RENAME` (OpenSSH implements it with
-  link+unlink, failing on an existing target → `NativeNoReplace`). Replace uses
-  `posix-rename@openssh.com` when offered (`AtomicReplace`), else stat+unlink+rename as
-  today.
-- XS-7: Handles: `ReadHandle` over an open `sftp_file` with `sftp_aio` read-ahead
-  (window `RequestWindow` from S-21, capped at 4 MiB in flight); `WriteHandle` with
-  pipelined `sftp_aio` writes; Resume opens without `O_TRUNC` and checks the size equals
-  `resumeOffset`. `commit()` sends `fsync@openssh.com` when offered (unchanged from
-  today's upload).
+- XS-4: Links: READLINK, SYMLINK, and `hardlink@openssh.com` when the server offers it.
+  OpenSSH's server takes the SSH_FXP_SYMLINK arguments in the reverse order of the
+  draft; the backend sends the target first, as OpenSSH expects, and the interop suite
+  checks it against the OpenSSH containers.
+- XS-5: `setAttributes` via SETSTAT (mode, atime/mtime). `SetModified` and `PosixModes`
+  are reported.
+- XS-6: Rename: NoReplace uses plain RENAME, which OpenSSH fails on an existing target
+  (`NativeNoReplace`). Replace uses `posix-rename@openssh.com` when the server offers it
+  (`AtomicReplace`), else stat, REMOVE and RENAME.
+- XS-7: Handles: `ReadHandle` over one open file with pipelined READs (S-21), at most
+  4 MiB in flight; `WriteHandle` with pipelined WRITEs; Resume opens without truncating
+  and checks that the size equals `resumeOffset`. `commit()` sends `fsync@openssh.com`
+  when the server offers it.
 - XS-8: `spaceInfo` from `statvfs@openssh.com` (free = f_bavail × f_frsize, total =
   f_blocks × f_frsize).
-- XS-9: Shell exec (capability `ShellExec`), only when the account option
-  `allow_shell=true` and the server grants an exec channel. API:
-  `Result exec(const QStringList &argv, const ExecOptions &, ExecResult *)` on the SFTP
-  backend's extension interface `org.netvfs.ShellExec` (not part of `Backend`).
-  argv is quoted with POSIX single-quote rules by netvfs; stdout/stderr capped (default
-  1 MiB), timeout, cancel (channel close + `Canceled`). Never invoked by netvfs itself
-  except through documented helpers: `serverCopy` (`cp -pR -- src dst` /
-  `cp -p -- src dst`), `serverChecksum` (`sha256sum -- path`, then `shasum -a 256`
-  fallback), `serverFind` (fixed template). Results are parsed defensively; any parse
-  failure is `Unsupported`, not a guess. With these helpers the backend reports
-  `ServerCopy`, `ServerCopyRecursive` and `Checksums: sha256`.
-- XS-10: `copy-data` (OpenSSH) is not exposed by libssh 0.12.2; track upstream and
-  switch `ServerCopy` to it when available, keeping shell as fallback.
-- XS-11: Keyboard-interactive (amends S-14 `interactiveNotSupported`): attempted after
-  publickey/password methods fail or when the account's `auth_mode=interactive`, only
-  with an `AuthPrompter`. Partial success chains (publickey then OTP) are supported.
-  New account `auth_mode` value `interactive` with optional stored secret.
-- XS-12: `keepAlive` sends `keepalive@openssh.com` global request with want-reply and
-  waits for any reply (failure reply counts as alive).
-- XS-13: ProxyJump (later): account option `jump_host` (`user@host:port`) using libssh
-  `SSH_OPTIONS_PROXYJUMP` with its own pinned identity (`jump_host_key`) — identity checks
-  apply to every hop (C-7 per hop). Out of scope for 0.2.
+- XS-10: `copy` (XC-17) uses `copy-data` when the server offers it, for files only
+  (`ServerCopy`, never `ServerCopyRecursive`). The backend computes no checksums (no
+  `Checksums`).
+- XS-11: Keyboard-interactive: with an `AuthPrompter`, it is tried after the configured
+  method fails, and it is the method of `auth_mode=interactive`, whose stored secret is
+  optional. A partial success continues with keyboard-interactive, or with a password
+  asked through the prompter, so publickey or password followed by a one-time password
+  works.
+- XS-12: `keepAlive` sends the `keepalive@openssh.com` global request with want-reply and
+  waits for any reply (a failure reply counts as alive).
 
-### 6.2 SMB (amends SPEC-smb)
+### 6.2 SMB
+
+The SMB backend is `netvfs-smb` in `libnetvfs-rs.so` (SPEC-smb). SPEC-smb section 8
+records how it implements XM-1 to XM-9.
 
 - XM-1: Security profiles (amends M-1, M-2, M-3; option `security_profile`, default
   `strict`):
 
-  | Profile | Dialects | Signing | Encryption | Allowed for service |
+  | Profile | Dialect | Signing | Encryption | Allowed for service |
   |---|---|---|---|---|
-  | `strict` | 3.0–3.1.1 | required | required | backup, files |
-  | `signed` | 3.0–3.1.1 | required | if server offers | backup, files |
-  | `legacy` | 2.0.2–3.1.1 | required | if offered | files |
-  | `guest` | 2.0.2–3.1.1 | off | off | files (explicit consent) |
+  | `strict` | 3.1.1 | required | required | backup, files |
+  | `signed` | 3.1.1 | required | where the server marks the session or share | backup, files |
+  | `guest` | 3.1.1 | off | off | files, with the account's consent (`allow_insecure`) |
 
-  The account UI and
-  `AccountSession` enforce the "allowed for service" column (XA-4); the backend enforces
-  the profile it is given and still refuses any dialect it did not offer (M-1 defence in
-  depth). `guest` uses an empty user name and no password; servers that map guest are
-  detected (`SMB2_SESSION_FLAG_IS_GUEST`) and, for any other profile, a guest mapping is a
+  The account UI and `AccountSession` enforce the "allowed for service" column (XA-4);
+  the backend enforces the profile it is given. Any other profile value is
+  `SecurityPolicy`. `guest` signs in anonymously and ignores the account's credentials;
+  for `strict` and `signed`, a session the server marks as guest or null is a
   `SecurityPolicy` failure (a server silently downgrading credentials to guest is never
   accepted).
 - XM-2: Server mode: when the `share` option is empty, the backend's root lists shares
-  (directories, `type = Directory`, flag `ReadOnly` absent); paths are `/<share>/<rest>`.
-  Each share gets its own libsmb2 context, created lazily on first use, authenticated with
-  the same credentials, at most 4 concurrently (LRU close). Operations on `/` other than
-  `list`/`stat` return `PermissionDenied`; on `/<share>` itself, `removeDir`/`rename`
-  return `PermissionDenied`. M-13 thread confinement applies to all contexts.
+  (directories, `type = Directory`); paths are `/<share>/<rest>`. One session serves all
+  shares: `IPC$` is its main tree, and each share is a tree of the same session,
+  connected on first use, at most 4 at a time (the least recently used one without open
+  files is disconnected). Operations on `/` other than `list`/`stat` return
+  `PermissionDenied`; on `/<share>` itself, `removeDir`/`rename` return
+  `PermissionDenied`. M-13 thread confinement applies.
 - XM-3: Share list sources, merged and de-duplicated: the account option `shares`
-  (string list the user saved), and, when enabled, share enumeration (XM-7). Without
+  (string list the user saved), and share enumeration (XM-7) when it is on. Without
   either, root lists nothing and the UI asks for a share name.
-- XM-4: Entry mapping: `created` from birth time, `Hidden`/`ReadOnly`/`System` from file
-  attributes, `type` Symlink for reparse points reported as such (target `Unsupported`
-  to read), `CaseInsensitive` and `WindowsNames` capabilities (M-9 rules already in
-  `Paths`).
-- XM-5: Rename NoReplace is native (libsmb2 renames without ReplaceIfExists:
-  `NativeNoReplace`); Replace keeps stat+unlink+rename (non-atomic, no `AtomicReplace`)
-  until libsmb2 exposes `ReplaceIfExists` (track; a local patch under `vendor/patches`
-  is acceptable per D-1).
-- XM-6: Handles: `ReadHandle` keeps one `smb2fh` open with pipelined reads of
-  `chunkSize` (M-11) up to 4 MiB in flight; `WriteHandle` likewise; Resume opens without
-  truncate. `setAttributes` supports `modified`/`accessed` via SET_INFO
-  (FileBasicInformation); `PosixModes` not reported.
-- XM-7: Share enumeration runs out of process (keeps G-SMB item 4 for the plugin): helper
-  `/usr/libexec/netvfs/netvfs-smb-shares`, linked against the same vendored libsmb2
-  without `noshareenum.c`, applies the same profile settings, reads a request (params,
-  secret) as length-prefixed data on stdin (never argv or environment; M-5 neutralisation
-  applies), writes JSON lines `{"name","type","remark"}` on stdout, exits. The backend
-  spawns it with `posix_spawn`, enforces the connect/request timeouts, kills it on
-  cancel, accepts only `STYPE_DISKTREE` shares, and hides `$`-suffixed admin shares
-  unless `show_admin_shares=true`. Any helper crash or malformed output is
-  `ProtocolError` and leaves the backend usable. Shipped with the backend in `netvfs`
-  (XP-3); `ShareEnumeration` is still reported only when the helper is present.
+- XM-4: Entry mapping: `created` from the birth time, `Hidden`/`ReadOnly`/`System` from
+  the file attributes, `type` Symlink for reparse points (no `Symlinks` capability; the
+  target is not read), and the `CaseInsensitive` and `WindowsNames` capabilities (M-9
+  rules in `Paths`).
+- XM-5: Rename NoReplace is native (FileRenameInformation without `ReplaceIfExists`:
+  `NativeNoReplace`); Replace sets `ReplaceIfExists` (`AtomicReplace`).
+- XM-6: Handles: `ReadHandle` keeps one file open with pipelined reads of the chunk size
+  of M-11, up to 4 MiB in flight; `WriteHandle` likewise; Resume opens without
+  truncating. `setAttributes` supports `modified`/`accessed` via SET_INFO
+  (FileBasicInformation); `PosixModes` is not reported.
+- XM-7: Share enumeration (option `share_enumeration`, default true, server mode only)
+  runs in the backend: srvsvc NetrShareEnum over a pipe of the `IPC$` tree. Every count
+  and string of the reply is capped before anything is allocated. Only disk shares
+  (`STYPE_DISKTREE`) are listed, and names ending in `$` only when
+  `show_admin_shares=true`. A malformed reply is `ProtocolError` and leaves the backend
+  usable. `ShareEnumeration` is reported while enumeration is on.
 - XM-8: `keepAlive` sends SMB2 ECHO. `spaceInfo` from FileFsFullSizeInformation.
-- XM-9: DFS referrals and Kerberos stay out of scope; DFS paths return `Unsupported`
+- XM-9: DFS referrals and Kerberos are out of scope; DFS paths return `Unsupported`
   with detail "DFS referral".
 
-### 6.3 Local (new plugin `libnetvfs-local.so`)
+### 6.3 Local (plugin `libnetvfs-local.so`)
 
-Priority note (draft 2): the Harbour file browser handles local files itself inside its
-sandbox, and the bridge never touches local paths (XB-11). The local backend remains
-useful for the conformance suite (a fast, container-free target), the CLI, and future
-in-process consumers, but it is no longer on the file browser's critical path.
+The Harbour file browser handles local files itself inside its sandbox, and the bridge
+never touches local paths (XB-11). The local backend serves the conformance suite (a
+fast, container-free target), the CLI and in-process consumers.
 
 - L-1: POSIX implementation for the local file system; `connect` succeeds immediately,
   identity `Kind::None`, credentials ignored. Option `root` (default `/`); relative paths
@@ -549,7 +505,9 @@ in-process consumers, but it is no longer on the file browser's critical path.
   kernel and filesystem support it (fallback `link`+`unlink` for files, stat check for
   folders); `rename` for Replace (`AtomicReplace`).
 - L-4: Copy: `ioctl(FICLONE)` then `copy_file_range` then read/write loop
-  (`ServerCopy`); recursive copy left to `Ops::walk`-based consumers.
+  (`ServerCopy`). The copy gets the source's permission bits less the umask (as `cp`)
+  and, where the file system allows, its access and modification times (as `cp -p`).
+  Recursive copy is left to `Ops::walk`-based consumers.
 - L-5: Checksums computed locally (sha256, sha1, md5) in streaming fashion with cancel.
 - L-6: `spaceInfo` via `statvfs`; `keepAlive` success; `cancel` flag checked between
   1 MiB chunks and between directory entries (C-9 holds unless the kernel blocks in a
@@ -557,16 +515,7 @@ in-process consumers, but it is no longer on the file browser's critical path.
 - L-7: Writes: Resume opens with `O_WRONLY` without truncation and checks size;
   `commit()` does `fsync` (file) and `fsync` on the parent folder after rename by
   `Transfer`.
-- L-8: No privilege escalation. A future root helper is a separate component.
-
-### 6.4 Later backends (sketch only)
-
-- S3-compatible (`libnetvfs-s3.so`): AWS SigV4; buckets as server-mode
-  top-level folders; folders as prefixes; multipart upload for resume; `AtomicPut`;
-  `ServerCopy` (CopyObject ≤ 5 GB, UploadPartCopy above); no symlinks/modes; ETag as
-  change token. Credentials: access key id as user name, secret key as secret.
-- NFSv3/v4 (`libnetvfs-nfs.so`): libnfs (same author and model as libsmb2), vendored like
-  libsmb2; AUTH_SYS only, clearly labelled as unauthenticated-by-design.
+- L-8: No privilege escalation.
 
 ## 7. Discovery
 
@@ -578,7 +527,6 @@ in-process consumers, but it is no longer on the file browser's critical path.
   expiry by TTL; signals `found/updated/lost`. Queries follow RFC 6762 backoff (1 s, 2 s,
   4 s … max 60 s) and stop when no consumer listens.
 - XD-3: Discovery never connects to anything; it only produces connection templates.
-- XD-4: Later: WS-Discovery probe for Windows SMB hosts (UDP 3702), behind an option.
 - XD-5: Sandboxed consumers have no network access; they receive discovery results only
   through the bridge (`Discover`, `NearbyChanged`, XB-10). Discovery runs only while a
   consumer has asked for it.
@@ -591,28 +539,39 @@ in-process consumers, but it is no longer on the file browser's critical path.
   enabled.
 - XA-3: New per-provider keys (`netvfs/<provider>/...`): `files_root` (start path for
   browsing), `security_profile` (smb), `shares` (smb, string list), `show_admin_shares`
-  (smb), `allow_insecure` (smb guest/legacy), `allow_shell` (sftp); `auth_mode` gains
-  `interactive` (sftp). `host_key` holds the SSH host key pin (XC-16).
+  (smb), `share_enumeration` (smb, default true), `allow_insecure` (consent for the SMB
+  profile `guest`); `auth_mode` has the value `interactive` (sftp). `host_key` holds the
+  SSH host key pin (XC-16).
 - XA-4: `AccountSession::open(accountId, Service, QObject *parent)` with
   `enum class Service { Backup, Files }`. It refuses (`SecurityPolicy`) to hand out a
-  configuration whose profile is not allowed for that service (XM-1 table;
-  `allow_insecure` is never allowed for Backup). `AccountConfig` gains `filesRoot`,
-  `service`, `securityProfile`, `insecureAllowed`.
-- XA-5: Provider descriptors replace the SFTP/SMB branches in the account QML:
+  configuration that is not allowed for that service:
+
+  | Configuration | Backup | Files |
+  |---|---|---|
+  | smb `strict`, `signed` | yes | yes |
+  | smb `guest` | no | with `allow_insecure` |
+  | smb unknown profile | no | no |
+  | smb without a share (server mode) | no | yes |
+  | `allow_insecure=true` (any provider) | no | yes |
+  | `auth_mode=interactive` | no | yes |
+  | anything else | yes | yes |
+
+  `AccountConfig` has `filesRoot`, `service`, `securityProfile` and `insecureAllowed`.
+- XA-5: Provider descriptors drive the account QML:
   `/usr/share/netvfs/providers/<provider>.json` lists fields (key, type, label id,
   default, validation rule from `NetVfsInput`, visibility conditions), auth modes, and the
   services the provider offers. `ConnectionDialog` renders from the descriptor;
   `ServerIdentityDialog` renders SSH host keys.
-- XA-6 (amended in draft 2): Secrets are read by exactly two kinds of processes: the Buteo
+- XA-6: Secrets are read by exactly two kinds of processes: the Buteo
   plugins (inside msyncd) and `netvfs-bridge`. Consumers of the bridge never receive
   secrets. Confirm whether identities created with
   `createSignInCredentials("netvfs", "default", ...)` are readable by the bridge binary on
   5.2; if an ACL is needed, the account setup adds exactly msyncd's and the bridge's
   tokens, never `*`.
-- XA-7: Interactive accounts (`auth_mode=interactive`) may have no stored secret;
-  `SignonSecretSource` returns an empty `Credentials` for them instead of `AuthFailed`
-  (amends A-6 for that mode only).
-- XA-8: Attention states gain no new values. Clearing attention still requires the
+- XA-7: Interactive accounts (`auth_mode=interactive`) and SMB `guest` accounts may
+  have no stored secret; `SignonSecretSource` returns an empty `Credentials` for them
+  instead of `AuthFailed` (amends A-6 for these accounts only).
+- XA-8: The attention states are those of SPEC 6.4. Clearing attention requires the
   explicit review flow.
 
 ## 8a. Bridge for sandboxed consumers (`netvfs-bridge`)
@@ -632,9 +591,9 @@ permission, links nothing from netvfs, and never sees secrets or pins.
 - XB-2: `/usr/libexec/netvfs/netvfs-bridge`, one process per consumer, started by systemd
   user socket activation (`Accept=no`). It exits 30 s after its last client disconnected
   and no job runs.
-  It runs with the user's own groups: everything that parses server data (the backends,
-  libssh, libsmb2) stays outside the group `privileged`.
-  Since 0.5.0 it is written in Rust (`rust/netvfs-bridge`, doc/RUST.md; up to 0.4 C++/Qt).
+  It runs with the user's own groups: everything that parses server data (the backends
+  and `libnetvfs-rs.so`) stays outside the group `privileged`.
+  It is written in Rust (`rust/netvfs-bridge`, doc/RUST.md).
   It reaches the C++ backends through `%{_libdir}/netvfs/libnetvfs-bridge-ffi.so`, a C ABI
   over libnetvfs (`src/bridge/ffi/netvfs_bridge_ffi.h`) that it loads with `dlopen`
   (`RTLD_NOW | RTLD_LOCAL`) from that fixed path and that exports one symbol,
@@ -646,10 +605,10 @@ permission, links nothing from netvfs, and never sees secrets or pins.
   is readable by the group `privileged` only. The bridge reads it through
   `/usr/libexec/netvfs/netvfs-accounts`, installed setgid `privileged`
   (`%attr(2755,root,privileged)`, `Requires(pre): sailfish-setup` for the group, as
-  mapplauncherd's boosters), started once per request. Since 0.4.0 it is
-  written in Rust (`rust/netvfs-accounts`, doc/RUST.md) and links no Qt, GLib or
-  libaccounts: it reads the database with SQLite as libaccounts-glib stores it and sends
-  libaccounts' change signal itself, with the same requests and answers as before:
+  mapplauncherd's boosters), started once per request. It is written in Rust
+  (`rust/netvfs-accounts`, doc/RUST.md) and links no Qt, GLib or libaccounts: it reads
+  the database with SQLite as libaccounts-glib stores it and sends libaccounts' change
+  signal itself. Its requests:
   - `list`: the accounts of XA-1 (enabled, Files service enabled) with what `ListLocations`
     shows; `files <id>`: the connection parameters of a listed account for the Files
     service, after XA-4, with its credentials id and whether its secret is optional
@@ -732,7 +691,7 @@ permission, links nothing from netvfs, and never sees secrets or pins.
   `~/.config/netvfs/bridge.conf`. On the first `Hello` with `unknown`, the bridge posts a
   notification "*Lautta* wants to use your network locations" with *Allow* and *Don't
   allow* actions, handled by the bridge. Until `granted`, `ListLocations` returns nothing
-  and every location call fails with `PermissionDenied`. The account UI module gains a page *Apps
+  and every location call fails with `PermissionDenied`. The account UI module has a page *Apps
   using network locations* (Settings → Accounts → netvfs) to revoke or grant; revocation
   closes open connections of that consumer immediately.
 - XB-7: Scope: accounts whose *Files* service is enabled (XA-1); ad-hoc locations created
@@ -743,8 +702,7 @@ permission, links nothing from netvfs, and never sees secrets or pins.
 - XB-8: Peer-to-peer D-Bus over the socket (no bus daemon, no proxy), object
   `/org/netvfs/Bridge`, interface `org.netvfs.Bridge1`.
   `Hello(s client) → (s bridgeVersion)` must be the first call.
-  The bridge is the server of the peer-to-peer connection (zbus since 0.5.0, libdbus
-  before): EXTERNAL authentication of its own uid, and unix fd passing when the client
+  The bridge is the server of the peer-to-peer connection (zbus): EXTERNAL authentication of its own uid, and unix fd passing when the client
   negotiates it. Every answer is the bridge's own, none comes from the D-Bus library:
   `org.freedesktop.DBus.Peer` (`Ping`, `GetMachineId`) on any path, `Introspect` on
   `/org/netvfs/Bridge` with the interface XML verbatim
@@ -789,12 +747,12 @@ permission, links nothing from netvfs, and never sees secrets or pins.
   fd when the job ends. It never receives or opens a local path.
 - XB-12: Connection pools per location live in the bridge, with lanes as the consumer
   hints them (defaults interactive 1, bulk 2, stream ≤ 1; total per host ≤ 4). netvfs
-  rules apply unchanged (C-7, C-9, C-14, establish before credentials). Since 0.5.0 the
+  rules apply unchanged (C-7, C-9, C-14, establish before credentials). The
   bridge asks signond for an account's secret (XA-6) only after the server's identity
   was accepted, in the same step that connects and authenticates: a server that is not
   verified costs a connect, but no secret of the account is in the bridge's memory while
   it talks to it. A signond failure is therefore reported after the connect, and sets no
-  attention (as before).
+  attention.
 - XB-13: Disconnects. When a consumer connection closes, the bridge cancels all of its
   requests and jobs; partial remote temp files are left in place so the consumer can
   resume. Handles are closed.
@@ -825,42 +783,43 @@ permission, links nothing from netvfs, and never sees secrets or pins.
 
 ## 9. Security additions
 
-- XSEC-1: C-7 holds for every new protocol: no credential before the identity check
+- XSEC-1: C-7 holds for every protocol: no credential before the identity check
   passed.
 - XSEC-2: Downgrades are never automatic. A backend never retries with a weaker
   profile, dialect or auth method than configured.
-- XSEC-3: The share enumeration helper (XM-7) and the shell exec channel (XS-9) are the
-  only new parsers of complex untrusted data outside the existing ones; both are
-  isolated (process, or fixed templates + capped defensive parsing).
-- XSEC-6: SEC-5 wiping extends to `AuthPrompter` answers, the helper
-  request buffer in XM-7 and ad-hoc secrets received by the bridge (XB-16). The bridge
-  wipes its own copies; the received message that carried the secret (`ConnectAdHoc`'s
-  `ay`, the answers of `Answer`) stays unwiped in the D-Bus library's buffer (zbus since
-  0.5.0) until the call is handled and the message dropped, as it did in libdbus's
-  buffer before.
+- XSEC-3: Every parser of server data is Rust code in `libnetvfs-rs.so`: SSH (russh),
+  SFTP packets and attributes, SMB messages and transform headers, SPNEGO and NTLM
+  (sspi), and the srvsvc share list. Each caps counts and lengths before allocating, and
+  each has a cargo-fuzz target (XT-3).
+- XSEC-6: SEC-5 wiping extends to `AuthPrompter` answers and ad-hoc secrets received
+  by the bridge (XB-16). The bridge wipes its own copies; the received message that
+  carried the secret (`ConnectAdHoc`'s `ay`, the answers of `Answer`) stays unwiped in
+  zbus's buffer until the call is handled and the message dropped.
 - XSEC-7: The bridge is the only netvfs component reachable from a sandbox. Its attack
-  surface is the D-Bus message parser (zbus and zvariant, in Rust, since 0.5.0) and its
+  surface is the D-Bus message parser (zbus and zvariant, in Rust) and its
   own argument validation: every path is checked with the rules of `Paths::normalize`
   before use, every numeric argument is range-checked, and every fd is validated
   (XB-11). The parser only sees messages within the inbound limits of XB-17.
 
-## 10. Packaging (amends P-*)
+## 10. Packaging (amends SPEC 4.1)
 
 - XP-1: Packages:
 
   | Package | Contents | Requires |
   |---|---|---|
-  | `netvfs` | `libnetvfs.so.1`, backend dir, the `sftp`, `smb` and `local` backends, `netvfs-smb-shares` helper, QML module `org.netvfs.accounts`, provider descriptors, account providers with their UI QML and icons, `<p>-files` services and their service type, `netvfs-cli`, translations | Qt5Core, Qt5DBus, Qt5Network, accounts-qt5, libsignon-qt5, Silica, jolla-settings-accounts; Recommends `netvfs-backup` |
+  | `netvfs` | `libnetvfs.so.1`, backend dir, the `sftp`, `smb` and `local` backends, `libnetvfs-rs.so`, QML module `org.netvfs.accounts`, provider descriptors, account providers with their UI QML and icons, `<p>-files` services and their service type, `netvfs-cli`, the Engineering English texts (`netvfs*.qm`, generated at build time; there are no translations) | Qt5Core, Qt5DBus, Qt5Network, accounts-qt5, libsignon-qt5, Silica, jolla-settings-accounts; Recommends `netvfs-backup` |
   | `netvfs-backup` | `sftp-backup` and `smb-backup` services, Buteo plugins and profiles | netvfs, buteo, jolla-vault |
   | `netvfs-bridge` | `netvfs-bridge` (XB-2), its C ABI `libnetvfs-bridge-ffi.so`, `netvfs-accounts` (setgid `privileged`, XB-2a), systemd generator and template units, `consumers/lautta.conf` | netvfs, systemd, sailfish-setup (pre) |
   | `netvfs-devel` | headers, pkg-config | netvfs |
 
-- XP-3: The SMB share helper runs out of process (XM-7) but ships with the backend.
-  `tools/ci/check-rpm.sh` asserts that `libnetvfs-smb.so` still contains no share
-  enumeration code (the existing link-time guard stays) and that the helper does.
+- XP-3: `tools/ci/check-rpm.sh` asserts that `libnetvfs-rs.so` is in the `netvfs`
+  package, exports only `nvr_get`, links only the C runtime, and sits where its
+  plugins, `libnetvfs-smb.so` among them, look for it; and that no file of the `netvfs`
+  package links libssh or libcrypto. `make check-packaging` checks the install tree
+  against the `%files` lists.
 - XP-4: The RPM check script also asserts that only `netvfs-backup` depends on Buteo.
 - XP-5: `netvfs-bridge` stays a package of its own and no package requires it, so only
-  devices with a sandboxed consumer carry the setgid accounts helper. The bridge still
+  devices with a sandboxed consumer carry the setgid accounts helper. The bridge
   reports providers whose backend it cannot load as `Unsupported`.
 - XP-6: Parts nobody installs on their own share one package; separate packages stay
   only for what pulls in something the rest does not need (Buteo and jolla-vault for
@@ -868,13 +827,13 @@ permission, links nothing from netvfs, and never sees secrets or pins.
 
 ## 11. CLI
 
-- XC-CLI: `netvfs-cli` gains: `stat`, `lstat`, `ls -l` (full v2 entry, `--json`),
+- XC-CLI: `netvfs-cli` has, besides `identify`, `verify`, `put`, `get` and `ls`: `stat`, `lstat`, `ls -l` (full v2 entry, `--json`),
   `mkdir [-p] [--exclusive]`, `rm [-r]`, `rmdir`, `mv [--replace]`, `cp` (server copy if
   available, else across via `copyAcross`), `cat [--offset N --length N]`, `chmod`,
   `touch --mtime`, `ln -s`, `readlink`, `df`, `sum --algo`, `caps`, `shares` (SMB),
   `discover [--seconds N]`, `--url URL` as an alternative to `--provider/--host`,
-  `--prompt` (keyboard-interactive on the terminal), `--profile` (SMB). Secrets still only
-  via `--secret-env` or prompt.
+  `--prompt` (keyboard-interactive on the terminal), `--profile strict|signed|guest`
+  (SMB). Secrets come only from `--secret-env` or a prompt.
 
 ## 12. Tests
 
@@ -889,63 +848,36 @@ permission, links nothing from netvfs, and never sees secrets or pins.
   servers that allow it), cancel within 2 s for every blocking method under a stalling
   proxy (`sftpproxy.py`, `flipproxy.py`), `keepAlive` after server restart →
   `ConnectionLost`.
-- XT-2: New containers: Samba multi-share + `map to guest` + SMB 2.1-only configuration,
-  OpenSSH with keyboard-interactive (PAM OTP stub) and `MaxSessions 2`.
-- XT-3: Fuzzing on the host (clang, libFuzzer, ASan/UBSan): `Url` parser, `Names` codec,
-  share-helper output parser. Corpora in `tests/fuzz/corpus`, runs in CI for a fixed time
-  budget.
+- XT-2: Containers: Samba servers with several disk shares for server mode and a guest
+  server (`map to guest = Bad User`), besides those of SPEC-smb section 7; OpenSSH with
+  keyboard-interactive (a PAM one-time-password stub) and a user limited to
+  `MaxSessions 0`, besides those of SPEC-sftp section 9.
+- XT-3: Fuzzing on the host. libFuzzer harnesses in `tests/fuzz` (clang, ASan/UBSan):
+  the `Url` parser, the `Names` codec and the DNS message parser. cargo-fuzz targets in
+  `rust/fuzz`: SFTP packets and attributes, SMB responses and transform headers,
+  SPNEGO, the NTLM challenge, the srvsvc share list, SSH key import, and the bridge's
+  arguments, bus replies, C ABI marshalling, paths and stored values. Corpora in
+  `tests/fuzz/corpus` and `rust/fuzz/seeds`; CI runs each target for 60 s.
 - XT-4: Mutation lists (`tests/mutations/*.json`) for: rename-mode logic,
   `checkServerIdentity`, XM-1 profile enforcement, XA-4 service gating, resume offset
   checks, `Names` codec.
-- XT-5: Identity tests: no request before identity check for every backend (proxy asserts
-  no NTLMSSP_AUTH before acceptance), pin mismatch behaviour.
-- XT-6: Buteo regression: the existing Buteo unit and interop tests run unchanged in
-  behaviour (files 0600, `.part` naming, Replace semantics) after every API step.
+- XT-5: Identity tests: no credential before the identity check, and pin mismatch
+  behaviour, for SFTP. SMB has no server identity (SPEC-smb section 8, XT-5).
+- XT-6: Buteo regression: the Buteo unit and interop tests check the backup behaviour
+  (files 0600, `.part` naming, Replace semantics).
 - XT-7: Bridge tests: a contract suite (D-Bus introspection XML and golden message
   sequences in `tests/bridge/contract`) shared with the consumer's fake bridge; peer check
   (wrong uid, wrong executable, pid reuse); consent states and revocation mid-job; fd
   validation (directory, read-only fd for download, FIFO without size); disconnect
   cancels jobs within C-9's 2 s; folder deletion and recreation (XB-4); limits (XB-17);
   fuzzing of argument validation through a libFuzzer harness that feeds decoded
-  messages to the adaptor. Since 0.5.0 the contract suite also runs as a black box
+  messages to the adaptor. The contract suite also runs as a black box
   against the built binary from a libdbus client (`tests/bridge/contract`: introspection,
   peer interface, fd passing, error details, every golden sequence), next to the Rust
   tests of `rust/netvfs-bridge`; the argument fuzzing is a cargo-fuzz target.
 
-## 13. Migration plan (PR sequence)
-
-Each step keeps `make check` green, SonarCloud clean, and Buteo behaviour identical.
-
-1. Merge `foundations` (PR #1). Commit the existing SPEC documents under `doc/`.
-2. Introduce `Error` additions, `Result::detail/retryAfterMs`, `Entry` v2 and `isDir()`;
-   adapt backends, Buteo, CLI, QML, tests. Soname bump.
-3. `Names` codec and lossless names in SFTP; conformance suite skeleton with local
-   test doubles.
-4. Streaming `list` + `ListSink`, `lstat`, `makeDir(exclusive)`, `removeFile/removeDir`,
-   `rename(mode)`; helpers `list(vector)`, `remove`, `makePath`.
-5. Local backend (L-*) — gives the conformance suite a fast, container-free target
-   (not needed by the file browser itself, §6.3).
-6. Handles (XC-13), upload/download options (XC-14), create modes (XC-23), Transfer
-   policy (XH-1), resume.
-7. `setAttributes`, links, `spaceInfo`, `keepAlive`, `capabilities()` everywhere.
-8. Packaging split (XP-*).
-9. `ServerIdentity` v2.
-10. SMB profiles, server mode, share helper.
-11. Accounts: files service, new providers, descriptors, generalised account UI, XA-4/6/7.
-12. Discovery.
-13. Bridge (§8a): protocol types and fake consumer, generator and units, peer check,
-    consent, listing/metadata/namespace, handles, jobs with fd passing, questions,
-    handoff. Contract tests shared with the consumer (XT-7).
-14. Keyboard-interactive (`AuthPrompter`) + interactive accounts.
-15. SFTP shell exec helpers, server copy/checksum; `Ops::walk`, `removeTree`,
-    `BoundedPipe`, `copyAcross`, CLI expansion (some of these can move earlier if the
-    file browser's M1 needs them; `BoundedPipe` and `walk` are needed by M1).
-
 ## 14. Open questions
 
-1. libsmb2 `ReplaceIfExists` and server-side copy (`FSCTL_SRV_COPYCHUNK`): upstream
-   them, or carry patches under `vendor/patches/libsmb2` per D-1?
-2. libssh `copy-data`: upstream contribution vs. waiting.
 3. signond ACL behaviour on 5.2 (XA-6) — decides whether the bridge needs an ACL entry.
 4. Which settings D-Bus entry points open a specific account page and the account
    creation flow for a provider on 5.2 (XB-15)? Needs a device test.

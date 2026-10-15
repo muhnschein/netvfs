@@ -5,8 +5,8 @@ use super::*;
 use crate::fake::{Action, Fake, Node, Rule};
 use crate::proto::{
     Extension, FX_BAD_MESSAGE, FX_NO_SUCH_FILE, FX_OK, FX_PERMISSION_DENIED, FXF_TRUNC, FXP_ATTRS,
-    FXP_EXTENDED, FXP_EXTENDED_REPLY, FXP_LSTAT, FXP_MKDIR, FXP_OPEN, FXP_OPENDIR, FXP_READDIR, FXP_READLINK,
-    FXP_REALPATH, FXP_REMOVE, FXP_RENAME, FXP_RMDIR, FXP_SETSTAT, FXP_STAT, FXP_SYMLINK,
+    FXP_EXTENDED, FXP_EXTENDED_REPLY, FXP_LSTAT, FXP_MKDIR, FXP_NAME, FXP_OPEN, FXP_OPENDIR, FXP_READDIR,
+    FXP_READLINK, FXP_REALPATH, FXP_REMOVE, FXP_RENAME, FXP_RMDIR, FXP_SETSTAT, FXP_STAT, FXP_SYMLINK,
 };
 
 fn cancel() -> CancelToken {
@@ -383,6 +383,53 @@ async fn list_in_batches_without_dots() {
         .await
         .unwrap();
     assert_eq!(sink.batches.len(), 6, "batch size 0 counts as 1");
+}
+
+/// A NAME reply of `names`, each with the attributes of a file.
+fn name_reply(names: &[&[u8]]) -> Vec<u8> {
+    let attrs = Attrs { size: Some(1), permissions: Some(0o100_644), ..Attrs::default() };
+    let mut body = u32::try_from(names.len()).unwrap().to_be_bytes().to_vec();
+    for name in names {
+        body.extend(crate::fake::string(name));
+        body.extend(crate::fake::string(b"long name"));
+        body.extend(crate::fake::encode_attrs(&attrs));
+    }
+    body
+}
+
+#[tokio::test]
+async fn list_leaves_out_names_that_are_no_entry_of_the_folder() {
+    // A server that lists paths, NULs and empty names among its entries:
+    // they are dropped, the entries around them stay.
+    let fake = Fake::new();
+    fake.dir("/home/u/d");
+    fake.file("/home/u/d/last", b"");
+    let reply = name_reply(&[
+        b"first",
+        b".",
+        b"..",
+        b"",
+        b"../../etc/passwd",
+        b"/etc/passwd",
+        b"sub/name",
+        b"trailing/",
+        b"nul\0name",
+        b"\0",
+        b"...",
+        b".hidden",
+    ]);
+    fake.rule(Rule::new(FXP_READDIR, Action::Reply(FXP_NAME, reply)).once());
+    let mut remote = fake.remote().await;
+    let mut sink = Collect::default();
+    remote
+        .list(b"d", ListOptions { batch_size: 2, resolve_symlink_types: false }, &mut sink, &cancel())
+        .await
+        .unwrap();
+    // The first reply is the rule's; the server's own listing follows.
+    assert_eq!(sink.names(), ["first", "...", ".hidden", "last"]);
+    let sizes: Vec<usize> = sink.batches.iter().map(Vec::len).collect();
+    assert_eq!(sizes, [2, 1, 1]);
+    assert_eq!(fake.open_handles(), 0);
 }
 
 #[tokio::test]

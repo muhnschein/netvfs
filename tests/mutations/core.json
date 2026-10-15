@@ -77,6 +77,13 @@
     "test": "build/tests/unit/core/tst_core"
   },
   {
+    "name": "M-9 a Windows name reported as Internal",
+    "file": "src/core/paths.cpp",
+    "search": "            return Result(Error::InvalidName, problem);",
+    "replace": "            return Result(Error::Internal, problem);",
+    "test": "build/tests/unit/core/tst_core"
+  },
+  {
     "name": "secret not wiped",
     "file": "src/core/secure.cpp",
     "search": "        wipeBytes(data.data(), static_cast<size_t>(data.size()));\n    data.clear();",

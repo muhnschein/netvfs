@@ -46,7 +46,7 @@ struct NETVFS_EXPORT Entry {
     EntryFlags flags;
     QByteArray etag;                 // opaque change token; empty if none
     QString contentType;             // server-declared; advisory only, never trusted
-    QVariantMap extra;               // backend-specific (e.g. SMB "remark"), documented per backend
+    QVariantMap extra;               // backend-specific; no backend fills it
 
     bool isDir() const;              // Directory, or Symlink whose targetType is Directory
     bool isFile() const;             // File, or Symlink whose targetType is File

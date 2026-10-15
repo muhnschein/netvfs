@@ -313,8 +313,12 @@ async fn too_many_rounds() {
 #[tokio::test]
 async fn key_sign_in() {
     // S-12, S-T12: Ed25519 and ECDSA keys from the secret.
-    for (file, algorithm) in [("ed25519-openssh", "ssh-ed25519"), ("ecdsa384-openssh", "ecdsa-sha2-nistp384")]
-    {
+    // The P-256 key's scalar has a leading zero byte (31 bytes in the file).
+    for (file, algorithm) in [
+        ("ed25519-openssh", "ssh-ed25519"),
+        ("ecdsa384-openssh", "ecdsa-sha2-nistp384"),
+        ("ecdsa256-short-scalar", "ecdsa-sha2-nistp256"),
+    ] {
         let (secret, public) = key_secret(file);
         let server = Server::start(script(vec![PK, PW], vec![Step::Key(public)])).await;
         sign_in(&server, &secret, Mode::PublicKey).await.unwrap();

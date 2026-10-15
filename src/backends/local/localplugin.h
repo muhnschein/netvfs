@@ -8,7 +8,7 @@
 
 namespace NetVfs {
 
-// Root object of libnetvfs-local.so (SPEC-v2 section 6.5). (A single-level
+// Root object of libnetvfs-local.so (SPEC-v2 section 6.3). (A single-level
 // namespace: Qt 5.6 moc cannot parse C++17 nested namespace definitions.)
 class LocalBackendFactory : public QObject, public BackendFactory
 {

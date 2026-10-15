@@ -122,6 +122,62 @@ fn fingerprints_are_the_ones_ssh_keygen_prints() {
     }
 }
 
+/// The length of the private scalar of an unencrypted OpenSSH ECDSA key
+/// file, as stored (an SSH mpint: no leading zero bytes).
+fn stored_scalar_len(file: &str) -> usize {
+    /// The SSH string at the start of `data`, and what follows it.
+    fn string(data: &[u8]) -> (&[u8], &[u8]) {
+        let (len, rest) = data.split_at(4);
+        rest.split_at(usize::try_from(u32::from_be_bytes(len.try_into().unwrap())).unwrap())
+    }
+    let text = String::from_utf8(fixture(file)).unwrap();
+    let body: String = text.lines().filter(|l| !l.starts_with("-----")).collect();
+    let blob = BASE64.decode(body.as_bytes()).unwrap();
+    let mut rest = blob.strip_prefix(b"openssh-key-v1\0").unwrap();
+    for _ in 0..3 {
+        rest = string(rest).1; // cipher, KDF, KDF options
+    }
+    rest = rest.split_at(4).1; // number of keys
+    rest = string(rest).1; // public key
+    let mut rest = string(rest).0.split_at(8).1; // the private part after its check bytes
+    for _ in 0..3 {
+        rest = string(rest).1; // key type, curve, public point
+    }
+    string(rest).0.len()
+}
+
+#[test]
+fn p256_keys_with_a_short_scalar() {
+    // ssh-keygen writes a P-256 scalar with a leading zero byte as 31 bytes
+    // (about one key in 256); this key (OpenSSH 9.6p1, then `ssh-keygen -p`
+    // for the encrypted copy) is one. rust/vendor/ssh-key reads it.
+    assert_eq!(stored_scalar_len("ecdsa256-short-scalar"), 31);
+    let pub_file = String::from_utf8(fixture("ecdsa256-short-scalar.pub")).unwrap();
+    let blob = pub_file.split_whitespace().nth(1).unwrap();
+    for (file, passphrase) in [("ecdsa256-short-scalar", &b""[..]), ("ecdsa256-short-scalar-enc", PASSPHRASE)]
+    {
+        let key = read_private_key(&fixture(file), passphrase).unwrap_or_else(|e| panic!("{file}: {e:?}"));
+        let Some(russh::keys::ssh_key::private::EcdsaKeypair::NistP256 { private, .. }) =
+            key.key_data().ecdsa()
+        else {
+            panic!("{file}: not a P-256 key");
+        };
+        assert_eq!(private.as_slice()[0], 0, "{file}: the scalar is padded to 32 bytes");
+        let material = material(&key).unwrap();
+        assert_eq!(material.algorithm, "ecdsa-sha2-nistp256");
+        assert_eq!(material.public_line, format!("ecdsa-sha2-nistp256 {blob} sailfish-backup"));
+        // `ssh-keygen -lf ecdsa256-short-scalar.pub`.
+        assert_eq!(material.fingerprint, "SHA256:eHNCT7aZVPJ7aBziwLCZ5kCrJrZ99PG/sVG9z//cpwo");
+        // The key signs, and its public key verifies the signature.
+        let signature = key.sign("netvfs", HashAlg::Sha256, b"message").unwrap();
+        key.public_key().verify("netvfs", b"message", &signature).unwrap();
+        assert!(key.public_key().verify("netvfs", b"massage", &signature).is_err());
+        // The stored form (the scalar written back as 32 bytes) reads again.
+        assert_eq!(describe(&material.private_key).unwrap(), material);
+    }
+    assert_eq!(refusal(import(&fixture("ecdsa256-short-scalar-enc"), WRONG)), auth(NOT_CORRECT));
+}
+
 #[test]
 fn public_lines_carry_the_blob_of_the_pub_file() {
     for file in ["ed25519-openssh", "ecdsa384-openssh", "ecdsa521-openssh", "ecdsa256-pkcs8", "ecdsa256-sec1"]

@@ -34,7 +34,7 @@ const char Usage[] =
     "NETVFS_SECRET), never from the command line; --prompt answers server questions\n"
     "(keyboard-interactive) on the terminal. --option sets provider keys such as\n"
     "auth_mode, share, domain; --host-key PIN pins the server's SSH key; --profile\n"
-    "is the SMB security profile (strict, signed, legacy, guest).\n"
+    "is the SMB security profile (strict, signed, guest).\n"
     "\n"
     "commands:\n"
     "  identify                     connect without credentials, print the server identity\n"
@@ -74,7 +74,7 @@ bool takesNoValue(const QString &arg)
 bool validProfile(const QString &profile)
 {
     return profile == QLatin1String("strict") || profile == QLatin1String("signed")
-        || profile == QLatin1String("legacy") || profile == QLatin1String("guest");
+        || profile == QLatin1String("guest");
 }
 
 // Options that give the location by parts.
@@ -116,7 +116,7 @@ bool applyValueOption(const QString &arg, const QString &value, Options *options
         options->overrides.insert(QStringLiteral("host_key"), value);
     } else if (arg == QLatin1String("--profile")) {
         if (!validProfile(value)) {
-            *error = QStringLiteral("--profile must be strict, signed, legacy or guest");
+            *error = QStringLiteral("--profile must be strict, signed or guest");
             return false;
         }
         options->overrides.insert(QStringLiteral("security_profile"), value);

@@ -2,16 +2,15 @@
 #
 # Packages of SPEC-v2 XP-1 (amends SPEC 4.1, P-4, P-6):
 #
-#   netvfs          libnetvfs, all protocol backends and the SMB share helper,
-#                   libnetvfs-rs.so (the Rust backends the plugins load), the
+#   netvfs          libnetvfs, all protocol backends, libnetvfs-rs.so (the
+#                   Rust backends the plugins load), the
 #                   account UI module, the account providers, the Files
 #                   services, netvfs-cli, translations
 #   netvfs-backup   SFTP and SMB backups: services, Buteo plugins and profiles
 #   netvfs-bridge   netvfs-bridge and its setgid accounts helper, for
 #                   sandboxed consumers, and libnetvfs-bridge-ffi.so, the
 #                   C ABI through which the bridge reaches the backends (both
-#                   binaries are Rust, the helper since 0.4 and the bridge
-#                   since 0.5: rust/, doc/RUST.md)
+#                   binaries are Rust: rust/, doc/RUST.md)
 #   netvfs-devel    headers, pkg-config
 #
 # The parts nobody installs on their own are one package; what stays
@@ -26,7 +25,7 @@
 # one package.
 
 Name:       netvfs
-Version:    0.5.0
+Version:    0.6.0
 Release:    1
 Summary:    Remote file access accounts for Sailfish OS
 License:    LGPL-2.1-or-later
@@ -38,7 +37,6 @@ ExclusiveArch: aarch64
 # SPEC P-5
 BuildRequires: qt5-qmake
 BuildRequires: qt5-qttools-linguist
-BuildRequires: cmake
 BuildRequires: sailfish-svg2png
 BuildRequires: pkgconfig(Qt5Core)
 BuildRequires: pkgconfig(Qt5DBus)
@@ -54,9 +52,9 @@ BuildRequires: pkgconfig(buteosyncfw5) >= 0.10.0
 # which no SDK target ships yet: CI cross-builds them, and libnetvfs-rs.so,
 # with the SDK's own compiler and sysroot before this build
 # (tools/ci/cross-build.sh), and the spec installs them (doc/RUST.md "Cross
-# build"). rpm still derives their library dependencies. The bridge speaks
-# peer-to-peer D-Bus with zbus, so the package build no longer needs libdbus
-# (the tests still do).
+# build"). rpm derives their library dependencies. The bridge speaks
+# peer-to-peer D-Bus with zbus, so the package build needs no libdbus (the
+# tests use it).
 
 Requires:   sailfish-version >= 5.2.0
 Requires:   sailfishsilica-qt5
@@ -75,9 +73,8 @@ providers in Settings > Accounts, network locations for apps, and the
 command line tool netvfs-cli.
 
 libnetvfs (accounts, credentials, sessions and errors over pluggable protocol
-backends) with its SFTP, SMB and local file system backends. SMB
-share enumeration runs in a helper process of its own (SPEC-v2 XM-7), so the
-DCE/RPC parser never runs inside the SMB backend. libnetvfs also links
+backends) with its SFTP, SMB and local file system backends; the SFTP and
+SMB backends are Rust (libnetvfs-rs.so; SMB 3.1.1 only). libnetvfs also links
 QtNetwork, for the DNS-SD discovery of servers on the local network
 (SPEC-v2 XD-1).
 
@@ -118,11 +115,9 @@ consumers over a socket in their data folder, without handing out secrets.
 %setup -q -n %{name}-%{version}
 
 %build
-# SPEC P-1..P-3: vendored libraries first, static and position-independent.
-./vendor/build-vendor.sh "$PWD/build-vendor"
 # The Rust binaries and libnetvfs-rs.so, cross-built by CI into
 # rust/prebuilt (see above).
-%qmake5 -r VENDOR_PREFIX="$PWD/build-vendor" NETVFS_BUILD_TESTS=0 "VERSION=%{version}" \
+%qmake5 -r NETVFS_BUILD_TESTS=0 "VERSION=%{version}" \
     NETVFS_RUST_PREBUILT="$PWD/rust/prebuilt"
 %make_build
 
@@ -170,8 +165,8 @@ systemctl-user daemon-reload || :
 # The Rust backends, loaded by their plugins with dlopen next to the backend
 # folder (doc/RUST.md).
 %{_libdir}/netvfs/libnetvfs-rs.so
+# The bridge package's binaries live here.
 %dir %{_prefix}/libexec/netvfs
-%{_prefix}/libexec/netvfs/netvfs-smb-shares
 %dir %{_datadir}/netvfs
 %{_datadir}/netvfs/providers
 %dir %{_libdir}/qt5/qml/org/netvfs

@@ -6,7 +6,7 @@
 
 use crate::client::{Client, Field, PathOf, Simple, ok};
 use crate::errors::Failure;
-use crate::paths::{display, join, last_component, resolve};
+use crate::paths::{display, is_entry_name, join, last_component, resolve};
 use crate::proto::{
     Attrs, FX_FAILURE, FXF_CREAT, FXF_EXCL, FXF_READ, FXF_WRITE, Limits, Reply, ServerVersion, Statvfs,
     decode_owner_names,
@@ -513,10 +513,9 @@ impl Remote {
             else {
                 return Ok(());
             };
-            for name in names {
-                if name.filename == b"." || name.filename == b".." {
-                    continue;
-                }
+            // A name that is no entry of this folder is left out; the
+            // rest of the listing stays.
+            for name in names.into_iter().filter(|n| is_entry_name(&n.filename)) {
                 let mut entry = entry_from(&name.attrs, &name.filename);
                 if options.resolve_symlink_types && entry.kind == EntryType::Symlink {
                     self.resolve_target(remote, &mut entry, &mut budget, cancel).await;

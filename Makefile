@@ -1,8 +1,9 @@
 # SPDX-License-Identifier: LGPL-2.1-or-later
 #
-#   make               build everything (vendored libraries first)
+#   make               build everything
 #   make check         Rust checks, unit tests, then the interop suite (needs docker)
-#   make check-rust    the Rust workspace (rust/): format, lint, tests (nextest), lockfile, MSRV
+#   make check-rust    the Rust workspace (rust/): format, lint, tests (nextest), lockfile, MSRV,
+#                      netvfs-smb's crypto fence
 #   make check-unit    unit tests only
 #   make check-rust-ffi the Rust side of the C ABI against the built libnetvfs-bridge-ffi.so
 #   make check-interop interop suite against containerised servers
@@ -10,7 +11,7 @@
 #   make coverage      unit + interop tests instrumented, writes build-coverage/coverage.xml
 #                      (C++, gcovr) and build-coverage/rust-lcov.info (Rust, llvm-cov)
 #   make clippy-report clippy findings as JSON for SonarQube, build-coverage/clippy.json
-#   make SANITIZE=1 check   the same under ASan + UBSan (vendored libraries included)
+#   make SANITIZE=1 check   the same under ASan + UBSan
 #   make HOST_BUTEO=0  use the system buteosyncfw5 (pkg-config) instead of
 #                      building the pinned vendor/host/buteo-syncfw
 
@@ -21,15 +22,12 @@ QMAKE_ARGS ?=
 ifeq ($(SANITIZE),1)
 BUILD ?= build-asan
 QMAKE_ARGS += NETVFS_SANITIZE=1
-VENDOR_CFLAGS = -fsanitize=address,undefined -fno-omit-frame-pointer
 export LSAN_OPTIONS := suppressions=$(CURDIR)/tools/sanitizer/lsan.supp:print_suppressions=0
 else ifeq ($(COVERAGE),1)
 BUILD ?= build-coverage
 QMAKE_ARGS += NETVFS_COVERAGE=1
-VENDOR_CFLAGS =
 else
 BUILD ?= build
-VENDOR_CFLAGS =
 endif
 
 BUILD_DIR := $(abspath $(BUILD))
@@ -60,14 +58,11 @@ else
 RUST_ENV =
 endif
 
-.PHONY: all vendor host-buteo configure check check-rust check-rust-ffi check-unit check-interop check-packaging \
+.PHONY: all host-buteo configure check check-rust check-rust-ffi check-unit check-interop check-packaging \
     coverage clippy-report clean distclean
 
 all: configure
 	$(MAKE) -C $(BUILD_DIR) $(if $(findstring -j,$(MAKEFLAGS)),,-j$(JOBS))
-
-vendor:
-	CFLAGS="$(VENDOR_CFLAGS)" LDFLAGS="$(VENDOR_CFLAGS)" ./vendor/build-vendor.sh $(BUILD_DIR)/vendor
 
 # The host has no buteo packages; the Sailfish SDK build never runs this.
 host-buteo:
@@ -75,14 +70,15 @@ ifeq ($(HOST_BUTEO),1)
 	./vendor/host/build-host-buteo.sh $(BUILD_DIR)/host-buteo
 endif
 
-configure: vendor host-buteo
+configure: host-buteo
 	mkdir -p $(BUILD_DIR)
-	cd $(BUILD_DIR) && $(QMAKE) -r $(CURDIR)/netvfs.pro VENDOR_PREFIX=$(BUILD_DIR)/vendor $(QMAKE_ARGS)
+	cd $(BUILD_DIR) && $(QMAKE) -r $(CURDIR)/netvfs.pro $(QMAKE_ARGS)
 
 check: check-rust check-unit check-rust-ffi check-interop
 
 check-rust:
 	./tools/ci/check-lockfile.sh rust/Cargo.lock
+	./tools/ci/check-crypto-fence.sh
 	cd rust && $(CARGO) fmt --all -- --check
 	cd rust && $(CARGO) clippy --locked --workspace --all-targets $(RUST_FEATURES) -- -D warnings
 	cd rust && $(RUST_ENV) $(CARGO) nextest run --locked --workspace $(RUST_FEATURES) --profile $(NEXTEST_PROFILE)
@@ -129,12 +125,11 @@ check-interop: all
 
 # SPEC-v2 XP-1: every installed file in exactly one package of rpm/netvfs.spec
 # (the host has no sailfish-svg2png, so no icons; tests install to /usr/tests,
-# package builds skip them). XP-3: no share enumeration in the SMB plugin,
-# and the check does find it in the share helper. The C ABI of netvfs-bridge
+# package builds skip them). The C ABI of netvfs-bridge
 # is checked against the host's glibc, and the bridge must look for it where
 # the spec puts it (tools/ci/check-ffi-lib.sh). So is libnetvfs-rs.so, and
 # the plugins of the Rust backends (the test plugin of provider mem, the
-# SFTP plugin) must look for it where qmake installs it
+# SFTP plugin and the SMB plugin) must look for it where qmake installs it
 # (tools/ci/check-rs-lib.sh).
 PACKAGE_ROOT := $(BUILD_DIR)/install-root
 PACKAGE_FILES = ./tools/ci/check-files.py --map "$$($(QMAKE) -query QT_INSTALL_LIBS)=/usr/lib64" \
@@ -144,14 +139,12 @@ check-packaging: all
 	$(MAKE) -s -C $(BUILD_DIR) install INSTALL_ROOT=$(PACKAGE_ROOT) >/dev/null
 	rm -rf $(PACKAGE_ROOT)/usr/tests
 	$(PACKAGE_FILES) $(PACKAGE_ROOT)
-	./tools/ci/check-noshareenum.sh $(BUILD_DIR)/lib/netvfs/backends/libnetvfs-smb.so
 	./tools/ci/check-ffi-lib.sh $(BUILD_DIR)/lib/netvfs/libnetvfs-bridge-ffi.so \
 	    "$$($(PACKAGE_FILES) --list $(PACKAGE_ROOT) | sed -n 's|^ *\(/.*/libnetvfs-bridge-ffi\.so\)$$|\1|p')" \
 	    $(BUILD_DIR)/libexec/netvfs/netvfs-bridge "$$(getconf GNU_LIBC_VERSION | cut -d ' ' -f 2)"
-	! ./tools/ci/check-noshareenum.sh $(BUILD_DIR)/libexec/netvfs/netvfs-smb-shares >/dev/null
 	./tools/ci/check-rs-lib.sh $(BUILD_DIR)/lib/netvfs/libnetvfs-rs.so "$$(getconf GNU_LIBC_VERSION | cut -d ' ' -f 2)" \
 	    "$$($(QMAKE) -query QT_INSTALL_LIBS)/netvfs/libnetvfs-rs.so" $(BUILD_DIR)/lib/netvfs/test-backends/libnetvfs-mem.so \
-	    $(BUILD_DIR)/lib/netvfs/backends/libnetvfs-sftp.so
+	    $(BUILD_DIR)/lib/netvfs/backends/libnetvfs-sftp.so $(BUILD_DIR)/lib/netvfs/backends/libnetvfs-smb.so
 	./tests/packaging/test_packaging.py
 
 coverage:
