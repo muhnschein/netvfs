@@ -428,10 +428,9 @@ The SFTP backend is `netvfs-sftp` in `libnetvfs-rs.so` (SPEC-sftp).
   when the server offers it.
 - XS-8: `spaceInfo` from `statvfs@openssh.com` (free = f_bavail × f_frsize, total =
   f_blocks × f_frsize).
-- XS-9: The backend runs no command on the server: it opens no exec channel, and
-  reports neither `Checksums` nor `ServerCopyRecursive`.
 - XS-10: `copy` (XC-17) uses `copy-data` when the server offers it, for files only
-  (`ServerCopy`).
+  (`ServerCopy`, never `ServerCopyRecursive`). The backend computes no checksums (no
+  `Checksums`).
 - XS-11: Keyboard-interactive: with an `AuthPrompter`, it is tried after the configured
   method fails, and it is the method of `auth_mode=interactive`, whose stored secret is
   optional. A partial success continues with keyboard-interactive, or with a password
@@ -506,7 +505,9 @@ fast, container-free target), the CLI and in-process consumers.
   kernel and filesystem support it (fallback `link`+`unlink` for files, stat check for
   folders); `rename` for Replace (`AtomicReplace`).
 - L-4: Copy: `ioctl(FICLONE)` then `copy_file_range` then read/write loop
-  (`ServerCopy`); recursive copy left to `Ops::walk`-based consumers.
+  (`ServerCopy`). The copy gets the source's permission bits less the umask (as `cp`)
+  and, where the file system allows, its access and modification times (as `cp -p`).
+  Recursive copy is left to `Ops::walk`-based consumers.
 - L-5: Checksums computed locally (sha256, sha1, md5) in streaming fashion with cancel.
 - L-6: `spaceInfo` via `statvfs`; `keepAlive` success; `cancel` flag checked between
   1 MiB chunks and between directory entries (C-9 holds unless the kernel blocks in a

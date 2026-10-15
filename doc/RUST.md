@@ -239,12 +239,18 @@ convert both ways (`rsmarshal`) and wrap the C++ callback objects
 as a refusal and turns the call's result into Internal "A callback of the
 Rust backend failed". A name that `Names` cannot encode is InvalidName
 before it reaches Rust; the capabilities are fixed once `authenticate`
-succeeds (XC-5). The library's table maps a
-mistake of its caller to ProtocolError "Invalid <what> from the plugin" or
-"Missing <what> from the plugin": a negative count, offset or mode, an
-unknown option kind or disposition, a missing pointer or callback. A local
-sink that cannot be written to (the `nvb_io` write of a download fails) is
-NoSpace "Cannot write the local file".
+succeeds (XC-5). The shim itself refuses a read size that is negative or
+more than one `QByteArray` holds, and a negative write length, as Internal
+"Invalid range" and "Invalid length", as the local backend does. The
+library's table maps a mistake of its caller to ProtocolError "Invalid
+<what> from the plugin" or "Missing <what> from the plugin": a negative
+offset, a length, size or mode below -1, an unknown option kind or
+disposition, a missing pointer or callback. A handle that was closed,
+committed or aborted is NULL on the C++ side, so a later call on it is
+ProtocolError "Missing read handle from the plugin" (or "write handle"),
+and its `position()` is -1. A local sink that cannot be written to (the
+`nvb_io` write of a download fails) is NoSpace "Cannot write the local
+file".
 
 ## netvfs-sftp
 

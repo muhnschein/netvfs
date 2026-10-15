@@ -87,7 +87,7 @@ What remains:
 ## 4. Paths
 
 - **M-8** Paths are relative to the share root and use `/` at the backend API; on the wire they are UTF-16LE with `\` separators **[test]**. A leading `/` in the backups folder is stripped. In server mode paths are `/<share>/<rest>` (SPEC-v2 XM-2).
-- **M-9** Path components containing any of `\ : * ? " < > |` or a control character, or ending in a space or a dot, are rejected in the UI before any connection is made, and the backend refuses them before any request is sent (`WindowsNames`, SPEC-v2 XM-4).
+- **M-9** Path components containing any of `\ : * ? " < > |` or a control character, or ending in a space or a dot, are rejected in the UI before any connection is made, and the backend refuses them with `InvalidName` before any request is sent (`WindowsNames`, SPEC-v2 XM-4) **[test]**.
 
 ---
 
