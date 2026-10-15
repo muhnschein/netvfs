@@ -562,10 +562,10 @@ fn the_table_is_one_static() {
 #[test]
 fn providers() {
     let mut c = ptr::dangling_mut();
-    let e = res(unsafe { (t().conn_new)(b(b"sftp"), &raw mut c) }).unwrap_err();
+    let e = res(unsafe { (t().conn_new)(b(b"ftp"), &raw mut c) }).unwrap_err();
     assert_eq!(
         (e.name.as_str(), e.message.as_str()),
-        ("Unsupported", "No Rust backend for provider \"sftp\"")
+        ("Unsupported", "No Rust backend for provider \"ftp\"")
     );
     assert!(c.is_null());
     let e = res(unsafe { (t().conn_new)(b(b"mem"), ptr::null_mut()) }).unwrap_err();
@@ -1319,20 +1319,152 @@ fn a_connection_may_move_between_threads() {
     .unwrap();
 }
 
+/// `sftp` through the table: a connection to a port nobody listens on
+/// fails the way the backend says, and nothing leaks.
 #[test]
-fn keys_are_not_supported_yet() {
-    let mut key: *mut NvrKey = ptr::dangling_mut();
-    let e = res(unsafe { (t().key_generate)(&raw mut key) }).unwrap_err();
+fn sftp_is_a_provider() {
+    let closed = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = closed.local_addr().unwrap().port();
+    drop(closed);
+    let mut c = ptr::null_mut();
+    res(unsafe { (t().conn_new)(b(b"sftp"), &raw mut c) }).unwrap();
+    let conn = Conn(c);
+    assert_eq!(live_objects(), 1);
+    let p = NvbParams {
+        provider: b(b"sftp"),
+        host: b(b"127.0.0.1"),
+        port: i32::from(port),
+        username: b(b"alice"),
+        options: ptr::null(),
+        n_options: 0,
+        connect_timeout_ms: 5000,
+        request_timeout_ms: 5000,
+    };
+    let mut seen: *mut NvbIdentity = ptr::dangling_mut();
+    let e = res(unsafe { (t().connect)(conn.0, &raw const p, &raw mut seen) }).unwrap_err();
     assert_eq!(
-        (e.name.as_str(), e.message.as_str()),
-        ("Unsupported", "SSH keys are not supported by the Rust backends")
+        (e.name.as_str(), e.message),
+        ("NetworkUnreachable", format!("Cannot connect to 127.0.0.1 port {port}"))
     );
-    assert!(key.is_null());
+    assert!(seen.is_null());
+    assert_eq!(name(conn.auth(b"pw", ptr::null())), "Internal");
+    drop(conn);
+    assert_no_leaks();
+}
+
+fn fixture(file: &str) -> Vec<u8> {
+    let path = format!("{}/../netvfs-sftp/testdata/keys/{file}", env!("CARGO_MANIFEST_DIR"));
+    std::fs::read(path).unwrap()
+}
+
+/// A key block as (private key, algorithm, public line, fingerprint); the
+/// block is freed.
+fn take_key(key: *mut NvrKey) -> (Vec<u8>, String, String, String) {
+    assert!(!key.is_null());
+    let k = unsafe { &*key };
+    let out = (bytes(k.private_key), text(k.algorithm), text(k.public_line), text(k.fingerprint));
+    free(key);
+    out
+}
+
+#[test]
+fn key_generate_and_describe() {
+    let mut key: *mut NvrKey = ptr::dangling_mut();
+    res(unsafe { (t().key_generate)(&raw mut key) }).unwrap();
+    let made = take_key(key);
+    let (private, algorithm, line, fingerprint) = made.clone();
+    assert!(private.starts_with(b"-----BEGIN OPENSSH PRIVATE KEY-----\n"), "{private:?}");
+    assert_eq!(algorithm, "ssh-ed25519");
+    let fields: Vec<&str> = line.split(' ').collect();
+    assert_eq!((fields.len(), fields[0], fields[2]), (3, "ssh-ed25519", "sailfish-backup"));
+    assert!(fields[1].starts_with("AAAAC3NzaC1lZDI1NTE5AAAAI"), "{line}");
+    assert!(fingerprint.starts_with("SHA256:"), "{fingerprint}");
+    assert_eq!(fingerprint.len(), 50);
+
+    // The stored key gives back the same material.
     key = ptr::dangling_mut();
-    assert_eq!(name(res(unsafe { (t().key_import)(b(b"file"), b(b""), &raw mut key) })), "Unsupported");
-    assert!(key.is_null());
-    assert_eq!(name(res(unsafe { (t().key_describe)(b(b"key"), &raw mut key) })), "Unsupported");
-    assert_eq!(name(res(unsafe { (t().key_generate)(ptr::null_mut()) })), "ProtocolError");
+    res(unsafe { (t().key_describe)(b(&private), &raw mut key) }).unwrap();
+    assert_eq!(take_key(key), made);
+
+    // A second key is a new key.
+    res(unsafe { (t().key_generate)(&raw mut key) }).unwrap();
+    let other = take_key(key);
+    assert_ne!((&other.0, &other.3), (&made.0, &made.3));
+    assert_no_leaks();
+}
+
+#[test]
+fn key_import() {
+    let mut key: *mut NvrKey = ptr::dangling_mut();
+    let file = fixture("ed25519-openssh");
+    res(unsafe { (t().key_import)(b(&file), b(b""), &raw mut key) }).unwrap();
+    let (private, algorithm, line, fingerprint) = take_key(key);
+    assert_eq!(
+        (algorithm.as_str(), line.as_str(), fingerprint.as_str()),
+        (
+            "ssh-ed25519",
+            "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBSCaUB0YoRmEeMJtmGFVr7cpQsKw0yZRUowmCSPc4He sailfish-backup",
+            "SHA256:ZGPW31uwJF+/lR0hhEstPwJCRwMYsx0C3T2YPcRL/3c"
+        )
+    );
+    // The stored copy has no passphrase.
+    key = ptr::dangling_mut();
+    res(unsafe { (t().key_describe)(b(&private), &raw mut key) }).unwrap();
+    assert_eq!(take_key(key).3, fingerprint);
+
+    let encrypted = fixture("ed25519-openssh-enc");
+    key = ptr::dangling_mut();
+    res(unsafe { (t().key_import)(b(&encrypted), b(b"correct-horse"), &raw mut key) }).unwrap();
+    let (private, _, _, fingerprint) = take_key(key);
+    assert_eq!(fingerprint, "SHA256:V3dDf1W0ahmN12EbuUrVqKGy5H6JjR9COfxe/qTnMXA");
+    key = ptr::dangling_mut();
+    res(unsafe { (t().key_describe)(b(&private), &raw mut key) }).unwrap();
+    assert_eq!(take_key(key).3, fingerprint);
+    assert_no_leaks();
+}
+
+#[test]
+fn key_refusals() {
+    let refused = |e: *mut NvbError, key: *mut NvrKey| {
+        assert!(key.is_null());
+        let f = res(e).unwrap_err();
+        (f.name, f.message)
+    };
+    let fails = |name: &str, message: &str| (name.to_owned(), message.to_owned());
+    let mut key: *mut NvrKey = ptr::dangling_mut();
+    let encrypted = fixture("ed25519-openssh-enc");
+    let e = unsafe { (t().key_import)(b(&encrypted), b(b"wrong"), &raw mut key) };
+    assert_eq!(refused(e, key), fails("AuthFailed", "The passphrase is not correct"));
+    key = ptr::dangling_mut();
+    let e = unsafe { (t().key_import)(b(&encrypted), b(b""), &raw mut key) };
+    assert_eq!(refused(e, key), fails("AuthFailed", "The key is protected by a passphrase"));
+    let rsa = fixture("rsa-openssh");
+    key = ptr::dangling_mut();
+    let e = unsafe { (t().key_import)(b(&rsa), b(b""), &raw mut key) };
+    let rsa_refused = "RSA keys are not supported; generate a new key, or use an Ed25519 or ECDSA key";
+    assert_eq!(refused(e, key), fails("Unsupported", rsa_refused));
+    key = ptr::dangling_mut();
+    let e = unsafe { (t().key_describe)(b(&rsa), &raw mut key) };
+    assert_eq!(refused(e, key), fails("Unsupported", rsa_refused));
+    // Describe never decrypts.
+    key = ptr::dangling_mut();
+    let e = unsafe { (t().key_describe)(b(&encrypted), &raw mut key) };
+    assert_eq!(refused(e, key), fails("AuthFailed", "The key is protected by a passphrase"));
+    let not_a_key = "The file is not a private key in OpenSSH or PEM format";
+    key = ptr::dangling_mut();
+    let e = unsafe { (t().key_import)(NvbBytes { ptr: ptr::null(), len: 9 }, b(b""), &raw mut key) };
+    assert_eq!(refused(e, key), fails("Unsupported", not_a_key));
+    key = ptr::dangling_mut();
+    let e = unsafe { (t().key_describe)(b(b"key"), &raw mut key) };
+    assert_eq!(refused(e, key), fails("Unsupported", not_a_key));
+
+    let missing = fails("ProtocolError", "Missing result pointer from the plugin");
+    let e = unsafe { (t().key_generate)(ptr::null_mut()) };
+    assert_eq!(refused(e, ptr::null_mut()), missing);
+    let e = unsafe { (t().key_import)(b(&encrypted), b(b"correct-horse"), ptr::null_mut()) };
+    assert_eq!(refused(e, ptr::null_mut()), missing);
+    let e = unsafe { (t().key_describe)(b(b"key"), ptr::null_mut()) };
+    assert_eq!(refused(e, ptr::null_mut()), missing);
     assert_no_leaks();
 }
 

@@ -994,6 +994,7 @@ name = "netvfs-backend"
 version = "0.5.0"
 dependencies = [
  "libc",
+ "netvfs-sftp",
  "netvfs-vfs",
  "sha2",
  "tokio",
