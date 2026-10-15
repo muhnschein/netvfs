@@ -508,10 +508,9 @@ impl SftpRead {
         }
         *filled = filled.saturating_add(used);
         *position = position.saturating_add(len_u64(used));
-        if used < data.len() {
-            self.buffer = data.get(used..).unwrap_or_default().to_vec();
-            self.buffer_at = *position;
-        }
+        // What did not fit is kept (the kept data was used up before).
+        self.buffer = data.get(used..).unwrap_or_default().to_vec();
+        self.buffer_at = *position;
         // A short answer: the rest of its block is asked for before the
         // requests behind it are taken.
         let n = len_u64(data.len());

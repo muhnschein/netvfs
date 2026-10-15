@@ -404,6 +404,30 @@ async fn download_keeps_the_window_full_and_follows_a_growing_file() {
 }
 
 #[tokio::test]
+async fn download_keeps_sixteen_reads_in_flight() {
+    let (fake, remote) = setup().await;
+    fake.file("/home/u/f", &digits(400));
+    // The first READ is never answered.
+    fake.rule(Rule::new(FXP_READ, Action::Ignore).once());
+    let c = cancel();
+    let trip = c.clone();
+    let watcher = fake.clone();
+    let stop = tokio::spawn(async move {
+        eventually(|| watcher.requests(FXP_READ).len() >= WINDOW).await;
+        tokio::time::sleep(Duration::from_millis(30)).await;
+        let sent = watcher.requests(FXP_READ).len();
+        trip.cancel();
+        sent
+    });
+    let down = Download { client: remote.client(), chunk: 4 };
+    let mut sink = Collect::default();
+    let e = down.run(b"/home/u/f", 0, None, &mut sink, &mut Recorder::default(), &c).await.unwrap_err();
+    assert_eq!(e.name, ErrorName::Canceled);
+    assert_eq!(stop.await.unwrap(), WINDOW);
+    assert_eq!(sink.data, b"");
+}
+
+#[tokio::test]
 async fn download_survives_short_reads() {
     let (fake, remote) = setup().await;
     fake.file("/home/u/f", &digits(50));
@@ -655,6 +679,13 @@ async fn read_ahead_hints() {
     assert_eq!(read_offsets(&fake), [20, 24, 28, 32, 36, 40]);
     h.read_ahead(0, 0);
     assert_eq!(read(&mut h, 36, 8).await.unwrap(), content[36..44]);
+    // A hint that starts where the requests on their way end adds to them.
+    let mut h = reader(&fake, &remote, b"/home/u/f", 4).await;
+    h.read_ahead(60, 8);
+    h.read_ahead(68, 8);
+    eventually(|| fake.requests(FXP_READ).len() == 4).await;
+    assert_eq!(read_offsets(&fake), [60, 64, 68, 72]);
+    assert_eq!(read(&mut h, 60, 16).await.unwrap(), content[60..76]);
     // A hint is capped at 4 MiB.
     let big = digits(5 << 20);
     fake.file("/home/u/big", &big);
@@ -664,6 +695,23 @@ async fn read_ahead_hints() {
     tokio::time::sleep(Duration::from_millis(20)).await;
     assert_eq!(fake.requests(FXP_READ).len(), 16);
     assert_eq!(*read_offsets(&fake).last().unwrap(), 15 * 256 * 1024);
+}
+
+#[tokio::test]
+async fn read_ahead_hint_without_bytes_is_ignored() {
+    let (fake, remote) = setup().await;
+    let content = digits(200);
+    fake.file("/home/u/f", &content);
+    let mut h = reader(&fake, &remote, b"/home/u/f", 4).await;
+    // A window of requests for the hint; it is kept up while reading.
+    h.read_ahead(0, 100);
+    eventually(|| fake.requests(FXP_READ).len() == WINDOW).await;
+    // No bytes: the hint before it stays.
+    h.read_ahead(8, 0);
+    assert_eq!(read(&mut h, 0, 4).await.unwrap(), content[..4]);
+    assert_eq!(read(&mut h, 4, 4).await.unwrap(), content[4..8]);
+    eventually(|| fake.requests(FXP_READ).len() == WINDOW + 1).await;
+    assert_eq!(*read_offsets(&fake).last().unwrap(), 64);
 }
 
 #[tokio::test]
