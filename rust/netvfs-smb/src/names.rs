@@ -172,15 +172,15 @@ fn windows_problem(component: &[u8], units: &[u16]) -> Option<String> {
 /// components: each must be WTF-8 and a valid Windows name.
 ///
 /// # Errors
-/// `InvalidName` for bytes that are not WTF-8; `Internal` for a name
-/// Windows servers cannot store (M-9, as `Paths::checkWindowsPath`).
+/// `InvalidName` for bytes that are not WTF-8 and for a name Windows
+/// servers cannot store (M-9, as `Paths::checkWindowsPath`).
 pub fn smb_path(components: &[&[u8]]) -> Result<Vec<u16>, Status> {
     let mut out = Vec::new();
     for (i, component) in components.iter().enumerate() {
         let units = utf16_from_wtf8(component)
             .ok_or_else(|| Status::invalid_name(format!("\"{}\" is not a valid name", display(component))))?;
         if let Some(problem) = windows_problem(component, &units) {
-            return Err(Status::internal(problem));
+            return Err(Status::invalid_name(problem));
         }
         if i > 0 {
             out.push(u16::from(b'\\'));
@@ -318,7 +318,7 @@ mod tests {
     }
 
     #[test]
-    fn windows_rules_are_internal_errors() {
+    fn windows_rules_are_invalid_names() {
         for (name, message) in [
             ("bad|name", "\"bad|name\" contains the character |"),
             ("a:b", "\"a:b\" contains the character :"),
@@ -334,7 +334,7 @@ mod tests {
             ("trailing.", "\"trailing.\" ends in a space or a dot"),
         ] {
             let e = smb_path(&[b"ok", name.as_bytes()]).unwrap_err();
-            assert_eq!((e.name, e.message.as_str()), (ErrorName::Internal, message), "{name}");
+            assert_eq!((e.name, e.message.as_str()), (ErrorName::InvalidName, message), "{name}");
         }
         for fine in [" lead", ".hidden", "a.b", "x y"] {
             smb_path(&[fine.as_bytes()]).unwrap();

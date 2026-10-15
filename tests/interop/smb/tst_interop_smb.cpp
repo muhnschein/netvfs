@@ -835,7 +835,7 @@ private slots:
         readOnlySink.open(QIODevice::ReadOnly);
         QCOMPARE(backend->download(QStringLiteral("ops/small"), &readOnlySink, DownloadOptions(), nullptr).error(), Error::NoSpace);
         // M-9 inside a session too: nothing is sent.
-        QCOMPARE(backend->makePath(QStringLiteral("ops/bad|name")).error(), Error::Internal);
+        QCOMPARE(backend->makePath(QStringLiteral("ops/bad|name")).error(), Error::InvalidName);
     }
 
     // The account lacks write access: PermissionDenied, not a sign-in error.

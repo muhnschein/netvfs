@@ -315,7 +315,10 @@ private slots:
     {
         QFETCH(QString, path);
         QFETCH(bool, ok);
-        QCOMPARE(Paths::checkWindowsPath(path).ok(), ok);
+        const Result r = Paths::checkWindowsPath(path);
+        QCOMPARE(r.ok(), ok);
+        if (!ok)
+            QCOMPARE(r.error(), Error::InvalidName);
     }
 
     void pins()

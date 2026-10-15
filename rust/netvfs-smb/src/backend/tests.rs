@@ -385,7 +385,7 @@ async fn paths_name_the_share_and_the_path() {
         assert_eq!(smb.split(bad).unwrap_err().name, ErrorName::InvalidName, "{bad:?}");
     }
     // M-9: a name Windows cannot store.
-    assert_eq!(smb.split(b"/a/b?").unwrap_err().name, ErrorName::Internal);
+    assert_eq!(smb.split(b"/a/b?").unwrap_err().name, ErrorName::InvalidName);
     assert!(smb.share_level(b"/"));
     assert!(smb.share_level(b"/data"));
     assert!(!smb.share_level(b"/data/x"));
