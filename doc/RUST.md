@@ -24,7 +24,8 @@ netvfs are written in Rust:
 - `libnetvfs-rs.so`, the Rust backends (see "netvfs-backend"): C++ backend
   plugins load it with `dlopen` from `/usr/lib64/netvfs` and reach its
   backends through a C ABI of one table (`src/backends/rs/netvfs_rs.h`).
-  Its only provider so far is `mem`, an in-memory backend for tests.
+  Its providers: `smb`, an SMB 3.1.1 client of its own (see "netvfs-smb"),
+  and `mem`, an in-memory backend for tests.
 
 Everything else stays C++.
 
@@ -65,6 +66,7 @@ Everything else stays C++.
 | `rust/netvfs-bridge/src/testing.rs`, `testutil.rs`, `bin/accounts_fake.rs` | tests only (features `testing`, `test-bins`): fixtures, a private bus, `netvfs-accounts-fake` |
 | `src/bridge/rust/rust.pro` | the qmake target that builds both binaries with cargo (see "Build") |
 | `rust/netvfs-backend/` | `libnetvfs-rs.so` (see "netvfs-backend"): `ffi/` the C ABI of `netvfs_rs.h`, `runtime.rs` the tokio runtime and the cancel cut, `erased.rs` the traits behind `dyn`, `providers.rs` the backends by provider name, `mem/` tests only (feature `testing`): the in-memory backend |
+| `rust/netvfs-smb/` | provider `smb` (see "netvfs-smb"): `transport`, `msg/` (the MS-SMB2 codecs), `negotiate`, `auth` (sspi glue), `crypto` (the only user of RustCrypto), `conn` (credits, compounding, the receive task), `session`, `fs`, `files` (handles), `rpc` (srvsvc), `names`, `status`, `error`, `profile`, `backend` |
 | `src/backends/rs/` | the C++ shim: `netvfs_rs.h`, the loader, `RsBackend`, `RsReadHandle`, `RsWriteHandle`, `RsKeyTools`, the conversions and callbacks; `rs.pro` builds the library with cargo |
 | `rust/fuzz/` | cargo-fuzz targets (nightly, not in the workspace) |
 
@@ -76,12 +78,15 @@ error names), `zbus` 5 (`tokio`, `p2p`), `tokio`, `serde`, `zeroize` and
 netvfs-bridge: the protocol crate, `netvfs-vfs`, `libc`, `zeroize`, `zbus` 5
 (`tokio`, `p2p`, `bus-impl`), `tokio` and `futures-lite`. netvfs-vfs:
 `tokio` (`sync` only) and `zeroize`. netvfs-backend: `netvfs-vfs`, `libc`,
-`tokio` (`rt-multi-thread`, `time`, `sync`), `zeroize`; `sha2` only behind
-its test-only `testing` feature.
+`tokio` (`rt-multi-thread`, `time`, `sync`), `zeroize`, `netvfs-smb`; `sha2`
+only behind its test-only `testing` feature. netvfs-smb: `netvfs-vfs`,
+`tokio` (`rt`, `net`, `io-util`, `time`, `sync`), `zeroize`, `sspi` 0.23
+(default features off) and, in its `crypto` module only, `aes`, `aes-gcm`,
+`cmac`, `hmac`, `sha2` and `getrandom`; `md-5` and `rc4` for one test.
 
 `unsafe` is allowed in the helper's `sandbox`, in netvfs-bridge's `ffi`
-and `sys` modules and in netvfs-backend's `ffi` module only; every block
-says why it holds. The `ffi` module keeps the threading and ownership rules of
+and `sys` modules and in netvfs-backend's `ffi` module only (netvfs-smb
+forbids it); every block says why it holds. The `ffi` module keeps the threading and ownership rules of
 `src/bridge/ffi/netvfs_bridge_ffi.h` by its types: plain Rust values in,
 `Result<_, Status>` out, every block C++ returns read and freed at once,
 secrets passed as `Zeroizing` buffers without a copy on the Rust side.
@@ -211,6 +216,98 @@ Rust backend failed". Names the server cannot store are InvalidName before
 they reach Rust; the capabilities are fixed once `authenticate` succeeds
 (XC-5).
 
+## netvfs-smb
+
+Provider `smb` of `libnetvfs-rs.so`, and the SMB plugin
+`libnetvfs-smb.so` (`src/backends/smb`) is a shim plugin like the test
+plugin of `mem`. An SMB client of its own, for SMB 3.1.1 only: no SMB 1,
+2.x or 3.0.x code, so a server without 3.1.1 is refused (SecurityPolicy,
+"the server does not support SMB 3.1.1 ...").
+
+**Security.** NEGOTIATE offers dialect 0x0311 alone, with the preauth
+integrity context (SHA-512, a random 32-byte salt), the ciphers AES-128-GCM
+and AES-256-GCM, and AES-128-CMAC signing; a response that picks anything
+else, or lacks the preauth context, is refused. The profiles (`profile.rs`,
+option `security_profile`):
+
+| Profile | Signing | Encryption | Account |
+|---|---|---|---|
+| `strict` (default) | required | every request after SESSION_SETUP, and every response must be encrypted; a server without a common cipher is refused before SESSION_SETUP | NTLMv2 |
+| `signed` | required | where the server marks the session or the share (ENCRYPT_DATA); marked without a cipher: refused | NTLMv2 |
+| `guest` | none | none; a server that wants it: refused | NTLMSSP anonymous |
+
+Any other value, `legacy` included, is SecurityPolicy. Outside `guest` a
+session the server marks IS_GUEST or IS_NULL is refused (XM-1), and the
+final SESSION_SETUP response must be signed with the new session's key
+(MS-SMB2 3.2.5.3.1), which also proves the server knows the password.
+After that, a response that is not signed (`signed`) or not encrypted
+(`strict`, or marked) ends the connection, also an error or an interim
+one; so does one for another session, a compressed frame or a request.
+NTLMv2 and SPNEGO come from `sspi` (no Kerberos, no network of its own);
+sspi checks the server's mechListMIC, and the user name `/GUEST`, for which
+sspi skips that check, is refused, as is a password that sspi would take
+for an NT hash (`$NTLM$`).
+
+**The crypto fence.** netvfs-smb implements no primitive: AES-GCM, CMAC,
+HMAC-SHA256 and SHA-512 come from RustCrypto, and they are imported by one
+module only, `crypto.rs`, which holds the MS-SMB2 glue: the preauth hash
+chain, the SP800-108 key derivation (HMAC-SHA256, one block, labels with
+their trailing NUL), CMAC signing and its constant-time verification, and
+TRANSFORM_HEADER sealing and opening (AAD: header bytes 20 to 52; a
+per-session nonce counter, and the session ends before it would wrap).
+`tools/ci/check-crypto-fence.sh` (in `make check-rust`) fails if any
+other source file of the crate names a RustCrypto crate or `getrandom`.
+Every function of the module has known-answer tests (the Microsoft Open
+Specifications vectors for 3.1.1, and a Wireshark AES-256-GCM capture) and
+tests that one flipped bit of key, nonce, AAD, tag or signature fails; the
+full-crate cargo-mutants run must catch every mutant of the module.
+
+**Connection** (`conn.rs`). One TCP connection per backend, with one
+session; every share is a tree of it. A receive task matches responses to
+requests by message id; requests wait for credits (multi-credit READ and
+WRITE, CreditCharge per 64 KiB), a STATUS_PENDING interim keeps a request
+waiting (bounded), and a request whose caller goes away is sent a CANCEL,
+its credits coming back with the final response. A namespace operation is
+one compound of CREATE, the related requests and CLOSE (stat: CREATE and
+CLOSE; rename, times and delete: SET_INFO; free space: QUERY_INFO; a
+listing's first batch: QUERY_DIRECTORY). Keep-alive is ECHO. Every length
+from the wire is checked against its cap before anything is allocated
+(frames: what NEGOTIATE allows; READ and IOCTL output: what was asked
+for).
+
+**Files.** CREATE, CLOSE, READ, WRITE, FLUSH, QUERY_DIRECTORY, QUERY_INFO
+and SET_INFO (times; rename with ReplaceIfExists, so AtomicReplace; delete
+on close). Transfers and read handles keep up to 4 MiB in flight in chunks
+of the server's maximum, at most 1 MiB (64 KiB without multi-credit).
+Names are UTF-16LE on the wire and WTF-8 in netvfs (XC-4): a lone
+surrogate keeps its three-byte form both ways. A DFS link is Unsupported
+with the detail "DFS referral" (XM-9). NT statuses map to netvfs errors
+as SPEC-smb 5 says (`status.rs`); during sign-in a refusal that is about
+neither the credentials nor the share name is SecurityPolicy.
+
+**Server mode.** Without option `share` the root lists the shares: IPC$
+is connected at sign-in, and the list comes from srvsvc NetrShareEnum
+level 1 over its pipe, in process (`rpc.rs`: DCE/RPC bind, request and
+fragments, NDR decoding with every count and string capped). Saved names
+(`shares`) come first; disk shares only, `$` shares with
+`show_admin_shares`. At most four shares are connected at a time; the
+least recently used is disconnected for a fifth, never one with open
+handles (TooManyConnections).
+
+**Tests.** Unit tests for every codec (and the refusal of each over-long
+field), the crypto vectors and bit flips, NDR, names, the profile and
+error tables, and the connection, session, file and backend logic against
+a fake server in the test process (`fake.rs`); `tests/sspi_ntlm.rs` pins
+sspi's NTLMv2 output against MS-NLMP 4.2.4 with RustCrypto's MD5 and RC4
+(test only). `tests/samba.rs` runs the crate against the Samba containers
+of `tests/interop/smb` (run.sh sets `NETVFS_INTEROP_SMB_*`; without them
+the tests pass at once, saying so): dialects, ciphers and profiles,
+refusals, tampered replies through the flip proxy, stalls, a round trip
+and server mode. `tests/windows.rs` does the same against Windows's own
+server in the CI job "SMB against Windows" (M-T11). The C++ suites
+(`tests/interop/smb`, the conformance suite's SMB targets) run through the
+shim.
+
 ## Lints
 
 Set once for the workspace in `rust/Cargo.toml`:
@@ -254,10 +351,12 @@ name of its own, as Sailjail requires.
 | The built `netvfs-bridge` as a black box from a libdbus client (`tests/bridge/common`, the consumer side of the C++ bridge of 0.4): the introspection XML byte for byte, the `Peer` interface, an unknown path, fd passing both ways, error details, and every golden sequence of the contract, with the fake backend seeded through `NETVFS_FAKE_SEED` and a scripted accounts helper | `tests/bridge/contract` (`tst_contract`) | `make check-unit` |
 | The built `netvfs-bridge` under socket activation (the test plays systemd), listing through the built `netvfs-accounts` against a libaccounts database; exit codes for an unknown consumer and a usage error | `tests/bridge/process` (`tst_bridgeprocess`) | `make check-unit` |
 | The target build: tests under qemu, smoke run, linked libraries | see "Cross build" | CI job "Sailfish OS 5.2 aarch64 RPMs" |
-| Mutations the tests must catch: curated lists, and cargo-mutants on every line a pull request changes (with the FFI's C++ libraries built by `tools/ci/ffi-libs.sh`, so `tests/ffi.rs` runs; exclusions with reasons in `rust/.cargo/mutants.toml`) | `tests/mutations/helper.json`, `bridge.json`, `ffi.json`, `rs.json` (the shim); `tools/ci/rust-mutants.sh diff <base> [<ffi-libs dir> [<k>/<n>]]` | CI matrix `helper`, `bridge`, `ffi`, `rs`; CI jobs "Tests bite (Rust, changed code, k/12)" |
+| Mutations the tests must catch: curated lists, and cargo-mutants on every line a pull request changes (with the FFI's C++ libraries built by `tools/ci/ffi-libs.sh`, so `tests/ffi.rs` runs; exclusions with reasons in `rust/.cargo/mutants.toml`) | `tests/mutations/helper.json`, `bridge.json`, `ffi.json`, `rs.json` (the shim), `smb.json` (netvfs-smb, through the interop suite and its own tests); `tools/ci/rust-mutants.sh diff <base> [<ffi-libs dir> [<k>/<n>]]` | CI matrix `helper`, `bridge`, `ffi`, `rs`, `smb` (with the Samba servers started once); CI jobs "Tests bite (Rust, changed code, k/12)" |
 | cargo-mutants on a whole crate, before the pull request of a new crate merges | `tools/ci/rust-mutants.sh crate <package> [<ffi-libs dir> [<k>/<n>]]` | workflow "Mutants (full crate)" (`mutants.yml`, by hand, 12 shards) |
 | cargo-mutants with a test command of its own per mutant, for code whose real tests are suites through the C++ side or the interop containers: each mutant must build and make the command fail | `tools/ci/rust-mutants.sh interop <package> <base or all> <k>/<n> <command>` (`rust-mutants-command.py`) | by hand, e.g. `... interop netvfs-backend all 0/12 'make -s -C build/tests/backends/rs check'` |
-| Fuzzing: stored values, bus replies, arguments, the FFI marshalling (`ffi_marshal`: parameters, entries, identities into their C form and back) | `rust/fuzz` | `./tools/ci/rust-fuzz.sh <seconds>` (nightly) |
+| Fuzzing: stored values, bus replies, arguments, the FFI marshalling (`ffi_marshal`: parameters, entries, identities into their C form and back); what an SMB server sends: responses (`smb_response`), TRANSFORM_HEADER and signing round trips with bit flips (`smb_transform`), the NTLM challenge (`ntlm_challenge`), SPNEGO (`spnego`), the srvsvc share list (`ndr_share_enum`) | `rust/fuzz` | `./tools/ci/rust-fuzz.sh <seconds>` (nightly) |
+| netvfs-smb against Samba (the interop containers) and against Windows | `rust/netvfs-smb/tests/samba.rs`, `windows.rs` | `tests/interop/smb/run.sh` (`make check-interop`); CI job "SMB against Windows" |
+| The crypto fence: RustCrypto in netvfs-smb's `crypto` module only | `tools/ci/check-crypto-fence.sh` | `make check-rust` |
 | Advisories, yanked crates, licences, sources | `rust/deny.toml` | CI job "Rust supply chain"; advisories again weekly |
 | Tests under ASan + LSan (the FFI test with the C++ side instrumented too, see below; netvfs-backend's `tests/ffi.rs` with the library's code instrumented), the current stable's clippy, the online workflow audit | `.github/workflows/scheduled.yml` (weekly, or by hand: `workflow_dispatch`) | `./tools/ci/rust-sanitize.sh <nightly> [<ffi-libs dir>]` |
 | Workflow audit: no credentials left in checkouts, no `${{ }}` in `run:` | `.github/workflows` | CI job "Workflow audit" (`zizmor --offline`) |
