@@ -3,8 +3,9 @@
 //! owns all bridge state, without locks, fed by one channel of [`Event`]s:
 //! what the socket front reports ([`server::Event`]), what workers and copy
 //! jobs report ([`WorkerEvent`]), the results of work items, consent file
-//! changes, prompt answers, account changes, discovery results, and its own
-//! timers (idle exit, maintenance, the nearby report). The port of
+//! changes, prompt answers, account changes, discovery results, changes of
+//! connection states, and its own timers (idle exit, maintenance, the nearby
+//! report, the look at the connection states). The port of
 //! `BridgeServer` and the bookkeeping half of `Session` (session.cpp,
 //! sessionfiles.cpp, sessionjobs.cpp).
 //!
@@ -12,7 +13,8 @@
 //!   discovery, Cancel, questions, the settings handoff.
 //! - `files`: listing, metadata, namespace operations, read handles.
 //! - `jobs`: Upload, Download (XB-11), Walk, RemoveTree, CopyAcross.
-//! - [`quota`] (XB-17), [`questions`] (the broker), [`nearby`] (XD-5).
+//! - [`quota`] (XB-17), [`questions`] (the broker), [`nearby`] (XD-5),
+//!   [`states`] (`LocationsChanged` for connection states, XB-12).
 //!
 //! Work runs on the workers of [`locations`](crate::locations); the bodies
 //! of streamed work are [`jobs`](crate::jobs). A work item reports its
@@ -26,6 +28,7 @@ mod jobs;
 pub mod nearby;
 pub mod questions;
 pub mod quota;
+pub mod states;
 
 use crate::accounts::helper::HelperDirectory;
 use crate::accounts::watch::AccountChanges;
@@ -41,6 +44,7 @@ use crate::locations::copyjobs::{CopyId, CopyJobs};
 use crate::locations::knownhosts::KnownHosts;
 use crate::locations::pool::{CONNECTION_IDLE, PoolSet};
 use crate::locations::spec::LocationSpec;
+use crate::locations::state::StateSignal;
 use crate::locations::worker::{Turn, Work, WorkerId};
 use crate::locations::{Answer, AskId, CancelToken, TaskContext, WorkerEvent, WorkerEvents};
 use crate::peer::PeerChecker;
@@ -54,6 +58,7 @@ use netvfs_bridge_proto::limits::POOL_PER_HOST;
 use netvfs_bridge_proto::{Lane, WireNearby};
 use questions::QuestionBroker;
 use quota::Quota;
+use states::{StateReport, States};
 use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 use std::future::Future;
@@ -280,6 +285,8 @@ pub(crate) enum Event {
     AccountsListed { generation: u64, accounts: Vec<AccountLocation> },
     /// The nearby servers changed.
     Nearby(Vec<WireNearby>),
+    /// A connection state of a location may have changed.
+    ConnectionStates,
     /// Counters for tests.
     Probe(oneshot::Sender<Counters>),
     /// Stop serving (tests).
@@ -443,6 +450,10 @@ pub(crate) struct Core {
     /// Questions of workers → their ids.
     asks: HashMap<AskId, String>,
     nearby: Nearby,
+    /// What the sessions were told of the connection states (XB-12).
+    states: StateReport,
+    /// Raised by the pools on a change of a connection state.
+    state_signal: StateSignal,
     sessions: BTreeMap<SessionId, Session>,
     idle_deadline: Option<Instant>,
     /// Answers to the prompt being stored.
@@ -533,6 +544,12 @@ impl Core {
         let connector = Arc::new(Connector::new(ffi, pins, events.clone(), config.question_timeout));
         let consent_store = ConsentStore::new(&config.consent_file);
         let consent = consent_store.consent(&config.consumer.id);
+        let state_tx = tx.clone();
+        let state_signal = StateSignal::new(move || {
+            // A closed channel: the core has stopped.
+            drop(state_tx.send(Event::ConnectionStates));
+        });
+        let pools = PoolSet::new(Arc::clone(&connector), POOL_PER_HOST).with_signal(state_signal.clone());
         Self {
             ffi,
             tx,
@@ -543,13 +560,15 @@ impl Core {
             accounts_generation: 0,
             handoff: Handoff::new(&config.handoff_config, DynLauncher(services.launcher)),
             known_hosts,
-            book: LocationBook::new(PoolSet::new(Arc::clone(&connector), POOL_PER_HOST)),
+            book: LocationBook::new(pools),
             copy_jobs: CopyJobs::new(connector, events),
             copy_owners: HashMap::new(),
             quota: Quota::default(),
             questions: QuestionBroker::default(),
             asks: HashMap::new(),
             nearby: Nearby::new(services.nearby),
+            states: StateReport::default(),
+            state_signal,
             sessions: BTreeMap::new(),
             idle_deadline: None,
             consent_writes: 0,
@@ -566,7 +585,7 @@ impl Core {
         );
         loop {
             self.update_idle();
-            let (idle, nearby) = (self.idle_deadline, self.nearby.due());
+            let (idle, nearby, states) = (self.idle_deadline, self.nearby.due(), self.states.due());
             let flow = tokio::select! {
                 event = rx.recv() => match event {
                     Some(event) => self.handle(event),
@@ -579,6 +598,10 @@ impl Core {
                 }
                 () = sleep_until(nearby) => {
                     self.report_nearby();
+                    Flow::Continue
+                }
+                () = sleep_until(states) => {
+                    self.report_states();
                     Flow::Continue
                 }
             };
@@ -611,11 +634,12 @@ impl Core {
                 if generation == self.accounts_generation {
                     self.set_accounts(&accounts);
                     if self.consent == Consent::Granted {
-                        self.broadcast(&OutSignal::LocationsChanged);
+                        self.locations_changed();
                     }
                 }
             }
             Event::Nearby(services) => self.nearby.changed(services, Instant::now()),
+            Event::ConnectionStates => self.states.changed(Instant::now()),
             Event::Probe(tx) => drop(tx.send(self.counters())),
             Event::Shutdown => return Flow::Stop,
         }
@@ -818,6 +842,32 @@ impl Core {
         }
     }
 
+    /// What `ListLocations` shows changed: `LocationsChanged` to every
+    /// session, which now knows the connection states too.
+    fn locations_changed(&mut self) {
+        self.broadcast(&OutSignal::LocationsChanged);
+        let states = self.connection_states();
+        self.states.announced(states);
+    }
+
+    /// The connection states `ListLocations` shows now (none without
+    /// consent).
+    fn connection_states(&self) -> States {
+        if self.consent == Consent::Granted { self.book.states() } else { States::new() }
+    }
+
+    /// The look at the connection states is due: `LocationsChanged` if one
+    /// differs from what the sessions were told (XB-12).
+    fn report_states(&mut self) {
+        // Changes from now on wake the core again. Whether one woke it this
+        // time does not matter: a `ListLocations` may have asked for the look.
+        let _woken = self.state_signal.take();
+        let states = self.connection_states();
+        if self.states.check(states) && self.consent == Consent::Granted {
+            self.broadcast(&OutSignal::LocationsChanged);
+        }
+    }
+
     fn session(&mut self, sid: SessionId) -> Option<&mut Session> {
         self.sessions.get_mut(&sid)
     }
@@ -941,8 +991,12 @@ impl Core {
         });
     }
 
+    /// Takes the account list; the connection states it shows count as
+    /// known (a list that changed is told by the caller).
     fn set_accounts(&mut self, accounts: &[AccountLocation]) {
         self.book.set_accounts(accounts.iter().map(account_spec).collect());
+        let states = self.connection_states();
+        self.states.announced(states);
     }
 
     // ------------------------------------------------------------ helpers

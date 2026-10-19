@@ -144,14 +144,22 @@ impl Core {
         reply.ok(&Reply::Empty);
     }
 
-    pub(super) fn on_list_locations(&self, reply: ReplyTo) {
+    pub(super) fn on_list_locations(&mut self, reply: ReplyTo) {
         // XB-6: nothing until granted.
         let locations = if self.consent == Consent::Granted {
             let ffi = self.ffi;
-            self.book
+            let states = self.book.states();
+            let locations = self
+                .book
                 .visible()
-                .map(|spec| spec.wire(|params, path| ffi.url_format(params, path).ok()))
-                .collect()
+                .map(|spec| {
+                    let state = states.get(&spec.id).copied().unwrap_or_default();
+                    spec.wire(state, |params, path| ffi.url_format(params, path).ok())
+                })
+                .collect();
+            // XB-12: a state not announced yet is, soon, to every session.
+            self.states.listed(&states, Instant::now());
+            locations
         } else {
             Vec::new()
         };
@@ -269,7 +277,7 @@ impl Core {
         let result = result.and_then(|()| if self.book.add_ad_hoc(loc) { Ok(()) } else { Err(no_consent()) });
         match result {
             Ok(()) => {
-                self.broadcast(&OutSignal::LocationsChanged);
+                self.locations_changed();
                 if let Some(reply) = reply {
                     reply.ok(&Reply::Text(loc.to_owned()));
                 }
@@ -288,7 +296,7 @@ impl Core {
             reply.fail(&Status::new(ErrorName::NotFound, "No such ad-hoc location"));
             return;
         }
-        self.broadcast(&OutSignal::LocationsChanged);
+        self.locations_changed();
         reply.ok(&Reply::Empty);
     }
 
@@ -385,7 +393,7 @@ impl Core {
             }
             self.book.revoke();
         } else if consent == Consent::Granted {
-            self.broadcast(&OutSignal::LocationsChanged);
+            self.locations_changed();
         }
     }
 

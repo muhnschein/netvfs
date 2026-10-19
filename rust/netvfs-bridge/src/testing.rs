@@ -477,6 +477,9 @@ pub struct Setup {
     pub handoff_conf: Option<String>,
     /// `files` never answers (`HangingAccounts`).
     pub hang_accounts: bool,
+    /// Pooled connections without work are closed after this (at the
+    /// core's next maintenance).
+    pub connection_idle: Duration,
 }
 
 impl Default for Setup {
@@ -487,6 +490,7 @@ impl Default for Setup {
             executable: None,
             handoff_conf: None,
             hang_accounts: false,
+            connection_idle: crate::locations::pool::CONNECTION_IDLE,
         }
     }
 }
@@ -542,7 +546,7 @@ impl Fixture {
             known_hosts_file: dir.join("known_hosts"),
             handoff_config: dir.join("handoff.conf"),
             idle_exit: setup.idle_exit,
-            connection_idle: crate::locations::pool::CONNECTION_IDLE,
+            connection_idle: setup.connection_idle,
             question_timeout: crate::locations::connector::QUESTION_TIMEOUT,
         };
         if let Some(conf) = &setup.handoff_conf {

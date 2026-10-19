@@ -37,7 +37,24 @@
       <arg name="consent" type="s"/>
     </signal>
 
-    <!-- Locations -->
+    <!-- Locations
+      ListLocations info (a{sv}): "kind" (s, "account" or "adhoc"), "host" (s),
+      "port" (i) and "user" (s) when set, "path" (ay), "url" (s) when known,
+      for accounts "accountId" (i) and "attention" (s) when set, and "state" (s),
+      the connection state of the consumer's pool for the location (XB-12):
+        "connected"     at least one connection is established (connected and
+                        authenticated);
+        "connecting"    none is, at least one is being established;
+        "disconnected"  none is or is being established: never used, closed
+                        when idle, or after Disconnect;
+        "failed"        as "disconnected", but the last attempt to connect
+                        failed, with "stateError" (s), its error name. The next
+                        attempt that succeeds, or Disconnect, clears it.
+      The pools are the consumer's: every connection of a consumer sees the
+      same states. LocationsChanged: something ListLocations shows changed,
+      also a state (states at most every 250 ms); work on an established
+      connection changes no state.
+    -->
     <method name="ListLocations">
       <arg name="locations" type="a(sssa{sv})" direction="out"/>
     </method>

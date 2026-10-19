@@ -2,7 +2,7 @@
 //! Shared state of the fake bridge and of one client session.
 
 use super::tree::Tree;
-use crate::wire::{WireCapabilities, WireLocation, WireNearby};
+use crate::wire::{WireCapabilities, WireLocation, WireNearby, location_state};
 use std::collections::{BTreeMap, HashMap};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -266,12 +266,35 @@ impl Default for State {
 }
 
 impl State {
-    pub fn add_location(&mut self, id: &str, provider: &str, name: &str, info: Vec<(String, InfoValue)>) {
+    /// Adds a location; without a `state` in `info` it is disconnected.
+    pub fn add_location(&mut self, id: &str, provider: &str, name: &str, mut info: Vec<(String, InfoValue)>) {
+        if !info.iter().any(|(k, _)| k == location_state::KEY) {
+            info.push((location_state::KEY.to_owned(), InfoValue::Str(location_state::DISCONNECTED.into())));
+        }
         self.locations.insert(
             id.to_owned(),
             LocationRec { provider: provider.to_owned(), name: name.to_owned(), info },
         );
         self.trees.entry(id.to_owned()).or_default();
+    }
+
+    /// Sets the connection state of location `id` (`state`, and
+    /// `stateError` for `failed`); whether that changed anything.
+    pub fn set_state(&mut self, id: &str, state: &str, error: Option<&str>) -> bool {
+        let Some(rec) = self.locations.get_mut(id) else { return false };
+        let value = |key: &str| rec.info.iter().find(|(k, _)| k == key).map(|(_, v)| v.clone());
+        let error = error.map(|e| InfoValue::Str(e.to_owned()));
+        if value(location_state::KEY) == Some(InfoValue::Str(state.to_owned()))
+            && value(location_state::ERROR_KEY) == error
+        {
+            return false;
+        }
+        rec.info.retain(|(k, _)| k != location_state::KEY && k != location_state::ERROR_KEY);
+        rec.info.push((location_state::KEY.to_owned(), InfoValue::Str(state.to_owned())));
+        if let Some(error) = error {
+            rec.info.push((location_state::ERROR_KEY.to_owned(), error));
+        }
+        true
     }
 
     pub fn remove_location(&mut self, id: &str) {
@@ -550,6 +573,19 @@ mod tests {
         let w = st.wire_locations();
         assert_eq!(w.len(), 1);
         assert_eq!(crate::wire::value_str(&w[0].info["host"]).as_deref(), Some("h"));
+        // Disconnected until it is used.
+        let state = |st: &State, key: &str| {
+            st.wire_locations()[0].info.get(key).and_then(|v| crate::wire::value_str(v))
+        };
+        assert_eq!(state(&st, "state").as_deref(), Some("disconnected"));
+        assert!(st.set_state("account:1", "failed", Some("Timeout")));
+        assert!(!st.set_state("account:1", "failed", Some("Timeout")));
+        assert_eq!(state(&st, "stateError").as_deref(), Some("Timeout"));
+        assert!(st.set_state("account:1", "failed", Some("AuthFailed")));
+        assert!(st.set_state("account:1", "connected", None));
+        assert_eq!((state(&st, "state").as_deref(), state(&st, "stateError")), (Some("connected"), None));
+        assert_eq!(state(&st, "host").as_deref(), Some("h"));
+        assert!(!st.set_state("account:9", "connected", None));
         st.remove_location("account:1");
         assert!(st.wire_locations().is_empty());
         assert_eq!(Consent::Denied.as_str(), "denied");

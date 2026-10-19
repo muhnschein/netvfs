@@ -211,7 +211,7 @@ impl FakeBridge {
     // ---- locations ------------------------------------------------------
 
     /// An account location `account:<n>` (netvfs info keys `kind`, `host`,
-    /// `accountId`, `path`).
+    /// `accountId`, `path`, and `state` disconnected).
     pub async fn add_account(&self, n: i32, provider: &str, name: &str, host: &str) -> String {
         let id = format!("account:{n}");
         let info = vec![
@@ -248,6 +248,17 @@ impl FakeBridge {
             }
         });
         self.shared.broadcast_locations().await;
+    }
+
+    /// Sets the connection state of `id` (`state`: `disconnected`,
+    /// `connecting`, `connected` or `failed`, with `error` the XC-21 name of
+    /// a failure) and tells every client if it changed. On its own the fake
+    /// shows a location disconnected until a call needs a connection, and
+    /// again after `Disconnect`.
+    pub async fn set_state(&self, id: &str, state: &str, error: Option<&str>) {
+        if self.shared.with(|s| s.set_state(id, state, error)) {
+            self.shared.broadcast_locations().await;
+        }
     }
 
     /// The `ListLocations` result as sent now.

@@ -740,6 +740,16 @@ permission, links nothing from netvfs, and never sees secrets or pins.
   still hold their ids; no id is ever given to another location, also not by a later run
   of the bridge, so a stale ad-hoc id fails with `NotFound`.
 
+  `ListLocations` info: `kind` (`s`: `account` or `adhoc`), `host` (`s`), `port` (`i`)
+  and `user` (`s`) when set, `path` (`ay`, the start folder), `url` (`s`) when the
+  backend can write one, for an account `accountId` (`i`) and `attention` (`s`, XA-8)
+  when set, and `state` (`s`), the location's connection state (XB-12): `connected`,
+  `connecting`, `disconnected` or `failed`, with `failed` also `stateError` (`s`), the
+  XC-21 name of the failure. Consumers ignore keys they do not know, so that keys can
+  be added. `LocationsChanged` (no arguments) says that something `ListLocations` shows
+  changed: a location came or went, an account's settings or attention changed, or a
+  connection state did (XB-12); a consumer that shows them lists again.
+
   `Walk` options: `maxDepth` (−1 for no limit), `followSymlinks` and `postOrder`.
   `postOrder` is accepted and has no effect: `WalkBatch` reports every folder before its
   children (its second visit after the children, `Ops::walk`'s `leave()`, is not sent).
@@ -759,6 +769,35 @@ permission, links nothing from netvfs, and never sees secrets or pins.
   verified costs a connect, but no secret of the account is in the bridge's memory while
   it talks to it. A signond failure is therefore reported after the connect, and sets no
   attention.
+
+  The pools are the consumer's (one bridge process per consumer, XB-2), shared by all of
+  its connections, so every connection of a consumer sees the same states. A location's
+  `state` in `ListLocations` is that of its pool's connections, as they are when
+  `ListLocations` answers:
+  - `connected`: at least one is established (connected and authenticated);
+  - `connecting`: none is, at least one is being established (connect, identity check,
+    sign-in, a `Question` waiting for its answer);
+  - `disconnected`: none is or is being established: never used yet, closed after a
+    minute unused, dropped by an item that ended with `ConnectionLost`, `Timeout`,
+    `NetworkUnreachable` or canceled, or after `Disconnect`;
+  - `failed`: as `disconnected`, but the last attempt to connect failed; `stateError`
+    names its error (`NetworkUnreachable`, `Timeout`, `AuthFailed`,
+    `ServerIdentityChanged`, …). The next attempt that succeeds clears it, and so does
+    `Disconnect`. An attempt that was canceled (its request canceled, the consumer
+    gone) is no failure: it leaves `stateError` as it was.
+
+  Only the pool's live connections count: one that `Disconnect`, the idle timeout or
+  another location's need of the host slot is closing is not established any more.
+  `CopyAcross` connects outside the pools and is not counted. An ad-hoc location is listed
+  only once `ConnectAdHoc` established its first connection, so it first shows as
+  `connected`. When a state changes, the bridge looks again 250 ms later and sends
+  `LocationsChanged` if a state then differs from what the consumer's connections were
+  last told (by a `LocationsChanged`) or from what a `ListLocations` answered since: a
+  burst of changes costs one signal, at most one every 250 ms, and a state that was
+  never listed and went back costs none. Work on an established connection, also work
+  that fails without dropping it, and `ListLocations` itself change no state and cause
+  no signal. A state is only reported: closing connections stays the bridge's (the
+  rules above and `Disconnect`).
 - XB-13: Disconnects. When a consumer connection closes, the bridge cancels all of its
   requests and jobs; partial remote temp files are left in place so the consumer can
   resume. Handles are closed.

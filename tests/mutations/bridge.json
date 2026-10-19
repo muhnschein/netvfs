@@ -397,5 +397,68 @@
     "search": "                if let Some(changed) = &self.changed {\n                    changed();\n                }",
     "replace": "                let _ = &self.changed;",
     "test": "cd rust && cargo test --locked -q -p netvfs-bridge --lib accounts::helper"
+  },
+  {
+    "name": "XB-12 ListLocations without the connection state",
+    "file": "rust/netvfs-bridge/src/locations/spec.rs",
+    "search": "        map.insert(location_state::KEY.to_owned(), text(state.as_str()));\n",
+    "replace": "",
+    "test": "cd rust && cargo test --locked -q -p netvfs-bridge --lib locations::spec"
+  },
+  {
+    "name": "XB-12 an established connection not shown as connected",
+    "file": "rust/netvfs-bridge/src/locations/pool.rs",
+    "search": "                Phase::Established => return ConnectionState::Connected,",
+    "replace": "                Phase::Established => {}",
+    "test": "cd rust && cargo test --locked -q -p netvfs-bridge --lib locations::pool"
+  },
+  {
+    "name": "XB-12 a connection being established not shown as connecting",
+    "file": "rust/netvfs-bridge/src/locations/pool.rs",
+    "search": "                Phase::Connecting => connecting = true,",
+    "replace": "                Phase::Connecting => {}",
+    "test": "cd rust && cargo test --locked -q -p netvfs-bridge --lib locations::pool"
+  },
+  {
+    "name": "XB-12 a failed attempt to connect not shown",
+    "file": "rust/netvfs-bridge/src/locations/worker.rs",
+    "search": "                    shared.tracker.failed(status.name);",
+    "replace": "                    let _unrecorded = status.name;",
+    "test": "cd rust && cargo test --locked -q -p netvfs-bridge --lib locations::worker"
+  },
+  {
+    "name": "XB-12 a successful attempt keeps the failure",
+    "file": "rust/netvfs-bridge/src/locations/worker.rs",
+    "search": "                shared.tracker.clear();\n                shared.set_phase(Phase::Established);",
+    "replace": "                shared.set_phase(Phase::Established);",
+    "test": "cd rust && cargo test --locked -q -p netvfs-bridge --lib locations::worker"
+  },
+  {
+    "name": "XB-12 a canceled attempt shown as failed",
+    "file": "rust/netvfs-bridge/src/locations/worker.rs",
+    "search": "                if status.name != ErrorName::Canceled && !task.canceled() {",
+    "replace": "                if !status.name.as_str().is_empty() {",
+    "test": "cd rust && cargo test --locked -q -p netvfs-bridge --lib locations::worker"
+  },
+  {
+    "name": "XB-12 Disconnect keeps the failure",
+    "file": "rust/netvfs-bridge/src/locations/pool.rs",
+    "search": "            self.retire(0, true);\n        }\n        self.tracker.clear();",
+    "replace": "            self.retire(0, true);\n        }",
+    "test": "cd rust && cargo test --locked -q -p netvfs-bridge --lib locations::pool"
+  },
+  {
+    "name": "XB-12 LocationsChanged on every look at the states",
+    "file": "rust/netvfs-bridge/src/core/states.rs",
+    "search": "        let tell = self.listed || states != self.announced;",
+    "replace": "        let tell = true;",
+    "test": "cd rust && cargo test --locked -q -p netvfs-bridge --lib core::states"
+  },
+  {
+    "name": "XB-12 no LocationsChanged for a changed connection state",
+    "file": "rust/netvfs-bridge/src/core/mod.rs",
+    "search": "        if self.states.check(states) && self.consent == Consent::Granted {",
+    "replace": "        if self.states.check(states) && self.consent == Consent::Denied {",
+    "test": "cd rust && NETVFS_BRIDGE_FFI=$PWD/../build/lib/netvfs/libnetvfs-bridge-ffi.so NETVFS_BRIDGE_FFI_FAKE=$PWD/../build/lib/libnetvfs-bridge-ffi-fake.so NETVFS_BACKEND_PATH=$PWD/../build/lib/netvfs/test-backends cargo test --locked -q -p netvfs-bridge --features testing --test server -- connection_states"
   }
 ]

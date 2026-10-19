@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 //! What a consumer may reach (SPEC-v2 XB-7) and how (design §3.2, §3.3):
 //! location specs ([`spec`]), their connection pools with lanes and the
-//! per-host limit ([`pool`], XB-12), one std thread per backend connection
+//! per-host limit ([`pool`], XB-12), the connection state of a location
+//! ([`state`], XB-12), one std thread per backend connection
 //! ([`worker`], C-8), the copy jobs on threads of their own ([`copyjobs`]),
 //! the connection policy for accounts and ad-hoc locations ([`connector`],
 //! XB-14, C-7), the book that holds them for the core ([`book`]) and the
@@ -12,8 +13,10 @@
 //! The book, the pools and the copy jobs belong to the core actor (no
 //! locks). Each worker is a std thread named `nvb-w` that owns its
 //! [`ffi::Conn`](crate::ffi::Conn); each copy job a thread `nvb-copy` with
-//! two. Shared across threads are only the per-operation [`CancelToken`]s
-//! and each worker's queue (a mutex with its connection's cancel handle).
+//! two. Shared across threads are only the per-operation [`CancelToken`]s,
+//! each worker's queue (a mutex with its connection's cancel handle and
+//! phase), and each pool's [`StateTracker`](state::StateTracker) with the
+//! [`StateSignal`](state::StateSignal) that wakes the core.
 //!
 //! # Worker → core
 //!
@@ -32,6 +35,7 @@ pub mod knownhosts;
 mod mock;
 pub mod pool;
 pub mod spec;
+pub mod state;
 pub mod worker;
 
 use crate::Status;

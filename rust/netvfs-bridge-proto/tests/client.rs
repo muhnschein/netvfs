@@ -149,6 +149,8 @@ async fn listing_signals_arrive_in_order() {
                 assert_eq!((r, error.as_str()), (req, ""));
                 break;
             }
+            // The listing connected the location: its state is told.
+            Signal::LocationsChanged => {}
             other => panic!("unexpected {other:?}"),
         }
     }
@@ -267,4 +269,49 @@ async fn closing_the_connection_ends_it() {
     conn.close().await;
     let e = BridgeError::from(conn.proxy().list_locations().await.unwrap_err());
     assert!(matches!(e, BridgeError::Disconnected(_)), "{e:?}");
+}
+
+/// `state` and `stateError` of `loc` in `ListLocations`.
+async fn state_of(conn: &netvfs_bridge_proto::Connection, loc: &str) -> (String, Option<String>) {
+    let locations = conn.proxy().list_locations().await.unwrap();
+    let info = &locations.iter().find(|l| l.id == loc).unwrap().info;
+    let text = |key: &str| info.get(key).and_then(|v| netvfs_bridge_proto::value_str(v));
+    (text("state").unwrap(), text("stateError"))
+}
+
+/// The next `LocationsChanged`, skipping other signals.
+async fn locations_changed(signals: &mut SignalStream) {
+    while !matches!(next_signal(signals).await, Signal::LocationsChanged) {}
+}
+
+#[tokio::test]
+async fn connection_states_follow_use_disconnect_and_the_script() {
+    let fake = fake_with_account().await;
+    let conn = fake.connect().await.unwrap();
+    let mut signals = conn.signals();
+    hello(&conn).await;
+    let s = |state: &str, error: Option<&str>| (state.to_owned(), error.map(str::to_owned));
+    assert_eq!(state_of(&conn, "account:1").await, s("disconnected", None));
+    // A call that needs a connection connects it, and tells.
+    conn.proxy().capabilities("account:1").await.unwrap();
+    locations_changed(&mut signals).await;
+    assert_eq!(state_of(&conn, "account:1").await, s("connected", None));
+    conn.proxy().disconnect("account:1").await.unwrap();
+    locations_changed(&mut signals).await;
+    assert_eq!(state_of(&conn, "account:1").await, s("disconnected", None));
+    // Scripted: a failure with its error, told once.
+    fake.set_state("account:1", "failed", Some("AuthFailed")).await;
+    locations_changed(&mut signals).await;
+    assert_eq!(state_of(&conn, "account:1").await, s("failed", Some("AuthFailed")));
+    fake.set_state("account:1", "failed", Some("AuthFailed")).await;
+    conn.proxy().stat("account:1", b"", true, "").await.unwrap();
+    locations_changed(&mut signals).await;
+    assert_eq!(state_of(&conn, "account:1").await, s("connected", None));
+    // Work on a connected location tells nothing more.
+    conn.proxy().stat("account:1", b"", true, "").await.unwrap();
+    let quiet = tokio::time::timeout(Duration::from_millis(200), signals.next()).await;
+    assert!(quiet.is_err(), "{quiet:?}");
+    // A connected ad-hoc location.
+    let loc = conn.proxy().connect_ad_hoc("sftp://h/", b"", &OptsBuilder::new().build()).await.unwrap();
+    assert_eq!(state_of(&conn, &loc).await, s("connected", None));
 }
