@@ -62,6 +62,7 @@ const TESTS: &[(&str, Test)] = &[
     ("walk_batch_limit", walk_batch_limit),
     ("account_identity_changed_sets_attention", account_identity_changed_sets_attention),
     ("ad_hoc_identity_question", ad_hoc_identity_question),
+    ("ad_hoc_ids_after_a_restart", ad_hoc_ids_after_a_restart),
     ("keyboard_interactive", keyboard_interactive),
     ("connect_ad_hoc_refusals", connect_ad_hoc_refusals),
     ("peer_check_refuses", peer_check_refuses),
@@ -937,6 +938,29 @@ fn ad_hoc_identity_question(h: &Harness) {
             probe.wait_until(WAIT, |n| n.questions == 0 && n.requests == 0 && n.sessions == 1).await.unwrap();
         assert_eq!((after.questions, after.requests, after.sessions), (0, 0, 1));
         assert_eq!(c.proxy().list_locations().await.unwrap().len(), 1);
+    });
+}
+
+/// A restarted bridge (XB-2) forgot its ad-hoc locations, but the consumer
+/// may still hold their ids (URIs on its clipboard): they name nothing now,
+/// never a location the new run connected.
+fn ad_hoc_ids_after_a_restart(h: &Harness) {
+    let mut f = Fixture::new(h, Consent::Granted);
+    let old = block_on(async {
+        let c = f.hello_client().await;
+        c.proxy().connect_ad_hoc("fake://user@one.example/", b"", &no_opts()).await.unwrap()
+    });
+    assert!(f.stop().is_some());
+    let f = Fixture::new(h, Consent::Granted);
+    block_on(async {
+        let c = f.hello_client().await;
+        let p = c.proxy();
+        assert_eq!(error_name(&p.stat(&old, b"/", true, "").await), name(ErrorName::NotFound));
+        let new = p.connect_ad_hoc("fake://user@two.example/", b"", &no_opts()).await.unwrap();
+        assert_ne!(new, old);
+        assert_eq!(error_name(&p.stat(&old, b"/", true, "").await), name(ErrorName::NotFound));
+        assert_eq!(error_name(&p.forget_ad_hoc(&old).await), name(ErrorName::NotFound));
+        p.stat(&new, b"/", true, "").await.unwrap();
     });
 }
 

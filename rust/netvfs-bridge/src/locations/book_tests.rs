@@ -148,7 +148,12 @@ fn changed_and_removed_accounts_lose_their_pools() {
 fn ad_hoc_locations_appear_once_connected() {
     let (_mock, mut book) = book();
     let (first, secret) = ad_hoc(&mut book, "h", b"pw");
-    assert_eq!(first, "adhoc:1");
+    // `adhoc:<run>-<n>`: 16 hex digits of this run, then the count from 1.
+    let run = first.strip_prefix("adhoc:").and_then(|id| id.strip_suffix("-1")).unwrap();
+    assert!(
+        run.len() == 16 && run.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)),
+        "{first}"
+    );
     // Connecting: the pool exists, nobody sees it.
     assert_eq!(pool_ids(&book), [first.as_str()]);
     assert_eq!(ids(&book).len(), 0);
@@ -176,14 +181,29 @@ fn ad_hoc_locations_appear_once_connected() {
     assert_eq!(&*secret.secret(), b"pw");
 
     let (second, secret2) = ad_hoc(&mut book, "h2", b"pw2");
-    assert_eq!(second, "adhoc:2");
+    assert_eq!(second, format!("adhoc:{run}-2"));
     book.abandon_ad_hoc(&second);
     assert!(secret2.secret().is_empty(), "wiped");
     assert!(book.pools().get(&second).is_none());
     assert!(!book.add_ad_hoc(&second));
     book.abandon_ad_hoc(&first);
     assert!(book.has_pool(&first), "only connecting ones are abandoned");
-    assert_eq!(book.reserve_ad_hoc_id(), "adhoc:3");
+    assert_eq!(book.reserve_ad_hoc_id(), format!("adhoc:{run}-3"));
+}
+
+#[test]
+fn a_restarted_bridge_never_gives_an_earlier_ad_hoc_id_again() {
+    // The bridge forgets its ad-hoc locations when it exits (XB-2), but a
+    // consumer may still hold their ids (URIs on its clipboard): a new run
+    // must not hand them out again, or they would name another server.
+    let (_mock, mut earlier) = book();
+    let old: Vec<String> = (0..3).map(|_| earlier.reserve_ad_hoc_id()).collect();
+    drop(earlier);
+    let (_mock, mut restarted) = book();
+    for _ in 0..3 {
+        let id = restarted.reserve_ad_hoc_id();
+        assert!(!old.contains(&id), "{id} was given out by the earlier run");
+    }
 }
 
 #[test]

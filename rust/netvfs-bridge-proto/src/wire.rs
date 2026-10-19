@@ -103,7 +103,7 @@ pub struct WireCapabilities {
 /// `(sssa{sv})`: id, provider, display name, info.
 #[derive(Debug, Serialize, Deserialize, Type)]
 pub struct WireLocation {
-    /// Location id (`account:<n>`, `adhoc:<n>`).
+    /// Location id (`account:<n>`, `adhoc:<run>-<n>`; opaque, SPEC-v2 XB-10).
     pub id: String,
     /// Backend provider (`sftp`, `smb`, …).
     pub provider: String,
