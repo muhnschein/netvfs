@@ -72,16 +72,20 @@ pub fn account_location_id(account_id: i32) -> String {
     format!("account:{account_id}")
 }
 
-/// The id of the `n`th ad-hoc location: `adhoc:<n>`.
+/// The id of the `n`th ad-hoc location of the bridge run `run`:
+/// `adhoc:<run>-<n>`, `run` as 16 hex digits (XB-10). Ad-hoc locations
+/// end with the run while consumers may still hold their ids; `run`
+/// differs between runs, so a later run never gives such an id to another
+/// location.
 #[must_use]
-pub fn ad_hoc_location_id(n: u64) -> String {
-    format!("adhoc:{n}")
+pub fn ad_hoc_location_id(run: u64, n: u64) -> String {
+    format!("adhoc:{run:016x}-{n}")
 }
 
 /// One location (`LocationSpec`). The parameters never hold a secret.
 #[derive(Debug, Clone)]
 pub struct LocationSpec {
-    /// `account:<n>` or `adhoc:<n>`.
+    /// `account:<n>` or `adhoc:<run>-<n>`.
     pub id: String,
     /// Account or ad hoc.
     pub kind: LocationKind,
@@ -233,6 +237,7 @@ fn text(s: &str) -> OwnedValue {
 mod tests {
     use super::*;
     use crate::ffi::Value as Opt;
+    use crate::server::args::is_valid_location_id;
     use netvfs_bridge_proto::ErrorName;
     use std::cell::Cell;
 
@@ -272,7 +277,10 @@ mod tests {
     #[test]
     fn ids_kinds_and_host_keys() {
         assert_eq!(account_location_id(12), "account:12");
-        assert_eq!(ad_hoc_location_id(3), "adhoc:3");
+        assert_eq!(ad_hoc_location_id(0x1f, 3), "adhoc:000000000000001f-3");
+        assert_eq!(ad_hoc_location_id(u64::MAX, 12), "adhoc:ffffffffffffffff-12");
+        // The longest is still a location id the bridge takes back.
+        assert!(is_valid_location_id(&ad_hoc_location_id(u64::MAX, u64::MAX)));
         let account = LocationSpec::account(
             7,
             "sftp",

@@ -182,6 +182,13 @@
     "test": "cd rust && cargo test --locked -q -p netvfs-bridge --lib locations::connector"
   },
   {
+    "name": "XB-10 a restarted bridge gives ad-hoc ids again",
+    "file": "rust/netvfs-bridge/src/locations/book.rs",
+    "search": "            run: new_run(),",
+    "replace": "            run: 0,",
+    "test": "cd rust && cargo test --locked -q -p netvfs-bridge --lib locations::book"
+  },
+  {
     "name": "XB-14 ForgetAdHoc keeps the pin",
     "file": "rust/netvfs-bridge/src/locations/book.rs",
     "search": "        let _had_pin = pins.remove(&spec.host_key());",

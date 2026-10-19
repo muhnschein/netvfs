@@ -48,7 +48,7 @@ pub const MAX_CALL_BODY: usize = 128 * 1024;
 /// The SMB security profiles `ConnectAdHoc` accepts.
 const SECURITY_PROFILES: [&str; 3] = ["strict", "signed", "guest"];
 
-/// A validated location id (`account:12`, `adhoc:3`): `[a-z0-9:-]{1,64}`.
+/// A validated location id (`account:12`, `adhoc:<run>-3`): `[a-z0-9:-]{1,64}`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LocId(String);
 
@@ -496,7 +496,7 @@ pub fn is_valid_token(value: &str, max: usize) -> bool {
         && value.bytes().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'-')
 }
 
-/// `[a-z0-9:-]{1,64}`: location ids (`account:12`, `adhoc:3`) and question
+/// `[a-z0-9:-]{1,64}`: location ids (`account:12`, `adhoc:<run>-3`) and question
 /// ids (`q7`).
 #[must_use]
 pub fn is_valid_location_id(id: &str) -> bool {

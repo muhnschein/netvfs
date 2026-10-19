@@ -19,8 +19,9 @@ use netvfs_bridge_proto::ErrorName;
 use netvfs_bridge_proto::Lane;
 use std::collections::BTreeMap;
 use std::fmt;
+use std::hash::{BuildHasher as _, RandomState};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 /// Locations, ad-hoc secrets and pools.
 pub struct LocationBook<B: Backend> {
@@ -29,6 +30,8 @@ pub struct LocationBook<B: Backend> {
     /// Ad-hoc locations whose first connection is being established; their
     /// pools exist (and count against the host limit) but nobody sees them.
     connecting: BTreeMap<String, Arc<LocationSpec>>,
+    /// This run's part of the ad-hoc ids ([`new_run`]).
+    run: u64,
     next_ad_hoc: u64,
     pools: PoolSet<B>,
 }
@@ -56,6 +59,13 @@ pub fn no_such_location() -> Status {
     Status::new(ErrorName::NotFound, "No such location")
 }
 
+/// A random number for this run of the bridge, the `<run>` of its ad-hoc
+/// ids ([`ad_hoc_location_id`]). `RandomState`'s keys come from the
+/// system's random source; the time and the process id are hashed with them.
+fn new_run() -> u64 {
+    RandomState::new().hash_one((SystemTime::now(), std::process::id()))
+}
+
 /// `Unsupported`: the backend package is missing (XP-5).
 #[must_use]
 pub fn no_backend(provider: &str) -> Status {
@@ -63,13 +73,14 @@ pub fn no_backend(provider: &str) -> Status {
 }
 
 impl<B: Backend> LocationBook<B> {
-    /// An empty book over `pools`.
+    /// An empty book over `pools`, for one run of the bridge.
     #[must_use]
-    pub const fn new(pools: PoolSet<B>) -> Self {
+    pub fn new(pools: PoolSet<B>) -> Self {
         Self {
             accounts: Vec::new(),
             ad_hoc: BTreeMap::new(),
             connecting: BTreeMap::new(),
+            run: new_run(),
             next_ad_hoc: 1,
             pools,
         }
@@ -170,9 +181,10 @@ impl<B: Backend> LocationBook<B> {
         self.find(id).ok_or_else(no_such_location)
     }
 
-    /// The id of the next ad-hoc location (`reserveAdHocId`).
+    /// The id of the next ad-hoc location (`reserveAdHocId`): never one
+    /// given out before, by this book or by an earlier run's.
     pub fn reserve_ad_hoc_id(&mut self) -> String {
-        let id = ad_hoc_location_id(self.next_ad_hoc);
+        let id = ad_hoc_location_id(self.run, self.next_ad_hoc);
         self.next_ad_hoc = self.next_ad_hoc.saturating_add(1);
         id
     }

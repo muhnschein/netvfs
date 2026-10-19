@@ -21,6 +21,13 @@ ignore = [
     # (through picky) for NTLM only (the Negotiate package is limited to
     # "ntlm": no Kerberos, no PKINIT, no certificate).
     { id = "RUSTSEC-2023-0071", reason = "no RSA private-key operation: RSA user keys refused, sspi limited to NTLM" },
+    # zvariant, zvariant_derive, zbus_names: unmaintained as standalone
+    # crates because zbus 6 folds them in (z-galaxy/zbus#2043). They are
+    # parts of zbus 5, which still gets its releases; moving to zbus 6 is a
+    # change of its own.
+    { id = "RUSTSEC-2026-0370", reason = "zvariant is part of zbus 5; zbus 6 folds it in" },
+    { id = "RUSTSEC-2026-0371", reason = "zbus_names is part of zbus 5; zbus 6 folds it in" },
+    { id = "RUSTSEC-2026-0372", reason = "zvariant_derive is part of zbus 5; zbus 6 folds it in" },
 ]
 
 [licenses]

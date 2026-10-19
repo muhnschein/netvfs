@@ -734,6 +734,12 @@ permission, links nothing from netvfs, and never sees secrets or pins.
   | Questions | signal `Question(s id, s kind, a{sv})`, `Answer(s id, a{sv})`; kinds: `identity-unknown` (ad-hoc only), `keyboard-interactive`, `insecure-consent` (ad-hoc only) |
   | Handoff | `OpenAccountSettings(s loc)`, `AddAccount(s provider)` |
 
+  Location ids (`loc`) are opaque to consumers: `account:<n>` for an account,
+  `adhoc:<run>-<n>` for an ad-hoc location, where `<run>` is 16 hex digits drawn at random
+  when the bridge starts. Ad-hoc locations end with the bridge process, but consumers may
+  still hold their ids; no id is ever given to another location, also not by a later run
+  of the bridge, so a stale ad-hoc id fails with `NotFound`.
+
   `Walk` options: `maxDepth` (−1 for no limit), `followSymlinks` and `postOrder`.
   `postOrder` is accepted and has no effect: `WalkBatch` reports every folder before its
   children (its second visit after the children, `Ops::walk`'s `leave()`, is not sent).
