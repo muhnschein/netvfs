@@ -2,10 +2,11 @@
 // XB-20: what is listed of the devices of a phone with an SD card, a USB
 // stick and an internal eMMC, as UDisks2 describes them.
 
-use super::*;
-use crate::drives::sample::*;
+use super::{BLOCK, BLOCK_DEVICES, DRIVE, FILESYSTEM, Kind, ManagedObjects, drives};
+use crate::drives::sample::{CARD, STICK, block, device, drive, object_path, owned, phone, set};
+use netvfs_bridge_proto::{drive_info, value_bool, value_i64, value_str};
 use zbus::zvariant::serialized::{Context, Data};
-use zbus::zvariant::{LE, to_bytes};
+use zbus::zvariant::{LE, OwnedObjectPath, OwnedValue, to_bytes};
 
 fn ids(objects: &ManagedObjects) -> Vec<String> {
     drives(objects).into_iter().map(|d| d.id).collect()
