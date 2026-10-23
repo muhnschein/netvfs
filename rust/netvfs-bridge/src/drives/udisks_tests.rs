@@ -348,3 +348,11 @@ fn a_udisks_that_does_not_answer() {
         assert_eq!(udisks.list().await.len(), 2);
     });
 }
+
+#[test]
+fn its_debug_output_names_the_bus_and_the_watch() {
+    let udisks = UDisks::new(Bus::Address("unix:path=/nonexistent/bus".to_owned()), CALL_TIMEOUT, || true);
+    let text = format!("{udisks:?}");
+    assert!(text.starts_with("UDisks {"), "{text}");
+    assert!(text.contains("/nonexistent/bus") && text.contains("watching: Cell { value: false }"), "{text}");
+}
