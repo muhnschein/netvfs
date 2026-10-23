@@ -10,7 +10,9 @@
 use crate::status::Status;
 use netvfs_bridge_proto::errors::{INVALID_ARGS, UNKNOWN_METHOD};
 use netvfs_bridge_proto::methods::{INTERFACE, OBJECT_PATH};
-use netvfs_bridge_proto::{ErrorName, WireCapabilities, WireEntry, WireLocation, WireNearby, WireWalkItem};
+use netvfs_bridge_proto::{
+    ErrorName, WireCapabilities, WireDrive, WireEntry, WireLocation, WireNearby, WireWalkItem,
+};
 use std::collections::HashMap;
 use zbus::Message;
 use zbus::message::Header;
@@ -61,6 +63,8 @@ pub enum Reply {
     Names(Vec<String>),
     /// `a(sssa{sv})`: `ListLocations`.
     Locations(Vec<WireLocation>),
+    /// `a(ssaya{sv})`: `ListDrives`.
+    Drives(Vec<WireDrive>),
     /// `(asasx)`: `Capabilities`.
     Capabilities(WireCapabilities),
     /// `u`: `List` (request id), `Upload`, `Download`, `CopyAcross`,
@@ -68,7 +72,7 @@ pub enum Reply {
     Id(u32),
     /// `(ayyyxxxxixxssqays)`: `Stat`.
     Entry(WireEntry),
-    /// `ay`: `ReadLink`, `Checksum`, `Read`.
+    /// `ay`: `ReadLink`, `Checksum`, `Read`, `Mount`.
     Bytes(Vec<u8>),
     /// `xxx`: `SpaceInfo` (free, total, used; -1 unknown).
     Space {
@@ -97,6 +101,7 @@ impl Reply {
             Self::Hello | Self::Text(_) => "s",
             Self::Names(_) => "as",
             Self::Locations(_) => "a(sssa{sv})",
+            Self::Drives(_) => "a(ssaya{sv})",
             Self::Capabilities(_) => "(asasx)",
             Self::Id(_) => "u",
             Self::Entry(_) => netvfs_bridge_proto::methods::ENTRY_SIGNATURE,
@@ -118,6 +123,7 @@ impl Reply {
             Self::Text(s) => reply.build(&(wire_text(s),)),
             Self::Names(names) => reply.build(&(wire_texts(names),)),
             Self::Locations(list) => reply.build(&(list.iter().map(wire_location).collect::<Vec<_>>(),)),
+            Self::Drives(list) => reply.build(&(list.iter().map(wire_drive).collect::<Vec<_>>(),)),
             Self::Capabilities(c) => reply.build(&(WireCapabilities {
                 flags: wire_texts(&c.flags),
                 checksum_algorithms: wire_texts(&c.checksum_algorithms),
@@ -134,6 +140,10 @@ impl Reply {
 
 fn wire_location(l: &WireLocation) -> (String, String, String, &HashMap<String, OwnedValue>) {
     (wire_text(&l.id), wire_text(&l.provider), wire_text(&l.name), &l.info)
+}
+
+fn wire_drive(d: &WireDrive) -> (String, String, &[u8], &HashMap<String, OwnedValue>) {
+    (wire_text(&d.id), wire_text(&d.label), &d.mount_point, &d.info)
 }
 
 /// The D-Bus error name for a failure. `from_validation`: the failure comes
@@ -192,6 +202,8 @@ pub enum OutSignal {
     ConsentChanged(String),
     /// `""`.
     LocationsChanged,
+    /// `""` (XB-20).
+    DrivesChanged,
     /// `a(sssq)`.
     NearbyChanged(Vec<WireNearby>),
     /// `ua(ayyyxxxxixxssqays)`.
@@ -252,6 +264,7 @@ impl OutSignal {
         match self {
             Self::ConsentChanged(_) => "ConsentChanged",
             Self::LocationsChanged => "LocationsChanged",
+            Self::DrivesChanged => "DrivesChanged",
             Self::NearbyChanged(_) => "NearbyChanged",
             Self::ListBatch { .. } => "ListBatch",
             Self::ListDone { .. } => "ListDone",
@@ -270,7 +283,7 @@ impl OutSignal {
         let signal = Message::signal(OBJECT_PATH, INTERFACE, self.name())?;
         match self {
             Self::ConsentChanged(s) => signal.build(&(wire_text(s),)),
-            Self::LocationsChanged => signal.build(&()),
+            Self::LocationsChanged | Self::DrivesChanged => signal.build(&()),
             Self::NearbyChanged(items) => signal.build(&(items.iter().map(wire_nearby).collect::<Vec<_>>(),)),
             Self::ListBatch { request, entries } => {
                 signal.build(&(*request, entries.iter().map(wire_entry).collect::<Vec<_>>()))

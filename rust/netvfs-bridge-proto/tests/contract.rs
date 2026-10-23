@@ -96,7 +96,7 @@ fn method_table_matches_xml() {
         .map(|m| Member { name: m.name.to_owned(), input: m.input.to_owned(), output: m.output.to_owned() })
         .collect();
     assert_eq!(table, xml);
-    assert_eq!(table.len(), 37);
+    assert_eq!(table.len(), 40);
 }
 
 #[test]
@@ -185,7 +185,7 @@ mod fake {
             (methods, signals)
         };
         let want = sorted(&read(&contract_dir().join("org.netvfs.Bridge1.xml")));
-        assert_eq!(want.0.len(), 37);
+        assert_eq!(want.0.len(), 40);
         assert_eq!(sorted(&served), want);
     }
 }

@@ -6,7 +6,7 @@
 
 use super::{
     BRIDGE_VERSION, ErrorName, HashMap, INTERFACE, INVALID_ARGS, Message, OBJECT_PATH, OutSignal, OwnedValue,
-    Reply, Status, UNKNOWN_METHOD, Value, WireCapabilities, WireEntry, WireLocation, WireNearby,
+    Reply, Status, UNKNOWN_METHOD, Value, WireCapabilities, WireDrive, WireEntry, WireLocation, WireNearby,
     WireWalkItem, error_name, error_reply, status_extra, wire_entry, wire_text, wire_text_from_bytes,
 };
 use netvfs_bridge_proto::methods::{ENTRY_SIGNATURE, METHODS, SIGNALS, find_signal};
@@ -52,6 +52,7 @@ fn all_replies() -> Vec<Reply> {
         Reply::Text("granted".to_owned()),
         Reply::Names(vec!["storage-settings".to_owned()]),
         Reply::Locations(vec![]),
+        Reply::Drives(vec![]),
         Reply::Capabilities(WireCapabilities::default()),
         Reply::Id(3),
         Reply::Entry(entry()),
@@ -188,6 +189,17 @@ fn reply_values() {
         ("account:1", "fake", "N\u{fffd}")
     );
     assert_eq!(value_str(&list[0].info["kind"]).as_deref(), Some("account"));
+    let drive = WireDrive {
+        id: "sda1".to_owned(),
+        label: "L\0".to_owned(),
+        mount_point: b"/run/media/u/L\xff".to_vec(),
+        info: OptsBuilder::new().str("kind", "usb").build_owned(),
+    };
+    let (drives,): (Vec<WireDrive>,) =
+        Reply::Drives(vec![drive]).build(&header).unwrap().body().deserialize().unwrap();
+    assert_eq!((drives[0].id.as_str(), drives[0].label.as_str()), ("sda1", "L\u{fffd}"));
+    assert_eq!(drives[0].mount_point, b"/run/media/u/L\xff");
+    assert_eq!(value_str(&drives[0].info["kind"]).as_deref(), Some("usb"));
     assert_eq!(Reply::Id(3).build(&header).unwrap().body().deserialize::<(u32,)>().unwrap(), (3,));
     assert_eq!(
         Reply::Bytes(b"\0x".to_vec()).build(&header).unwrap().body().deserialize::<(Vec<u8>,)>().unwrap().0,
@@ -216,6 +228,7 @@ fn all_signals() -> Vec<OutSignal> {
             kind: "identity-unknown".to_owned(),
             details: HashMap::new(),
         },
+        OutSignal::DrivesChanged,
     ]
 }
 

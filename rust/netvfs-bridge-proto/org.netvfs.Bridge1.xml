@@ -2,7 +2,7 @@
  "http://www.freedesktop.org/standards/dbus/1.0/introspect.dtd">
 <!-- SPDX-License-Identifier: LGPL-2.1-or-later -->
 <!--
-  netvfs-bridge protocol, SPEC-v2 section 8a (XB-8..XB-17).
+  netvfs-bridge protocol, SPEC-v2 section 8a (XB-8..XB-20).
   Peer-to-peer D-Bus over the consumer's socket; object /org/netvfs/Bridge.
 
   Types (XB-9):
@@ -37,8 +37,9 @@
       <arg name="consent" type="s"/>
     </signal>
     <!-- XB-19: what the bridge offers besides the methods of netvfs 0.4, as
-      names: "storage-settings" (OpenStorageSettings opens Settings > Storage).
-      Consumers ignore names they do not know; an older bridge answers
+      names: "storage-settings" (OpenStorageSettings opens Settings > Storage),
+      "drives" (ListDrives, Mount, Unmount, DrivesChanged; XB-20). Consumers
+      ignore names they do not know; an older bridge answers
       org.freedesktop.DBus.Error.UnknownMethod, which means none. Needs no
       consent. -->
     <method name="GetFeatures">
@@ -277,6 +278,33 @@
     </method>
     <!-- Opens Settings > Storage (XB-15); needs no consent. -->
     <method name="OpenStorageSettings"/>
+
+    <!-- Drives (XB-20): the memory cards and USB drives UDisks2 can mount,
+      mounted or not; never internal or system storage. Needs no consent.
+      ListDrives entries, sorted by id:
+        id          opaque, [A-Za-z0-9_]{1,64}
+        label       the filesystem's label, "" without one
+        mountPoint  where it is mounted, empty when it is not
+        info (a{sv}): "kind" (s, "sd" or "usb"), "size" (x, bytes), "fsType" (s),
+          "readOnly" (b), and when known "uuid" (s) and "model" (s).
+      Mount answers the mount point (below /run/media/<user>), at once for a
+      mounted drive; Unmount of a drive that is not mounted succeeds. Errors:
+      NotFound (no such drive), PermissionDenied (polkit refused), Locked (in
+      use), AlreadyExists, Unsupported (no UDisks2, an unknown filesystem),
+      Timeout (60 s), Internal (UDisks2 failed; its message as "detail").
+      DrivesChanged: a drive came or went, was mounted or unmounted; sent once
+      the consumer has listed drives. A consumer that shows them lists again. -->
+    <method name="ListDrives">
+      <arg name="drives" type="a(ssaya{sv})" direction="out"/>
+    </method>
+    <signal name="DrivesChanged"/>
+    <method name="Mount">
+      <arg name="drive" type="s" direction="in"/>
+      <arg name="mountPoint" type="ay" direction="out"/>
+    </method>
+    <method name="Unmount">
+      <arg name="drive" type="s" direction="in"/>
+    </method>
   </interface>
   <interface name="org.freedesktop.DBus.Introspectable">
     <method name="Introspect">

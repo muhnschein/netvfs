@@ -19,13 +19,15 @@
 //! The platform part: consumer registration and paths ([`config`]),
 //! logging ([`log`]), consent and its notification ([`consent`],
 //! [`prompt`]), the settings handoff ([`handoff`]), the accounts helper
-//! ([`accounts`]) and known hosts ([`locations::knownhosts`]). `unsafe` is
-//! confined to `ffi` and `sys`.
+//! ([`accounts`]), known hosts ([`locations::knownhosts`]) and the memory
+//! cards and USB drives of UDisks2 ([`drives`]). `unsafe` is confined to
+//! `ffi` and `sys`.
 
 pub mod accounts;
 pub mod config;
 pub mod consent;
 pub mod core;
+pub mod drives;
 pub mod ffi;
 pub mod handoff;
 pub mod ini;

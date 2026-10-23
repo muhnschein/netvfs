@@ -72,6 +72,8 @@ pub enum Signal {
         /// What to show.
         details: HashMap<String, OwnedValue>,
     },
+    /// The drives changed; `ListDrives` has the new list (XB-20).
+    DrivesChanged,
 }
 
 fn body<T>(msg: &Message) -> Result<T, BridgeError>
@@ -131,6 +133,7 @@ fn decode_member(member: &str, msg: &Message) -> Result<Option<Signal>, BridgeEr
             let (id, kind, details) = body::<(String, String, HashMap<String, OwnedValue>)>(msg)?;
             Signal::Question { id, kind, details }
         }
+        "DrivesChanged" => Signal::DrivesChanged,
         _ => return Ok(None),
     }))
 }
@@ -178,6 +181,8 @@ mod tests {
         }
         let locations = signal(INTERFACE, "LocationsChanged", &());
         assert!(matches!(decode_signal(&locations).unwrap(), Some(Signal::LocationsChanged)));
+        let drives = signal(INTERFACE, "DrivesChanged", &());
+        assert!(matches!(decode_signal(&drives).unwrap(), Some(Signal::DrivesChanged)));
         let server = WireNearby { name: "NAS".into(), provider: "smb".into(), host: "nas".into(), port: 445 };
         let nearby = signal(INTERFACE, "NearbyChanged", &(vec![server.clone()],));
         match decode_signal(&nearby).unwrap() {

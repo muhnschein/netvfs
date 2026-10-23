@@ -4,13 +4,14 @@
 //! what the socket front reports ([`server::Event`]), what workers and copy
 //! jobs report ([`WorkerEvent`]), the results of work items, consent file
 //! changes, prompt answers, account changes, discovery results, changes of
-//! connection states, and its own timers (idle exit, maintenance, the nearby
-//! report, the look at the connection states). The port of
-//! `BridgeServer` and the bookkeeping half of `Session` (session.cpp,
-//! sessionfiles.cpp, sessionjobs.cpp).
+//! connection states and of the drives, and its own timers (idle exit,
+//! maintenance, the nearby report, the look at the connection states). The
+//! port of `BridgeServer` and the bookkeeping half of `Session`
+//! (session.cpp, sessionfiles.cpp, sessionjobs.cpp).
 //!
 //! - [`admin`]: Hello, consent (XB-6), features (XB-19), locations, ad-hoc
 //!   locations, discovery, Cancel, questions, the settings handoff.
+//! - `drives`: ListDrives, Mount, Unmount, DrivesChanged (XB-20).
 //! - `files`: listing, metadata, namespace operations, read handles.
 //! - `jobs`: Upload, Download (XB-11), Walk, RemoveTree, CopyAcross.
 //! - [`quota`] (XB-17), [`questions`] (the broker), [`nearby`] (XD-5),
@@ -23,6 +24,7 @@
 //! still there.
 
 mod admin;
+mod drives;
 mod files;
 mod jobs;
 pub mod nearby;
@@ -35,6 +37,8 @@ use crate::accounts::watch::AccountChanges;
 use crate::accounts::{AccountDirectory, AccountLocation, Attention, FilesAccess};
 use crate::config::{ConsumerInfo, Env};
 use crate::consent::{Consent, ConsentStore, ConsentWatcher};
+use crate::drives::DriveSource;
+use crate::drives::udisks::UDisks;
 use crate::ffi::{Conn, Ffi, ParsedUrl};
 use crate::handoff::{self, Handoff, HandoffCall, Launcher, SessionBusLauncher};
 use crate::jobs::JobOutcome;
@@ -52,6 +56,7 @@ use crate::prompt::{ConsentPrompt, NotificationPrompt, PromptEvent};
 use crate::server::{self, Call, ListenAddress, Listener, OutSignal, Outbox, Reply, ReplyTo, SessionId};
 use crate::status::Status;
 use admin::Waiter;
+use drives::DriveCall;
 use jobs::TransferCall;
 use nearby::{FfiNearby, Nearby, NearbySource};
 use netvfs_bridge_proto::limits::POOL_PER_HOST;
@@ -147,6 +152,9 @@ pub struct Services {
     pub nearby: Box<dyn NearbySource>,
     /// Sends the settings handoff calls (XB-15).
     pub launcher: Box<dyn Launcher>,
+    /// The memory cards and USB drives (XB-20); their changes go to
+    /// [`CoreLink::drives_changed`].
+    pub drives: Rc<dyn DriveSource>,
 }
 
 impl fmt::Debug for Services {
@@ -188,8 +196,8 @@ impl fmt::Debug for Deps {
 
 impl Deps {
     /// The bridge's own: the accounts helper of `env`, the notification
-    /// prompt, account changes and the handoff on the session bus, and the
-    /// C++ discovery.
+    /// prompt, account changes and the handoff on the session bus, the
+    /// C++ discovery, and UDisks2 on the system bus.
     #[must_use]
     pub fn system(ffi: Ffi, listen: ListenAddress, env: &Env) -> Self {
         let helper = env.accounts_helper();
@@ -219,6 +227,7 @@ async fn system_services(ffi: Ffi, helper: PathBuf, link: CoreLink) -> Services 
         }
     });
     let answers = link.clone();
+    let drives_changed = link.clone();
     Services {
         accounts: Rc::new(HelperDirectory::new(helper)),
         prompt: Box::new(NotificationPrompt::start(bus.clone(), move |e| {
@@ -227,6 +236,7 @@ async fn system_services(ffi: Ffi, helper: PathBuf, link: CoreLink) -> Services 
         })),
         nearby: Box::new(FfiNearby::new(ffi, link)),
         launcher: Box::new(SessionBusLauncher::new(bus)),
+        drives: Rc::new(UDisks::system(move || drives_changed.drives_changed())),
     }
 }
 
@@ -287,6 +297,8 @@ pub(crate) enum Event {
     Nearby(Vec<WireNearby>),
     /// A connection state of a location may have changed.
     ConnectionStates,
+    /// What `ListDrives` lists changed.
+    DrivesChanged,
     /// Counters for tests.
     Probe(oneshot::Sender<Counters>),
     /// Stop serving (tests).
@@ -326,6 +338,12 @@ impl CoreLink {
     #[must_use = "false: the core has stopped"]
     pub fn nearby(&self, services: Vec<WireNearby>) -> bool {
         self.send(Event::Nearby(services))
+    }
+
+    /// What `ListDrives` lists changed: `DrivesChanged` to every session.
+    #[must_use = "false: the core has stopped"]
+    pub fn drives_changed(&self) -> bool {
+        self.send(Event::DrivesChanged)
     }
 
     /// Stops serving: [`serve`](crate::serve) returns success.
@@ -439,6 +457,7 @@ pub(crate) struct Core {
     prompt: Box<dyn ConsentPrompt>,
     accounts: Rc<dyn Directory>,
     accounts_generation: u64,
+    drives: Rc<dyn DriveSource>,
     handoff: Handoff<DynLauncher>,
     known_hosts: Arc<KnownHosts>,
     book: LocationBook<Connector>,
@@ -558,6 +577,7 @@ impl Core {
             prompt: services.prompt,
             accounts: services.accounts,
             accounts_generation: 0,
+            drives: services.drives,
             handoff: Handoff::new(&config.handoff_config, DynLauncher(services.launcher)),
             known_hosts,
             book: LocationBook::new(pools),
@@ -640,6 +660,7 @@ impl Core {
             }
             Event::Nearby(services) => self.nearby.changed(services, Instant::now()),
             Event::ConnectionStates => self.states.changed(Instant::now()),
+            Event::DrivesChanged => self.broadcast(&OutSignal::DrivesChanged),
             Event::Probe(tx) => drop(tx.send(self.counters())),
             Event::Shutdown => return Flow::Stop,
         }
@@ -737,6 +758,9 @@ impl Core {
             Call::OpenAccountSettings { loc } => self.on_open_account_settings(reply, &loc),
             Call::AddAccount { provider } => self.on_add_account(reply, &provider),
             Call::OpenStorageSettings => self.on_open_storage_settings(reply),
+            Call::ListDrives => self.on_drive_call(sid, reply, DriveCall::List),
+            Call::Mount { drive } => self.on_drive_call(sid, reply, DriveCall::Mount(drive)),
+            Call::Unmount { drive } => self.on_drive_call(sid, reply, DriveCall::Unmount(drive)),
             call => self.on_file_call(sid, reply, call, lane),
         }
     }

@@ -24,7 +24,7 @@ use netvfs_bridge_proto::limits::{
     MAX_WALK_DEPTH, MIN_TIME_MS,
 };
 use netvfs_bridge_proto::methods::find_method;
-use netvfs_bridge_proto::{ErrorName, Lane, MethodInfo};
+use netvfs_bridge_proto::{ErrorName, Lane, MethodInfo, drive_info};
 use std::collections::BTreeMap;
 use std::fmt;
 use std::os::fd::OwnedFd;
@@ -323,6 +323,14 @@ pub enum Call {
         provider: String,
     },
     OpenStorageSettings,
+    ListDrives,
+    /// `drive`: `[A-Za-z0-9_]{1,64}` (XB-20).
+    Mount {
+        drive: String,
+    },
+    Unmount {
+        drive: String,
+    },
 }
 
 impl Call {
@@ -367,6 +375,9 @@ impl Call {
             Self::OpenAccountSettings { .. } => "OpenAccountSettings",
             Self::AddAccount { .. } => "AddAccount",
             Self::OpenStorageSettings => "OpenStorageSettings",
+            Self::ListDrives => "ListDrives",
+            Self::Mount { .. } => "Mount",
+            Self::Unmount { .. } => "Unmount",
         }
     }
 
@@ -427,7 +438,7 @@ pub fn decode(msg: &Message) -> Result<Call, Status> {
 type Decoder = fn(&Body) -> Result<Call, Status>;
 
 /// The rules, in the order of the method table (`args.cpp` `rules()`).
-const DECODERS: [(&str, Decoder); 37] = [
+const DECODERS: [(&str, Decoder); 40] = [
     ("Hello", hello),
     ("GetConsent", |_| Ok(Call::GetConsent)),
     ("RequestConsent", |_| Ok(Call::RequestConsent)),
@@ -465,6 +476,9 @@ const DECODERS: [(&str, Decoder); 37] = [
     ("OpenAccountSettings", |b| loc_only(b).map(|loc| Call::OpenAccountSettings { loc })),
     ("AddAccount", add_account),
     ("OpenStorageSettings", |_| Ok(Call::OpenStorageSettings)),
+    ("ListDrives", |_| Ok(Call::ListDrives)),
+    ("Mount", |b| drive_only(b).map(|drive| Call::Mount { drive })),
+    ("Unmount", |b| drive_only(b).map(|drive| Call::Unmount { drive })),
 ];
 
 fn decoder(name: &str) -> Decoder {
@@ -713,6 +727,15 @@ fn answer(body: &Body) -> Result<Call, Status> {
     let mut answers = Vec::new();
     each_option(&opts, |key, value| answer_option(key, value, &mut accept, &mut answers))?;
     Ok(Call::Answer { id, accept, answers })
+}
+
+/// A drive id of `ListDrives` (XB-20): an object path element, never a path.
+fn drive_only(body: &Body) -> Result<String, Status> {
+    let (drive,): (String,) = deserialize(body)?;
+    if !drive_info::is_valid_id(&drive) {
+        return Err(Status::invalid_args("Invalid drive id"));
+    }
+    Ok(drive)
 }
 
 fn add_account(body: &Body) -> Result<Call, Status> {

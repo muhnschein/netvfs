@@ -7,13 +7,15 @@
 use super::DEFAULT_CAPS;
 use super::args::{self, Dict};
 use super::fail::Fail;
-use super::state::{CancelOutcome, Consent, InfoValue, RecordedAnswer, Session, Shared};
+use super::state::{CancelOutcome, Consent, FakeDrive, InfoValue, RecordedAnswer, Session, Shared};
 use super::transfer::{self, Env};
 use super::tree::{Tree, TreeError};
 use crate::errors::ErrorName;
 use crate::limits::{MAX_HANDLES, MAX_PATH, RETRY_AFTER_MS};
 use crate::methods::{FEATURE_STORAGE_SETTINGS, Lane, OBJECT_PATH, find_method};
-use crate::wire::{WireCapabilities, WireEntry, WireLocation, WireNearby, WireWalkItem, location_state};
+use crate::wire::{
+    WireCapabilities, WireDrive, WireEntry, WireLocation, WireNearby, WireWalkItem, location_state,
+};
 use sha2::Digest as _;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -743,12 +745,41 @@ impl Iface {
         Ok(())
     }
 
+    // ---- Drives ------------------------------------------------------------
+
+    async fn list_drives(&self) -> Result<Vec<WireDrive>, Fail> {
+        self.begin("ListDrives", None, "").await?;
+        Ok(self.shared.with(|s| s.drives.iter().map(FakeDrive::wire).collect()))
+    }
+
+    async fn mount(&self, drive: String) -> Result<Vec<u8>, Fail> {
+        let drive = args::drive(&drive)?;
+        self.begin("Mount", None, &drive).await?;
+        let (point, changed) = self.shared.with(|s| s.mount(&drive, true)).ok_or_else(no_drive)?;
+        if changed {
+            self.shared.broadcast_drives().await;
+        }
+        Ok(point)
+    }
+
+    async fn unmount(&self, drive: String) -> Result<(), Fail> {
+        let drive = args::drive(&drive)?;
+        self.begin("Unmount", None, &drive).await?;
+        let (_, changed) = self.shared.with(|s| s.mount(&drive, false)).ok_or_else(no_drive)?;
+        if changed {
+            self.shared.broadcast_drives().await;
+        }
+        Ok(())
+    }
+
     // ---- Signals -----------------------------------------------------------
 
     #[zbus(signal)]
     pub async fn consent_changed(ctxt: &SignalEmitter<'_>, consent: String) -> zbus::Result<()>;
     #[zbus(signal)]
     pub async fn locations_changed(ctxt: &SignalEmitter<'_>) -> zbus::Result<()>;
+    #[zbus(signal)]
+    pub async fn drives_changed(ctxt: &SignalEmitter<'_>) -> zbus::Result<()>;
     #[zbus(signal)]
     pub async fn nearby_changed(ctxt: &SignalEmitter<'_>, nearby: Vec<WireNearby>) -> zbus::Result<()>;
     #[zbus(signal)]
@@ -793,6 +824,10 @@ impl Iface {
     }
 }
 
+fn no_drive() -> Fail {
+    Fail::net(ErrorName::NotFound, "No such drive")
+}
+
 /// Signal context of a session, if its connection is up.
 pub(super) fn context(session: &Session) -> Option<SignalEmitter<'static>> {
     let conn = session.conn()?;
@@ -814,6 +849,15 @@ impl Shared {
             if let Some(ctx) = context(&session) {
                 // As above.
                 Iface::locations_changed(&ctx).await.ok();
+            }
+        }
+    }
+
+    pub async fn broadcast_drives(&self) {
+        for session in self.sessions_snapshot() {
+            if let Some(ctx) = context(&session) {
+                // A closed client simply misses the signal.
+                Iface::drives_changed(&ctx).await.ok();
             }
         }
     }

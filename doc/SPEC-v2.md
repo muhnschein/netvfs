@@ -587,7 +587,8 @@ permission, links nothing from netvfs, and never sees secrets or pins.
 - XB-1: Trust model. The bridge acts on netvfs accounts on behalf of a consumer that the
   user has approved (XB-6). It never acts on local paths (XB-11), never discloses secrets
   or pins, and never changes accounts; account changes are handed off to Settings
-  (XB-15).
+  (XB-15). Besides the network locations it mounts and unmounts memory cards and USB
+  drives, as Settings → Storage does (XB-20).
 - XB-2: `/usr/libexec/netvfs/netvfs-bridge`, one process per consumer, started by systemd
   user socket activation (`Accept=no`). It exits 30 s after its last client disconnected
   and no job runs.
@@ -733,6 +734,7 @@ permission, links nothing from netvfs, and never sees secrets or pins.
   | Jobs | `Upload(s loc, ay path, h fd, a{sv} opts) → u job`, `Download(s loc, ay path, h fd, a{sv} opts) → u job`, `CopyAcross(s srcLoc, ay src, s dstLoc, ay dst, a{sv} opts) → u job`, `RemoveTree(s loc, ay path) → u job`, `Walk(s loc, ay root, a{sv} opts) → u job`, `Cancel(u id)`, signals `JobProgress(u job, x done, x total)` (≤ 4 Hz), `WalkBatch(u job, a(ay path, entry))`, `JobFinished(u job, s error, s message, a{sv} extra)` |
   | Questions | signal `Question(s id, s kind, a{sv})`, `Answer(s id, a{sv})`; kinds: `identity-unknown` (ad-hoc only), `keyboard-interactive`, `insecure-consent` (ad-hoc only) |
   | Handoff | `OpenAccountSettings(s loc)`, `AddAccount(s provider)`, `OpenStorageSettings()` |
+  | Drives | `ListDrives → a(s id, s label, ay mountPoint, a{sv} info)`, signal `DrivesChanged`, `Mount(s drive) → ay mountPoint`, `Unmount(s drive)` (XB-20) |
 
   Location ids (`loc`) are opaque to consumers: `account:<n>` for an account,
   `adhoc:<run>-<n>` for an ad-hoc location, where `<run>` is 16 hex digits drawn at random
@@ -836,9 +838,62 @@ permission, links nothing from netvfs, and never sees secrets or pins.
 - XB-19: Features. `GetFeatures() → as` names what the bridge offers besides the methods
   of netvfs 0.4, so that a consumer shows an action only where it works:
   `storage-settings` when `handoff.conf` has a valid `OpenStorageSettings` entry
-  (XB-15). Consumers ignore names they do not know, so that names can be added; an
-  older bridge has no `GetFeatures` and answers `org.freedesktop.DBus.Error.UnknownMethod`,
-  which means none. It needs `Hello` first, but no consent.
+  (XB-15), and `drives` for the drive methods (XB-20). Consumers ignore names they do not
+  know, so that names can be added; an older bridge has no `GetFeatures` and answers
+  `org.freedesktop.DBus.Error.UnknownMethod`, which means none. It needs `Hello` first,
+  but no consent.
+- XB-20: Drives. A sandboxed consumer cannot reach UDisks2, so the bridge lists and
+  mounts the memory cards and USB drives the user would otherwise mount in Settings →
+  Storage. `ListDrives` reads UDisks2's `GetManagedObjects` on the system bus and lists,
+  mounted or not, every block device that
+  - has UDisks2's `Filesystem` interface and `IdUsage` `filesystem` (a filesystem
+    UDisks2 can mount: a locked encrypted card is not listed, its unlocked cleartext
+    device is, as a device of its backing device's drive),
+  - is neither `HintSystem` nor `HintIgnore`,
+  - belongs to a drive (its own, or that of its crypto backing device) on the `usb` bus
+    (kind `usb`) or with an SD medium, a `MediaCompatibility` entry beginning with
+    `flash_sd` (kind `sd`). The internal eMMC is on the `sdio` bus as well, but its
+    medium is `flash_mmc`: udev's `80-udisks2.rules` sets the medium from the card's MMC
+    type, the property that Sailfish OS's automount (`mount-sd@`) goes by too. So
+    neither it, its partitions nor the logical volumes on it (which have no drive) are
+    listed.
+
+  Entries are `(s id, s label, ay mountPoint, a{sv} info)`, sorted by id: `id` is the
+  last element of the block device's object path (`mmcblk1p1`, `sda1`; opaque to
+  consumers, `[A-Za-z0-9_]{1,64}`), `label` its `IdLabel` (empty without one),
+  `mountPoint` its first mount point (empty when it is not mounted), and the info
+  `kind` (`s`: `sd` or `usb`), `size` (`x`, bytes), `fsType` (`s`, `IdType`), `readOnly`
+  (`b`), and when known `uuid` (`s`, `IdUUID`) and `model` (`s`, the drive's vendor and
+  model). Consumers ignore keys they do not know.
+  `Mount(drive) → ay` mounts with `Filesystem.Mount` and `auth.no_user_interaction`,
+  so UDisks2 chooses the mount point below `/run/media/<user>` and the options, as for
+  Settings → Storage, and answers the mount point; a mounted drive answers its mount
+  point without a call. `Unmount(drive)` calls `Filesystem.Unmount` (no `force`); a
+  drive that is not mounted succeeds at once. Both look the drive up again and act only
+  on a drive that `ListDrives` would list at that moment, otherwise `NotFound`. Polkit
+  (Sailfish OS 5.2's UDisks2 policy) allows `filesystem-mount` and
+  `filesystem-unmount-others` to any subject, so the bridge, a user service outside the
+  seat's session, mounts and unmounts without a question, also a card that `mount-sd@`
+  or another user mounted; ejecting and powering off a drive need `auth_admin` outside
+  the active session and are not offered. UDisks2's errors map to XC-21 names:
+  `NotAuthorized`, `NotAuthorizedCanObtain`, `NotAuthorizedDismissed` and
+  `OptionNotPermitted` → `PermissionDenied`, `DeviceBusy` → `Locked` (files are open on
+  the drive), `Cancelled` → `Canceled`, `Timedout` → `Timeout`, `NotSupported` →
+  `Unsupported`, `AlreadyMounted` → `AlreadyExists`, `NotMounted` → `NotFound`, any
+  other → `Internal`, and of the bus `ServiceUnknown` → `Unsupported`, `UnknownObject` →
+  `NotFound`, `NoReply` → `Timeout`; the `detail` is UDisks2's error name and message.
+  A call waits at most 60 s for UDisks2 and counts as a request (XB-17). `ListDrives`
+  never fails: without a system bus or UDisks2, or without an answer in time, it lists
+  nothing. `Mount` and `Unmount` fail with `Unsupported` without UDisks2 and with
+  `Timeout` without an answer in time. The bridge connects to the system bus only on its
+  first drive call.
+
+  `DrivesChanged` (no arguments): once a consumer has listed drives, the bridge follows
+  UDisks2's `InterfacesAdded`, `InterfacesRemoved` and `PropertiesChanged` signals,
+  lists again 200 ms after the first of a burst, and tells every connection when the
+  list differs from the last one it listed (a drive came or went, was mounted or
+  unmounted). Drives need no consent: they show nothing of the user's network locations
+  (XB-6), and polkit lets every process of the user do the same.
 
 ## 9. Security additions
 
@@ -857,8 +912,9 @@ permission, links nothing from netvfs, and never sees secrets or pins.
 - XSEC-7: The bridge is the only netvfs component reachable from a sandbox. Its attack
   surface is the D-Bus message parser (zbus and zvariant, in Rust) and its
   own argument validation: every path is checked with the rules of `Paths::normalize`
-  before use, every numeric argument is range-checked, and every fd is validated
-  (XB-11). The parser only sees messages within the inbound limits of XB-17.
+  before use, every numeric argument is range-checked, every fd is validated
+  (XB-11), and a drive is acted on only when it is one `ListDrives` lists (XB-20). The
+  parser only sees messages within the inbound limits of XB-17.
 
 ## 10. Packaging (amends SPEC 4.1)
 

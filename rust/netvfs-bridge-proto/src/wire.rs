@@ -145,6 +145,47 @@ pub struct WireNearby {
     pub port: u16,
 }
 
+/// `(ssaya{sv})`: a memory card or USB drive of `ListDrives` (SPEC-v2 XB-20).
+#[derive(Debug, Serialize, Deserialize, Type)]
+pub struct WireDrive {
+    /// Drive id (opaque, `[A-Za-z0-9_]{1,64}`).
+    pub id: String,
+    /// The filesystem's label, empty without one.
+    pub label: String,
+    /// Where it is mounted, empty when it is not.
+    pub mount_point: Vec<u8>,
+    /// More facts ([`drive_info`]).
+    pub info: HashMap<String, OwnedValue>,
+}
+
+/// The info keys of a [`WireDrive`] (SPEC-v2 XB-20).
+pub mod drive_info {
+    /// `s`: [`KIND_SD`] or [`KIND_USB`].
+    pub const KIND: &str = "kind";
+    /// `x`: bytes.
+    pub const SIZE: &str = "size";
+    /// `s`: the filesystem type (`vfat`, `exfat`, `ext4`, …).
+    pub const FS_TYPE: &str = "fsType";
+    /// `b`.
+    pub const READ_ONLY: &str = "readOnly";
+    /// `s`, when known.
+    pub const UUID: &str = "uuid";
+    /// `s`: the drive's vendor and model, when known.
+    pub const MODEL: &str = "model";
+    /// A memory card.
+    pub const KIND_SD: &str = "sd";
+    /// A USB drive.
+    pub const KIND_USB: &str = "usb";
+
+    /// `[A-Za-z0-9_]{1,64}`: the last element of a UDisks2 object path.
+    #[must_use]
+    pub fn is_valid_id(id: &str) -> bool {
+        !id.is_empty()
+            && id.len() <= crate::limits::MAX_ID
+            && id.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'_')
+    }
+}
+
 /// `(ay(ayyyxxxxixxssqays))` of `WalkBatch`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 pub struct WireWalkItem {
@@ -296,6 +337,17 @@ mod tests {
         assert_eq!(WireLocation::SIGNATURE.to_string(), "(sssa{sv})");
         assert_eq!(WireNearby::SIGNATURE.to_string(), "(sssq)");
         assert_eq!(WireWalkItem::SIGNATURE.to_string(), "(ay(ayyyxxxxixxssqays))");
+        assert_eq!(WireDrive::SIGNATURE.to_string(), "(ssaya{sv})");
+    }
+
+    #[test]
+    fn drive_ids_are_object_path_elements() {
+        for id in ["mmcblk1p1", "sda1", "dm_2d3", "A", &"x".repeat(64)] {
+            assert!(drive_info::is_valid_id(id), "{id}");
+        }
+        for id in ["", "sd-a", "../sda", "sda/1", "sda1 ", &"x".repeat(65), "äö"] {
+            assert!(!drive_info::is_valid_id(id), "{id}");
+        }
     }
 
     #[test]

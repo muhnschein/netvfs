@@ -144,8 +144,9 @@ void tst_Contract::signalsOfTheXml()
 {
     const XmlInterface xml = parseInterface(readFile(ContractDir + QStringLiteral("/org.netvfs.Bridge1.xml")),
                                             QStringLiteral("org.netvfs.Bridge1"));
-    const QStringList expectedSignals = { "ConsentChanged", "JobFinished", "JobProgress", "ListBatch", "ListDone",
-                                          "LocationsChanged", "NearbyChanged", "Question", "WalkBatch" };
+    const QStringList expectedSignals = { "ConsentChanged", "DrivesChanged", "JobFinished", "JobProgress",
+                                          "ListBatch", "ListDone", "LocationsChanged", "NearbyChanged",
+                                          "Question", "WalkBatch" };
     QCOMPARE(xml.signalSignatures.keys(), expectedSignals);
     QCOMPARE(xml.signalSignatures.value("ListBatch"), QByteArray("ua(ayyyxxxxixxssqays)"));
 }

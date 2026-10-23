@@ -22,6 +22,14 @@ pub fn location(id: &str) -> Result<String, Fail> {
     if ok { Ok(id.to_owned()) } else { Err(Fail::args("Invalid location id")) }
 }
 
+pub fn drive(id: &str) -> Result<String, Fail> {
+    if crate::wire::drive_info::is_valid_id(id) {
+        Ok(id.to_owned())
+    } else {
+        Err(Fail::args("Invalid drive id"))
+    }
+}
+
 pub fn path(raw: &[u8]) -> Result<Vec<u8>, Fail> {
     Ok(normalize(raw)?)
 }

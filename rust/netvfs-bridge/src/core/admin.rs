@@ -19,7 +19,7 @@ use crate::prompt::PromptEvent;
 use crate::server::args::{AdHocOpts, LocId, Secret, is_valid_token};
 use crate::server::{OutSignal, Reply, ReplyTo, SessionId};
 use crate::status::Status;
-use netvfs_bridge_proto::methods::FEATURE_STORAGE_SETTINGS;
+use netvfs_bridge_proto::methods::{FEATURE_DRIVES, FEATURE_STORAGE_SETTINGS};
 use netvfs_bridge_proto::{ErrorName, Lane};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -145,6 +145,7 @@ impl Core {
         if self.handoff.offers_storage_settings() {
             features.push(FEATURE_STORAGE_SETTINGS.to_owned());
         }
+        features.push(FEATURE_DRIVES.to_owned());
         reply.ok(&Reply::Names(features));
     }
 

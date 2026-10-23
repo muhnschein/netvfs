@@ -2,7 +2,7 @@
 //! Shared state of the fake bridge and of one client session.
 
 use super::tree::Tree;
-use crate::wire::{WireCapabilities, WireLocation, WireNearby, location_state};
+use crate::wire::{WireCapabilities, WireDrive, WireLocation, WireNearby, drive_info, location_state};
 use std::collections::{BTreeMap, HashMap};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -171,6 +171,54 @@ impl InfoValue {
     }
 }
 
+/// A memory card or USB drive of the fake (XB-20).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FakeDrive {
+    /// The drive id.
+    pub id: String,
+    /// The filesystem label.
+    pub label: String,
+    /// Where it is mounted, empty when it is not.
+    pub mount_point: Vec<u8>,
+    /// `sd` or `usb`.
+    pub kind: String,
+    /// Bytes.
+    pub size: i64,
+}
+
+impl FakeDrive {
+    /// An unmounted `vfat` drive.
+    #[must_use]
+    pub fn new(id: &str, label: &str, kind: &str, size: i64) -> Self {
+        Self {
+            id: id.to_owned(),
+            label: label.to_owned(),
+            mount_point: Vec::new(),
+            kind: kind.to_owned(),
+            size,
+        }
+    }
+
+    /// The drive as `ListDrives` lists it.
+    #[must_use]
+    pub fn wire(&self) -> WireDrive {
+        let info = [
+            (drive_info::KIND, InfoValue::Str(self.kind.clone())),
+            (drive_info::FS_TYPE, InfoValue::Str("vfat".to_owned())),
+            (drive_info::READ_ONLY, InfoValue::Bool(false)),
+        ];
+        let mut info: HashMap<String, OwnedValue> =
+            info.iter().map(|(k, v)| ((*k).to_owned(), v.to_owned_value())).collect();
+        info.insert(drive_info::SIZE.to_owned(), OwnedValue::from(self.size));
+        WireDrive {
+            id: self.id.clone(),
+            label: self.label.clone(),
+            mount_point: self.mount_point.clone(),
+            info,
+        }
+    }
+}
+
 /// A question `ConnectAdHoc` asks before it connects.
 #[derive(Debug, Clone)]
 pub struct ScriptedQuestion {
@@ -229,6 +277,8 @@ pub struct State {
     pub handoffs: Vec<String>,
     /// What `GetFeatures` answers (XB-19).
     pub features: Vec<String>,
+    /// What `ListDrives` lists (XB-20).
+    pub drives: Vec<FakeDrive>,
     pub nearby: Vec<WireNearby>,
     pub next_adhoc: u32,
     pub next_question: u32,
@@ -257,7 +307,11 @@ impl Default for State {
             answers: Vec::new(),
             calls: Vec::new(),
             handoffs: Vec::new(),
-            features: vec![crate::methods::FEATURE_STORAGE_SETTINGS.to_owned()],
+            features: vec![
+                crate::methods::FEATURE_STORAGE_SETTINGS.to_owned(),
+                crate::methods::FEATURE_DRIVES.to_owned(),
+            ],
+            drives: Vec::new(),
             nearby: Vec::new(),
             next_adhoc: 1,
             next_question: 1,
@@ -269,6 +323,24 @@ impl Default for State {
 }
 
 impl State {
+    /// Mounts (`mount`) or unmounts `drive`: where it is mounted then, and
+    /// whether that changed; `None` for an unknown drive. A drive is mounted
+    /// below `/run/media/user/`, by label or else by id.
+    pub fn mount(&mut self, drive: &str, mount: bool) -> Option<(Vec<u8>, bool)> {
+        let d = self.drives.iter_mut().find(|d| d.id == drive)?;
+        let wanted = if mount && d.mount_point.is_empty() {
+            let name = if d.label.is_empty() { &d.id } else { &d.label };
+            format!("/run/media/user/{name}").into_bytes()
+        } else if mount {
+            d.mount_point.clone()
+        } else {
+            Vec::new()
+        };
+        let changed = wanted != d.mount_point;
+        d.mount_point.clone_from(&wanted);
+        Some((wanted, changed))
+    }
+
     /// Adds a location; without a `state` in `info` it is disconnected.
     pub fn add_location(&mut self, id: &str, provider: &str, name: &str, mut info: Vec<(String, InfoValue)>) {
         if !info.iter().any(|(k, _)| k == location_state::KEY) {

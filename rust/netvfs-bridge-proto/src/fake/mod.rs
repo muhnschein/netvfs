@@ -13,7 +13,9 @@ mod state;
 mod transfer;
 mod tree;
 
-pub use state::{CallRecord, Consent, Failure, InfoValue, JobFailure, RecordedAnswer, ScriptedQuestion};
+pub use state::{
+    CallRecord, Consent, Failure, FakeDrive, InfoValue, JobFailure, RecordedAnswer, ScriptedQuestion,
+};
 
 use crate::connect::Connection;
 use crate::errors::BridgeError;
@@ -412,6 +414,19 @@ impl FakeBridge {
     /// What `GetFeatures` answers (XB-19); by default every feature.
     pub fn set_features(&self, features: &[&str]) {
         self.shared.with(|s| s.features = features.iter().map(|f| (*f).to_owned()).collect());
+    }
+
+    /// Replaces the drives `ListDrives` lists and tells every client
+    /// (`DrivesChanged`).
+    pub async fn set_drives(&self, drives: Vec<FakeDrive>) {
+        self.shared.with(|s| s.drives = drives);
+        self.shared.broadcast_drives().await;
+    }
+
+    /// The drives, as mounted and unmounted.
+    #[must_use]
+    pub fn drives(&self) -> Vec<FakeDrive> {
+        self.shared.with(|s| s.drives.clone())
     }
 
     /// `settings:<loc>`, `add:<provider>` and `storage` handoffs.

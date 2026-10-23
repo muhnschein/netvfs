@@ -2,7 +2,7 @@
 # cargo-fuzz targets for untrusted inputs (doc/RUST.md): of netvfs-accounts,
 # stored setting values from the accounts database, the session bus's replies
 # and its arguments; of netvfs-bridge, a consumer's call arguments and byte
-# paths, and the FFI marshalling; of netvfs-sftp, an SFTP server's packets
+# paths, the FFI marshalling, and UDisks2's description of the drives; of netvfs-sftp, an SFTP server's packets
 # and attribute blocks, and key files; of netvfs-smb, what an SMB server sends
 # (responses, TRANSFORM_HEADER frames, the NTLM challenge, SPNEGO, the srvsvc
 # share list).
@@ -131,6 +131,13 @@ bench = false
 [[bin]]
 name = "ndr_share_enum"
 path = "fuzz_targets/ndr_share_enum.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "udisks_objects"
+path = "fuzz_targets/udisks_objects.rs"
 test = false
 doc = false
 bench = false

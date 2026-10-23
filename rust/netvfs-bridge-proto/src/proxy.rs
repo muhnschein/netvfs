@@ -2,7 +2,7 @@
 //! zbus proxy for `org.netvfs.Bridge1` at `/org/netvfs/Bridge` (XB-8..XB-10).
 //! The interface text is `org.netvfs.Bridge1.xml` ([`crate::methods::INTROSPECTION_XML`]).
 
-use crate::wire::{Opts, WireCapabilities, WireEntry, WireLocation};
+use crate::wire::{Opts, WireCapabilities, WireDrive, WireEntry, WireLocation};
 use zbus::zvariant::Fd;
 
 #[zbus::proxy(
@@ -122,4 +122,12 @@ pub trait Bridge1 {
     fn add_account(&self, provider: &str) -> zbus::Result<()>;
     /// `OpenStorageSettings()`: hands off to Settings › Storage.
     fn open_storage_settings(&self) -> zbus::Result<()>;
+
+    // Drives
+    /// `ListDrives` → the memory cards and USB drives, mounted or not (XB-20).
+    fn list_drives(&self) -> zbus::Result<Vec<WireDrive>>;
+    /// `Mount(drive)` → where it is mounted.
+    fn mount(&self, drive: &str) -> zbus::Result<Vec<u8>>;
+    /// `Unmount(drive)`.
+    fn unmount(&self, drive: &str) -> zbus::Result<()>;
 }

@@ -474,5 +474,61 @@
     "search": "    method(\"OpenStorageSettings\", \"\", \"\", Interactive, false),",
     "replace": "    method(\"OpenStorageSettings\", \"\", \"\", Interactive, true),",
     "test": "cd rust && NETVFS_BRIDGE_FFI=$PWD/../build/lib/netvfs/libnetvfs-bridge-ffi.so NETVFS_BRIDGE_FFI_FAKE=$PWD/../build/lib/libnetvfs-bridge-ffi-fake.so NETVFS_BACKEND_PATH=$PWD/../build/lib/netvfs/test-backends cargo test --locked -q -p netvfs-bridge --features testing --test server -- storage_settings"
+  },
+  {
+    "name": "XB-20 the internal eMMC listed as a memory card",
+    "file": "rust/netvfs-bridge/src/drives/classify.rs",
+    "search": "    media.iter().any(|m| m.starts_with(\"flash_sd\")).then_some(Kind::Sd)",
+    "replace": "    media.iter().any(|m| m.starts_with(\"flash_\")).then_some(Kind::Sd)",
+    "test": "cd rust && cargo test --locked -q -p netvfs-bridge --lib drives::classify"
+  },
+  {
+    "name": "XB-20 system devices listed",
+    "file": "rust/netvfs-bridge/src/drives/classify.rs",
+    "search": "    if text(block, \"IdUsage\") != \"filesystem\" || flag(block, \"HintSystem\") || flag(block, \"HintIgnore\") {",
+    "replace": "    if text(block, \"IdUsage\") != \"filesystem\" || flag(block, \"HintIgnore\") {",
+    "test": "cd rust && cargo test --locked -q -p netvfs-bridge --lib drives::classify"
+  },
+  {
+    "name": "XB-20 a drive acted on that ListDrives does not list",
+    "file": "rust/netvfs-bridge/src/drives/udisks.rs",
+    "search": "            .find(|d| d.id == id)",
+    "replace": "            .find(|_| true)",
+    "test": "cd rust && cargo test --locked -q -p netvfs-bridge --lib drives::udisks"
+  },
+  {
+    "name": "XB-20 mounted with a question to the user",
+    "file": "rust/netvfs-bridge/src/drives/udisks.rs",
+    "search": "(\"auth.no_user_interaction\", Value::from(true))",
+    "replace": "(\"auth.no_user_interaction\", Value::from(false))",
+    "test": "cd rust && cargo test --locked -q -p netvfs-bridge --lib drives::udisks"
+  },
+  {
+    "name": "XB-20 DrivesChanged after every burst of UDisks2's signals",
+    "file": "rust/netvfs-bridge/src/drives/udisks.rs",
+    "search": "        if self.0.last.borrow().as_ref() == Some(&drives) {",
+    "replace": "        if false {",
+    "test": "cd rust && cargo test --locked -q -p netvfs-bridge --lib drives::udisks"
+  },
+  {
+    "name": "XB-19 drives not offered",
+    "file": "rust/netvfs-bridge/src/core/admin.rs",
+    "search": "        features.push(FEATURE_DRIVES.to_owned());\n",
+    "replace": "        let _ = FEATURE_DRIVES;\n",
+    "test": "cd rust && NETVFS_BRIDGE_FFI=$PWD/../build/lib/netvfs/libnetvfs-bridge-ffi.so NETVFS_BRIDGE_FFI_FAKE=$PWD/../build/lib/libnetvfs-bridge-ffi-fake.so NETVFS_BACKEND_PATH=$PWD/../build/lib/netvfs/test-backends cargo test --locked -q -p netvfs-bridge --features testing --test server -- storage_settings"
+  },
+  {
+    "name": "XB-20 drives behind the consent",
+    "file": "rust/netvfs-bridge-proto/src/methods.rs",
+    "search": "    method(\"Mount\", \"s\", \"ay\", Interactive, false),",
+    "replace": "    method(\"Mount\", \"s\", \"ay\", Interactive, true),",
+    "test": "cd rust && NETVFS_BRIDGE_FFI=$PWD/../build/lib/netvfs/libnetvfs-bridge-ffi.so NETVFS_BRIDGE_FFI_FAKE=$PWD/../build/lib/libnetvfs-bridge-ffi-fake.so NETVFS_BACKEND_PATH=$PWD/../build/lib/netvfs/test-backends cargo test --locked -q -p netvfs-bridge --features testing --test server -- drives"
+  },
+  {
+    "name": "XB-20 DrivesChanged not sent",
+    "file": "rust/netvfs-bridge/src/core/mod.rs",
+    "search": "            Event::DrivesChanged => self.broadcast(&OutSignal::DrivesChanged),",
+    "replace": "            Event::DrivesChanged => (),",
+    "test": "cd rust && NETVFS_BRIDGE_FFI=$PWD/../build/lib/netvfs/libnetvfs-bridge-ffi.so NETVFS_BRIDGE_FFI_FAKE=$PWD/../build/lib/libnetvfs-bridge-ffi-fake.so NETVFS_BACKEND_PATH=$PWD/../build/lib/netvfs/test-backends cargo test --locked -q -p netvfs-bridge --features testing --test server -- drives"
   }
 ]

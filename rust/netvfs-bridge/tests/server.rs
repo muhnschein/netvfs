@@ -24,14 +24,14 @@ use netvfs_bridge::handoff::HandoffArg;
 use netvfs_bridge::locations::knownhosts::KnownHosts;
 use netvfs_bridge::server::ListenAddress;
 use netvfs_bridge::testing::{
-    self, ACCOUNT_LOC, FakeAccounts, Fixture, Harness, Setup, Test, WAIT, block_on, error_name,
+    self, ACCOUNT_LOC, FakeAccounts, FakeDrives, Fixture, Harness, Setup, Test, WAIT, block_on, error_name,
     wait_disconnected, wait_for, wait_signal,
 };
 use netvfs_bridge::testutil::TempDir;
 use netvfs_bridge::{Deps, Services};
 use netvfs_bridge_proto::limits::{MAX_HANDLES, MAX_JOBS, MAX_LIST_BATCH, MAX_REQUESTS, POOL_PER_HOST};
 use netvfs_bridge_proto::zvariant::Fd;
-use netvfs_bridge_proto::{Connection, ErrorName, Opts, OptsBuilder, Signal, SignalStream};
+use netvfs_bridge_proto::{Connection, ErrorName, Opts, OptsBuilder, Signal, SignalStream, value_str};
 use std::fs::{File, OpenOptions};
 use std::io::{Read as _, Seek as _, SeekFrom, Write as _};
 use std::os::fd::AsFd as _;
@@ -70,6 +70,7 @@ const TESTS: &[(&str, Test)] = &[
     ("discovery", discovery),
     ("handoff", handoff),
     ("storage_settings", storage_settings),
+    ("drives", drives),
     ("locations_changed", locations_changed),
     ("connection_states", connection_states),
     ("connection_states_of_idle_connections", connection_states_of_idle_connections),
@@ -1126,7 +1127,7 @@ fn handoff(h: &Harness) {
         );
         assert_eq!(error_name(&c.proxy().add_account("smb").await), name(ErrorName::Unsupported));
         // Without the entry: no storage settings (XB-19).
-        assert_eq!(c.proxy().get_features().await.unwrap(), Vec::<String>::new());
+        assert_eq!(c.proxy().get_features().await.unwrap(), ["drives"]);
         assert_eq!(error_name(&c.proxy().open_storage_settings().await), name(ErrorName::Unsupported));
         assert_eq!(f.launcher.calls().len(), 0);
     });
@@ -1145,7 +1146,7 @@ fn storage_settings(h: &Harness) {
             // Hello first, as for every call.
             assert_eq!(error_name(&c.proxy().get_features().await), name(ErrorName::ProtocolError));
             c.proxy().hello("t").await.unwrap();
-            assert_eq!(c.proxy().get_features().await.unwrap(), ["storage-settings"]);
+            assert_eq!(c.proxy().get_features().await.unwrap(), ["storage-settings", "drives"]);
             c.proxy().open_storage_settings().await.unwrap();
             let calls = f.launcher.calls();
             assert_eq!(calls.len(), 1, "{consent:?}");
@@ -1164,6 +1165,47 @@ fn storage_settings(h: &Harness) {
             }
         });
     }
+}
+
+fn drives(h: &Harness) {
+    // XB-20: without consent, which they do not need.
+    let f = Fixture::new(h, Consent::Denied);
+    f.drives.state().drives = vec![FakeDrives::card("mmcblk1p1", "CARD"), FakeDrives::card("sda1", "")];
+    block_on(async {
+        let c = f.client().await;
+        // Hello first, as for every call.
+        assert_eq!(error_name(&c.proxy().list_drives().await), name(ErrorName::ProtocolError));
+        c.proxy().hello("t").await.unwrap();
+        let quiet = f.client().await; // no Hello: no signals
+        let mut quiet_signals = quiet.signals();
+        let mut signals = c.signals();
+        let listed = c.proxy().list_drives().await.unwrap();
+        let shown: Vec<_> = listed.iter().map(|d| (d.id.as_str(), d.label.as_str())).collect();
+        assert_eq!(shown, [("mmcblk1p1", "CARD"), ("sda1", "")]);
+        assert!(listed[0].mount_point.is_empty());
+        assert_eq!(value_str(&listed[0].info["kind"]).as_deref(), Some("sd"));
+        assert_eq!(c.proxy().mount("sda1").await.unwrap(), b"/run/media/user/sda1");
+        assert_eq!(c.proxy().list_drives().await.unwrap()[1].mount_point, b"/run/media/user/sda1");
+        c.proxy().unmount("sda1").await.unwrap();
+        assert_eq!(error_name(&c.proxy().mount("sdz9").await), name(ErrorName::NotFound));
+        // An id that is not one never reaches the drives.
+        let bad = c.proxy().mount("../sda1").await;
+        assert_eq!(error_name(&bad).as_deref(), Some("org.freedesktop.DBus.Error.InvalidArgs"));
+        // What UDisks2 answered.
+        f.drives.state().error = Some(netvfs_bridge::Status::new(ErrorName::Locked, "UDisks2 failed"));
+        assert_eq!(error_name(&c.proxy().unmount("mmcblk1p1").await), name(ErrorName::Locked));
+        let calls = f.drives.state().calls.clone();
+        let expected = [(true, "sda1"), (false, "sda1"), (true, "sdz9"), (false, "mmcblk1p1")];
+        assert_eq!(calls, expected.map(|(mount, id)| (mount, id.to_owned())));
+        // Each was a request (XB-17), and gave its slot back.
+        assert_eq!(f.probe().counters().await.unwrap().requests, 0);
+        // A change: DrivesChanged to the sessions that said Hello.
+        f.drives_changed();
+        assert!(wait_signal(&mut signals, WAIT, |s| matches!(s, Signal::DrivesChanged)).await.is_some());
+        let heard = wait_signal(&mut quiet_signals, Duration::from_millis(200), |_| true).await;
+        assert!(heard.is_none(), "{heard:?}");
+        assert_eq!(c.proxy().get_features().await.unwrap(), ["drives"]);
+    });
 }
 
 fn locations_changed(h: &Harness) {
@@ -1429,6 +1471,7 @@ fn debug_output(h: &Harness) {
         prompt: Box::new(f.prompt.clone()),
         nearby: Box::new(f.nearby.clone()),
         launcher: Box::new(f.launcher.clone()),
+        drives: Rc::new(f.drives.clone()),
     };
     assert_eq!(format!("{services:?}"), "Services { prompt_shown: false, .. }");
     let deps = Deps {

@@ -86,7 +86,7 @@ use Lane::{Bulk, Interactive, Stream};
 
 /// The methods, in the order of `args.cpp` and of the XML; the methods
 /// netvfs 0.4 did not have follow their groups' older members.
-pub const METHODS: [MethodInfo; 37] = [
+pub const METHODS: [MethodInfo; 40] = [
     method("Hello", "s", "s", Interactive, false),
     method("GetConsent", "", "s", Interactive, false),
     method("RequestConsent", "", "", Interactive, false),
@@ -129,10 +129,15 @@ pub const METHODS: [MethodInfo; 37] = [
     method("AddAccount", "s", "", Interactive, true),
     // Settings › Storage shows nothing of the user's locations (XB-15).
     method("OpenStorageSettings", "", "", Interactive, false),
+    // Memory cards and USB drives show nothing of the user's locations, and
+    // polkit lets any process of the user mount them (XB-20).
+    method("ListDrives", "", "a(ssaya{sv})", Interactive, false),
+    method("Mount", "s", "ay", Interactive, false),
+    method("Unmount", "s", "", Interactive, false),
 ];
 
 /// The signals as `(name, signature)`, in the order of the XML.
-pub const SIGNALS: [(&str, &str); 9] = [
+pub const SIGNALS: [(&str, &str); 10] = [
     ("ConsentChanged", "s"),
     ("LocationsChanged", ""),
     ("NearbyChanged", "a(sssq)"),
@@ -142,11 +147,14 @@ pub const SIGNALS: [(&str, &str); 9] = [
     ("WalkBatch", "ua(ay(ayyyxxxxixxssqays))"),
     ("JobFinished", "ussa{sv}"),
     ("Question", "ssa{sv}"),
+    ("DrivesChanged", ""),
 ];
 
 /// `GetFeatures`: the bridge opens Settings › Storage (`OpenStorageSettings`,
 /// XB-15).
 pub const FEATURE_STORAGE_SETTINGS: &str = "storage-settings";
+/// `GetFeatures`: `ListDrives`, `Mount`, `Unmount` and `DrivesChanged` (XB-20).
+pub const FEATURE_DRIVES: &str = "drives";
 
 /// The method called `name`.
 #[must_use]
@@ -205,6 +213,9 @@ mod tests {
             "OpenAccountSettings",
             "AddAccount",
             "OpenStorageSettings",
+            "ListDrives",
+            "Mount",
+            "Unmount",
         ];
         let names: Vec<&str> = METHODS.iter().map(|m| m.name).collect();
         assert_eq!(names, expected);
@@ -223,7 +234,10 @@ mod tests {
                 "ListLocations",
                 "Cancel",
                 "Answer",
-                "OpenStorageSettings"
+                "OpenStorageSettings",
+                "ListDrives",
+                "Mount",
+                "Unmount"
             ]
         );
     }
