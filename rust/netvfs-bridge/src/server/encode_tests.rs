@@ -50,6 +50,7 @@ fn all_replies() -> Vec<Reply> {
         Reply::Empty,
         Reply::Hello,
         Reply::Text("granted".to_owned()),
+        Reply::Names(vec!["storage-settings".to_owned()]),
         Reply::Locations(vec![]),
         Reply::Capabilities(WireCapabilities::default()),
         Reply::Id(3),
@@ -157,6 +158,8 @@ fn reply_values() {
     assert_eq!(bridge, BRIDGE_VERSION);
     let text = Reply::Text("a\0".to_owned()).build(&header).unwrap();
     assert_eq!(text.body().deserialize::<(String,)>().unwrap().0, "a\u{fffd}");
+    let names = Reply::Names(vec!["a\0".to_owned(), "b".to_owned()]).build(&header).unwrap();
+    assert_eq!(names.body().deserialize::<(Vec<String>,)>().unwrap().0, ["a\u{fffd}", "b"]);
     let caps = WireCapabilities {
         flags: vec!["A\0".to_owned()],
         checksum_algorithms: vec!["md5".to_owned()],

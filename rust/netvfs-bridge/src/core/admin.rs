@@ -3,7 +3,8 @@
 //! Admin` of session.cpp, the consent half of bridgeserver.cpp): `Hello`,
 //! `GetConsent`, `RequestConsent`, `ListLocations`, `Capabilities`,
 //! `Disconnect`, `ConnectAdHoc`, `ForgetAdHoc`, `Discover`, `Cancel`,
-//! `Answer`, `OpenAccountSettings` and `AddAccount`.
+//! `Answer`, `OpenAccountSettings`, `AddAccount`, `GetFeatures` and
+//! `OpenStorageSettings`.
 
 use super::questions::INSECURE_CONSENT;
 use super::{Core, Event};
@@ -18,6 +19,7 @@ use crate::prompt::PromptEvent;
 use crate::server::args::{AdHocOpts, LocId, Secret, is_valid_token};
 use crate::server::{OutSignal, Reply, ReplyTo, SessionId};
 use crate::status::Status;
+use netvfs_bridge_proto::methods::FEATURE_STORAGE_SETTINGS;
 use netvfs_bridge_proto::{ErrorName, Lane};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -135,6 +137,15 @@ impl Core {
 
     pub(super) fn on_get_consent(&self, reply: ReplyTo) {
         reply.ok(&Reply::Text(self.consent.as_str().to_owned()));
+    }
+
+    /// XB-19: what this bridge offers besides the methods of netvfs 0.4.
+    pub(super) fn on_get_features(&self, reply: ReplyTo) {
+        let mut features = Vec::new();
+        if self.handoff.offers_storage_settings() {
+            features.push(FEATURE_STORAGE_SETTINGS.to_owned());
+        }
+        reply.ok(&Reply::Names(features));
     }
 
     pub(super) fn on_request_consent(&mut self, reply: ReplyTo) {
@@ -355,6 +366,13 @@ impl Core {
 
     pub(super) fn on_add_account(&self, reply: ReplyTo, provider: &str) {
         match self.handoff.add_account(provider) {
+            Ok(()) => reply.ok(&Reply::Empty),
+            Err(status) => reply.fail(&status),
+        }
+    }
+
+    pub(super) fn on_open_storage_settings(&self, reply: ReplyTo) {
+        match self.handoff.open_storage_settings() {
             Ok(()) => reply.ok(&Reply::Empty),
             Err(status) => reply.fail(&status),
         }

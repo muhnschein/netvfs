@@ -409,7 +409,12 @@ impl FakeBridge {
         self.shared.with(|s| s.calls.clear());
     }
 
-    /// `settings:<loc>` and `add:<provider>` handoffs.
+    /// What `GetFeatures` answers (XB-19); by default every feature.
+    pub fn set_features(&self, features: &[&str]) {
+        self.shared.with(|s| s.features = features.iter().map(|f| (*f).to_owned()).collect());
+    }
+
+    /// `settings:<loc>`, `add:<provider>` and `storage` handoffs.
     #[must_use]
     pub fn handoffs(&self) -> Vec<String> {
         self.shared.with(|s| s.handoffs.clone())

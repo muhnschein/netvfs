@@ -460,5 +460,19 @@
     "search": "        if self.states.check(states) && self.consent == Consent::Granted {",
     "replace": "        if self.states.check(states) && self.consent == Consent::Denied {",
     "test": "cd rust && NETVFS_BRIDGE_FFI=$PWD/../build/lib/netvfs/libnetvfs-bridge-ffi.so NETVFS_BRIDGE_FFI_FAKE=$PWD/../build/lib/libnetvfs-bridge-ffi-fake.so NETVFS_BACKEND_PATH=$PWD/../build/lib/netvfs/test-backends cargo test --locked -q -p netvfs-bridge --features testing --test server -- connection_states"
+  },
+  {
+    "name": "XB-19 storage-settings offered without a handoff entry",
+    "file": "rust/netvfs-bridge/src/core/admin.rs",
+    "search": "        if self.handoff.offers_storage_settings() {",
+    "replace": "        if true {",
+    "test": "cd rust && NETVFS_BRIDGE_FFI=$PWD/../build/lib/netvfs/libnetvfs-bridge-ffi.so NETVFS_BRIDGE_FFI_FAKE=$PWD/../build/lib/libnetvfs-bridge-ffi-fake.so NETVFS_BACKEND_PATH=$PWD/../build/lib/netvfs/test-backends cargo test --locked -q -p netvfs-bridge --features testing --test server -- handoff"
+  },
+  {
+    "name": "XB-15 Settings > Storage behind the consent",
+    "file": "rust/netvfs-bridge-proto/src/methods.rs",
+    "search": "    method(\"OpenStorageSettings\", \"\", \"\", Interactive, false),",
+    "replace": "    method(\"OpenStorageSettings\", \"\", \"\", Interactive, true),",
+    "test": "cd rust && NETVFS_BRIDGE_FFI=$PWD/../build/lib/netvfs/libnetvfs-bridge-ffi.so NETVFS_BRIDGE_FFI_FAKE=$PWD/../build/lib/libnetvfs-bridge-ffi-fake.so NETVFS_BACKEND_PATH=$PWD/../build/lib/netvfs/test-backends cargo test --locked -q -p netvfs-bridge --features testing --test server -- storage_settings"
   }
 ]

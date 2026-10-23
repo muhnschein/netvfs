@@ -23,6 +23,9 @@ pub trait Bridge1 {
     fn get_consent(&self) -> zbus::Result<String>;
     /// `RequestConsent`: asks the user again.
     fn request_consent(&self) -> zbus::Result<()>;
+    /// `GetFeatures` → what the bridge offers besides the methods of netvfs
+    /// 0.4 (`UnknownMethod` from an older bridge: nothing).
+    fn get_features(&self) -> zbus::Result<Vec<String>>;
 
     // Locations
     /// `ListLocations`: the locations in scope (none without consent).
@@ -117,4 +120,6 @@ pub trait Bridge1 {
     fn open_account_settings(&self, loc: &str) -> zbus::Result<()>;
     /// `AddAccount(provider)`: hands off to the account creation.
     fn add_account(&self, provider: &str) -> zbus::Result<()>;
+    /// `OpenStorageSettings()`: hands off to Settings › Storage.
+    fn open_storage_settings(&self) -> zbus::Result<()>;
 }

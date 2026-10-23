@@ -57,6 +57,8 @@ pub enum Reply {
     Hello,
     /// `s`: `GetConsent`, `ConnectAdHoc`.
     Text(String),
+    /// `as`: `GetFeatures`.
+    Names(Vec<String>),
     /// `a(sssa{sv})`: `ListLocations`.
     Locations(Vec<WireLocation>),
     /// `(asasx)`: `Capabilities`.
@@ -93,6 +95,7 @@ impl Reply {
         match self {
             Self::Empty => "",
             Self::Hello | Self::Text(_) => "s",
+            Self::Names(_) => "as",
             Self::Locations(_) => "a(sssa{sv})",
             Self::Capabilities(_) => "(asasx)",
             Self::Id(_) => "u",
@@ -113,6 +116,7 @@ impl Reply {
             Self::Empty => reply.build(&()),
             Self::Hello => reply.build(&(BRIDGE_VERSION,)),
             Self::Text(s) => reply.build(&(wire_text(s),)),
+            Self::Names(names) => reply.build(&(wire_texts(names),)),
             Self::Locations(list) => reply.build(&(list.iter().map(wire_location).collect::<Vec<_>>(),)),
             Self::Capabilities(c) => reply.build(&(WireCapabilities {
                 flags: wire_texts(&c.flags),

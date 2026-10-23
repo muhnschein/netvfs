@@ -12,7 +12,7 @@ use super::transfer::{self, Env};
 use super::tree::{Tree, TreeError};
 use crate::errors::ErrorName;
 use crate::limits::{MAX_HANDLES, MAX_PATH, RETRY_AFTER_MS};
-use crate::methods::{Lane, OBJECT_PATH, find_method};
+use crate::methods::{FEATURE_STORAGE_SETTINGS, Lane, OBJECT_PATH, find_method};
 use crate::wire::{WireCapabilities, WireEntry, WireLocation, WireNearby, WireWalkItem, location_state};
 use sha2::Digest as _;
 use std::collections::HashMap;
@@ -330,6 +330,11 @@ impl Iface {
             self.ask_consent();
         }
         Ok(())
+    }
+
+    async fn get_features(&self) -> Result<Vec<String>, Fail> {
+        self.begin("GetFeatures", None, "").await?;
+        Ok(self.shared.with(|s| s.features.clone()))
     }
 
     // ---- Locations -------------------------------------------------------
@@ -726,6 +731,15 @@ impl Iface {
         let provider = args::token(&provider, 32)?;
         self.begin("AddAccount", None, &provider).await?;
         self.shared.with(|s| s.handoffs.push(format!("add:{provider}")));
+        Ok(())
+    }
+
+    async fn open_storage_settings(&self) -> Result<(), Fail> {
+        self.begin("OpenStorageSettings", None, "").await?;
+        if !self.shared.with(|s| s.features.iter().any(|f| f == FEATURE_STORAGE_SETTINGS)) {
+            return Err(Fail::net(ErrorName::Unsupported, "No settings handoff is configured"));
+        }
+        self.shared.with(|s| s.handoffs.push("storage".to_owned()));
         Ok(())
     }
 

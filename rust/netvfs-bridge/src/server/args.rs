@@ -172,6 +172,7 @@ pub enum Call {
     },
     GetConsent,
     RequestConsent,
+    GetFeatures,
     ListLocations,
     Capabilities {
         loc: LocId,
@@ -321,6 +322,7 @@ pub enum Call {
     AddAccount {
         provider: String,
     },
+    OpenStorageSettings,
 }
 
 impl Call {
@@ -331,6 +333,7 @@ impl Call {
             Self::Hello { .. } => "Hello",
             Self::GetConsent => "GetConsent",
             Self::RequestConsent => "RequestConsent",
+            Self::GetFeatures => "GetFeatures",
             Self::ListLocations => "ListLocations",
             Self::Capabilities { .. } => "Capabilities",
             Self::Disconnect { .. } => "Disconnect",
@@ -363,6 +366,7 @@ impl Call {
             Self::Answer { .. } => "Answer",
             Self::OpenAccountSettings { .. } => "OpenAccountSettings",
             Self::AddAccount { .. } => "AddAccount",
+            Self::OpenStorageSettings => "OpenStorageSettings",
         }
     }
 
@@ -423,10 +427,11 @@ pub fn decode(msg: &Message) -> Result<Call, Status> {
 type Decoder = fn(&Body) -> Result<Call, Status>;
 
 /// The rules, in the order of the method table (`args.cpp` `rules()`).
-const DECODERS: [(&str, Decoder); 35] = [
+const DECODERS: [(&str, Decoder); 37] = [
     ("Hello", hello),
     ("GetConsent", |_| Ok(Call::GetConsent)),
     ("RequestConsent", |_| Ok(Call::RequestConsent)),
+    ("GetFeatures", |_| Ok(Call::GetFeatures)),
     ("ListLocations", |_| Ok(Call::ListLocations)),
     ("Capabilities", |b| loc_only(b).map(|loc| Call::Capabilities { loc })),
     ("Disconnect", |b| loc_only(b).map(|loc| Call::Disconnect { loc })),
@@ -459,6 +464,7 @@ const DECODERS: [(&str, Decoder); 35] = [
     ("Answer", answer),
     ("OpenAccountSettings", |b| loc_only(b).map(|loc| Call::OpenAccountSettings { loc })),
     ("AddAccount", add_account),
+    ("OpenStorageSettings", |_| Ok(Call::OpenStorageSettings)),
 ];
 
 fn decoder(name: &str) -> Decoder {

@@ -227,6 +227,8 @@ pub struct State {
     pub answers: Vec<RecordedAnswer>,
     pub calls: Vec<CallRecord>,
     pub handoffs: Vec<String>,
+    /// What `GetFeatures` answers (XB-19).
+    pub features: Vec<String>,
     pub nearby: Vec<WireNearby>,
     pub next_adhoc: u32,
     pub next_question: u32,
@@ -255,6 +257,7 @@ impl Default for State {
             answers: Vec::new(),
             calls: Vec::new(),
             handoffs: Vec::new(),
+            features: vec![crate::methods::FEATURE_STORAGE_SETTINGS.to_owned()],
             nearby: Vec::new(),
             next_adhoc: 1,
             next_question: 1,

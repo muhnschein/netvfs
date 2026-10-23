@@ -52,7 +52,9 @@ fn valid_message(name: &str) -> Message {
     let p: &[u8] = b"a";
     match name {
         "Hello" => message(name, &("x",)),
-        "GetConsent" | "RequestConsent" | "ListLocations" => message(name, &()),
+        "GetConsent" | "RequestConsent" | "GetFeatures" | "ListLocations" | "OpenStorageSettings" => {
+            message(name, &())
+        }
         "Capabilities" | "Disconnect" | "ForgetAdHoc" | "OpenAccountSettings" => message(name, &(LOC,)),
         "ConnectAdHoc" => message(name, &("sftp://h/", p, none())),
         "Discover" => message(name, &(true,)),

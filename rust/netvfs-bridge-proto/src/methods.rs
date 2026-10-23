@@ -84,11 +84,15 @@ const fn method(
 
 use Lane::{Bulk, Interactive, Stream};
 
-/// The methods, in the order of `args.cpp` and of the XML.
-pub const METHODS: [MethodInfo; 35] = [
+/// The methods, in the order of `args.cpp` and of the XML; the methods
+/// netvfs 0.4 did not have follow their groups' older members.
+pub const METHODS: [MethodInfo; 37] = [
     method("Hello", "s", "s", Interactive, false),
     method("GetConsent", "", "s", Interactive, false),
     method("RequestConsent", "", "", Interactive, false),
+    // What the consumer may use besides the methods of netvfs 0.4 (XB-19);
+    // it reveals nothing of the user's locations.
+    method("GetFeatures", "", "as", Interactive, false),
     // Without consent it returns nothing instead of failing (XB-6).
     method("ListLocations", "", "a(sssa{sv})", Interactive, false),
     method("Capabilities", "s", "(asasx)", Interactive, true),
@@ -123,6 +127,8 @@ pub const METHODS: [MethodInfo; 35] = [
     method("Answer", "sa{sv}", "", Interactive, false),
     method("OpenAccountSettings", "s", "", Interactive, true),
     method("AddAccount", "s", "", Interactive, true),
+    // Settings › Storage shows nothing of the user's locations (XB-15).
+    method("OpenStorageSettings", "", "", Interactive, false),
 ];
 
 /// The signals as `(name, signature)`, in the order of the XML.
@@ -137,6 +143,10 @@ pub const SIGNALS: [(&str, &str); 9] = [
     ("JobFinished", "ussa{sv}"),
     ("Question", "ssa{sv}"),
 ];
+
+/// `GetFeatures`: the bridge opens Settings › Storage (`OpenStorageSettings`,
+/// XB-15).
+pub const FEATURE_STORAGE_SETTINGS: &str = "storage-settings";
 
 /// The method called `name`.
 #[must_use]
@@ -161,6 +171,7 @@ mod tests {
             "Hello",
             "GetConsent",
             "RequestConsent",
+            "GetFeatures",
             "ListLocations",
             "Capabilities",
             "Disconnect",
@@ -193,6 +204,7 @@ mod tests {
             "Answer",
             "OpenAccountSettings",
             "AddAccount",
+            "OpenStorageSettings",
         ];
         let names: Vec<&str> = METHODS.iter().map(|m| m.name).collect();
         assert_eq!(names, expected);
@@ -201,7 +213,19 @@ mod tests {
         assert!(!find_method("ListLocations").unwrap().needs_consent);
         assert!(find_method("Nope").is_none());
         let free: Vec<&str> = METHODS.iter().filter(|m| !m.needs_consent).map(|m| m.name).collect();
-        assert_eq!(free, ["Hello", "GetConsent", "RequestConsent", "ListLocations", "Cancel", "Answer"]);
+        assert_eq!(
+            free,
+            [
+                "Hello",
+                "GetConsent",
+                "RequestConsent",
+                "GetFeatures",
+                "ListLocations",
+                "Cancel",
+                "Answer",
+                "OpenStorageSettings"
+            ]
+        );
     }
 
     #[test]

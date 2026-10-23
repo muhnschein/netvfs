@@ -69,6 +69,7 @@ const TESTS: &[(&str, Test)] = &[
     ("peer_check_refuses", peer_check_refuses),
     ("discovery", discovery),
     ("handoff", handoff),
+    ("storage_settings", storage_settings),
     ("locations_changed", locations_changed),
     ("connection_states", connection_states),
     ("connection_states_of_idle_connections", connection_states_of_idle_connections),
@@ -1124,8 +1125,45 @@ fn handoff(h: &Harness) {
             name(ErrorName::Unsupported)
         );
         assert_eq!(error_name(&c.proxy().add_account("smb").await), name(ErrorName::Unsupported));
+        // Without the entry: no storage settings (XB-19).
+        assert_eq!(c.proxy().get_features().await.unwrap(), Vec::<String>::new());
+        assert_eq!(error_name(&c.proxy().open_storage_settings().await), name(ErrorName::Unsupported));
         assert_eq!(f.launcher.calls().len(), 0);
     });
+}
+
+const STORAGE_CONF: &str =
+    "[OpenStorageSettings]\nService=a.b\nPath=/c\nInterface=a.b\nMethod=page\nArguments=s:system/storage\n";
+
+fn storage_settings(h: &Harness) {
+    // Neither needs consent: they show nothing of the user's locations.
+    for consent in [Consent::Unknown, Consent::Denied, Consent::Granted] {
+        let setup = Setup { consent, handoff_conf: Some(STORAGE_CONF.to_owned()), ..Setup::default() };
+        let f = Fixture::start(h, setup);
+        block_on(async {
+            let c = f.client().await;
+            // Hello first, as for every call.
+            assert_eq!(error_name(&c.proxy().get_features().await), name(ErrorName::ProtocolError));
+            c.proxy().hello("t").await.unwrap();
+            assert_eq!(c.proxy().get_features().await.unwrap(), ["storage-settings"]);
+            c.proxy().open_storage_settings().await.unwrap();
+            let calls = f.launcher.calls();
+            assert_eq!(calls.len(), 1, "{consent:?}");
+            assert_eq!(
+                (calls[0].method.as_str(), calls[0].arguments.as_slice()),
+                ("page", &[HandoffArg::Str("system/storage".to_owned())][..])
+            );
+            // The account handoffs of the same table are not configured.
+            if consent == Consent::Granted {
+                assert_eq!(error_name(&c.proxy().add_account("smb").await), name(ErrorName::Unsupported));
+            } else {
+                assert_eq!(
+                    error_name(&c.proxy().add_account("smb").await),
+                    name(ErrorName::PermissionDenied)
+                );
+            }
+        });
+    }
 }
 
 fn locations_changed(h: &Harness) {

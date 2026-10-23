@@ -315,3 +315,21 @@ async fn connection_states_follow_use_disconnect_and_the_script() {
     let loc = conn.proxy().connect_ad_hoc("sftp://h/", b"", &OptsBuilder::new().build()).await.unwrap();
     assert_eq!(state_of(&conn, &loc).await, s("connected", None));
 }
+
+#[tokio::test]
+async fn features_and_the_storage_handoff_need_no_consent() {
+    // XB-19, XB-15.
+    let fake = fake_with_account().await;
+    fake.set_consent(netvfs_bridge_proto::fake::Consent::Denied).await;
+    let conn = fake.connect().await.unwrap();
+    hello(&conn).await;
+    assert_eq!(conn.proxy().get_features().await.unwrap(), ["storage-settings"]);
+    conn.proxy().open_storage_settings().await.unwrap();
+    assert_eq!(fake.handoffs(), ["storage"]);
+    // A bridge without the handoff entry.
+    fake.set_features(&[]);
+    assert!(conn.proxy().get_features().await.unwrap().is_empty());
+    let e = BridgeError::from(conn.proxy().open_storage_settings().await.unwrap_err());
+    assert_eq!(e.netvfs_name(), Some("Unsupported"));
+    assert_eq!(fake.handoffs(), ["storage"]);
+}

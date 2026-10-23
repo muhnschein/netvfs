@@ -722,7 +722,7 @@ permission, links nothing from netvfs, and never sees secrets or pins.
 
   | Group | Methods / signals |
   |---|---|
-  | Session | `Hello`, `GetConsent → s`, `RequestConsent`, signal `ConsentChanged(s)` |
+  | Session | `Hello`, `GetConsent → s`, `RequestConsent`, signal `ConsentChanged(s)`, `GetFeatures → as` (XB-19) |
   | Locations | `ListLocations → a(s id, s provider, s name, a{sv} info)`, signal `LocationsChanged`, `Capabilities(s loc)`, `Disconnect(s loc)` |
   | Ad-hoc | `ConnectAdHoc(s url, ay secret, a{sv} opts) → s loc`, `ForgetAdHoc(s loc)` |
   | Discovery | `Discover(b on)`, signal `NearbyChanged(a(s name, s provider, s host, q port))` |
@@ -732,7 +732,7 @@ permission, links nothing from netvfs, and never sees secrets or pins.
   | Handles | `OpenRead(s loc, ay path, s lane) → (u h, x size)`, `Read(u h, x offset, u max) → ay` (max 1 MiB), `ReadAhead(u h, x offset, x bytes)`, `Close(u h)` |
   | Jobs | `Upload(s loc, ay path, h fd, a{sv} opts) → u job`, `Download(s loc, ay path, h fd, a{sv} opts) → u job`, `CopyAcross(s srcLoc, ay src, s dstLoc, ay dst, a{sv} opts) → u job`, `RemoveTree(s loc, ay path) → u job`, `Walk(s loc, ay root, a{sv} opts) → u job`, `Cancel(u id)`, signals `JobProgress(u job, x done, x total)` (≤ 4 Hz), `WalkBatch(u job, a(ay path, entry))`, `JobFinished(u job, s error, s message, a{sv} extra)` |
   | Questions | signal `Question(s id, s kind, a{sv})`, `Answer(s id, a{sv})`; kinds: `identity-unknown` (ad-hoc only), `keyboard-interactive`, `insecure-consent` (ad-hoc only) |
-  | Handoff | `OpenAccountSettings(s loc)`, `AddAccount(s provider)` |
+  | Handoff | `OpenAccountSettings(s loc)`, `AddAccount(s provider)`, `OpenStorageSettings()` |
 
   Location ids (`loc`) are opaque to consumers: `account:<n>` for an account,
   `adhoc:<run>-<n>` for an ad-hoc location, where `<run>` is 16 hex digits drawn at random
@@ -808,8 +808,16 @@ permission, links nothing from netvfs, and never sees secrets or pins.
   `~/.local/share/netvfs/bridge/<id>/known_hosts`; a changed ad-hoc identity is an error,
   and re-pinning requires `ForgetAdHoc` and a new first contact.
 - XB-15: Handoff. `OpenAccountSettings(loc)` opens the account's page in Settings →
-  Accounts; `AddAccount(provider)` opens the netvfs account creation flow. The bridge is
-  unsandboxed and launches these through the platform's settings D-Bus interface.
+  Accounts; `AddAccount(provider)` opens the netvfs account creation flow;
+  `OpenStorageSettings()` opens Settings → Storage, where the user mounts, unmounts and
+  formats memory cards and USB drives. The bridge is unsandboxed and launches these
+  through the platform's settings D-Bus interface, as `/usr/share/netvfs/bridge/handoff.conf`
+  says (one group per method; a missing or invalid group fails the call with
+  `Unsupported` or `InvalidName`). A sandboxed app cannot open Settings › Storage
+  itself: jolla-settings has no URL scheme, and its `com.jolla.settings.ui` interface
+  (`showPage("system_settings/system/storage")` for Storage) is open only to a few
+  platform apps' Sailjail profiles, none of them Harbour's. `OpenStorageSettings` needs
+  no consent: it shows nothing of the user's locations.
 - XB-16: Ad-hoc secrets arrive as `ay`, are moved into `Credentials` and wiped (SEC-5);
   `ConnectAdHoc` never persists them. A URL with a password is rejected (XH-6).
   Keyboard-interactive prompts are relayed through `Question`.
@@ -825,6 +833,12 @@ permission, links nothing from netvfs, and never sees secrets or pins.
   further calls while 64 messages wait, so a consumer that does not read cannot make the
   bridge buffer without bound.
 - XB-18: Logging follows C-16/C-17 and prefixes the consumer id.
+- XB-19: Features. `GetFeatures() → as` names what the bridge offers besides the methods
+  of netvfs 0.4, so that a consumer shows an action only where it works:
+  `storage-settings` when `handoff.conf` has a valid `OpenStorageSettings` entry
+  (XB-15). Consumers ignore names they do not know, so that names can be added; an
+  older bridge has no `GetFeatures` and answers `org.freedesktop.DBus.Error.UnknownMethod`,
+  which means none. It needs `Hello` first, but no consent.
 
 ## 9. Security additions
 

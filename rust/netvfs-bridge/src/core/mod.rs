@@ -9,8 +9,8 @@
 //! `BridgeServer` and the bookkeeping half of `Session` (session.cpp,
 //! sessionfiles.cpp, sessionjobs.cpp).
 //!
-//! - [`admin`]: Hello, consent (XB-6), locations, ad-hoc locations,
-//!   discovery, Cancel, questions, the settings handoff.
+//! - [`admin`]: Hello, consent (XB-6), features (XB-19), locations, ad-hoc
+//!   locations, discovery, Cancel, questions, the settings handoff.
 //! - `files`: listing, metadata, namespace operations, read handles.
 //! - `jobs`: Upload, Download (XB-11), Walk, RemoveTree, CopyAcross.
 //! - [`quota`] (XB-17), [`questions`] (the broker), [`nearby`] (XD-5),
@@ -723,6 +723,7 @@ impl Core {
             Call::Hello { client } => self.on_hello(sid, reply, &client),
             Call::GetConsent => self.on_get_consent(reply),
             Call::RequestConsent => self.on_request_consent(reply),
+            Call::GetFeatures => self.on_get_features(reply),
             Call::ListLocations => self.on_list_locations(reply),
             Call::Capabilities { loc } => self.on_capabilities(sid, reply, &loc, lane),
             Call::Disconnect { loc } => self.on_disconnect(reply, &loc),
@@ -735,6 +736,7 @@ impl Core {
             Call::Answer { id, accept, answers } => self.on_answer(sid, reply, &id, accept, answers),
             Call::OpenAccountSettings { loc } => self.on_open_account_settings(reply, &loc),
             Call::AddAccount { provider } => self.on_add_account(reply, &provider),
+            Call::OpenStorageSettings => self.on_open_storage_settings(reply),
             call => self.on_file_call(sid, reply, call, lane),
         }
     }
