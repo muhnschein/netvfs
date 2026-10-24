@@ -24,6 +24,13 @@
 # tools/ci/check-files.py checks that every installed file belongs to exactly
 # one package.
 
+# SPEC P-8: reproducible packages (doc/VERIFYING.md). SOURCE_DATE_EPOCH set
+# (tools/ci/build-rpm.sh: commit's time): build time = it, file dates clamped
+# to it. Host name fixed either way: rpm records it.
+%define use_source_date_epoch_as_buildtime 1
+%define clamp_mtime_to_source_date_epoch 1
+%define _buildhost netvfs-build
+
 Name:       netvfs
 Version:    0.6.0
 Release:    1
