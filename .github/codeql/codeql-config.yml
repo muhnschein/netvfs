@@ -1,0 +1,12 @@
+# Scope of workflow "CodeQL" (codeql.yml): code that ships, as
+# sonar-project.properties draws it. Left out: tests, fuzz targets, vendored
+# crates (rust/vendor: crates.io code with a patch of ours, a dependency like
+# the others) and the host-only Buteo (vendor/host). Rust test modules inside
+# src/ and test-only features drop out through the extractor options in the
+# workflow.
+paths-ignore:
+  - rust/*/tests
+  - rust/fuzz
+  - rust/vendor
+  - tests
+  - vendor
