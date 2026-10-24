@@ -37,9 +37,9 @@ clone under `~/.cache/netvfs-verify`, never in your tree: ~5 GB, checks for
   takes the version from the spec (in a git tree it derives one from the
   latest tag, branch, time and hash).
 - Build paths: the Rust binaries record none. `tools/ci/cross-build.sh` maps
-  checkout, cargo output, lifted SDK and cargo home to `/netvfs`, `/out`,
-  `/sdk`, `/cargo` (rustc `--remap-path-prefix`, gcc `-ffile-prefix-map`).
-  C++ and packaging run in the SDK image at a fixed path.
+  cargo home to `/cargo` (rustc `--remap-path-prefix`); cargo names the
+  workspace's own sources relative to the checkout. C++ and packaging run in
+  the SDK image at a fixed path.
 - Build environment: SDK image pinned by digest (`.github/workflows/ci.yml`,
   job `rpm`: compilers, sysroot, Qt, rpm); Rust pinned
   (`rust/rust-toolchain.toml`).
