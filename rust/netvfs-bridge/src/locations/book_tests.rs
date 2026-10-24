@@ -10,6 +10,7 @@ use super::{
 use crate::ffi::{Params, Value};
 use crate::locations::mock::{Mock, MockHandle, Seen, blocking, recv, reporting, task};
 use crate::locations::spec::{AdHocSecret, Attention};
+use crate::locations::state::ConnectionState;
 use std::sync::{Mutex, mpsc};
 use zeroize::Zeroizing;
 
@@ -345,4 +346,41 @@ fn a_connecting_ad_hoc_location_takes_no_disconnect_or_handle_close() {
     std::thread::sleep(Duration::from_millis(20));
     assert_eq!(mock.count("close"), 0);
     assert_eq!(mock.count("free"), 0);
+}
+
+#[test]
+fn states_of_what_list_locations_shows() {
+    use ConnectionState::{Connected, Disconnected};
+    let (mock, mut book) = book();
+    book.set_accounts(vec![account(1, "a"), account(2, "b")]);
+    let states =
+        |book: &LocationBook<Mock>| -> Vec<(String, ConnectionState)> { book.states().into_iter().collect() };
+    let of = |list: &[(&str, ConnectionState)]| -> Vec<(String, ConnectionState)> {
+        list.iter().map(|(id, state)| ((*id).to_owned(), *state)).collect()
+    };
+    // Without a pool, or with one that never connected: disconnected.
+    assert!(book.ensure_pool("account:2", true, available).is_ok());
+    assert_eq!(states(&book), of(&[("account:1", Disconnected), ("account:2", Disconnected)]));
+    // An ad-hoc location being connected is not shown, nor is its state.
+    let (adhoc, _) = ad_hoc(&mut book, "h", b"pw");
+    let (tx, rx) = mpsc::channel();
+    mock.hold_establish(true);
+    book.submit(&adhoc, Lane::Interactive, task(), reporting(&tx, Ok(())));
+    mock.wait_for("establish 1", 1);
+    assert_eq!(book.pools().get(&adhoc).unwrap().state(), ConnectionState::Connecting);
+    assert_eq!(book.state(&adhoc), Disconnected);
+    assert_eq!(states(&book).len(), 2);
+    mock.hold_establish(false);
+    assert_eq!(recv(&rx), Seen::Conn(1));
+    assert!(book.add_ad_hoc(&adhoc));
+    // Shown, with the states of their pools.
+    book.submit("account:2", Lane::Interactive, task(), reporting(&tx, Ok(())));
+    assert_eq!(recv(&rx), Seen::Conn(2));
+    assert_eq!(
+        states(&book),
+        of(&[("account:1", Disconnected), ("account:2", Connected), (adhoc.as_str(), Connected)])
+    );
+    book.disconnect("account:2");
+    assert_eq!(book.state("account:2"), Disconnected);
+    assert_eq!(book.state("account:9"), Disconnected);
 }

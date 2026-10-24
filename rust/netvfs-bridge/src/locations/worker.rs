@@ -12,12 +12,21 @@
 //! cancels, has every queued item end with `Canceled` and ends the thread;
 //! [`Worker::finished`] says when it has.
 //!
-//! Shared with the core are only the queue and the connection's cancel
-//! handle, under one mutex: a cancel never overlaps or follows the free of
-//! the connection (T4), because the thread takes the handle out under it
-//! first.
+//! The worker reports where its connection is ([`Worker::phase`]) and how
+//! an attempt to connect ended to its pool's [`StateTracker`] (XB-12): an
+//! attempt that fails is recorded unless it was canceled (`Canceled`, or
+//! the request's flag set: by the consumer, or by a stop), one that
+//! succeeds clears that record. The record is set before the phase leaves
+//! `Connecting`, so that the pool never shows the end of a failed attempt
+//! as a plain disconnect.
+//!
+//! Shared with the core are only the queue, the phase and the connection's
+//! cancel handle, under one mutex: a cancel never overlaps or follows the
+//! free of the connection (T4), because the thread takes the handle out
+//! under it first.
 
 use super::spec::LocationSpec;
+use super::state::{Phase, StateTracker};
 use super::{TaskContext, canceled};
 use crate::Status;
 use netvfs_bridge_proto::{ErrorName, Lane};
@@ -209,6 +218,7 @@ struct State<B: Backend> {
     current: Option<super::CancelToken>,
     cancel: Option<B::Cancel>,
     last_activity: Instant,
+    phase: Phase,
 }
 
 struct Shared<B: Backend> {
@@ -217,11 +227,20 @@ struct Shared<B: Backend> {
     wake: Condvar,
     finished: AtomicBool,
     handles: Arc<AtomicUsize>,
+    tracker: Arc<StateTracker>,
 }
 
 impl<B: Backend> Shared<B> {
     fn lock(&self) -> MutexGuard<'_, State<B>> {
         self.state.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// The connection is now in `phase`; a change is signalled.
+    fn set_phase(&self, phase: Phase) {
+        let before = std::mem::replace(&mut self.lock().phase, phase);
+        if before != phase {
+            self.tracker.changed();
+        }
     }
 }
 
@@ -246,11 +265,17 @@ impl<B: Backend> fmt::Debug for Worker<B> {
 }
 
 impl<B: Backend> Worker<B> {
-    /// Starts the thread of a connection to `spec` in `lane`.
+    /// Starts the thread of a connection to `spec` in `lane`, which reports
+    /// to its pool's `tracker`.
     ///
     /// # Errors
     /// The thread could not be started.
-    pub fn start(backend: Arc<B>, spec: Arc<LocationSpec>, lane: Lane) -> io::Result<Self> {
+    pub fn start(
+        backend: Arc<B>,
+        spec: Arc<LocationSpec>,
+        lane: Lane,
+        tracker: Arc<StateTracker>,
+    ) -> io::Result<Self> {
         let shared = Arc::new(Shared {
             backend,
             state: Mutex::new(State {
@@ -260,10 +285,12 @@ impl<B: Backend> Worker<B> {
                 current: None,
                 cancel: None,
                 last_activity: Instant::now(),
+                phase: Phase::Closed,
             }),
             wake: Condvar::new(),
             finished: AtomicBool::new(false),
             handles: Arc::new(AtomicUsize::new(0)),
+            tracker,
         });
         let id = WorkerId::next();
         let theirs = Arc::clone(&shared);
@@ -344,6 +371,12 @@ impl<B: Backend> Worker<B> {
     pub fn open_handles(&self) -> usize {
         self.shared.handles.load(Ordering::Acquire)
     }
+
+    /// Where its connection is.
+    #[must_use]
+    pub fn phase(&self) -> Phase {
+        self.shared.lock().phase
+    }
 }
 
 impl<B: Backend> Drop for Worker<B> {
@@ -376,13 +409,38 @@ impl<B: Backend> Local<B> {
         self.handles.clear();
         shared.lock().cancel = None;
         self.conn = None;
+        shared.set_phase(Phase::Closed);
     }
 
     /// `ensureBackend`: the established connection, created on first use.
+    /// The attempt's outcome goes to the tracker before the phase leaves
+    /// `Connecting`.
     fn ensure(&mut self, shared: &Shared<B>, spec: &LocationSpec, task: &TaskContext) -> Result<(), Status> {
         if self.conn.is_some() {
             return Ok(());
         }
+        shared.set_phase(Phase::Connecting);
+        let established = self.connect(shared, spec, task);
+        match &established {
+            Ok(()) => {
+                shared.tracker.clear();
+                shared.set_phase(Phase::Established);
+            }
+            Err(status) => {
+                // A canceled attempt says nothing about the server; a stop
+                // cancels the running item too.
+                if status.name != ErrorName::Canceled && !task.canceled() {
+                    shared.tracker.failed(status.name);
+                }
+                self.reset(shared);
+            }
+        }
+        established
+    }
+
+    /// Creates and establishes the connection; it is kept even when
+    /// establishing fails (the caller resets it then).
+    fn connect(&mut self, shared: &Shared<B>, spec: &LocationSpec, task: &TaskContext) -> Result<(), Status> {
         let backend = &shared.backend;
         let mut conn = backend.create(spec)?;
         {
@@ -395,9 +453,6 @@ impl<B: Backend> Local<B> {
         }
         let established = backend.establish(&mut conn, spec, task);
         self.conn = Some(conn);
-        if established.is_err() {
-            self.reset(shared);
-        }
         established
     }
 }

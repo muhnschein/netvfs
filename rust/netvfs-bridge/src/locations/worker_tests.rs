@@ -3,15 +3,33 @@
 #![allow(clippy::assertions_on_result_states, clippy::arithmetic_side_effects)]
 
 use super::{
-    Arc, AtomicUsize, ErrorName, Handles, Instant, Lane, Ordering, THREAD_NAME, Turn, Work, Worker,
-    drops_connection,
+    Arc, AtomicUsize, ErrorName, Handles, Instant, Lane, Ordering, Phase, StateTracker, THREAD_NAME, Turn,
+    Work, Worker, drops_connection,
 };
 use crate::locations::mock::{Mock, MockHandle, Seen, blocking, recv, reporting, spec, status, task};
+use crate::locations::state::StateSignal;
 use std::sync::mpsc;
 use std::time::Duration;
 
 fn worker(mock: &Arc<Mock>) -> Worker<Mock> {
-    Worker::start(Arc::clone(mock), spec("account:1", "h"), Lane::Bulk).unwrap()
+    Worker::start(Arc::clone(mock), spec("account:1", "h"), Lane::Bulk, Arc::default()).unwrap()
+}
+
+/// A worker whose pool's tracker and signal the test sees.
+fn tracked(mock: &Arc<Mock>) -> (Worker<Mock>, Arc<StateTracker>, StateSignal) {
+    let signal = StateSignal::default();
+    let tracker = StateTracker::new(signal.clone());
+    let w =
+        Worker::start(Arc::clone(mock), spec("account:1", "h"), Lane::Bulk, Arc::clone(&tracker)).unwrap();
+    (w, tracker, signal)
+}
+
+fn wait_phase(w: &Worker<Mock>, phase: Phase) {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while w.phase() != phase {
+        assert!(Instant::now() < deadline, "the worker stayed {:?}", w.phase());
+        std::thread::sleep(Duration::from_millis(2));
+    }
 }
 
 fn wait_finished(w: &Worker<Mock>) {
@@ -317,4 +335,110 @@ fn ids_debug_and_failed_turns() {
     });
     a.post(task(), named);
     assert_eq!(rx.recv().unwrap().as_deref(), Some("nvb-w"));
+}
+
+#[test]
+fn the_phase_follows_the_connection_and_is_signalled() {
+    let mock = Mock::new();
+    let (w, tracker, signal) = tracked(&mock);
+    assert_eq!(w.phase(), Phase::Closed);
+    assert!(!signal.take());
+    // Connecting while it is established.
+    let (tx, rx) = mpsc::channel();
+    mock.hold_establish(true);
+    w.post(task(), reporting(&tx, Ok(())));
+    mock.wait_for("establish 1", 1);
+    assert_eq!(w.phase(), Phase::Connecting);
+    assert!(signal.take());
+    // Established before the item runs.
+    mock.hold_establish(false);
+    assert_eq!(recv(&rx), Seen::Conn(1));
+    assert_eq!(w.phase(), Phase::Established);
+    assert!(signal.take());
+    // Work on the connection, also work that fails, changes nothing.
+    w.post(task(), reporting(&tx, Err(status(ErrorName::NotFound))));
+    w.post(task(), reporting(&tx, Ok(())));
+    assert_eq!([recv(&rx), recv(&rx)], [Seen::Conn(1), Seen::Conn(1)]);
+    wait_idle(&w);
+    assert_eq!(w.phase(), Phase::Established);
+    assert!(!signal.take(), "no change, no signal");
+    // A result that drops the connection closes it.
+    w.post(task(), reporting(&tx, Err(status(ErrorName::ConnectionLost))));
+    assert_eq!(recv(&rx), Seen::Conn(1));
+    wait_phase(&w, Phase::Closed);
+    assert_eq!(mock.count("free 1"), 1);
+    assert!(signal.take());
+    // A lost connection is no failed attempt.
+    assert_eq!(tracker.failure(), None);
+    // So does the end of the thread.
+    w.post(task(), reporting(&tx, Ok(())));
+    assert_eq!(recv(&rx), Seen::Conn(2));
+    assert!(signal.take());
+    w.stop();
+    wait_finished(&w);
+    assert_eq!(w.phase(), Phase::Closed);
+    assert!(signal.take());
+    assert_eq!(tracker.failure(), None);
+}
+
+#[test]
+fn a_failed_attempt_is_recorded_until_one_succeeds() {
+    let mock = Mock::new();
+    let (w, tracker, signal) = tracked(&mock);
+    let (tx, rx) = mpsc::channel();
+    // Recorded before the item sees the failure, the phase closed.
+    mock.fail_establish(status(ErrorName::AuthFailed));
+    w.post(task(), reporting(&tx, Ok(())));
+    assert_eq!(recv(&rx), Seen::Failed(ErrorName::AuthFailed));
+    assert_eq!((tracker.failure(), w.phase()), (Some(ErrorName::AuthFailed), Phase::Closed));
+    assert!(signal.take());
+    // A connection that cannot even be made is a failed attempt too.
+    mock.fail_create(status(ErrorName::Unsupported));
+    w.post(task(), reporting(&tx, Ok(())));
+    assert_eq!(recv(&rx), Seen::Failed(ErrorName::Unsupported));
+    assert_eq!((tracker.failure(), w.phase()), (Some(ErrorName::Unsupported), Phase::Closed));
+    // The next attempt that succeeds clears it.
+    w.post(task(), reporting(&tx, Ok(())));
+    assert_eq!(recv(&rx), Seen::Conn(2));
+    assert_eq!((tracker.failure(), w.phase()), (None, Phase::Established));
+    // Items on the established connection make no attempt.
+    tracker.failed(ErrorName::Timeout);
+    w.post(task(), reporting(&tx, Err(status(ErrorName::AuthFailed))));
+    assert_eq!(recv(&rx), Seen::Conn(2));
+    wait_idle(&w);
+    assert_eq!(tracker.failure(), Some(ErrorName::Timeout));
+}
+
+#[test]
+fn a_canceled_attempt_is_no_failure() {
+    let mock = Mock::new();
+    let (w, tracker, _signal) = tracked(&mock);
+    // An earlier failure stays what the location shows.
+    tracker.failed(ErrorName::NetworkUnreachable);
+    let (tx, rx) = mpsc::channel();
+    // The backend says Canceled.
+    mock.fail_establish(status(ErrorName::Canceled));
+    w.post(task(), reporting(&tx, Ok(())));
+    assert_eq!(recv(&rx), Seen::Failed(ErrorName::Canceled));
+    assert_eq!(tracker.failure(), Some(ErrorName::NetworkUnreachable));
+    // The request was canceled while the backend failed otherwise.
+    mock.hold_establish(true);
+    let t = task();
+    let flag = Arc::clone(&t.cancel);
+    w.post(t, reporting(&tx, Ok(())));
+    mock.wait_for("establish 2", 1);
+    flag.store(true, Ordering::Release);
+    mock.queue_establish(Err(status(ErrorName::Timeout)));
+    mock.hold_establish(false);
+    assert_eq!(recv(&rx), Seen::Failed(ErrorName::Timeout));
+    assert_eq!(tracker.failure(), Some(ErrorName::NetworkUnreachable));
+    // Stopped while establishing (Disconnect, an idle close).
+    mock.hold_establish(true);
+    w.post(task(), reporting(&tx, Ok(())));
+    mock.wait_for("establish 3", 1);
+    assert_eq!(w.phase(), Phase::Connecting);
+    w.stop();
+    assert_eq!(recv(&rx), Seen::Failed(ErrorName::Canceled));
+    wait_finished(&w);
+    assert_eq!((tracker.failure(), w.phase()), (Some(ErrorName::NetworkUnreachable), Phase::Closed));
 }
