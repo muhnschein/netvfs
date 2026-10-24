@@ -8,6 +8,8 @@ use std::os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, OwnedFd, RawFd};
 use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 
+use tokio::io::unix::AsyncFd;
+
 /// An inotify instance (`IN_NONBLOCK`, `IN_CLOEXEC`).
 #[derive(Debug)]
 pub struct Inotify {
@@ -74,6 +76,19 @@ impl Inotify {
         let mut buf = vec![0u8; 16 * 1024];
         let n = (&self.file).read(&mut buf)?;
         Ok(parse_events(buf.get(..n).unwrap_or_default()))
+    }
+
+    /// Hands the instance to the I/O driver of the current tokio runtime,
+    /// which must have I/O enabled.
+    ///
+    /// # Errors
+    /// When the driver cannot register the descriptor.
+    pub fn register(self) -> io::Result<AsyncFd<Self>> {
+        // SAFETY: the instance owns its descriptor (`file`, private and never
+        // replaced), so the descriptor stays open and the same until the
+        // AsyncFd drops or returns the instance, and `as_raw_fd` returns it
+        // every time.
+        unsafe { AsyncFd::register(self) }.map_err(io::Error::from)
     }
 }
 

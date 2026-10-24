@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! The calls into libc (and the one `unsafe` constructor of zbus) of the
-//! bridge, each wrapped in a safe function. The only module of the crate
+//! The calls into libc (and the `unsafe` constructors of zbus and tokio) of
+//! the bridge, each wrapped in a safe function. The only module of the crate
 //! with `unsafe` code besides `ffi` (design §6.12); every block has its
 //! SAFETY comment.
 #![allow(unsafe_code)]
