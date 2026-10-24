@@ -1,22 +1,58 @@
 #!/bin/sh
+# SPDX-License-Identifier: LGPL-2.1-or-later
 # Builds the aarch64 RPMs with the Sailfish OS Platform SDK container.
-# Env: SDK_IMAGE (container image), TARGET (sb2 target name).
+# Env: SDK_IMAGE (container image), TARGET (sb2 target name),
+#      SOURCE_DATE_EPOCH (default: the commit's time).
 # The Rust binaries and libnetvfs-rs.so come prebuilt from rust/prebuilt (the
 # RPM job's step "Cross-build the Rust binaries" puts them there, doc/RUST.md
 # "Cross build"); without them this script cross-builds them first, which
 # needs the host packages of lift-sdk.sh.
+# Reproducible (SPEC P-8): same commit, same RPMs, byte for byte
+# (doc/VERIFYING.md). SOURCE_DATE_EPOCH is the packages' build time and
+# clamps their file dates; the spec fixes the host name.
 set -eu
 : "${SDK_IMAGE:?}" "${TARGET:?}"
 root=$(cd "$(dirname "$0")/../.." && pwd)
+if [ -z "${SOURCE_DATE_EPOCH:-}" ]; then
+    SOURCE_DATE_EPOCH=$(git -C "$root" log -1 --format=%ct 2>/dev/null || true)
+fi
+# Untracked files are copied too and changes go in: the packages then are
+# no commit's. Warn, don't refuse.
+if [ -z "$SOURCE_DATE_EPOCH" ]; then
+    echo "build-rpm: warning: no git commit and no SOURCE_DATE_EPOCH; package dates are today's" >&2
+else
+    dirty=$(git -C "$root" status --porcelain --ignore-submodules=dirty 2>/dev/null || true)
+    if [ -n "$dirty" ]; then
+        echo "build-rpm: warning: uncommitted changes go into the packages, so they are no commit's:" >&2
+        echo "$dirty" | head -n 10 >&2
+    fi
+fi
 if [ ! -x "$root/rust/prebuilt/netvfs-bridge" ] || [ ! -x "$root/rust/prebuilt/netvfs-accounts" ] \
     || [ ! -f "$root/rust/prebuilt/libnetvfs-rs.so" ]; then
     sdk=$root/build-sdk-cross
     [ -x "$sdk/bin/aarch64-meego-linux-gnu-gcc" ] || "$root/tools/ci/lift-sdk.sh" "$SDK_IMAGE" "$TARGET" "$sdk"
     "$root/tools/ci/cross-build.sh" "$sdk" "$root/rust/prebuilt"
 fi
-# The SDK runs as mersdk (uid 100000) and builds in the source tree.
-sudo chown -R 100000:100000 "$root"
-trap 'sudo chown -R "$(id -u):$(id -g)" "$root"' EXIT
-docker run --rm -v "$root:/home/mersdk/src" -w /home/mersdk/src "$SDK_IMAGE" \
+# The SDK builds as mersdk (uid 100000), in its tree: a copy of the tracked
+# files and the binaries, so nothing left in the checkout reaches the
+# packages and qmake's in-tree output never lands in it. No .git in the copy:
+# mb2 takes the version from the spec (in a git tree it derives one from the
+# latest tag, branch, time and hash).
+work=$(mktemp -d)
+trap 'rm -rf "$work" 2>/dev/null || sudo rm -rf "$work"' EXIT
+src=$work/src
+mkdir -p "$src/rust/prebuilt"
+# Regular files and links only: the submodule is a folder (and host-only).
+# shellcheck disable=SC2016 # expanded by the inner shell.
+(cd "$root" && git ls-files -z --cached --others --exclude-standard |
+    xargs -0 sh -c 'for f do [ ! -f "$f" ] || cp --parents -P -t "$0" "$f"; done' "$src")
+cp "$root"/rust/prebuilt/netvfs-bridge "$root"/rust/prebuilt/netvfs-accounts \
+    "$root"/rust/prebuilt/libnetvfs-rs.so "$src/rust/prebuilt/"
+chmod -R a+rwX "$work"
+docker run --rm \
+    ${SOURCE_DATE_EPOCH:+-e SOURCE_DATE_EPOCH="$SOURCE_DATE_EPOCH"} \
+    -v "$src:/home/mersdk/src" -w /home/mersdk/src "$SDK_IMAGE" \
     bash -euc "./tools/ci/sdk-build.sh '$TARGET'"
+mkdir -p "$root/RPMS"
+cp "$src"/RPMS/*.rpm "$root/RPMS/"
 ls -l "$root"/RPMS

@@ -325,3 +325,35 @@ jobs:
           name: netvfs-rpms-aarch64
           path: RPMS/*.rpm
           if-no-files-found: error
+
+  reproducible:
+    # SPEC P-8: the RPM job's packages rebuilt the way doc/VERIFYING.md
+    # tells users (tools/verify-rpm.sh): fresh clone, other runner, path,
+    # cargo home, time zone, umask and time. Not byte for byte: red.
+    name: RPMs rebuild byte for byte
+    needs: rpm
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - name: Cross-build tools (i386 C library for the SDK compiler)
+        run: |
+          sudo apt-get update -q
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends libc6-i386
+      - name: Fetch the RPM job's packages
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh run download "$GITHUB_RUN_ID" -R "$GITHUB_REPOSITORY" -n netvfs-rpms-aarch64 --dir "$RUNNER_TEMP/rpms"
+      # The commit from this checkout: a pull request's merge commit is on no
+      # branch a fresh clone from GitHub fetches.
+      - name: Rebuild and compare
+        env:
+          TZ: Pacific/Chatham
+        run: |
+          umask 0002
+          CARGO_HOME="$RUNNER_TEMP/cargo" NETVFS_REPO="$GITHUB_WORKSPACE" \
+            ./tools/verify-rpm.sh --ref "$GITHUB_SHA" "$RUNNER_TEMP"/rpms/*.rpm

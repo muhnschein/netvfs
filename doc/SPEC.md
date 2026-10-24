@@ -505,6 +505,7 @@ qmake builds the C++ code; cargo builds the Rust workspace (RUST.md), which CI c
 - **P-5** `BuildRequires`: `qt5-qmake`, `qt5-qttools-linguist`, `sailfish-svg2png`, and pkg-config modules `Qt5Core`, `Qt5DBus`, `Qt5Network`, `Qt5Concurrent`, `Qt5Qml`, `Qt5Quick`, `accounts-qt5`, `libsignon-qt5`, `buteosyncfw5 >= 0.10.0`.
 - **P-6** `%post` and `%postun` of `netvfs-backup` run `systemctl-user try-restart msyncd.service || :` so the daemon picks up new or removed plugins and profiles (the Mastodon package does the same **[src]**).
 - **P-7** Licence: LGPL-2.1-or-later for the whole project. The Jolla reference code is BSD-3-Clause and may be adapted with its notices retained.
+- **P-8** Reproducible: a commit builds to the same RPMs, byte for byte. Build time and file dates are the commit's time (`SOURCE_DATE_EPOCH`), the build host is fixed, the package builds from a copy of the tracked files (no leftovers; the version from the spec, not from git tags), the Rust binaries record no build path, and every input is pinned (SDK image by digest, Rust toolchain, `rust/Cargo.lock`). `tools/verify-rpm.sh` rebuilds a commit and compares (`doc/VERIFYING.md`).
 
 ---
 
@@ -519,7 +520,8 @@ qmake builds the C++ code; cargo builds the Rust workspace (RUST.md), which CI c
 - the libFuzzer harnesses of `tests/fuzz` and the cargo-fuzz targets of `rust/fuzz` for 60 s each;
 - `cargo deny check` on the Rust workspace;
 - netvfs-smb against Windows's own SMB server (SPEC-smb M-T11);
-- the cross-build for Sailfish OS 5.2 aarch64, the Rust tests on the target's libraries under qemu, the RPM build in the Sailfish SDK, and `tools/ci/check-rpm.sh` on the RPMs.
+- the cross-build for Sailfish OS 5.2 aarch64, the Rust tests on the target's libraries under qemu, the RPM build in the Sailfish SDK, and `tools/ci/check-rpm.sh` on the RPMs;
+- `tools/verify-rpm.sh` on those RPMs: a rebuild from a fresh clone on another runner must match them byte for byte (P-8).
 
 Not covered: a real device (12.3).
 
