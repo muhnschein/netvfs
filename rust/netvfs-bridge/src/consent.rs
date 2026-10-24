@@ -163,7 +163,7 @@ impl ConsentWatcher {
         let name = file.file_name().map(|n| n.as_bytes().to_vec()).unwrap_or_default();
         let inotify = Inotify::new()?;
         let wd = watch(&inotify, &folder)?;
-        Ok(Self { inotify: AsyncFd::new(inotify)?, folder, name, wd })
+        Ok(Self { inotify: inotify.register()?, folder, name, wd })
     }
 
     /// Waits until the file may have changed: written, replaced, removed,
