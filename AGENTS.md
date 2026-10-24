@@ -58,8 +58,10 @@ User tests RPMs on phone; that test judges feel, lag, real servers. Say exactly 
 ## Comments and docs
 
 - Caveman-full = drop articles, filler, pleasantries, hedging. Fragments OK, short words. Identifiers, paths, code, errors exact. E.g. "`rust/Cargo.lock` from pinned cargo: resolver v3 prefers crates whose `rust-version` fits 1.95."
-- This file: caveman-full.
-- Code comments, `doc/*.md`: as existing ones: short plain prose, explain why, cite sections and requirement IDs. SPDX header on every source file. Behaviour change → SPEC, RUST.md updated, same PR; specs describe what exists, no change notes.
+- Code comments, `doc/*.md`, this file: caveman-full. What is true now and why; keep constraints; cite sections and requirement IDs. No changelog, bug report, history, story (git's job): delete comment rather than turn it into history. Existing prose: rewrite what you touch, not more.
+- SPDX header on every source file. Behaviour change → SPEC, RUST.md updated, same PR; specs describe what exists, no change notes.
+- `README.md`, `CHANGELOG.md`, release notes, forum posts: plain prose for users, as short and to the point as possible.
+- User-visible change → line in `CHANGELOG.md` under `## Unreleased` (file or section missing → create it), same PR.
 - No plans, research notes, scratch files in repo.
 
 ## Git and PRs
@@ -75,7 +77,7 @@ User tests RPMs on phone; that test judges feel, lag, real servers. Say exactly 
 
 ## Releases
 
-- Only on user's go. None cut yet: no tags, no changelog; version in `rpm/netvfs.spec` and `rust/Cargo.toml`. Latest `main` commit green first, Sonar included: check main, not just PR.
+- Only on user's go. None cut yet, no tags; version in `rpm/netvfs.spec` and `rust/Cargo.toml`. Latest `main` commit green first, Sonar included: check main, not just PR.
 - Strict semver: nothing breaking → minor.
 - Before release: advisories against locked crates resolved (D-2); interop suite re-run after any dependency bump (D-3).
 
