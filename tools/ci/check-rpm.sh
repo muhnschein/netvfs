@@ -19,6 +19,8 @@
 #     plugin among them;
 #   - no file of the main package links libssh or libcrypto (SSH is in
 #     libnetvfs-rs.so);
+#   - no packaged file or folder is writable by group or others (%license
+#     packages LICENSE with the mode it has in the build tree);
 #   - all packages install into the SDK target (resolving Requires from the
 #     release repositories), every ELF file resolves its libraries and none
 #     carries a library search path from the build.
@@ -79,6 +81,10 @@ for r in $rpms; do
     # XP-5: the setgid helper only where it is asked for.
     if echo "$requires" | grep -q '^netvfs-bridge'; then
         fail "$name requires netvfs-bridge"
+    fi
+    writable=$(rpm -qp --qf '[%{FILEMODES:perms} %{FILENAMES}\n]' "$r" | grep -E '^[^l].{4}w|^[^l].{7}w' || true)
+    if [ -n "$writable" ]; then
+        fail "$name has files writable by group or others: $writable"
     fi
 done
 

@@ -8,8 +8,8 @@
 #   --ref <ref>  commit (full hash), branch or tag the RPMs claim to be
 #   <rpm>        packages to check, e.g. a CI artifact or one off a phone
 #
-# Needs Linux on x86_64, git, Docker, sudo (tools/ci/build-rpm.sh removes
-# the SDK user's build files with it), the i386 C library (Ubuntu:
+# Needs Linux on x86_64, git, Docker, sudo (tools/ci/build-rpm.sh hands
+# its build copy to the SDK user with it), the i386 C library (Ubuntu:
 # libc6-i386, for the SDK's compiler) and rustup. First run: SDK image pull
 # (~13 GB unpacked), ~15 min build. Builds in a fresh clone under
 # NETVFS_WORKDIR, never in this tree; needs ~5 GB free there (checks for 6).

@@ -14,8 +14,8 @@ request: `refs/pull/<number>/merge` while the pull request is unchanged (CI
 builds it merged into `main`). Any of the packages in one run: a line each,
 exit is the worst.
 
-Needs Linux on x86_64, git, Docker, sudo (`tools/ci/build-rpm.sh` removes
-the SDK user's build files with it), the i386 C library (Ubuntu: `libc6-i386`;
+Needs Linux on x86_64, git, Docker, sudo (`tools/ci/build-rpm.sh` hands
+its build copy to the SDK user with it), the i386 C library (Ubuntu: `libc6-i386`;
 the SDK's compiler is an i486 program) and rustup. First run: SDK image pull
 (~13 GB unpacked, where Docker keeps images), ~15 min build. Builds in a fresh
 clone under `~/.cache/netvfs-verify`, never in your tree: ~5 GB, checks for

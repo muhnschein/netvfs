@@ -48,7 +48,11 @@ mkdir -p "$src/rust/prebuilt"
     xargs -0 sh -c 'for f do [ ! -f "$f" ] || cp --parents -P -t "$0" "$f"; done' "$src")
 cp "$root"/rust/prebuilt/netvfs-bridge "$root"/rust/prebuilt/netvfs-accounts \
     "$root"/rust/prebuilt/libnetvfs-rs.so "$src/rust/prebuilt/"
-chmod -R a+rwX "$work"
+# File modes from the executable bit alone (644, 755), not this umask:
+# %license packages LICENSE with its mode. The SDK user owns the copy: it
+# builds there and overwrites files (qmake's Makefile).
+chmod -R u=rwX,go=rX "$src"
+sudo chown -R 100000:100000 "$work"
 docker run --rm \
     ${SOURCE_DATE_EPOCH:+-e SOURCE_DATE_EPOCH="$SOURCE_DATE_EPOCH"} \
     -v "$src:/home/mersdk/src" -w /home/mersdk/src "$SDK_IMAGE" \
