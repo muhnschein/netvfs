@@ -22,19 +22,22 @@ trap 'rm -rf "$tmp"' EXIT
 
 worst=0
 result() {
-    [ "$1" -le "$worst" ] || worst=$1
+    level=$1
+    [ "$level" -le "$worst" ] || worst=$level
 }
 package() {
-    rpm -qp --qf '%{NAME}.%{ARCH}' "$1" 2>/dev/null
+    file=$1
+    rpm -qp --qf '%{NAME}.%{ARCH}' "$file" 2>/dev/null
 }
 # What a package holds: content hash of each file; mode, owner, link target of
 # each entry.
 inside() {
-    mkdir "$2"
-    (cd "$2" && rpm2cpio "$1" | cpio -idm --quiet) || return 1
-    (cd "$2" && find . -type f -exec sha256sum {} + | sort -k 2) > "$2.sums"
-    rpm -qp --qf '[%{FILEMODES:perms} %{FILEUSERNAME}:%{FILEGROUPNAME} %{FILENAMES} %{FILELINKTOS}\n]' "$1" |
-        sort -k 3 > "$2.meta"
+    file=$1 dir=$2
+    mkdir "$dir"
+    rpm2cpio "$file" | (cd "$dir" && cpio -idm --quiet) || return 1
+    (cd "$dir" && find . -type f -exec sha256sum {} + | sort -k 2) > "$dir.sums"
+    rpm -qp --qf '[%{FILEMODES:perms} %{FILEUSERNAME}:%{FILEGROUPNAME} %{FILENAMES} %{FILELINKTOS}\n]' "$file" |
+        sort -k 3 > "$dir.meta"
 }
 
 n=0
