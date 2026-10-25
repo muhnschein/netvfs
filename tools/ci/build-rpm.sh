@@ -50,8 +50,9 @@ cp "$root"/rust/prebuilt/netvfs-bridge "$root"/rust/prebuilt/netvfs-accounts \
     "$root"/rust/prebuilt/libnetvfs-rs.so "$src/rust/prebuilt/"
 # File modes from the executable bit alone (644, 755), not this umask:
 # %license packages LICENSE with its mode. The SDK user owns the copy: it
-# builds there and overwrites files (qmake's Makefile).
-chmod -R u=rwX,go=rX "$src"
+# builds there and overwrites files (qmake's Makefile); others may read it
+# (the RPMs).
+chmod -R u=rwX,go=rX "$work"
 sudo chown -R 100000:100000 "$work"
 docker run --rm \
     ${SOURCE_DATE_EPOCH:+-e SOURCE_DATE_EPOCH="$SOURCE_DATE_EPOCH"} \
