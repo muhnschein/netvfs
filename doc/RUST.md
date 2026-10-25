@@ -72,6 +72,7 @@ Everything else stays C++.
 | `src/backends/rs/` | the C++ shim: `netvfs_rs.h`, the loader, `RsBackend`, `RsReadHandle`, `RsWriteHandle`, `RsKeyTools`, the conversions and callbacks; `rs.pro` builds the library with cargo |
 | `rust/fuzz/` | cargo-fuzz targets (nightly, not in the workspace) |
 | `rust/vendor/ssh-key/` | ssh-key 0.7.0-rc.11 with one change (see below; not in the workspace) |
+| `rust/vendor/picky-asn1-der/` | picky-asn1-der 0.5.7 with one change (see below; not in the workspace) |
 
 Dependencies: `libc` and `rusqlite` (without the bundled SQLite: the system
 libsqlite3 through pkg-config). The protocol crate: `netvfs-vfs` (for the
@@ -100,9 +101,20 @@ scalar without leading zero bytes, so about one P-256 key in 256 that
 ssh-keygen makes has a 31-byte scalar; with the change such keys import
 (`rust/netvfs-sftp/testdata/keys/ecdsa256-short-scalar`, also
 passphrase-encrypted). `README.netvfs.md` there gives the published
-crate's checksum, the diff and the reason. The copy is excluded from the
-workspace (format, clippy, tests), from cargo-mutants, from Sonar and from
-Rust coverage.
+crate's checksum, the diff and the reason.
+
+sspi decodes SPNEGO with `picky-asn1-der` 0.5.7, which netvfs builds from
+`rust/vendor/picky-asn1-der` (`[patch.crates-io]` in the same two
+manifests). The copy is the crate as published plus one line: in
+`src/de/mod.rs`, `Deserializer::h_next_object` adds the header length to a
+raw DER object's length with `checked_add`, so that a length near
+`usize::MAX` from the server is `TruncatedData`, not an overflow (a panic
+with overflow checks, a wrapped length without). The input is a test in
+netvfs-smb's `auth` and a seed of the fuzz target `spnego`;
+`README.netvfs.md` there gives the checksum, the diff and the reason.
+
+Both copies are excluded from the workspace (format, clippy, tests), from
+cargo-mutants, from Sonar and from Rust coverage.
 
 `rust/deny.toml` allows an older second version of `syn`, `getrandom`
 (0.2 and 0.3), `sha3`, `base64` and `generic-array`, each with its reason.

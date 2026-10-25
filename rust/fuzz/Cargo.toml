@@ -33,9 +33,11 @@ tokio = { version = "1", default-features = false, features = ["io-util", "rt", 
 
 [workspace]
 
-# As in ../Cargo.toml: ssh-key with the change of ../vendor/ssh-key.
+# As in ../Cargo.toml: ssh-key and picky-asn1-der with the changes of
+# ../vendor/ssh-key and ../vendor/picky-asn1-der.
 [patch.crates-io]
 ssh-key = { path = "../vendor/ssh-key" }
+picky-asn1-der = { path = "../vendor/picky-asn1-der" }
 
 [[bin]]
 name = "stored_value"
