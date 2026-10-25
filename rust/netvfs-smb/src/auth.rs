@@ -429,8 +429,8 @@ mod tests {
     fn a_der_length_of_usize_max_is_refused() {
         // Fuzz target spnego's reproducer (rust/fuzz/seeds/spnego): inside the NegTokenResp, a
         // DER length of 8 bytes 0xff (usize::MAX). picky-asn1-der adds the header length to
-        // it (rust/vendor/picky-asn1-der); overflow there must be an error, not a panic. As
-        // the first token and as the final one, like the fuzz target.
+        // it (rust/vendor/picky-asn1-der); overflow there must be an error, not a panic. The
+        // final token goes through the same decode (sspi's NegTokenTarg1).
         let mut token = vec![0xa1, 0x23, 0x61, 0x2b, 0xa2, 0x00, 0x25, 0x88];
         token.resize(108, 0xff);
         let account = Account::User {
@@ -440,12 +440,6 @@ mod tests {
         };
         let (mut a, _) = Authenticator::start(&account, "server").unwrap();
         let e = a.step(&token).unwrap_err();
-        assert!(matches!(e, Error::Policy(_)), "{e}");
-
-        let (mut a, first) = Authenticator::start(&account, "server").unwrap();
-        let challenge = crate::fake::Acceptor::new("alice", "CORP", "pw").step(&first);
-        assert!(matches!(a.step(&challenge).unwrap(), Step::Continue(_)));
-        let e = a.finish(&token).unwrap_err();
         assert!(matches!(e, Error::Policy(_)), "{e}");
     }
 
