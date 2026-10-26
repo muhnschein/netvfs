@@ -4,7 +4,8 @@
 
 use super::{BLOCK, BLOCK_DEVICES, DRIVE, ENCRYPTED, FILESYSTEM, Kind, ManagedObjects, drives};
 use crate::drives::sample::{
-    CARD, EMMC, STICK, block, device, drive, luks, object_path, owned, phone, set, unlock,
+    CARD, EMMC, STICK, block, cleartext, device, drive, encrypted_card, luks, object_path, owned, phone, set,
+    unlock,
 };
 use netvfs_bridge_proto::{drive_info, value_bool, value_i64, value_str};
 use zbus::zvariant::serialized::{Context, Data};
@@ -75,20 +76,53 @@ fn devices_without_a_drive_or_of_an_unknown_drive_are_not_listed() {
 #[test]
 fn an_unlocked_card_is_listed_through_its_backing_device() {
     let mut objects = phone();
-    let mut clear = block("/", "SECRET");
-    set(&mut clear, BLOCK, "CryptoBackingDevice", object_path(&format!("{BLOCK_DEVICES}mmcblk1p1")));
-    objects.insert(device("dm_2d3"), clear);
+    objects.insert(device("dm_2d3"), cleartext("mmcblk1p1", "SECRET"));
     // The unlocked contents of an encrypted eMMC partition (Sailfish's home).
-    let mut home = block("/", "home");
-    set(&mut home, BLOCK, "CryptoBackingDevice", object_path(&format!("{BLOCK_DEVICES}mmcblk0p20")));
-    objects.insert(device("dm_2d4"), home);
+    objects.insert(device("dm_2d4"), cleartext("mmcblk0p20", "home"));
     // A backing device that is not there.
-    let mut lost = block("/", "lost");
-    set(&mut lost, BLOCK, "CryptoBackingDevice", object_path(&format!("{BLOCK_DEVICES}sdz9")));
-    objects.insert(device("dm_2d5"), lost);
+    objects.insert(device("dm_2d5"), cleartext("sdz9", "lost"));
     let listed = drives(&objects);
     assert_eq!(listed.iter().map(|d| d.id.as_str()).collect::<Vec<_>>(), ["dm_2d3", "mmcblk1p1", "sda1"]);
     assert_eq!((listed[0].kind, listed[0].label.as_str()), (Kind::Sd, "SECRET"));
+}
+
+#[test]
+fn an_unlocked_device_goes_by_the_hints_of_its_encrypted_device() {
+    // UDisks2 marks the cleartext device a system device: no drive.
+    let mut objects = phone();
+    objects.insert(device("dm_2d3"), cleartext("mmcblk1p1", "SECRET"));
+    assert_eq!(ids(&objects), ["dm_2d3", "mmcblk1p1", "sda1"]);
+    for name in ["HintSystem", "HintIgnore"] {
+        let mut objects = phone();
+        set(objects.get_mut(&device("mmcblk1p1")).unwrap(), BLOCK, name, owned(true));
+        objects.insert(device("dm_2d3"), cleartext("mmcblk1p1", "SECRET"));
+        assert_eq!(ids(&objects), ["sda1"], "{name} of the encrypted device");
+    }
+    let mut objects = phone();
+    let mut hidden = cleartext("mmcblk1p1", "SECRET");
+    set(&mut hidden, BLOCK, "HintIgnore", owned(true));
+    objects.insert(device("dm_2d3"), hidden);
+    assert_eq!(ids(&objects), ["mmcblk1p1", "sda1"]);
+}
+
+#[test]
+fn a_card_encrypted_whole_as_a_phone_describes_it() {
+    let listed = drives(&encrypted_card(false));
+    let seen = listed.iter().map(|d| (d.id.as_str(), d.locked)).collect::<Vec<_>>();
+    assert_eq!(seen, [("mmcblk0", true)]);
+    assert_eq!((listed[0].kind, listed[0].label.as_str()), (Kind::Sd, ""));
+    // Unlocked: its cleartext device, a system device to UDisks2, and not
+    // the cleartext device of `/home`, whose encrypted device has no drive.
+    let listed = drives(&encrypted_card(true));
+    let seen = listed.iter().map(|d| (d.id.as_str(), d.locked)).collect::<Vec<_>>();
+    assert_eq!(seen, [("dm_2d3", false)]);
+    let card = &listed[0];
+    assert_eq!((card.kind, card.label.as_str(), card.fs_type.as_str()), (Kind::Sd, "PHOTOS", "ext4"));
+    assert!(card.mount_point.is_empty());
+    // `/home` stays out by its encrypted device's drive too: it has none.
+    let mut objects = encrypted_card(true);
+    set(objects.get_mut(&device("dm_2d1")).unwrap(), BLOCK, "HintSystem", owned(false));
+    assert_eq!(ids(&objects), ["dm_2d3"]);
 }
 
 #[test]

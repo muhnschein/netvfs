@@ -5,10 +5,10 @@
 //!
 //! A block device is listed when it has a filesystem UDisks2 can mount or is
 //! a LUKS device not unlocked, is neither a system device nor hidden, and
-//! belongs to a USB drive or to a drive with an SD medium (its own drive, or
-//! that of the encrypted device it is the unlocked contents of). The
-//! internal eMMC is on the `sdio` bus like a memory card, but its medium is
-//! `flash_mmc`.
+//! belongs to a USB drive or to a drive with an SD medium. The unlocked
+//! contents of an encrypted device go by that device: its hints, its drive.
+//! The internal eMMC is on the `sdio` bus like a memory card, but its medium
+//! is `flash_mmc`.
 
 use netvfs_bridge_proto::{
     WireDrive, drive_info, value_bool, value_bytes, value_i64, value_str, value_strings,
@@ -126,11 +126,14 @@ pub fn drives(objects: &ManagedObjects) -> Vec<Drive> {
 fn listed(objects: &ManagedObjects, path: &OwnedObjectPath, ifaces: &Interfaces) -> Option<Drive> {
     let id = path.as_str().strip_prefix(BLOCK_DEVICES).filter(|id| drive_info::is_valid_id(id))?;
     let block = ifaces.get(BLOCK)?;
-    if flag(block, "HintSystem") || flag(block, "HintIgnore") {
+    let (mount_point, locked) = contents(block, ifaces)?;
+    let backing = backing(objects, block)?;
+    // UDisks2 marks every device without a drive a system device
+    // (`update_hints`), so an unlocked one goes by its encrypted device.
+    if flag(backing, "HintSystem") || flag(backing, "HintIgnore") || flag(block, "HintIgnore") {
         return None;
     }
-    let (mount_point, locked) = contents(block, ifaces)?;
-    let drive = drive_of(objects, block)?;
+    let drive = drive_of(objects, backing)?;
     let kind = kind(drive)?;
     let model = [text(drive, "Vendor"), text(drive, "Model")]
         .iter()
@@ -155,7 +158,7 @@ fn listed(objects: &ManagedObjects, path: &OwnedObjectPath, ifaces: &Interfaces)
 /// What a listed block device holds: a filesystem UDisks2 can mount, with
 /// its first mount point (empty while not mounted), or a LUKS device not
 /// unlocked (locked). Once unlocked, its cleartext device is listed instead
-/// ([`drive_of`]).
+/// ([`backing`]).
 fn contents(block: &Properties, ifaces: &Interfaces) -> Option<(Vec<u8>, bool)> {
     match text(block, "IdUsage").as_str() {
         "filesystem" => {
@@ -169,15 +172,19 @@ fn contents(block: &Properties, ifaces: &Interfaces) -> Option<(Vec<u8>, bool)> 
     }
 }
 
-/// The drive a block device is on: its own, or that of the device it is
-/// the unlocked contents of. Logical volumes and other mapped devices have
-/// none.
-fn drive_of<'a>(objects: &'a ManagedObjects, block: &'a Properties) -> Option<&'a Properties> {
-    let source = match object(block, "CryptoBackingDevice") {
-        Some(backing) => objects.iter().find(|(p, _)| p.as_str() == backing)?.1.get(BLOCK)?,
-        None => block,
-    };
-    let drive = object(source, "Drive")?;
+/// The block device on the drive: the encrypted device `block` is the
+/// unlocked contents of, else `block`.
+fn backing<'a>(objects: &'a ManagedObjects, block: &'a Properties) -> Option<&'a Properties> {
+    match object(block, "CryptoBackingDevice") {
+        Some(backing) => objects.iter().find(|(p, _)| p.as_str() == backing)?.1.get(BLOCK),
+        None => Some(block),
+    }
+}
+
+/// The drive of a block device. Logical volumes and other mapped devices
+/// have none.
+fn drive_of<'a>(objects: &'a ManagedObjects, block: &Properties) -> Option<&'a Properties> {
+    let drive = object(block, "Drive")?;
     objects.iter().find(|(p, _)| p.as_str() == drive)?.1.get(DRIVE)
 }
 

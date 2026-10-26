@@ -852,7 +852,9 @@ permission, links nothing from netvfs, and never sees secrets or pins.
     `crypto`, `IdType` `crypto_LUKS`, an `Encrypted` interface whose
     `CleartextDevice` is `/` (listed as locked; once unlocked, its cleartext device is
     listed instead),
-  - is neither `HintSystem` nor `HintIgnore`,
+  - is neither `HintSystem` nor `HintIgnore`; a cleartext device goes by its crypto
+    backing device's hints (UDisks2 marks every device without a drive `HintSystem`)
+    and is left out when it is `HintIgnore` itself,
   - belongs to a drive (its own, or that of its crypto backing device) on the `usb` bus
     (kind `usb`) or with an SD medium, a `MediaCompatibility` entry beginning with
     `flash_sd` (kind `sd`). The internal eMMC is on the `sdio` bus as well, but its
