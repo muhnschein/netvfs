@@ -847,9 +847,14 @@ permission, links nothing from netvfs, and never sees secrets or pins.
   Storage. `ListDrives` reads UDisks2's `GetManagedObjects` on the system bus and lists,
   mounted or not, every block device that
   - has UDisks2's `Filesystem` interface and `IdUsage` `filesystem` (a filesystem
-    UDisks2 can mount: a locked encrypted card is not listed, its unlocked cleartext
-    device is, as a device of its backing device's drive),
-  - is neither `HintSystem` nor `HintIgnore`,
+    UDisks2 can mount; an unlocked encrypted device's cleartext device is one, as a
+    device of its backing device's drive), or is a LUKS device not unlocked: `IdUsage`
+    `crypto`, `IdType` `crypto_LUKS`, an `Encrypted` interface whose
+    `CleartextDevice` is `/` (listed as locked; once unlocked, its cleartext device is
+    listed instead),
+  - is neither `HintSystem` nor `HintIgnore`; a cleartext device goes by its crypto
+    backing device's hints (UDisks2 marks every device without a drive `HintSystem`)
+    and is left out when it is `HintIgnore` itself,
   - belongs to a drive (its own, or that of its crypto backing device) on the `usb` bus
     (kind `usb`) or with an SD medium, a `MediaCompatibility` entry beginning with
     `flash_sd` (kind `sd`). The internal eMMC is on the `sdio` bus as well, but its
@@ -863,14 +868,17 @@ permission, links nothing from netvfs, and never sees secrets or pins.
   consumers, `[A-Za-z0-9_]{1,64}`), `label` its `IdLabel` (empty without one),
   `mountPoint` its first mount point (empty when it is not mounted), and the info
   `kind` (`s`: `sd` or `usb`), `size` (`x`, bytes), `fsType` (`s`, `IdType`), `readOnly`
-  (`b`), and when known `uuid` (`s`, `IdUUID`) and `model` (`s`, the drive's vendor and
-  model). Consumers ignore keys they do not know.
+  (`b`), when known `uuid` (`s`, `IdUUID`) and `model` (`s`, the drive's vendor and
+  model), and `locked` (`b`, `true`) for a LUKS device not unlocked. Consumers ignore
+  keys they do not know.
   `Mount(drive) → ay` mounts with `Filesystem.Mount` and `auth.no_user_interaction`,
   so UDisks2 chooses the mount point below `/run/media/<user>` and the options, as for
   Settings → Storage, and answers the mount point; a mounted drive answers its mount
   point without a call. `Unmount(drive)` calls `Filesystem.Unmount` (no `force`); a
   drive that is not mounted succeeds at once. Both look the drive up again and act only
-  on a drive that `ListDrives` would list at that moment, otherwise `NotFound`. Polkit
+  on a drive that `ListDrives` would list at that moment, otherwise `NotFound`. `Mount`
+  of a locked drive fails with `Unsupported` without a call: Settings → Storage
+  unlocks it, and no passphrase passes through the bridge. Polkit
   (Sailfish OS 5.2's UDisks2 policy) allows `filesystem-mount` and
   `filesystem-unmount-others` to any subject, so the bridge, a user service outside the
   seat's session, mounts and unmounts without a question, also a card that `mount-sd@`
@@ -892,7 +900,7 @@ permission, links nothing from netvfs, and never sees secrets or pins.
   UDisks2's `InterfacesAdded`, `InterfacesRemoved` and `PropertiesChanged` signals,
   lists again 200 ms after the first of a burst, and tells every connection when the
   list differs from the last one it listed (a drive came or went, was mounted or
-  unmounted). Drives need no consent: they show nothing of the user's network locations
+  unmounted, unlocked or locked). Drives need no consent: they show nothing of the user's network locations
   (XB-6), and polkit lets every process of the user do the same.
 
 ## 9. Security additions

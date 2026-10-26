@@ -485,9 +485,44 @@
   {
     "name": "XB-20 system devices listed",
     "file": "rust/netvfs-bridge/src/drives/classify.rs",
-    "search": "    if text(block, \"IdUsage\") != \"filesystem\" || flag(block, \"HintSystem\") || flag(block, \"HintIgnore\") {",
-    "replace": "    if text(block, \"IdUsage\") != \"filesystem\" || flag(block, \"HintIgnore\") {",
+    "search": "    if flag(backing, \"HintSystem\") || flag(backing, \"HintIgnore\") || flag(block, \"HintIgnore\") {",
+    "replace": "    if flag(backing, \"HintIgnore\") || flag(block, \"HintIgnore\") {",
     "test": "cd rust && cargo test --locked -q -p netvfs-bridge --lib drives::classify"
+  },
+  {
+    "name": "XB-20 an unlocked device judged by its own HintSystem",
+    "file": "rust/netvfs-bridge/src/drives/classify.rs",
+    "search": "    if flag(backing, \"HintSystem\") ||",
+    "replace": "    if flag(block, \"HintSystem\") ||",
+    "test": "cd rust && cargo test --locked -q -p netvfs-bridge --lib drives::classify"
+  },
+  {
+    "name": "XB-20 a hidden cleartext device listed",
+    "file": "rust/netvfs-bridge/src/drives/classify.rs",
+    "search": " || flag(block, \"HintIgnore\") {",
+    "replace": " {",
+    "test": "cd rust && cargo test --locked -q -p netvfs-bridge --lib drives::classify"
+  },
+  {
+    "name": "XB-20 a locked LUKS device not listed",
+    "file": "rust/netvfs-bridge/src/drives/classify.rs",
+    "search": "        \"crypto\" if text(block, \"IdType\") == \"crypto_LUKS\" => {",
+    "replace": "        \"crypto\" if false => {",
+    "test": "cd rust && cargo test --locked -q -p netvfs-bridge --lib drives::classify"
+  },
+  {
+    "name": "XB-20 an unlocked LUKS device listed as locked too",
+    "file": "rust/netvfs-bridge/src/drives/classify.rs",
+    "search": "\"CleartextDevice\").is_none()",
+    "replace": "\"CleartextDevice\").is_none() || true",
+    "test": "cd rust && cargo test --locked -q -p netvfs-bridge --lib drives::classify"
+  },
+  {
+    "name": "XB-20 a locked drive handed to UDisks2's Mount",
+    "file": "rust/netvfs-bridge/src/drives/udisks.rs",
+    "search": "        if drive.locked {",
+    "replace": "        if false {",
+    "test": "cd rust && cargo test --locked -q -p netvfs-bridge --lib drives::udisks"
   },
   {
     "name": "XB-20 a drive acted on that ListDrives does not list",

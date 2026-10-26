@@ -161,6 +161,10 @@ impl UDisks {
             // Mounted already, or not mounted.
             return Ok(drive.mount_point);
         }
+        if drive.locked {
+            // XB-20: Settings → Storage unlocks it; the bridge takes no passphrase.
+            return Err(Status::new(ErrorName::Unsupported, "The drive is locked"));
+        }
         // XB-20: as Settings → Storage mounts, without a question.
         let options = HashMap::from([("auth.no_user_interaction", Value::from(true))]);
         let path = drive.object_path();

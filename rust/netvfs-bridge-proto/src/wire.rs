@@ -150,7 +150,8 @@ pub struct WireNearby {
 pub struct WireDrive {
     /// Drive id (opaque, `[A-Za-z0-9_]{1,64}`).
     pub id: String,
-    /// The filesystem's label, empty without one.
+    /// The filesystem's label (a locked drive's: its LUKS header's), empty
+    /// without one.
     pub label: String,
     /// Where it is mounted, empty when it is not.
     pub mount_point: Vec<u8>,
@@ -172,6 +173,9 @@ pub mod drive_info {
     pub const UUID: &str = "uuid";
     /// `s`: the drive's vendor and model, when known.
     pub const MODEL: &str = "model";
+    /// `b`, `true`: an encrypted (LUKS) device not unlocked. Settings →
+    /// Storage unlocks it; `Mount` answers `Unsupported`.
+    pub const LOCKED: &str = "locked";
     /// A memory card.
     pub const KIND_SD: &str = "sd";
     /// A USB drive.

@@ -3,11 +3,12 @@
 //! what `GetManagedObjects` answers: a pure function of that answer, so that
 //! it can be tested and fuzzed without a bus.
 //!
-//! A block device is listed when it has a filesystem UDisks2 can mount, is
-//! neither a system device nor hidden, and belongs to a USB drive or to a
-//! drive with an SD medium (its own drive, or that of the encrypted device
-//! it is the unlocked contents of). The internal eMMC is on the `sdio` bus
-//! like a memory card, but its medium is `flash_mmc`.
+//! A block device is listed when it has a filesystem UDisks2 can mount or is
+//! a LUKS device not unlocked, is neither a system device nor hidden, and
+//! belongs to a USB drive or to a drive with an SD medium. The unlocked
+//! contents of an encrypted device go by that device: its hints, its drive.
+//! The internal eMMC is on the `sdio` bus like a memory card, but its medium
+//! is `flash_mmc`.
 
 use netvfs_bridge_proto::{
     WireDrive, drive_info, value_bool, value_bytes, value_i64, value_str, value_strings,
@@ -21,6 +22,8 @@ pub const BLOCK: &str = "org.freedesktop.UDisks2.Block";
 pub const FILESYSTEM: &str = "org.freedesktop.UDisks2.Filesystem";
 /// UDisks2's interface of drives.
 pub const DRIVE: &str = "org.freedesktop.UDisks2.Drive";
+/// UDisks2's interface of an encrypted device.
+pub const ENCRYPTED: &str = "org.freedesktop.UDisks2.Encrypted";
 /// The object paths of block devices; a drive id is what follows.
 pub const BLOCK_DEVICES: &str = "/org/freedesktop/UDisks2/block_devices/";
 
@@ -73,6 +76,9 @@ pub struct Drive {
     pub uuid: String,
     /// The drive's vendor and model; may be empty.
     pub model: String,
+    /// A LUKS device not unlocked: Settings → Storage unlocks it, no
+    /// passphrase passes through the bridge, so it is never mounted.
+    pub locked: bool,
 }
 
 impl Drive {
@@ -96,6 +102,9 @@ impl Drive {
                 info.insert(key.to_owned(), owned_text(text));
             }
         }
+        if self.locked {
+            info.insert(drive_info::LOCKED.to_owned(), OwnedValue::from(true));
+        }
         WireDrive {
             id: self.id.clone(),
             label: self.label.clone(),
@@ -116,13 +125,16 @@ pub fn drives(objects: &ManagedObjects) -> Vec<Drive> {
 
 fn listed(objects: &ManagedObjects, path: &OwnedObjectPath, ifaces: &Interfaces) -> Option<Drive> {
     let id = path.as_str().strip_prefix(BLOCK_DEVICES).filter(|id| drive_info::is_valid_id(id))?;
-    let (block, filesystem) = (ifaces.get(BLOCK)?, ifaces.get(FILESYSTEM)?);
-    if text(block, "IdUsage") != "filesystem" || flag(block, "HintSystem") || flag(block, "HintIgnore") {
+    let block = ifaces.get(BLOCK)?;
+    let (mount_point, locked) = contents(block, ifaces)?;
+    let backing = backing(objects, block)?;
+    // UDisks2 marks every device without a drive a system device
+    // (`update_hints`), so an unlocked one goes by its encrypted device.
+    if flag(backing, "HintSystem") || flag(backing, "HintIgnore") || flag(block, "HintIgnore") {
         return None;
     }
-    let drive = drive_of(objects, block)?;
+    let drive = drive_of(objects, backing)?;
     let kind = kind(drive)?;
-    let mount_points = filesystem.get("MountPoints").and_then(|v| mount_points(v)).unwrap_or_default();
     let model = [text(drive, "Vendor"), text(drive, "Model")]
         .iter()
         .map(|s| s.trim())
@@ -132,25 +144,47 @@ fn listed(objects: &ManagedObjects, path: &OwnedObjectPath, ifaces: &Interfaces)
     Some(Drive {
         id: id.to_owned(),
         label: text(block, "IdLabel"),
-        mount_point: mount_points.into_iter().next().unwrap_or_default(),
+        mount_point,
         kind,
         size: block.get("Size").and_then(|v| value_i64(v)).unwrap_or(-1),
         fs_type: text(block, "IdType"),
         read_only: flag(block, "ReadOnly"),
         uuid: text(block, "IdUUID"),
         model,
+        locked,
     })
 }
 
-/// The drive a block device is on: its own, or that of the device it is
-/// the unlocked contents of. Logical volumes and other mapped devices have
-/// none.
-fn drive_of<'a>(objects: &'a ManagedObjects, block: &'a Properties) -> Option<&'a Properties> {
-    let source = match object(block, "CryptoBackingDevice") {
-        Some(backing) => objects.iter().find(|(p, _)| p.as_str() == backing)?.1.get(BLOCK)?,
-        None => block,
-    };
-    let drive = object(source, "Drive")?;
+/// What a listed block device holds: a filesystem UDisks2 can mount, with
+/// its first mount point (empty while not mounted), or a LUKS device not
+/// unlocked (locked). Once unlocked, its cleartext device is listed instead
+/// ([`backing`]).
+fn contents(block: &Properties, ifaces: &Interfaces) -> Option<(Vec<u8>, bool)> {
+    match text(block, "IdUsage").as_str() {
+        "filesystem" => {
+            let points = ifaces.get(FILESYSTEM)?.get("MountPoints").and_then(|v| mount_points(v));
+            Some((points.unwrap_or_default().into_iter().next().unwrap_or_default(), false))
+        }
+        "crypto" if text(block, "IdType") == "crypto_LUKS" => {
+            object(ifaces.get(ENCRYPTED)?, "CleartextDevice").is_none().then(|| (Vec::new(), true))
+        }
+        _ => None,
+    }
+}
+
+/// The block device on the drive: the encrypted device `block` is the
+/// unlocked contents of, else `block`.
+fn backing<'a>(objects: &'a ManagedObjects, block: &'a Properties) -> Option<&'a Properties> {
+    match object(block, "CryptoBackingDevice") {
+        Some(backing) => objects.iter().find(|(p, _)| p.as_str() == backing)?.1.get(BLOCK),
+        None => Some(block),
+    }
+}
+
+/// The drive of a block device. Logical volumes and other mapped devices
+/// have none.
+fn drive_of<'a>(objects: &'a ManagedObjects, block: &Properties) -> Option<&'a Properties> {
+    let drive = object(block, "Drive")?;
     objects.iter().find(|(p, _)| p.as_str() == drive)?.1.get(DRIVE)
 }
 

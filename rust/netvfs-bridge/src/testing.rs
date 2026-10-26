@@ -436,6 +436,7 @@ impl FakeDrives {
             read_only: false,
             uuid: String::new(),
             model: String::new(),
+            locked: false,
         }
     }
 
