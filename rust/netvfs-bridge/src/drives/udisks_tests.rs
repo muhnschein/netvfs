@@ -7,7 +7,7 @@
 use super::{Bus, CALL_TIMEOUT, DEBOUNCE, ERROR_PREFIX, MANAGER, SERVICE, UDisks, error_name};
 use crate::drives::DriveSource;
 use crate::drives::classify::{BLOCK_DEVICES, Drive, FILESYSTEM, ManagedObjects};
-use crate::drives::sample::{device, owned, phone, set};
+use crate::drives::sample::{CARD, device, luks, owned, phone, set, unlock};
 use crate::testutil::TestBus;
 use futures_lite::StreamExt;
 use netvfs_bridge_proto::{ErrorName, value_bool};
@@ -37,6 +37,9 @@ struct State {
     error: Option<(String, String)>,
     /// No call is answered.
     silent: bool,
+    /// The card's LUKS partition `mmcblk1p2`: unlocked (as `dm_2d0`) or not;
+    /// none without.
+    luks: Option<bool>,
 }
 
 struct FakeUDisks {
@@ -81,6 +84,12 @@ impl FakeUDisks {
 
 fn objects(state: &State) -> ManagedObjects {
     let mut objects = phone();
+    if let Some(unlocked) = state.luks {
+        objects.insert(device("mmcblk1p2"), luks(CARD, "VAULT"));
+        if unlocked {
+            unlock(&mut objects, "mmcblk1p2", "dm_2d0", "SECRET");
+        }
+    }
     for id in &state.gone {
         objects.remove(&device(id));
     }
@@ -296,6 +305,39 @@ fn changes_are_told_once_drives_were_listed() {
         fake.emit("sda1").await;
         tokio::time::sleep(QUIET).await;
         assert_eq!(changes.get(), 2);
+    });
+}
+
+#[test]
+fn a_locked_drive_is_never_mounted_and_its_unlocking_is_told() {
+    let Some(bus) = TestBus::start() else { return };
+    run(async {
+        let fake = FakeUDisks::start(&bus).await;
+        fake.state.borrow_mut().luks = Some(false);
+        let changes = Rc::new(Cell::new(0));
+        let udisks = client(&bus, CALL_TIMEOUT, &changes);
+        let listed = udisks.list().await;
+        assert_eq!(ids(&listed), ["mmcblk1p1", "mmcblk1p2", "sda1"]);
+        assert!(listed[1].locked && !listed[0].locked);
+        // XB-20: Settings → Storage unlocks it; UDisks2 is not asked.
+        let status = udisks.mount("mmcblk1p2").await.unwrap_err();
+        assert_eq!(status.name, ErrorName::Unsupported);
+        udisks.unmount("mmcblk1p2").await.unwrap();
+        assert!(fake.calls().is_empty());
+
+        // Unlocked in Settings: its cleartext device instead, told once.
+        fake.state.borrow_mut().luks = Some(true);
+        fake.emit("mmcblk1p2").await;
+        assert!(wait_for(|| changes.get() == 1).await);
+        let listed = udisks.list().await;
+        assert_eq!(ids(&listed), ["dm_2d0", "mmcblk1p1", "sda1"]);
+        assert!(!listed[0].locked);
+
+        // Locked again.
+        fake.state.borrow_mut().luks = Some(false);
+        fake.emit("dm_2d0").await;
+        assert!(wait_for(|| changes.get() == 2).await);
+        assert_eq!(ids(&udisks.list().await), ["mmcblk1p1", "mmcblk1p2", "sda1"]);
     });
 }
 

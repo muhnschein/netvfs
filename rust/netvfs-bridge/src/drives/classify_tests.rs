@@ -2,8 +2,10 @@
 // XB-20: what is listed of the devices of a phone with an SD card, a USB
 // stick and an internal eMMC, as UDisks2 describes them.
 
-use super::{BLOCK, BLOCK_DEVICES, DRIVE, FILESYSTEM, Kind, ManagedObjects, drives};
-use crate::drives::sample::{CARD, STICK, block, device, drive, object_path, owned, phone, set};
+use super::{BLOCK, BLOCK_DEVICES, DRIVE, ENCRYPTED, FILESYSTEM, Kind, ManagedObjects, drives};
+use crate::drives::sample::{
+    CARD, EMMC, STICK, block, device, drive, luks, object_path, owned, phone, set, unlock,
+};
 use netvfs_bridge_proto::{drive_info, value_bool, value_i64, value_str};
 use zbus::zvariant::serialized::{Context, Data};
 use zbus::zvariant::{LE, OwnedObjectPath, OwnedValue, to_bytes};
@@ -52,7 +54,7 @@ fn system_hidden_and_unmountable_devices_are_not_listed() {
         set(objects.get_mut(&device("sda1")).unwrap(), iface, name, value);
         assert_eq!(ids(&objects), ["mmcblk1p1"], "{shown}");
     }
-    // A partition table or a locked encrypted card has no Filesystem.
+    // A partition table has no Filesystem.
     let mut objects = phone();
     objects.get_mut(&device("sda1")).unwrap().remove(FILESYSTEM);
     assert_eq!(ids(&objects), ["mmcblk1p1"]);
@@ -87,6 +89,70 @@ fn an_unlocked_card_is_listed_through_its_backing_device() {
     let listed = drives(&objects);
     assert_eq!(listed.iter().map(|d| d.id.as_str()).collect::<Vec<_>>(), ["dm_2d3", "mmcblk1p1", "sda1"]);
     assert_eq!((listed[0].kind, listed[0].label.as_str()), (Kind::Sd, "SECRET"));
+}
+
+#[test]
+fn a_locked_luks_device_is_listed_as_locked() {
+    let mut objects = phone();
+    objects.insert(device("mmcblk1p2"), luks(CARD, "VAULT"));
+    objects.insert(device("sdb1"), luks(STICK, ""));
+    let listed = drives(&objects);
+    let ids = listed.iter().map(|d| (d.id.as_str(), d.locked)).collect::<Vec<_>>();
+    assert_eq!(ids, [("mmcblk1p1", false), ("mmcblk1p2", true), ("sda1", false), ("sdb1", true)]);
+    let vault = &listed[1];
+    assert_eq!(
+        (vault.kind, vault.label.as_str(), vault.fs_type.as_str()),
+        (Kind::Sd, "VAULT", "crypto_LUKS")
+    );
+    assert_eq!((vault.size, vault.uuid.as_str()), (64_000_000_000, "5c1e0a4f-6d2b-4b8e-9f3a-2e7d1c0b9a88"));
+    assert!(vault.mount_point.is_empty());
+    assert_eq!((listed[3].kind, listed[3].label.as_str()), (Kind::Usb, ""));
+    let wire = vault.wire();
+    assert_eq!(value_bool(&wire.info[drive_info::LOCKED]), Some(true));
+    assert_eq!(value_str(&wire.info[drive_info::FS_TYPE]).as_deref(), Some("crypto_LUKS"));
+    assert!(!listed[0].wire().info.contains_key(drive_info::LOCKED));
+}
+
+#[test]
+fn an_unlocked_luks_device_is_listed_by_its_cleartext_device_only() {
+    let mut objects = phone();
+    objects.insert(device("mmcblk1p2"), luks(CARD, "VAULT"));
+    unlock(&mut objects, "mmcblk1p2", "dm_2d3", "SECRET");
+    let listed = drives(&objects);
+    let ids = listed.iter().map(|d| (d.id.as_str(), d.locked)).collect::<Vec<_>>();
+    assert_eq!(ids, [("dm_2d3", false), ("mmcblk1p1", false), ("sda1", false)]);
+    assert_eq!((listed[0].kind, listed[0].label.as_str()), (Kind::Sd, "SECRET"));
+}
+
+#[test]
+fn luks_devices_of_the_emmc_hidden_or_of_other_kinds_are_not_listed() {
+    let mut objects = phone();
+    // The encrypted home of Sailfish OS on the eMMC.
+    objects.insert(device("mmcblk0p21"), luks(EMMC, "home"));
+    assert_eq!(ids(&objects), ["mmcblk1p1", "sda1"]);
+    let cases: [(&str, &str, OwnedValue); 4] = [
+        (BLOCK, "HintSystem", owned(true)),
+        (BLOCK, "HintIgnore", owned(true)),
+        // Only LUKS, which Settings → Storage encrypts with, is listed.
+        (BLOCK, "IdType", owned("BitLocker")),
+        // A cleartext device that is not one of the listed objects still
+        // means unlocked.
+        (ENCRYPTED, "CleartextDevice", object_path(&format!("{BLOCK_DEVICES}dm_2d9"))),
+    ];
+    for (iface, name, value) in cases {
+        let mut objects = phone();
+        let mut vault = luks(CARD, "VAULT");
+        let shown = format!("{name}={value:?}");
+        set(&mut vault, iface, name, value);
+        objects.insert(device("mmcblk1p2"), vault);
+        assert_eq!(ids(&objects), ["mmcblk1p1", "sda1"], "{shown}");
+    }
+    // Without the Encrypted interface UDisks2 cannot unlock it.
+    let mut objects = phone();
+    let mut vault = luks(CARD, "VAULT");
+    vault.remove(ENCRYPTED);
+    objects.insert(device("mmcblk1p2"), vault);
+    assert_eq!(ids(&objects), ["mmcblk1p1", "sda1"]);
 }
 
 #[test]

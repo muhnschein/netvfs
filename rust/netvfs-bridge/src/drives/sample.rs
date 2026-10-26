@@ -2,7 +2,9 @@
 //! What UDisks2 describes of a phone with an SD card, a USB stick and an
 //! internal eMMC (XB-20), for the tests of the classifier and the client.
 
-use super::classify::{BLOCK, BLOCK_DEVICES, DRIVE, FILESYSTEM, Interfaces, ManagedObjects, Properties};
+use super::classify::{
+    BLOCK, BLOCK_DEVICES, DRIVE, ENCRYPTED, FILESYSTEM, Interfaces, ManagedObjects, Properties,
+};
 use std::collections::HashMap;
 use zbus::zvariant::{ObjectPath, OwnedObjectPath, OwnedValue, Value};
 
@@ -55,6 +57,30 @@ pub fn block(drive: &str, label: &str) -> Interfaces {
         ),
         (FILESYSTEM.to_owned(), props(vec![("MountPoints", owned(Vec::<Vec<u8>>::new()))])),
     ])
+}
+
+/// A LUKS device of `drive` not unlocked: no filesystem, an `Encrypted`
+/// interface without a cleartext device.
+pub fn luks(drive: &str, label: &str) -> Interfaces {
+    let mut ifaces = block(drive, label);
+    ifaces.remove(FILESYSTEM);
+    set(&mut ifaces, BLOCK, "IdUsage", owned("crypto"));
+    set(&mut ifaces, BLOCK, "IdType", owned("crypto_LUKS"));
+    set(&mut ifaces, BLOCK, "IdUUID", owned("5c1e0a4f-6d2b-4b8e-9f3a-2e7d1c0b9a88"));
+    let encrypted =
+        props(vec![("CleartextDevice", object_path("/")), ("HintEncryptionType", owned("luks2"))]);
+    ifaces.insert(ENCRYPTED.to_owned(), encrypted);
+    ifaces
+}
+
+/// Unlocks the LUKS device `id` of `objects` as `clear`, a cleartext
+/// device with a `vfat` filesystem labelled `label`.
+pub fn unlock(objects: &mut ManagedObjects, id: &str, clear: &str, label: &str) {
+    let cleartext = format!("{BLOCK_DEVICES}{clear}");
+    set(objects.get_mut(&device(id)).unwrap(), ENCRYPTED, "CleartextDevice", object_path(&cleartext));
+    let mut contents = block("/", label);
+    set(&mut contents, BLOCK, "CryptoBackingDevice", object_path(&format!("{BLOCK_DEVICES}{id}")));
+    objects.insert(device(clear), contents);
 }
 
 pub fn set(ifaces: &mut Interfaces, iface: &str, name: &str, value: OwnedValue) {

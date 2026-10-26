@@ -280,20 +280,26 @@
     <method name="OpenStorageSettings"/>
 
     <!-- Drives (XB-20): the memory cards and USB drives UDisks2 can mount,
-      mounted or not; never internal or system storage. Needs no consent.
+      mounted or not, and their LUKS devices not unlocked; never internal or
+      system storage. Needs no consent.
       ListDrives entries, sorted by id:
         id          opaque, [A-Za-z0-9_]{1,64}
-        label       the filesystem's label, "" without one
+        label       the filesystem's label (a locked drive's: its LUKS
+                    header's), "" without one
         mountPoint  where it is mounted, empty when it is not
         info (a{sv}): "kind" (s, "sd" or "usb"), "size" (x, bytes), "fsType" (s),
-          "readOnly" (b), and when known "uuid" (s) and "model" (s).
+          "readOnly" (b), when known "uuid" (s) and "model" (s), and "locked"
+          (b, true) for a LUKS device not unlocked: Settings > Storage
+          unlocks it, then its unlocked filesystem is listed instead.
       Mount answers the mount point (below /run/media/<user>), at once for a
       mounted drive; Unmount of a drive that is not mounted succeeds. Errors:
       NotFound (no such drive), PermissionDenied (polkit refused), Locked (in
-      use), AlreadyExists, Unsupported (no UDisks2, an unknown filesystem),
-      Timeout (60 s), Internal (UDisks2 failed; its message as "detail").
-      DrivesChanged: a drive came or went, was mounted or unmounted; sent once
-      the consumer has listed drives. A consumer that shows them lists again. -->
+      use), AlreadyExists, Unsupported (no UDisks2, an unknown filesystem, a
+      locked drive), Timeout (60 s), Internal (UDisks2 failed; its message as
+      "detail").
+      DrivesChanged: a drive came or went, was mounted or unmounted, unlocked
+      or locked; sent once the consumer has listed drives. A consumer that
+      shows them lists again. -->
     <method name="ListDrives">
       <arg name="drives" type="a(ssaya{sv})" direction="out"/>
     </method>
