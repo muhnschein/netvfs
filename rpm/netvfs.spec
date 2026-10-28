@@ -142,9 +142,12 @@ systemctl-user try-restart msyncd.service || :
 
 # XB-3: the generator turns the consumer files into units on daemon-reload;
 # starting the targets again starts the socket and path units they now want.
+# XP-7: a bridge still running the old binary stops; its socket stays, so the
+# consumer's next connection starts the new one.
 %post bridge
 systemctl-user daemon-reload || :
 systemctl-user start sockets.target paths.target || :
+systemctl-user stop 'netvfs-bridge@*.service' || :
 
 %preun bridge
 if [ "$1" -eq 0 ]; then
