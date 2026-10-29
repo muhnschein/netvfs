@@ -1,0 +1,5 @@
+name: netvfs/rust-queries
+version: 0.0.0
+library: false
+dependencies:
+  codeql/rust-all: "*"
