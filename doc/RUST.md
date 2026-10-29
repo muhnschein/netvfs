@@ -495,7 +495,7 @@ name of its own, as Sailjail requires.
 | Advisories, yanked crates, licences, sources | `rust/deny.toml` | CI job "Rust supply chain"; advisories again weekly |
 | Tests under ASan + LSan (the FFI test with the C++ side instrumented too, see below; netvfs-backend's `tests/ffi.rs` with the library's code instrumented), the current stable's clippy, the online workflow audit | `.github/workflows/scheduled.yml` (weekly, or by hand: `workflow_dispatch`) | `./tools/ci/rust-sanitize.sh <nightly> [<ffi-libs dir>]` |
 | Workflow audit: no credentials left in checkouts, no `${{ }}` in `run:` | `.github/workflows` | CI job "Workflow audit" (`zizmor --offline`) |
-| Static analysis of the code that ships: Rust as the release build sees it (no `cfg(test)`, default features), C++, Python, workflows; tests, fuzz targets and vendored crates left out | `.github/codeql/codeql-config.yml`, extractor options in `codeql.yml` | workflow "CodeQL" (`codeql.yml`: pushes to `main`, pull requests, weekly) |
+| Static analysis of the code that ships: Rust as the release build sees it (no `cfg(test)`, default features), C++, Python, workflows; tests, fuzz targets and vendored crates left out; `rust/hard-coded-cryptographic-value` from our copy (`.github/codeql/rust-queries`): zeroed buffer lent out mutably before its use is filled, no constant; its query test (`.github/codeql/rust-queries-tests`, planted cases) in same job | `.github/codeql/codeql-config.yml` (Rust: `codeql-config-rust.yml`), extractor options in `codeql.yml` | workflow "CodeQL" (`codeql.yml`: pushes to `main`, pull requests, weekly) |
 | Coverage for Sonar | `build-coverage/rust-lcov.info` | `make coverage` |
 | Clippy findings for Sonar | `build-coverage/clippy.json` | `make COVERAGE=1 clippy-report` |
 
