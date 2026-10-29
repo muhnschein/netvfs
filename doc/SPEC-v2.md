@@ -947,6 +947,10 @@ permission, links nothing from netvfs, and never sees secrets or pins.
 - XP-6: Parts nobody installs on their own share one package; separate packages stay
   only for what pulls in something the rest does not need (Buteo and jolla-vault for
   backups, a setgid binary for the bridge) or is only for development.
+- XP-7: Installing or upgrading `netvfs-bridge` stops every running bridge service, so
+  no consumer keeps talking to the old binary until its idle exit. The socket units stay;
+  the consumer's next connection starts the new bridge. Calls and jobs in flight end with
+  the connection (XB-13).
 
 ## 11. CLI
 
