@@ -116,25 +116,6 @@ impl Drop for TestChild {
     }
 }
 
-/// Whether a stream socket listens at `path`. Socket file exists after
-/// `bind`, before `listen`: connecting in between gets ECONNREFUSED.
-/// Read from `/proc/net/unix`, no connection made.
-#[must_use]
-pub fn listening(path: &Path) -> bool {
-    std::fs::read_to_string("/proc/net/unix").is_ok_and(|table| listening_in(&table, path))
-}
-
-/// `/proc/net/unix` rows: `Num RefCount Protocol Flags Type St Inode Path`.
-/// Listening = flag `__SO_ACCEPTCON` (0x10000), type `SOCK_STREAM` (1).
-fn listening_in(table: &str, path: &Path) -> bool {
-    table.lines().skip(1).any(|row| {
-        let fields: Vec<&str> = row.split_whitespace().collect();
-        let [_, _, _, flags, kind, _, _, name] = fields[..] else { return false };
-        let flags = u32::from_str_radix(flags, 16).unwrap_or(0);
-        flags & 0x10000 != 0 && kind == "0001" && Path::new(name) == path
-    })
-}
-
 /// A command that runs `program` as systemd's socket activation would
 /// (`sd_listen_fds`): `listener` at fd 3, `LISTEN_FDS=1`, and `LISTEN_PID`
 /// the process's own pid, which a shell sets before it execs `program` (the
@@ -233,42 +214,6 @@ fn read_address(child: &mut Child) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn listening_means_listen_was_called() {
-        let dir = TempDir::default();
-        let stream = dir.path().join("stream.sock");
-        let datagram = dir.path().join("datagram.sock");
-        assert!(!listening(&stream));
-        let listener = std::os::unix::net::UnixListener::bind(&stream).unwrap();
-        assert!(listening(&stream));
-        // Bound, never listening: a file at the path all the same.
-        let _bound = std::os::unix::net::UnixDatagram::bind(&datagram).unwrap();
-        assert!(datagram.exists() && !listening(&datagram));
-        drop(listener);
-        assert!(!listening(&stream));
-    }
-
-    #[test]
-    fn listening_reads_flags_type_and_path() {
-        let head = "Num       RefCount Protocol Flags    Type St Inode Path\n";
-        let line = |flags: &str, kind: &str, path: &str| {
-            format!("0000000000000000: 00000002 00000000 {flags} {kind} 01 4242 {path}\n")
-        };
-        let row = |flags: &str, kind: &str, path: &str| format!("{head}{}", line(flags, kind, path));
-        let at = Path::new("/t/bridge.sock");
-        assert!(listening_in(&row("00010000", "0001", "/t/bridge.sock"), at));
-        assert!(!listening_in(&row("00000000", "0001", "/t/bridge.sock"), at));
-        assert!(!listening_in(&row("00010000", "0002", "/t/bridge.sock"), at));
-        assert!(!listening_in(&row("00010000", "0001", "/t/other.sock"), at));
-        assert!(!listening_in(
-            &format!("{head}0000000000000000: 00000002 00000000 00010000 0001 01 4242\n"),
-            at
-        ));
-        assert!(!listening_in(&row("00010000", "0001", "/t/bridge.sock"), Path::new("/t/bridge")));
-        // First row is the header.
-        assert!(!listening_in(&line("00010000", "0001", "/t/bridge.sock"), at));
-    }
 
     #[test]
     fn folders_are_removed() {
