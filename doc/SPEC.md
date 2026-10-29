@@ -516,7 +516,8 @@ qmake builds the C++ code; cargo builds the Rust workspace (RUST.md), which CI c
 `make check` runs on an x86_64 host: the Rust workspace checks and tests (`make check-rust`, RUST.md), the C++ unit tests (`tests/unit`) and the interop suite (12.2). CI (`.github/workflows`) also runs:
 
 - the same under AddressSanitizer and UndefinedBehaviorSanitizer (`make SANITIZE=1 check`);
-- every mutation list in `tests/mutations` (each mutant must make a test fail), and cargo-mutants on the Rust code a pull request changes;
+- the mutation lists in `tests/mutations` (each mutant must make a test fail): on a pull request those whose code, tests or build setup it touches, every list weekly on `main` and by hand (Run workflow; a failed weekly run opens an issue); `tools/ci/mutation-lists.py` picks. Each mutant's release Rust build skips LTO, so rebuilds take seconds;
+- cargo-mutants on the Rust code a pull request changes;
 - the libFuzzer harnesses of `tests/fuzz` and the cargo-fuzz targets of `rust/fuzz` for 60 s each;
 - `cargo deny check` on the Rust workspace;
 - netvfs-smb against Windows's own SMB server (SPEC-smb M-T11);

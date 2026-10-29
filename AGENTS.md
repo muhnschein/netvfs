@@ -23,7 +23,7 @@ In this order; later step only once earlier ones hold:
 
 1. Change implemented.
 2. Tests added for it (regression test per bug).
-3. Tests proven to bite: each fails with change reverted or mutated. Report how (e.g. "22/22 mutations caught"); name what headless tests can't prove. Rust: `tools/ci/ffi-libs.sh build-ffi && tools/ci/rust-mutants.sh diff origin/main build-ffi` (without FFI libraries bridge's FFI test catches nothing; CI runs same, 12 shards). C++ and cross-language: mutation in `tests/mutations/<list>.json` (`tools/mutation-check.py`; new list → CI matrix, `tools/ci/check-mutation-matrix.py` checks). New crate → full-crate run (`mutants.yml`, by hand) before merge, results in PR.
+3. Tests proven to bite: each fails with change reverted or mutated. Report how (e.g. "22/22 mutations caught"); name what headless tests can't prove. Rust: `tools/ci/ffi-libs.sh build-ffi && tools/ci/rust-mutants.sh diff origin/main build-ffi` (without FFI libraries bridge's FFI test catches nothing; CI runs same, 12 shards). C++ and cross-language: mutation in `tests/mutations/<list>.json` (`tools/mutation-check.py`). PR CI runs lists whose area PR touches, all weekly (`tools/ci/mutation-lists.py`). New crate → full-crate run (`mutants.yml`, by hand) before merge, results in PR.
 4. `make check` green locally.
 5. PR CI green: every CI job, SonarQube (quality gate, zero open issues or hotspots: `tools/ci/sonar-issues.py`), CodeQL.
 6. Device: CI job "Sailfish OS 5.2 aarch64 RPMs" builds them on every push; run them on test phone (see "Device tests"); give user `netvfs-rpms-aarch64` artifact link of the green run and evidence. Change lautta uses → link lautta RPM too, say install order (netvfs first).
