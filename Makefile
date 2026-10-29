@@ -22,6 +22,8 @@ QMAKE_ARGS ?=
 ifeq ($(SANITIZE),1)
 BUILD ?= build-asan
 QMAKE_ARGS += NETVFS_SANITIZE=1
+# ASan is heavy: one test per core, not nextest.toml's 32.
+NEXTEST_ARGS = --test-threads num-cpus
 export LSAN_OPTIONS := suppressions=$(CURDIR)/tools/sanitizer/lsan.supp:print_suppressions=0
 else ifeq ($(COVERAGE),1)
 BUILD ?= build-coverage
@@ -81,7 +83,7 @@ check-rust:
 	./tools/ci/check-crypto-fence.sh
 	cd rust && $(CARGO) fmt --all -- --check
 	cd rust && $(CARGO) clippy --locked --workspace --all-targets $(RUST_FEATURES) -- -D warnings
-	cd rust && $(RUST_ENV) $(CARGO) nextest run --locked --workspace $(RUST_FEATURES) --profile $(NEXTEST_PROFILE)
+	cd rust && $(RUST_ENV) $(CARGO) nextest run --locked --workspace $(RUST_FEATURES) --profile $(NEXTEST_PROFILE) $(NEXTEST_ARGS)
 	cd rust && $(RUST_ENV) $(CARGO) test --locked --workspace --doc $(RUST_FEATURES)
 	cd rust && $(CARGO) +$(RUST_MSRV) check --locked --workspace --all-targets $(RUST_FEATURES)
 
@@ -110,15 +112,18 @@ FFI_TEST_ENV += NETVFS_TEST_SANITIZER=address
 endif
 check-rust-ffi: all
 	cd rust && $(TEST_ENV) $(FFI_TEST_ENV) $(RUST_ENV) $(CARGO) nextest run --locked --workspace $(RUST_FEATURES) \
-	    --profile $(NEXTEST_PROFILE) -E 'package(netvfs-bridge)'
+	    --profile $(NEXTEST_PROFILE) $(NEXTEST_ARGS) -E 'package(netvfs-bridge)'
 
 clippy-report:
 	mkdir -p $(BUILD_DIR)
 	cd rust && $(CARGO) clippy --locked --workspace --all-targets $(RUST_FEATURES) --message-format=json \
 	    > $(BUILD_DIR)/clippy.json
 
+# Test binaries side by side, each one's output kept together (-O): they mostly
+# wait on event loops and timers; 90 s in series, 19 s on 4 cores.
 check-unit: all
-	$(TEST_ENV) dbus-run-session -- $(MAKE) -C $(BUILD_DIR)/tests check
+	$(TEST_ENV) dbus-run-session -- $(MAKE) -C $(BUILD_DIR)/tests \
+	    $(if $(findstring -j,$(MAKEFLAGS)),,-j$(JOBS)) -Otarget check
 
 check-interop: all
 	$(TEST_ENV) ./tests/interop/run.sh $(BUILD_DIR)
