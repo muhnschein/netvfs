@@ -520,9 +520,12 @@ qmake builds the C++ code; cargo builds the Rust workspace (RUST.md), which CI c
 - the libFuzzer harnesses of `tests/fuzz` and the cargo-fuzz targets of `rust/fuzz` for 60 s each;
 - `cargo deny check` on the Rust workspace;
 - netvfs-smb against Windows's own SMB server (SPEC-smb M-T11);
-- the cross-build for Sailfish OS 5.2 aarch64, the Rust tests on the target's libraries under qemu, the RPM build in the Sailfish SDK, and `tools/ci/check-rpm.sh` on the RPMs.
+- the cross-build for Sailfish OS 5.2 aarch64, the Rust tests on the target's libraries under qemu, the RPM build in the Sailfish SDK, and `tools/ci/check-rpm.sh` on the RPMs;
+- selftests of CI's own scripts (`tools/ci/*-selftest.sh`).
 
-Not covered: a real device (12.3).
+A pull request touching only `*.md` outside `vendor/` and `rust/vendor/` skips build, test and Sonar jobs (`tools/ci/changes.sh`). A host test killed by a signal leaves its core, binary and stacks as artifact `test-cores` (`tools/ci/core-backtraces.sh`). Packages come from `tools/ci/apt-install.sh`: third-party lists dropped, fastest Ubuntu mirror first, a stalled mirror cut off.
+
+Not covered: a real device (12.3). Agents run device tests on the test phone of `muhnschein-sfos-harness` (AGENTS.md "Device tests").
 
 ### 12.2 Interop suite (host-side CI, no device)
 
