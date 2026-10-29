@@ -4,8 +4,8 @@
 //! [`Fixture`], the port of `tests/bridge/common/bridgetest.h`: the bridge
 //! in-process, on a runtime thread of its own, against the real
 //! `libnetvfs-bridge-ffi.so` and the fake backend, with fake accounts, a
-//! fake prompt, a fake discovery and a recording handoff launcher,
-//! listening on `unix:path=<tmp>/bridge.sock`. Clients are
+//! fake prompt, a fake discovery, a recording handoff launcher and fake
+//! drives, listening on `unix:path=<tmp>/bridge.sock`. Clients are
 //! [`netvfs_bridge_proto::Connection`]s; a [`Probe`] reads the core's
 //! counters.
 //!
@@ -18,7 +18,9 @@ use crate::accounts::{AccountDirectory, AccountLocation, Attention, ConnectionPa
 use crate::config::ConsumerInfo;
 use crate::consent::{Consent, ConsentStore};
 use crate::core::nearby::NearbySource;
-use crate::core::{Config, CoreLink, Counters, Deps, MakeServices, Services};
+use crate::core::{Config, CoreLink, Counters, Deps, LocalFuture, MakeServices, Services};
+use crate::drives::classify::Kind;
+use crate::drives::{Drive, DriveSource};
 use crate::ffi::fake::{self, Fake};
 use crate::ffi::{Ffi, Params, ParsedUrl};
 use crate::handoff::{HandoffCall, Launcher};
@@ -404,6 +406,75 @@ impl Launcher for RecordingLauncher {
     }
 }
 
+/// What the fake drives hold and saw.
+#[derive(Debug, Default)]
+pub struct DrivesState {
+    /// What `ListDrives` lists.
+    pub drives: Vec<Drive>,
+    /// `Mount` (true) and `Unmount` (false) calls, with their drive.
+    pub calls: Vec<(bool, String)>,
+    /// The next `Mount` or `Unmount` fails with this.
+    pub error: Option<Status>,
+}
+
+/// A [`DriveSource`] in memory that mounts at `/run/media/user/<id>`;
+/// tests report changes through [`Fixture::drives_changed`].
+#[derive(Debug, Clone, Default)]
+pub struct FakeDrives(pub Arc<Mutex<DrivesState>>);
+
+impl FakeDrives {
+    /// A memory card `id` labelled `label`, not mounted.
+    #[must_use]
+    pub fn card(id: &str, label: &str) -> Drive {
+        Drive {
+            id: id.to_owned(),
+            label: label.to_owned(),
+            mount_point: Vec::new(),
+            kind: Kind::Sd,
+            size: 1 << 30,
+            fs_type: "vfat".to_owned(),
+            read_only: false,
+            uuid: String::new(),
+            model: String::new(),
+            locked: false,
+        }
+    }
+
+    /// The state, locked.
+    pub fn state(&self) -> MutexGuard<'_, DrivesState> {
+        lock(&self.0)
+    }
+
+    fn act(&self, id: &str, mount: bool) -> Result<Vec<u8>, Status> {
+        let mut state = self.state();
+        state.calls.push((mount, id.to_owned()));
+        if let Some(error) = state.error.take() {
+            return Err(error);
+        }
+        let drive = state.drives.iter_mut().find(|d| d.id == id);
+        let drive =
+            drive.ok_or_else(|| Status::new(netvfs_bridge_proto::ErrorName::NotFound, "No such drive"))?;
+        drive.mount_point = if mount { format!("/run/media/user/{id}").into_bytes() } else { Vec::new() };
+        let point = drive.mount_point.clone();
+        drop(state);
+        Ok(point)
+    }
+}
+
+impl DriveSource for FakeDrives {
+    fn list(&self) -> LocalFuture<'_, Vec<Drive>> {
+        Box::pin(std::future::ready(self.state().drives.clone()))
+    }
+
+    fn mount<'a>(&'a self, id: &'a str) -> LocalFuture<'a, Result<Vec<u8>, Status>> {
+        Box::pin(std::future::ready(self.act(id, true)))
+    }
+
+    fn unmount<'a>(&'a self, id: &'a str) -> LocalFuture<'a, Result<(), Status>> {
+        Box::pin(std::future::ready(self.act(id, false).map(drop)))
+    }
+}
+
 // ------------------------------------------------------------- fixture
 
 /// The core's counters, read through its channel.
@@ -460,6 +531,8 @@ pub struct Fixture {
     pub nearby: FakeNearby,
     /// The settings handoff.
     pub launcher: RecordingLauncher,
+    /// The drives (none at the start).
+    pub drives: FakeDrives,
     link: CoreLink,
     bridge: Option<JoinHandle<ExitCode>>,
 }
@@ -477,6 +550,9 @@ pub struct Setup {
     pub handoff_conf: Option<String>,
     /// `files` never answers (`HangingAccounts`).
     pub hang_accounts: bool,
+    /// Pooled connections without work are closed after this (at the
+    /// core's next maintenance).
+    pub connection_idle: Duration,
 }
 
 impl Default for Setup {
@@ -487,6 +563,7 @@ impl Default for Setup {
             executable: None,
             handoff_conf: None,
             hang_accounts: false,
+            connection_idle: crate::locations::pool::CONNECTION_IDLE,
         }
     }
 }
@@ -542,7 +619,7 @@ impl Fixture {
             known_hosts_file: dir.join("known_hosts"),
             handoff_config: dir.join("handoff.conf"),
             idle_exit: setup.idle_exit,
-            connection_idle: crate::locations::pool::CONNECTION_IDLE,
+            connection_idle: setup.connection_idle,
             question_timeout: crate::locations::connector::QUESTION_TIMEOUT,
         };
         if let Some(conf) = &setup.handoff_conf {
@@ -551,13 +628,17 @@ impl Fixture {
         let accounts = FakeAccounts::default();
         accounts.state().accounts.push(FakeAccounts::fake_account(1));
         accounts.state().hang = setup.hang_accounts;
-        let (prompt, nearby, launcher) =
-            (FakePrompt::default(), FakeNearby::default(), RecordingLauncher::default());
+        let (prompt, nearby, launcher, drives) = (
+            FakePrompt::default(),
+            FakeNearby::default(),
+            RecordingLauncher::default(),
+            FakeDrives::default(),
+        );
         ConsentStore::new(&config.consent_file).set_consent(CONSUMER, setup.consent).expect("bridge.conf");
         let (ready, linked) = mpsc::channel::<CoreLink>();
         let services: MakeServices = {
-            let (accounts, prompt, nearby, launcher) =
-                (accounts.clone(), prompt.clone(), nearby.clone(), launcher.clone());
+            let (accounts, prompt, nearby, launcher, drives) =
+                (accounts.clone(), prompt.clone(), nearby.clone(), launcher.clone(), drives.clone());
             Box::new(move |link| {
                 drop(ready.send(link));
                 Box::pin(async move {
@@ -566,6 +647,7 @@ impl Fixture {
                         prompt: Box::new(prompt),
                         nearby: Box::new(nearby),
                         launcher: Box::new(launcher),
+                        drives: Rc::new(drives),
                     }
                 })
             })
@@ -594,6 +676,7 @@ impl Fixture {
             prompt,
             nearby,
             launcher,
+            drives,
             link,
             bridge: Some(bridge),
         }
@@ -602,6 +685,11 @@ impl Fixture {
     /// The accounts changed (the helper's `AccountChanged`).
     pub fn accounts_changed(&self) {
         assert!(self.link.accounts_changed(), "the core has stopped");
+    }
+
+    /// The drives changed (UDisks2's signals).
+    pub fn drives_changed(&self) {
+        assert!(self.link.drives_changed(), "the core has stopped");
     }
 
     /// Stores `consent` in `bridge.conf`, as netvfs-ui does.

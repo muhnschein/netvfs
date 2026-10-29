@@ -1,13 +1,20 @@
 {
-    "description": "Hello first, then consent and the locations in scope (XB-6, XB-7, XB-8)",
+    "description": "Hello first, then consent, the locations in scope and their connection state (XB-6, XB-7, XB-8, XB-12)",
     "consent": "granted",
     "steps": [
         { "call": "Hello", "sig": "s", "args": ["contract"], "reply": ["*"] },
         { "call": "GetConsent", "sig": "", "args": [], "reply": ["granted"] },
         { "call": "ListLocations", "sig": "", "args": [],
-          "reply": [[["account:1", "fake", "Fake 1", { "kind": "account", "host": "fake.example", "accountId": 1 }]]] },
+          "reply": [[["account:1", "fake", "Fake 1",
+                      { "kind": "account", "host": "fake.example", "accountId": 1, "state": "disconnected" }]]] },
         { "call": "Capabilities", "sig": "s", "args": ["account:1"], "reply": [["*", "*", "*"]] },
+        { "call": "ListLocations", "sig": "", "args": [],
+          "reply": [[["account:1", "fake", "Fake 1", { "state": "connected" }]]] },
+        { "signal": "LocationsChanged", "args": [] },
         { "call": "Disconnect", "sig": "s", "args": ["account:1"], "reply": [] },
+        { "call": "ListLocations", "sig": "", "args": [],
+          "reply": [[["account:1", "fake", "Fake 1", { "state": "disconnected" }]]] },
+        { "signal": "LocationsChanged", "args": [] },
         { "call": "Disconnect", "sig": "s", "args": ["account:2"], "error": "org.netvfs.Error.NotFound" },
         { "call": "RequestConsent", "sig": "", "args": [], "reply": [] }
     ]

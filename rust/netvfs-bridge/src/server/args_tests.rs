@@ -52,7 +52,13 @@ fn valid_message(name: &str) -> Message {
     let p: &[u8] = b"a";
     match name {
         "Hello" => message(name, &("x",)),
-        "GetConsent" | "RequestConsent" | "ListLocations" => message(name, &()),
+        "GetConsent"
+        | "RequestConsent"
+        | "GetFeatures"
+        | "ListLocations"
+        | "OpenStorageSettings"
+        | "ListDrives" => message(name, &()),
+        "Mount" | "Unmount" => message(name, &("mmcblk1p1",)),
         "Capabilities" | "Disconnect" | "ForgetAdHoc" | "OpenAccountSettings" => message(name, &(LOC,)),
         "ConnectAdHoc" => message(name, &("sftp://h/", p, none())),
         "Discover" => message(name, &(true,)),
@@ -437,6 +443,16 @@ fn identifiers() {
     assert!(
         matches!(validate("AddAccount", &("smb",)).unwrap(), Call::AddAccount { ref provider } if provider == "smb")
     );
+    // XB-20: a drive id is an object path element, nothing a path could hide in.
+    assert!(matches!(validate("Mount", &("sda1",)).unwrap(), Call::Mount { ref drive } if drive == "sda1"));
+    assert!(
+        matches!(validate("Unmount", &("dm_2d3",)).unwrap(), Call::Unmount { ref drive } if drive == "dm_2d3")
+    );
+    for bad in ["", "../sda1", "sda1/x", "sd a", "x".repeat(65).as_str()] {
+        assert_eq!(validate("Mount", &(bad,)).unwrap_err().message, "Invalid drive id", "{bad}");
+        assert_eq!(validate("Unmount", &(bad,)).unwrap_err().message, "Invalid drive id", "{bad}");
+    }
+    assert_eq!(error("Mount", &(1u32,)), ErrorName::ProtocolError);
     assert_eq!(validate("Capabilities", &("",)).unwrap_err().message, "Invalid location id");
     assert_eq!(error("Disconnect", &("a b",)), ErrorName::ProtocolError);
     assert_eq!(location_id("account:1".to_owned()).unwrap().as_str(), "account:1");

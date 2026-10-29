@@ -7,13 +7,15 @@
 use super::DEFAULT_CAPS;
 use super::args::{self, Dict};
 use super::fail::Fail;
-use super::state::{CancelOutcome, Consent, InfoValue, RecordedAnswer, Session, Shared};
+use super::state::{CancelOutcome, Consent, FakeDrive, InfoValue, RecordedAnswer, Session, Shared};
 use super::transfer::{self, Env};
 use super::tree::{Tree, TreeError};
 use crate::errors::ErrorName;
 use crate::limits::{MAX_HANDLES, MAX_PATH, RETRY_AFTER_MS};
-use crate::methods::{Lane, OBJECT_PATH, find_method};
-use crate::wire::{WireCapabilities, WireEntry, WireLocation, WireNearby, WireWalkItem};
+use crate::methods::{FEATURE_STORAGE_SETTINGS, Lane, OBJECT_PATH, find_method};
+use crate::wire::{
+    WireCapabilities, WireDrive, WireEntry, WireLocation, WireNearby, WireWalkItem, location_state,
+};
 use sha2::Digest as _;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -157,8 +159,24 @@ impl Iface {
         }
     }
 
-    fn tree<R>(&self, loc: &str, f: impl FnOnce(&mut Tree) -> Result<R, TreeError>) -> Result<R, Fail> {
+    /// A call that needs a connection of `loc`'s pool: the location is
+    /// connected from now on (XB-12), until `Disconnect`; a change is told.
+    fn reach(&self, loc: &str) -> Result<(), Fail> {
         self.require_location(loc)?;
+        self.set_state(loc, location_state::CONNECTED);
+        Ok(())
+    }
+
+    /// Sets `loc`'s state, and tells every client if it changed.
+    fn set_state(&self, loc: &str, state: &str) {
+        if self.shared.with(|s| s.set_state(loc, state, None)) {
+            let shared = Arc::clone(&self.shared);
+            tokio::spawn(async move { shared.broadcast_locations().await });
+        }
+    }
+
+    fn tree<R>(&self, loc: &str, f: impl FnOnce(&mut Tree) -> Result<R, TreeError>) -> Result<R, Fail> {
+        self.reach(loc)?;
         self.shared.with(|s| f(s.tree_mut(loc))).map_err(Fail::from)
     }
 
@@ -271,10 +289,12 @@ fn parse_adhoc(url: &str, opts: &args::AdHocOpts) -> Result<AdHocUrl, Fail> {
 }
 
 fn adhoc_info(p: &AdHocUrl) -> Vec<(String, InfoValue)> {
+    // The bridge shows an ad-hoc location once it has connected.
     let mut info = vec![
         ("kind".to_owned(), InfoValue::Str("adhoc".into())),
         ("host".to_owned(), InfoValue::Str(p.host.clone())),
         ("path".to_owned(), InfoValue::Bytes(p.path.clone())),
+        (location_state::KEY.to_owned(), InfoValue::Str(location_state::CONNECTED.into())),
     ];
     if let Some(port) = p.port {
         info.push(("port".to_owned(), InfoValue::Int(port)));
@@ -314,6 +334,11 @@ impl Iface {
         Ok(())
     }
 
+    async fn get_features(&self) -> Result<Vec<String>, Fail> {
+        self.begin("GetFeatures", None, "").await?;
+        Ok(self.shared.with(|s| s.features.clone()))
+    }
+
     // ---- Locations -------------------------------------------------------
 
     async fn list_locations(&self) -> Result<Vec<WireLocation>, Fail> {
@@ -325,7 +350,7 @@ impl Iface {
     async fn capabilities(&self, loc: String) -> Result<(WireCapabilities,), Fail> {
         let loc = args::location(&loc)?;
         self.begin("Capabilities", None, &loc).await?;
-        self.require_location(&loc)?;
+        self.reach(&loc)?;
         Ok((self.shared.with(|s| {
             s.caps.get(&loc).cloned().unwrap_or_else(|| WireCapabilities {
                 flags: DEFAULT_CAPS.iter().map(|f| (*f).to_owned()).collect(),
@@ -338,7 +363,9 @@ impl Iface {
     async fn disconnect(&self, loc: String) -> Result<(), Fail> {
         let loc = args::location(&loc)?;
         self.begin("Disconnect", None, &loc).await?;
-        self.require_location(&loc)
+        self.require_location(&loc)?;
+        self.set_state(&loc, location_state::DISCONNECTED);
+        Ok(())
     }
 
     // ---- Ad-hoc locations --------------------------------------------------
@@ -412,7 +439,7 @@ impl Iface {
         let lane = args::lane(&lane, Lane::Interactive)?;
         let batch = args::list_batch(batch)?;
         self.begin("List", Some(lane), &loc).await?;
-        self.require_location(&loc)?;
+        self.reach(&loc)?;
         let listing = self.tree(&loc, |t| t.list(&dir));
         Ok(self
             .start_job(&ctxt, move |env, req, cancel| transfer::run_list(env, req, listing, batch, cancel)))
@@ -588,7 +615,7 @@ impl Iface {
         let opts = args::transfer_opts(&opts, true)?;
         self.begin("Upload", Some(opts.lane), &loc).await?;
         let file = transfer::Source::new(std::fs::File::from(std::os::fd::OwnedFd::from(fd)))?;
-        self.require_location(&loc)?;
+        self.reach(&loc)?;
         Ok(self.start_job(&ctxt, move |env, job, cancel| {
             transfer::run_upload(env, job, cancel, loc, path, file, opts)
         }))
@@ -607,7 +634,7 @@ impl Iface {
         let opts = args::transfer_opts(&opts, false)?;
         self.begin("Download", Some(opts.lane), &loc).await?;
         let file = transfer::Source::new(std::fs::File::from(std::os::fd::OwnedFd::from(fd)))?;
-        self.require_location(&loc)?;
+        self.reach(&loc)?;
         Ok(self.start_job(&ctxt, move |env, job, cancel| {
             transfer::run_download(env, job, cancel, loc, path, file, opts)
         }))
@@ -628,6 +655,7 @@ impl Iface {
         let dst = args::path(&dst)?;
         let opts = args::copy_opts(&opts)?;
         self.begin("CopyAcross", None, &src_loc).await?;
+        // Copy jobs connect outside the pools: no state changes.
         self.require_location(&src_loc)?;
         self.require_location(&dst_loc)?;
         Ok(self.start_job(&ctxt, move |env, job, cancel| {
@@ -644,7 +672,7 @@ impl Iface {
         let loc = args::location(&loc)?;
         let path = args::path(&path)?;
         self.begin("RemoveTree", None, &loc).await?;
-        self.require_location(&loc)?;
+        self.reach(&loc)?;
         Ok(self
             .start_job(&ctxt, move |env, job, cancel| transfer::run_remove_tree(env, job, cancel, loc, path)))
     }
@@ -660,7 +688,7 @@ impl Iface {
         let root = args::path(&root)?;
         let opts = args::walk_opts(&opts)?;
         self.begin("Walk", None, &loc).await?;
-        self.require_location(&loc)?;
+        self.reach(&loc)?;
         Ok(self
             .start_job(&ctxt, move |env, job, cancel| transfer::run_walk(env, job, cancel, loc, root, opts)))
     }
@@ -708,12 +736,50 @@ impl Iface {
         Ok(())
     }
 
+    async fn open_storage_settings(&self) -> Result<(), Fail> {
+        self.begin("OpenStorageSettings", None, "").await?;
+        if !self.shared.with(|s| s.features.iter().any(|f| f == FEATURE_STORAGE_SETTINGS)) {
+            return Err(Fail::net(ErrorName::Unsupported, "No settings handoff is configured"));
+        }
+        self.shared.with(|s| s.handoffs.push("storage".to_owned()));
+        Ok(())
+    }
+
+    // ---- Drives ------------------------------------------------------------
+
+    async fn list_drives(&self) -> Result<Vec<WireDrive>, Fail> {
+        self.begin("ListDrives", None, "").await?;
+        Ok(self.shared.with(|s| s.drives.iter().map(FakeDrive::wire).collect()))
+    }
+
+    async fn mount(&self, drive: String) -> Result<Vec<u8>, Fail> {
+        let drive = args::drive(&drive)?;
+        self.begin("Mount", None, &drive).await?;
+        let (point, changed) = self.shared.with(|s| s.mount(&drive, true)).ok_or_else(no_drive)?;
+        if changed {
+            self.shared.broadcast_drives().await;
+        }
+        Ok(point)
+    }
+
+    async fn unmount(&self, drive: String) -> Result<(), Fail> {
+        let drive = args::drive(&drive)?;
+        self.begin("Unmount", None, &drive).await?;
+        let (_, changed) = self.shared.with(|s| s.mount(&drive, false)).ok_or_else(no_drive)?;
+        if changed {
+            self.shared.broadcast_drives().await;
+        }
+        Ok(())
+    }
+
     // ---- Signals -----------------------------------------------------------
 
     #[zbus(signal)]
     pub async fn consent_changed(ctxt: &SignalEmitter<'_>, consent: String) -> zbus::Result<()>;
     #[zbus(signal)]
     pub async fn locations_changed(ctxt: &SignalEmitter<'_>) -> zbus::Result<()>;
+    #[zbus(signal)]
+    pub async fn drives_changed(ctxt: &SignalEmitter<'_>) -> zbus::Result<()>;
     #[zbus(signal)]
     pub async fn nearby_changed(ctxt: &SignalEmitter<'_>, nearby: Vec<WireNearby>) -> zbus::Result<()>;
     #[zbus(signal)]
@@ -758,6 +824,10 @@ impl Iface {
     }
 }
 
+fn no_drive() -> Fail {
+    Fail::net(ErrorName::NotFound, "No such drive")
+}
+
 /// Signal context of a session, if its connection is up.
 pub(super) fn context(session: &Session) -> Option<SignalEmitter<'static>> {
     let conn = session.conn()?;
@@ -779,6 +849,15 @@ impl Shared {
             if let Some(ctx) = context(&session) {
                 // As above.
                 Iface::locations_changed(&ctx).await.ok();
+            }
+        }
+    }
+
+    pub async fn broadcast_drives(&self) {
+        for session in self.sessions_snapshot() {
+            if let Some(ctx) = context(&session) {
+                // A closed client simply misses the signal.
+                Iface::drives_changed(&ctx).await.ok();
             }
         }
     }

@@ -3,8 +3,9 @@
 //! with the Files service or an ad-hoc location it created (port of
 //! `location.cpp`), and [`Attention`] (XB-14).
 
+use super::state::ConnectionState;
 use crate::ffi::Params;
-use netvfs_bridge_proto::WireLocation;
+use netvfs_bridge_proto::{WireLocation, location_state};
 use std::collections::HashMap;
 use std::fmt;
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
@@ -183,13 +184,18 @@ impl LocationSpec {
 
     /// The `a{sv}` of `ListLocations`: `kind`, `host`, `port` (when set),
     /// `user` (when set), `path`, `url` (when `format_url` gives one; asked
-    /// once per spec), and for accounts `accountId` and `attention` (when
-    /// set).
+    /// once per spec), `state` (of `state`, XB-12) with `stateError` when
+    /// it failed, and for accounts `accountId` and `attention` (when set).
     pub fn info(
         &self,
+        state: ConnectionState,
         format_url: impl FnOnce(&Params, &[u8]) -> Option<String>,
     ) -> HashMap<String, OwnedValue> {
         let mut map = HashMap::new();
+        map.insert(location_state::KEY.to_owned(), text(state.as_str()));
+        if let Some(error) = state.error() {
+            map.insert(location_state::ERROR_KEY.to_owned(), text(error.as_str()));
+        }
         let kind = if self.account_id().is_some() { "account" } else { "adhoc" };
         map.insert("kind".to_owned(), text(kind));
         map.insert("host".to_owned(), text(&self.params.host));
@@ -216,13 +222,17 @@ impl LocationSpec {
         map
     }
 
-    /// The `(sssa{sv})` of `ListLocations`.
-    pub fn wire(&self, format_url: impl FnOnce(&Params, &[u8]) -> Option<String>) -> WireLocation {
+    /// The `(sssa{sv})` of `ListLocations`, in connection state `state`.
+    pub fn wire(
+        &self,
+        state: ConnectionState,
+        format_url: impl FnOnce(&Params, &[u8]) -> Option<String>,
+    ) -> WireLocation {
         WireLocation {
             id: self.id.clone(),
             provider: self.provider.clone(),
             name: self.name.clone(),
-            info: self.info(format_url),
+            info: self.info(state, format_url),
         }
     }
 }
@@ -337,7 +347,7 @@ mod tests {
             asked.set(asked.get() + 1);
             Some(format!("{}://{}{}", p.provider, p.host, String::from_utf8_lossy(path)))
         };
-        let info = spec.info(format);
+        let info = spec.info(ConnectionState::Failed(ErrorName::AuthFailed), format);
         assert_eq!(string(&info, "kind").as_deref(), Some("account"));
         assert_eq!(string(&info, "host").as_deref(), Some("srv"));
         assert_eq!(int(&info, "port"), Some(2222));
@@ -346,38 +356,51 @@ mod tests {
         assert_eq!(string(&info, "url").as_deref(), Some("sftp://srv/home/\u{fffd}"));
         assert_eq!(int(&info, "accountId"), Some(5));
         assert_eq!(string(&info, "attention").as_deref(), Some("auth-failed"));
-        assert_eq!(info.len(), 8);
+        assert_eq!(string(&info, "state").as_deref(), Some("failed"));
+        assert_eq!(string(&info, "stateError").as_deref(), Some("AuthFailed"));
+        assert_eq!(info.len(), 10);
         // The URL is formatted once per spec.
-        let again = spec.info(|_: &Params, _: &[u8]| -> Option<String> { panic!("formatted twice") });
+        let again = spec.info(ConnectionState::Connected, |_: &Params, _: &[u8]| -> Option<String> {
+            panic!("formatted twice")
+        });
         assert_eq!(string(&again, "url").as_deref(), Some("sftp://srv/home/\u{fffd}"));
         assert_eq!(asked.get(), 1);
+        // Only a failed state has an error.
+        assert_eq!(string(&again, "state").as_deref(), Some("connected"));
+        assert!(!again.contains_key("stateError"));
         // No attention, no port, no user, no URL.
         spec = LocationSpec::account(5, "sftp", "Five", params("srv", 0), Vec::new(), Attention::None);
         spec.params.username.clear();
-        let info = spec.info(|_: &Params, _: &[u8]| None);
+        let info = spec.info(ConnectionState::Disconnected, |_: &Params, _: &[u8]| None);
         let mut keys: Vec<&str> = info.keys().map(String::as_str).collect();
         keys.sort_unstable();
-        assert_eq!(keys, ["accountId", "host", "kind", "path"]);
+        assert_eq!(keys, ["accountId", "host", "kind", "path", "state"]);
+        assert_eq!(string(&info, "state").as_deref(), Some("disconnected"));
     }
 
     #[test]
     fn info_of_an_ad_hoc_location_and_wire() {
         let spec = LocationSpec::ad_hoc("adhoc:2", "Two", params("h", 21), b"/x".to_vec(), None);
-        let info = spec.info(|_: &Params, _: &[u8]| Some(String::new()));
+        let info = spec.info(ConnectionState::Connecting, |_: &Params, _: &[u8]| Some(String::new()));
         assert_eq!(string(&info, "kind").as_deref(), Some("adhoc"));
+        assert_eq!(string(&info, "state").as_deref(), Some("connecting"));
         // An empty URL is no URL; ad-hoc locations have no account id.
         assert!(
             !info.contains_key("url") && !info.contains_key("accountId") && !info.contains_key("attention")
         );
-        let wire = spec.wire(|_: &Params, _: &[u8]| Some("sftp://h:21/x".into()));
+        let failed = ConnectionState::Failed(ErrorName::NetworkUnreachable);
+        let wire = spec.wire(failed, |_: &Params, _: &[u8]| Some("sftp://h:21/x".into()));
         assert_eq!(
             (wire.id.as_str(), wire.provider.as_str(), wire.name.as_str()),
             ("adhoc:2", "sftp", "Two")
         );
+        assert_eq!(string(&wire.info, "state").as_deref(), Some("failed"));
+        assert_eq!(string(&wire.info, "stateError").as_deref(), Some("NetworkUnreachable"));
         // The cache holds what the first call gave: no URL.
         assert!(!wire.info.contains_key("url"));
         let fresh = LocationSpec::ad_hoc("adhoc:2", "Two", params("h", 21), b"/x".to_vec(), None);
-        let wire = fresh.wire(|_: &Params, _: &[u8]| Some("sftp://h:21/x".into()));
+        let wire =
+            fresh.wire(ConnectionState::Connected, |_: &Params, _: &[u8]| Some("sftp://h:21/x".into()));
         assert_eq!(string(&wire.info, "url").as_deref(), Some("sftp://h:21/x"));
     }
 

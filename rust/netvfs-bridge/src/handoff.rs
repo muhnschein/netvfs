@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! The settings handoff (SPEC-v2 XB-15): `OpenAccountSettings` and
-//! `AddAccount` call the platform's settings D-Bus interface on the session
-//! bus, as a table in `handoff.conf` (QSettings INI syntax) says:
+//! The settings handoff (SPEC-v2 XB-15): `OpenAccountSettings`,
+//! `AddAccount` and `OpenStorageSettings` call the platform's settings D-Bus
+//! interface on the session bus, as a table in `handoff.conf` (QSettings INI
+//! syntax) says:
 //!
 //! ```ini
 //! [OpenAccountSettings]
@@ -26,6 +27,7 @@ pub const DEFAULT_CONFIG: &str = "/usr/share/netvfs/bridge/handoff.conf";
 
 const OPEN_ACCOUNT_SETTINGS: &str = "OpenAccountSettings";
 const ADD_ACCOUNT: &str = "AddAccount";
+const OPEN_STORAGE_SETTINGS: &str = "OpenStorageSettings";
 
 /// One argument of a handoff call.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -92,6 +94,21 @@ impl<L: Launcher> Handoff<L> {
     /// As [`Self::resolve`] and [`Launcher::launch`].
     pub fn add_account(&self, provider: &str) -> Result<(), Status> {
         self.run(ADD_ACCOUNT, 0, provider)
+    }
+
+    /// `OpenStorageSettings()`; `{accountId}` is `0` and `{provider}` empty.
+    ///
+    /// # Errors
+    /// As [`Self::resolve`] and [`Launcher::launch`].
+    pub fn open_storage_settings(&self) -> Result<(), Status> {
+        self.run(OPEN_STORAGE_SETTINGS, 0, "")
+    }
+
+    /// Whether the table has a valid `OpenStorageSettings` entry: the
+    /// feature `storage-settings` of `GetFeatures` (XB-19).
+    #[must_use]
+    pub fn offers_storage_settings(&self) -> bool {
+        self.resolve(OPEN_STORAGE_SETTINGS, 0, "").is_ok()
     }
 
     fn run(&self, group: &str, account_id: i32, provider: &str) -> Result<(), Status> {
@@ -321,6 +338,45 @@ mod tests {
                 ("com.jolla.settings", "/com/jolla/settings/ui", "showAccounts", 0)
             );
         }
+        // jolla-settings' showPage(path) with the Storage page's entry path.
+        assert!(shipped.offers_storage_settings());
+        shipped.open_storage_settings().unwrap();
+        let storage = shipped.launcher.0.borrow().clone();
+        assert_eq!(
+            storage,
+            [HandoffCall {
+                service: "com.jolla.settings".into(),
+                path: "/com/jolla/settings/ui".into(),
+                interface: "com.jolla.settings.ui".into(),
+                method: "showPage".into(),
+                arguments: vec![HandoffArg::Str("system_settings/system/storage".into())],
+            }]
+        );
+    }
+
+    #[test]
+    fn storage_settings_entry() {
+        let dir = TempDir::new();
+        // A table without the entry offers no storage settings.
+        let accounts_only = table(&dir, &entry(""));
+        assert!(!accounts_only.offers_storage_settings());
+        let status = accounts_only.open_storage_settings().unwrap_err();
+        assert_eq!(status.to_string(), "Unsupported: No settings handoff is configured");
+        // An invalid entry neither.
+        let invalid = table(&dir, "[OpenStorageSettings]\nService=s.x\nPath=p\nInterface=i.x\nMethod=m\n");
+        assert!(!invalid.offers_storage_settings());
+        assert_eq!(invalid.open_storage_settings().unwrap_err().name, ErrorName::InvalidName);
+        assert!(invalid.launcher.0.borrow().is_empty());
+        // Placeholders: no account, no provider.
+        let storage = table(
+            &dir,
+            "[OpenStorageSettings]\nService=s.x\nPath=/p\nInterface=i.x\nMethod=m\nArguments=i:{accountId},s:{provider}\n",
+        );
+        assert!(storage.offers_storage_settings());
+        storage.open_storage_settings().unwrap();
+        let calls = storage.launcher.0.borrow().clone();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].arguments, [HandoffArg::Int(0), HandoffArg::Str(String::new())]);
     }
 
     #[test]

@@ -426,6 +426,24 @@ mod tests {
     }
 
     #[test]
+    fn a_der_length_of_usize_max_is_refused() {
+        // Fuzz target spnego's reproducer (rust/fuzz/seeds/spnego): inside the NegTokenResp, a
+        // DER length of 8 bytes 0xff (usize::MAX). picky-asn1-der adds the header length to
+        // it (rust/vendor/picky-asn1-der); overflow there must be an error, not a panic. The
+        // final token goes through the same decode (sspi's NegTokenTarg1).
+        let mut token = vec![0xa1, 0x23, 0x61, 0x2b, 0xa2, 0x00, 0x25, 0x88];
+        token.resize(108, 0xff);
+        let account = Account::User {
+            user: "alice".into(),
+            domain: "CORP".into(),
+            password: Zeroizing::new("pw".into()),
+        };
+        let (mut a, _) = Authenticator::start(&account, "server").unwrap();
+        let e = a.step(&token).unwrap_err();
+        assert!(matches!(e, Error::Policy(_)), "{e}");
+    }
+
+    #[test]
     fn anonymous_flow_checks_the_challenge() {
         let (mut a, first) = Authenticator::start(&Account::Anonymous, "h").unwrap();
         assert_eq!(first, anonymous_negotiate());

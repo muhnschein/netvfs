@@ -15,8 +15,14 @@
 //! (`closeOneIdle`), whose slot counts as free at once. Nothing here waits
 //! for a thread: stopped workers are kept until they have finished and are
 //! dropped then (reaped on [`PoolSet::submit`] and [`PoolSet::maintain`]).
+//!
+//! [`Pool::state`] is the location's connection state
+//! ([`ConnectionState`]) from its live connections and its
+//! [`StateTracker`]; every change of it raises the set's [`StateSignal`]:
+//! a worker's phase or attempt, and a connection stopped here.
 
 use super::spec::LocationSpec;
+use super::state::{ConnectionState, Phase, StateSignal, StateTracker};
 use super::worker::{Backend, Turn, Work, Worker, WorkerId};
 use super::{TaskContext, canceled};
 use crate::Status;
@@ -119,6 +125,7 @@ pub struct Pool<B: Backend> {
     workers: Vec<Worker<B>>,
     retired: Vec<Retired<B>>,
     pending: Vec<Pending<B>>,
+    tracker: Arc<StateTracker>,
 }
 
 impl<B: Backend> fmt::Debug for Pool<B> {
@@ -133,9 +140,10 @@ impl<B: Backend> fmt::Debug for Pool<B> {
 }
 
 impl<B: Backend> Pool<B> {
-    fn new(spec: Arc<LocationSpec>) -> Self {
+    fn new(spec: Arc<LocationSpec>, signal: StateSignal) -> Self {
         let host = spec.host_key();
-        Self { spec, host, workers: Vec::new(), retired: Vec::new(), pending: Vec::new() }
+        let tracker = StateTracker::new(signal);
+        Self { spec, host, workers: Vec::new(), retired: Vec::new(), pending: Vec::new(), tracker }
     }
 
     /// The location.
@@ -169,6 +177,26 @@ impl<B: Backend> Pool<B> {
         self.pending.is_empty() && self.workers.iter().all(|w| w.idle_since().is_some())
     }
 
+    /// The location's connection state: connected while one of its live
+    /// connections is established, else connecting while one is being
+    /// established, else failed if the last attempt failed, else
+    /// disconnected. Work waiting for a host slot connects nothing yet.
+    #[must_use]
+    pub fn state(&self) -> ConnectionState {
+        let mut connecting = false;
+        for w in &self.workers {
+            match w.phase() {
+                Phase::Established => return ConnectionState::Connected,
+                Phase::Connecting => connecting = true,
+                Phase::Closed => {}
+            }
+        }
+        if connecting {
+            return ConnectionState::Connecting;
+        }
+        self.tracker.failure().map_or(ConnectionState::Disconnected, ConnectionState::Failed)
+    }
+
     /// The least loaded connection of `lane` (or of any lane).
     fn least_loaded(&self, lane: Lane, any_lane: bool) -> Option<usize> {
         let mut best: Option<(usize, usize)> = None;
@@ -198,20 +226,23 @@ impl<B: Backend> Pool<B> {
     }
 
     /// Stops the connection at `index`; `counted`: its slot stays taken
-    /// until the thread has finished.
+    /// until the thread has finished. It no longer counts for the state.
     fn retire(&mut self, index: usize, counted: bool) {
         if index < self.workers.len() {
             let worker = self.workers.remove(index);
             worker.stop();
             self.retired.push(Retired { worker, host: self.host.clone(), counted });
+            self.tracker.changed();
         }
     }
 
-    /// Stops every connection (`Disconnect`).
+    /// Stops every connection (`Disconnect`); a failed attempt before is
+    /// forgotten: the location is disconnected now.
     fn stop_all(&mut self) {
         while !self.workers.is_empty() {
             self.retire(0, true);
         }
+        self.tracker.clear();
     }
 
     /// Stops one idle connection without handles, its slot free at once
@@ -268,6 +299,8 @@ pub struct PoolSet<B: Backend> {
     pools: Vec<Pool<B>>,
     /// Stopped workers of pools that went away.
     orphans: Vec<Retired<B>>,
+    /// Raised when a pool's state may have changed.
+    signal: StateSignal,
 }
 
 impl<B: Backend> fmt::Debug for PoolSet<B> {
@@ -282,10 +315,24 @@ impl<B: Backend> fmt::Debug for PoolSet<B> {
 
 impl<B: Backend> PoolSet<B> {
     /// No pools; connections through `backend`, at most `per_host` per
-    /// host.
+    /// host. Changes of the pools' states are signalled to nobody.
     #[must_use]
     pub fn new(backend: Arc<B>, per_host: usize) -> Self {
-        Self { backend, hosts: HostRegistry::new(per_host), pools: Vec::new(), orphans: Vec::new() }
+        Self {
+            backend,
+            hosts: HostRegistry::new(per_host),
+            pools: Vec::new(),
+            orphans: Vec::new(),
+            signal: StateSignal::default(),
+        }
+    }
+
+    /// The same, with changes of the pools' states raising `signal`; set
+    /// before the first pool is added.
+    #[must_use]
+    pub fn with_signal(mut self, signal: StateSignal) -> Self {
+        self.signal = signal;
+        self
     }
 
     /// The backend the connections use.
@@ -321,7 +368,7 @@ impl<B: Backend> PoolSet<B> {
         if self.index(&spec.id).is_some() {
             return false;
         }
-        self.pools.push(Pool::new(spec));
+        self.pools.push(Pool::new(spec, self.signal.clone()));
         true
     }
 
@@ -393,7 +440,8 @@ impl<B: Backend> PoolSet<B> {
                 || (self.evict_idle(&host, index) && self.hosts.try_acquire(&host, 1)))
         {
             let Some(pool) = self.pools.get_mut(index) else { return Ok(None) };
-            match Worker::start(Arc::clone(&self.backend), Arc::clone(&pool.spec), lane) {
+            let tracker = Arc::clone(&pool.tracker);
+            match Worker::start(Arc::clone(&self.backend), Arc::clone(&pool.spec), lane, tracker) {
                 Ok(worker) => {
                     pool.workers.push(worker);
                     return Ok(Some(pool.workers.len().saturating_sub(1)));

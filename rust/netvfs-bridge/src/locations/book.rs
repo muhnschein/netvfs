@@ -11,8 +11,9 @@
 
 use super::TaskContext;
 use super::connector::PinStore;
-use super::pool::PoolSet;
+use super::pool::{Pool, PoolSet};
 use super::spec::{LocationKind, LocationSpec, ad_hoc_location_id};
+use super::state::ConnectionState;
 use super::worker::{Backend, Turn, Work, WorkerId};
 use crate::status::Status;
 use netvfs_bridge_proto::ErrorName;
@@ -148,6 +149,22 @@ impl<B: Backend> LocationBook<B> {
     #[must_use]
     pub fn find(&self, id: &str) -> Option<&Arc<LocationSpec>> {
         self.accounts.iter().find(|a| a.id == id).or_else(|| self.ad_hoc.get(id))
+    }
+
+    /// The connection state of the visible location `id` (XB-12):
+    /// disconnected without a pool.
+    #[must_use]
+    pub fn state(&self, id: &str) -> ConnectionState {
+        if self.connecting.contains_key(id) {
+            return ConnectionState::Disconnected;
+        }
+        self.pools.get(id).map_or(ConnectionState::Disconnected, Pool::state)
+    }
+
+    /// The connection states of what `ListLocations` shows, by id.
+    #[must_use]
+    pub fn states(&self) -> BTreeMap<String, ConnectionState> {
+        self.visible().map(|spec| (spec.id.clone(), self.state(&spec.id))).collect()
     }
 
     /// Whether the visible location `id` has a pool (`existing`).

@@ -8,4 +8,9 @@ OpenAccountSettings/Interface|QString|com.jolla.settings.ui|1|com.jolla.settings
 OpenAccountSettings/Method|QString|showAccounts|1|showAccounts
 OpenAccountSettings/Path|QString|/com/jolla/settings/ui|1|/com/jolla/settings/ui
 OpenAccountSettings/Service|QString|com.jolla.settings|1|com.jolla.settings
+OpenStorageSettings/Arguments|QString|s:system_settings/system/storage|1|s:system_settings/system/storage
+OpenStorageSettings/Interface|QString|com.jolla.settings.ui|1|com.jolla.settings.ui
+OpenStorageSettings/Method|QString|showPage|1|showPage
+OpenStorageSettings/Path|QString|/com/jolla/settings/ui|1|/com/jolla/settings/ui
+OpenStorageSettings/Service|QString|com.jolla.settings|1|com.jolla.settings
 status|2
