@@ -58,9 +58,10 @@ export NETVFS_TEST_SANITIZER=address
 # Third-party leaks only (Qt, libaccounts), as for the C++ sanitizer job.
 export LSAN_OPTIONS="suppressions=$root/tools/sanitizer/lsan.supp:print_suppressions=0"
 export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$PWD/target/asan}"
+# ASan is heavy: one test per core, not the profile's 32.
 run() {
     cargo +"$toolchain" nextest run -Zbuild-std --target "$host" --locked --workspace --all-features \
-        --profile ci "$@"
+        --profile ci --test-threads num-cpus "$@"
 }
 # The helper confined by its own seccomp filter cannot be stopped by
 # LeakSanitizer (no ptrace), so the sandbox tests run with ASan alone.

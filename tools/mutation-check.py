@@ -19,6 +19,12 @@ import subprocess
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+FAST_RELEASE = {
+    "CARGO_PROFILE_RELEASE_LTO": "off",
+    "CARGO_PROFILE_RS_RELEASE_LTO": "off",
+    "CARGO_PROFILE_RELEASE_CODEGEN_UNITS": "16",
+    "CARGO_PROFILE_RELEASE_INCREMENTAL": "true",
+}
 
 
 def run(cmd, env=None):
@@ -35,6 +41,11 @@ def main():
 
     env = dict(os.environ)
     env.setdefault("QT_QPA_PLATFORM", "offscreen")
+    # Each mutant rebuilds: release Rust without LTO, 16 codegen units,
+    # incremental (~35 s down to ~6 s a mutant); same code, only slower to
+    # run. ci.yml's mutation job sets the same.
+    for name, value in FAST_RELEASE.items():
+        env.setdefault(name, value)
     survivors = []
     total = 0
     for path in files:

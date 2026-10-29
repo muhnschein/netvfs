@@ -2,8 +2,13 @@
 # a flaky test fails the build instead of hiding.
 [profile.default]
 slow-timeout = { period = "60s", terminate-after = 5 }
+# Tests mostly wait on sockets, child processes, timers: 32 at once, whatever
+# the cores (4 cores: 14 s down to 8 s). Makefile drops to one per core under
+# SANITIZE=1.
+test-threads = 32
 
 [profile.ci]
+test-threads = 32
 retries = 0
 fail-fast = false
 failure-output = "immediate-final"
