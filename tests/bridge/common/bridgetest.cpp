@@ -37,6 +37,24 @@ bool spin(const std::function<bool()> &done, int timeoutMs)
     return true;
 }
 
+// A stream socket listens at `path`: socket file exists after bind(), before
+// listen(), and a connect in between is refused. /proc/net/unix rows: Num
+// RefCount Protocol Flags Type St Inode Path; __SO_ACCEPTCON 0x10000.
+bool listening(const QString &path)
+{
+    QFile table(QStringLiteral("/proc/net/unix"));
+    if (!table.open(QIODevice::ReadOnly))
+        return false;
+    const QList<QByteArray> rows = table.readAll().split('\n');
+    for (int i = 1; i < rows.size(); ++i) {
+        const QList<QByteArray> fields = rows.at(i).simplified().split(' ');
+        if (fields.size() == 8 && (fields.at(3).toUInt(nullptr, 16) & 0x10000) && fields.at(4) == "0001"
+            && QString::fromLocal8Bit(fields.at(7)) == path)
+            return true;
+    }
+    return false;
+}
+
 bool writeFile(const QString &path, const QByteArray &content)
 {
     QDir().mkpath(QFileInfo(path).absolutePath());
@@ -281,7 +299,7 @@ bool BridgeProcess::start()
     if (!m_process.waitForStarted(10000))
         return false;
     const QString socket = m_dir.filePath(QStringLiteral("bridge.sock"));
-    return spin([&]() { return QFileInfo::exists(socket) || m_process.state() == QProcess::NotRunning; }, 10000)
+    return spin([&]() { return listening(socket) || m_process.state() == QProcess::NotRunning; }, 10000)
         && m_process.state() == QProcess::Running;
 }
 
