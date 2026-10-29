@@ -152,7 +152,8 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    # bridge list: 41-58 min seen; cap leaves room for slow runners.
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
