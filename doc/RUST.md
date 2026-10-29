@@ -154,7 +154,7 @@ prebuilt server):
 | Step | Script |
 |---|---|
 | Lift `/opt/cross` (gcc 13 for `aarch64-meego-linux-gnu`, i486 binaries), the host libraries it loads and the target sysroot out of the pinned 5.2.0.15 SDK image; add the binutils names gcc looks for, a linker wrapper and an unversioned `libsqlite3.so` | `tools/ci/lift-sdk.sh <image> <target> <dir>` |
-| `cargo build --release` for `aarch64-unknown-linux-gnu` with that linker, PIE, full RELRO, `-z now`, no executable stack; `libnetvfs-rs.so` the same way with its own profile (`--profile rs-release`, no PIE: a shared library) | `tools/ci/cross-build.sh <dir> rust/prebuilt` |
+| `cargo build --release` for `aarch64-unknown-linux-gnu` with that linker, PIE, full RELRO, `-z now`, no executable stack, cargo home mapped to a fixed name (reproducible, SPEC P-8); `libnetvfs-rs.so` the same way with its own profile (`--profile rs-release`, no PIE: a shared library) | `tools/ci/cross-build.sh <dir> rust/prebuilt` |
 | The workspace's tests for the target under `qemu-aarch64-static`, against the target's glibc and SQLite (the confinement tests run natively only) | `tools/ci/cross-build.sh <dir> <out> test` |
 | The cross-built helper's answers to `list` and `files` equal the host build's, byte for byte; the cross-built bridge starts and gets as far as loading its C ABI | `tools/ci/cross-smoke.sh <dir> rust/prebuilt/netvfs-accounts rust/prebuilt/netvfs-bridge` |
 | NEEDED (the helper: libc, libgcc_s, libsqlite3; the bridge: libc, libgcc_s, libm), highest GLIBC symbol version (the target's glibc is the floor), PIE, RELRO, BIND_NOW, NX stack | `tools/ci/check-linked-libs.sh`, from `tools/ci/check-rpm.sh` on the packaged binaries |

@@ -33,6 +33,10 @@ export SQLITE3_STATIC=0
 hardening="-C relro-level=full -C link-arg=-Wl,-z,now -C link-arg=-Wl,-z,noexecstack -C link-arg=-Wl,--as-needed"
 export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS="$hardening"
 export CARGO_TARGET_DIR="$out/target"
+# Reproducible (SPEC P-8): cargo home = only build path in release binaries
+# (registry crates' panic locations); workspace sources are relative already.
+# No spaces in it: RUSTFLAGS splits.
+remap="--remap-path-prefix=${CARGO_HOME:-$HOME/.cargo}=/cargo"
 
 cd "$root/rust"
 rustup target add "$triple" > /dev/null
@@ -51,13 +55,14 @@ if [ "$mode" = test ]; then
     cargo test --locked -p netvfs-bridge --lib --target "$triple" -- --exact "$flow"
     exit 0
 fi
-CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS="-C relocation-model=pie $hardening" \
+CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS="-C relocation-model=pie $hardening $remap" \
     cargo build --release --locked --workspace --target "$triple" --bins
 for bin in netvfs-bridge netvfs-accounts; do
     cp -f "$CARGO_TARGET_DIR/$triple/release/$bin" "$out/$bin"
 done
 # libnetvfs-rs.so with its own profile (rs-release: panics unwind to the
 # table, fat LTO; src/backends/rs/rs.pro).
-cargo build --profile rs-release --locked -p netvfs-backend --lib --target "$triple"
+CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS="$hardening $remap" \
+    cargo build --profile rs-release --locked -p netvfs-backend --lib --target "$triple"
 cp -f "$CARGO_TARGET_DIR/$triple/rs-release/libnetvfs_rs.so" "$out/libnetvfs-rs.so"
 ls -l "$out"
