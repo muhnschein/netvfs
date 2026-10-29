@@ -15,8 +15,11 @@ exclude = ["fuzz", "vendor"]
 
 # vendor/ssh-key/README.netvfs.md: ssh-key 0.7.0-rc.11 (russh's key format
 # crate), with ECDSA private scalars shorter than the field size accepted.
+# vendor/picky-asn1-der/README.netvfs.md: picky-asn1-der 0.5.7 (sspi's DER
+# decoder), with a DER length near usize::MAX an error, not an overflow.
 [patch.crates-io]
 ssh-key = { path = "vendor/ssh-key" }
+picky-asn1-der = { path = "vendor/picky-asn1-der" }
 
 [workspace.package]
 version = "0.6.0"

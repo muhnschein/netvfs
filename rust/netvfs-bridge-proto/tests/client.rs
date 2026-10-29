@@ -149,6 +149,8 @@ async fn listing_signals_arrive_in_order() {
                 assert_eq!((r, error.as_str()), (req, ""));
                 break;
             }
+            // The listing connected the location: its state is told.
+            Signal::LocationsChanged => {}
             other => panic!("unexpected {other:?}"),
         }
     }
@@ -267,4 +269,120 @@ async fn closing_the_connection_ends_it() {
     conn.close().await;
     let e = BridgeError::from(conn.proxy().list_locations().await.unwrap_err());
     assert!(matches!(e, BridgeError::Disconnected(_)), "{e:?}");
+}
+
+/// `state` and `stateError` of `loc` in `ListLocations`.
+async fn state_of(conn: &netvfs_bridge_proto::Connection, loc: &str) -> (String, Option<String>) {
+    let locations = conn.proxy().list_locations().await.unwrap();
+    let info = &locations.iter().find(|l| l.id == loc).unwrap().info;
+    let text = |key: &str| info.get(key).and_then(|v| netvfs_bridge_proto::value_str(v));
+    (text("state").unwrap(), text("stateError"))
+}
+
+/// The next `LocationsChanged`, skipping other signals.
+async fn locations_changed(signals: &mut SignalStream) {
+    while !matches!(next_signal(signals).await, Signal::LocationsChanged) {}
+}
+
+#[tokio::test]
+async fn connection_states_follow_use_disconnect_and_the_script() {
+    let fake = fake_with_account().await;
+    let conn = fake.connect().await.unwrap();
+    let mut signals = conn.signals();
+    hello(&conn).await;
+    let s = |state: &str, error: Option<&str>| (state.to_owned(), error.map(str::to_owned));
+    assert_eq!(state_of(&conn, "account:1").await, s("disconnected", None));
+    // A call that needs a connection connects it, and tells.
+    conn.proxy().capabilities("account:1").await.unwrap();
+    locations_changed(&mut signals).await;
+    assert_eq!(state_of(&conn, "account:1").await, s("connected", None));
+    conn.proxy().disconnect("account:1").await.unwrap();
+    locations_changed(&mut signals).await;
+    assert_eq!(state_of(&conn, "account:1").await, s("disconnected", None));
+    // Scripted: a failure with its error, told once.
+    fake.set_state("account:1", "failed", Some("AuthFailed")).await;
+    locations_changed(&mut signals).await;
+    assert_eq!(state_of(&conn, "account:1").await, s("failed", Some("AuthFailed")));
+    fake.set_state("account:1", "failed", Some("AuthFailed")).await;
+    conn.proxy().stat("account:1", b"", true, "").await.unwrap();
+    locations_changed(&mut signals).await;
+    assert_eq!(state_of(&conn, "account:1").await, s("connected", None));
+    // Work on a connected location tells nothing more.
+    conn.proxy().stat("account:1", b"", true, "").await.unwrap();
+    let quiet = tokio::time::timeout(Duration::from_millis(200), signals.next()).await;
+    assert!(quiet.is_err(), "{quiet:?}");
+    // A connected ad-hoc location.
+    let loc = conn.proxy().connect_ad_hoc("sftp://h/", b"", &OptsBuilder::new().build()).await.unwrap();
+    assert_eq!(state_of(&conn, &loc).await, s("connected", None));
+}
+
+#[tokio::test]
+async fn features_and_the_storage_handoff_need_no_consent() {
+    // XB-19, XB-15.
+    let fake = fake_with_account().await;
+    fake.set_consent(netvfs_bridge_proto::fake::Consent::Denied).await;
+    let conn = fake.connect().await.unwrap();
+    hello(&conn).await;
+    assert_eq!(conn.proxy().get_features().await.unwrap(), ["storage-settings", "drives"]);
+    conn.proxy().open_storage_settings().await.unwrap();
+    assert_eq!(fake.handoffs(), ["storage"]);
+    // A bridge without the handoff entry.
+    fake.set_features(&[]);
+    assert!(conn.proxy().get_features().await.unwrap().is_empty());
+    let e = BridgeError::from(conn.proxy().open_storage_settings().await.unwrap_err());
+    assert_eq!(e.netvfs_name(), Some("Unsupported"));
+    assert_eq!(fake.handoffs(), ["storage"]);
+}
+
+#[tokio::test]
+async fn drives_are_listed_mounted_and_unmounted_without_consent() {
+    // XB-20.
+    use netvfs_bridge_proto::fake::FakeDrive;
+    use netvfs_bridge_proto::{drive_info, value_i64, value_str};
+    let fake = fake_with_account().await;
+    fake.set_consent(netvfs_bridge_proto::fake::Consent::Denied).await;
+    let conn = fake.connect().await.unwrap();
+    hello(&conn).await;
+    let mut signals = conn.signals();
+    fake.set_drives(vec![
+        FakeDrive::new("mmcblk1p1", "CARD", "sd", 64),
+        FakeDrive::new("sda1", "", "usb", 8),
+    ])
+    .await;
+    assert!(changed(&mut signals).await);
+    let drives = conn.proxy().list_drives().await.unwrap();
+    let ids: Vec<&str> = drives.iter().map(|d| d.id.as_str()).collect();
+    assert_eq!(ids, ["mmcblk1p1", "sda1"]);
+    assert_eq!(drives[0].label, "CARD");
+    assert!(drives[0].mount_point.is_empty());
+    assert_eq!(value_str(&drives[0].info[drive_info::KIND]).as_deref(), Some("sd"));
+    assert_eq!(value_i64(&drives[0].info[drive_info::SIZE]), Some(64));
+
+    assert_eq!(conn.proxy().mount("mmcblk1p1").await.unwrap(), b"/run/media/user/CARD");
+    assert!(changed(&mut signals).await);
+    // Mounted already: the same place, no change.
+    assert_eq!(conn.proxy().mount("mmcblk1p1").await.unwrap(), b"/run/media/user/CARD");
+    assert_eq!(conn.proxy().mount("sda1").await.unwrap(), b"/run/media/user/sda1");
+    conn.proxy().unmount("mmcblk1p1").await.unwrap();
+    conn.proxy().unmount("mmcblk1p1").await.unwrap();
+    assert!(fake.drives()[0].mount_point.is_empty());
+
+    let e = BridgeError::from(conn.proxy().mount("sdb1").await.unwrap_err());
+    assert_eq!(e.netvfs_name(), Some("NotFound"));
+    let e = BridgeError::from(conn.proxy().unmount("../sda1").await.unwrap_err());
+    assert!(matches!(e, BridgeError::InvalidArgs(_)), "{e:?}");
+}
+
+/// Whether a `DrivesChanged` arrives within a second.
+async fn changed(signals: &mut SignalStream) -> bool {
+    tokio::time::timeout(Duration::from_secs(1), async {
+        while let Some(signal) = signals.next().await {
+            if matches!(signal, Ok(Signal::DrivesChanged)) {
+                return true;
+            }
+        }
+        false
+    })
+    .await
+    .unwrap_or(false)
 }

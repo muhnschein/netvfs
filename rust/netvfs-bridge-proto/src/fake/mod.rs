@@ -13,7 +13,9 @@ mod state;
 mod transfer;
 mod tree;
 
-pub use state::{CallRecord, Consent, Failure, InfoValue, JobFailure, RecordedAnswer, ScriptedQuestion};
+pub use state::{
+    CallRecord, Consent, Failure, FakeDrive, InfoValue, JobFailure, RecordedAnswer, ScriptedQuestion,
+};
 
 use crate::connect::Connection;
 use crate::errors::BridgeError;
@@ -211,7 +213,7 @@ impl FakeBridge {
     // ---- locations ------------------------------------------------------
 
     /// An account location `account:<n>` (netvfs info keys `kind`, `host`,
-    /// `accountId`, `path`).
+    /// `accountId`, `path`, and `state` disconnected).
     pub async fn add_account(&self, n: i32, provider: &str, name: &str, host: &str) -> String {
         let id = format!("account:{n}");
         let info = vec![
@@ -248,6 +250,17 @@ impl FakeBridge {
             }
         });
         self.shared.broadcast_locations().await;
+    }
+
+    /// Sets the connection state of `id` (`state`: `disconnected`,
+    /// `connecting`, `connected` or `failed`, with `error` the XC-21 name of
+    /// a failure) and tells every client if it changed. On its own the fake
+    /// shows a location disconnected until a call needs a connection, and
+    /// again after `Disconnect`.
+    pub async fn set_state(&self, id: &str, state: &str, error: Option<&str>) {
+        if self.shared.with(|s| s.set_state(id, state, error)) {
+            self.shared.broadcast_locations().await;
+        }
     }
 
     /// The `ListLocations` result as sent now.
@@ -398,7 +411,25 @@ impl FakeBridge {
         self.shared.with(|s| s.calls.clear());
     }
 
-    /// `settings:<loc>` and `add:<provider>` handoffs.
+    /// What `GetFeatures` answers (XB-19); by default every feature.
+    pub fn set_features(&self, features: &[&str]) {
+        self.shared.with(|s| s.features = features.iter().map(|f| (*f).to_owned()).collect());
+    }
+
+    /// Replaces the drives `ListDrives` lists and tells every client
+    /// (`DrivesChanged`).
+    pub async fn set_drives(&self, drives: Vec<FakeDrive>) {
+        self.shared.with(|s| s.drives = drives);
+        self.shared.broadcast_drives().await;
+    }
+
+    /// The drives, as mounted and unmounted.
+    #[must_use]
+    pub fn drives(&self) -> Vec<FakeDrive> {
+        self.shared.with(|s| s.drives.clone())
+    }
+
+    /// `settings:<loc>`, `add:<provider>` and `storage` handoffs.
     #[must_use]
     pub fn handoffs(&self) -> Vec<String> {
         self.shared.with(|s| s.handoffs.clone())

@@ -45,7 +45,7 @@ User tests RPMs on phone; that test judges feel, lag, real servers. Say exactly 
 - Server and consumer data = hostile: every length checked against its cap before allocating. New decoder → fuzz target (`rust/fuzz`, `tests/fuzz`).
 - Mutant exclusion (`rust/.cargo/mutants.toml`) only with proof it changes no observable behaviour, written beside it. `crypto.rs`: none.
 - Tests wait on signals or conditions, not fixed sleeps or wall-clock asserts (those flake on loaded runners).
-- New dependency must earn its keep: well maintained, widely used, more than someone's pet project, builds at Rust 1.95, `cargo deny` clean (second version only with reason in `rust/deny.toml`). Say why in RUST.md's dependency list (protocol or crypto crate: SPEC 10.1 too). Update with pinned cargo: `cd rust && cargo update -p <crate>`. `russh` pins RustCrypto pre-releases: bump as one unit. `rust/vendor/ssh-key` = patched copy (`README.netvfs.md` there).
+- New dependency must earn its keep: well maintained, widely used, more than someone's pet project, builds at Rust 1.95, `cargo deny` clean (second version only with reason in `rust/deny.toml`). Say why in RUST.md's dependency list (protocol or crypto crate: SPEC 10.1 too). Update with pinned cargo: `cd rust && cargo update -p <crate>`. `russh` pins RustCrypto pre-releases: bump as one unit. `rust/vendor/ssh-key`, `rust/vendor/picky-asn1-der` = patched copies (`README.netvfs.md` in each).
 
 ## UI and words
 

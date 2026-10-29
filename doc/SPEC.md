@@ -478,6 +478,7 @@ The SFTP and SMB clients are our own Rust code in the workspace `rust/` (RUST.md
 | `ssh-key` 0.7.0-rc.11, vendored in `rust/vendor/ssh-key` | OpenSSH key formats, for russh. The vendored copy has one change: an ECDSA private scalar shorter than the field size is left-padded, so that P-256 keys whose scalar OpenSSH stored in 31 bytes import. |
 | `pkcs8` 0.11 | the key derivation parameters of encrypted PKCS#8 keys, read before russh decrypts them |
 | `sspi` 0.23 | NTLMv2 in SPNEGO for SMB session setup, including the RC4 of the NTLM key exchange |
+| `picky-asn1-der` 0.5.7, vendored in `rust/vendor/picky-asn1-der` | sspi's DER decoder, for SPNEGO. The vendored copy has one change: a DER length that overflows once its header length is added is refused as truncated data, not wrapped and not a panic. |
 | `aes` 0.9, `aes-gcm` 0.11, `cmac` 0.8, `hmac` 0.13, `sha2` 0.11 (RustCrypto), `getrandom` 0.4 | SMB 3.1.1 key derivation, AES-128-CMAC signing, AES-GCM encryption, SHA-512 preauthentication integrity, nonces. Only `netvfs-smb`'s `crypto` module uses them (`tools/ci/check-crypto-fence.sh`). |
 
 ### 10.2 Gate G-SMB

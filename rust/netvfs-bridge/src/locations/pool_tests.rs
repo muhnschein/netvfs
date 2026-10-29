@@ -3,8 +3,11 @@
 // fake backend.
 #![allow(clippy::assertions_on_result_states, clippy::arithmetic_side_effects)]
 
-use super::{Arc, Duration, ErrorName, HostRegistry, Instant, Lane, PoolSet, Turn, Work, WorkerId};
-use crate::locations::mock::{Mock, MockHandle, Seen, blocking, recv, reporting, spec, task};
+use super::{
+    Arc, ConnectionState, Duration, ErrorName, HostRegistry, Instant, Lane, PoolSet, StateSignal, Turn, Work,
+    WorkerId,
+};
+use crate::locations::mock::{Mock, MockHandle, Seen, blocking, recv, reporting, spec, status, task};
 use std::sync::atomic::Ordering;
 use std::sync::mpsc;
 
@@ -13,6 +16,21 @@ const IDLE: Duration = Duration::from_mins(1);
 fn set(per_host: usize) -> (Arc<Mock>, PoolSet<Mock>) {
     let mock = Mock::new();
     (Arc::clone(&mock), PoolSet::new(mock, per_host))
+}
+
+/// A set whose state signal the test sees.
+fn signalled(per_host: usize) -> (Arc<Mock>, PoolSet<Mock>, StateSignal) {
+    let (mock, set) = set(per_host);
+    let signal = StateSignal::default();
+    (mock, set.with_signal(signal.clone()), signal)
+}
+
+fn state(set: &PoolSet<Mock>, id: &str) -> ConnectionState {
+    set.get(id).unwrap().state()
+}
+
+fn wait_state(set: &PoolSet<Mock>, id: &str, want: ConnectionState) {
+    wait_until(|| state(set, id) == want);
 }
 
 /// A busy connection: the item runs until `go` gets a message or drops.
@@ -150,6 +168,8 @@ fn an_idle_connection_of_another_location_makes_room() {
     assert_eq!(recv(&rx), Seen::Conn(2));
     // a's connection was closed, its slot counted free at once.
     assert_eq!(set.get("a").unwrap().connection_count(), 0);
+    assert_eq!(state(&set, "a"), ConnectionState::Disconnected);
+    assert_eq!(state(&set, "b"), ConnectionState::Connected);
     assert_eq!(set.hosts().in_use("fake://h:0"), 1);
     mock.wait_for("free 1", 1);
     wait_until(|| set.get("a").unwrap().retired.iter().all(|r| r.worker.finished()));
@@ -368,4 +388,127 @@ fn copy_jobs_take_host_slots_too() {
     assert_eq!(set.get("a").unwrap().pending_count(), 1);
     set.release_host("fake://h:0");
     assert_eq!(recv(&rx), Seen::Conn(1));
+}
+
+#[test]
+fn the_state_follows_the_live_connections() {
+    let (mock, mut set, signal) = signalled(4);
+    set.add(spec("a", "h"));
+    // Never used.
+    assert_eq!(state(&set, "a"), ConnectionState::Disconnected);
+    assert!(!signal.take());
+    // Connecting while the first connection is established.
+    let (tx, rx) = mpsc::channel();
+    mock.hold_establish(true);
+    set.submit("a", Lane::Interactive, task(), reporting(&tx, Ok(())));
+    mock.wait_for("establish 1", 1);
+    assert_eq!(state(&set, "a"), ConnectionState::Connecting);
+    assert!(signal.take());
+    mock.hold_establish(false);
+    assert_eq!(recv(&rx), Seen::Conn(1));
+    assert_eq!(state(&set, "a"), ConnectionState::Connected);
+    assert!(signal.take());
+    // One established connection is enough, whatever the others do.
+    mock.hold_establish(true);
+    set.submit("a", Lane::Bulk, task(), reporting(&tx, Ok(())));
+    mock.wait_for("establish 2", 1);
+    assert_eq!(state(&set, "a"), ConnectionState::Connected);
+    mock.hold_establish(false);
+    assert_eq!(recv(&rx), Seen::Conn(2));
+    wait_until(|| set.is_idle());
+    // Closed when idle: disconnected.
+    // What came before does not count.
+    let _before = signal.take();
+    assert!(set.maintain(Instant::now() + IDLE, IDLE));
+    assert_eq!(set.get("a").unwrap().connection_count(), 0);
+    assert_eq!(state(&set, "a"), ConnectionState::Disconnected);
+    assert!(signal.take());
+    // Their threads finishing changes no state.
+    mock.wait_for("free", 2);
+    wait_until(|| set.get("a").unwrap().retired.iter().all(|r| r.worker.finished()));
+    set.maintain(Instant::now(), IDLE);
+    assert_eq!(state(&set, "a"), ConnectionState::Disconnected);
+}
+
+#[test]
+fn a_failed_attempt_shows_until_one_succeeds_or_a_disconnect() {
+    let (mock, mut set, signal) = signalled(4);
+    set.add(spec("a", "h"));
+    let (tx, rx) = mpsc::channel();
+    mock.fail_establish(status(ErrorName::NetworkUnreachable));
+    set.submit("a", Lane::Interactive, task(), reporting(&tx, Ok(())));
+    assert_eq!(recv(&rx), Seen::Failed(ErrorName::NetworkUnreachable));
+    assert_eq!(state(&set, "a"), ConnectionState::Failed(ErrorName::NetworkUnreachable));
+    assert!(signal.take());
+    // Also once the connection that failed is closed when idle.
+    wait_until(|| set.is_idle());
+    assert!(set.maintain(Instant::now() + IDLE, IDLE));
+    assert_eq!(set.get("a").unwrap().connection_count(), 0);
+    assert_eq!(state(&set, "a"), ConnectionState::Failed(ErrorName::NetworkUnreachable));
+    // The last attempt counts: another error.
+    mock.fail_establish(status(ErrorName::AuthFailed));
+    set.submit("a", Lane::Interactive, task(), reporting(&tx, Ok(())));
+    assert_eq!(recv(&rx), Seen::Failed(ErrorName::AuthFailed));
+    assert_eq!(state(&set, "a"), ConnectionState::Failed(ErrorName::AuthFailed));
+    // A success clears it.
+    set.submit("a", Lane::Interactive, task(), reporting(&tx, Ok(())));
+    assert_eq!(recv(&rx), Seen::Conn(3));
+    assert_eq!(state(&set, "a"), ConnectionState::Connected);
+    // Connected while another lane's attempt fails, failed when that one is
+    // all there is.
+    mock.fail_establish(status(ErrorName::Timeout));
+    set.submit("a", Lane::Bulk, task(), reporting(&tx, Ok(())));
+    assert_eq!(recv(&rx), Seen::Failed(ErrorName::Timeout));
+    assert_eq!(state(&set, "a"), ConnectionState::Connected);
+    set.submit("a", Lane::Interactive, task(), reporting(&tx, Err(status(ErrorName::ConnectionLost))));
+    assert_eq!(recv(&rx), Seen::Conn(3));
+    wait_state(&set, "a", ConnectionState::Failed(ErrorName::Timeout));
+    // Disconnect forgets it: the location is disconnected now.
+    // What came before does not count.
+    let _before = signal.take();
+    set.stop_all("a");
+    assert_eq!(state(&set, "a"), ConnectionState::Disconnected);
+    assert!(signal.take());
+}
+
+#[test]
+fn a_connection_being_closed_is_not_counted() {
+    let (mock, mut set, signal) = signalled(4);
+    set.add(spec("a", "h"));
+    set.add(spec("b", "i"));
+    // Busy on an established connection: Disconnect makes it disconnected
+    // at once, while its thread still ends its item.
+    let (go, wait) = mpsc::channel::<()>();
+    let (tx, rx) = mpsc::channel();
+    let work: Work<Mock> = Box::new(move |turn: Turn<'_, Mock>| {
+        tx.send(turn.ready.as_ref().map(|c| c.id).ok()).unwrap();
+        // Waits for the test (which drops its end), not for the cancel.
+        let _gone = wait.recv();
+        Ok(())
+    });
+    set.submit("a", Lane::Bulk, task(), work);
+    assert_eq!(rx.recv().unwrap(), Some(1));
+    assert_eq!(state(&set, "a"), ConnectionState::Connected);
+    // What came before does not count.
+    let _before = signal.take();
+    set.stop_all("a");
+    assert_eq!(state(&set, "a"), ConnectionState::Disconnected);
+    assert!(signal.take());
+    assert!(!set.get("a").unwrap().retired[0].worker.finished());
+    // Other locations keep theirs.
+    assert_eq!(state(&set, "b"), ConnectionState::Disconnected);
+    drop(go);
+    mock.wait_for("free 1", 1);
+    assert_eq!(state(&set, "a"), ConnectionState::Disconnected);
+    // Stopped while connecting: no failure either.
+    mock.hold_establish(true);
+    let (tx, rx) = mpsc::channel();
+    set.submit("b", Lane::Interactive, task(), reporting(&tx, Ok(())));
+    mock.wait_for("establish 2", 1);
+    assert_eq!(state(&set, "b"), ConnectionState::Connecting);
+    set.stop_all("b");
+    assert_eq!(state(&set, "b"), ConnectionState::Disconnected);
+    assert_eq!(recv(&rx), Seen::Failed(ErrorName::Canceled));
+    mock.hold_establish(false);
+    assert_eq!(state(&set, "b"), ConnectionState::Disconnected);
 }

@@ -2,7 +2,7 @@
  "http://www.freedesktop.org/standards/dbus/1.0/introspect.dtd">
 <!-- SPDX-License-Identifier: LGPL-2.1-or-later -->
 <!--
-  netvfs-bridge protocol, SPEC-v2 section 8a (XB-8..XB-17).
+  netvfs-bridge protocol, SPEC-v2 section 8a (XB-8..XB-20).
   Peer-to-peer D-Bus over the consumer's socket; object /org/netvfs/Bridge.
 
   Types (XB-9):
@@ -36,8 +36,34 @@
     <signal name="ConsentChanged">
       <arg name="consent" type="s"/>
     </signal>
+    <!-- XB-19: what the bridge offers besides the methods of netvfs 0.4, as
+      names: "storage-settings" (OpenStorageSettings opens Settings > Storage),
+      "drives" (ListDrives, Mount, Unmount, DrivesChanged; XB-20). Consumers
+      ignore names they do not know; an older bridge answers
+      org.freedesktop.DBus.Error.UnknownMethod, which means none. Needs no
+      consent. -->
+    <method name="GetFeatures">
+      <arg name="features" type="as" direction="out"/>
+    </method>
 
-    <!-- Locations -->
+    <!-- Locations
+      ListLocations info (a{sv}): "kind" (s, "account" or "adhoc"), "host" (s),
+      "port" (i) and "user" (s) when set, "path" (ay), "url" (s) when known,
+      for accounts "accountId" (i) and "attention" (s) when set, and "state" (s),
+      the connection state of the consumer's pool for the location (XB-12):
+        "connected"     at least one connection is established (connected and
+                        authenticated);
+        "connecting"    none is, at least one is being established;
+        "disconnected"  none is or is being established: never used, closed
+                        when idle, or after Disconnect;
+        "failed"        as "disconnected", but the last attempt to connect
+                        failed, with "stateError" (s), its error name. The next
+                        attempt that succeeds, or Disconnect, clears it.
+      The pools are the consumer's: every connection of a consumer sees the
+      same states. LocationsChanged: something ListLocations shows changed,
+      also a state (states at most every 250 ms); work on an established
+      connection changes no state.
+    -->
     <method name="ListLocations">
       <arg name="locations" type="a(sssa{sv})" direction="out"/>
     </method>
@@ -249,6 +275,41 @@
     </method>
     <method name="AddAccount">
       <arg name="provider" type="s" direction="in"/>
+    </method>
+    <!-- Opens Settings > Storage (XB-15); needs no consent. -->
+    <method name="OpenStorageSettings"/>
+
+    <!-- Drives (XB-20): the memory cards and USB drives UDisks2 can mount,
+      mounted or not, and their LUKS devices not unlocked; never internal or
+      system storage. Needs no consent.
+      ListDrives entries, sorted by id:
+        id          opaque, [A-Za-z0-9_]{1,64}
+        label       the filesystem's label (a locked drive's: its LUKS
+                    header's), "" without one
+        mountPoint  where it is mounted, empty when it is not
+        info (a{sv}): "kind" (s, "sd" or "usb"), "size" (x, bytes), "fsType" (s),
+          "readOnly" (b), when known "uuid" (s) and "model" (s), and "locked"
+          (b, true) for a LUKS device not unlocked: Settings > Storage
+          unlocks it, then its unlocked filesystem is listed instead.
+      Mount answers the mount point (below /run/media/<user>), at once for a
+      mounted drive; Unmount of a drive that is not mounted succeeds. Errors:
+      NotFound (no such drive), PermissionDenied (polkit refused), Locked (in
+      use), AlreadyExists, Unsupported (no UDisks2, an unknown filesystem, a
+      locked drive), Timeout (60 s), Internal (UDisks2 failed; its message as
+      "detail").
+      DrivesChanged: a drive came or went, was mounted or unmounted, unlocked
+      or locked; sent once the consumer has listed drives. A consumer that
+      shows them lists again. -->
+    <method name="ListDrives">
+      <arg name="drives" type="a(ssaya{sv})" direction="out"/>
+    </method>
+    <signal name="DrivesChanged"/>
+    <method name="Mount">
+      <arg name="drive" type="s" direction="in"/>
+      <arg name="mountPoint" type="ay" direction="out"/>
+    </method>
+    <method name="Unmount">
+      <arg name="drive" type="s" direction="in"/>
     </method>
   </interface>
   <interface name="org.freedesktop.DBus.Introspectable">

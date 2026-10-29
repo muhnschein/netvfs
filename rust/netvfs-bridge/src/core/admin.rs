@@ -3,7 +3,8 @@
 //! Admin` of session.cpp, the consent half of bridgeserver.cpp): `Hello`,
 //! `GetConsent`, `RequestConsent`, `ListLocations`, `Capabilities`,
 //! `Disconnect`, `ConnectAdHoc`, `ForgetAdHoc`, `Discover`, `Cancel`,
-//! `Answer`, `OpenAccountSettings` and `AddAccount`.
+//! `Answer`, `OpenAccountSettings`, `AddAccount`, `GetFeatures` and
+//! `OpenStorageSettings`.
 
 use super::questions::INSECURE_CONSENT;
 use super::{Core, Event};
@@ -18,6 +19,7 @@ use crate::prompt::PromptEvent;
 use crate::server::args::{AdHocOpts, LocId, Secret, is_valid_token};
 use crate::server::{OutSignal, Reply, ReplyTo, SessionId};
 use crate::status::Status;
+use netvfs_bridge_proto::methods::{FEATURE_DRIVES, FEATURE_STORAGE_SETTINGS};
 use netvfs_bridge_proto::{ErrorName, Lane};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -137,6 +139,16 @@ impl Core {
         reply.ok(&Reply::Text(self.consent.as_str().to_owned()));
     }
 
+    /// XB-19: what this bridge offers besides the methods of netvfs 0.4.
+    pub(super) fn on_get_features(&self, reply: ReplyTo) {
+        let mut features = Vec::new();
+        if self.handoff.offers_storage_settings() {
+            features.push(FEATURE_STORAGE_SETTINGS.to_owned());
+        }
+        features.push(FEATURE_DRIVES.to_owned());
+        reply.ok(&Reply::Names(features));
+    }
+
     pub(super) fn on_request_consent(&mut self, reply: ReplyTo) {
         if self.consent != Consent::Granted {
             self.request_consent();
@@ -144,14 +156,22 @@ impl Core {
         reply.ok(&Reply::Empty);
     }
 
-    pub(super) fn on_list_locations(&self, reply: ReplyTo) {
+    pub(super) fn on_list_locations(&mut self, reply: ReplyTo) {
         // XB-6: nothing until granted.
         let locations = if self.consent == Consent::Granted {
             let ffi = self.ffi;
-            self.book
+            let states = self.book.states();
+            let locations = self
+                .book
                 .visible()
-                .map(|spec| spec.wire(|params, path| ffi.url_format(params, path).ok()))
-                .collect()
+                .map(|spec| {
+                    let state = states.get(&spec.id).copied().unwrap_or_default();
+                    spec.wire(state, |params, path| ffi.url_format(params, path).ok())
+                })
+                .collect();
+            // XB-12: a state not announced yet is, soon, to every session.
+            self.states.listed(&states, Instant::now());
+            locations
         } else {
             Vec::new()
         };
@@ -269,7 +289,7 @@ impl Core {
         let result = result.and_then(|()| if self.book.add_ad_hoc(loc) { Ok(()) } else { Err(no_consent()) });
         match result {
             Ok(()) => {
-                self.broadcast(&OutSignal::LocationsChanged);
+                self.locations_changed();
                 if let Some(reply) = reply {
                     reply.ok(&Reply::Text(loc.to_owned()));
                 }
@@ -288,7 +308,7 @@ impl Core {
             reply.fail(&Status::new(ErrorName::NotFound, "No such ad-hoc location"));
             return;
         }
-        self.broadcast(&OutSignal::LocationsChanged);
+        self.locations_changed();
         reply.ok(&Reply::Empty);
     }
 
@@ -352,6 +372,13 @@ impl Core {
         }
     }
 
+    pub(super) fn on_open_storage_settings(&self, reply: ReplyTo) {
+        match self.handoff.open_storage_settings() {
+            Ok(()) => reply.ok(&Reply::Empty),
+            Err(status) => reply.fail(&status),
+        }
+    }
+
     // ----------------------------------------------------------- consent
 
     /// `bridge.conf` changed on disk (`reloadConsent`).
@@ -385,7 +412,7 @@ impl Core {
             }
             self.book.revoke();
         } else if consent == Consent::Granted {
-            self.broadcast(&OutSignal::LocationsChanged);
+            self.locations_changed();
         }
     }
 
