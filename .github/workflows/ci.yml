@@ -5,10 +5,16 @@ on:
       - main
   pull_request:
     types: [opened, synchronize, reopened]
+  # Weekly on main, and by hand (Run workflow) before a release: every
+  # mutation list (tools/ci/mutation-lists.py).
+  schedule:
+    - cron: "41 2 * * 1"
+  workflow_dispatch:
 permissions:
   contents: read
 concurrency:
-  group: ci-${{ github.ref }}
+  # A merge must not cancel the weekly run.
+  group: ci-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 env:
   # Pinned cargo tools (tools/ci/cargo-tool.sh), cached per version.
@@ -26,6 +32,7 @@ jobs:
     timeout-minutes: 5
     outputs:
       code: ${{ steps.diff.outputs.code }}
+      lists: ${{ steps.lists.outputs.lists }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -34,6 +41,10 @@ jobs:
           fetch-depth: 2
       - id: diff
         run: ./tools/ci/changes.sh >>"$GITHUB_OUTPUT"
+        env:
+          EVENT: ${{ github.event_name }}
+      - id: lists
+        run: ./tools/ci/mutation-lists.py >>"$GITHUB_OUTPUT"
         env:
           EVENT: ${{ github.event_name }}
 
@@ -50,6 +61,7 @@ jobs:
       - run: ./tools/ci/apt-install.sh gdb
       - run: ./tools/ci/apt-install-selftest.sh
       - run: ./tools/ci/changes-selftest.sh
+      - run: ./tools/ci/mutation-lists-selftest.sh
       - run: ./tools/ci/core-backtraces-selftest.sh
 
   check:
@@ -87,8 +99,6 @@ jobs:
         run: make -j"$(nproc)"
       - name: Packaging checks (file lists, the Rust plugins, the bridge's C ABI)
         run: make check-packaging
-      - name: Every mutation list is in the mutation matrix
-        run: ./tools/ci/check-mutation-matrix.py
       # Test killed by a signal leaves its core here; read below on failure.
       # Proved each run: a shell that crashes itself must leave one, else
       # step fails.
@@ -148,16 +158,25 @@ jobs:
   mutation:
     # One job per mutation list: the interop-level lists run whole container
     # suites per mutation and would not fit one job's time limit together.
+    # Which lists: tools/ci/mutation-lists.py (PR: those its change can
+    # affect; push: none; weekly and by hand: all).
     name: Tests bite (${{ matrix.list }})
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: needs.changes.outputs.code == 'true' && needs.changes.outputs.lists != '[]'
     runs-on: ubuntu-24.04
     # bridge list: 41-58 min seen; cap leaves room for slow runners.
     timeout-minutes: 90
+    # Same as tools/mutation-check.py sets: the Build step must match, else the
+    # first mutant rebuilds all Rust.
+    env:
+      CARGO_PROFILE_RELEASE_LTO: "off"
+      CARGO_PROFILE_RS_RELEASE_LTO: "off"
+      CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
+      CARGO_PROFILE_RELEASE_INCREMENTAL: "true"
     strategy:
       fail-fast: false
       matrix:
-        list: [accounts, bridge, buteo, cli, core, discovery, ffi, helper, local, ops, packaging, qml, rs, sftp, smb, url]
+        list: ${{ fromJSON(needs.changes.outputs.lists) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -414,3 +433,29 @@ jobs:
           name: netvfs-rpms-aarch64
           path: RPMS/*.rpm
           if-no-files-found: error
+
+  # Nobody watches a scheduled run: a failure opens an issue (or comments on
+  # the one still open) instead of only turning the Actions tab red.
+  report:
+    name: Report a failed weekly run
+    needs: [check, sanitize, mutation, windows-smb, fuzz, rust-supply-chain, rpm]
+    if: failure() && github.event_name == 'schedule'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          TITLE: Weekly CI run failed
+          BODY: >-
+            The weekly CI run (every mutation list) failed on main at ${{ github.sha }}:
+            ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}.
+        run: |
+          open=$(gh issue list -R "$GITHUB_REPOSITORY" --state open --search "in:title \"$TITLE\"" \
+            --json number --jq '.[0].number // ""')
+          if [ -n "$open" ]; then
+            gh issue comment "$open" -R "$GITHUB_REPOSITORY" --body "$BODY"
+          else
+            gh issue create -R "$GITHUB_REPOSITORY" --title "$TITLE" --body "$BODY"
+          fi
