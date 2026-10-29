@@ -33,12 +33,9 @@ export SQLITE3_STATIC=0
 hardening="-C relro-level=full -C link-arg=-Wl,-z,now -C link-arg=-Wl,-z,noexecstack -C link-arg=-Wl,--as-needed"
 export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS="$hardening"
 export CARGO_TARGET_DIR="$out/target"
-# Reproducible binaries (SPEC P-8): the one build path they record, the
-# cargo home (panic locations of registry crates), mapped to a fixed name,
-# so it may live anywhere. Checkout, SDK and out dir need none: cargo names
-# the workspace's sources relative to it, and nothing else reaches the
-# binaries. Release builds only: tests stay as built. No spaces in the path
-# (RUSTFLAGS splits on them).
+# Reproducible (SPEC P-8): cargo home = only build path in release binaries
+# (registry crates' panic locations); workspace sources are relative already.
+# No spaces in it: RUSTFLAGS splits.
 remap="--remap-path-prefix=${CARGO_HOME:-$HOME/.cargo}=/cargo"
 
 cd "$root/rust"

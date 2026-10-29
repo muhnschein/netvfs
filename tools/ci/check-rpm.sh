@@ -6,6 +6,7 @@
 #     (discovery, XD-1), only netvfs-backup depends on Buteo (XP-4), no
 #     package requires the bridge (XP-5) and only its accounts helper is
 #     setgid privileged (XB-2a);
+#   - the bridge's %post stops running bridges (XP-7);
 #   - the Rust binaries of the bridge package link only the libraries they
 #     should (the setgid helper libc, libgcc_s and SQLite; netvfs-bridge no
 #     Qt, which it reaches only through its C ABI), need no newer glibc than
@@ -99,6 +100,10 @@ if bridge_rpm=$(rpm_of netvfs-bridge); then
     bridge_mode=$(echo "$modes" | grep ' /usr/libexec/netvfs/netvfs-bridge$' || true)
     if [ "${bridge_mode%% *}" != "-rwxr-xr-x" ]; then
         fail "netvfs-bridge is set-id: $bridge_mode"
+    fi
+    # XP-7: an upgrade stops bridges still running the old binary.
+    if ! rpm -qp --qf '%{POSTIN}' "$bridge_rpm" | grep -qxF "systemctl-user stop 'netvfs-bridge@*.service' || :"; then
+        fail "netvfs-bridge %post does not stop running bridges"
     fi
 fi
 

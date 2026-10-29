@@ -17,21 +17,67 @@ env:
   DENY_VERSION: 0.20.2
   ZIZMOR_VERSION: 1.30.1
 jobs:
+  # Docs-only PR (`*.md` outside vendor/, rust/vendor/): build and test jobs
+  # skipped; a job skipped by `if:` passes as a required check. Rules:
+  # tools/ci/changes.sh.
+  changes:
+    name: What changed
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      code: ${{ steps.diff.outputs.code }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # Merge commit and its base parent.
+          fetch-depth: 2
+      - id: diff
+        run: ./tools/ci/changes.sh >>"$GITHUB_OUTPUT"
+        env:
+          EVENT: ${{ github.event_name }}
+
+  # CI's own scripts: wrong apt rule deletes the archive, wrong change rule
+  # = code PR green without tests, wrong core reader = crash without stack.
+  ci-scripts:
+    name: CI scripts (selftests)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: ./tools/ci/apt-install.sh gdb
+      - run: ./tools/ci/apt-install-selftest.sh
+      - run: ./tools/ci/changes-selftest.sh
+      - run: ./tools/ci/core-backtraces-selftest.sh
+
   check:
     name: Build and test (host)
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-24.04
+    timeout-minutes: 40
     env:
       QMAKE_ARGS: NETVFS_WERROR=1
       NEXTEST_PROFILE: ci
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           submodules: recursive
           persist-credentials: false
       - name: Install dependencies
         run: ./tools/ci/install-host-deps.sh
+      # Crates' builds carried between runs: qmake's release build
+      # (build/rust-target) and the tests' (rust/target). Saved from main and
+      # this branch only; workspace crates always rebuilt.
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: |
+            rust -> target
+            rust -> ../build/rust-target
       - name: Cache cargo-nextest
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cargo/bin/cargo-nextest
           key: cargo-nextest-${{ env.NEXTEST_VERSION }}-ubuntu-24.04
@@ -43,27 +89,51 @@ jobs:
         run: make check-packaging
       - name: Every mutation list is in the mutation matrix
         run: ./tools/ci/check-mutation-matrix.py
+      # Test killed by a signal leaves its core here; read below on failure.
+      # Proved each run: a shell that crashes itself must leave one, else
+      # step fails.
+      - name: Keep the cores of crashed tests
+        run: |
+          mkdir -p "$RUNNER_TEMP/cores"
+          echo "$RUNNER_TEMP/cores/core.%p.%E" | sudo tee /proc/sys/kernel/core_pattern
+          ulimit -c unlimited
+          ! bash -c 'kill -SEGV $$'
+          rm "$RUNNER_TEMP"/cores/core.*bash
       - name: Rust (format, lint, nextest, lockfile, Rust 1.95)
-        run: make check-rust
+        run: ulimit -c unlimited && make check-rust
       - name: Unit tests
-        run: make check-unit
+        run: ulimit -c unlimited && make check-unit
       - name: Interop tests
-        run: make check-interop
+        run: ulimit -c unlimited && make check-interop
+      # Crashed test: stacks in the log; core, its binary, stacks kept a week.
+      - name: Stacks of crashed tests
+        if: failure()
+        run: ./tools/ci/core-backtraces.sh "$RUNNER_TEMP/cores"
+      - if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: test-cores
+          path: ${{ runner.temp }}/cores
+          if-no-files-found: ignore
+          retention-days: 7
 
   sanitize:
     name: Sanitizers (ASan + UBSan)
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-24.04
+    timeout-minutes: 45
     env:
       NEXTEST_PROFILE: ci
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           submodules: recursive
           persist-credentials: false
       - name: Install dependencies
         run: ./tools/ci/install-host-deps.sh
       - name: Cache cargo-nextest
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cargo/bin/cargo-nextest
           key: cargo-nextest-${{ env.NEXTEST_VERSION }}-ubuntu-24.04
@@ -79,18 +149,28 @@ jobs:
     # One job per mutation list: the interop-level lists run whole container
     # suites per mutation and would not fit one job's time limit together.
     name: Tests bite (${{ matrix.list }})
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-24.04
+    # bridge list: 41-58 min seen; cap leaves room for slow runners.
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
         list: [accounts, bridge, buteo, cli, core, discovery, ffi, helper, local, ops, packaging, qml, rs, sftp, smb, url]
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           submodules: recursive
           persist-credentials: false
       - name: Install dependencies
         run: ./tools/ci/install-host-deps.sh
+      # Same build in every list: one cache for all (shared-key), saved by
+      # whichever finishes first.
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: rust -> ../build/rust-target
+          shared-key: mutation
       - name: Build
         run: make -j"$(nproc)"
       # One set of SFTP interop servers for all the mutations of the list
@@ -114,7 +194,8 @@ jobs:
     # shards: a large diff has thousands of mutants, more than one job's
     # time limit allows.
     name: Tests bite (Rust, changed code, ${{ matrix.shard }}/12)
-    if: github.event_name == 'pull_request'
+    needs: changes
+    if: github.event_name == 'pull_request' && needs.changes.outputs.code == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 180
     strategy:
@@ -122,14 +203,14 @@ jobs:
       matrix:
         shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
       - name: Install dependencies
         run: ./tools/ci/install-host-deps.sh
       - name: Cache cargo-nextest
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cargo/bin/cargo-nextest
           key: cargo-nextest-${{ env.NEXTEST_VERSION }}-ubuntu-24.04
@@ -139,7 +220,7 @@ jobs:
       - name: Build the FFI's C++ libraries
         run: ./tools/ci/ffi-libs.sh build-ffi
       - name: Cache cargo-mutants
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cargo/bin/cargo-mutants
           key: cargo-mutants-${{ env.MUTANTS_VERSION }}-ubuntu-24.04
@@ -168,7 +249,7 @@ jobs:
           BASE_REF: ${{ github.base_ref }}
           SHARD: ${{ matrix.shard }}
         run: ./tools/ci/rust-mutants.sh diff "origin/$BASE_REF" build-ffi "$SHARD/12"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: failure()
         with:
           name: rust-mutants-${{ matrix.shard }}
@@ -180,10 +261,12 @@ jobs:
     # and a share on the runner over loopback (real SMB 3.1.1; Windows's own
     # client shows the dialect first). rust/netvfs-smb/tests/windows.rs.
     name: SMB against Windows (M-T11)
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: windows-latest
-    timeout-minutes: 60
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: A local account and a share
@@ -235,8 +318,9 @@ jobs:
   workflows:
     name: Workflow audit (zizmor, offline)
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: zizmor
@@ -246,21 +330,23 @@ jobs:
 
   fuzz:
     name: Fuzzing (fixed budget)
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-24.04
+    timeout-minutes: 45
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Install dependencies
         run: |
-          sudo apt-get update -q
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends \
+          ./tools/ci/apt-install.sh --no-install-recommends \
               clang libclang-rt-dev qtbase5-dev pkg-config libsqlite3-dev
       - name: Fuzz harnesses (60 s each, ASan + UBSan)
         run: ./tests/fuzz/run.sh build-fuzz 60
       - name: Rust fuzz targets (60 s each, nightly, ASan)
         run: ./tools/ci/rust-fuzz.sh 60
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: failure()
         with:
           name: fuzz-reproducers
@@ -272,12 +358,13 @@ jobs:
   rust-supply-chain:
     name: Rust supply chain (cargo-deny)
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Cache cargo-deny
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cargo/bin/cargo-deny
           key: cargo-deny-${{ env.DENY_VERSION }}-ubuntu-24.04
@@ -289,19 +376,21 @@ jobs:
 
   rpm:
     name: Sailfish OS 5.2 aarch64 RPMs
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-24.04
+    timeout-minutes: 45
     env:
       SDK_IMAGE: mirror.gcr.io/coderus/sailfishos-platform-sdk-aarch64:5.2.0.15@sha256:e5f7596d14502746b308c3dde36f65fc25d7f76c45a01acaed56a1f55b76f592
       TARGET: SailfishOS-5.2.0.15-aarch64
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           submodules: recursive
           persist-credentials: false
       - name: Cross-build tools (i386 C library for the SDK compiler, qemu)
         run: |
-          sudo apt-get update -q
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends \
+          ./tools/ci/apt-install.sh --no-install-recommends \
               libc6-i386 qemu-user-static pkg-config libsqlite3-dev
           cd rust && rustup toolchain install
       - name: Lift the SDK compiler and target sysroot
@@ -320,7 +409,7 @@ jobs:
         run: ./tools/ci/build-rpm.sh
       - name: Check dependencies and installability on the target
         run: ./tools/ci/check-rpm.sh
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: netvfs-rpms-aarch64
           path: RPMS/*.rpm
@@ -333,17 +422,16 @@ jobs:
     name: RPMs rebuild byte for byte
     needs: rpm
     runs-on: ubuntu-24.04
+    timeout-minutes: 45
     permissions:
       contents: read
       actions: read
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Cross-build tools (i386 C library for the SDK compiler)
-        run: |
-          sudo apt-get update -q
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends libc6-i386
+        run: ./tools/ci/apt-install.sh --no-install-recommends libc6-i386
       - name: Fetch the RPM job's packages
         env:
           GH_TOKEN: ${{ github.token }}

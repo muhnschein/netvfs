@@ -33,11 +33,9 @@ if [ ! -x "$root/rust/prebuilt/netvfs-bridge" ] || [ ! -x "$root/rust/prebuilt/n
     [ -x "$sdk/bin/aarch64-meego-linux-gnu-gcc" ] || "$root/tools/ci/lift-sdk.sh" "$SDK_IMAGE" "$TARGET" "$sdk"
     "$root/tools/ci/cross-build.sh" "$sdk" "$root/rust/prebuilt"
 fi
-# The SDK builds as mersdk (uid 100000), in its tree: a copy of the tracked
-# files and the binaries, so nothing left in the checkout reaches the
-# packages and qmake's in-tree output never lands in it. No .git in the copy:
-# mb2 takes the version from the spec (in a git tree it derives one from the
-# latest tag, branch, time and hash).
+# SDK builds as mersdk (uid 100000) in a copy of tracked files plus binaries:
+# checkout leftovers stay out of packages, qmake output out of checkout.
+# No .git: mb2 then takes version from spec, not from latest tag.
 work=$(mktemp -d)
 trap 'rm -rf "$work" 2>/dev/null || sudo rm -rf "$work"' EXIT
 src=$work/src
