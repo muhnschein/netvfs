@@ -886,7 +886,7 @@ impl BridgeRun {
     }
 
     /// Starts the bridge, its stderr into [`BridgeRun::log`], and waits
-    /// until its socket exists.
+    /// until it listens (`listen` called, not just `bind`).
     #[must_use]
     pub fn spawn(&mut self) -> crate::testutil::TestChild {
         let log = std::fs::File::create(self.dir.join("bridge.log")).expect("bridge.log");
@@ -894,11 +894,11 @@ impl BridgeRun {
             crate::testutil::TestChild::spawn(self.command.stdout(std::process::Stdio::null()).stderr(log))
                 .expect("netvfs-bridge starts");
         let end = Instant::now().checked_add(WAIT).expect("a deadline");
-        while !self.socket.exists() {
+        while !crate::testutil::listening(&self.socket) {
             if let Some(status) = child.child().try_wait().expect("try_wait") {
                 panic!("netvfs-bridge ended with {status} before it listened");
             }
-            assert!(Instant::now() < end, "no socket at {}", self.socket.display());
+            assert!(Instant::now() < end, "nothing listens at {}", self.socket.display());
             thread::sleep(Duration::from_millis(10));
         }
         child
