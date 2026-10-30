@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-// Batching of ListBatch and WalkBatch (XB-17) under the flow budget (C-10).
-// Restriction lints that only add noise to tests (doc/RUST.md "Lints").
+// Restriction lints that only add noise to tests.
 #![allow(clippy::assertions_on_result_states, clippy::arithmetic_side_effects)]
 
 use super::{
@@ -80,11 +79,9 @@ fn batches_close_before_the_byte_limit() {
         &budget,
         &cancel,
     );
-    // Exactly the limit fits; one byte more starts a new batch.
     assert!(b.add(half));
     assert!(b.add(half));
     assert!(b.add(1));
-    // An item over the limit on its own still goes, alone.
     assert!(b.add(MAX_LIST_BATCH_BYTES + 1));
     assert!(b.add(2));
     assert!(b.flush());
@@ -167,7 +164,6 @@ fn a_full_budget_waits_and_a_closed_one_stops() {
     assert!(!b.add(1), "the session is gone");
     drop(b);
     assert_eq!(sent, 11);
-    // Over the limit: the producer waits until canceled.
     let budget = FlowBudget::new(10);
     assert!(budget.acquire(11, &cancel));
     let cancel = Arc::new(AtomicBool::new(false));

@@ -10,39 +10,28 @@
 
 namespace NetVfs::Local {
 
-// Shared by the backend and its handles (XC-13).
+// Shared by the backend and its handles.
 struct Context {
     std::atomic<bool> canceled { false };
-    // disconnect() starts a new generation; handles of older ones are dead
-    // and report ConnectionLost.
+    // disconnect() starts a new generation; older handles are dead and report ConnectionLost.
     quint64 generation = 0;
     int requestTimeoutMs = 0;
 
     Waiter waiter() const { return Waiter(&canceled, requestTimeoutMs); }
 };
 
-// SPEC-v2 section 6.3: the local file system through POSIX calls.
-//
-// L-1: connect() succeeds without a network; the identity is Kind::None and
-// credentials are ignored. Option "root" (default "/") is the base of
-// relative paths; absolute paths are file system absolute.
-// L-2: names are raw bytes (Names); entries come from statx() (birth time
-// where the file system has it), listings use lstat semantics.
-// L-3: rename(NoReplace) uses renameat2(RENAME_NOREPLACE), falling back to
-// link()+unlink() for files and a stat check for folders where the kernel or
-// file system lacks it; rename(Replace) is rename(2) (AtomicReplace).
-// NativeNoReplace is reported when the kernel has renameat2 and the root's
-// file system is one known to implement RENAME_NOREPLACE (decided without
-// creating anything at connect). Option "native_noreplace=false" forces the
-// fallback (tests, file systems that misreport the flag).
-// L-7: rename() fsyncs the parent folder(s) afterwards, so that a commit by
-// Transfer (upload to a temporary name, then rename) survives a crash.
-// L-8: no privilege escalation; everything runs with the caller's rights.
-//
-// Handles: no limit beyond the process's descriptor limit. Reads and writes
-// on FIFOs, sockets and devices wait with poll() in 100 ms slices, so
-// cancel() (C-9) and the request timeout (C-14) apply; a single syscall
-// blocked by the kernel on a dead device is the documented exception (L-6).
+// Local file system through POSIX calls. connect() needs no network; identity Kind::None,
+// credentials ignored. Option "root" (default "/") is the base of relative paths.
+// Names are raw bytes; entries from statx() (birth time where available); listings use lstat
+// semantics.
+// rename(NoReplace): renameat2(RENAME_NOREPLACE), else link()+unlink() for files and a stat check
+// for folders. rename(Replace) is rename(2). NativeNoReplace reported when the kernel has renameat2
+// and the root's file system is known to implement it (decided at connect without creating
+// anything). Option "native_noreplace=false" forces the fallback.
+// rename() fsyncs the parent folder(s) so Transfer's commit survives a crash. No privilege
+// escalation.
+// FIFO, socket and device I/O waits with poll() in 100 ms slices so cancel() and the request
+// timeout apply; one syscall blocked by the kernel on a dead device is the exception.
 class LocalBackend : public Backend
 {
 public:
@@ -104,6 +93,5 @@ private:
     AccountNames m_names;
 };
 
-} // namespace NetVfs::Local
-
+}
 #endif

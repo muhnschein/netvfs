@@ -1,22 +1,10 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! Pins sspi's NTLMv2 client against MS-NLMP §4.2.4 (NTLMv2 authentication example).
+//! Pins sspi's NTLMv2 client against MS-NLMP 4.2.4 (NTLMv2 authentication example).
 //!
-//! sspi draws the client challenge and the exported session key from the OS RNG and takes
-//! the time from the server's MsvAvTimestamp (or the clock), with no way to inject the
-//! §4.2.4 values through its public API, so the published NTProofStr cannot be replayed
-//! byte for byte. Instead the §4.2.4 *inputs* (User/Domain/Password, server challenge
-//! 0123456789abcdef, flags 0xE28A8233, target info Domain/Server) go into sspi, and its
-//! AUTHENTICATE_MESSAGE is checked with the published NTOWFv2 value and RustCrypto
-//! primitives (test-only; the library never computes any of this):
-//! NTProofStr, LMv2, KeyExchangeKey → exported session key, and the MIC.
+//! sspi draws the client challenge and exported session key from the OS RNG and takes the time from the server's MsvAvTimestamp (or the clock), with no way to inject the 4.2.4 values, so the published NTProofStr cannot be replayed byte for byte. Instead the 4.2.4 *inputs* (User/Domain/Password, server challenge 0123456789abcdef, flags 0xE28A8233, target info Domain/Server) go into sspi, and its AUTHENTICATE_MESSAGE is checked with the published NTOWFv2 value and RustCrypto primitives (test-only): NTProofStr, LMv2, KeyExchangeKey → exported session key, MIC.
 //!
-//! Published values (MS-NLMP 4.2.4.1.1, 4.2.4.1.2, 4.2.4.2.1, 4.2.4.2.2), as transcribed with
-//! links to those sections in pyspnego `tests/_ntlm_raw/test_crypto.py`
-//! <https://raw.githubusercontent.com/jborean93/pyspnego/main/tests/_ntlm_raw/test_crypto.py>;
-//! learn.microsoft.com itself was not reachable when this was written.
+//! Published values (MS-NLMP 4.2.4.1.1, 4.2.4.1.2, 4.2.4.2.1, 4.2.4.2.2), as transcribed in pyspnego `tests/_ntlm_raw/test_crypto.py` <https://raw.githubusercontent.com/jborean93/pyspnego/main/tests/_ntlm_raw/test_crypto.py>.
 #![allow(clippy::doc_markdown)]
-// A test crate: the helpers outside `#[test]` parse fixed, known-good messages and may
-// panic, index and do plain arithmetic (clippy.toml relaxes that only inside `#[test]`).
 #![allow(clippy::unwrap_used, clippy::panic, clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 
 use hmac::{Hmac, KeyInit, Mac};
@@ -75,7 +63,7 @@ fn av(id: u16, value: &[u8]) -> Vec<u8> {
     v
 }
 
-/// The §4.2.4.3 CHALLENGE_MESSAGE layout, optionally with an MsvAvTimestamp.
+/// The 4.2.4.3 CHALLENGE_MESSAGE layout, optionally with an MsvAvTimestamp.
 fn challenge(timestamp: Option<u64>) -> Vec<u8> {
     let name = utf16("Server");
     let mut info = av(2, &utf16("Domain"));
@@ -206,8 +194,7 @@ fn sspi_ntlmv2_matches_ms_nlmp_4_2_4() {
     assert_eq!(proof, hmac_md5(&NTOWFV2, &[&SERVER_CHALLENGE, blob]));
     assert_eq!(&blob[..2], &[1, 1]);
     let client_challenge = &blob[16..24];
-    // LMv2 = HMAC-MD5(NTOWFv2, SC ‖ CC) ‖ CC (sent although MS-NLMP 3.1.5.1.2 says SHOULD NOT
-    // when the server sends MsvAvTimestamp; here it does not).
+    // LMv2 = HMAC-MD5(NTOWFv2, SC ‖ CC) ‖ CC (sent although MS-NLMP 3.1.5.1.2 says SHOULD NOT when the server sends MsvAvTimestamp; here it does not).
     let mut lm = hmac_md5(&NTOWFV2, &[&SERVER_CHALLENGE, client_challenge]).to_vec();
     lm.extend_from_slice(client_challenge);
     assert_eq!(field(a, 12), lm);

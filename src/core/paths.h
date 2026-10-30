@@ -9,11 +9,9 @@
 
 namespace NetVfs::Paths {
 
-// SPEC C-15. '/' separated; repeated separators collapse; a trailing separator
-// is dropped; a leading separator is kept (absolute path, backend-defined
-// meaning). Components "." and "..", and NUL characters, are rejected with
-// InvalidName; lone surrogates (Names::decode escapes, XC-4) are accepted.
-// An empty input normalizes to "" (the backend's base directory).
+// '/' separated; repeated separators collapse; trailing dropped; leading kept (absolute,
+// backend-defined). "." and ".." components and NUL: InvalidName; lone surrogates (Names::decode
+// escapes) accepted. Empty input = "" (backend base directory).
 NETVFS_EXPORT Result normalize(const QString &path, QString *normalized);
 
 NETVFS_EXPORT bool isAbsolute(const QString &normalizedPath);
@@ -22,23 +20,17 @@ NETVFS_EXPORT QString join(const QString &dir, const QString &name);
 NETVFS_EXPORT QString parent(const QString &normalizedPath);
 NETVFS_EXPORT QString fileName(const QString &normalizedPath);
 
-// SPEC-smb M-9: a component must not contain \ : * ? " < > | or end in a
-// space or a dot. Returns an empty string when acceptable, else the reason.
+// Component must not contain \ : * ? " < >
+// or end in space or dot. Empty = acceptable, else the reason.
 NETVFS_EXPORT QString windowsComponentProblem(const QString &component);
-// InvalidName with the reason of the first component that breaks M-9.
 NETVFS_EXPORT Result checkWindowsPath(const QString &normalizedPath);
 
-// SPEC-v2 XH-7: proposes a name that is safe to create on a destination with
-// these capabilities, for example when copying "a:b.txt" to an SMB share.
-// '/' and NUL become '_'. With WindowsNames: \ : * ? " < > | and control
-// characters become '_', trailing spaces and dots are removed, and reserved
-// device names (CON, PRN, AUX, NUL, COM1-9, LPT1-9, with or without an
-// extension) get a '_' appended to the stem. With maxNameBytes > 0 the UTF-8
-// encoding (Names::encode) is truncated to that many bytes without splitting a
-// code point, keeping the extension when it fits. Never returns an empty
-// string, "." or "..".
+// Proposes a name safe on a destination with these capabilities. '/' and NUL become '_'.
+// WindowsNames: \ : * ? " < >
+// and control chars become '_', trailing spaces/dots removed, reserved device names (CON, PRN, AUX,
+// NUL, COM1-9, LPT1-9) get '_' after the stem. maxNameBytes > 0: UTF-8 truncated without splitting
+// a code point, extension kept when it fits. Never empty, "." or "..".
 NETVFS_EXPORT QString sanitizeFor(const Capabilities &capabilities, const QString &name);
 
-} // namespace NetVfs::Paths
-
+}
 #endif

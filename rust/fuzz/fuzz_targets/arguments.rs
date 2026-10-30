@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! The helper's command line (anyone can run it): NUL-separated arguments,
-//! answered from an empty database.
+//! The helper's command line: NUL-separated arguments, empty database.
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;

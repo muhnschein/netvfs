@@ -1,22 +1,14 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! What a session does with an incoming message (design §3.5; the C++
-//! `Session::onMessage` and libdbus's own `org.freedesktop.DBus.Peer`
-//! handling). There is no zbus `ObjectServer`: zbus answers nothing by
-//! itself (design §8), so everything is answered here or by the core.
+//! What a session does with an incoming message. No zbus `ObjectServer`: zbus answers nothing itself, so everything is answered here or by the core.
 //!
-//! Order of the checks, as the C++ bridge had them:
+//! Checks in order:
 //! 1. Messages other than method calls are ignored.
-//! 2. `org.freedesktop.DBus.Peer` on any path: `Ping`, `GetMachineId`; any
-//!    other member `UnknownMethod` (libdbus did this before the bridge saw
-//!    the message).
-//! 3. Another path than `/org/netvfs/Bridge`: `UnknownMethod` "No such
-//!    object".
-//! 4. `Introspect` (interface `org.freedesktop.DBus.Introspectable` or
-//!    none): the introspection XML, byte for byte.
+//! 2. `org.freedesktop.DBus.Peer` on any path: `Ping`, `GetMachineId`; any other member `UnknownMethod`.
+//! 3. Another path than `/org/netvfs/Bridge`: `UnknownMethod` "No such object".
+//! 4. `Introspect` (interface `org.freedesktop.DBus.Introspectable` or none): the introspection XML, byte for byte.
 //! 5. Another interface than `org.netvfs.Bridge1` (or none): `UnknownMethod`.
 //! 6. [`args::decode`]: method, signature, arguments.
-//! 7. Before a valid `Hello`, any other method fails with
-//!    `org.netvfs.Error.ProtocolError`.
+//! 7. Before a valid `Hello`, any other method fails with `org.netvfs.Error.ProtocolError`.
 //!
 //! Replies are not sent to a call flagged `NO_REPLY_EXPECTED`.
 
@@ -31,10 +23,8 @@ use zbus::message::{Header, Type};
 use zbus::names::InterfaceName;
 use zbus::zvariant::ObjectPath;
 
-/// The standard interfaces the bridge answers itself.
 const PEER: &str = "org.freedesktop.DBus.Peer";
 const INTROSPECTABLE: &str = "org.freedesktop.DBus.Introspectable";
-/// Where libdbus looks for the machine id, in this order.
 const MACHINE_ID_FILES: [&str; 2] = ["/var/lib/dbus/machine-id", "/etc/machine-id"];
 
 /// What to do with one incoming message.
@@ -44,7 +34,7 @@ pub enum Action {
     Ignore,
     /// Send this reply.
     Reply(Message),
-    /// Hand the call to the core; the reply slot is made by the session.
+    /// Hand the call to the core.
     Forward(&'static MethodInfo, Call),
 }
 
@@ -108,8 +98,6 @@ fn unknown_method(header: &Header<'_>, message: &str) -> zbus::Result<Message> {
     encode::error_reply(header, encode::error_name(&status, true), &status)
 }
 
-/// libdbus's `_dbus_connection_peer_filter`: `Ping`, `GetMachineId`, and
-/// `UnknownMethod` for anything else of the interface.
 fn peer(header: &Header<'_>, member: &str) -> zbus::Result<Message> {
     match member {
         "Ping" => Message::method_return(header)?.build(&()),
@@ -123,7 +111,6 @@ fn peer(header: &Header<'_>, member: &str) -> zbus::Result<Message> {
     }
 }
 
-/// The first valid machine id (32 hex digits) of `files`.
 fn machine_id(files: &[&Path]) -> Option<String> {
     files.iter().find_map(|path| {
         let text = std::fs::read_to_string(path).ok()?;

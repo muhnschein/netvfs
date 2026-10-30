@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-// netvfs 0.4's C++ tst_bridgeunits peer* cases, with a fake /proc in a
-// temporary folder.
-// Restriction lints that only add noise to tests (doc/RUST.md "Lints").
+// Peer checks with a fake /proc in a temporary folder.
 #![allow(clippy::assertions_on_result_states, clippy::arithmetic_side_effects)]
 
 use super::{
@@ -38,7 +36,7 @@ impl FakeProc {
     }
 
     fn set_start_time(&self, pid: i32, start_time: i64) {
-        // Field 22 is starttime; comm with spaces and parentheses on purpose.
+        // Field 22 is starttime; comm has spaces and parentheses on purpose.
         let mut stat = format!("{pid} (we (ird) name) S");
         for _ in 4..=21 {
             stat.push_str(" 0");
@@ -99,7 +97,6 @@ fn uid() {
     none.credentials = Box::new(|_| None);
     let err = check(&exe, none).unwrap_err();
     assert_eq!(err.message, "no peer credentials");
-    // pid 0 or negative: no process.
     assert!(denied(check(&exe, fake_environment(&proc, 4242, 0, false))));
     let err = check(&exe, fake_environment(&proc, 1000, 100, false)).unwrap_err();
     assert_eq!(err.message, "peer uid 1000 is not the bridge's uid");
@@ -119,10 +116,8 @@ fn executable() {
     assert!(denied(check(&registered, fake_environment(&proc, 4242, 101, false))));
     let missing = check(&dir.path().join("missing"), fake_environment(&proc, 4242, 100, false));
     assert_eq!(missing.unwrap_err().message, "the registered executable cannot be read");
-    // A process that is gone.
     let gone = check(&registered, fake_environment(&proc, 4242, 555, false));
     assert_eq!(gone.unwrap_err().message, "peer process 555 is gone");
-    // exe unreadable (dangling link).
     proc.add_process(102, &dir.path().join("deleted"), 50);
     let unreadable = check(&registered, fake_environment(&proc, 4242, 102, false));
     assert_eq!(unreadable.unwrap_err().message, "cannot read the executable of peer 102");
@@ -130,8 +125,7 @@ fn executable() {
 
 #[test]
 fn executable_copy() {
-    // XB-5: Sailjail (firejail --private-bin) runs a copy of the registered
-    // executable from a tmpfs. Larger than one comparison chunk.
+    // Sailjail (firejail --private-bin) runs a copy of the registered executable from a tmpfs. Larger than one comparison chunk.
     let proc = FakeProc::new();
     let dir = TempDir::new();
     let mut content = b"\x7fELF".to_vec();
@@ -143,7 +137,6 @@ fn executable_copy() {
     let mut last_byte = content.clone();
     *last_byte.last_mut().unwrap() = b'y';
     write_file(&dir.path().join("same-size"), &last_byte);
-    // Differs in the second chunk only.
     let mut second_chunk = content.clone();
     second_chunk[COMPARE_CHUNK_BYTES + 1] = b'z';
     write_file(&dir.path().join("second-chunk"), &second_chunk);
@@ -183,19 +176,16 @@ fn copy_pid_reuse() {
     write_file(&copy, b"the app");
     write_file(&other, b"another");
     proc.add_process(100, &other, 50);
-    // The pid was reused by a process running a copy while exe was open.
     let mut env = fake_environment(&proc, 4242, 100, false);
     let (p, c) = (proc.clone(), copy.clone());
     env.after_exe_read = Some(Box::new(move || p.add_process(100, &c, 51)));
     assert!(denied(check(&registered, env)));
-    // The content comes from the file opened inside the start time window,
-    // not from a second look at /proc/<pid>/exe.
+    // Content comes from the file opened inside the start-time window, not a second look at /proc/<pid>/exe.
     proc.add_process(100, &other, 50);
     let mut env = fake_environment(&proc, 4242, 100, false);
     let (p, c) = (proc.clone(), copy.clone());
     env.after_exe_read = Some(Box::new(move || p.add_process(100, &c, 50)));
     assert!(denied(check(&registered, env)));
-    // And the other way round: the copy that was open is accepted.
     proc.add_process(100, &copy, 50);
     let mut env = fake_environment(&proc, 4242, 100, false);
     env.after_exe_read = Some(Box::new(move || proc.add_process(100, &other, 50)));
@@ -207,12 +197,10 @@ fn pid_reuse() {
     let proc = FakeProc::new();
     let exe = this_exe();
     proc.add_process(100, &exe, 50);
-    // The pid was reused while exe was read: another start time afterwards.
     let mut env = fake_environment(&proc, 4242, 100, false);
     let p = proc.clone();
     env.after_exe_read = Some(Box::new(move || p.set_start_time(100, 51)));
     assert_eq!(check(&exe, env).unwrap_err().message, "peer pid 100 was reused");
-    // A process started after the check began cannot be the peer.
     proc.set_start_time(100, 200_000);
     assert_eq!(
         check(&exe, fake_environment(&proc, 4242, 100, false)).unwrap_err().message,
@@ -222,7 +210,6 @@ fn pid_reuse() {
     assert!(denied(check(&exe, fake_environment(&proc, 4242, 100, false))));
     proc.set_start_time(100, 100_000);
     check(&exe, fake_environment(&proc, 4242, 100, false)).unwrap();
-    // Without a clock only the before/after comparison applies.
     proc.set_start_time(100, 200_000);
     let mut env = fake_environment(&proc, 4242, 100, false);
     env.boot_ticks_now = Box::new(|| None);
@@ -234,7 +221,6 @@ fn pidfd() {
     let proc = FakeProc::new();
     let exe = this_exe();
     proc.add_process(100, &exe, 50);
-    // pidfd_open() path: the pidfd must still name pid 100 after the reads.
     let opened = Arc::new(AtomicI32::new(-1));
     let with_pidfd = |alive_pid: i32| {
         let mut env = fake_environment(&proc, 4242, 100, false);
@@ -250,10 +236,8 @@ fn pidfd() {
         env
     };
     check(&exe, with_pidfd(100)).unwrap();
-    // The process exited.
     assert_eq!(check(&exe, with_pidfd(-1)).unwrap_err().message, "peer process 100 exited during the check");
-    // SO_PEERPIDFD: the pidfd from the credentials is used, pidfd_open is
-    // not. A fresh /proc without its fdinfo: not alive.
+    // SO_PEERPIDFD: credentials' pidfd is used, pidfd_open is not.
     let proc = FakeProc::new();
     proc.add_process(100, &exe, 50);
     let mut env = fake_environment(&proc, 4242, 100, true);
@@ -263,12 +247,9 @@ fn pidfd() {
 
 #[test]
 fn real_process() {
-    // The real /proc and SO_PEERCRED on a socketpair: this test process.
     let (a, _b) = socket();
     PeerChecker::new(this_exe()).check(a.as_fd()).unwrap();
     assert!(denied(PeerChecker::new("/bin/sh").check(a.as_fd())));
-    // A copy at another inode (Sailjail's private-bin), through the real
-    // /proc/self/exe.
     let dir = TempDir::new();
     let copy = dir.path().join("copy");
     std::fs::copy(this_exe(), &copy).unwrap();

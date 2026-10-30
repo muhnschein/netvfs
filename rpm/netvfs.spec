@@ -1,28 +1,20 @@
 # SPDX-License-Identifier: LGPL-2.1-or-later
 #
-# Packages of SPEC-v2 XP-1 (amends SPEC 4.1, P-4, P-6):
+# Packages:
 #
-#   netvfs          libnetvfs, all protocol backends, libnetvfs-rs.so (the
-#                   Rust backends the plugins load), the
-#                   account UI module, the account providers, the Files
-#                   services, netvfs-cli, translations
+#   netvfs          libnetvfs, all backends, libnetvfs-rs.so (Rust backends the plugins load), account UI
+#   module, account providers, Files services, netvfs-cli, translations
 #   netvfs-backup   SFTP and SMB backups: services, Buteo plugins and profiles
-#   netvfs-bridge   netvfs-bridge and its setgid accounts helper, for
-#                   sandboxed consumers, and libnetvfs-bridge-ffi.so, the
-#                   C ABI through which the bridge reaches the backends (both
-#                   binaries are Rust: rust/, doc/RUST.md)
+#   netvfs-bridge   netvfs-bridge and its setgid accounts helper (Rust), for sandboxed consumers, and
+#   libnetvfs-bridge-ffi.so, the C ABI through which the bridge reaches the backends
 #   netvfs-devel    headers, pkg-config
 #
-# The parts nobody installs on their own are one package; what stays
-# separate pulls in something the rest does not need (Buteo, a setgid
-# binary) or is only for development.
+# Parts nobody installs alone are one package; what stays separate pulls in something the rest does not need
+# (Buteo, a setgid binary) or is for development.
 #
-# XC-1a: every package requires netvfs of the same build. Library
-# dependencies (Qt, libaccounts-qt5, libsignon-qt5, libsqlite3,
-# libbuteosyncfw5) are added by rpm's automatic soname dependencies;
-# tools/ci/check-rpm.sh checks the ones the split relies on.
-# tools/ci/check-files.py checks that every installed file belongs to exactly
-# one package.
+# Every package requires netvfs of the same build. Library dependencies come from rpm's automatic soname
+# dependencies; tools/ci/check-rpm.sh checks the ones the split relies on, tools/ci/check-files.py that every
+# installed file belongs to exactly one package.
 
 Name:       netvfs
 Version:    0.6.0
@@ -31,16 +23,14 @@ Summary:    Remote file access accounts for Sailfish OS
 License:    LGPL-2.1-or-later
 URL:        https://github.com/muhnschein/netvfs
 Source0:    %{name}-%{version}.tar.bz2
-# SPEC P-4
 ExclusiveArch: aarch64
 
-# SPEC P-5
 BuildRequires: qt5-qmake
 BuildRequires: qt5-qttools-linguist
 BuildRequires: sailfish-svg2png
 BuildRequires: pkgconfig(Qt5Core)
 BuildRequires: pkgconfig(Qt5DBus)
-# SPEC-v2 XD-1: discovery in libnetvfs; the bridge's ad-hoc locations.
+# Discovery in libnetvfs; the bridge's ad-hoc locations.
 BuildRequires: pkgconfig(Qt5Network)
 BuildRequires: pkgconfig(Qt5Concurrent)
 BuildRequires: pkgconfig(Qt5Qml)
@@ -48,23 +38,17 @@ BuildRequires: pkgconfig(Qt5Quick)
 BuildRequires: pkgconfig(accounts-qt5)
 BuildRequires: pkgconfig(libsignon-qt5)
 BuildRequires: pkgconfig(buteosyncfw5) >= 0.10.0
-# SPEC-v2 XB-2, XB-2a: netvfs-bridge and its accounts helper are Rust 1.95,
-# which no SDK target ships yet: CI cross-builds them, and libnetvfs-rs.so,
-# with the SDK's own compiler and sysroot before this build
-# (tools/ci/cross-build.sh), and the spec installs them (doc/RUST.md "Cross
-# build"). rpm derives their library dependencies. The bridge speaks
-# peer-to-peer D-Bus with zbus, so the package build needs no libdbus (the
-# tests use it).
+# netvfs-bridge and its accounts helper are Rust 1.95, which no SDK target ships: CI cross-builds them and
+# libnetvfs-rs.so with the SDK's compiler and sysroot before this build (tools/ci/cross-build.sh); the spec
+# installs them. Bridge speaks peer-to-peer D-Bus with zbus: no libdbus needed to build.
 
 Requires:   sailfish-version >= 5.2.0
 Requires:   sailfishsilica-qt5
 Requires:   jolla-settings-accounts
 Requires:   sailfish-components-accounts-qt5
-# The SSH key import page of the shared creation flow uses the system file
-# picker (SPEC-sftp; the page is part of the module, so every account UI
-# loads it).
+# SSH key import page uses the system file picker; part of the module, so every account UI loads it.
 Requires:   sailfish-components-pickers-qt5
-# SPEC-v2 XP-1: backups come along unless they are removed.
+# Backups come along unless removed.
 Recommends: %{name}-backup = %{version}-%{release}
 
 %description
@@ -75,8 +59,7 @@ command line tool netvfs-cli.
 libnetvfs (accounts, credentials, sessions and errors over pluggable protocol
 backends) with its SFTP, SMB and local file system backends; the SFTP and
 SMB backends are Rust (libnetvfs-rs.so; SMB 3.1.1 only). libnetvfs also links
-QtNetwork, for the DNS-SD discovery of servers on the local network
-(SPEC-v2 XD-1).
+QtNetwork, for the DNS-SD discovery of servers on the local network.
 
 %package devel
 Summary:    Development files for libnetvfs
@@ -98,25 +81,22 @@ sftp-backup and smb-backup services and their Buteo backup plugins and
 profiles. Without this package the accounts only provide files.
 
 %package bridge
-# SPEC-v2 XP-5: separate, so that only devices with a sandboxed consumer get
-# the setgid accounts helper; nothing requires it.
+# Separate so only devices with a sandboxed consumer get the setgid accounts helper; nothing requires it.
 Summary:    Network locations for sandboxed apps
 Requires:   %{name} = %{version}-%{release}
 Requires:   systemd
-# SPEC-v2 XB-2a: the group `privileged` of the setgid accounts helper (as
-# mapplauncherd's boosters).
+# Group `privileged` of the setgid accounts helper (as mapplauncherd's boosters).
 Requires(pre): sailfish-setup
 
 %description bridge
-netvfs-bridge (SPEC-v2 8a): serves netvfs locations to registered sandboxed
+netvfs-bridge: serves netvfs locations to registered sandboxed
 consumers over a socket in their data folder, without handing out secrets.
 
 %prep
 %setup -q -n %{name}-%{version}
 
 %build
-# The Rust binaries and libnetvfs-rs.so, cross-built by CI into
-# rust/prebuilt (see above).
+# Rust binaries and libnetvfs-rs.so, cross-built by CI into rust/prebuilt.
 %qmake5 -r NETVFS_BUILD_TESTS=0 "VERSION=%{version}" \
     NETVFS_RUST_PREBUILT="$PWD/rust/prebuilt"
 %make_build
@@ -124,8 +104,7 @@ consumers over a socket in their data folder, without handing out secrets.
 %install
 %qmake5_install
 
-# Script bodies, not "-p /sbin/ldconfig": rpm passes the count of
-# installed instances to a -p program as an argument, and ldconfig takes
+# Script bodies, not "-p /sbin/ldconfig": rpm passes the instance count to a -p program and ldconfig takes
 # "1" for a folder and fails.
 %post
 /sbin/ldconfig
@@ -133,16 +112,15 @@ consumers over a socket in their data folder, without handing out secrets.
 %postun
 /sbin/ldconfig
 
-# SPEC P-6: msyncd picks up new or removed plugins and profiles.
+# msyncd picks up new or removed plugins and profiles.
 %post backup
 systemctl-user try-restart msyncd.service || :
 
 %postun backup
 systemctl-user try-restart msyncd.service || :
 
-# XB-3: the generator turns the consumer files into units on daemon-reload;
-# starting the targets again starts the socket and path units they now want.
-# XP-7: a bridge still running the old binary stops; its socket stays, so the
+# The generator turns consumer files into units on daemon-reload; starting the targets again starts the
+# socket and path units they now want. A bridge still running the old binary stops; its socket stays, so the
 # consumer's next connection starts the new one.
 %post bridge
 systemctl-user daemon-reload || :
@@ -165,10 +143,9 @@ systemctl-user daemon-reload || :
 %{_libdir}/netvfs/backends/libnetvfs-sftp.so
 %{_libdir}/netvfs/backends/libnetvfs-smb.so
 %{_libdir}/netvfs/backends/libnetvfs-local.so
-# The Rust backends, loaded by their plugins with dlopen next to the backend
-# folder (doc/RUST.md).
+# Rust backends, dlopen'd by their plugins next to the backend folder.
 %{_libdir}/netvfs/libnetvfs-rs.so
-# The bridge package's binaries live here.
+# Bridge package's binaries.
 %dir %{_prefix}/libexec/netvfs
 %dir %{_datadir}/netvfs
 %{_datadir}/netvfs/providers
@@ -219,10 +196,9 @@ systemctl-user daemon-reload || :
 
 %files bridge
 %{_prefix}/libexec/netvfs/netvfs-bridge
-# The backends' C ABI for the Rust netvfs-bridge (loaded with dlopen, next to
-# the backend folder, outside the linker path).
+# Backends' C ABI for the Rust netvfs-bridge (dlopen'd next to the backend folder, outside the linker path).
 %{_libdir}/netvfs/libnetvfs-bridge-ffi.so
-# SPEC-v2 XB-2a: only the group `privileged` can read the accounts database.
+# Only group `privileged` can read the accounts database.
 %attr(2755,root,privileged) %{_prefix}/libexec/netvfs/netvfs-accounts
 %{_prefix}/lib/systemd/user-generators/netvfs-bridge-generator
 %dir %{_datadir}/netvfs/consumers

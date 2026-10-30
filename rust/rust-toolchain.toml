@@ -1,6 +1,4 @@
-# The compiler the Sailfish OS SDK will ship (rust-version in Cargo.toml):
-# builds, lints and tests use it, so CI checks what the target compiles.
-# scheduled.yml runs the current stable's clippy as well.
+# Compiler the Sailfish OS SDK will ship (rust-version in Cargo.toml): CI checks what the target compiles. scheduled.yml also runs current stable clippy.
 [toolchain]
 channel = "1.95.0"
 components = ["clippy", "rustfmt", "llvm-tools-preview"]

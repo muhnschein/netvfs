@@ -1,8 +1,5 @@
 name: Weekly
-# What can change without a commit: advisories against the locked crates,
-# the next stable clippy, the online workflow audit, and the Rust tests under
-# AddressSanitizer and LeakSanitizer, netvfs-bridge's FFI test with the C++
-# side instrumented too (doc/RUST.md "Tests").
+# Advisories against locked crates, next stable clippy, online workflow audit, Rust tests under ASan and LSan, netvfs-bridge's FFI test with the C++ side instrumented too.
 on:
   schedule:
     - cron: "41 4 * * 1"
@@ -16,8 +13,7 @@ env:
   DENY_VERSION: 0.20.2
   ZIZMOR_VERSION: 1.30.1
   NEXTEST_VERSION: 0.9.148
-  # -Zsanitizer needs nightly; pinned so that a nightly regression does not
-  # look like a finding. Bump on purpose.
+  # -Zsanitizer needs nightly; pinned so a nightly regression is not mistaken for a finding.
   SANITIZER_NIGHTLY: nightly-2026-10-01
 jobs:
   advisories:
@@ -89,9 +85,7 @@ jobs:
           key: cargo-nextest-${{ env.NEXTEST_VERSION }}-ubuntu-24.04
       - name: Install cargo-nextest
         run: ./tools/ci/cargo-tool.sh cargo-nextest "$NEXTEST_VERSION"
-      # The C++ side of the FFI test with clang's ASan, whose runtime the
-      # Rust test binary links: a clang of rustc's LLVM major, which
-      # rust-sanitize.sh checks (doc/RUST.md "Tests", design §6.6).
+      # C++ side of the FFI test with clang's ASan, whose runtime the Rust test binary links: clang of rustc's LLVM major, checked by rust-sanitize.sh.
       - name: Build the FFI's C++ libraries with ASan (the clang of rustc's LLVM)
         run: |
           major=$(rustc +"$SANITIZER_NIGHTLY" -vV | sed -n 's/^LLVM version: \([0-9]*\).*/\1/p')

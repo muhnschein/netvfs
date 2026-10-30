@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: LGPL-2.1-or-later
 # Per provider <p>: /usr/share/accounts/providers/<p>.provider and
-# /usr/share/accounts/ui/<p>{,-settings,-update}.qml; for backup providers
-# also /usr/share/accounts/services/<p>-backup.service (both generated from
-# templates, SPEC 6.1). The "<p>-files" services are in files-services/.
+# /usr/share/accounts/ui/<p>{,-settings,-update}.qml; for backup providers also
+# /usr/share/accounts/services/<p>-backup.service (both generated from templates). "<p>-files"
+# services are in files-services/.
 TEMPLATE = aux
 include(providers.pri)
 
@@ -26,5 +26,5 @@ for(p, NETVFS_BACKUP_PROVIDERS) {
 }
 
 OTHER_FILES += providers.pri templates/provider.xml.in templates/service.xml.in
-# Re-run qmake (and so regenerate the files) when a template changes.
+# Re-run qmake (regenerates the files) when a template changes.
 QMAKE_INTERNAL_INCLUDED_FILES += $$PWD/templates/provider.xml.in $$PWD/templates/service.xml.in

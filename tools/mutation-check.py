@@ -41,9 +41,8 @@ def main():
 
     env = dict(os.environ)
     env.setdefault("QT_QPA_PLATFORM", "offscreen")
-    # Each mutant rebuilds: release Rust without LTO, 16 codegen units,
-    # incremental (~35 s down to ~6 s a mutant); same code, only slower to
-    # run. ci.yml's mutation job sets the same.
+    # Each mutant rebuilds: release Rust without LTO, 16 codegen units, incremental (~35 s down to ~6 s a mutant); same code,
+    # only slower to run. ci.yml's mutation job sets the same.
     for name, value in FAST_RELEASE.items():
         env.setdefault(name, value)
     survivors = []

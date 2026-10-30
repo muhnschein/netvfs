@@ -1,8 +1,5 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! Jobs: `Upload`, `Download` (XB-11), `Walk`, `RemoveTree` and
-//! `CopyAcross` (`Session::Jobs` of sessionjobs.cpp). A job replies its id
-//! at once, reports `JobProgress` at most every 250 ms and ends with
-//! `JobFinished`.
+//! `Upload`, `Download`, `Walk`, `RemoveTree`, `CopyAcross`: reply with the job id at once, `JobProgress` at most every 250 ms, end with `JobFinished`.
 
 use super::{Core, Event, quota};
 use crate::ffi::Conn;
@@ -23,26 +20,17 @@ use std::os::fd::{AsRawFd, OwnedFd};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-/// What `Upload` and `Download` carry.
 #[derive(Debug)]
 pub(super) struct TransferCall {
-    /// The location.
     pub(super) loc: LocId,
-    /// The remote path.
     pub(super) path: NPath,
-    /// The local descriptor.
     pub(super) fd: OwnedFd,
-    /// The options.
     pub(super) opts: TransferOpts,
-    /// The lane.
     pub(super) lane: Lane,
-    /// Upload (else download).
     pub(super) upload: bool,
 }
 
 impl Core {
-    /// Takes a job slot and replies with the job id (`startJob`); `None`
-    /// (after an error reply) over the limit.
     fn start_job(&mut self, sid: SessionId, reply: ReplyTo) -> Option<(u32, CancelToken)> {
         if !self.quota.acquire_job() {
             reply.fail(&quota::too_many("Too many running jobs"));
@@ -57,14 +45,11 @@ impl Core {
         Some((job, cancel))
     }
 
-    /// `JobProgress` of `job` of `sid`, from any thread.
     fn reporter(&self, sid: SessionId, job: u32) -> impl FnMut(i64, i64) + Send + 'static {
         let tx = self.tx.clone();
         move |done, total| drop(tx.send(Event::Progress { sid, job, done, total }))
     }
 
-    /// Runs `body` on a pooled connection of `loc` and reports how it
-    /// ended (`runJob`); a failure of a canceled job is `Canceled`.
     fn run_job(
         &mut self,
         sid: SessionId,
@@ -87,8 +72,6 @@ impl Core {
         self.book.submit(loc.as_str(), lane, TaskContext::new(sid, cancel), work);
     }
 
-    /// XB-11: the descriptor is checked before any network work; regular
-    /// files are read and written at explicit offsets, FIFOs sequentially.
     pub(super) fn on_transfer(&mut self, sid: SessionId, reply: ReplyTo, call: TransferCall) {
         let need = if call.upload { FdAccess::Read } else { FdAccess::Write };
         let info = match check_transfer_fd(call.fd.as_raw_fd(), need) {
@@ -156,8 +139,6 @@ impl Core {
         });
     }
 
-    /// Two connections at once on a thread of their own (`copy_across`
-    /// needs both owned by the calling thread).
     pub(super) fn on_copy_across(
         &mut self,
         sid: SessionId,

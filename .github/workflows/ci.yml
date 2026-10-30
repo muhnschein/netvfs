@@ -5,8 +5,7 @@ on:
       - main
   pull_request:
     types: [opened, synchronize, reopened]
-  # Weekly on main, and by hand (Run workflow) before a release: every
-  # mutation list (tools/ci/mutation-lists.py).
+  # Weekly on main and by hand before a release: every mutation list (tools/ci/mutation-lists.py).
   schedule:
     - cron: "41 2 * * 1"
   workflow_dispatch:
@@ -23,9 +22,7 @@ env:
   DENY_VERSION: 0.20.2
   ZIZMOR_VERSION: 1.30.1
 jobs:
-  # Docs-only PR (`*.md` outside vendor/, rust/vendor/): build and test jobs
-  # skipped; a job skipped by `if:` passes as a required check. Rules:
-  # tools/ci/changes.sh.
+  # Docs-only PR (`*.md` outside vendor/, rust/vendor/): build and test jobs skipped; a job skipped by `if:` passes as a required check (tools/ci/changes.sh).
   changes:
     name: What changed
     runs-on: ubuntu-24.04
@@ -48,8 +45,7 @@ jobs:
         env:
           EVENT: ${{ github.event_name }}
 
-  # CI's own scripts: wrong apt rule deletes the archive, wrong change rule
-  # = code PR green without tests, wrong core reader = crash without stack.
+  # CI's own scripts: wrong apt rule deletes the archive, wrong change rule = code PR green without tests, wrong core reader = crash without stack.
   ci-scripts:
     name: CI scripts (selftests)
     runs-on: ubuntu-24.04
@@ -80,9 +76,7 @@ jobs:
           persist-credentials: false
       - name: Install dependencies
         run: ./tools/ci/install-host-deps.sh
-      # Crates' builds carried between runs: qmake's release build
-      # (build/rust-target) and the tests' (rust/target). Saved from main and
-      # this branch only; workspace crates always rebuilt.
+      # Crates' builds carried between runs: qmake's release build (build/rust-target) and the tests' (rust/target). Saved from main and this branch only; workspace crates always rebuilt.
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: |
@@ -99,9 +93,7 @@ jobs:
         run: make -j"$(nproc)"
       - name: Packaging checks (file lists, the Rust plugins, the bridge's C ABI)
         run: make check-packaging
-      # Test killed by a signal leaves its core here; read below on failure.
-      # Proved each run: a shell that crashes itself must leave one, else
-      # step fails.
+      # Test killed by a signal leaves a core here, read below on failure. Proved each run: a shell that crashes itself must leave one, else step fails.
       - name: Keep the cores of crashed tests
         run: |
           mkdir -p "$RUNNER_TEMP/cores"
@@ -115,7 +107,7 @@ jobs:
         run: ulimit -c unlimited && make check-unit
       - name: Interop tests
         run: ulimit -c unlimited && make check-interop
-      # Crashed test: stacks in the log; core, its binary, stacks kept a week.
+      # Crashed test: stacks in the log; core, binary, stacks kept a week.
       - name: Stacks of crashed tests
         if: failure()
         run: ./tools/ci/core-backtraces.sh "$RUNNER_TEMP/cores"
@@ -156,18 +148,14 @@ jobs:
         run: make SANITIZE=1 check
 
   mutation:
-    # One job per mutation list: the interop-level lists run whole container
-    # suites per mutation and would not fit one job's time limit together.
-    # Which lists: tools/ci/mutation-lists.py (PR: those its change can
-    # affect; push: none; weekly and by hand: all).
+    # One job per mutation list: interop-level lists run whole container suites per mutation and would not fit one job's time limit together. Which lists: tools/ci/mutation-lists.py (PR: those its change can affect; push: none; weekly and by hand: all).
     name: Tests bite (${{ matrix.list }})
     needs: changes
     if: needs.changes.outputs.code == 'true' && needs.changes.outputs.lists != '[]'
     runs-on: ubuntu-24.04
     # bridge list: 41-58 min seen; cap leaves room for slow runners.
     timeout-minutes: 90
-    # Same as tools/mutation-check.py sets: the Build step must match, else the
-    # first mutant rebuilds all Rust.
+    # Same as tools/mutation-check.py sets: Build step must match, else the first mutant rebuilds all Rust.
     env:
       CARGO_PROFILE_RELEASE_LTO: "off"
       CARGO_PROFILE_RS_RELEASE_LTO: "off"
@@ -184,21 +172,18 @@ jobs:
           persist-credentials: false
       - name: Install dependencies
         run: ./tools/ci/install-host-deps.sh
-      # Same build in every list: one cache for all (shared-key), saved by
-      # whichever finishes first.
+      # Same build in every list: one cache (shared-key), saved by whichever finishes first.
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: rust -> ../build/rust-target
           shared-key: mutation
       - name: Build
         run: make -j"$(nproc)"
-      # One set of SFTP interop servers for all the mutations of the list
-      # (tests/interop/sftp/run.sh uses the servers the variable names).
+      # One set of SFTP interop servers for all mutations of the list (tests/interop/sftp/run.sh uses the servers the variable names).
       - name: Start the SFTP interop servers
         if: matrix.list == 'sftp'
         run: NETVFS_SFTP_SERVERS_ONLY=1 ./tests/interop/sftp/run.sh build | tail -n 1 >> "$GITHUB_ENV"
-      # One set of Samba servers for all the mutations of the list
-      # (tests/interop/smb/run.sh uses the servers the variables name).
+      # One set of Samba servers for all mutations of the list (tests/interop/smb/run.sh uses the servers the variables name).
       - name: Start the SMB interop servers
         if: matrix.list == 'smb'
         run: NETVFS_SMB_SERVERS_ONLY=1 ./tests/interop/smb/run.sh build | grep '^NETVFS_INTEROP_SMB_' >> "$GITHUB_ENV"
@@ -208,10 +193,7 @@ jobs:
         run: ./tools/mutation-check.py --build build "tests/mutations/$LIST.json"
 
   rust-mutants:
-    # cargo-mutants on the Rust lines this pull request changes: every
-    # surviving mutant fails the job (doc/RUST.md "Tests bite"). Split into
-    # shards: a large diff has thousands of mutants, more than one job's
-    # time limit allows.
+    # cargo-mutants on the Rust lines this PR changes: every surviving mutant fails the job. Sharded: a large diff has thousands of mutants, more than one job's time limit.
     name: Tests bite (Rust, changed code, ${{ matrix.shard }}/12)
     needs: changes
     if: github.event_name == 'pull_request' && needs.changes.outputs.code == 'true'
@@ -245,8 +227,7 @@ jobs:
           key: cargo-mutants-${{ env.MUTANTS_VERSION }}-ubuntu-24.04
       - name: Install cargo-mutants
         run: ./tools/ci/cargo-tool.sh cargo-mutants "$MUTANTS_VERSION"
-      # netvfs-sftp's tests need the SFTP interop servers
-      # (rust/netvfs-sftp/tests/openssh.rs): started once for the shard.
+      # netvfs-sftp's tests need the SFTP interop servers (rust/netvfs-sftp/tests/openssh.rs): started once for the shard.
       - name: Start the SFTP interop servers
         env:
           BASE_REF: ${{ github.base_ref }}
@@ -254,8 +235,7 @@ jobs:
           if ! git diff --quiet "origin/$BASE_REF...HEAD" -- rust/netvfs-sftp; then
               NETVFS_SFTP_SERVERS_ONLY=1 ./tests/interop/sftp/run.sh build-ffi | tail -n 1 >> "$GITHUB_ENV"
           fi
-      # netvfs-smb's tests need the Samba servers
-      # (rust/netvfs-smb/tests/samba.rs): started once for the shard.
+      # netvfs-smb's tests need the Samba servers (rust/netvfs-smb/tests/samba.rs): started once for the shard.
       - name: Start the SMB interop servers
         env:
           BASE_REF: ${{ github.base_ref }}
@@ -276,9 +256,7 @@ jobs:
           if-no-files-found: ignore
 
   windows-smb:
-    # M-T11: netvfs-smb against Windows's own SMB server, a local account
-    # and a share on the runner over loopback (real SMB 3.1.1; Windows's own
-    # client shows the dialect first). rust/netvfs-smb/tests/windows.rs.
+    # netvfs-smb against Windows's own SMB server: local account and share on the runner over loopback (real SMB 3.1.1). rust/netvfs-smb/tests/windows.rs.
     name: SMB against Windows (M-T11)
     needs: changes
     if: needs.changes.outputs.code == 'true'
@@ -434,8 +412,7 @@ jobs:
           path: RPMS/*.rpm
           if-no-files-found: error
 
-  # Nobody watches a scheduled run: a failure opens an issue (or comments on
-  # the one still open) instead of only turning the Actions tab red.
+  # Nobody watches a scheduled run: a failure opens an issue (or comments on the open one).
   report:
     name: Report a failed weekly run
     needs: [check, sanitize, mutation, windows-smb, fuzz, rust-supply-chain, rpm]

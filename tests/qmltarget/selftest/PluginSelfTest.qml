@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-// Instantiated by run-in-sdk.sh on the target's Qt 5.6 engine: the C++ types'
-// scoped enums (enum class + Q_ENUM) and both singletons must be usable from
-// QML exactly as the pages use them. A failed check throws, which qmlcheck
-// reports as a warning in this file and so as a failure.
+// Instantiated by run-in-sdk.sh on the target's Qt 5.6 engine: the C++ types' scoped enums (enum class + Q_ENUM) and both
+// singletons must be usable from QML as the pages use them. A failed check throws, which qmlcheck reports as a warning in
+// this file, so as a failure.
 import QtQuick 2.0
 import org.netvfs.accounts 1.0
 
@@ -37,9 +36,9 @@ Item {
         check(keys.installState === SshKeyTool.InstallIdle && SshKeyTool.InstallFailed === 3,
               "SshKeyTool.InstallState")
         check(NetVfsInput.defaultPort("sftp") === 22 && NetVfsInput.portValue("2222") === 2222, "NetVfsInput")
-        check(NetVfsInput.backupsPathProblem("smb", "a:b") !== "", "NetVfsInput M-9")
+        check(NetVfsInput.backupsPathProblem("smb", "a:b") !== "", "NetVfsInput Windows-invalid name")
         check(NetVfsHelpers.credentialsApplication === "netvfs", "NetVfsHelpers")
-        // SPEC-v2 XA-5: run-in-sdk.sh points NETVFS_PROVIDERS_DIR at accounts/descriptors.
+        // run-in-sdk.sh points NETVFS_PROVIDERS_DIR at accounts/descriptors.
         check(NetVfsProviders.providers().length === 2, "NetVfsProviders.providers")
         check(NetVfsProviders.descriptor("smb").fields.length > 5, "NetVfsProviders.descriptor")
         check(NetVfsProviders.offersService("smb", "files") && !NetVfsProviders.offersService("local", "backup"),

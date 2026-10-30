@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 //! Known-answer and bit-flip tests for the crypto glue.
 //!
-//! Vector provenance (the constants at the end were generated mechanically from these files,
-//! not typed; a transcription error would make a test fail, not pass):
+//! Vector provenance (constants at the end were generated mechanically, not typed):
 //! - Microsoft Open Specifications blog, "SMB 3.1.1 Pre-authentication integrity in Windows 10"
 //!   <https://learn.microsoft.com/en-us/archive/blogs/openspecification/smb-3-1-1-pre-authentication-integrity-in-windows-10>,
 //!   as transcribed in Dell's pike, `tests/test_smb3_encryption_vector.py`
@@ -79,10 +78,6 @@ fn seal_key_128(key: [u8; 16], session_id: u64) -> SealKey {
     SealKey { key: GcmKey::Aes128(Zeroizing::new(key)), session_id, counter: 0, salt: [0; 4] }
 }
 
-// ---------------------------------------------------------------------------------------------
-// Microsoft-published vectors
-// ---------------------------------------------------------------------------------------------
-
 #[test]
 fn preauth_chain_and_signing_key_match_preauth_blog() {
     let mut h = PreauthHash::default();
@@ -91,8 +86,7 @@ fn preauth_chain_and_signing_key_match_preauth_blog() {
         (PIKE_PA_NEGOTIATE_RESPONSE, PIKE_PA_EXP_PAE_2),
         (PIKE_PA_SESSION_SETUP_REQUEST, PIKE_PA_EXP_PAE_3),
         (PIKE_PA_SESSION_SETUP_RESPONSE, PIKE_PA_EXP_PAE_4),
-        // pike calls the second SESSION_SETUP *request* "response2" (MessageId 3, no
-        // SERVER_TO_REDIR flag): the chain ends with the last request.
+        // pike calls the second SESSION_SETUP *request* "response2" (MessageId 3, no SERVER_TO_REDIR flag): the chain ends with the last request.
         (PIKE_PA_SESSION_SETUP_RESPONSE2, PIKE_PA_EXP_PAE_5),
     ] {
         h.update(&hex(msg));
@@ -115,7 +109,6 @@ fn preauth_chain_matches_encryption_blog_a1() {
         h.update(&hex(msg));
         assert_eq!(h.value()[..], hex(want)[..]);
     }
-    // The same final value as pike's independent transcription of this appendix.
     assert_eq!(
         h.value()[..],
         hex(&[
@@ -139,7 +132,7 @@ fn blog_a1_hash() -> PreauthHash {
     h
 }
 
-/// SessionId of the A.1 session (from its headers).
+/// SessionId of the A.1 session.
 const BLOG_A1_SESSION: u64 = 0x0000_1000_0000_0025;
 
 #[test]
@@ -154,7 +147,6 @@ fn session_keys_match_encryption_blog_a1() {
     assert_eq!(keys.signing.0[..], hex(BLOG_GCM_SIGNING_KEY)[..]);
     assert_eq!(seal_key_bytes(keys.seal.as_ref().unwrap()), hex(BLOG_GCM_ENCRYPTION_KEY));
     assert_eq!(open_key_bytes(keys.open.as_ref().unwrap()), hex(BLOG_GCM_DECRYPTION_KEY));
-    // The derived signing key verifies the server's signed final SESSION_SETUP response.
     keys.signing.verify(&hex(BLOG_GCM_SETUP_RESPONSE2)).unwrap();
 }
 
@@ -163,7 +155,6 @@ fn cmac_signature_matches_encryption_blog_a1() {
     let key = SigningKey::from_bytes(arr(BLOG_GCM_SIGNING_KEY));
     let signed = hex(BLOG_GCM_SETUP_RESPONSE2);
     key.verify(&signed).unwrap();
-    // Signing the same message (signature field cleared) reproduces the signature.
     let mut msg = signed.clone();
     msg[48..64].fill(0);
     key.sign(&mut msg).unwrap();
@@ -183,7 +174,6 @@ fn keys_and_cmac_signature_match_encryption_blog_a2() {
         kdf::<16>(&sk, super::LABEL_S2C_CIPHER, hash.value()).unwrap()[..],
         hex(BLOG_CCM_DECRYPTION_KEY)[..]
     );
-    // CCM is never negotiated by us, but this session signs with AES-CMAC too.
     SigningKey::from_bytes(arr(BLOG_CCM_SIGNING_KEY)).verify(&hex(BLOG_CCM_SETUP_RESPONSE2)).unwrap();
 }
 
@@ -198,15 +188,13 @@ fn gcm_seal_matches_encryption_blog_a1() {
 fn gcm_open_matches_encryption_blog_a1() {
     let key = open_key_128(arr(BLOG_GCM_DECRYPTION_KEY), BLOG_A1_SESSION);
     assert_eq!(key.open(&hex(BLOG_GCM_RESPONSE_TRANSFORMED)).unwrap(), hex(BLOG_GCM_RESPONSE_PLAIN));
-    // And the request direction, opened with the client-to-server key.
     let c2s = open_key_128(arr(BLOG_GCM_ENCRYPTION_KEY), BLOG_A1_SESSION);
     assert_eq!(c2s.open(&hex(BLOG_GCM_WRITE_TRANSFORMED)).unwrap(), hex(BLOG_GCM_WRITE_PLAIN));
 }
 
 #[test]
 fn kdf_matches_smb30_blog() {
-    // SMB 3.0 uses constant labels and contexts instead of the preauth hash; the KDF is the
-    // same function, so these pin label/context handling (NUL terminators included).
+    // SMB 3.0 uses constant labels and contexts instead of the preauth hash; same KDF, so these pin label/context handling (NUL terminators included).
     let sk = hex(BLOG_SMB30_SESSION_KEY);
     assert_eq!(kdf::<16>(&sk, b"SMB2AESCMAC\0", b"SmbSign\0").unwrap()[..], hex(BLOG_SMB30_SIGNING_KEY)[..]);
     assert_eq!(
@@ -218,10 +206,6 @@ fn kdf_matches_smb30_blog() {
         hex(BLOG_SMB30_DECRYPTION_KEY)[..]
     );
 }
-
-// ---------------------------------------------------------------------------------------------
-// Third-party vectors: Wireshark captures (real traffic, keys from Wireshark's test suite)
-// ---------------------------------------------------------------------------------------------
 
 fn capture_hash(frames: [&[&str]; 5]) -> PreauthHash {
     let mut h = PreauthHash::default();
@@ -245,14 +229,11 @@ fn wireshark_aes128gcm_capture() {
     .unwrap();
     assert_eq!(open_key_bytes(keys.open.as_ref().unwrap()), hex(&["b02f5de25e0562075c3dc329fa2aa396"]));
     assert_eq!(seal_key_bytes(keys.seal.as_ref().unwrap()), hex(&["7201623a31754e6581864581209dd3d2"]));
-    // The final SESSION_SETUP response (frame 6) is AES-CMAC signed (no signing context
-    // was negotiated in this capture, so CMAC is the 3.1.1 default).
+    // Final SESSION_SETUP response (frame 6) is AES-CMAC signed: no signing context negotiated, CMAC is the 3.1.1 default.
     keys.signing.verify(&hex(WS128_FRAME6)).unwrap();
-    // Frame 8: encrypted TREE_CONNECT response.
     let resp = keys.open.as_ref().unwrap().open(&hex(WS128_FRAME8)).unwrap();
     assert_eq!(&resp[..4], b"\xfeSMB");
     assert_eq!(u16::from_le_bytes([resp[12], resp[13]]), 3);
-    // Frame 7: encrypted TREE_CONNECT request, opened with the client-to-server key.
     let c2s = open_key_128(seal_key_bytes(keys.seal.as_ref().unwrap()).try_into().unwrap(), session);
     let req = c2s.open(&hex(WS128_FRAME7)).unwrap();
     assert!(contains(&req, &utf16(r"\\dfsroot1.foo.test\IPC$")));
@@ -260,9 +241,7 @@ fn wireshark_aes128gcm_capture() {
 
 #[test]
 fn wireshark_aes256gcm_capture() {
-    // suite_decryption.py: sesid 56dc03ab00000000, seskey 6a5004ad... (16 bytes, NTLM),
-    // s2c 46b64f32... and c2s 484c30bf... (32 bytes each): the 256-bit keys come from the
-    // 16-byte full session key with L = 256.
+    // suite_decryption.py: sesid 56dc03ab00000000, seskey 6a5004ad... (16 bytes, NTLM); 256-bit keys s2c 46b64f32... and c2s 484c30bf... derive from the full session key with L = 256.
     let session = u64::from_le_bytes(arr(&["56dc03ab00000000"]));
     let hash = capture_hash([WS256_FRAME1, WS256_FRAME2, WS256_FRAME3, WS256_FRAME4, WS256_FRAME5]);
     let keys = derive_session_keys(
@@ -272,11 +251,7 @@ fn wireshark_aes256gcm_capture() {
         session,
     )
     .unwrap();
-    // Wireshark's UAT for this capture lists 46b64f32... as "s2c" and 484c30bf... as "c2s",
-    // but its suite also passes them swapped (test_smb311_aes256gcm_partial_keyswap: the
-    // dissector tries both). What decides is which key opens which direction (below): the
-    // MS-SMB2 labels give S2C = 484c30bf... and C2S = 46b64f32..., and those decrypt the
-    // server's and the client's frame respectively.
+    // Wireshark's UAT lists 46b64f32... as "s2c" and 484c30bf... as "c2s" but its suite also passes them swapped (dissector tries both). MS-SMB2 labels give S2C = 484c30bf..., C2S = 46b64f32...; those decrypt the server's and client's frame.
     assert_eq!(
         open_key_bytes(keys.open.as_ref().unwrap()),
         hex(&["484c30bf3e17e322e0d217764d4584a325ec0495519c3f1547e0f996ab76c4c4"])
@@ -293,14 +268,9 @@ fn wireshark_aes256gcm_capture() {
         .unwrap();
     let req = c2s.open(&hex(WS256_FRAME7)).unwrap();
     assert!(contains(&req, &utf16(r"\\172.31.9.163\IPC$")));
-    // This capture negotiated AES-GMAC signing (signing context 0x0008, algorithm 2), which
-    // we never offer: its frame 6 must NOT verify as AES-CMAC.
+    // Capture negotiated AES-GMAC signing (context 0x0008, algorithm 2), never offered here: frame 6 must NOT verify as AES-CMAC.
     assert_eq!(keys.signing.verify(&hex(WS256_FRAME6)), Err(CryptoError::BadSignature));
 }
-
-// ---------------------------------------------------------------------------------------------
-// Bit flips: every altered input must fail
-// ---------------------------------------------------------------------------------------------
 
 #[test]
 fn cmac_any_flipped_bit_fails() {
@@ -312,14 +282,12 @@ fn cmac_any_flipped_bit_fails() {
         assert_eq!(SigningKey::from_bytes(k).verify(&msg), Err(CryptoError::BadSignature), "key bit {bit}");
     }
     for bit in 0..msg.len() * 8 {
-        // Signature bits (48..64) and every other header/body bit.
         assert_eq!(
             SigningKey::from_bytes(key).verify(&flip(&msg, bit)),
             Err(CryptoError::BadSignature),
             "message bit {bit}"
         );
     }
-    // Truncated or extended messages fail too.
     SigningKey::from_bytes(key).verify(&msg[..msg.len() - 1]).unwrap_err();
     let mut longer = msg.clone();
     longer.push(0);
@@ -345,7 +313,7 @@ fn gcm_any_flipped_bit_fails() {
         let got = open_key_128(key, BLOG_A1_SESSION).open(&flip(&frame, bit));
         let want = match byte {
             0..4 => Err(CryptoError::Malformed("not a transform header")),
-            // tag 4..20, nonce 20..32, unused nonce bytes 32..36, Reserved 40..42, ciphertext
+            // tag 4..20, nonce 20..32, unused nonce 32..36, Reserved 40..42, ciphertext
             4..36 | 40..42 | 52.. => Err(CryptoError::Unauthentic),
             36..40 => Err(CryptoError::Malformed("OriginalMessageSize does not match the frame")),
             42..44 => Err(CryptoError::Malformed("flags are not 'encrypted'")),
@@ -357,9 +325,7 @@ fn gcm_any_flipped_bit_fails() {
 
 #[test]
 fn gcm_aad_is_bytes_20_to_52_only_and_checked_by_the_tag() {
-    // With the field checks out of the way (same session, size, flags), every AAD byte still
-    // has to be authenticated: re-seal with the session id changed and open with a key that
-    // expects the old id -> WrongSession; open with the matching id -> fine.
+    // With the field checks out of the way, every AAD byte must still be authenticated: re-seal with another session id, open with a key expecting the old id -> WrongSession; matching id -> fine.
     let key = seal_key_128(arr(BLOG_GCM_ENCRYPTION_KEY), BLOG_A1_SESSION + 1);
     let sealed = key.seal_with_nonce(&arr(BLOG_GCM_WRITE_NONCE), &hex(BLOG_GCM_WRITE_PLAIN)).unwrap();
     assert_ne!(sealed[4..20], hex(BLOG_GCM_WRITE_TRANSFORMED)[4..20], "session id is in the AAD");
@@ -380,9 +346,9 @@ fn open_refuses_malformed_frames() {
     frame.push(0);
     assert_eq!(key.open(&frame), Err(CryptoError::Malformed("OriginalMessageSize does not match the frame")));
     frame.pop();
-    frame[42] = 0; // flags 0
+    frame[42] = 0;
     assert_eq!(key.open(&frame), Err(CryptoError::Malformed("flags are not 'encrypted'")));
-    frame[0] = 0xFE; // a plain SMB2 header is not a transform
+    frame[0] = 0xFE;
     assert_eq!(key.open(&frame), Err(CryptoError::Malformed("not a transform header")));
 }
 
@@ -424,12 +390,10 @@ fn session_key_shorter_than_16_is_zero_padded_and_empty_is_refused() {
     let padded = derive_session_keys(&[1, 2, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], &h, None, 1).unwrap();
     assert_eq!(short.signing.0[..], padded.signing.0[..]);
     derive_session_keys(&[], &h, Some(Cipher::Aes128Gcm), 1).unwrap_err();
-    // Only the first 16 bytes count for signing and AES-128 keys...
     let long = derive_session_keys(&[9; 32], &h, Some(Cipher::Aes128Gcm), 1).unwrap();
     let first16 = derive_session_keys(&[9; 16], &h, Some(Cipher::Aes128Gcm), 1).unwrap();
     assert_eq!(long.signing.0[..], first16.signing.0[..]);
     assert_eq!(seal_key_bytes(long.seal.as_ref().unwrap()), seal_key_bytes(first16.seal.as_ref().unwrap()));
-    // ...but the full key goes into AES-256 keys.
     let long = derive_session_keys(&[9; 32], &h, Some(Cipher::Aes256Gcm), 1).unwrap();
     let first16 = derive_session_keys(&[9; 16], &h, Some(Cipher::Aes256Gcm), 1).unwrap();
     assert_ne!(seal_key_bytes(long.seal.as_ref().unwrap()), seal_key_bytes(first16.seal.as_ref().unwrap()));
@@ -466,13 +430,8 @@ fn random_salt_differs_between_sessions() {
     let h = PreauthHash::default();
     let a = derive_session_keys(&[1; 16], &h, Some(Cipher::Aes128Gcm), 1).unwrap();
     let b = derive_session_keys(&[1; 16], &h, Some(Cipher::Aes128Gcm), 1).unwrap();
-    // 2^-32 chance of a false failure.
     assert_ne!(a.seal.unwrap().salt, b.seal.unwrap().salt);
 }
-
-// ---------------------------------------------------------------------------------------------
-// The rest of the surface: constructors, Debug, Display, randomness
-// ---------------------------------------------------------------------------------------------
 
 #[test]
 fn raw_key_constructors_check_the_length_and_keep_the_cipher() {
@@ -497,7 +456,6 @@ fn raw_key_constructors_check_the_length_and_keep_the_cipher() {
             );
         }
     }
-    // The two ciphers are not interchangeable.
     let mut seal = SealKey::from_bytes(Cipher::Aes256Gcm, &[5; 32], 3).unwrap();
     let frame = seal.seal(b"x").unwrap();
     assert_eq!(
@@ -539,7 +497,6 @@ fn server_side_keys_pair_with_the_clients() {
         assert_eq!(server_open.open(&request).unwrap(), b"request");
         let response = server_seal.seal(b"response").unwrap();
         assert_eq!(client.open.as_ref().unwrap().open(&response).unwrap(), b"response");
-        // Each direction has its own key.
         assert_eq!(client.open.as_ref().unwrap().open(&request), Err(CryptoError::Unauthentic));
     }
 }
@@ -567,7 +524,6 @@ fn random_fills_the_buffer() {
     let mut b = [0u8; 32];
     super::random(&mut a).unwrap();
     super::random(&mut b).unwrap();
-    // 2^-256 chances of a false failure each.
     assert_ne!(a, [0; 32]);
     assert_ne!(a, b);
     super::random(&mut []).unwrap();
@@ -578,7 +534,6 @@ fn preauth_hash_starts_at_zero() {
     assert_eq!(PreauthHash::default().value(), &[0u8; 64]);
     let mut h = PreauthHash::default();
     h.update(b"");
-    // SHA-512 of 64 zero bytes (Python's hashlib).
     assert_eq!(
         h.value()[..],
         hex(&[
@@ -599,15 +554,10 @@ fn sign_refuses_short_messages_and_sets_only_the_signature() {
     assert_eq!(msg[64..], [0x5A; 16]);
     assert_ne!(msg[48..64], [0x5A; 16]);
     key.verify(&msg).unwrap();
-    // A header alone (64 bytes) is a message too.
     let mut head = vec![7u8; 64];
     key.sign(&mut head).unwrap();
     key.verify(&head).unwrap();
 }
-
-// ---------------------------------------------------------------------------------------------
-// Vectors (generated; see the module comment)
-// ---------------------------------------------------------------------------------------------
 
 /// pike tests/test_smb3_encryption_vector.py test_pre_auth_integrity: negotiate_request
 const PIKE_PA_NEGOTIATE_REQUEST: &[&str] = &[

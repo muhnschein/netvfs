@@ -88,14 +88,14 @@ bool ConsentModel::store(const QString &consumerId, Consent consent)
             continue;
         ConsentStore consents = consentStore();
         consents.setConsent(consumerId, consent);
-        if (consents.consent(consumerId) != consent)   // not writable
+        if (consents.consent(consumerId) != consent)
             return false;
         m_consents[row] = consent;
         const QModelIndex changed = index(row);
         emit dataChanged(changed, changed, { roleId(Role::Consent) });
         return true;
     }
-    return false;   // only registered consumers
+    return false;
 }
 
 ConsentStore ConsentModel::consentStore() const
@@ -103,4 +103,4 @@ ConsentStore ConsentModel::consentStore() const
     return m_storePath.isEmpty() ? ConsentStore() : ConsentStore(m_storePath);
 }
 
-} // namespace NetVfsUi
+}

@@ -18,8 +18,7 @@ fn target(addr: SocketAddr) -> Target {
     }
 }
 
-/// A prompter that gives the replies it holds, in turn, and records what
-/// it was asked.
+/// Gives the replies it holds in turn and records what it was asked.
 #[derive(Default)]
 struct Answers {
     replies: VecDeque<Option<Vec<&'static [u8]>>>,
@@ -166,7 +165,7 @@ fn what_a_round_gets() {
             assert_eq!(round_action(&[], usable, has), Acknowledge);
         }
     }
-    // Without a prompter: S-11 exactly, whatever the text.
+    // Without a prompter: whatever the text.
     assert_eq!(round_action(&pass, true, false), AnswerWithSecret);
     assert_eq!(round_action(&code, true, false), AnswerWithSecret);
     assert_eq!(round_action(&pass, false, false), Refuse);
@@ -231,7 +230,6 @@ async fn password_sign_in() {
 
 #[tokio::test]
 async fn a_password_is_never_sent_to_a_key_only_server() {
-    // S-T7.
     let server = Server::start(script(vec![PK], vec![Step::Password("secret")])).await;
     let e = sign_in(&server, b"secret", Mode::Password).await.unwrap_err();
     assert_eq!(e, denied("This server only accepts SSH keys (publickey)."));
@@ -255,7 +253,7 @@ async fn a_server_that_names_no_method() {
 
 #[tokio::test]
 async fn keyboard_interactive_takes_the_stored_password() {
-    // S-11, S-T11: only keyboard-interactive, one non-echo prompt.
+    // Only keyboard-interactive, one non-echo prompt.
     let server =
         Server::start(script(vec![KI], vec![Step::Interactive(vec![Round::one("Password: ", "secret")])]))
             .await;
@@ -312,7 +310,7 @@ async fn too_many_rounds() {
 
 #[tokio::test]
 async fn key_sign_in() {
-    // S-12, S-T12: Ed25519 and ECDSA keys from the secret.
+    // Ed25519 and ECDSA keys from the secret.
     // The P-256 key's scalar has a leading zero byte (31 bytes in the file).
     for (file, algorithm) in [
         ("ed25519-openssh", "ssh-ed25519"),
@@ -346,7 +344,6 @@ async fn key_sign_in() {
 
 #[tokio::test]
 async fn partial_success_without_a_prompter_fails() {
-    // S-13.
     let chain =
         vec![Step::Password("secret"), Step::Interactive(vec![Round::one("Verification code: ", "123456")])];
     let server = Server::start(script(vec![PW], chain)).await;
@@ -355,7 +352,7 @@ async fn partial_success_without_a_prompter_fails() {
 
 #[tokio::test]
 async fn password_and_one_time_code() {
-    // XS-11: the code goes to the prompter, never the stored password.
+    // The code goes to the prompter, never the stored password.
     let chain =
         vec![Step::Password("secret"), Step::Interactive(vec![Round::one("Verification code: ", "123456")])];
     let server = Server::start(script(vec![PW], chain)).await;
@@ -385,7 +382,7 @@ async fn key_and_prompted_password() {
 
 #[tokio::test]
 async fn keyboard_interactive_after_the_configured_method_failed() {
-    // XS-11: with a prompter.
+    // With a prompter.
     let rounds = vec![Round::one("Password: ", "secret"), Round::one("Code: ", "42")];
     let server = Server::start(script(vec![PW, KI], vec![Step::Interactive(rounds)])).await;
     let mut answers = Answers::with(vec![Some(vec![b"42"])]);

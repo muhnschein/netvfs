@@ -2,14 +2,11 @@
 #ifndef NETVFS_BRIDGE_FFI_MARSHAL_H
 #define NETVFS_BRIDGE_FFI_MARSHAL_H
 
-// Conversions between NetVfs types and the flat data of the C ABI
-// (netvfs_bridge_ffi.h). Every conversion towards C is written once, as a
-// template over an "arena" that provides the memory:
-//  - HoldArena: the objects live as long as the arena; for data handed to a
-//    callback, borrowed for that callback only (O2).
-//  - SizeArena and BlockArena: pack() measures an object with the first and
-//    fills ONE malloc'd block with the second, so that the caller releases
-//    it with a single free() (O3).
+// Conversions between NetVfs types and the flat data of the C ABI. Every conversion towards C is
+// written once, as a template over an "arena" that provides the memory:
+//   HoldArena: objects live as long as the arena; for data handed to a callback.
+//   SizeArena and BlockArena: pack() measures an object with the first and fills ONE malloc'd block
+//     with the second, so the caller releases it with a single free().
 #include "netvfs_bridge_ffi.h"
 
 #include "error.h"
@@ -39,9 +36,6 @@ constexpr size_t alignUp(size_t n)
     return (n + BlockAlign - 1) / BlockAlign * BlockAlign;
 }
 
-// --------------------------------------------------------------- arenas
-
-// Keeps everything it hands out until it is destroyed.
 class HoldArena
 {
 public:
@@ -61,12 +55,11 @@ public:
     }
 
 private:
-    std::deque<QByteArray> m_bytes;          // a deque never moves its elements
+    std::deque<QByteArray> m_bytes;
     std::vector<std::shared_ptr<void>> m_arrays;
 };
 
-// Measures a block: the arrays (aligned) and the bytes. The arrays it hands
-// out are scratch memory, so that the filling code can run unchanged.
+// Measures a block. The arrays it hands out are scratch memory so the filling code runs unchanged.
 class SizeArena
 {
 public:
@@ -92,7 +85,6 @@ private:
     size_t m_dataBytes = 0;
 };
 
-// Fills a block measured by a SizeArena: arrays first, then the bytes.
 class BlockArena
 {
 public:
@@ -109,9 +101,8 @@ public:
         return out;
     }
 
-    // The array object is created in the block by placement array new, whose
-    // result points to its first element (no array cookie: CWG 2382). For
-    // n == 0 the pointer is still inside (or one past) the block, not null.
+    // Array created in the block by placement array new, whose result points to its first element
+    // (no array cookie: CWG 2382).
     template <typename T>
     T *array(size_t n)
     {
@@ -127,10 +118,9 @@ private:
     char *m_data;
 };
 
-// One malloc'd block holding a T and everything it points to (O3). `fill`
-// is called as fill(arena, T *) twice: to measure, then to fill. The caller
-// releases the block with free() and runs no destructor, so nothing in it
-// may need one.
+// One malloc'd block holding a T and everything it points to. `fill` is called as fill(arena, T *)
+// twice: to measure, then to fill. Caller releases with free() and runs no destructor, so nothing
+// in it may need one.
 template <typename T, typename Fill>
 T *pack(const Fill &fill)
 {
@@ -150,22 +140,17 @@ T *pack(const Fill &fill)
     return out;
 }
 
-// ------------------------------------------------------------ C -> NetVfs
-
-// O1: copies. Throws std::length_error above the QByteArray limit.
+// Copies. Throws std::length_error above the QByteArray limit.
 QByteArray toByteArray(nvb_bytes bytes);
 QString toUtf8String(nvb_bytes bytes);
-// XC-4: protocol bytes to a lossless QString (Names::decode).
+// Protocol bytes to a lossless QString (Names::decode).
 QString toPath(nvb_bytes bytes);
-// Values and options; an unknown value kind is a ProtocolError.
+// Unknown value kind is a ProtocolError.
 Result toParams(const nvb_params &in, ConnectionParams *out);
 QDateTime fromMs(int64_t ms);
 
-// ------------------------------------------------------------ NetVfs -> C
-
 qint64 toMs(const QDateTime &time);
-// NVB_VALUE_* for a value the ABI can carry, 0 for any other (dates as
-// ISO-8601 UTC strings, as the C++ bridge sent them).
+// NVB_VALUE_* for a value the ABI can carry, 0 for any other (dates as ISO-8601 UTC strings).
 uint32_t valueKind(const QVariant &value);
 
 template <typename Arena>
@@ -197,12 +182,12 @@ void fillValue(Arena &arena, nvb_value *out, const QVariant &value)
         break;
     }
     default:
-        break;   // not carried: fillMap() leaves such values out
+        break;
     }
 }
 
-// The values of `map` the ABI can carry, in key order. They are picked
-// once, so that the array has exactly one element per value written to it.
+// The values of `map` the ABI can carry, in key order; picked once so the array has exactly one
+// element per written value.
 template <typename Arena>
 const nvb_kv *fillMap(Arena &arena, const QVariantMap &map, size_t *count)
 {
@@ -221,7 +206,6 @@ const nvb_kv *fillMap(Arena &arena, const QVariantMap &map, size_t *count)
     return kv;
 }
 
-// XB-9 wire form of an entry.
 template <typename Arena>
 void fillEntry(Arena &arena, nvb_entry *out, const Entry &entry)
 {
@@ -251,14 +235,12 @@ void fillError(Arena &arena, nvb_error *out, const Result &result)
     out->retry_after_ms = result.retryAfterMs();
 }
 
-// nullptr for success; else one block (XC-21, XC-24). A failure without a
-// name (Error::None cannot fail) does not occur.
+// nullptr for success; else one block.
 nvb_error *packError(const Result &result);
 nvb_blob *packBlob(const QByteArray &data);
 nvb_entry *packEntry(const Entry &entry);
 nvb_capabilities *packCapabilities(const Capabilities &capabilities);
 nvb_url *packUrl(const ConnectionParams &params, const QString &path);
 
-} // namespace NetVfs::Ffi
-
+}
 #endif

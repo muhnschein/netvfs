@@ -1,11 +1,7 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! Replies, error replies and signals of `org.netvfs.Bridge1` (XB-8, XB-9,
-//! XC-24): the port of the C++ bridge's `protocol.cpp` (netvfs 0.4).
+//! Replies, error replies and signals of `org.netvfs.Bridge1`.
 //!
-//! Every string the bridge sends goes through [`wire_text`]: D-Bus strings
-//! must be valid UTF-8 without NUL, so NUL becomes U+FFFD (as the C++
-//! `WireWriter` did; a peer such as libdbus drops the connection on an
-//! invalid string).
+//! Every string sent goes through [`wire_text`]: D-Bus strings must be valid UTF-8 without NUL, so NUL becomes U+FFFD (libdbus drops the connection on an invalid string).
 
 use crate::status::Status;
 use netvfs_bridge_proto::errors::{INVALID_ARGS, UNKNOWN_METHOD};
@@ -21,14 +17,13 @@ use zbus::zvariant::{OwnedValue, Value};
 /// The bridge version `Hello` announces.
 pub const BRIDGE_VERSION: &str = env!("CARGO_PKG_VERSION");
 
-/// A string as the wire can carry it: NUL becomes U+FFFD.
+/// A string as the wire can carry it.
 #[must_use]
 pub fn wire_text(s: &str) -> String {
     s.replace('\0', "\u{fffd}")
 }
 
-/// Bytes as a wire string (owner, group, content type of entries from the
-/// backends): lossy UTF-8, NUL as U+FFFD.
+/// Bytes as a wire string (owner, group, content type of entries from the backends).
 #[must_use]
 pub fn wire_text_from_bytes(bytes: &[u8]) -> String {
     wire_text(&String::from_utf8_lossy(bytes))
@@ -49,32 +44,30 @@ fn wire_texts(items: &[String]) -> Vec<String> {
     items.iter().map(|s| wire_text(s)).collect()
 }
 
-/// The return values of a successful call, one variant per output
-/// signature of the method table.
+/// The return values of a successful call, one variant per output signature of the method table.
 #[derive(Debug)]
 pub enum Reply {
-    /// `""`: no return values.
+    /// `""`.
     Empty,
-    /// `Hello`: `s` (the bridge version).
+    /// `Hello`.
     Hello,
-    /// `s`: `GetConsent`, `ConnectAdHoc`.
+    /// `s`.
     Text(String),
-    /// `as`: `GetFeatures`.
+    /// `as`.
     Names(Vec<String>),
-    /// `a(sssa{sv})`: `ListLocations`.
+    /// `a(sssa{sv})`.
     Locations(Vec<WireLocation>),
-    /// `a(ssaya{sv})`: `ListDrives`.
+    /// `a(ssaya{sv})`.
     Drives(Vec<WireDrive>),
-    /// `(asasx)`: `Capabilities`.
+    /// `(asasx)`.
     Capabilities(WireCapabilities),
-    /// `u`: `List` (request id), `Upload`, `Download`, `CopyAcross`,
-    /// `RemoveTree`, `Walk` (job id).
+    /// `u`.
     Id(u32),
-    /// `(ayyyxxxxixxssqays)`: `Stat`.
+    /// `(ayyyxxxxixxssqays)`.
     Entry(WireEntry),
-    /// `ay`: `ReadLink`, `Checksum`, `Read`, `Mount`.
+    /// `ay`.
     Bytes(Vec<u8>),
-    /// `xxx`: `SpaceInfo` (free, total, used; -1 unknown).
+    /// `xxx`.
     Space {
         /// Free bytes.
         free: i64,
@@ -83,7 +76,7 @@ pub enum Reply {
         /// Used bytes.
         used: i64,
     },
-    /// `ux`: `OpenRead` (handle, size).
+    /// `ux`.
     Opened {
         /// The handle.
         handle: u32,
@@ -146,10 +139,7 @@ fn wire_drive(d: &WireDrive) -> (String, String, &[u8], &HashMap<String, OwnedVa
     (wire_text(&d.id), wire_text(&d.label), &d.mount_point, &d.info)
 }
 
-/// The D-Bus error name for a failure. `from_validation`: the failure comes
-/// from argument validation, where `ProtocolError` is
-/// `org.freedesktop.DBus.Error.InvalidArgs` and `Unsupported` is
-/// `org.freedesktop.DBus.Error.UnknownMethod` (`Protocol::errorNameFor`).
+/// The D-Bus error name for a failure.
 #[must_use]
 pub fn error_name(status: &Status, from_validation: bool) -> &'static str {
     match (status.name, from_validation) {
@@ -173,8 +163,7 @@ pub fn error_reply(call: &Header<'_>, name: &str, status: &Status) -> zbus::Resu
     if extra.is_empty() { reply.build(&(text,)) } else { reply.build(&(text, extra)) }
 }
 
-/// `detail` and `retryAfterMs` of a status, as error replies and
-/// `JobFinished` carry them (XC-24).
+/// `detail` and `retryAfterMs` of a status, as error replies and `JobFinished` carry them.
 #[must_use]
 pub fn status_extra(status: &Status) -> HashMap<String, Value<'static>> {
     let mut extra = HashMap::new();
@@ -187,7 +176,6 @@ pub fn status_extra(status: &Status) -> HashMap<String, Value<'static>> {
     extra
 }
 
-/// `(name, message)` of `ListDone` / `JobFinished`: empty on success.
 fn outcome(result: &Result<(), Status>) -> (&'static str, String) {
     match result {
         Ok(()) => ("", String::new()),
@@ -198,11 +186,11 @@ fn outcome(result: &Result<(), Status>) -> (&'static str, String) {
 /// A signal of `org.netvfs.Bridge1`, as the bridge sends it.
 #[derive(Debug, Clone, PartialEq)]
 pub enum OutSignal {
-    /// `s`: `granted`, `denied` or `unknown`.
+    /// `s`.
     ConsentChanged(String),
     /// `""`.
     LocationsChanged,
-    /// `""` (XB-20).
+    /// `""`.
     DrivesChanged,
     /// `a(sssq)`.
     NearbyChanged(Vec<WireNearby>),
@@ -226,7 +214,7 @@ pub enum OutSignal {
         job: u32,
         /// Bytes done.
         done: i64,
-        /// Bytes in all, -1 if not known.
+        /// Total bytes.
         total: i64,
     },
     /// `ua(ay(ayyyxxxxixxssqays))`.
@@ -236,8 +224,7 @@ pub enum OutSignal {
         /// Entries with their paths.
         items: Vec<WireWalkItem>,
     },
-    /// `ussa{sv}`; the status's `detail` and `retryAfterMs` are added to
-    /// `extra`.
+    /// `ussa{sv}`.
     JobFinished {
         /// The job id.
         job: u32,
@@ -319,8 +306,6 @@ fn wire_walk_item(item: &WireWalkItem) -> WireWalkItem {
     WireWalkItem { path: item.path.clone(), entry: wire_entry(&item.entry) }
 }
 
-/// The `a{sv}` of `JobFinished`: the job's results, plus the status's
-/// `detail` and `retryAfterMs` (which win over results of the same name).
 fn job_extra<'a>(
     extra: &'a HashMap<String, OwnedValue>,
     added: &'a HashMap<String, Value<'static>>,

@@ -14,13 +14,13 @@
 
 namespace NetVfsUi {
 
-// Lets the UI thread cancel a blocking backend call running on a worker
-// (SPEC C-9: Backend::cancel() is thread-safe).
+// Lets the UI thread cancel a blocking backend call running on a worker (Backend::cancel() is
+// thread-safe).
 class CancelToken
 {
 public:
-    // The worker registers its backend for the duration of its calls. A
-    // token that was already canceled cancels the backend at once.
+    // The worker registers its backend for the duration of its calls. An already canceled token
+    // cancels the backend at once.
     void attach(NetVfs::Backend *backend);
     void detach();
     void cancel();
@@ -32,10 +32,9 @@ private:
     std::atomic<bool> m_canceled { false };
 };
 
-// Runs blocking work on a private thread pool (SPEC C-8) and delivers the
-// completion on the owner's thread. Only the most recent job completes:
-// starting a new job or calling cancel() discards the result of the
-// previous one. The destructor cancels and waits for running work.
+// Runs blocking work on a private thread pool, delivers completion on the owner's thread. Only the
+// most recent job completes: a new job or cancel() discards the previous result. Destructor cancels
+// and waits for running work.
 class BackendJobs : public QObject
 {
     Q_OBJECT
@@ -58,6 +57,5 @@ private:
     bool m_running = false;
 };
 
-} // namespace NetVfsUi
-
+}
 #endif

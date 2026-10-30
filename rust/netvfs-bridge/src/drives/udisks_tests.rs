@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-// XB-20 against a fake UDisks2 on a private bus, which describes the phone
-// of `sample` and mounts below /run/media/user.
-// Restriction lints that only add noise to tests (doc/RUST.md "Lints").
+// Client against a fake UDisks2 on a private bus, describing the phone of `sample`; mounts below /run/media/user.
 #![allow(clippy::arithmetic_side_effects)]
 
 use super::{Bus, CALL_TIMEOUT, DEBOUNCE, ERROR_PREFIX, MANAGER, SERVICE, UDisks, error_name};
@@ -20,25 +18,15 @@ use zbus::names::BusName;
 use zbus::zvariant::{OwnedValue, Value};
 use zbus::{Connection, MessageStream};
 
-/// Longer than a debounced listing takes.
 const QUIET: Duration = Duration::from_millis(600);
 
-/// What the fake UDisks2 holds and saw.
 #[derive(Debug, Default)]
 struct State {
-    /// Mounted devices → mount point.
     mounted: HashMap<String, String>,
-    /// Devices that went away.
     gone: Vec<String>,
-    /// `Mount` and `Unmount` calls: member, device, whether
-    /// `auth.no_user_interaction` was set.
     calls: Vec<(String, String, bool)>,
-    /// The next `Mount` or `Unmount` fails with this name and message.
     error: Option<(String, String)>,
-    /// No call is answered.
     silent: bool,
-    /// The card's LUKS partition `mmcblk1p2`: unlocked (as `dm_2d0`) or not;
-    /// none without.
     luks: Option<bool>,
 }
 
@@ -50,7 +38,6 @@ struct FakeUDisks {
 impl FakeUDisks {
     async fn start(bus: &TestBus) -> Self {
         let conn = bus.connect().await;
-        // Before the name, so that no call is missed.
         let mut calls = MessageStream::from(&conn);
         conn.request_name(SERVICE).await.unwrap();
         let state = Rc::new(RefCell::new(State::default()));
@@ -69,7 +56,6 @@ impl FakeUDisks {
         self.state.borrow().calls.clone()
     }
 
-    /// Says that something of device `id` changed, as UDisks2 does.
     async fn emit(&self, id: &str) {
         let changed: HashMap<&str, Value<'_>> = HashMap::new();
         let path = format!("{BLOCK_DEVICES}{id}");
@@ -140,7 +126,6 @@ fn run<F: Future>(test: F) -> F::Output {
     tokio::task::LocalSet::new().block_on(&runtime, test)
 }
 
-/// A client of the bus of `fake` that counts the changes it is told.
 fn client(bus: &TestBus, timeout: Duration, changes: &Rc<Cell<usize>>) -> UDisks {
     let changes = Rc::clone(changes);
     UDisks::new(Bus::Address(bus.address().to_owned()), timeout, move || {
@@ -178,10 +163,8 @@ fn listed_drives_are_mounted_and_unmounted_without_a_question() {
         assert_eq!(ids(&listed), ["mmcblk1p1", "sda1"]);
         assert!(listed.iter().all(|d| d.mount_point.is_empty()));
         assert_eq!(udisks.mount("sda1").await.unwrap(), b"/run/media/user/sda1");
-        // Mounted already: its mount point, without a call.
         assert_eq!(udisks.mount("sda1").await.unwrap(), b"/run/media/user/sda1");
         assert_eq!(udisks.list().await[1].mount_point, b"/run/media/user/sda1");
-        // Not mounted: nothing to do.
         udisks.unmount("mmcblk1p1").await.unwrap();
         udisks.unmount("sda1").await.unwrap();
         assert_eq!(fake.calls(), [call("Mount", "sda1"), call("Unmount", "sda1")]);
@@ -195,13 +178,11 @@ fn only_listed_drives_are_acted_on() {
     run(async {
         let fake = FakeUDisks::start(&bus).await;
         let udisks = client(&bus, CALL_TIMEOUT, &Rc::default());
-        // The eMMC, mounted or not, and a device that is not there.
         for id in ["mmcblk0p20", "sdz1"] {
             assert_eq!(udisks.mount(id).await.unwrap_err().name, ErrorName::NotFound, "{id}");
         }
         fake.state.borrow_mut().mounted.insert("mmcblk0p20".to_owned(), "/persist".to_owned());
         assert_eq!(udisks.unmount("mmcblk0p20").await.unwrap_err().name, ErrorName::NotFound);
-        // The stick was pulled out.
         fake.state.borrow_mut().gone.push("sda1".to_owned());
         assert_eq!(udisks.mount("sda1").await.unwrap_err().name, ErrorName::NotFound);
         assert!(fake.calls().is_empty());
@@ -260,7 +241,6 @@ fn the_error_names() {
     for (name, expected) in bus {
         assert_eq!(error_name(&format!("org.freedesktop.DBus.Error.{name}")), expected, "{name}");
     }
-    // Not UDisks2's own, not the bus's.
     assert_eq!(error_name("org.example.NotMounted"), ErrorName::Internal);
 }
 
@@ -271,19 +251,16 @@ fn changes_are_told_once_drives_were_listed() {
         let fake = FakeUDisks::start(&bus).await;
         let changes = Rc::new(Cell::new(0));
         let udisks = client(&bus, CALL_TIMEOUT, &changes);
-        // Nobody listed drives yet: no watch.
         udisks.mount("sda1").await.unwrap();
         fake.emit("sda1").await;
         tokio::time::sleep(QUIET).await;
         assert_eq!(changes.get(), 0);
 
-        // A signal that changes nothing listed.
         assert_eq!(udisks.list().await[1].mount_point, b"/run/media/user/sda1");
         fake.emit("mmcblk0p20").await;
         tokio::time::sleep(QUIET).await;
         assert_eq!(changes.get(), 0);
 
-        // Unmounted: told once, after the burst of signals.
         udisks.unmount("sda1").await.unwrap();
         let first = Instant::now();
         for _ in 0..3 {
@@ -294,12 +271,10 @@ fn changes_are_told_once_drives_were_listed() {
         tokio::time::sleep(QUIET).await;
         assert_eq!(changes.get(), 1);
 
-        // The stick is pulled out.
         fake.state.borrow_mut().gone.push("sda1".to_owned());
         fake.emit("sda1").await;
         assert!(wait_for(|| changes.get() == 2).await);
 
-        // A listing in between is the last one: nothing new to tell.
         fake.state.borrow_mut().gone.clear();
         assert_eq!(ids(&udisks.list().await), ["mmcblk1p1", "sda1"]);
         fake.emit("sda1").await;
@@ -319,13 +294,11 @@ fn a_locked_drive_is_never_mounted_and_its_unlocking_is_told() {
         let listed = udisks.list().await;
         assert_eq!(ids(&listed), ["mmcblk1p1", "mmcblk1p2", "sda1"]);
         assert!(listed[1].locked && !listed[0].locked);
-        // XB-20: Settings → Storage unlocks it; UDisks2 is not asked.
         let status = udisks.mount("mmcblk1p2").await.unwrap_err();
         assert_eq!(status.name, ErrorName::Unsupported);
         udisks.unmount("mmcblk1p2").await.unwrap();
         assert!(fake.calls().is_empty());
 
-        // Unlocked in Settings: its cleartext device instead, told once.
         fake.state.borrow_mut().luks = Some(true);
         fake.emit("mmcblk1p2").await;
         assert!(wait_for(|| changes.get() == 1).await);
@@ -333,7 +306,6 @@ fn a_locked_drive_is_never_mounted_and_its_unlocking_is_told() {
         assert_eq!(ids(&listed), ["dm_2d0", "mmcblk1p1", "sda1"]);
         assert!(!listed[0].locked);
 
-        // Locked again.
         fake.state.borrow_mut().luks = Some(false);
         fake.emit("dm_2d0").await;
         assert!(wait_for(|| changes.get() == 2).await);
@@ -366,11 +338,9 @@ fn the_watch_ends_with_its_listener() {
 fn without_udisks_nothing_is_listed() {
     let Some(bus) = TestBus::start() else { return };
     run(async {
-        // A bus without UDisks2.
         let udisks = client(&bus, CALL_TIMEOUT, &Rc::default());
         assert!(udisks.list().await.is_empty());
         assert_eq!(udisks.mount("sda1").await.unwrap_err().name, ErrorName::Unsupported);
-        // No bus.
         let none = UDisks::new(Bus::Address("unix:path=/nonexistent/bus".to_owned()), CALL_TIMEOUT, || true);
         assert!(none.list().await.is_empty());
         assert_eq!(none.unmount("sda1").await.unwrap_err().name, ErrorName::Unsupported);

@@ -1,13 +1,7 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! Workers, pools, the connector, copy jobs and the job bodies against the
-//! real `libnetvfs-bridge-ffi.so` with the fake backend (the variables of
-//! `tests/ffi.rs`; without them every test says it is skipped and passes).
-//! The Rust side of the C++ bridge tests of connections, questions,
-//! attention and transfers (design §4.1, chunk C).
+//! Workers, pools, connector, copy jobs and job bodies against the real `libnetvfs-bridge-ffi.so` with the fake backend (variables of `tests/ffi.rs`; without them every test says it is skipped and passes).
 //!
-//! Its own harness, as `tests/ffi.rs`: `init` and the Qt event loop run on
-//! the main thread, each test on a thread of its own (the bridge's layout:
-//! workers block, the main thread serves signond).
+//! Own harness as `tests/ffi.rs`: `init` and the Qt event loop run on the main thread, each test on a thread of its own (workers block, the main thread serves signond).
 #![allow(
     missing_docs,
     clippy::unwrap_used,
@@ -51,8 +45,6 @@ use std::thread;
 use std::time::{Duration, Instant};
 use zbus::zvariant::OwnedValue;
 use zeroize::Zeroizing;
-
-// ------------------------------------------------------------- harness
 
 #[derive(Clone, Copy)]
 struct Env {
@@ -184,8 +176,6 @@ fn off_qt_thread<R: Send>(env: &Env, work: impl FnOnce(&Env) -> R + Send) -> R {
     })
 }
 
-// ------------------------------------------------------------- the core
-
 /// What the core saw from workers.
 #[derive(Debug)]
 enum Seen {
@@ -197,8 +187,7 @@ enum Seen {
     Warning(String),
 }
 
-/// A stand-in for the core: answers account fetches and questions from
-/// queues and records everything.
+/// Stand-in for the core: answers account fetches and questions from queues and records everything.
 #[derive(Default)]
 struct Core {
     access: Mutex<Option<Result<AccountAccess, Status>>>,
@@ -350,8 +339,7 @@ fn pattern(size: usize) -> Vec<u8> {
     (0..size).map(|i| u8::try_from((i * 7 + i / 251) & 0xff).unwrap()).collect()
 }
 
-/// Account 7 at fake.example, its data with `host_key` (if any) and an
-/// optional secret (credentials id 0, XA-7).
+/// Account 7 at fake.example, its data with `host_key` (if any) and an optional secret (credentials id 0).
 fn account(rig: &mut Rig, host_key: Option<&str>) -> String {
     let spec = LocationSpec::account(7, "fake", "Seven", params(), b"/".to_vec(), Attention::None);
     rig.book.set_accounts(vec![spec]);
@@ -379,8 +367,7 @@ fn ad_hoc(rig: &mut Rig, secret: Option<&[u8]>) -> String {
 
 type Body<R> = Box<dyn FnOnce(&mut Conn, &mut Handles<Handle>, WorkerId) -> (R, Result<(), Status>) + Send>;
 
-/// Runs `body` on a connection of `loc`; what it gave, or why there was no
-/// connection.
+/// Runs `body` on a connection of `loc`; what it gave, or why there was no connection.
 fn on_worker<R: Send + 'static>(
     rig: &mut Rig,
     loc: &str,
@@ -409,9 +396,7 @@ fn wrap<R: Send + 'static>(
     })
 }
 
-/// What the work gave. Waits as the core does, with its maintenance tick:
-/// that reaps the stopped connections whose threads have finished, so that
-/// work waiting for one of their host slots gets it.
+/// Waits as the core does, with its maintenance tick: that reaps stopped connections whose threads finished, so work waiting for their host slots gets one.
 #[track_caller]
 fn get<R>(rig: &mut Rig, rx: &mpsc::Receiver<Result<R, Status>>) -> Result<R, Status> {
     let deadline = Instant::now() + Duration::from_secs(20);
@@ -449,8 +434,6 @@ fn wait_until(what: &str, mut done: impl FnMut() -> bool) {
     }
 }
 
-// --------------------------------------------------------------- tests
-
 fn account_connects_with_its_pin_and_signon(env: &Env) {
     let f = env.fake;
     f.set_identity_pin(&pin_for(b"k1"));
@@ -461,10 +444,7 @@ fn account_connects_with_its_pin_and_signon(env: &Env) {
     let seen = rig.core.take();
     assert!(matches!(seen.as_slice(), [Seen::Fetch(7)]), "{seen:?}");
     assert_eq!((f.log_count("connect"), f.log_count("authenticate")), (1, 1));
-    // The pin of the account's data decides, not known_hosts.
     assert!(rig.pins.map.lock().unwrap().is_empty());
-    // The account's data reach the backend: a failing fetch fails the
-    // connection (a new one, after Disconnect).
     rig.book.disconnect(&loc);
     rig.core.give(Some(Err(Status::new(ErrorName::NotFound, "No such account"))));
     let failed = connect(&mut rig, &loc);
@@ -483,7 +463,6 @@ fn account_identity_problems_set_attention(env: &Env) {
         let failed = connect(&mut rig, &loc);
         assert_eq!(name_of(&failed), Some(error));
         let seen = rig.core.take();
-        // Accounts are never asked: Settings reviews the attention state.
         match seen.as_slice() {
             [Seen::Fetch(7), Seen::Attention(7, Attention::ServerIdentityChanged, seen_pin)] => {
                 assert_eq!(*seen_pin, pin_for(b"k1"));
@@ -506,7 +485,6 @@ fn account_auth_failure_sets_attention(env: &Env) {
         matches!(seen.as_slice(), [Seen::Fetch(7), Seen::Attention(7, Attention::AuthFailed, pin)] if pin.is_empty()),
         "{seen:?}"
     );
-    // A failure before the identity check leaves no attention.
     f.fail_op("connect", ErrorName::NetworkUnreachable);
     let failed = connect(&mut rig, &loc);
     assert_eq!(name_of(&failed), Some(ErrorName::NetworkUnreachable));
@@ -516,11 +494,9 @@ fn account_auth_failure_sets_attention(env: &Env) {
 fn account_data_failures(env: &Env) {
     let mut rig = rig_with(env, Duration::from_secs(10), Duration::from_millis(150));
     let loc = account(&mut rig, None);
-    // Nobody answers: Timeout.
     rig.core.give(None);
     let failed = connect(&mut rig, &loc).unwrap_err();
     assert_eq!((failed.name, failed.message.as_str()), (ErrorName::Timeout, "No account data"));
-    // Canceled while waiting.
     let mut rig = rig_with(env, Duration::from_secs(10), Duration::from_secs(10));
     let loc = account(&mut rig, None);
     rig.core.give(None);
@@ -539,7 +515,6 @@ fn ad_hoc_identity_question(env: &Env) {
     let mut rig = rig(env);
     let host_key = "fake://fake.example:0";
 
-    // Declined.
     let declined = ad_hoc(&mut rig, Some(b"secret"));
     rig.core.answer(Some(Answer { accept: false, answers: Vec::new() }));
     let failed = connect(&mut rig, &declined).unwrap_err();
@@ -558,7 +533,6 @@ fn ad_hoc_identity_question(env: &Env) {
     assert!(rig.pins.map.lock().unwrap().is_empty());
     rig.book.abandon_ad_hoc(&declined);
 
-    // Accepted: the pin is stored, the next connection asks nothing.
     let accepted = ad_hoc(&mut rig, Some(b"secret"));
     rig.core.answer(Some(Answer { accept: true, answers: Vec::new() }));
     connect(&mut rig, &accepted).unwrap();
@@ -569,21 +543,18 @@ fn ad_hoc_identity_question(env: &Env) {
     connect(&mut rig, &accepted).unwrap();
     assert_eq!(rig.core.asks().len(), 0);
 
-    // The server's key changed: no question, ServerIdentityChanged.
     f.set_identity_pin(&pin_for(b"k2"));
     rig.book.disconnect(&accepted);
     let failed = connect(&mut rig, &accepted);
     assert_eq!(name_of(&failed), Some(ErrorName::ServerIdentityChanged));
     assert_eq!(rig.core.asks().len(), 0);
 
-    // No answer at all (the session went away): declined as well.
     rig.pins.map.lock().unwrap().clear();
     let gone = ad_hoc(&mut rig, Some(b"secret"));
     rig.core.answer(None);
     assert_eq!(name_of(&connect(&mut rig, &gone)), Some(ErrorName::ServerIdentityUnknown));
     rig.book.abandon_ad_hoc(&gone);
 
-    // An accepted pin that cannot be saved still connects, with a warning.
     rig.pins.read_only.store(true, Ordering::Release);
     let unsaved = ad_hoc(&mut rig, Some(b"secret"));
     rig.core.answer(Some(Answer { accept: true, answers: Vec::new() }));
@@ -597,19 +568,16 @@ fn ad_hoc_identity_question(env: &Env) {
 fn ad_hoc_secret_and_forget(env: &Env) {
     let f = env.fake;
     let mut rig = rig_with(env, Duration::from_millis(300), Duration::from_secs(10));
-    // The consumer's secret is what the connection uses.
     let wrong = ad_hoc(&mut rig, Some(b"wrong"));
     assert_eq!(name_of(&connect(&mut rig, &wrong)), Some(ErrorName::AuthFailed));
     rig.book.abandon_ad_hoc(&wrong);
     let id = ad_hoc(&mut rig, Some(b"secret"));
     connect(&mut rig, &id).unwrap();
     assert!(rig.book.add_ad_hoc(&id));
-    // Without a secret: empty credentials, no user either (as C++).
     f.set_credentials("", b"");
     let none = ad_hoc(&mut rig, None);
     connect(&mut rig, &none).unwrap();
 
-    // A question nobody answers within the timeout is withdrawn.
     f.set_identity_pin(&pin_for(b"k1"));
     let unanswered = ad_hoc(&mut rig, None);
     let failed = connect(&mut rig, &unanswered);
@@ -618,7 +586,6 @@ fn ad_hoc_secret_and_forget(env: &Env) {
     assert!(seen.iter().any(|s| matches!(s, Seen::Withdrawn(_))), "{seen:?}");
     rig.book.abandon_ad_hoc(&unanswered);
 
-    // Forgetting drops the pin: the next contact asks again.
     let pinned = ad_hoc(&mut rig, None);
     rig.core.answer(Some(Answer { accept: true, answers: Vec::new() }));
     connect(&mut rig, &pinned).unwrap();
@@ -654,14 +621,12 @@ fn keyboard_interactive_question(env: &Env) {
         ["Verification code: "]
     );
     assert_eq!(f.log_count("answers:"), 1);
-    // Two answers for one prompt, or a refusal: no answers go out.
     for reply in [yes(&[b"246810", b"1"]), Answer { accept: false, answers: Vec::new() }] {
         rig.book.disconnect(&id);
         rig.core.answer(Some(reply));
         assert_eq!(name_of(&connect(&mut rig, &id)), Some(ErrorName::AuthFailed));
     }
     assert_eq!(f.log_count("answers:"), 1);
-    // Accounts are asked too.
     f.set_credentials("user", b"");
     let loc = account(&mut rig, None);
     rig.core.answer(Some(yes(&[b"246810"])));
@@ -677,7 +642,6 @@ fn connections_are_reused_and_dropped(env: &Env) {
     connect(&mut rig, &id).unwrap();
     connect(&mut rig, &id).unwrap();
     assert_eq!((f.log_count("connect"), f.live_backends()), (1, 1));
-    // An operation's own failure keeps the connection; a lost one drops it.
     let failing =
         |name: ErrorName| -> Body<()> { Box::new(move |_, _, _| ((), Err(Status::new(name, "x")))) };
     let rx = on_worker(&mut rig, &id, TaskContext::detached(), failing(ErrorName::NotFound));
@@ -689,11 +653,9 @@ fn connections_are_reused_and_dropped(env: &Env) {
     wait_until("the connection freed", || f.live_backends() == 0);
     connect(&mut rig, &id).unwrap();
     assert_eq!(f.log_count("connect"), 2);
-    // Disconnect frees it; idle maintenance too.
     rig.book.disconnect(&id);
     wait_until("disconnected", || f.live_backends() == 0);
     connect(&mut rig, &id).unwrap();
-    // Once the item is done (its result arrives just before).
     wait_until("idle", || {
         rig.book.maintain(Instant::now() + Duration::from_secs(61), Duration::from_mins(1))
     });
@@ -713,7 +675,6 @@ fn cancel_kicks_a_running_listing(env: &Env) {
     connect(&mut rig, &id).unwrap();
     let task = TaskContext::new(SessionId(1), Arc::new(AtomicBool::new(false)));
     let (started_tx, started) = mpsc::channel();
-    // The sink never stops it: only the connection's cancel does.
     let rx = on_worker(
         &mut rig,
         &id,
@@ -732,7 +693,6 @@ fn cancel_kicks_a_running_listing(env: &Env) {
     rig.book.kick();
     assert_eq!(name_of(&get(&mut rig, &rx).unwrap()), Some(ErrorName::Canceled));
     assert!(start.elapsed() < Duration::from_secs(2), "{:?}", start.elapsed());
-    // The canceled item dropped its connection.
     wait_until("the connection freed", || f.live_backends() == 0);
     f.set_chunk_delay_ms(0);
     connect(&mut rig, &id).unwrap();
@@ -773,11 +733,9 @@ fn list_streams_batches(env: &Env) {
     }
     assert_eq!(batches[2].0[1].name, b"f9");
     assert_eq!(budget.in_flight(), batches.iter().map(|b| b.1).sum::<usize>(), "the emitter owns the bytes");
-    // A batch that cannot go out stops the listing.
     let (batches, result) = run(&mut rig, b"/dir", 4, 1);
     assert_eq!(name_of(&result), Some(ErrorName::Canceled));
     assert_eq!(batches.len(), 1);
-    // A failure is the backend's.
     let (_, result) = run(&mut rig, b"/missing", 4, usize::MAX);
     assert_eq!(name_of(&result), Some(ErrorName::NotFound));
 }
@@ -844,7 +802,6 @@ fn walk_and_remove_tree(env: &Env) {
     assert_eq!(i64::try_from(&outcome.extra["dirs"]).unwrap(), 2);
     assert!(!updates.is_empty() && updates.len() < 10, "throttled: {}", updates.len());
     assert!(!f.exists(b"/tree"));
-    // Canceled from the start: nothing goes.
     f.add_dir(b"/t2", None);
     f.add_file(b"/t2/a", b"");
     let rx = on_worker(
@@ -938,7 +895,6 @@ fn transfers_of_regular_files(env: &Env) {
     let mut rig = rig(env);
     let id = ad_hoc(&mut rig, Some(b"secret"));
 
-    // Upload from offset 1000 to the end.
     let path = temp_path("up");
     std::fs::write(&path, &data).unwrap();
     let (fd, info) = checked(File::open(&path).unwrap().into(), FdAccess::Read);
@@ -950,7 +906,6 @@ fn transfers_of_regular_files(env: &Env) {
     assert_eq!(bytes_of(&outcome), 299_000);
     assert_eq!(f.file_data(b"/up").unwrap(), data[1000..]);
     assert_ne!(updates.len(), 0);
-    // Create refuses an existing file; truncate replaces with 10 bytes.
     let (fd, info) = checked(File::open(&path).unwrap().into(), FdAccess::Read);
     let job =
         transfer::Transfer { fd, info, path: b"/up".to_vec(), opts: TransferOpts::default(), upload: true };
@@ -966,7 +921,6 @@ fn transfers_of_regular_files(env: &Env) {
     let job = transfer::Transfer { fd, info, path: b"/up".to_vec(), opts, upload: true };
     transfer_job(&mut rig, &id, job).0.result.unwrap();
     assert_eq!(f.file_data(b"/up").unwrap(), data[5..15]);
-    // Resume at 10: the same offset locally and remotely.
     let (fd, info) = checked(File::open(&path).unwrap().into(), FdAccess::Read);
     let opts =
         TransferOpts { offset: 10, size: -1, disposition: Disposition::Resume, ..TransferOpts::default() };
@@ -978,7 +932,6 @@ fn transfers_of_regular_files(env: &Env) {
     expected.extend_from_slice(&data[10..]);
     assert_eq!(f.file_data(b"/up").unwrap(), expected);
 
-    // Download from offset 10 into the same offset of a local file.
     f.add_file(b"/down", &data);
     let local = temp_path("down");
     std::fs::write(&local, b"0123456789").unwrap();
@@ -991,14 +944,12 @@ fn transfers_of_regular_files(env: &Env) {
     assert_eq!(bytes_of(&outcome), 299_990);
     let got = std::fs::read(&local).unwrap();
     assert_eq!((&got[..10], &got[10..]), (&b"0123456789"[..], &data[10..]));
-    // A length.
     let file = OpenOptions::new().write(true).truncate(true).open(&local).unwrap();
     let (fd, info) = checked(file.into(), FdAccess::Write);
     let opts = TransferOpts { offset: 0, size: 100, ..TransferOpts::default() };
     let job = transfer::Transfer { fd, info, path: b"/down".to_vec(), opts, upload: false };
     transfer_job(&mut rig, &id, job).0.result.unwrap();
     assert_eq!(std::fs::read(&local).unwrap(), data[..100]);
-    // The wrong access is refused before any work.
     let read_only = File::open(&local).unwrap();
     assert_eq!(
         check_transfer_fd(read_only.as_raw_fd(), FdAccess::Write).unwrap_err().name,
@@ -1013,7 +964,6 @@ fn transfers_through_pipes(env: &Env) {
     let mut rig = rig(env);
     let id = ad_hoc(&mut rig, Some(b"secret"));
 
-    // Upload from a pipe: sequential, to its end; offsets do not apply.
     let (r, mut w) = std::io::pipe().unwrap();
     let (fd, info) = checked(r.into(), FdAccess::Read);
     assert_eq!(info, FdInfo { fifo: true, size: -1 });
@@ -1029,7 +979,6 @@ fn transfers_through_pipes(env: &Env) {
     assert_eq!(f.file_data(b"/piped").unwrap(), data);
     assert_eq!(bytes_of(&outcome), 200_000);
 
-    // Download into a pipe from offset 100.
     let (mut r, w) = std::io::pipe().unwrap();
     let (fd, info) = checked(w.into(), FdAccess::Write);
     let reader = thread::spawn(move || {
@@ -1043,7 +992,6 @@ fn transfers_through_pipes(env: &Env) {
     outcome.result.as_ref().unwrap();
     assert_eq!(reader.join().unwrap(), data[100..]);
 
-    // A pipe whose reader went away fails the download.
     let (r, w) = std::io::pipe().unwrap();
     drop(r);
     let (fd, info) = checked(w.into(), FdAccess::Write);

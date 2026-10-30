@@ -88,7 +88,6 @@ async fn stat_is_one_compound_round_trip() {
         (EntryType::File, Some(42), Some(MS), Some(MS + 2), Some(MS + 1))
     );
     assert_eq!(e.flags, EntryFlags::READ_ONLY);
-    // Not found: the CREATE's status.
     let (r, ()) = tokio::join!(stat(&conn, TREE, units("x"), &c), async {
         let reqs = peer.recv().await;
         answer(
@@ -135,7 +134,6 @@ async fn make_dir_and_an_existing_name() {
         peer
     });
     r.unwrap();
-    // Exclusive: the collision is the answer.
     let collision =
         vec![(NtStatus::OBJECT_NAME_COLLISION, vec![]), (NtStatus::OBJECT_NAME_COLLISION, vec![])];
     let (r, mut peer) = tokio::join!(make_dir(&conn, TREE, units("d"), true, &c), async {
@@ -144,7 +142,6 @@ async fn make_dir_and_an_existing_name() {
         peer
     });
     assert_eq!(r, Err(Error::Status(NtStatus::OBJECT_NAME_COLLISION)));
-    // Not exclusive: a folder is fine, a file is not.
     for (attrs, ok) in [(0x10, true), (0x20, false)] {
         let (r, p) = tokio::join!(make_dir(&conn, TREE, units("d"), false, &c), async {
             let reqs = peer.recv().await;
@@ -186,7 +183,6 @@ async fn remove_file_and_folder() {
         assert_eq!(cmds, [Command::Create, Command::SetInfo, Command::Close]);
         assert_eq!(related_flags(&reqs), [false, true, true]);
         assert_eq!(create_of(&reqs[0]), (0x0011_0080, 1, 0x40, units("f").to_vec()));
-        // FileDispositionInformation, DeletePending.
         let b = reqs[1].body();
         assert_eq!((b[2], b[3]), (1, 13));
         assert_eq!(b[32], 1);
@@ -205,7 +201,6 @@ async fn remove_file_and_folder() {
         peer
     });
     assert_eq!(r, Err(local(ErrorName::IsADirectory, "remove: a folder")));
-    // A folder: removed, then checked gone.
     let (r, mut peer) = tokio::join!(remove_dir(&conn, TREE, units("d"), &c), async {
         let reqs = peer.recv().await;
         assert_eq!(create_of(&reqs[0]).2, options::DIRECTORY);
@@ -220,7 +215,6 @@ async fn remove_file_and_folder() {
         peer
     });
     r.unwrap();
-    // Still there afterwards: not empty.
     let (r, mut peer) = tokio::join!(remove_dir(&conn, TREE, units("d"), &c), async {
         let reqs = peer.recv().await;
         answer(&mut peer, &reqs, ok3()).await;
@@ -234,7 +228,6 @@ async fn remove_file_and_folder() {
         peer
     });
     assert_eq!(r, Err(local(ErrorName::DirectoryNotEmpty, "remove folder: the folder is not empty")));
-    // The server says so, or it is a file, or the check fails.
     for (status, want) in [
         (NtStatus::DIRECTORY_NOT_EMPTY, Error::Status(NtStatus::DIRECTORY_NOT_EMPTY)),
         (NtStatus::NOT_A_DIRECTORY, local(ErrorName::NotADirectory, "remove folder: not a folder")),
@@ -281,7 +274,6 @@ async fn rename_with_and_without_replace() {
         peer
     });
     r.unwrap();
-    // Replace: a folder target is refused before anything changes.
     let (r, mut peer) = tokio::join!(rename(&conn, TREE, units("a"), units("b"), true, &c), async {
         let reqs = peer.recv().await;
         assert_eq!(create_of(&reqs[0]).3, units("b").to_vec());
@@ -420,8 +412,6 @@ fn dir_body(names: &[&str]) -> Vec<u8> {
 
 #[tokio::test]
 async fn list_leaves_out_names_that_are_no_entry_of_the_folder() {
-    // A server that lists paths, NULs and empty names among its entries:
-    // they are dropped, the entries around them stay.
     let (conn, mut peer) = started().await;
     let c = CancelToken::new();
     let mut sink = Batches { got: vec![], stop_after: usize::MAX };
@@ -493,7 +483,6 @@ async fn list_in_batches_and_close() {
     });
     r.unwrap();
     assert_eq!(sink.got, [vec![b"a".to_vec(), b"b".to_vec()], vec![b"c".to_vec(), b"d".to_vec()]]);
-    // The sink stops: Canceled, and the folder is closed.
     let mut sink = Batches { got: vec![], stop_after: 1 };
     let (r, mut peer) = tokio::join!(list(&conn, TREE, units("d"), 1, &mut sink, &c), async {
         let reqs = peer.recv().await;
@@ -508,7 +497,6 @@ async fn list_in_batches_and_close() {
     });
     assert_eq!(r, Err(local(ErrorName::Canceled, "The listing was stopped")));
     assert_eq!(sink.got.len(), 1);
-    // A file.
     let mut sink = Batches { got: vec![], stop_after: usize::MAX };
     let (r, ()) = tokio::join!(list(&conn, TREE, units("f"), 1, &mut sink, &c), async {
         let reqs = peer.recv().await;

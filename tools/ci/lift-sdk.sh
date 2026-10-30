@@ -1,14 +1,9 @@
 #!/bin/sh
 # SPDX-License-Identifier: LGPL-2.1-or-later
-# Lifts what a host cargo needs to cross-build for the Sailfish OS target out
-# of the Platform SDK image (doc/RUST.md "Cross build"): the SDK's aarch64
-# gcc and binutils (/opt/cross, i486 binaries), the host libraries they load
-# from the image, and the target's sysroot. Then adds what the image leaves
-# to scratchbox2: binutils under the names gcc looks for, a linker wrapper,
-# and the unversioned libsqlite3.so that the target lacks without
-# sqlite-devel (the binaries still record libsqlite3.so.0).
-# The host needs the i386 C library (Ubuntu: libc6-i386) and qemu-user-static
-# for the smoke run.
+# Lifts what a host cargo needs to cross-build for the Sailfish OS target out of the Platform SDK image: SDK's aarch64
+# gcc and binutils (/opt/cross, i486 binaries), host libraries they load, the target's sysroot. Then adds what the image
+# leaves to scratchbox2: binutils under the names gcc looks for, a linker wrapper, unversioned libsqlite3.so (the target
+# lacks it without sqlite-devel; binaries still record libsqlite3.so.0). Host needs libc6-i386 and qemu-user-static.
 # Usage: lift-sdk.sh <image> <target name> <dir>
 set -eu
 image=$1
@@ -20,8 +15,7 @@ mkdir -p "$dir/hostlib" "$dir/bin" "$dir/linklib"
 dir=$(cd "$dir" && pwd)
 cid=$(docker create "$image" /bin/true)
 trap 'docker rm "$cid" > /dev/null' EXIT
-# Through tar, so that an unprivileged user can unpack it: no device nodes,
-# no ownership, and every file readable and removable afterwards.
+# Through tar so an unprivileged user can unpack: no device nodes, no ownership, every file readable and removable.
 lift() {
     from=$1
     to=$2

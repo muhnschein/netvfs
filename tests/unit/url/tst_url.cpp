@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-// SPEC-v2 XH-6 (Url), XH-7 (Paths::sanitizeFor), XC-4 (Paths::normalize amendment).
+// (Url), (Paths::sanitizeFor), (Paths::normalize amendment).
 #include "names.h"
 #include "paths.h"
 #include "url.h"
@@ -31,7 +31,6 @@ class TstUrl : public QObject
 private slots:
     void initTestCase() { qRegisterMetaType<NetVfs::Error>(); }
 
-    // ------------------------------------------------------------------ parse
 
     void parse_data()
     {
@@ -145,11 +144,10 @@ private slots:
         QVERIFY(Url::parse(QStringLiteral("sftp://h"), &params, &path).ok());
         QCOMPARE(params.connectTimeoutMs, 1234);
         QCOMPARE(opt(params, "allow_insecure"), QStringLiteral("true"));
-        QVERIFY(!params.options.contains(QStringLiteral("share")));   // URL-derived keys are reset
+        QVERIFY(!params.options.contains(QStringLiteral("share")));
         QVERIFY(Url::parse(QStringLiteral("sftp://h"), &params, nullptr).ok());   // path is optional
     }
 
-    // ------------------------------------------------------------------ rejection
 
     void reject_data()
     {
@@ -251,7 +249,6 @@ private slots:
         QVERIFY(params.provider.isEmpty());
     }
 
-    // ------------------------------------------------------------------ format
 
     void format()
     {
@@ -333,10 +330,9 @@ private slots:
         QCOMPARE(second.username, first.username);
         QCOMPARE(second.options, first.options);
         QCOMPARE(secondPath, firstPath);
-        QCOMPARE(Url::format(second, secondPath), formatted);     // and the text is a fixed point
+        QCOMPARE(Url::format(second, secondPath), formatted);
     }
 
-    // ------------------------------------------------------------------ toAce
 
     void toAce()
     {
@@ -347,7 +343,7 @@ private slots:
         QCOMPARE(Url::toAce(QStringLiteral("192.168.0.1")), QByteArray("192.168.0.1"));
     }
 
-    // ------------------------------------------------------------------ Paths::normalize (XC-4)
+    // Paths::normalize
 
     void normalizeAcceptsLoneSurrogates()
     {
@@ -359,7 +355,7 @@ private slots:
         QVERIFY(Paths::normalize(decoded, &out).ok());
         QCOMPARE(out, decoded);
         QString raw = QStringLiteral("x");
-        raw.append(QChar(0xD800));       // an unpaired UTF-16 surrogate is accepted as well
+        raw.append(QChar(0xD800));
         QVERIFY(Paths::normalize(raw, &out).ok());
         QCOMPARE(out, raw);
     }
@@ -379,7 +375,7 @@ private slots:
         QVERIFY(Paths::normalize(QStringLiteral("a/..b/c."), &out).ok());
     }
 
-    // ------------------------------------------------------------------ Paths::sanitizeFor (XH-7)
+    // Paths::sanitizeFor
 
     void sanitize_data()
     {
@@ -463,7 +459,7 @@ private slots:
             QVERIFY(Names::encode(result).size() <= maxBytes);
         if (windows)
             QVERIFY2(Paths::windowsComponentProblem(result).isEmpty(), qPrintable(result));
-        QCOMPARE(Paths::sanitizeFor(caps, result), result);        // idempotent
+        QCOMPARE(Paths::sanitizeFor(caps, result), result);
     }
 
     void sanitizeNeverBreaksCodePoints()

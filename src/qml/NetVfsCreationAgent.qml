@@ -4,14 +4,10 @@ import Sailfish.Silica 1.0
 import com.jolla.settings.accounts 1.0
 import org.netvfs.accounts 1.0
 
-// Creation flow (SPEC 7.3) shared by the providers' <p>.qml files:
-// input (from the provider descriptor, SPEC-v2 XA-5) -> identify (no
-// credentials, C-7) -> confirm server identity (SSH key; XC-16,
-// SPEC-v2-review 2.20) -> [SSH key page, S-16] -> verify (for backup when
-// chosen, else for files: nothing is written, 2.19) -> create (U-3) with the
-// chosen services (XA-1) -> final dialog.
-// Uses only the AccountCreationAgent members listed in SPEC 7.1 (R1) and no
-// OnlineSync* component or AccountFactory (U-1).
+// Creation flow shared by the providers' <p>.qml: input (from the provider descriptor) -> identify
+// (no credentials) -> confirm server identity (SSH key) -> [SSH key page] -> verify (backup when
+// chosen, else files: nothing written) -> create with the chosen services -> final dialog. Uses
+// only AccountCreationAgent members; no OnlineSync* component or AccountFactory.
 AccountCreationAgent {
     id: root
 
@@ -30,7 +26,7 @@ AccountCreationAgent {
     property Item _keyPage
     property bool _verifying
 
-    // Parented to the agent so they outlive the pages (U-5).
+    // Parented to the agent so they outlive the pages.
     property NetVfsProbe _probe: NetVfsProbe {
         onIdentified: root._identified()
         onVerified: root._verified()
@@ -44,7 +40,7 @@ AccountCreationAgent {
         onFailed: root._setupFailed(text)
     }
 
-    // U-5: hold the agent while the account is written.
+    // Hold the agent while the account is written.
     delayDeletion: _setup.busy
 
     function _collectInput() {
@@ -87,7 +83,7 @@ AccountCreationAgent {
         if (_probe.identityStatus === NetVfsProbe.IdentityUnknown) {
             pageStack.replace(identityComponent, { "identity": _probe.serverIdentity })
         } else if (_probe.identityStatus === NetVfsProbe.NoIdentity) {
-            // SMB has no server identity to confirm (SPEC-smb 3).
+            // SMB has no server identity to confirm.
             _busyPage.showBusy(_verifyText())
             _startVerify(_busyPage)
         } else {
@@ -96,7 +92,7 @@ AccountCreationAgent {
         }
     }
 
-    // XC-16: host_key.
+    // host_key.
     function _identityAccepted(pinOptions) {
         _params = connectionDialog.connectionParams(pinOptions)
     }
@@ -105,7 +101,7 @@ AccountCreationAgent {
         _busyPage = page
         _verifying = true
         if (_authMode === "publickey") {
-            // Stored with the account for display (SPEC-sftp 2).
+            // Stored with the account for display.
             _params = NetVfsHelpers.withOptions(_params, { "public_key": _keyTool.publicKey })
         }
         if (_backup) {
@@ -167,7 +163,7 @@ AccountCreationAgent {
         return qsTrId("settings-accounts-netvfs-la-verifying_files")
     }
 
-    // U-4: back to the input, or to the key page when the key was refused.
+    // Back to the input, or to the key page when the key was refused.
     function _goBack() {
         _probe.cancel()
         if (_verifying && _keyPage !== null && _probe.error === NetVfsProbe.AuthFailed) {
@@ -245,7 +241,7 @@ AccountCreationAgent {
     Component {
         id: finishComponent
 
-        // SPEC 7.3 step 6: editable description; accept goes to the end destination.
+        // Editable description; accept goes to the end destination.
         Dialog {
             id: finishDialog
 

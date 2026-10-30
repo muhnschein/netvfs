@@ -1,13 +1,7 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! The read half of a session's socket (design §8): zbus accepts messages up
-//! to the D-Bus maximum of 128 MiB and keeps up to `max_queued` of them, so
-//! the bridge reads the frames itself and closes the connection on a
-//! message whose header declares more than [`MAX_MESSAGE_BYTES`], before
-//! its body is read, or that brings more than [`MAX_MESSAGE_FDS`]
-//! descriptors (libdbus's limits for the C++ bridge were 1 MiB and 2).
+//! Read half of a session's socket: zbus accepts messages up to 128 MiB and queues up to `max_queued`, so the bridge reads frames itself and closes the connection on a header declaring more than [`MAX_MESSAGE_BYTES`] (before the body is read) or more than [`MAX_MESSAGE_FDS`] descriptors.
 //!
-//! The largest legitimate call is `ConnectAdHoc` (64 KiB secret, 4 KiB URL);
-//! `Upload` and `Download` carry one descriptor.
+//! Largest legitimate call: `ConnectAdHoc` (64 KiB secret, 4 KiB URL); `Upload` and `Download` carry one descriptor.
 
 use crate::sys::frame::message_from_frame;
 use std::future::Future;
@@ -23,7 +17,6 @@ use zbus::zvariant::Endian;
 pub const MAX_MESSAGE_BYTES: usize = 2 << 20;
 /// Most descriptors one message may carry.
 pub const MAX_MESSAGE_FDS: usize = 2;
-/// The fixed part of a D-Bus message header.
 const PRIMARY_HEADER_BYTES: usize = 16;
 
 type Boxed<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
@@ -65,8 +58,7 @@ pub fn frame_size(header: &[u8]) -> io::Result<FrameSize> {
     Ok(FrameSize { endian, total: padded.saturating_add(body) })
 }
 
-/// A read half that refuses oversized messages; everything else is the
-/// tokio unix stream's (zbus's handshake reads through `recvmsg`).
+/// A read half that refuses oversized messages.
 #[derive(Debug)]
 pub struct LimitedRead {
     inner: Box<dyn ReadHalf>,
@@ -79,7 +71,6 @@ impl LimitedRead {
         Self { inner }
     }
 
-    /// Fills `bytes` up to `want`, collecting descriptors into `fds`.
     async fn fill(&mut self, bytes: &mut Vec<u8>, want: usize, fds: &mut Vec<OwnedFd>) -> zbus::Result<()> {
         while bytes.len() < want {
             let start = bytes.len();
@@ -98,7 +89,6 @@ impl LimitedRead {
         Ok(())
     }
 
-    /// One complete message: bytes the handshake already read first.
     async fn read_message(
         &mut self,
         carried: &mut Vec<u8>,

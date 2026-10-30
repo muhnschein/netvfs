@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! [`CancelToken`]: `Backend::cancel` (C-9) for async code. One token
+//! [`CancelToken`]: `Backend::cancel` for async code. One token
 //! stands for one connection between two `resetCancel`s: the C ABI trips it
 //! from any thread, every call of the connection sees it, and
 //! `resetCancel` gives the connection a fresh token, so that a call that

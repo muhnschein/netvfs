@@ -26,34 +26,30 @@ class BackupService;
 
 enum class BackupOperation { Backup, BackupQuery, BackupRestore };
 
-// How a run opens its account session (caller-owned result); empty means
-// AccountSession::open() (accounts database and signond).
+// How a run opens its account session (caller-owned result); empty means AccountSession::open().
 using SessionFactory = std::function<AccountSession *(int accountId, QObject *parent)>;
 
-// What a run works on.
 struct RunSpec {
     QString provider;
     BackupOperation operation = BackupOperation::Backup;
     int accountId = 0;
     QString profileName;
-    QString restoreFile;     // BackupRestore: the local target (profile key sfos-backuprestore-file)
+    QString restoreFile;
 };
 
-// One run of a backup operation (SPEC 8.4 to 8.6) on the plugin thread.
-// Network work runs in NetworkJobs (B-3). Emits finished() exactly once
-// (B-7); after that the run is inert.
+// One run of a backup operation on the plugin thread. Network work runs in NetworkJobs. Emits
+// finished() exactly once; after that the run is inert.
 class BackupRun : public QObject
 {
     Q_OBJECT
 public:
     BackupRun(const RunSpec &spec, BackupService *service, const SessionFactory &sessionFactory);
-    // Stops the worker and removes a local archive of an unfinished run.
     ~BackupRun() override;
     Q_DISABLE_COPY(BackupRun)
 
     void start();
-    // B-4: cancels the in-flight call; finished(Canceled) follows once the
-    // worker returns. No attention state is recorded for an aborted run.
+    // Cancels the in-flight call; finished(Canceled) follows once the worker returns. No attention
+    // state is recorded for an aborted run.
     void abort();
     bool isRunning() const { return m_running; }
 
@@ -86,20 +82,19 @@ private:
     const SessionFactory m_sessionFactory;
     std::unique_ptr<AccountSession> m_session;
     std::unique_ptr<NetworkJob> m_job;
-    std::function<void()> m_next;      // after a successful job
+    std::function<void()> m_next;
     std::unique_ptr<Accounts::Manager> m_manager;
 
     bool m_running = false;
     bool m_aborted = false;
     bool m_waitingForArchive = false;
-    bool m_archiveReady = false;       // UploadingBackup seen
-    Result m_override;                 // reported instead of the job result
+    bool m_archiveReady = false;
+    Result m_override;
     QString m_remoteDir;
     QString m_archivePath;
-    QString m_seenPin;                 // server identity seen by the last connection
+    QString m_seenPin;
     QStringList m_listing;
 };
 
-} // namespace NetVfs
-
+}
 #endif

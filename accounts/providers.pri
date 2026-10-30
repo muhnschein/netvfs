@@ -1,10 +1,9 @@
 # SPDX-License-Identifier: LGPL-2.1-or-later
-# The account providers (SPEC 6.1) and a generator for the
-# provider and service files, shared by files.pro and files-services/.
+# Account providers and a generator for provider and service files, shared by files.pro and
+# files-services/.
 
-# Every provider gets <p>.provider, the account UI and a "<p>-files" service
-# (XA-1); the providers in NETVFS_BACKUP_PROVIDERS also get "<p>-backup"
-# (Buteo plugins exist for them).
+# Every provider gets <p>.provider, the account UI and a "<p>-files" service; providers in
+# NETVFS_BACKUP_PROVIDERS also get "<p>-backup" (Buteo plugins exist for them).
 NETVFS_PROVIDERS = sftp smb
 NETVFS_BACKUP_PROVIDERS = sftp smb
 

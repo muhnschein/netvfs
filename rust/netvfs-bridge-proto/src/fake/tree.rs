@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! The fake server's in-memory file tree for one location. Errors use the
-//! netvfs XC-21 names so they travel as `org.netvfs.Error.<Name>`.
+//! The fake server's in-memory file tree for one location. Errors use netvfs error names so they
+//! travel as `org.netvfs.Error.<Name>`.
 
 use crate::errors::ErrorName;
 use crate::limits::MAX_PATH;
 use crate::wire::{WireEntry, entry_flags};
 use std::collections::BTreeMap;
 
-/// A tree error: XC-21 name plus message.
+/// A tree error: name plus message.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TreeError {
     /// The error name.
@@ -46,8 +46,7 @@ pub struct Counts {
     pub dirs: i64,
 }
 
-/// Normalised path (no empty or `.` components) as bytes; `..` is refused
-/// (`Paths::normalize`).
+/// Normalised path (no empty or `.` components) as bytes; `..` is refused.
 pub fn normalize(raw: &[u8]) -> TResult<Vec<u8>> {
     if raw.len() > MAX_PATH {
         return err(ErrorName::InvalidName, "Path too long");
@@ -116,7 +115,6 @@ impl Tree {
             .sum()
     }
 
-    /// Creates `path` and missing parents (test setup).
     pub fn put_file(&mut self, path: &[u8], data: &[u8]) {
         self.put_dirs(&parent_of(path));
         self.nodes
@@ -388,8 +386,7 @@ impl Tree {
         Ok(())
     }
 
-    /// The nodes below `path` (and `path` itself, relative path empty) for
-    /// copying between locations.
+    /// Nodes below `path` (and `path` itself, empty relative path) for copying between locations.
     pub fn export(&self, path: &[u8], recursive: bool) -> TResult<Vec<(Vec<u8>, Node)>> {
         let root = match self.nodes.get(path) {
             Some(n) => n.clone(),
@@ -468,7 +465,6 @@ impl Tree {
         }
     }
 
-    /// File contents for reading.
     pub fn file_data(&self, path: &[u8]) -> TResult<&[u8]> {
         let real = self.resolve(path)?;
         match self.nodes.get(&real) {
@@ -478,7 +474,6 @@ impl Tree {
         }
     }
 
-    /// Length of an existing destination file, if there is one.
     #[must_use]
     pub fn file_len(&self, path: &[u8]) -> Option<usize> {
         match self.nodes.get(path) {

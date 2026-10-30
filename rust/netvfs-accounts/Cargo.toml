@@ -1,6 +1,6 @@
 [package]
 name = "netvfs-accounts"
-description = "The setgid accounts helper of netvfs-bridge (SPEC-v2 XB-2a)"
+description = "The setgid accounts helper of netvfs-bridge"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

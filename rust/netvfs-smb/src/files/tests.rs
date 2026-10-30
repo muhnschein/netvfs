@@ -124,7 +124,7 @@ fn chunk_is_the_server_maximum_within_limits() {
     assert_eq!(chunk(8 << 20, false), crate::conn::CREDIT_UNIT);
     assert_eq!(chunk(1000, true), 1000);
     assert_eq!(chunk(MAX_CHUNK, true), MAX_CHUNK);
-    // M-11: never more than 1 MiB.
+    // Never more than 1 MiB.
     assert_eq!(chunk(16 << 20, true), 1 << 20);
     assert_eq!(chunk(0, true), 1);
 }
@@ -140,13 +140,11 @@ async fn reads_are_pipelined_and_handed_out_in_order() {
     assert_eq!(r, Ok(3000));
     assert_eq!(seen, [(0, 1000), (1000, 1000), (2000, 1000)]);
     assert_eq!(buf, content(0, 3000));
-    // Where the last read ended: no new position.
     let mut buf = vec![0u8; 500];
     let (r, seen) = tokio::join!(h.read(3000, &mut buf, &c), serve_reads(&mut peer, 10_000, 1));
     assert_eq!(r, Ok(500));
     assert_eq!(seen, [(3000, 500)]);
     assert_eq!(buf, content(3000, 3500));
-    // An empty buffer reads nothing.
     assert_eq!(h.read(0, &mut [], &c).await, Ok(0));
     let (r, ()) = tokio::join!(h.close(&c), answer_close(&mut peer));
     assert_eq!(r, Ok(()));
@@ -160,17 +158,13 @@ async fn read_ahead_requests_up_to_the_size_and_a_short_read_ends_the_file() {
     h.read_ahead(0, 1 << 30);
     let seen = serve_reads(&mut peer, 2500, 3).await;
     assert_eq!(seen, [(0, 1000), (1000, 1000), (2000, 500)]);
-    // A read beyond what was asked ahead: past the size one READ, which
-    // finds the end.
     let mut buf = vec![0u8; 4000];
     let (r, seen) = tokio::join!(h.read(0, &mut buf, &c), serve_reads(&mut peer, 2500, 1));
     assert_eq!(r, Ok(2500));
     assert_eq!(seen, [(2500, 1000)]);
     assert_eq!(&buf[..2500], content(0, 2500).as_slice());
-    // At the end: 0.
     let (r, seen) = tokio::join!(h.read(2500, &mut buf, &c), serve_reads(&mut peer, 2500, 1));
     assert_eq!((r, seen), (Ok(0), vec![(2500, 1000)]));
-    // A file that grew: read past the size one chunk at a time.
     let (r, seen) = tokio::join!(h.read(2500, &mut buf, &c), async {
         let mut seen = serve_reads(&mut peer, 4000, 1).await;
         seen.extend(serve_reads(&mut peer, 4000, 1).await);
@@ -179,11 +173,9 @@ async fn read_ahead_requests_up_to_the_size_and_a_short_read_ends_the_file() {
     assert_eq!(r, Ok(1500));
     assert_eq!(seen, [(2500, 1000), (3500, 1000)]);
     assert_eq!(&buf[..1500], content(2500, 4000).as_slice());
-    // A hint of nothing, or at the size, sends nothing.
     h.read_ahead(0, 0);
     h.read_ahead(2500, 1000);
     drop(h);
-    // The drop closes the file.
     expect_close(&mut peer).await;
 }
 
@@ -201,11 +193,9 @@ async fn reading_elsewhere_drops_what_was_asked_ahead() {
     let mut buf = vec![0u8; 100];
     let (r, mut peer) = tokio::join!(h.read(5000, &mut buf, &c), async {
         let (req, cancels) = next(&mut peer).await;
-        // The READs asked ahead are canceled first, by their MessageId.
         assert_eq!(cancels, 3);
         answer_read(&mut peer, &req, 10_000).await;
         assert_eq!(read_of(&req), (5000, 100));
-        // Their late answers are dropped.
         for a in &ahead {
             peer.send(&[fake::error(a, NtStatus::CANCELLED, 1)], false).await;
         }
@@ -213,7 +203,6 @@ async fn reading_elsewhere_drops_what_was_asked_ahead() {
     });
     assert_eq!(r, Ok(100));
     assert_eq!(buf, content(5000, 5100));
-    // A hint behind the queue drops it as well.
     h.read_ahead(9000, 500);
     let (req, _) = next(&mut peer).await;
     assert_eq!(read_of(&req), (9000, 500));
@@ -236,7 +225,6 @@ async fn at_most_the_window_is_on_the_way() {
     let (r, ()) = tokio::join!(h.read(0, &mut buf, &c), async {
         let mut reqs = Vec::new();
         for i in 0..N + 2 {
-            // The window is full: the next READ waits for an answer.
             while reqs.len() < (N + i).min(N + 2) {
                 reqs.push(next(&mut peer).await.0);
             }
@@ -265,7 +253,6 @@ async fn a_chunk_is_handed_out_in_pieces() {
     let mut buf = vec![0u8; 600];
     assert_eq!(h.read(400, &mut buf, &c).await, Ok(600));
     assert_eq!(buf, content(400, 1000));
-    // Both came from the one READ: the next request is the CLOSE.
     let (r, ()) = tokio::join!(h.close(&c), answer_close(&mut peer));
     assert_eq!(r, Ok(()));
 }
@@ -308,10 +295,8 @@ async fn a_tripped_token_fails_the_read_even_with_data_queued() {
     let mut buf = vec![0u8; 10];
     let e = h.read(0, &mut buf, &tripped).await.unwrap_err();
     assert_eq!(e.name, ErrorName::Canceled);
-    // The handle still works: the queue went, the READ is made again.
     let (r, seen) = tokio::join!(h.read(0, &mut buf, &c), serve_reads(&mut peer, 10_000, 1));
     assert_eq!((r, seen), (Ok(10), vec![(0, 10)]));
-    // A token tripped while waiting cancels the READ on the server.
     let late = CancelToken::new();
     let (r, ()) = tokio::join!(h.read(10, &mut buf, &late), async {
         let (req, _) = next(&mut peer).await;
@@ -330,7 +315,6 @@ async fn read_failures() {
     let c = CancelToken::new();
     let mut h = SmbRead::new(open_of(&conn), 10_000, 1000);
     let mut buf = vec![0u8; 10];
-    // A status.
     let (r, ()) = tokio::join!(h.read(0, &mut buf, &c), async {
         let (req, _) = next(&mut peer).await;
         peer.send(&[fake::error(&req, NtStatus::ACCESS_DENIED, 1)], false).await;
@@ -338,13 +322,11 @@ async fn read_failures() {
     let e = r.unwrap_err();
     assert_eq!(e.name, ErrorName::PermissionDenied);
     assert!(e.message.starts_with("read"), "{e:?}");
-    // More data than asked for.
     let (r, ()) = tokio::join!(h.read(0, &mut buf, &c), async {
         let (req, _) = next(&mut peer).await;
         peer.send(&[fake::response(&req, NtStatus::SUCCESS, &read_body(&[0; 11]), 1)], false).await;
     });
     assert_eq!(r.unwrap_err().name, ErrorName::ProtocolError);
-    // Data outside the message.
     let (r, ()) = tokio::join!(h.read(0, &mut buf, &c), async {
         let (req, _) = next(&mut peer).await;
         let mut body = read_body(&[0; 10]);
@@ -352,13 +334,11 @@ async fn read_failures() {
         peer.send(&[fake::response(&req, NtStatus::SUCCESS, &body, 1)], false).await;
     });
     assert_eq!(r.unwrap_err().name, ErrorName::ProtocolError);
-    // A failed CLOSE is reported.
     let (r, ()) = tokio::join!(h.close(&c), async {
         let req = expect_close(&mut peer).await;
         peer.send(&[fake::error(&req, NtStatus::FILE_CLOSED, 1)], false).await;
     });
     assert!(r.is_err());
-    // A gone connection fails reads and hints quietly.
     let mut h = SmbRead::new(open_of(&conn), 10_000, 1000);
     drop(peer);
     let e = h.read(0, &mut buf, &c).await.unwrap_err();
@@ -385,7 +365,6 @@ async fn writes_go_in_chunks_without_waiting_and_commit_flushes_and_closes() {
     let mut h = SmbWrite::new(open_of(&conn), vec![u16::from(b'f')], 0, None, 1000);
     assert_eq!(h.position(), 0);
     let data = content(0, 2500);
-    // Two full chunks go at once and nothing is waited for.
     h.write(&data, &c).await.unwrap();
     assert_eq!(h.position(), 2500);
     let mut writes = Vec::new();
@@ -452,7 +431,6 @@ async fn a_write_of_nothing_fails_the_commit_and_closes() {
                 peer.send(&[fake::response(&rest, NtStatus::SUCCESS, &write_body(counts[1]), 1)], false)
                     .await;
             }
-            // No FLUSH and no times: the file is closed.
             answer_close(&mut peer).await;
         });
         let e = r.unwrap_err();
@@ -469,7 +447,6 @@ async fn a_failed_write_fails_every_later_call() {
     let c = CancelToken::new();
     let mut h = SmbWrite::new(open_of(&conn), vec![u16::from(b'f')], 0, Some(MS), MAX_CHUNK);
     let data = vec![7u8; MAX_IN_FLIGHT];
-    // The window holds four chunks; the fifth waits for the first.
     h.write(&data, &c).await.unwrap();
     let mut writes = Vec::new();
     for _ in 0..4 {
@@ -477,7 +454,6 @@ async fn a_failed_write_fails_every_later_call() {
     }
     let (r, mut peer) = tokio::join!(h.write(&data[..MAX_CHUNK], &c), async {
         peer.send(&[fake::error(&writes[0], NtStatus::DISK_FULL, 16)], false).await;
-        // The other three are canceled.
         for w in &writes[1..] {
             let cancel = peer.recv_one().await;
             assert_eq!(cancel.command(), Command::Cancel);
@@ -487,10 +463,9 @@ async fn a_failed_write_fails_every_later_call() {
     });
     let e = r.unwrap_err();
     assert_eq!(e.name, ErrorName::NoSpace);
-    // Sticky: nothing more is sent, and commit only closes.
     assert_eq!(h.write(b"x", &c).await.unwrap_err(), e);
     assert_eq!(h.position(), u64::try_from(MAX_IN_FLIGHT).unwrap());
-    // As after a canceled upload: commit still waits for the CLOSE (C-12).
+    // As after a canceled upload: commit still waits for the CLOSE.
     c.cancel();
     let mut commit = pin!(h.commit(&c));
     assert!(!done_now(commit.as_mut()));
@@ -539,15 +514,13 @@ async fn abort_waits_for_the_close_and_drop_closes_without_flushing() {
     let mut h = SmbWrite::new(open_of(&conn), vec![u16::from(b'f')], 0, Some(MS), 1000);
     h.write(&content(0, 1500), &c).await.unwrap();
     let (first, _) = next(&mut peer).await;
-    // As after a canceled upload: the tripped token does not stop the CLOSE.
     c.cancel();
     let mut abort = pin!(h.abort());
     assert!(!done_now(abort.as_mut()));
-    // The WRITE on the way is canceled, the buffered rest never sent.
     let (close, cancels) = next(&mut peer).await;
     assert_eq!((close.command(), cancels), (Command::Close, 1));
     peer.send(&[fake::error(&first, NtStatus::CANCELLED, 1)], false).await;
-    // C-12: done only once the server closed the file.
+    // Done only once the server closed the file.
     assert!(!done_now(abort.as_mut()));
     peer.send(&[fake::response(&close, NtStatus::SUCCESS, &close_body(), 1)], false).await;
     abort.await;

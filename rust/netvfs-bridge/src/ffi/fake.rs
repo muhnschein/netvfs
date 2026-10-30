@@ -1,8 +1,5 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! Tests only (feature `testing`): the control table of the fake backend,
-//! `libnetvfs-bridge-ffi-fake.so` (`tests/bridge/ffifake/nvb_fake.h`,
-//! design §4.1). It drives the same `FakeServer` as the plugin that
-//! `conn_new("fake")` loads through `NETVFS_BACKEND_PATH`. Never installed.
+//! Tests only (feature `testing`): control table of the fake backend `libnetvfs-bridge-ffi-fake.so` (`tests/bridge/ffifake/nvb_fake.h`). Drives the same `FakeServer` as the plugin `conn_new("fake")` loads through `NETVFS_BACKEND_PATH`. Never installed.
 
 use super::loader::{self, LoadError};
 use super::marshal;
@@ -69,8 +66,7 @@ fn b(data: &[u8]) -> NvbBytes {
     NvbBytes::of(data)
 }
 
-// SAFETY (for every call below): the fake's functions take any thread
-// (nvb_fake.h) and only borrow their arguments for the call (O1).
+// SAFETY (for every call below): the fake's functions take any thread and only borrow their arguments for the call.
 impl Fake {
     /// Loads the library named by `NETVFS_BRIDGE_FFI_FAKE`; `None` when the
     /// variable is not set.
@@ -124,7 +120,7 @@ impl Fake {
     /// A file's data.
     #[must_use]
     pub fn file_data(&self, path: &[u8]) -> Option<Vec<u8>> {
-        // SAFETY: see above; the blob is one block (O3), read, then freed.
+        // SAFETY: see above; the blob is one block, read, then freed.
         unsafe {
             let blob = (self.t.file_data)(b(path));
             let data = blob.as_ref().map(|blob| marshal::slice(blob.data).to_vec());

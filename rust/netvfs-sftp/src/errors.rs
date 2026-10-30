@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! How a request fails ([`Failure`]) and how that becomes a [`Status`]
-//! (SPEC-sftp 7, XC-21): the server's `SSH_FX_*` codes by name, and the
-//! client's own failures (cancel, timeout, a lost or broken connection) as
-//! they are.
+//! A failed request ([`Failure`]) and its [`Status`]: server `SSH_FX_*` codes by name, local failures (cancel,
+//! timeout, lost or broken connection) as they are.
 
 use crate::proto::{
     FX_BAD_MESSAGE, FX_CONNECTION_LOST, FX_EOF, FX_FAILURE, FX_FILE_ALREADY_EXISTS, FX_NO_CONNECTION,
@@ -36,8 +34,7 @@ impl Failure {
         }
     }
 
-    /// The status for the caller; `context` names what the request was
-    /// about (a path, or "read").
+    /// The status for the caller; `context` names the path or "read".
     #[must_use]
     pub fn status(&self, context: &str) -> Status {
         match self {
@@ -59,7 +56,6 @@ fn server_status(reply: &StatusReply, context: &str) -> Status {
     }
 }
 
-/// The server's message, or a text for the code when it sent none.
 fn message(reply: &StatusReply) -> String {
     if !reply.message.is_empty() {
         return reply.message.clone();
@@ -73,37 +69,37 @@ fn message(reply: &StatusReply) -> String {
     }
 }
 
-/// `ConnectionLost`: the SFTP channel or the SSH connection went away.
+/// `ConnectionLost`: SFTP channel or SSH connection went away.
 #[must_use]
 pub fn connection_lost() -> Status {
     Status::new(ErrorName::ConnectionLost, "The connection to the server was lost")
 }
 
-/// `ConnectionLost` after [`disconnect`](netvfs_vfs::Backend::disconnect).
+/// `ConnectionLost` after `disconnect`.
 #[must_use]
 pub fn connection_closed() -> Status {
     Status::new(ErrorName::ConnectionLost, "The connection was closed")
 }
 
-/// `ProtocolError` for a reply that cannot be read.
+/// `ProtocolError`: unreadable reply.
 #[must_use]
 pub fn malformed(e: WireError) -> Status {
     Status::new(ErrorName::ProtocolError, "The server sent a malformed reply").with_detail(e.0)
 }
 
-/// `ProtocolError` for a reply of the wrong kind.
+/// `ProtocolError`: reply of the wrong kind.
 #[must_use]
 pub fn unexpected() -> Failure {
     Failure::Local(Status::new(ErrorName::ProtocolError, "The server sent an unexpected reply"))
 }
 
-/// `Timeout` (C-14).
+/// `Timeout`.
 #[must_use]
 pub fn timed_out(ms: u128) -> Status {
     Status::new(ErrorName::Timeout, format!("The server did not answer within {} s", ms.div_ceil(1000)))
 }
 
-/// `Internal` for a call with a range it cannot have.
+/// `Internal`: impossible range.
 #[must_use]
 pub fn invalid_range() -> Status {
     Status::internal("Invalid range")

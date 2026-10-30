@@ -1,9 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: LGPL-2.1-or-later
-# Prove tools/ci/changes.sh skips build and test jobs for docs alone, never for anything else.
-#
-# Costly mistake: a code change read as docs-only, CI green without running a
-# test. Most cases guard that side.
+# Prove changes.sh skips build and test jobs for docs alone, never for anything else. Costly mistake: code read as docs-only, CI green without tests; most cases guard that side.
 set -u
 
 root=$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd)
@@ -46,8 +43,7 @@ says true "a submodule's docs run them" "vendor/host/buteo-syncfw/README.md"
 says true "a file only named like docs runs them" "CHANGELOG.md.orig"
 says true "an empty list runs them" ""
 
-# Whole script on own repo: last commit touches docs alone, so only the event
-# can make it run everything.
+# Whole script on own repo: last commit touches docs alone, so only the event can make it run everything.
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 git_() {

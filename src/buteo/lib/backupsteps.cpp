@@ -63,4 +63,4 @@ Result restoreBackup(Backend *backend, const QString &remoteDir, const QString &
     return r;
 }
 
-} // namespace NetVfs::BackupSteps
+}

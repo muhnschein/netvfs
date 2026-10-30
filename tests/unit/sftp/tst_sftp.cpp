@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 // The SFTP plugin of the build tree, through BackendLoader as every consumer
-// reaches it: the SSH key tools of its root object (S-6, S-15) and the
-// connection failures that need no SSH server (SPEC-sftp 7, C-14, S-2).
+// reaches it: the SSH key tools of its root object and the
+// connection failures that need no SSH server.
 #include "backendloader.h"
 #include "sshkeys.h"
 
@@ -114,7 +114,7 @@ private:
 // Banner plus a KEXINIT whose key exchange no client supports.
 QByteArray unsupportedKexGreeting()
 {
-    QByteArray payload(1, '\x14');   // SSH_MSG_KEXINIT
+    QByteArray payload(1, '\x14');
     payload += QByteArray(16, '\x2a');
     const QList<QByteArray> lists = { "frobnicate-kex@example.org", "ssh-ed25519", "aes128-ctr", "aes128-ctr",
                                       "hmac-sha2-256", "hmac-sha2-256", "none", "none", "", "" };
@@ -151,7 +151,6 @@ private:
     QTemporaryDir m_dir;
     SshKeyTools *m_tools = nullptr;
 
-    // Runs a tool from the host (ssh-keygen, openssl); false if it is absent or fails.
     bool tool(const QString &program, const QStringList &arguments, QByteArray *output = nullptr)
     {
         if (QStandardPaths::findExecutable(program).isEmpty())
@@ -198,7 +197,6 @@ private:
         f.write(data);
     }
 
-    // "SHA256:..." of a key file as printed by ssh-keygen -lf.
     QString keygenFingerprint(const QString &name)
     {
         QByteArray out;
@@ -208,7 +206,6 @@ private:
         return QString::fromLatin1(out.split(' ').value(1));
     }
 
-    // The public key ssh-keygen derives from a private key file.
     QByteArray keygenPublic(const QString &name)
     {
         QByteArray out;
@@ -233,7 +230,6 @@ private slots:
         QVERIFY(m_tools);
     }
 
-    // --- SSH key tools (plugin root object) --------------------------------
 
     void generate()
     {
@@ -260,7 +256,7 @@ private slots:
         QCOMPARE(described.algorithm, first.algorithm);
         QVERIFY(m_tools->generate(nullptr).ok());
 
-        // S-6: the fingerprint is the one ssh-keygen prints; ssh-keygen reads
+        // the fingerprint is the one ssh-keygen prints; ssh-keygen reads
         // the exported private key, which is not encrypted (stored in signond).
         writeFile(QStringLiteral("generated.pub"), first.publicLine.toLatin1() + '\n');
         writeFile(QStringLiteral("generated"), first.privateKey);
@@ -307,7 +303,6 @@ private slots:
         QVERIFY(key.publicLine.endsWith(QLatin1String(" sailfish-backup")));
         QCOMPARE(key.publicLine.split(QLatin1Char(' ')).value(1).toLatin1(),
                  file(name + QStringLiteral(".pub")).split(' ').value(1));
-        // Re-exported unencrypted in OpenSSH format, which ssh-keygen reads.
         QVERIFY(key.privateKey.startsWith("-----BEGIN OPENSSH PRIVATE KEY-----\n"));
         writeFile(name + QStringLiteral(".exported"), key.privateKey);
         QCOMPARE(keygenPublic(name + QStringLiteral(".exported")), key.publicLine.toLatin1().split(' ').mid(0, 2).join(' '));
@@ -327,7 +322,6 @@ private slots:
         }
     }
 
-    // S-15: what the hardened subset refuses, with the fix in the message.
     void refusedKeyFiles_data()
     {
         QTest::addColumn<QStringList>("keygen");
@@ -338,7 +332,6 @@ private slots:
         QTest::newRow("rsa 2048 openssh") << QStringList { "-t", "rsa", "-b", "2048" } << QByteArray() << RsaRefused;
         QTest::newRow("rsa pkcs8") << QStringList { "-t", "rsa", "-b", "2048", "-m", "PKCS8" } << QByteArray()
                                    << RsaRefused;
-        // ssh-keygen wants five characters at least.
         QTest::newRow("rsa openssh passphrase") << QStringList { "-t", "rsa", "-b", "2048" } << QByteArray("passphrase")
                                                 << RsaRefused;
         QTest::newRow("ecdsa legacy pem passphrase") << QStringList { "-t", "ecdsa", "-b", "256", "-m", "PEM" }
@@ -400,7 +393,7 @@ private slots:
                                               QStringLiteral("-noout"), QStringLiteral("-out"),
                                               QStringLiteral("dsa.pem"), QStringLiteral("1024") }))
             QSKIP("openssl is not installed");
-        Result r = m_tools->importKey(file(QStringLiteral("dsa.pem")), QByteArray(), &key);   // PKCS#8
+        Result r = m_tools->importKey(file(QStringLiteral("dsa.pem")), QByteArray(), &key);
         QCOMPARE(r.error(), Error::Unsupported);
         QCOMPARE(r.message(), QString::fromLatin1(DsaRefused));
         QVERIFY(tool(QStringLiteral("openssl"), { QStringLiteral("dsa"),
@@ -414,7 +407,6 @@ private slots:
         r = m_tools->importKey(file(QStringLiteral("small.pem")), QByteArray(), &key);
         QCOMPARE(r.error(), Error::Unsupported);
         QCOMPARE(r.message(), QString::fromLatin1(RsaRefused));
-        // A PKCS#8 key of another type: named by its OID.
         QVERIFY(tool(QStringLiteral("openssl"), { QStringLiteral("genpkey"), QStringLiteral("-algorithm"),
                                                  QStringLiteral("ed448"), QStringLiteral("-out"),
                                                  QStringLiteral("ed448.pem") }));
@@ -447,7 +439,6 @@ private slots:
         QVERIFY(key.privateKey.isEmpty());
     }
 
-    // --- backend failures without a server ---------------------------------
 
     void plugin()
     {
@@ -474,7 +465,7 @@ private slots:
         QCOMPARE(b->freeSpace(QStringLiteral("x"), &bytes).error(), Error::Internal);
         QCOMPARE(b->read(QStringLiteral("x"), 0, 1, &data).error(), Error::Internal);
         QCOMPARE(b->keepAlive().error(), Error::Internal);
-        QVERIFY(b->capabilities().flags.isEmpty());   // XC-5: valid after authenticate()
+        QVERIFY(b->capabilities().flags.isEmpty());   // valid after authenticate()
         QCOMPARE(b->setAttributes(QStringLiteral("x"), AttributeChanges()).error(), Error::Internal);
         QString target;
         QCOMPARE(b->readLink(QStringLiteral("x"), &target).error(), Error::Internal);
@@ -540,7 +531,7 @@ private slots:
 
     void timeout()
     {
-        // C-14: the connect timeout applies while waiting for the banner.
+        // the connect timeout applies while waiting for the banner.
         QTcpServer silent;   // listens, never accepts or answers
         QVERIFY(silent.listen(QHostAddress::LocalHost));
         auto b = backend();
@@ -555,7 +546,7 @@ private slots:
 
     void noCommonAlgorithm()
     {
-        // S-2: no common algorithm is SecurityPolicy, naming the list and
+        // no common algorithm is SecurityPolicy, naming the list and
         // what the server offers.
         const ScriptedPeer peer(unsupportedKexGreeting());
         auto b = backend();

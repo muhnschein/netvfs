@@ -1,12 +1,9 @@
 #!/bin/sh
 # SPDX-License-Identifier: LGPL-2.1-or-later
-# The Rust coverage of `make coverage` as lcov for SonarQube: the counters
-# that the instrumented netvfs-accounts and netvfs-bridge (built by qmake)
-# wrote while the C++ tests ran them, those of libnetvfs-rs.so with the mem
-# backend that the shim's tests load (tests/backends/rs/lib), and those of
-# the workspace's own tests (netvfs-bridge's ffi test against the C++ library
-# included: `make check-rust-ffi`), merged with the llvm-tools of the pinned
-# toolchain.
+# Rust coverage of `make coverage` as lcov for SonarQube: counters written by the instrumented netvfs-accounts and
+# netvfs-bridge (qmake) while C++ tests ran them, those of libnetvfs-rs.so with the mem backend the shim's tests load
+# (tests/backends/rs/lib), and those of the workspace's own tests (incl. `make check-rust-ffi`), merged with the
+# pinned toolchain's llvm-tools.
 # Usage: rust-coverage.sh <build-coverage dir>; writes <dir>/rust-lcov.info.
 set -eu
 build=$1
@@ -16,10 +13,8 @@ host=$(rustc -vV | sed -n 's/^host: //p')
 tools=$(rustc --print sysroot)/lib/rustlib/$host/bin
 [ -x "$tools/llvm-cov" ] || { echo "rust-coverage.sh: no llvm-cov; rustup component add llvm-tools"; exit 1; }
 
-# The binaries the counters belong to: the helper, the bridge and the test
-# build of libnetvfs-rs.so as qmake built them, and the workspace's test and
-# probe binaries (as `make check-rust` and `make check-rust-ffi` built them:
-# the same features as RUST_FEATURES).
+# Binaries the counters belong to: helper, bridge, test build of libnetvfs-rs.so as qmake built them, workspace test and
+# probe binaries (as `make check-rust` and `make check-rust-ffi` built them: RUST_FEATURES).
 objects="$build/rust-target/release/netvfs-accounts $build/rust-target/release/netvfs-bridge"
 objects="$objects $build/rust-target/rs-test/libnetvfs_rs.so"
 objects="$objects $(RUSTFLAGS="-C instrument-coverage" NETVFS_RUST_COVERAGE_DIR="$build/rust-coverage" \

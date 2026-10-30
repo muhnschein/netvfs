@@ -1,17 +1,7 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! Test support for the whole bridge (feature `testing`; design §4.1): the
-//! harness of test binaries that need the C ABI ([`run_main`]), and the
-//! [`Fixture`], the port of `tests/bridge/common/bridgetest.h`: the bridge
-//! in-process, on a runtime thread of its own, against the real
-//! `libnetvfs-bridge-ffi.so` and the fake backend, with fake accounts, a
-//! fake prompt, a fake discovery, a recording handoff launcher and fake
-//! drives, listening on `unix:path=<tmp>/bridge.sock`. Clients are
-//! [`netvfs_bridge_proto::Connection`]s; a [`Probe`] reads the core's
-//! counters.
+//! Test support for the whole bridge (feature `testing`): the harness of test binaries that need the C ABI ([`run_main`]) and the [`Fixture`], the bridge in-process on a runtime thread of its own against the real `libnetvfs-bridge-ffi.so` and the fake backend, with fake accounts, prompt, discovery, recording handoff launcher and fake drives, listening on `unix:path=<tmp>/bridge.sock`. Clients are [`netvfs_bridge_proto::Connection`]s; a [`Probe`] reads the core's counters.
 //!
-//! The C ABI comes from the variables of [`VARIABLES`]; without them
-//! [`run_main`] says every test is skipped. A failing set-up is a failing
-//! test, so these helpers panic.
+//! The C ABI comes from the variables of [`VARIABLES`]; without them [`run_main`] says every test is skipped. Helpers panic on set-up failure.
 #![allow(clippy::expect_used, clippy::panic, clippy::missing_panics_doc, clippy::print_stdout)]
 
 use crate::accounts::{AccountDirectory, AccountLocation, Attention, ConnectionParams, FilesAccess};
@@ -38,26 +28,22 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError, mpsc};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
-/// The variables that name the C ABI, the fake's control table and the
-/// fake backend's folder (`make check-rust-ffi` sets them).
+/// The variables naming the C ABI, the fake's control table and the fake backend's folder.
 pub const VARIABLES: [&str; 3] = [crate::ffi::PATH_ENV, fake::PATH_ENV, "NETVFS_BACKEND_PATH"];
 /// The fixture's consumer.
 pub const CONSUMER: &str = "test";
 /// The location of the fixture's account 1.
 pub const ACCOUNT_LOC: &str = "account:1";
-/// The fixture's idle exit unless a test sets one: long, so that the
-/// bridge stays while a test runs (the fixture stops it when dropped).
+/// The fixture's idle exit unless a test sets one: long, so the bridge stays while a test runs.
 pub const FIXTURE_IDLE_EXIT: Duration = Duration::from_secs(30);
-/// How long a test may run before the harness gives up on it.
+/// How long a test may run before the harness gives up.
 pub const HANG: Duration = Duration::from_mins(1);
-/// How long the waits of these helpers wait by default.
+/// Default wait of these helpers.
 pub const WAIT: Duration = Duration::from_secs(10);
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(PoisonError::into_inner)
 }
-
-// ------------------------------------------------------------- harness
 
 /// The C ABI and the fake backend's control table.
 #[derive(Debug, Clone, Copy)]
@@ -69,8 +55,7 @@ pub struct Harness {
 }
 
 impl Harness {
-    /// Loads both libraries; `None` when a variable of [`VARIABLES`] is
-    /// not set.
+    /// Loads both libraries; `None` when a variable of [`VARIABLES`] is not set.
     #[must_use]
     pub fn load() -> Option<Self> {
         if VARIABLES.iter().any(|v| std::env::var_os(v).is_none()) {
@@ -99,11 +84,7 @@ fn selected(tests: &[(&'static str, Test)], args: &[String]) -> Vec<(&'static st
         .collect()
 }
 
-/// The `main` of a test binary with `harness = false`: lists the tests
-/// (`--list`, for nextest), skips them all without the C ABI, otherwise
-/// `init`s the Qt application as `app` on this (main) thread and runs each
-/// selected test on a thread of its own while this one serves the Qt event
-/// loop; the fake backend is reset before each test.
+/// The `main` of a test binary with `harness = false`: lists tests (`--list`, for nextest), skips all without the C ABI, otherwise `init`s the Qt application as `app` on this (main) thread and runs each selected test on a thread of its own while this one serves the Qt event loop; the fake backend is reset before each test.
 #[must_use]
 pub fn run_main(app: &str, tests: &[(&'static str, Test)]) -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -134,7 +115,6 @@ pub fn run_main(app: &str, tests: &[(&'static str, Test)]) -> ExitCode {
     if failed == 0 { ExitCode::SUCCESS } else { ExitCode::FAILURE }
 }
 
-/// Ends the process when `name` runs longer than [`HANG`].
 #[allow(clippy::exit, reason = "a hung test cannot be stopped otherwise")]
 fn watch(name: &'static str) -> mpsc::Sender<()> {
     let (done, finished) = mpsc::channel::<()>();
@@ -147,7 +127,6 @@ fn watch(name: &'static str) -> mpsc::Sender<()> {
     done
 }
 
-/// Ends the Qt loop when the test thread is done.
 struct QuitOnDrop(Ffi);
 
 impl Drop for QuitOnDrop {
@@ -156,7 +135,6 @@ impl Drop for QuitOnDrop {
     }
 }
 
-/// Waits until the Qt loop runs.
 fn wait_for_loop(ffi: Ffi) {
     let (tx, rx) = mpsc::channel();
     loop {
@@ -171,7 +149,6 @@ fn wait_for_loop(ffi: Ffi) {
     rx.recv().expect("the Qt loop runs");
 }
 
-/// Runs `work` on another thread while this one runs the Qt event loop.
 fn off_qt_thread<R: Send>(h: Harness, work: impl FnOnce(&Harness) -> R + Send) -> R {
     thread::scope(|s| {
         let worker = s.spawn(move || {
@@ -246,8 +223,6 @@ pub fn error_name<T>(result: &Result<T, zbus::Error>) -> Option<String> {
     result.as_ref().err().and_then(|e| BridgeError::from(e.clone()).dbus_name().map(str::to_owned))
 }
 
-// --------------------------------------------------------------- fakes
-
 /// What the fake accounts hold and saw.
 #[derive(Debug, Default)]
 pub struct AccountsState {
@@ -263,7 +238,7 @@ pub struct AccountsState {
     pub hang: bool,
 }
 
-/// An [`AccountDirectory`] in memory (`FakeAccounts` of bridgetest.cpp).
+/// An [`AccountDirectory`] in memory.
 #[derive(Debug, Clone, Default)]
 pub struct FakeAccounts(pub Arc<Mutex<AccountsState>>);
 
@@ -313,8 +288,7 @@ impl AccountDirectory for FakeAccounts {
         }
         let params = state.accounts.iter().find(|a| a.account_id == id).map(|a| a.params.clone());
         drop(state);
-        // XA-7: credentials id 0 with an optional secret, as the fake backend
-        // is set up by the fixture (user `user`, empty secret).
+        // Credentials id 0 with an optional secret, as the fixture sets up the fake backend (user `user`, empty secret).
         params
             .map(|params| FilesAccess { params, credentials_id: 0, secret_optional: true })
             .ok_or_else(|| Status::new(netvfs_bridge_proto::ErrorName::NotFound, "No such account"))
@@ -475,8 +449,6 @@ impl DriveSource for FakeDrives {
     }
 }
 
-// ------------------------------------------------------------- fixture
-
 /// The core's counters, read through its channel.
 #[derive(Debug, Clone)]
 pub struct Probe(CoreLink);
@@ -511,7 +483,7 @@ impl Probe {
     }
 }
 
-/// The bridge of consumer `test` in-process (`Fixture` of bridgetest.cpp).
+/// The bridge of consumer `test` in-process.
 #[derive(Debug)]
 pub struct Fixture {
     /// The C ABI and the fake backend.
@@ -568,8 +540,7 @@ impl Default for Setup {
     }
 }
 
-/// `fake://[user@]host[/path]`: an ad-hoc location of the fake backend
-/// (which has no URL scheme of its own); other URLs go to the C ABI.
+/// `fake://[user@]host[/path]`: an ad-hoc location of the fake backend (no URL scheme of its own); other URLs go to the C ABI.
 #[must_use]
 pub fn fake_url(url: &str) -> Option<ParsedUrl> {
     let rest = url.strip_prefix("fake://")?;
@@ -601,7 +572,6 @@ impl Fixture {
     #[must_use]
     pub fn start(harness: &Harness, setup: Setup) -> Self {
         let h = *harness;
-        // XA-7: the fake server takes the account's empty optional secret.
         h.fake.set_credentials("user", b"");
         let dir = TempDir::new();
         let socket = dir.join("bridge.sock");
@@ -756,18 +726,9 @@ impl Drop for Fixture {
     }
 }
 
-// ---------------------------------------------------------- the binary
-
-/// The fake helper's table: account 1 as the [`Fixture`] has it (provider
-/// `fake`, "Fake 1" at `fake.example`, user `user`, files at `/`).
 const FAKE_ACCOUNTS: &str = "account\t1\tfake\tFake 1\tfake.example\t0\tuser\t/\t\n";
 
-/// The `netvfs-bridge` binary as a test runs it (the process, contract and
-/// notification tests): consumer `id`, registered with this test binary as
-/// its executable, and a private home, configuration, data and consumers
-/// folder below [`BridgeRun::dir`]; no accounts helper, no session bus,
-/// the idle exit after 500 ms. The `with_*` methods change that before
-/// [`BridgeRun::spawn`].
+/// The `netvfs-bridge` binary as a test runs it: consumer `id`, registered with this test binary as its executable, private home, configuration, data and consumers folder below [`BridgeRun::dir`]; no accounts helper, no session bus, idle exit after 500 ms. The `with_*` methods change that before [`BridgeRun::spawn`].
 #[derive(Debug)]
 pub struct BridgeRun {
     /// The temporary folder: `home`, `config`, `data`, `consumers`,
@@ -840,7 +801,7 @@ impl BridgeRun {
         Self { dir, consumer: consumer.to_owned(), socket, command }
     }
 
-    /// `bridge.conf` with `consent` for the consumer, as netvfs-ui writes it.
+    /// `bridge.conf` with `consent` for the consumer, as the account UI writes it.
     pub fn with_consent(&mut self, consent: Consent) -> &mut Self {
         ConsentStore::new(self.consent_file()).set_consent(&self.consumer, consent).expect("bridge.conf");
         self
@@ -861,12 +822,7 @@ impl BridgeRun {
         self.with_files(&[])
     }
 
-    /// The files of the fake backend's server (`NETVFS_FAKE_SEED`, design
-    /// §4.1), (path, content). Also the server's credentials: user `user`
-    /// with the empty secret of the fake helper's accounts (credentials id
-    /// 0, secret optional). The seed format has no empty hex word; `-` is
-    /// one that decodes to nothing (`QByteArray::fromHex` skips what is not
-    /// a hex digit).
+    /// Files of the fake backend's server (`NETVFS_FAKE_SEED`), (path, content). Also the server's credentials: user `user` with the empty secret of the fake helper's accounts. The seed format has no empty hex word; `-` decodes to nothing (`QByteArray::fromHex` skips non-hex digits).
     pub fn with_files(&mut self, files: &[(&[u8], &[u8])]) -> &mut Self {
         let mut seed = String::from("credentials user -\n");
         for (path, content) in files {

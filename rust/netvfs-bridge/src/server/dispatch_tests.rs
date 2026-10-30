@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-// netvfs 0.4's C++ tst_bridgeserver: the server's own answers, in the C++
-// order of checks.
-// Restriction lints that only add noise to tests (doc/RUST.md "Lints").
+// Restriction lints that only add noise to tests.
 #![allow(clippy::assertions_on_result_states, clippy::arithmetic_side_effects)]
 
 use super::{
@@ -37,7 +35,6 @@ fn reply(msg: &Message, state: &mut State) -> Message {
     }
 }
 
-/// The error name and message of an error reply.
 fn error(msg: &Message, state: &mut State) -> (String, String) {
     let reply = reply(msg, state);
     assert_eq!(reply.message_type(), Type::Error);
@@ -77,7 +74,6 @@ fn peer_interface_on_any_path() {
             "Unknown method invoked on org.freedesktop.DBus.Peer interface".to_owned()
         )
     );
-    // The machine id is answered whether or not the host has one.
     let get = call("/", Some(PEER), "GetMachineId").build(&()).unwrap();
     let answer = reply(&get, &mut fresh());
     match answer.message_type() {
@@ -117,7 +113,6 @@ fn introspection_is_verbatim() {
         let (xml,): (String,) = answer.body().deserialize().unwrap();
         assert_eq!(xml, INTROSPECTION_XML);
     }
-    // Not on another path, nor on the bridge interface.
     let elsewhere = call("/", Some(INTROSPECTABLE), "Introspect").build(&()).unwrap();
     assert_eq!(error(&elsewhere, &mut fresh()), (UNKNOWN_METHOD.to_owned(), "No such object".to_owned()));
     let bridge_member = call(OBJECT_PATH, Some(INTERFACE), "Introspect").build(&()).unwrap();
@@ -156,7 +151,6 @@ fn hello_must_come_first() {
         error(&early, &mut state),
         ("org.netvfs.Error.ProtocolError".to_owned(), "Hello must be the first call".to_owned())
     );
-    // Without an interface the bridge interface is meant.
     let first = call(OBJECT_PATH, None, "Hello").build(&("x",)).unwrap();
     match classify(&first, &mut state) {
         Action::Forward(method, Call::Hello { client }) => {
@@ -170,7 +164,6 @@ fn hello_must_come_first() {
         Action::Forward(method, Call::GetConsent) => assert_eq!(method.name, "GetConsent"),
         other => panic!("expected GetConsent, got {other:?}"),
     }
-    // A second Hello is the core's to answer.
     assert!(matches!(classify(&hello(), &mut state), Action::Forward(_, Call::Hello { .. })));
 }
 
@@ -186,7 +179,6 @@ fn no_reply_expected_and_other_types() {
         classify(&quiet(call(OBJECT_PATH, Some(INTERFACE), "GetConsent")), &mut state),
         Action::Ignore
     ));
-    // A valid call is forwarded anyway; the reply slot drops the answer.
     let quiet_hello = call(OBJECT_PATH, Some(INTERFACE), "Hello")
         .with_flags(Flags::NoReplyExpected)
         .unwrap()

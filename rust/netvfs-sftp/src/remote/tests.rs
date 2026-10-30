@@ -106,7 +106,7 @@ fn extensions_need_their_version() {
 
 #[test]
 fn chunks_follow_the_limits() {
-    // S-21: 32 KiB without a limit, at most 256 KiB.
+    // 32 KiB without a limit, at most 256 KiB.
     assert_eq!((FALLBACK_CHUNK, MAX_CHUNK), (32 * 1024, 256 * 1024));
     assert_eq!(chunk(None), FALLBACK_CHUNK);
     assert_eq!(chunk(Some(0)), FALLBACK_CHUNK);

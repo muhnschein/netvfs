@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-// netvfs-bridge-generator (SPEC-v2 XB-3, XB-4, XT-7): golden unit files,
+// netvfs-bridge-generator: golden unit files
 // validation of consumer files (the same rules as ConsumerInfo), and the
 // folder deletion/recreation logic of the rendezvous check, run against a
 // fake systemctl because CI has no systemd --user.
@@ -107,7 +107,7 @@ void tst_Generator::goldenUnits()
             QVERIFY2(actual.isSymLink(), qPrintable(entry));
             QCOMPARE(QFile::symLinkTarget(actual.filePath()).section(QLatin1Char('/'), -1),
                      QFile::symLinkTarget(golden.filePath()).section(QLatin1Char('/'), -1));
-            QCOMPARE(readFile(actual.filePath()).isEmpty(), false);   // the link resolves
+            QCOMPARE(readFile(actual.filePath()).isEmpty(), false);
             continue;
         }
         if (golden.isDir())
@@ -120,7 +120,6 @@ void tst_Generator::goldenUnits()
     QVERIFY(wants.isDir());
     QVERIFY(!(wants.permissions() & (QFileDevice::ReadGroup | QFileDevice::WriteGroup | QFileDevice::ExeGroup
                                      | QFileDevice::ReadOther | QFileDevice::WriteOther | QFileDevice::ExeOther)));
-    // XB-4 essentials, spelled out.
     const QByteArray socket = readFile(out.path() + QStringLiteral("/netvfs-bridge@lautta.socket"));
     QVERIFY(socket.contains("ListenStream=%h/.local/share/org.netvfs/lautta/netvfs/bridge.sock\n"));
     QVERIFY(socket.contains("SocketMode=0600\n"));
@@ -140,7 +139,7 @@ void tst_Generator::skipsInvalidConsumers()
                               "specifier.conf" })
         QVERIFY2(run.stderrText.contains(QLatin1String(name)), name);
     QVERIFY(!run.stderrText.contains(QLatin1String("lautta.conf")));
-    QVERIFY(run.stderrText.contains(QLatin1String("Upper.conf: Id must match")));   // refused by its name
+    QVERIFY(run.stderrText.contains(QLatin1String("Upper.conf: Id must match")));
     for (const QString &entry : tree(out.path()))
         QVERIFY2(entry.contains(QLatin1String("lautta")) || entry.contains(QLatin1String("photos"))
                      || entry.endsWith(QLatin1String(".wants")), qPrintable(entry));
@@ -227,7 +226,6 @@ void tst_Generator::usageAndMissingFolder()
     QTemporaryDir out;
     QCOMPARE(generate(QStringLiteral("/nonexistent/consumers"), { out.path() }).exitCode, 0);
     QVERIFY(tree(out.path()).isEmpty());
-    // An unusable output folder is reported.
     QCOMPARE(generate(Inputs, { QStringLiteral("/nonexistent/out") }).exitCode, 1);
 }
 
@@ -246,7 +244,6 @@ void tst_Generator::rendezvousCheck_data()
     QTest::addColumn<bool>("socketExists");
     QTest::addColumn<bool>("unitActive");
     QTest::addColumn<bool>("restart");
-    // XB-4: the folder was deleted and recreated -> the socket is gone -> restart.
     QTest::newRow("socket missing") << false << true << true;
     QTest::newRow("unit inactive") << true << false << true;
     QTest::newRow("both fine") << true << true << false;
@@ -275,7 +272,6 @@ void tst_Generator::rendezvousCheck()
                                     QStringLiteral("import socket,sys; s=socket.socket(socket.AF_UNIX); s.bind(sys.argv[1])"),
                                     socketPath }) == 0);
     }
-    // A fake systemctl that logs its arguments.
     QTemporaryDir bin;
     const QString log = bin.path() + QStringLiteral("/log");
     QFile fake(bin.path() + QStringLiteral("/systemctl"));

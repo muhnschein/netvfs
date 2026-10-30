@@ -104,7 +104,6 @@ bool AccountsFixture::setService(int accountId, const QString &service, bool ena
 
 QVariant AccountsFixture::value(int accountId, const QString &key, const QString &service)
 {
-    // A fresh manager so values written through other managers are seen.
     Accounts::Manager fresh;
     Accounts::Account *account = fresh.account(static_cast<Accounts::AccountId>(accountId));
     if (!account)

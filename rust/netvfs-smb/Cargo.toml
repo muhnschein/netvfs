@@ -14,15 +14,13 @@ workspace = true
 netvfs-vfs = { path = "../netvfs-vfs" }
 tokio = { version = "1", default-features = false, features = ["rt", "net", "io-util", "time", "sync"] }
 zeroize = "1"
-# NTLMv2 in SPNEGO (auth). No network client, no DNS resolver, no
-# Kerberos at run time: the Negotiate package is limited to "ntlm".
+# NTLMv2 in SPNEGO. No network client, DNS resolver or Kerberos at run time: Negotiate limited to "ntlm".
 sspi = { version = "0.23", default-features = false }
 # RustCrypto primitives and the OS random generator: imported by the
 # `crypto` module only (tools/ci/check-crypto-fence.sh).
 aes = { version = "0.9", features = ["zeroize"] }
 aes-gcm = { version = "0.11", default-features = false, features = ["aes", "zeroize"] }
-# `zeroize`: the MAC and hash states derived from key material are wiped
-# when dropped, as the AES key schedules are.
+# `zeroize`: MAC and hash states derived from key material are wiped on drop, like AES key schedules.
 cmac = { version = "0.8", features = ["zeroize"] }
 hmac = { version = "0.13", features = ["zeroize"] }
 sha2 = { version = "0.11", features = ["zeroize"] }
@@ -30,7 +28,6 @@ getrandom = "0.4"
 
 [dev-dependencies]
 tokio = { version = "1", default-features = false, features = ["rt", "rt-multi-thread", "net", "io-util", "time", "sync", "macros"] }
-# tests/sspi_ntlm.rs only: recomputes sspi's NTLMv2 output (MS-NLMP 4.2.4)
-# with RustCrypto's MD5 and RC4, so that sspi's own RC4 (KEY_EXCH) is pinned.
+# tests/sspi_ntlm.rs only: recomputes sspi's NTLMv2 output (MS-NLMP 4.2.4) with RustCrypto MD5 and RC4, pinning sspi's own RC4 (KEY_EXCH).
 md-5 = "0.11"
 rc4 = "0.2"

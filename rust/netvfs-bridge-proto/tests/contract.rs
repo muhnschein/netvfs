@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! The shared contract (SPEC-v2 XT-7, C++ `tst_contract`): the crate's copy
-//! of the introspection XML equals the contract copy, the method table and
-//! the signals match the XML, and the golden sequences replay against the
-//! fake bridge.
+//! The shared contract: the crate's copy of the introspection XML equals the contract copy, the
+//! method table and signals match the XML, and the golden sequences replay against the fake bridge.
 // Test helpers outside #[test] functions: a failing test is the point.
 #![allow(clippy::unwrap_used, clippy::panic)]
 
@@ -22,7 +20,6 @@ fn read(path: &Path) -> String {
     std::fs::read_to_string(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
 }
 
-/// A method or signal of the XML: name, input (or signal) signature, output signature.
 #[derive(Debug, PartialEq, Eq)]
 struct Member {
     name: String,
@@ -30,8 +27,6 @@ struct Member {
     output: String,
 }
 
-/// The methods and the signals of `org.netvfs.Bridge1`, in document order.
-/// One element per line, as in the contract file.
 fn members(xml: &str) -> (Vec<Member>, Vec<Member>) {
     fn attr<'a>(line: &'a str, name: &str) -> Option<&'a str> {
         let (_, rest) = line.split_once(&format!(" {name}=\""))?;
@@ -75,8 +70,7 @@ fn members(xml: &str) -> (Vec<Member>, Vec<Member>) {
     (methods, signals)
 }
 
-// tst_contract contractCopyIsCurrent: the XML the bridge serves and the
-// contract copy must not drift.
+// The served XML and the contract copy must not drift.
 #[test]
 fn xml_copy_is_current() {
     let contract = read(&contract_dir().join("org.netvfs.Bridge1.xml"));
@@ -86,8 +80,7 @@ fn xml_copy_is_current() {
     );
 }
 
-// tst_contract methodTableMatchesXml, and the order of args.cpp, which is the
-// order of the XML.
+// Method table matches the XML, in `args.cpp` order.
 #[test]
 fn method_table_matches_xml() {
     let (xml, _) = members(INTROSPECTION_XML);
@@ -148,7 +141,7 @@ mod fake {
     use super::{contract_dir, members, read};
     use netvfs_bridge_proto::fake::{FakeBridge, replay};
 
-    // tst_contract goldenSequences, against the fake (as lautta runs them).
+    // Golden sequences against the fake (as lautta runs them).
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn fake_replays() {
         let ran = replay::replay_dir(&contract_dir()).await.unwrap();
@@ -177,7 +170,7 @@ mod fake {
             .await
             .unwrap();
         let served: String = reply.body().deserialize().unwrap();
-        // zbus orders the members its own way.
+        // zbus orders members its own way.
         let sorted = |xml: &str| {
             let (mut methods, mut signals) = members(xml);
             methods.sort_by(|a, b| a.name.cmp(&b.name));

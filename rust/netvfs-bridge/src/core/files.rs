@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! Listing, metadata, namespace operations and read handles (`Session::
-//! Files` of sessionfiles.cpp).
+//! Listing, metadata, namespace operations and read handles.
 
 use super::{Core, Event, HandleRef, quota};
 use crate::ffi::{Attributes, Conn};
@@ -13,17 +12,14 @@ use crate::server::{NPath, OutSignal, Outbox, Reply, ReplyTo, SessionId};
 use crate::status::Status;
 use netvfs_bridge_proto::{ErrorName, Lane};
 
-/// `ConnectionLost` of a handle whose connection went away.
 fn handle_lost() -> Status {
     Status::new(ErrorName::ConnectionLost, "The connection of this handle was closed")
 }
 
-/// `NotFound` of an unknown handle.
 fn no_such_handle() -> Status {
     Status::new(ErrorName::NotFound, "No such handle")
 }
 
-/// The backend's attribute changes for `SetAttributes`.
 fn attributes(changes: AttributeChanges) -> Attributes {
     Attributes {
         mode: changes.mode.and_then(|m| i32::try_from(m).ok()),
@@ -32,12 +28,10 @@ fn attributes(changes: AttributeChanges) -> Attributes {
     }
 }
 
-/// Whether a `SetAttributes` changes nothing.
 const fn no_changes(changes: AttributeChanges) -> bool {
     changes.mode.is_none() && changes.mtime_ms.is_none() && changes.atime_ms.is_none()
 }
 
-/// Reads at most `max` bytes at `offset` of `handle` of the turn's worker.
 fn read_on_worker(turn: Turn<'_, Connector>, handle: u32, offset: i64, max: u32) -> Result<Vec<u8>, Status> {
     turn.ready?;
     let h = turn.handles.and_then(|handles| handles.get_mut(handle)).ok_or_else(handle_lost)?;
@@ -48,8 +42,6 @@ fn read_on_worker(turn: Turn<'_, Connector>, handle: u32, offset: i64, max: u32)
 }
 
 impl Core {
-    // ------------------------------------------------------------ List
-
     pub(super) fn on_list(
         &mut self,
         sid: SessionId,
@@ -86,15 +78,12 @@ impl Core {
         self.book.submit(loc.as_str(), lane, TaskContext::new(sid, cancel), work);
     }
 
-    /// A `List` ended: `ListDone` (`finishList`).
     pub(super) fn on_list_done(&mut self, sid: SessionId, request: u32, result: Result<(), Status>) {
         self.quota.release_request();
         let Some(session) = self.session(sid) else { return };
         session.end_public(request);
         session.signal(&OutSignal::ListDone { request, result });
     }
-
-    // ------------------------------------------------ metadata, namespace
 
     pub(super) fn on_stat(
         &mut self,
@@ -154,7 +143,6 @@ impl Core {
         });
     }
 
-    /// A namespace operation without return values.
     pub(super) fn run_empty(
         &mut self,
         sid: SessionId,
@@ -176,7 +164,7 @@ impl Core {
         lane: Lane,
     ) {
         if no_changes(changes) {
-            reply.ok(&Reply::Empty); // nothing to change, no network round trip
+            reply.ok(&Reply::Empty);
             return;
         }
         let changes = attributes(changes);
@@ -196,8 +184,6 @@ impl Core {
             conn.copy(from.as_bytes(), to.as_bytes(), opts.recursive, opts.replace)
         });
     }
-
-    // --------------------------------------------------------- handles
 
     pub(super) fn on_open_read(
         &mut self,
@@ -236,7 +222,6 @@ impl Core {
         self.book.submit(loc.as_str(), lane, TaskContext::new(sid, cancel), work);
     }
 
-    /// An `OpenRead` ended (`handleOpened`).
     pub(super) fn on_opened(
         &mut self,
         sid: SessionId,
@@ -271,7 +256,6 @@ impl Core {
         }
     }
 
-    /// The handle `id` of `sid` with a live connection (`resolveHandle`).
     fn resolve_handle(&self, sid: SessionId, id: u32) -> Result<HandleRef, Status> {
         let h = self.sessions.get(&sid).and_then(|s| s.handles.get(&id)).ok_or_else(no_such_handle)?;
         if !self.book.has_pool(&h.loc) || !self.book.pools().owns(&h.loc, h.worker) {

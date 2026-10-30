@@ -7,16 +7,16 @@
 #include <QtCore/QMap>
 #include <QtCore/QVector>
 
-// SPEC-v2 XT-1: one backend instance under test. The JSON format is
+// one backend instance under test. The JSON format is
 // described in tests/conformance/README.md.
 namespace Conformance {
 
 // A second way into the same server through a proxy that can stop
 // answering (sftpproxy.py, flipproxy.py, httpstall.py, ftpstall.py).
 struct StallProxy {
-    NetVfs::ConnectionParams params;   // the target's params with the proxy's host/port/options
-    QString engage;                    // shell command: start holding replies back
-    QString release;                   // shell command: answer again
+    NetVfs::ConnectionParams params;
+    QString engage;
+    QString release;
     bool enabled = false;
 };
 
@@ -24,15 +24,15 @@ struct Target {
     QString name;
     NetVfs::ConnectionParams params;
     QString user;
-    QString secretEnv;                 // environment variable holding the secret
+    QString secretEnv;
     bool trustOnFirstUse = false;      // accept the identity seen when no host_key is set
-    QString baseDir;                   // backend path; each run works in a new folder below it
-    QString hostPath;                  // optional: baseDir as seen from this host
-    int listCount = 10000;             // entries in the large listing case
-    bool fifoStall = false;            // FIFOs under hostPath stall the backend (local)
+    QString baseDir;
+    QString hostPath;
+    int listCount = 10000;
+    bool fifoStall = false;
     StallProxy stallProxy;
-    QString restart;                   // optional shell command restarting the server
-    QMap<QString, QString> skip;       // test function -> reason
+    QString restart;
+    QMap<QString, QString> skip;
 };
 
 // Targets from $NETVFS_CONFORMANCE_CONFIG, else the default: the local

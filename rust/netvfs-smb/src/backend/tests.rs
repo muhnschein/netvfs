@@ -275,7 +275,6 @@ async fn nothing_works_before_sign_in() {
     assert_eq!(smb.capabilities(), Capabilities::default());
     let e = smb.stat(b"/x", true, &c).await.unwrap_err();
     assert_eq!((e.name, e.message.as_str()), (ErrorName::Internal, "Not signed in"));
-    // Names are checked first.
     assert_eq!(smb.stat(b"/a/../b", true, &c).await.unwrap_err().name, ErrorName::InvalidName);
     assert_eq!(smb.keep_alive(&c).await.unwrap_err().message, "Not signed in");
     let e = smb.authenticate(&Credentials::default(), None, &c).await.unwrap_err();
@@ -283,7 +282,6 @@ async fn nothing_works_before_sign_in() {
         (e.name, e.message.as_str()),
         (ErrorName::Internal, "authenticate() needs a successful connect()")
     );
-    // A port nothing listens on, one out of range.
     let closed = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap().local_addr().unwrap();
     let mut p = params(&[]);
     p.host = "127.0.0.1".into();
@@ -297,8 +295,6 @@ async fn nothing_works_before_sign_in() {
         (e.name, e.message.as_str()),
         (ErrorName::NetworkUnreachable, "Cannot connect to the server: port 70000 is out of range")
     );
-    // Connected: the credentials and options are checked before the
-    // session starts.
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     p.port = i32::from(listener.local_addr().unwrap().port());
     assert_eq!(smb.connect(&p, &c).await, Ok(None));
@@ -324,7 +320,6 @@ async fn nothing_works_before_sign_in() {
     p.options.insert("share".into(), s("a:b"));
     smb.connect(&p, &c).await.unwrap();
     assert_eq!(smb.authenticate(&user("u", b"pw"), None, &c).await.unwrap_err().name, ErrorName::InvalidName);
-    // A server that closes at once: the sign-in is refused (M-T7).
     p.options.remove("share");
     tokio::spawn(async move {
         loop {
@@ -334,7 +329,6 @@ async fn nothing_works_before_sign_in() {
     smb.connect(&p, &c).await.unwrap();
     let e = smb.authenticate(&user("u", b"pw"), None, &c).await.unwrap_err();
     assert_eq!((e.name, e.message.as_str()), (ErrorName::SecurityPolicy, crate::error::SERVER_CLOSED));
-    // A tripped token.
     let tripped = CancelToken::new();
     tripped.cancel();
     smb.connect(&p, &c).await.unwrap();
@@ -384,7 +378,6 @@ async fn paths_name_the_share_and_the_path() {
     for bad in [&b"/a:b/x"[..], b"/da\xfft/x", b"/a/\0", b"/a/../b", b"/a/b\xff"] {
         assert_eq!(smb.split(bad).unwrap_err().name, ErrorName::InvalidName, "{bad:?}");
     }
-    // M-9: a name Windows cannot store.
     assert_eq!(smb.split(b"/a/b?").unwrap_err().name, ErrorName::InvalidName);
     assert!(smb.share_level(b"/"));
     assert!(smb.share_level(b"/data"));
@@ -423,7 +416,6 @@ async fn the_server_root_holds_only_the_shares() {
     let share_denied = Status::permission_denied("rename: a share cannot be removed or renamed");
     assert_eq!(smb.rename(b"/a", b"/a/b", RenameMode::Replace, &c).await, Err(share_denied.clone()));
     assert_eq!(smb.rename(b"/a/b", b"/", RenameMode::NoReplace, &c).await, Err(share_denied));
-    // XC-11: every field first, before any request.
     let mode = Attributes { mode: Some(0o644), ..Attributes::default() };
     assert_eq!(
         smb.set_attributes(b"/a/b", &mode, &c).await.unwrap_err().message,
@@ -453,13 +445,11 @@ async fn shares_connect_on_demand_and_the_oldest_goes() {
         });
         assert_eq!(r.unwrap().name, b"f");
     }
-    // The share itself: its name; the tree is reused, ignoring case.
     let (r, ()) = tokio::join!(smb.stat(b"/S1", true, &c), async {
         assert_eq!(stat_chain(&mut peer, 0x10, 0).await, (20, vec![]));
     });
     let e = r.unwrap();
     assert_eq!((e.name.as_slice(), e.kind), (&b"S1"[..], EntryType::Directory));
-    // A fifth share: s2, the least recently used, is disconnected.
     let (r, ()) = tokio::join!(smb.stat(b"/s5/f", true, &c), async {
         let gone = peer.recv_one().await;
         assert_eq!((gone.command(), gone.header.tree_id), (Command::TreeDisconnect, 21));
@@ -468,7 +458,6 @@ async fn shares_connect_on_demand_and_the_oldest_goes() {
         stat_chain(&mut peer, 0x20, 5).await;
     });
     r.unwrap();
-    // Files open on all four: no fifth.
     let mut handles = Vec::new();
     for (share, id) in [("s1", 20), ("s3", 22), ("s4", 23), ("s5", 24)] {
         let path = format!("/{share}/f");
@@ -482,7 +471,6 @@ async fn shares_connect_on_demand_and_the_oldest_goes() {
         (e.name, e.message.as_str()),
         (ErrorName::TooManyConnections, "Files are open on 4 shares already; close some first")
     );
-    // One file closed frees its share.
     let h = handles.remove(1);
     let (r, ()) = tokio::join!(h.close(&c), answer_close(&mut peer));
     r.unwrap();
@@ -510,13 +498,9 @@ async fn refused_shares() {
     let e = r.unwrap_err();
     assert_eq!(e.name, ErrorName::SecurityPolicy);
     assert!(e.message.contains(crate::error::SHARE_REFUSED), "{e:?}");
-    // XM-2: a share that does not exist cannot be made; the share root
-    // exists.
     let (r, ()) =
         tokio::join!(smb.make_dir(b"/nope", false, &c), tree_refused(&mut peer, NtStatus::BAD_NETWORK_NAME));
     assert_eq!(r, Err(Status::permission_denied("create folder: the server root holds only the shares")));
-    // Other refusals of the share, and a missing share below it, are what
-    // they are.
     let (r, ()) =
         tokio::join!(smb.make_dir(b"/secret", false, &c), tree_refused(&mut peer, NtStatus::ACCESS_DENIED));
     assert_eq!(r.unwrap_err().name, ErrorName::SecurityPolicy);
@@ -531,7 +515,6 @@ async fn refused_shares() {
     let share_denied = Status::permission_denied("remove folder: a share cannot be removed or renamed");
     assert_eq!(smb.remove_dir(b"/data", &c).await, Err(share_denied));
     assert_eq!(smb.remove_file(b"/data", &c).await.unwrap_err().message, "remove: a folder");
-    // Rename between shares.
     let (r, _) = tokio::join!(
         smb.rename(b"/data/a", b"/other/b", RenameMode::NoReplace, &c),
         tree_connect(&mut peer, 31)
@@ -557,14 +540,11 @@ async fn the_root_lists_saved_and_found_shares() {
         tokio::join!(smb.list(b"/", options, &mut sink, &c), rpc::tests::serve(&mut peer, &reply, 1000));
     r.unwrap();
     assert_eq!(sink.batches, [vec!["b", "A"], vec!["c"]]);
-    // Stopped by the sink.
     let mut sink = Names { stop_after: Some(1), ..Names::default() };
     let (r, ()) =
         tokio::join!(smb.list(b"/", options, &mut sink, &c), rpc::tests::serve(&mut peer, &reply, 1000));
     let e = r.unwrap_err();
     assert_eq!((e.name, e.message.as_str()), (ErrorName::Canceled, "The listing was stopped"));
-    // Admin shares when asked for; without enumeration only the saved
-    // ones.
     let options = [("show_admin_shares", s("true"))];
     let (mut smb, mut peer) = signed(&options, 1 << 20).await;
     let mut sink = Names::default();
@@ -578,7 +558,6 @@ async fn the_root_lists_saved_and_found_shares() {
     let mut sink = Names::default();
     smb.list(b"/", ListOptions::default(), &mut sink, &c).await.unwrap();
     assert_eq!(sink.batches, [vec!["x"]]);
-    // Enumeration that fails fails the listing.
     let (mut smb, mut peer) = signed(&[], 1 << 20).await;
     let mut sink = Names::default();
     let (r, _) = tokio::join!(
@@ -606,7 +585,6 @@ async fn download_reads_ahead_in_chunks_and_closes() {
     r.unwrap();
     assert_eq!(sink.0, content(0, 2500));
     assert_eq!(progress.updates, [(1000, Some(2500)), (2000, Some(2500)), (2500, Some(2500))]);
-    // A range.
     let mut sink = Collected::default();
     let mut progress = Moves::default();
     let (r, ()) = tokio::join!(smb.download(b"/f", 500, Some(700), &mut sink, &mut progress, &c), async {
@@ -617,7 +595,6 @@ async fn download_reads_ahead_in_chunks_and_closes() {
     r.unwrap();
     assert_eq!(sink.0, content(500, 1200));
     assert_eq!(progress.updates, [(700, Some(700))]);
-    // A stop asked for after the last byte comes too late.
     let mut sink = Collected::default();
     let mut progress = Moves { cancel_after: Some(1), ..Moves::default() };
     let (r, ()) = tokio::join!(smb.download(b"/f", 500, Some(700), &mut sink, &mut progress, &c), async {
@@ -627,7 +604,6 @@ async fn download_reads_ahead_in_chunks_and_closes() {
     });
     r.unwrap();
     assert_eq!(sink.0, content(500, 1200));
-    // Stopped by the progress: the file is closed without waiting.
     let mut progress = Moves { cancel_after: Some(0), ..Moves::default() };
     let mut sink = Collected::default();
     let (r, ()) = tokio::join!(smb.download(b"/f", 0, None, &mut sink, &mut progress, &c), async {
@@ -636,7 +612,6 @@ async fn download_reads_ahead_in_chunks_and_closes() {
         assert_eq!(close.command(), Command::Close);
     });
     assert_eq!(r.unwrap_err().name, ErrorName::Canceled);
-    // A folder.
     let (r, _) =
         tokio::join!(smb.open_read(b"/d", &c), create(&mut peer, NtStatus::FILE_IS_A_DIRECTORY, 0, 0));
     let e = r.unwrap_err();
@@ -688,7 +663,6 @@ async fn upload_writes_commits_and_sets_the_time() {
     });
     r.unwrap();
     assert_eq!(progress.updates, [(1000, Some(2500)), (2000, Some(2500)), (2500, Some(2500))]);
-    // The local side fails: the file is closed without a flush.
     let mut source = Bytes { data: data.clone(), at: 0, fail: true };
     let mut progress = Moves::default();
     let truncate = WriteOptions { disposition: Disposition::Truncate, ..WriteOptions::default() };
@@ -702,7 +676,6 @@ async fn upload_writes_commits_and_sets_the_time() {
         answer_close(&mut peer).await;
     });
     assert_eq!(r.unwrap_err().message, "the local file went");
-    // Stopped by the progress.
     let mut source = Bytes { data, at: 0, fail: false };
     let mut progress = Moves { cancel_after: Some(1), ..Moves::default() };
     let (r, ()) = tokio::join!(smb.upload(b"/new", &truncate, &mut source, &mut progress, &c), async {
@@ -720,14 +693,12 @@ async fn open_write_refusals() {
     let (mut smb, mut peer) = signed(&share_mode(), 1000).await;
     let c = CancelToken::new();
     let new = WriteOptions::default();
-    // A folder of that name.
     let (r, ()) = tokio::join!(smb.open_write(b"/d", &new, &c), async {
         create(&mut peer, NtStatus::OBJECT_NAME_COLLISION, 0, 0).await;
         stat_chain(&mut peer, 0x10, 0).await;
     });
     let e = r.unwrap_err();
     assert_eq!((e.name, e.message.as_str()), (ErrorName::IsADirectory, "open: a folder"));
-    // A file of that name.
     let (r, ()) = tokio::join!(smb.open_write(b"/f", &new, &c), async {
         create(&mut peer, NtStatus::OBJECT_NAME_COLLISION, 0, 0).await;
         stat_chain(&mut peer, 0x20, 3).await;
@@ -735,7 +706,6 @@ async fn open_write_refusals() {
     let e = r.unwrap_err();
     assert_eq!(e.name, ErrorName::AlreadyExists);
     assert!(e.message.starts_with("open: "), "{e:?}");
-    // Resume where the file does not end.
     let resume =
         WriteOptions { disposition: Disposition::Resume, resume_offset: 5, ..WriteOptions::default() };
     let (r, ()) = tokio::join!(smb.open_write(b"/f", &resume, &c), async {
@@ -748,13 +718,11 @@ async fn open_write_refusals() {
         (e.name, e.message.as_str()),
         (ErrorName::ProtocolError, "Cannot resume at 5: the file has 10 bytes")
     );
-    // Where it ends.
     let (r, _) =
         tokio::join!(smb.open_write(b"/f", &resume, &c), create(&mut peer, NtStatus::SUCCESS, 0x20, 5));
     let w = r.unwrap();
     assert_eq!(w.position(), 5);
     tokio::join!(w.abort(), answer_close(&mut peer));
-    // A resumed upload: the total counts what is there already.
     let mut source = Bytes { data: b"abc".to_vec(), at: 0, fail: false };
     let mut progress = Moves::default();
     let (r, ()) = tokio::join!(smb.upload(b"/f", &resume, &mut source, &mut progress, &c), async {
@@ -797,10 +765,8 @@ async fn namespace_calls_reach_the_share() {
         assert_eq!(stat_chain(&mut peer, 0x20, 7).await, (9, utf16(r"a\b")));
     });
     assert_eq!(r.unwrap().size, Some(7));
-    // The share root of share mode has no name.
     let (r, _) = tokio::join!(smb.stat(b"/", false, &c), stat_chain(&mut peer, 0x10, 0));
     assert_eq!(r.unwrap().name, b"");
-    // An empty change set checks that the entry exists.
     let none = Attributes::default();
     let (r, _) = tokio::join!(smb.set_attributes(b"/a", &none, &c), stat_chain(&mut peer, 0x20, 0));
     r.unwrap();
@@ -817,7 +783,6 @@ async fn namespace_calls_reach_the_share() {
         peer.send(&fake::chain(msgs), false).await;
     });
     r.unwrap();
-    // A failure names the call.
     let (r, ()) = tokio::join!(smb.remove_file(b"/gone", &c), async {
         let reqs = peer.recv().await;
         let msgs: Vec<Vec<u8>> =
@@ -827,14 +792,12 @@ async fn namespace_calls_reach_the_share() {
     let e = r.unwrap_err();
     assert_eq!(e.name, ErrorName::NotFound);
     assert!(e.message.starts_with("remove: "), "{e:?}");
-    // ECHO.
     let (r, ()) = tokio::join!(smb.keep_alive(&c), async {
         let echo = peer.recv_one().await;
         assert_eq!(echo.command(), Command::Echo);
         peer.send(&[fake::response(&echo, NtStatus::SUCCESS, &four(), 1)], false).await;
     });
     r.unwrap();
-    // Disconnect: LOGOFF, then nothing works; open handles are lost.
     let (r, _) = tokio::join!(smb.open_read(b"/f", &c), create(&mut peer, NtStatus::SUCCESS, 0x20, 5));
     let mut h = r.unwrap();
     smb.disconnect().await;

@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! The account directory against netvfs-accounts-fake, a real process that
-//! answers in the helper's format (the tst_BridgeAccounts directory cases).
+//! Account directory against netvfs-accounts-fake, a real process.
 
 #![allow(clippy::unwrap_used, clippy::unwrap_in_result, clippy::indexing_slicing)]
 
@@ -24,9 +23,7 @@ const TABLE: &str = "# The fake's table\n\n\
                      option\t1\tretries\tu\t3\n\
                      account\t5\tsmb\tNAS\tnas.example\t0\tbob\t/\tauth-failed\n";
 
-/// A directory over the fake helper with its table, through a wrapper
-/// script that sets `NETVFS_FAKE_ACCOUNTS` (the directory passes on the
-/// bridge's environment; tests run in parallel).
+/// Directory over the fake helper with its table, via a wrapper script setting `NETVFS_FAKE_ACCOUNTS` (tests run in parallel).
 struct Fixture {
     dir: TempDir,
     table: PathBuf,
@@ -79,7 +76,6 @@ async fn directory_lists() {
 
 #[tokio::test]
 async fn directory_failures() {
-    // A table the fake cannot read: the helper's failure, nothing listed.
     let fixture = Fixture::new("account\tbad\n");
     assert_eq!(fixture.directory().list().await.len(), 0);
     assert_eq!(fixture.directory().files(1).await.unwrap_err().name, ErrorName::Internal);
@@ -95,7 +91,6 @@ async fn directory_fetch_files() {
         (access.params.host.as_str(), access.credentials_id, access.secret_optional),
         ("nas.example", 0, true)
     );
-    // An account the helper does not hand out.
     for id in [2, 0, -1] {
         let status = directory.files(id).await.unwrap_err();
         assert_eq!(status.to_string(), "NotFound: No such account");
@@ -118,7 +113,6 @@ async fn directory_attention() {
     let table = std::fs::read_to_string(&fixture.table).unwrap();
     assert!(table.ends_with("attention\t1\tserver-identity-changed\tSHA256:pin\n"), "{table}");
 
-    // Refused writes are logged, and nothing changed.
     directory.set_attention(2, Attention::AuthFailed, "").await;
     directory.set_attention(1, Attention::None, "").await;
     assert_eq!(count.load(Ordering::SeqCst), 1);
@@ -126,8 +120,7 @@ async fn directory_attention() {
     assert!(fixture.dir.path().exists());
 }
 
-/// The fake's own answer to `arguments`, decoded as a status (`Err`: its
-/// text).
+/// The fake's answer to `arguments` as a status (`Err`: its text).
 fn fake_status(table: &std::path::Path, arguments: &[&str]) -> Result<(), String> {
     let output =
         std::process::Command::new(FAKE).args(arguments).env("NETVFS_FAKE_ACCOUNTS", table).output().unwrap();

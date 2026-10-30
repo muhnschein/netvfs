@@ -15,57 +15,51 @@
 
 namespace NetVfs {
 
-// ---------------------------------------------------------------- entries (XC-2)
-
 enum class EntryType : quint8 { Unknown, File, Directory, Symlink, Special };
 
 enum class EntryFlag : quint16 {
-    Hidden        = 0x0001,  // SMB hidden attribute; dot-names are NOT flagged here
-    ReadOnly      = 0x0002,  // SMB read-only attribute
-    System        = 0x0004,  // SMB system attribute
-    NameNotUtf8   = 0x0008,  // XC-4: name contains escaped bytes
-    TargetUnknown = 0x0010   // symlink whose target type could not be determined
+    Hidden        = 0x0001,  // SMB hidden attribute; dot-names NOT flagged
+    ReadOnly      = 0x0002,
+    System        = 0x0004,
+    NameNotUtf8   = 0x0008,
+    TargetUnknown = 0x0010
 };
 Q_DECLARE_FLAGS(EntryFlags, EntryFlag)
 
-// Sentinels for unknown values: -1 for numbers, invalid QDateTime, empty
-// strings (XC-1c: no std::optional in exported structs).
+// Sentinels for unknown: -1 for numbers, invalid QDateTime, empty strings.
 struct NETVFS_EXPORT Entry {
-    QString name;                    // XC-4 lossless (Names::decode)
+    QString name;
     EntryType type = EntryType::Unknown;
-    EntryType targetType = EntryType::Unknown;  // for Symlink, when resolved (XC-6)
-    qint64 size = -1;                // -1 unknown
-    QDateTime modified;              // UTC; invalid if unknown
-    QDateTime created;               // SMB, local (statx btime)
+    EntryType targetType = EntryType::Unknown;
+    qint64 size = -1;  // -1 unknown
+    QDateTime modified;
+    QDateTime created;
     QDateTime accessed;
-    qint32 mode = -1;                // permission bits & 07777; -1 unknown
+    qint32 mode = -1;  // permission bits & 07777; -1 unknown
     qint64 uid = -1;
     qint64 gid = -1;
-    QString owner;                   // names when the server provides them
+    QString owner;
     QString group;
     EntryFlags flags;
-    QByteArray etag;                 // opaque change token; empty if none
-    QString contentType;             // server-declared; advisory only, never trusted
-    QVariantMap extra;               // backend-specific; no backend fills it
-
-    bool isDir() const;              // Directory, or Symlink whose targetType is Directory
-    bool isFile() const;             // File, or Symlink whose targetType is File
+    QByteArray etag;
+    QString contentType;
+    QVariantMap extra;
+    bool isDir() const;
+    bool isFile() const;
 };
-
-// ---------------------------------------------------------- capabilities (XC-5)
 
 enum class Capability : quint32 {
     Symlinks, Hardlinks, PosixModes, Ownership, SetModified, SetModifiedOnUpload,
-    ReadHandles, EfficientRanges,        // ranged reads without reopening per call
-    WriteResume,                         // openWrite(Resume)
-    AtomicPut,                           // a PUT/write is atomic: no temp name needed
-    AtomicReplace,                       // rename(Replace) is atomic
-    NativeNoReplace,                     // rename(NoReplace) is enforced by the server
+    ReadHandles, EfficientRanges,
+    WriteResume,
+    AtomicPut,
+    AtomicReplace,
+    NativeNoReplace,
     ServerCopy, ServerCopyRecursive,
-    RecursiveDelete,                     // native tree delete exists (see XC-9)
+    RecursiveDelete,
     SpaceInfo, Checksums,
-    CaseInsensitive, WindowsNames,       // name rules of Paths::checkWindowsPath apply
-    ShareEnumeration,                    // SMB server mode can list shares
+    CaseInsensitive, WindowsNames,
+    ShareEnumeration,
     ETags
 };
 
@@ -74,30 +68,26 @@ inline uint qHash(Capability c, uint seed = 0) noexcept
     return ::qHash(static_cast<quint32>(c), seed);
 }
 
-// Stable names ("Symlinks", "AtomicPut", ...) for the CLI and the bridge (XB-9).
 NETVFS_EXPORT QString capabilityName(Capability c);
 NETVFS_EXPORT bool capabilityFromName(const QString &name, Capability *out);
 NETVFS_EXPORT QVector<Capability> allCapabilities();
 
 struct NETVFS_EXPORT Capabilities {
-    QSet<Capability> flags;                // QSet keeps the enum open for growth
-    QStringList checksumAlgorithms;        // "sha256", "md5", ...
-    qint64 maxNameBytes = -1;              // -1 unknown
-    qint64 maxReadChunk = 0;               // 0 unknown
+    QSet<Capability> flags;
+    QStringList checksumAlgorithms;
+    qint64 maxNameBytes = -1;
+    qint64 maxReadChunk = 0;
     qint64 maxWriteChunk = 0;
     bool has(Capability c) const { return flags.contains(c); }
-    QStringList names() const;             // sorted capabilityName()s
+    QStringList names() const;
 };
 
-// -------------------------------------------------------- identity (XC-16)
-
-// Server identity as seen during connect(). Kind::None for protocols without one.
 struct NETVFS_EXPORT ServerIdentity {
     enum class Kind { None, SshHostKey };
     Kind kind = Kind::None;
-    QString algorithm;        // "ssh-ed25519"
-    QByteArray publicKey;     // key blob
-    QString fingerprint;      // "SHA256:..."
+    QString algorithm;
+    QByteArray publicKey;
+    QString fingerprint;
 
     bool isEmpty() const { return publicKey.isEmpty(); }
 
@@ -112,18 +102,16 @@ struct NETVFS_EXPORT ServerIdentity {
     friend bool operator!=(const ServerIdentity &a, const ServerIdentity &b) { return !(a == b); }
 };
 
-// ------------------------------------------------------------- connection
-
-// Connection parameters. Provider-specific values live in `options`, keyed
-// without the "netvfs/<provider>/" prefix (for example "host_key", "share").
+// Provider-specific values live in `options`, keyed without the "netvfs/<provider>/" prefix (e.g.
+// "host_key", "share").
 struct ConnectionParams {
-    QString provider;       // "sftp", "smb", "local", ...
+    QString provider;
     QString host;
-    int port = 0;           // 0: protocol default
+    int port = 0;
     QString username;
     QVariantMap options;
-    int connectTimeoutMs = 15000;   // SPEC C-14
-    int requestTimeoutMs = 60000;   // SPEC C-14
+    int connectTimeoutMs = 15000;
+    int requestTimeoutMs = 60000;
 
     QString option(const QString &key, const QString &fallback = QString()) const
     {
@@ -139,7 +127,6 @@ struct ConnectionParams {
     }
 };
 
-// Credentials; the secret is wiped on destruction (SEC-5).
 class NETVFS_EXPORT Credentials
 {
 public:
@@ -155,8 +142,6 @@ public:
     void wipe();
 };
 
-// ------------------------------------------------------- interactive auth (XC-15)
-
 struct AuthPrompt {
     QString text;
     bool echo = false;
@@ -166,58 +151,47 @@ class NETVFS_EXPORT AuthPrompter
 {
 public:
     virtual ~AuthPrompter();
-    // Called on the backend thread; may block until the user answers.
-    // Returns false if the user declined (result: AuthFailed) or on cancel().
-    // The backend wipes `answers` after use (SEC-5).
+    // Called on the backend thread; may block until the user answers. false if declined
+    // (AuthFailed) or on cancel(). Backend wipes `answers` after use.
     virtual bool answer(const QString &name, const QString &instruction,
                         const QVector<AuthPrompt> &prompts, QVector<QByteArray> *answers) = 0;
-    // XC-22: Backend::cancel() calls this, from any thread, while answer()
-    // runs. An implementation whose answer() waits for a person must make
-    // that wait end soon and answer() return false; BlockingPrompter
-    // (prompter.h) does. The default does nothing, which is right only for
-    // prompters that never block.
+    // Backend::cancel() calls this from any thread while answer() runs. An answer() that waits for
+    // a person must end that wait soon and return false (BlockingPrompter does). Default does
+    // nothing: right only for prompters that never block.
     virtual void cancel()
     {
-        // Nothing to wake: this prompter never blocks.
     }
 };
 
-// ---------------------------------------------------------------- progress
-
-// Progress sink for streamed transfers. Called on the transferring thread.
+// Called on the transferring thread.
 class Progress
 {
 public:
     virtual ~Progress() = default;
     virtual void update(qint64 done, qint64 total) = 0;
-    // XC-14: a sink may stop the transfer without a cross-thread cancel();
-    // the transfer then ends with Canceled.
+    // A sink may stop the transfer without cross-thread cancel(); transfer ends with Canceled.
     virtual bool canceled() const { return false; }
 };
-
-// ------------------------------------------------------------- listing (XC-6)
 
 class ListSink
 {
 public:
     virtual ~ListSink() = default;
-    // Called on the backend thread. Return false to stop (result: Canceled).
+    // Called on the backend thread. false stops (Canceled).
     virtual bool entries(const QVector<Entry> &batch) = 0;
 };
 
 struct ListOptions {
     int batchSize = 256;
-    bool resolveSymlinkTypes = false;  // stat each symlink target to fill targetType
+    bool resolveSymlinkTypes = false;
 };
-
-// --------------------------------------------------- namespace options (XC-10..)
 
 enum class RenameMode { NoReplace, Replace };
 
 struct AttributeChanges {
-    qint32 mode = -1;        // -1: unchanged
-    QDateTime modified;      // invalid: unchanged
-    QDateTime accessed;      // invalid: unchanged
+    qint32 mode = -1;
+    QDateTime modified;
+    QDateTime accessed;
     bool isEmpty() const { return mode < 0 && !modified.isValid() && !accessed.isValid(); }
 };
 
@@ -232,15 +206,13 @@ struct SpaceInfo {
     qint64 used = -1;
 };
 
-// ------------------------------------------------------------ I/O (XC-13/14)
-
 struct WriteOptions {
     enum class Disposition { CreateNew, Truncate, Resume };
     Disposition disposition = Disposition::CreateNew;
-    qint64 resumeOffset = 0;          // Resume: must equal current remote size
-    qint32 createMode = -1;           // -1: backend default (XC-23)
-    qint64 expectedSize = -1;         // allows preallocation / Content-Length
-    QDateTime modified;               // applied on commit when SetModified/OnUpload
+    qint64 resumeOffset = 0;
+    qint32 createMode = -1;  // -1: backend default
+    qint64 expectedSize = -1;
+    QDateTime modified;
 };
 
 struct UploadOptions {
@@ -249,11 +221,10 @@ struct UploadOptions {
 
 struct DownloadOptions {
     qint64 offset = 0;
-    qint64 length = -1;               // -1: to EOF
+    qint64 length = -1;
 };
 
-} // namespace NetVfs
-
+}
 Q_DECLARE_OPERATORS_FOR_FLAGS(NetVfs::EntryFlags)
 
 #endif

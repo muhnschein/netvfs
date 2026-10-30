@@ -1,13 +1,10 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! The SSH wire types of SFTP (`uint32`, `uint64`, `string`): [`Reader`]
-//! over a received packet, every read checked against what is left and
-//! every string against a cap (design §3.2), and [`Packet`], an outgoing
-//! packet with its length and request id filled in at the end.
+//! SSH wire types of SFTP: [`Reader`] over a received packet (every read and string cap checked), [`Packet`] for
+//! outgoing packets with length and request id filled in at the end.
 
 use std::fmt;
 
-/// Longest packet body accepted from the server or sent to it: OpenSSH's
-/// 256 KiB plus room for the header of a full-size `DATA` or `WRITE`.
+/// Longest packet body accepted or sent: OpenSSH's 256 KiB plus the header of a full `DATA` or `WRITE`.
 pub const MAX_PACKET: usize = 256 * 1024 + 1024;
 
 /// A malformed or over-long reply: what was wrong with it.
@@ -108,7 +105,7 @@ pub struct Packet {
 }
 
 impl fmt::Debug for Packet {
-    // Packets carry file data; only the type and size are shown.
+    // Only type and size shown: packets carry file data.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Packet").field("type", &self.buf.get(4)).field("len", &self.buf.len()).finish()
     }

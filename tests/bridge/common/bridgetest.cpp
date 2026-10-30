@@ -62,7 +62,7 @@ bool writeFile(const QString &path, const QByteArray &content)
     return f.open(QIODevice::WriteOnly | QIODevice::Truncate) && f.write(content) == content.size();
 }
 
-// An answer of netvfs-accounts (XB-2a) that reports success: QDataStream
+// An answer of netvfs-accounts that reports success: QDataStream
 // Qt_5_6, error 0 and a null message, then `payload`.
 QByteArray helperAnswer(const std::function<void(QDataStream &)> &payload = nullptr)
 {
@@ -85,7 +85,6 @@ void writeAccountParams(QDataStream &stream)
 
 } // namespace
 
-// ------------------------------------------------------------- TestClient
 
 TestClient::TestClient(const QString &address, QObject *parent)
     : QObject(parent)
@@ -195,7 +194,6 @@ TestClient::Message TestClient::hello()
     return call("Hello", [](WireWriter &w) { w.string(QStringLiteral("test")); });
 }
 
-// ---------------------------------------------------------- the binary
 
 QString bridgeBinary()
 {
@@ -218,7 +216,6 @@ QProcessEnvironment bridgeEnvironment()
     return env;
 }
 
-// --------------------------------------------------------- BridgeProcess
 
 BridgeProcess::BridgeProcess(const QString &consent)
     : m_consent(consent)
@@ -248,7 +245,7 @@ bool BridgeProcess::writeAccountsHelper() const
                writeAccountParams(s);
                s << QStringLiteral("") << qint32(0);
            }))
-        // XA-7: credentials id 0 with an optional secret, so no signond.
+        // credentials id 0 with an optional secret, so no signond.
         && writeFile(folder + QStringLiteral("/files-1"), helperAnswer([](QDataStream &s) {
                writeAccountParams(s);
                s << quint32(0) << true;
@@ -323,7 +320,6 @@ int BridgeProcess::waitExit(int timeoutMs)
     return m_process.exitStatus() == QProcess::NormalExit ? m_process.exitCode() : -1;
 }
 
-// ------------------------------------------------------------------- JSON
 
 QList<QByteArray> splitSignature(const QByteArray &signature)
 {

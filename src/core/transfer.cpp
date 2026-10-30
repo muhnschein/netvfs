@@ -15,7 +15,6 @@ namespace NetVfs::Transfer {
 
 namespace {
 
-// Pass-through reader that counts the bytes handed to the backend.
 class CountingReader : public QIODevice
 {
 public:
@@ -40,7 +39,7 @@ private:
     qint64 m_count = 0;
 };
 
-// C-17: the message may name a remote path, so it is logged at debug level only.
+// The message may name a remote path: debug level only.
 void logRemovalFailure(const char *what, const Result &r)
 {
     qCWarning(lcNetVfsCore) << "Could not remove" << what << errorName(r.error());
@@ -55,8 +54,7 @@ void removeQuietly(Backend *backend, const QString &path, const Result &cause)
         logRemovalFailure("partial file", r);
 }
 
-} // namespace
-
+}
 QString partName(const QString &path)
 {
     return path + QStringLiteral(".part");
@@ -90,7 +88,6 @@ Result checkFreeSpace(Backend *backend, const QString &target, qint64 needed)
     return Result::success();
 }
 
-// Positions `source` at `offset` (seek, else read and discard).
 bool skipSource(QIODevice *source, qint64 offset)
 {
     if (!source->isSequential())
@@ -153,8 +150,7 @@ Result checkPolicy(const QString &target, const TransferPolicy &policy)
     return Result::success();
 }
 
-// Resuming needs a partial file of exactly `resumeOffset` bytes; the source
-// is positioned behind them.
+// Resuming needs a partial file of exactly `resumeOffset` bytes; source positioned behind them.
 Result prepareResume(Backend *backend, QIODevice *source, const QString &part, const TransferPolicy &policy)
 {
     Entry existing;
@@ -182,7 +178,6 @@ Result writeFresh(Backend *backend, CountingReader *reader, const QString &path,
     return backend->upload(reader, path, options, progress);
 }
 
-// Size check and the rename to the final name.
 Result commitUpload(Backend *backend, const QString &part, const QString &target, qint64 sent,
                     const TransferPolicy &policy)
 {
@@ -201,15 +196,13 @@ Result commitUpload(Backend *backend, const QString &part, const QString &target
     return r;
 }
 
-// Keeps a resumable temporary file; removes anything else.
 void cleanupPartial(Backend *backend, const QString &part, const TransferPolicy &policy, const Result &cause)
 {
     if (policy.useTempName && !policy.resume)
         removeQuietly(backend, part, cause);
 }
 
-} // namespace
-
+}
 Result upload(Backend *backend, QIODevice *source, qint64 size, const QString &finalPath,
               Progress *progress, const TransferPolicy &policy)
 {
@@ -313,7 +306,7 @@ Result removeStaleParts(Backend *backend, const QString &dir, const QDateTime &n
     if (!r.ok())
         return r;
 
-    // QRegExp: Qt 5.6 (the target) has no QRegularExpression wildcard support.
+    // QRegExp: Qt 5.6 has no QRegularExpression wildcard support.
     const QRegExp matcher(pattern, Qt::CaseSensitive, QRegExp::WildcardUnix);
     const QDateTime cutoff = now.addSecs(-maxAgeSecs);
     for (const Entry &entry : entries) {
@@ -330,4 +323,4 @@ Result removeStaleParts(Backend *backend, const QString &dir, const QDateTime &n
     return Result::success();
 }
 
-} // namespace NetVfs::Transfer
+}

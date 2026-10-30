@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! Argument validation as the C++ bridge does it (`args.cpp`): a
-//! malformed call is `InvalidArgs`, a bad path is `InvalidName`.
+//! Argument validation as the C++ bridge does it (`args.cpp`): malformed call is `InvalidArgs`, bad
+//! path `InvalidName`.
 
 use super::fail::Fail;
 use super::tree::normalize;

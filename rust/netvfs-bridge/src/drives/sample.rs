@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! What UDisks2 describes of a phone with an SD card, a USB stick and an
-//! internal eMMC, and of a phone with an encrypted card (XB-20), for the
-//! tests of the classifier and the client.
+//! UDisks2 descriptions of a phone with SD card, USB stick and eMMC, and one with an encrypted card, for classifier and client tests.
 
 use super::classify::{
     BLOCK, BLOCK_DEVICES, DRIVE, ENCRYPTED, FILESYSTEM, Interfaces, ManagedObjects, Properties,
@@ -61,8 +59,7 @@ pub fn block(drive: &str, label: &str) -> Interfaces {
     ])
 }
 
-/// A LUKS device of `drive` not unlocked: no filesystem, an `Encrypted`
-/// interface without a cleartext device.
+/// A locked LUKS device of `drive`: no filesystem, `Encrypted` without cleartext device.
 pub fn luks(drive: &str, label: &str) -> Interfaces {
     let mut ifaces = block(drive, label);
     ifaces.remove(FILESYSTEM);
@@ -75,9 +72,7 @@ pub fn luks(drive: &str, label: &str) -> Interfaces {
     ifaces
 }
 
-/// The unlocked contents of the encrypted device `backing`: a `vfat`
-/// filesystem labelled `label` without a drive, so a system device to
-/// UDisks2 (`update_hints`).
+/// Unlocked contents of encrypted `backing`: `vfat` labelled `label`, no drive (system device to UDisks2).
 pub fn cleartext(backing: &str, label: &str) -> Interfaces {
     let mut contents = block("/", label);
     set(&mut contents, BLOCK, "CryptoBackingDevice", object_path(&format!("{BLOCK_DEVICES}{backing}")));
@@ -85,7 +80,7 @@ pub fn cleartext(backing: &str, label: &str) -> Interfaces {
     contents
 }
 
-/// Unlocks the LUKS device `id` of `objects` as `clear` ([`cleartext`]).
+/// Unlocks LUKS device `id` of `objects` as `clear`.
 pub fn unlock(objects: &mut ManagedObjects, id: &str, clear: &str, label: &str) {
     let cleartext_device = format!("{BLOCK_DEVICES}{clear}");
     set(objects.get_mut(&device(id)).unwrap(), ENCRYPTED, "CleartextDevice", object_path(&cleartext_device));
@@ -100,7 +95,7 @@ pub fn device(id: &str) -> OwnedObjectPath {
     OwnedObjectPath::try_from(format!("{BLOCK_DEVICES}{id}")).unwrap()
 }
 
-/// The card, the stick and the eMMC with a partition each.
+/// Card, stick and eMMC with a partition each.
 pub fn phone() -> ManagedObjects {
     HashMap::from([
         (OwnedObjectPath::try_from(CARD).unwrap(), drive("sdio", &["flash_sd"])),
@@ -112,11 +107,7 @@ pub fn phone() -> ManagedObjects {
     ])
 }
 
-/// A phone with internal UFS storage and a memory card encrypted whole (no
-/// partition table), its contents `unlocked` as `dm_2d3` or not; modelled
-/// on what UDisks2 answered on a Sailfish OS 5 phone. Internal devices are
-/// system devices; the root and the encrypted `/home` are mapped devices
-/// without a drive.
+/// Phone with internal UFS and a whole-card encrypted memory card, `unlocked` as `dm_2d3` or not. Internal devices are system devices; root and encrypted `/home` are mapped without a drive.
 pub fn encrypted_card(unlocked: bool) -> ManagedObjects {
     let system = |mut ifaces: Interfaces, mount_point: &[u8]| {
         set(&mut ifaces, BLOCK, "HintSystem", owned(true));

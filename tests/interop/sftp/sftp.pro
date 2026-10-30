@@ -1,7 +1,5 @@
 # SPDX-License-Identifier: LGPL-2.1-or-later
-# tst_interop_sftp: the SPEC-sftp section 8 matrix against the servers that
-# run.sh starts. Not a "make check" test case; run.sh runs it. Everything
-# goes through the SFTP plugin of the build tree.
+# tst_interop_sftp: the SFTP matrix against the servers run.sh starts, through the SFTP plugin of the build tree. Not a "make check" test; run.sh runs it.
 include(../../test.pri)
 CONFIG -= testcase
 TARGET = tst_interop_sftp

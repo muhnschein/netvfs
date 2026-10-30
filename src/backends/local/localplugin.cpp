@@ -13,8 +13,8 @@ QString LocalBackendFactory::provider() const
 
 Result LocalBackendFactory::create(Backend **out)
 {
-    *out = std::make_unique<Local::LocalBackend>().release();   // the caller owns it
+    *out = std::make_unique<Local::LocalBackend>().release();
     return Result::success();
 }
 
-} // namespace NetVfs
+}

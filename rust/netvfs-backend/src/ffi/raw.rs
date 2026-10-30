@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! The `nvr_*` types of `src/backends/rs/netvfs_rs.h`, written by hand; the
-//! `nvb_*` data types are netvfs-vfs's ([`netvfs_vfs::abi`]). Field order,
-//! types and the table's slot order are the header's; the `layout` tests
-//! pin sizes and offsets on LP64 to what gcc gives. Ownership (R1 to R5)
-//! and threads (S1 to S5) are in the header.
+//! `nvr_*` types of `src/backends/rs/netvfs_rs.h`, by hand; `nvb_*` types are netvfs-vfs's ([`netvfs_vfs::abi`]).
+//! Field and slot order are the header's; `layout` tests pin sizes and offsets on LP64.
 
 pub use netvfs_vfs::abi::*;
 
@@ -13,8 +10,7 @@ use std::marker::{PhantomData, PhantomPinned};
 /// `NVR_ENTRY`, NUL-terminated for `dlsym`.
 pub const NVR_ENTRY: &[u8] = b"nvr_get\0";
 
-/// What a pointer of the C side stands for: neither constructible, nor
-/// `Send`, `Sync` or `Unpin` (the nomicon's pattern).
+/// Opaque pointee: not constructible, not `Send`, `Sync` or `Unpin`.
 macro_rules! opaque {
     ($($(#[$doc:meta])* $name:ident),* $(,)?) => {$(
         $(#[$doc])*
@@ -53,7 +49,7 @@ pub struct NvrCredentials {
 pub type NvrPromptFn =
     unsafe extern "C" fn(*mut c_void, NvbBytes, NvbBytes, *const NvbPrompt, usize, *mut NvbReply) -> c_int;
 
-/// `nvr_prompter`: `AuthPrompter` (XC-15).
+/// `nvr_prompter`: `AuthPrompter`.
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct NvrPrompter {
@@ -100,7 +96,7 @@ pub struct NvrKey {
 #[derive(Debug)]
 #[allow(clippy::type_complexity, reason = "the header's function pointer types")]
 pub struct NvrTable {
-    /// Releases a block (R3), wiping it; NULL is a no-op.
+    /// Releases a block, wiping it; NULL is a no-op.
     pub free: unsafe extern "C" fn(*mut c_void),
     /// Fills a prompt's answers.
     pub reply_set: unsafe extern "C" fn(*mut NvbReply, *const NvbBytes, usize),
@@ -108,7 +104,7 @@ pub struct NvrTable {
     pub conn_new: unsafe extern "C" fn(NvbBytes, *mut *mut NvrConn) -> *mut NvbError,
     /// Frees the handles left, disconnects and frees the connection.
     pub conn_free: unsafe extern "C" fn(*mut NvrConn),
-    /// `Backend::cancel` (C-9); any thread.
+    /// `Backend::cancel`; any thread.
     pub cancel: unsafe extern "C" fn(*mut NvrConn),
     /// `Backend::resetCancel`.
     pub reset_cancel: unsafe extern "C" fn(*mut NvrConn),

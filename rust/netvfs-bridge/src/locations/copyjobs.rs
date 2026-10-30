@@ -1,14 +1,7 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! `CopyAcross`: two connections on a thread of their own (port of
-//! `CopyJobs` in `serverparts.cpp`, design §3.3). `Ops::copyAcross` needs
-//! both backends owned by the calling thread (T5), so a copy job does not
-//! use the pools; it takes one host slot for each side instead, and is
-//! refused with `TooManyConnections` when a host is full (XB-12).
+//! `CopyAcross`: two connections on a thread of their own. `Ops::copyAcross` needs both backends owned by the calling thread, so a copy job does not use the pools; it takes one host slot per side and is refused with `TooManyConnections` when a host is full.
 //!
-//! The thread creates and establishes both connections, runs the body and
-//! frees them, then reports [`WorkerEvent::CopyDone`]; the core answers
-//! with [`CopyJobs::finish`], which waits for the thread (it has ended)
-//! and gives the host slots back.
+//! The thread creates and establishes both connections, runs the body and frees them, then reports [`WorkerEvent::CopyDone`]; the core answers with [`CopyJobs::finish`], which waits for the thread (it has ended) and gives the host slots back.
 
 use super::pool::PoolSet;
 use super::spec::LocationSpec;
@@ -29,14 +22,12 @@ pub const THREAD_NAME: &str = "nvb-copy";
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct CopyId(pub u64);
 
-/// What a copy job does with its two established connections (source,
-/// destination), on its thread.
+/// What a copy job does with its two established connections (source, destination), on its thread.
 pub type CopyBody<B> = Box<
     dyn for<'a> FnOnce(&'a mut <B as Backend>::Conn, &'a mut <B as Backend>::Conn) -> Result<(), Status>
         + Send,
 >;
 
-/// The cancel handles of a job's connections while they live.
 type Cancels<B> = Arc<Mutex<Vec<<B as Backend>::Cancel>>>;
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -66,7 +57,7 @@ impl<B: Backend> fmt::Debug for CopyJobs<B> {
     }
 }
 
-/// `TooManyConnections` with the retry time (XB-12, XB-17).
+/// `TooManyConnections` with the retry time.
 #[must_use]
 pub fn too_many_connections() -> Status {
     Status::new(ErrorName::TooManyConnections, "Too many connections to the server")
@@ -74,7 +65,7 @@ pub fn too_many_connections() -> Status {
 }
 
 impl<B: Backend> CopyJobs<B> {
-    /// No jobs; connections through `backend`, events to `events`.
+    /// No jobs.
     #[must_use]
     pub const fn new(backend: Arc<B>, events: WorkerEvents) -> Self {
         Self { backend, events, jobs: Vec::new(), next: 1 }
@@ -127,9 +118,7 @@ impl<B: Backend> CopyJobs<B> {
         }
     }
 
-    /// The job `id` reported [`WorkerEvent::CopyDone`]: waits for its
-    /// thread and gives the host slots back (waiting work on the hosts
-    /// retries). False for an unknown id.
+    /// The job `id` reported [`WorkerEvent::CopyDone`].
     pub fn finish(&mut self, id: CopyId, pools: &mut PoolSet<B>) -> bool {
         let Some(index) = self.jobs.iter().position(|j| j.id == id) else { return false };
         let mut job = self.jobs.remove(index);
@@ -144,7 +133,7 @@ impl<B: Backend> CopyJobs<B> {
         true
     }
 
-    /// Cancels the connections of the jobs whose flags are set (XB-13).
+    /// Cancels the connections of the jobs whose flags are set.
     pub fn kick(&self) {
         for job in self.jobs.iter().filter(|j| j.task.canceled()) {
             for cancel in lock(&job.cancels).iter() {
@@ -188,8 +177,6 @@ impl<B: Backend> Drop for CopyJobs<B> {
     }
 }
 
-/// The thread of one copy job (`runCopy`): both connections, the body, the
-/// frees.
 fn run_copy<B: Backend>(
     backend: &B,
     cancels: &Mutex<Vec<B::Cancel>>,
@@ -266,7 +253,6 @@ mod tests {
             mock.log(),
             ["create 1 a", "create 2 b", "establish 1 s0", "establish 2 s0", "free 1", "free 2"]
         );
-        // Ids go on.
         let next = jobs.start(&mut pools, spec("a", "h"), spec("b", "h"), task(), body(&tx, Ok(()))).unwrap();
         assert_eq!(next, CopyId(2));
         assert_eq!(pools.hosts().in_use("fake://h:0"), 2);
@@ -286,7 +272,6 @@ mod tests {
         assert_eq!(refused.retry_after_ms, 1000);
         assert_eq!(refused.message, "Too many connections to the server");
         assert_eq!(pools.hosts().in_use("fake://i:0"), 0);
-        // The destination full: the source's slot is given back.
         let refused =
             jobs.start(&mut pools, spec("a", "i"), spec("b", "h"), task(), body(&tx, Ok(()))).unwrap_err();
         assert_eq!(refused.name, ErrorName::TooManyConnections);
@@ -298,13 +283,11 @@ mod tests {
     fn failures_on_the_way() {
         let (mock, mut pools, mut jobs, mut rx) = jobs(4);
         let (tx, seen) = mpsc::channel();
-        // The source does not establish: no body, no second establish.
         mock.fail_establish(Status::new(ErrorName::NotFound, "x"));
         let id = jobs.start(&mut pools, spec("a", "h"), spec("b", "i"), task(), body(&tx, Ok(()))).unwrap();
         assert_eq!(done(&mut rx).1.unwrap_err().name, ErrorName::NotFound);
         jobs.finish(id, &mut pools);
         assert_eq!(mock.count("establish"), 1);
-        // The destination does not: no body.
         mock.queue_establish(Ok(()));
         mock.queue_establish(Err(status(ErrorName::AuthFailed)));
         let id = jobs.start(&mut pools, spec("a", "h"), spec("b", "i"), task(), body(&tx, Ok(()))).unwrap();
@@ -312,7 +295,6 @@ mod tests {
         jobs.finish(id, &mut pools);
         assert_eq!(mock.count("establish"), 3);
         assert!(seen.try_recv().is_err());
-        // No backend.
         mock.fail_create(status(ErrorName::Unsupported));
         let id = jobs.start(&mut pools, spec("a", "h"), spec("b", "i"), task(), body(&tx, Ok(()))).unwrap();
         assert_eq!(done(&mut rx).1.unwrap_err().name, ErrorName::Unsupported);
@@ -320,7 +302,6 @@ mod tests {
         assert!(seen.try_recv().is_err());
         assert_eq!(pools.hosts().hosts_in_use(), 0);
         assert_eq!(mock.live(), 0);
-        // The body's failure is the job's.
         let (mock, mut pools, mut jobs, mut rx) = self::jobs(4);
         let id = jobs
             .start(
@@ -353,7 +334,7 @@ mod tests {
         });
         let id = jobs.start(&mut pools, spec("a", "h"), spec("b", "i"), t.clone(), held).unwrap();
         started.recv().unwrap();
-        jobs.kick(); // not canceled: nothing
+        jobs.kick();
         assert_eq!(mock.count("cancel"), 0);
         t.cancel.store(true, Ordering::Release);
         jobs.kick();
@@ -361,7 +342,6 @@ mod tests {
         assert_eq!((mock.count("cancel 1"), mock.count("cancel 2")), (1, 1));
         jobs.finish(id, &mut pools);
         drop(go);
-        // Dropping the jobs cancels and waits for the running ones.
         let (go, wait) = mpsc::channel::<()>();
         let (tx, started) = mpsc::channel();
         let held: CopyBody<Mock> = Box::new(move |src: &mut MockConn, _dst: &mut MockConn| {

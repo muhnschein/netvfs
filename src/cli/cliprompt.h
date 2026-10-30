@@ -7,12 +7,11 @@
 #include <QtCore/QFile>
 #include <QtCore/QTextStream>
 
-// SPEC-v2 XC-15 / XC-CLI: keyboard-interactive authentication on the terminal
-// (netvfs-cli --prompt).
+// Keyboard-interactive authentication on the terminal (netvfs-cli --prompt).
 namespace NetVfs::Cli {
 
-// Switches the terminal echo; the real one uses termios on the controlling
-// terminal, tests substitute a recorder.
+// Switches the terminal echo; the real one uses termios on the controlling terminal, tests
+// substitute a recorder.
 class EchoControl
 {
 public:
@@ -20,8 +19,8 @@ public:
     virtual bool setEcho(bool on) = 0;
 };
 
-// The controlling terminal (/dev/tty), opened for reading answers. Echo is
-// restored on every path out of a prompt.
+// Controlling terminal (/dev/tty), opened for reading answers. Echo restored on every path out of a
+// prompt.
 class Terminal : public EchoControl
 {
 public:
@@ -29,7 +28,6 @@ public:
     Terminal(const Terminal &) = delete;
     Terminal &operator=(const Terminal &) = delete;
 
-    // False when the process has no controlling terminal.
     bool open();
     QIODevice *device() { return &m_file; }
     bool setEcho(bool on) override;
@@ -38,14 +36,12 @@ private:
     QFile m_file;
 };
 
-// Asks every prompt of the server on `prompts` (the terminal, never stdout)
-// and reads one line per prompt from `input`. Prompts the server marks as
-// no-echo are read with the echo off. Server text is sanitised before it is
-// shown (terminal escape sequences). End of input declines (AuthFailed).
+// Asks every server prompt on `prompts` (the terminal, never stdout), reads one line per prompt
+// from `input`. No-echo prompts read with echo off. Server text sanitised before display. End of
+// input declines (AuthFailed).
 class TerminalPrompter : public AuthPrompter
 {
 public:
-    // `echo` may be null (input is not a terminal).
     TerminalPrompter(QIODevice *input, QTextStream *prompts, EchoControl *echo);
 
     bool answer(const QString &name, const QString &instruction, const QVector<AuthPrompt> &prompts,
@@ -59,6 +55,5 @@ private:
     EchoControl *m_echo;
 };
 
-} // namespace NetVfs::Cli
-
+}
 #endif

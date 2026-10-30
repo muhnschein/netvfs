@@ -1,14 +1,10 @@
 #!/bin/sh
 # SPDX-License-Identifier: LGPL-2.1-or-later
-# Smoke run of the cross-built Rust binaries under qemu-aarch64-static with
-# the target's own glibc and SQLite (doc/RUST.md "Cross build"):
-#   - netvfs-accounts: its answers to `list` and `files` on a small
-#     accounts.db must be byte for byte those of the host build (seccomp
-#     does not install under qemu-user; the helper goes on without it, as it
-#     is best-effort);
-#   - netvfs-bridge: a usage error exits 2, and for a registered consumer it
-#     gets as far as loading its C ABI (which needs the target's Qt, so a
-#     missing one here: exit 1).
+# Smoke run of the cross-built Rust binaries under qemu-aarch64-static with the target's glibc and SQLite:
+#   - netvfs-accounts: answers to `list` and `files` on a small accounts.db must match the host build byte for byte
+#     (seccomp does not install under qemu-user; the helper goes on without it);
+#   - netvfs-bridge: a usage error exits 2; for a registered consumer it gets as far as loading its C ABI (needs the
+#     target's Qt, so missing here: exit 1).
 # Usage: cross-smoke.sh <sdk dir> <cross-built netvfs-accounts> [<cross-built netvfs-bridge>]
 set -eu
 sdk=$(cd "$1" && pwd)

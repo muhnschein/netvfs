@@ -63,8 +63,8 @@ int hexValue(char c)
     return -1;
 }
 
-// Raw characters are taken as their lossless UTF-8 bytes (Names::encode), then
-// "%XX" escapes are decoded to bytes; a bad escape fails.
+// Raw characters taken as lossless UTF-8 bytes (Names::encode), then "%XX" decoded to bytes; bad
+// escape fails.
 bool percentDecode(const QString &text, QByteArray *bytes)
 {
     const QByteArray raw = Names::encode(text);
@@ -113,8 +113,6 @@ QString percentEncode(const QString &text, bool keepSlash)
     return out;
 }
 
-// Decodes a user name or a path: percent escapes to bytes, then the lossless
-// codec (XC-4).
 bool decodeText(const QString &text, QString *out)
 {
     QByteArray bytes;
@@ -151,7 +149,7 @@ bool validIpv6(const QString &host)
     });
 }
 
-// Host name kept in Unicode: punycode labels are converted (QUrl::fromAce).
+// Host kept in Unicode: punycode labels converted (QUrl::fromAce).
 bool parseHostName(const QString &text, QString *host)
 {
     QString decoded;
@@ -246,7 +244,7 @@ Result parsePath(const QString &raw, QString *path)
     QString decoded;
     if (!decodeText(raw, &decoded))
         return invalid("bad escape in the path");
-    // The raw path starts with '/', so the result is "/" or "/..." (never empty).
+    // Raw path starts with '/', so result is "/" or "/..." (never empty).
     return Paths::normalize(decoded, path);
 }
 
@@ -257,7 +255,7 @@ QString withLeadingSlash(const QString &path)
     return QLatin1Char('/') + path;
 }
 
-// smb://host/share/dir: the first component is the share option.
+// smb://host/share/dir: first component is the share option.
 void splitShare(const QString &urlPath, QString *share, QString *path)
 {
     const QStringList parts = Paths::components(urlPath);
@@ -316,7 +314,6 @@ const char *schemeFor(const ConnectionParams &params)
     return nullptr;
 }
 
-// The location path below an SMB share: empty for the share root, else "/a/b".
 QString belowShare(const QString &path)
 {
     QString trimmed = path;
@@ -353,8 +350,7 @@ QString authorityText(const ConnectionParams &params)
     return out;
 }
 
-} // namespace
-
+}
 Result parse(const QString &url, ConnectionParams *params, QString *path)
 {
     if (hasControlCharacter(url))
@@ -415,4 +411,4 @@ QByteArray toAce(const QString &host)
     return QUrl::toAce(bare);
 }
 
-} // namespace NetVfs::Url
+}

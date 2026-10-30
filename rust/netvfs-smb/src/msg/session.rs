@@ -17,8 +17,7 @@ pub mod session_flags {
     pub const ENCRYPT_DATA: u16 = 0x0004;
 }
 
-/// Largest security token accepted from the server (NTLM challenge and SPNEGO wrappers are
-/// a few hundred bytes; Windows' Negotiate max token is 48 000).
+/// Largest token accepted from the server (NTLM and SPNEGO tokens: few hundred bytes).
 pub const MAX_TOKEN: usize = 48_000;
 
 /// SESSION_SETUP request body. Flags (binding) are always 0: no multichannel.
@@ -31,10 +30,10 @@ pub fn setup_request(security_mode: u8, token: &[u8]) -> Result<Vec<u8>> {
         .u8(0) // Flags: no SMB2_SESSION_FLAG_BINDING
         .u8(security_mode)
         .u32(0) // Capabilities (DFS not claimed)
-        .u32(0) // Channel
+        .u32(0)
         .u16(to_u16(HEADER_LEN.saturating_add(24))?)
         .u16(to_u16(token.len())?)
-        .u64(0) // PreviousSessionId
+        .u64(0)
         .bytes(token);
     Ok(w.into_vec())
 }
@@ -112,9 +111,7 @@ mod tests {
         );
         let empty = resp(&[9, 0, 0, 0, 0, 0, 0, 0, 0]);
         assert!(SetupResponse::decode(&empty).unwrap().token.is_empty());
-        // token runs past the end
         SetupResponse::decode(&resp(&[9, 0, 0, 0, 72, 0, 9, 0, 1])).unwrap_err();
-        // token above the cap, and at it
         SetupResponse::decode(&resp(&[9, 0, 0, 0, 72, 0, 0xff, 0xff])).unwrap_err();
         let mut at_cap = vec![9, 0, 0, 0, 72, 0];
         at_cap.extend_from_slice(&u16::try_from(MAX_TOKEN).unwrap().to_le_bytes());
@@ -122,7 +119,6 @@ mod tests {
         assert_eq!(SetupResponse::decode(&resp(&at_cap)).unwrap().token.len(), MAX_TOKEN);
         at_cap[6..8].copy_from_slice(&u16::try_from(MAX_TOKEN + 1).unwrap().to_le_bytes());
         assert_eq!(SetupResponse::decode(&resp(&at_cap)), Err(protocol("security token too long")));
-        // wrong structure size
         SetupResponse::decode(&resp(&[8, 0, 0, 0, 0, 0, 0, 0])).unwrap_err();
     }
 

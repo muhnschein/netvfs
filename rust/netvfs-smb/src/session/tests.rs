@@ -1,8 +1,5 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! Sign-in against the scripted server: NEGOTIATE refusals, the guest
-//! profile's anonymous exchange, the NTLM exchange with sspi's own acceptor
-//! as the server's side (so the final response is signed with the session's
-//! real key), TREE_CONNECT. tests/samba.rs runs the same against Samba.
+//! Sign-in against the scripted server: NEGOTIATE refusals, guest profile's anonymous exchange, NTLM exchange with sspi's own acceptor as the server (final response signed with the real session key), TREE_CONNECT. tests/samba.rs runs the same against Samba.
 
 use std::time::Duration;
 
@@ -16,8 +13,7 @@ use crate::wire::Writer;
 
 const T: Duration = Duration::from_secs(5);
 
-/// The body of a NEGOTIATE response for `dialect` with `cipher` (0: no
-/// encryption context).
+/// The body of a NEGOTIATE response for `dialect` with `cipher` (0: no encryption context).
 fn negotiate_body(dialect: u16, cipher: u16) -> Vec<u8> {
     let mut contexts = vec![preauth_context(&[3; 32]), signing_context()];
     if cipher != 0 {
@@ -78,8 +74,6 @@ async fn the_guest_profile_signs_in_anonymously_and_protects_nothing() {
     let s = r.unwrap();
     assert_eq!(s.flags, 3);
     assert_eq!(s.conn.session_id(), SESSION_ID);
-    // The largest READ the server offers (8 MiB), and room for headers,
-    // the rest of a compound and the transform header.
     assert_eq!(s.conn.max_frame(), 8 * 1024 * 1024 + 65_536 + 52);
     assert!(!s.conn.can_encrypt() && !s.conn.encrypts());
     let c = CancelToken::new();
@@ -118,10 +112,8 @@ async fn the_offer_is_smb_311_with_gcm_and_cmac() {
     let (r, ()) = tokio::join!(sign_in(client, Profile::Strict, &user, "srv", T, &c), async {
         let req = peer.recv_one().await;
         let body = req.body();
-        // One dialect, 3.1.1; signing required.
         assert_eq!(&body[2..6], &[1, 0, 0x03, 0]);
         assert_eq!(&body[36..38], &[0x11, 0x03]);
-        // The encryption context: AES-128-GCM, then AES-256-GCM.
         assert!(body.windows(10).any(|w| w == [0x02, 0x00, 0x06, 0x00, 0, 0, 0, 0, 0x02, 0x00]));
         assert!(body.windows(4).any(|w| w == [0x02, 0x00, 0x04, 0x00]));
         peer.send(&[error(&req, NtStatus::NOT_SUPPORTED, 1)], false).await;
@@ -133,7 +125,6 @@ async fn the_offer_is_smb_311_with_gcm_and_cmac() {
 async fn negotiate_refusals() {
     let c = CancelToken::new();
     let user = Account::User { user: "u".into(), domain: String::new(), password: "p".to_owned().into() };
-    // 3.0.2 is not what was offered; strict needs a cipher; a server error.
     for (dialect, cipher, profile, status, what) in [
         (0x0302, ciphers::AES128_GCM, Profile::Signed, NtStatus::SUCCESS, "only SMB 3.1.1"),
         (DIALECT_311, 0, Profile::Strict, NtStatus::SUCCESS, "no cipher in common"),
@@ -172,7 +163,6 @@ async fn the_server_closing_during_sign_in_is_a_lost_connection() {
 
 #[tokio::test]
 async fn session_setup_ids_and_rounds() {
-    // A response without a SessionId; then one that changes it.
     for change in [0u64, 99] {
         let (client, mut peer) = pair().await;
         let c = CancelToken::new();
@@ -194,7 +184,6 @@ async fn session_setup_ids_and_rounds() {
             });
         assert!(matches!(r, Err(Error::Protocol(ref m)) if m.contains("SessionId")), "{r:?}");
     }
-    // A third round for anonymous: refused.
     let (client, mut peer) = pair().await;
     let c = CancelToken::new();
     let (r, ()) = tokio::join!(sign_in(client, Profile::Guest, &Account::Anonymous, "srv", T, &c), async {
@@ -209,7 +198,6 @@ async fn session_setup_ids_and_rounds() {
         }
     });
     assert!(matches!(r, Err(Error::Policy(ref m)) if m.contains("another round")), "{r:?}");
-    // A refusal.
     let (client, mut peer) = pair().await;
     let (r, ()) = tokio::join!(sign_in(client, Profile::Guest, &Account::Anonymous, "srv", T, &c), async {
         answer_negotiate(&mut peer, 0).await;
@@ -317,8 +305,7 @@ async fn echo_round_trip(s: &Session, peer: &mut Peer, encrypted: bool) {
 
 #[tokio::test]
 async fn ntlm_sign_in_signs_or_seals_as_the_profile_says() {
-    // signed: signing only; strict: sealing with either cipher; signed on a
-    // session the server marks ENCRYPT_DATA: sealing.
+    // signed: signing only; strict: sealing with either cipher; signed on a session the server marks ENCRYPT_DATA: sealing.
     for (profile, cipher, flags, encrypted) in [
         (Profile::Signed, ciphers::AES128_GCM, 0, false),
         (Profile::Strict, ciphers::AES128_GCM, 0, true),
@@ -340,7 +327,7 @@ async fn ntlm_final_response_refusals() {
         Err(Error::Policy(m)) => m,
         other => panic!("{other:?}"),
     };
-    // XM-1: a guest or anonymous session for an account.
+    // A guest or anonymous session for an account.
     for flags in [session_flags::IS_GUEST, session_flags::IS_NULL] {
         let (r, _peer) = ntlm_session(Profile::Signed, ciphers::AES128_GCM, flags, Final::Signed).await;
         assert_eq!(policy_error(r), GUEST_MAPPED);
@@ -353,7 +340,6 @@ async fn ntlm_final_response_refusals() {
         let (r, _peer) = ntlm_session(Profile::Strict, ciphers::AES128_GCM, 0, how).await;
         assert_eq!(policy_error(r), what, "{how:?}");
     }
-    // A session marked for encryption without a common cipher.
     let (r, _peer) = ntlm_session(Profile::Signed, 0, session_flags::ENCRYPT_DATA, Final::Signed).await;
     let m = policy_error(r);
     assert!(m.contains("marks the session for encryption") && m.contains("0x0004"), "{m}");
@@ -390,7 +376,6 @@ async fn tree_connect_and_disconnect() {
         peer
     });
     r.unwrap();
-    // An unknown share; a share that wants encryption; no TreeId.
     let (r, mut peer) = tokio::join!(tree_connect(&s.conn, "srv", "nope", &c), async {
         let req = peer.recv_one().await;
         peer.send(&[error(&req, NtStatus::BAD_NETWORK_NAME, 1)], false).await;

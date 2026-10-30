@@ -1,13 +1,6 @@
 # SPDX-License-Identifier: LGPL-2.1-or-later
-# cargo-fuzz targets for untrusted inputs (doc/RUST.md): of netvfs-accounts,
-# stored setting values from the accounts database, the session bus's replies
-# and its arguments; of netvfs-bridge, a consumer's call arguments and byte
-# paths, the FFI marshalling, and UDisks2's description of the drives; of netvfs-sftp, an SFTP server's packets
-# and attribute blocks, and key files; of netvfs-smb, what an SMB server sends
-# (responses, TRANSFORM_HEADER frames, the NTLM challenge, SPNEGO, the srvsvc
-# share list).
-# Not part of the workspace: libFuzzer needs a nightly toolchain, the helper
-# builds with the SDK's 1.75. Run: cargo +nightly fuzz run <target>.
+# cargo-fuzz targets for untrusted inputs. Outside the workspace: libFuzzer needs nightly, helper builds with SDK 1.75.
+# Run: cargo +nightly fuzz run <target>.
 [package]
 name = "netvfs-accounts-fuzz"
 version = "0.0.0"
@@ -33,8 +26,7 @@ tokio = { version = "1", default-features = false, features = ["io-util", "rt", 
 
 [workspace]
 
-# As in ../Cargo.toml: ssh-key and picky-asn1-der with the changes of
-# ../vendor/ssh-key and ../vendor/picky-asn1-der.
+# As in ../Cargo.toml: patched ssh-key and picky-asn1-der.
 [patch.crates-io]
 ssh-key = { path = "../vendor/ssh-key" }
 picky-asn1-der = { path = "../vendor/picky-asn1-der" }

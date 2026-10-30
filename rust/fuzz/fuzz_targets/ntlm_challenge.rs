@@ -1,15 +1,11 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! The server's NTLM CHALLENGE_MESSAGE (the SESSION_SETUP response before
-//! the last): the input, wrapped in a well-formed SPNEGO NegTokenResp, goes
-//! to the NTLMv2 exchange (sspi), and raw to the anonymous one. Neither may
-//! panic; an accepted challenge gives an AUTHENTICATE token.
+//! NTLM CHALLENGE_MESSAGE in a SPNEGO NegTokenResp (NTLMv2) and raw (anonymous). No panic; accepted challenge gives AUTHENTICATE token.
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
 use netvfs_smb::auth::{Account, Authenticator, Step};
 use zeroize::Zeroizing;
 
-/// A DER length.
 fn der_len(out: &mut Vec<u8>, len: usize) {
     if len < 0x80 {
         out.push(len as u8);
@@ -28,8 +24,6 @@ fn tlv(tag: u8, value: &[u8]) -> Vec<u8> {
     out
 }
 
-/// NegTokenResp { negState accept-incomplete, supportedMech NTLMSSP,
-/// responseToken `token` }.
 fn neg_token_resp(token: &[u8]) -> Vec<u8> {
     const NTLMSSP_OID: [u8; 12] = [0x06, 0x0a, 0x2b, 0x06, 0x01, 0x04, 0x01, 0x82, 0x37, 0x02, 0x02, 0x0a];
     let mut fields = tlv(0xa0, &[0x0a, 0x01, 0x01]);

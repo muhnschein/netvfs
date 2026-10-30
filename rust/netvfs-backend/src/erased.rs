@@ -1,14 +1,8 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! [`Backend`], [`ReadHandle`] and [`WriteHandle`] behind `dyn`: the C ABI
-//! picks the backend by provider name at run time. The traits' futures are
-//! boxed here and nowhere else; each method forwards to the backend's own.
-//! The backend's method is called only when its future is first polled,
-//! so a backend that does its work before it returns a future (`ready`)
-//! still does nothing for a call refused at once (a tripped cancel).
+//! Backend and handle traits behind `dyn`: the C ABI picks the backend by provider name at run time.
 //!
-//! The objects are `Send`, not `Sync`: a connection is used by one thread
-//! at a time, not always by the thread that made it (C-8; the QML code
-//! makes backends on the GUI thread and runs them on a pool thread).
+//! The backend's method runs on first poll, so a call refused at once (tripped cancel) does no work.
+//! Objects are `Send`, not `Sync`: QML makes backends on the GUI thread, runs them on a pool thread.
 
 use netvfs_vfs::{
     Attributes, Backend, CancelToken, Capabilities, Credentials, Entry, ListOptions, ListSink, Params,
@@ -18,10 +12,8 @@ use netvfs_vfs::{
 use std::future::Future;
 use std::pin::Pin;
 
-/// A boxed future of one call.
 pub type Call<'a, T> = Pin<Box<dyn Future<Output = T> + 'a>>;
 
-/// [`Backend`] as an object.
 #[allow(missing_docs, reason = "each method is the Backend method of the same name")]
 pub trait DynBackend: Send {
     fn connect<'a>(
@@ -139,7 +131,6 @@ pub trait DynBackend: Send {
     ) -> Call<'a, Result<(), Status>>;
 }
 
-/// [`ReadHandle`] as an object.
 #[allow(missing_docs, reason = "each method is the ReadHandle method of the same name")]
 pub trait DynRead: Send {
     fn size(&self) -> Option<u64>;
@@ -153,7 +144,6 @@ pub trait DynRead: Send {
     fn close(self: Box<Self>, cancel: &CancelToken) -> Call<'_, Result<(), Status>>;
 }
 
-/// [`WriteHandle`] as an object.
 #[allow(missing_docs, reason = "each method is the WriteHandle method of the same name")]
 pub trait DynWrite: Send {
     fn write<'a>(&'a mut self, data: &'a [u8], cancel: &'a CancelToken) -> Call<'a, Result<(), Status>>;

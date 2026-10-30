@@ -9,7 +9,7 @@
 #include <QtCore/QString>
 #include <QtCore/QVector>
 
-// SPEC-v2 XB-2a: the answers of netvfs-accounts as the C++ bridge of netvfs
+// the answers of netvfs-accounts as the C++ bridge of netvfs
 // 0.4 decoded them (its AccountsHelper), kept as the reference that reads
 // the Rust helper's bytes back for the golden tests. The bridge itself is
 // Rust now and decodes them in rust/netvfs-bridge/src/accounts/qds.rs.
@@ -19,7 +19,6 @@
 namespace NetVfs { // NOSONAR(cpp:S5812)
 namespace Test {
 
-// A netvfs account with the Files service enabled, as `list` reports it.
 struct AccountLocation {
     int accountId = 0;
     QString provider;
@@ -29,11 +28,10 @@ struct AccountLocation {
     Attention attention = Attention::None;
 };
 
-// What `files <id>` answers, ready for the secret lookup.
 struct FilesAccess {
-    ConnectionParams params;       // the account's, for Files
+    ConnectionParams params;
     quint32 credentialsId = 0;
-    bool secretOptional = false;   // XA-7
+    bool secretOptional = false;
 };
 
 // A malformed answer is ProtocolError; otherwise the helper's own result.

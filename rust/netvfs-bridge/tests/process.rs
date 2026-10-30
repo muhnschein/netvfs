@@ -1,9 +1,5 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! The `netvfs-bridge` binary (SPEC-v2 XB-2; C++ `tst_bridgeprocess`): its
-//! command line and exit codes, and with the C ABI (the variables of
-//! `tests/ffi.rs`) runs that serve a client on `--listen unix:path=…` and
-//! on a socket passed as systemd does, and end with the idle exit. Every
-//! bridge started here dies with its test ([`TestChild`]).
+//! The `netvfs-bridge` binary: command line, exit codes, and with the C ABI: serving a client on `--listen unix:path=…` and on a systemd-style socket, then idle exit. Bridges die with their test ([`TestChild`]).
 #![allow(
     missing_docs,
     clippy::unwrap_used,
@@ -27,10 +23,8 @@ use std::time::{Duration, Instant};
 const BRIDGE: &str = env!("CARGO_BIN_EXE_netvfs-bridge");
 const HELPER: &str = env!("CARGO_BIN_EXE_netvfs-accounts-fake");
 const FFI_VARIABLES: [&str; 2] = ["NETVFS_BRIDGE_FFI", "NETVFS_BACKEND_PATH"];
-/// How long a bridge may take to end.
 const EXIT_WAIT: Duration = Duration::from_secs(10);
 
-/// Whether the C ABI is there; says the test is skipped when not.
 fn have_ffi() -> bool {
     let missing = FFI_VARIABLES.iter().any(|v| std::env::var_os(v).is_none());
     if missing {
@@ -39,8 +33,7 @@ fn have_ffi() -> bool {
     !missing
 }
 
-/// Runs `args` for consumer `proc-test` (registered) until it ends: exit
-/// code and stderr.
+/// Runs `args` for consumer `proc-test` (registered) until it ends: exit code and stderr.
 fn run(args: &[&str], ffi: Option<&Path>) -> (Option<i32>, String) {
     let mut run = BridgeRun::bare(Path::new(BRIDGE), "proc-test");
     run.command.args(args).stdout(Stdio::null()).stderr(Stdio::piped());
@@ -92,7 +85,6 @@ fn a_missing_c_abi_fails() {
 
 #[test]
 fn not_activated_fails() {
-    // `systemd:` (no --listen) without LISTEN_PID and LISTEN_FDS.
     if !have_ffi() {
         return;
     }
@@ -101,8 +93,7 @@ fn not_activated_fails() {
     assert!(stderr.contains("not socket-activated"), "{stderr}");
 }
 
-/// Waits for the bridge to end by itself: its exit code, and how long
-/// that took from `since`.
+/// Waits for the bridge to end by itself: exit code and time taken from `since`.
 fn idle_exit(child: &mut TestChild, since: Instant) -> (Option<i32>, Duration) {
     let status = child.wait_timeout(EXIT_WAIT).expect("no idle exit");
     (status.code(), since.elapsed())
@@ -121,10 +112,8 @@ fn serves_and_exits_when_idle() {
         let c = run.client().await;
         c.proxy().hello("process").await.unwrap();
         assert_eq!(c.proxy().get_consent().await.unwrap(), "granted");
-        // No helper: no accounts.
         assert!(c.proxy().list_locations().await.unwrap().is_empty());
         tokio::time::sleep(Duration::from_millis(800)).await;
-        // Still there while a consumer is connected.
         assert_eq!(c.proxy().get_consent().await.unwrap(), "granted");
         c.close().await;
     });
@@ -148,8 +137,7 @@ fn exits_when_idle_without_a_client() {
 
 #[test]
 fn exits_cleanly_with_a_session_bus() {
-    // The session-bus connection outlives the core: it must be dropped
-    // inside the runtime, or zbus panics as the bridge leaves.
+    // Session-bus connection outlives the core: must be dropped inside the runtime or zbus panics at exit.
     if !have_ffi() {
         return;
     }
@@ -167,9 +155,6 @@ fn exits_cleanly_with_a_session_bus() {
 
 #[test]
 fn exits_when_idle_after_a_client_vanished() {
-    // A client that ends without a word (killed): the bridge sees the
-    // connection close and still leaves after the idle time, also with a
-    // listing in flight.
     if !have_ffi() {
         return;
     }
@@ -180,8 +165,6 @@ fn exits_when_idle_after_a_client_vanished() {
     let files: Vec<(&[u8], &[u8])> = files.iter().map(|(p, c)| (p.as_slice(), *c)).collect();
     run.with_files(&files);
     let mut child = run.spawn();
-    // The client goes with its runtime, without closing the connection and
-    // while the bridge streams a listing to it.
     tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap().block_on(async {
         let c = run.client().await;
         c.proxy().hello("process").await.unwrap();
@@ -195,7 +178,6 @@ fn exits_when_idle_after_a_client_vanished() {
     assert_eq!(code, Some(0), "{}", run.log());
 }
 
-// tst_bridgeprocess socketActivation: started as systemd starts it.
 #[test]
 fn socket_activation() {
     if !have_ffi() {
@@ -215,24 +197,17 @@ fn socket_activation() {
         let l = &locations[0];
         assert_eq!((l.id.as_str(), l.provider.as_str(), l.name.as_str()), ("account:1", "fake", "Fake 1"));
         assert_eq!(String::try_from(l.info["host"].try_clone().unwrap()).unwrap(), "fake.example");
-        // The account's files, through the helper's access data and the
-        // seeded fake server.
         let entry = c.proxy().stat("account:1", b"/hello.txt", true, "").await.unwrap();
         assert_eq!((entry.name.as_slice(), entry.size), (&b"hello.txt"[..], 5));
         c.close().await;
     });
-    // XB-2: gone after the idle time with no client and no job.
     let (code, took) = idle_exit(&mut child, started);
     assert_eq!(code, Some(0), "{}", run.log());
     assert!(took >= Duration::from_millis(500), "{took:?}");
-    // XB-4: the bridge wrote nothing into the consumer's folder.
     assert!(!run.dir.join("home/.local/share/proc-test").exists());
     assert!(std::fs::read_dir(run.dir.join("home")).unwrap().next().is_none());
 }
 
-// The installed bridge's services on a session bus (Deps::system): an
-// account change that libaccounts announces there reaches the consumer,
-// every time.
 #[test]
 fn account_changes_on_the_session_bus() {
     if !have_ffi() {

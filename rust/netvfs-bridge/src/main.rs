@@ -1,18 +1,9 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 //! `/usr/libexec/netvfs/netvfs-bridge [--listen ADDRESS] <consumer-id>`
-//! (SPEC-v2 XB-2).
 //!
-//! Started by systemd user socket activation (`netvfs-bridge@<id>.socket`,
-//! `Accept=no`): the listening socket is fd 3 (the `systemd:` address), so
-//! the rendezvous stays exactly the socket systemd created in the
-//! consumer's folder (XB-4). `--listen unix:path=…` replaces it for
-//! development and tests.
+//! Started by systemd user socket activation (`netvfs-bridge@<id>.socket`, `Accept=no`): listening socket is fd 3 (`systemd:` address). `--listen unix:path=…` replaces it for development and tests.
 //!
-//! Threads (design §3.1): the main thread loads the C ABI, creates the Qt
-//! application and runs its event loop (T1); the bridge itself runs on
-//! `nvb-rt`, a current-thread tokio runtime, and ends the Qt loop when it
-//! is done (idle exit, XB-2). Exit codes: 0 after the idle exit, 1 on a
-//! failure, 2 for a usage error.
+//! Main thread loads the C ABI and runs the Qt event loop; the bridge runs on `nvb-rt`, a current-thread tokio runtime, and ends the Qt loop when done. Exit codes: 0 after idle exit, 1 failure, 2 usage error.
 
 use netvfs_bridge::config::{Env, load_consumer};
 use netvfs_bridge::ffi::Ffi;
@@ -23,14 +14,10 @@ use std::ffi::OsString;
 use std::io::Write;
 use std::process::ExitCode;
 
-/// The name of the runtime thread.
 const RUNTIME_THREAD: &str = "nvb-rt";
-/// Where systemd hands over the listening socket.
 const DEFAULT_LISTEN: &str = "systemd:";
-/// The application name of the Qt application.
 const APP_NAME: &str = "netvfs-bridge";
 
-/// The command line: where to listen and the consumer.
 #[derive(Debug, PartialEq, Eq)]
 struct Args {
     listen: String,
@@ -50,7 +37,6 @@ fn parse_args(args: Vec<OsString>) -> Option<Args> {
 }
 
 fn usage() -> ExitCode {
-    // Nothing else to do when stderr is gone.
     drop(writeln!(std::io::stderr(), "usage: netvfs-bridge [--listen DBUS-ADDRESS] <consumer-id>"));
     ExitCode::from(2)
 }

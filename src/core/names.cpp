@@ -13,7 +13,6 @@ bool isEscape(char16_t u)
     return u >= EscapeBase + 0x80 && u <= EscapeBase + 0xFF;
 }
 
-// True if a high surrogate followed by a low surrogate starts at `i`.
 bool pairAt(const QString &text, int i)
 {
     return i + 1 < text.size() && QChar::isHighSurrogate(text.at(i).unicode())
@@ -25,8 +24,7 @@ bool isContinuation(uint b)
     return (b & 0xC0) == 0x80;
 }
 
-// Length of the well-formed UTF-8 sequence starting at `i` (RFC 3629,
-// Unicode table 3-7), or 0 if ill-formed. Stores the code point.
+// Length of the well-formed UTF-8 sequence at `i` (RFC 3629), 0 if ill-formed.
 int sequenceLength(const QByteArray &bytes, int i, uint *codePoint)
 {
     const auto at = [&bytes](int k) { return static_cast<uint>(static_cast<uchar>(bytes.at(k))); };
@@ -47,16 +45,16 @@ int sequenceLength(const QByteArray &bytes, int i, uint *codePoint)
         length = 3;
         cp = b0 & 0x0F;
         if (b0 == 0xE0)
-            lo = 0xA0;          // overlong
+            lo = 0xA0;
         else if (b0 == 0xED)
-            hi = 0x9F;          // UTF-16 surrogates
+            hi = 0x9F;
     } else if (b0 >= 0xF0 && b0 <= 0xF4) {
         length = 4;
         cp = b0 & 0x07;
         if (b0 == 0xF0)
-            lo = 0x90;          // overlong
+            lo = 0x90;
         else if (b0 == 0xF4)
-            hi = 0x8F;          // > U+10FFFF
+            hi = 0x8F;
     } else {
         return 0;
     }
@@ -95,8 +93,7 @@ void appendUtf8(QByteArray *out, uint cp)
     }
 }
 
-} // namespace
-
+}
 QString decode(const QByteArray &bytes)
 {
     QString result;
@@ -131,11 +128,11 @@ QByteArray encode(const QString &name)
         const char16_t u = name.at(i).unicode();
         if (pairAt(name, i)) {
             appendUtf8(&out, QChar::surrogateToUcs4(u, name.at(i + 1).unicode()));
-            ++i;   // the low surrogate
+            ++i;
         } else if (isEscape(u)) {
             out.append(char(u - EscapeBase));
         } else if (QChar::isSurrogate(u)) {
-            appendUtf8(&out, Replacement);   // not produced by decode(); see isEncodable()
+            appendUtf8(&out, Replacement);
         } else {
             appendUtf8(&out, u);
         }
@@ -193,4 +190,4 @@ bool hasEscapes(const QString &name)
     return false;
 }
 
-} // namespace NetVfs::Names
+}

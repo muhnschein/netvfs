@@ -6,21 +6,19 @@ namespace NetVfs::Rs {
 using Ffi::toByteArray;
 using Ffi::toUtf8String;
 
-// The dispositions cross as their enum values.
 static_assert(static_cast<uint32_t>(WriteOptions::Disposition::CreateNew) == NVB_DISPOSITION_CREATE_NEW);
 static_assert(static_cast<uint32_t>(WriteOptions::Disposition::Truncate) == NVB_DISPOSITION_TRUNCATE);
 static_assert(static_cast<uint32_t>(WriteOptions::Disposition::Resume) == NVB_DISPOSITION_RESUME);
 
 namespace {
 
-// -1 is unknown (an invalid QDateTime), as Ffi::toMs() writes it.
+// -1 is unknown (invalid QDateTime), as Ffi::toMs() writes it.
 QDateTime timeOf(int64_t ms)
 {
     return ms == -1 ? QDateTime() : Ffi::fromMs(ms);
 }
 
-} // namespace
-
+}
 nvb_bytes view(const QByteArray &data)
 {
     return nvb_bytes { reinterpret_cast<const uint8_t *>(data.constData()), static_cast<size_t>(data.size()) };
@@ -147,4 +145,4 @@ nvb_upload_opts uploadOptionsOf(const WriteOptions &options)
     return out;
 }
 
-} // namespace NetVfs::Rs
+}

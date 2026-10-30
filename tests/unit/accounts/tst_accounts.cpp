@@ -132,7 +132,6 @@ private slots:
         QVERIFY(AccountStore(fixture->manager()).load(id, Service::Backup, nullptr).ok());
     }
 
-    // SPEC 6.4.
     void attentionStates()
     {
         const int id = fixture->createAccount(QStringLiteral("sftp"), sftpGlobals());
@@ -164,7 +163,7 @@ private slots:
         QCOMPARE(store.clearAttention(99999).error(), Error::NotFound);
     }
 
-    // A-6 / 6.4: only an unusable identity or secret flags the account.
+    // / 6.4: only an unusable identity or secret flags the account.
     void signonErrorMapping_data()
     {
         QTest::addColumn<int>("type");
@@ -205,7 +204,7 @@ private slots:
         QCOMPARE(ready.count(), 1);
         QCOMPARE(failed.count(), 0);
         QCOMPARE(secrets->requested, 7u);
-        QCOMPARE(session.credentials().userName, QStringLiteral("alice"));   // falls back to settings
+        QCOMPARE(session.credentials().userName, QStringLiteral("alice"));
         QCOMPARE(session.credentials().secret, QByteArray("pw"));
         QCOMPARE(session.params().host, QStringLiteral("nas.example"));
         QCOMPARE(session.backupsPath(), QStringLiteral("Sailfish OS/Backups"));
@@ -249,7 +248,6 @@ private slots:
         delete session;
     }
 
-    // SPEC-v2 XA-1, XA-3: new keys come back as options, files_root from the files service.
     void loadV2Keys()
     {
         QVariantMap globals = sftpGlobals();
@@ -273,13 +271,12 @@ private slots:
         QCOMPARE(config.params.options.value(QStringLiteral("shares")).toStringList(),
                  QStringList({ QStringLiteral("photos"), QStringLiteral("music") }));
         QVERIFY(config.params.flag(QStringLiteral("show_admin_shares")));
-        QVERIFY(!config.params.options.contains(QStringLiteral("auth_mode")));   // sftp keys stay out
+        QVERIFY(!config.params.options.contains(QStringLiteral("auth_mode")));
 
         QVERIFY(store.load(id, Service::Backup, &config).ok());
         QCOMPARE(config.service, Service::Backup);
         QVERIFY(config.serviceEnabled);
 
-        // Disabled service, then disabled account.
         QVERIFY(fixture->setService(id, QStringLiteral("smb-backup"), false));
         QVERIFY(store.load(id, Service::Backup, &config).ok());
         QVERIFY(!config.serviceEnabled);
@@ -301,7 +298,6 @@ private slots:
         QVERIFY(config.filesRoot.isEmpty());
     }
 
-    // SPEC-v2 XA-1: consumers list enabled accounts whose files service is enabled.
     void filesAccounts()
     {
         const int listed = fixture->createAccount(QStringLiteral("sftp"), sftpGlobals());
@@ -344,7 +340,6 @@ private slots:
         QCOMPARE(service, Service::Backup);
     }
 
-    // SPEC-v2 XA-4 and the "allowed for service" column of XM-1.
     void servicePolicy_data()
     {
         QTest::addColumn<QString>("provider");
@@ -408,7 +403,6 @@ private slots:
         QCOMPARE(isInsecureConfiguration(params), insecure);
     }
 
-    // SPEC-v2 XA-7 and SPEC-v2-review 2.15.
     void secretOptionality_data()
     {
         QTest::addColumn<QString>("provider");
@@ -437,7 +431,7 @@ private slots:
 
     void missingSecretDecision()
     {
-        // XA-7 keeps A-6 for everything else, and never hides an outage.
+        // keeps for everything else, and never hides an outage.
         const Result noSecret(Error::AuthFailed, QStringLiteral("empty"));
         const Result outage(Error::Internal, QStringLiteral("signond down"));
         QVERIFY(acceptsMissingSecret(noSecret, true));
@@ -481,7 +475,7 @@ private slots:
         QCOMPARE(options.size(), 1);
     }
 
-    // XA-4: the session refuses a configuration before reading the secret.
+    // the session refuses a configuration before reading the secret.
     void sessionServiceGating()
     {
         QVariantMap globals = sftpGlobals();
@@ -510,7 +504,6 @@ private slots:
         QVERIFY(files.params().flag(QStringLiteral("allow_insecure")));
         QVERIFY(files.filesRoot().isEmpty());
 
-        // Backup on an allowed account gets the account's parameters.
         QVariantMap pinned = sftpGlobals();
         pinned.insert(QStringLiteral("netvfs/fake/host_key"), QStringLiteral("ssh-ed25519 BBBB"));
         const int allowedId = fixture->createAccount(QStringLiteral("fake"), pinned);
@@ -524,7 +517,6 @@ private slots:
 
     void sessionSecretOptional()
     {
-        // XA-7: an interactive account reads its (absent) secret as optional.
         QVariantMap globals = sftpGlobals();
         globals.insert(QStringLiteral("netvfs/fake/auth_mode"), QStringLiteral("interactive"));
         const int id = fixture->createAccount(QStringLiteral("fake"), globals);
@@ -544,7 +536,7 @@ private slots:
         QCOMPARE(failed.at(0).at(0).value<Result>().error(), Error::SecurityPolicy);
     }
 
-    // XA-8: a Files run records the same attention; CredentialsNeedUpdateFrom names the service.
+    // a Files run records the same attention; CredentialsNeedUpdateFrom names the service.
     void attentionFromFiles()
     {
         const int id = fixture->createAccount(QStringLiteral("sftp"), sftpGlobals());
@@ -556,7 +548,6 @@ private slots:
         QVERIFY(store.clearAttention(id).ok());
     }
 
-    // A-6 against a real signond on the test's private session bus, when available.
     void signonSecretSource()
     {
         if (QStandardPaths::findExecutable(QStringLiteral("signond")).isEmpty()
@@ -589,7 +580,6 @@ private slots:
         QCOMPARE(credentials.userName, QStringLiteral("alice"));
         QCOMPARE(credentials.secret, QByteArray("s3cret pass"));
 
-        // Missing identity: AuthFailed.
         source.fetch(credentialsId + 1000);
         QVERIFY(failed.wait(15000));
         QCOMPARE(failed.at(0).at(0).value<Result>().error(), Error::AuthFailed);
@@ -599,7 +589,6 @@ private slots:
         QCOMPARE(failed.count(), 2);
         QCOMPARE(failed.at(1).at(0).value<Result>().error(), Error::AuthFailed);
 
-        // Stored identity with an empty secret: AuthFailed (A-6).
         SignOn::IdentityInfo emptyInfo = info;
         emptyInfo.setSecret(QString(), true);
         SignOn::Identity *empty = SignOn::Identity::newIdentity(emptyInfo, this);
@@ -612,7 +601,7 @@ private slots:
         QCOMPARE(failed.at(2).at(0).value<Result>().error(), Error::AuthFailed);
         QCOMPARE(fetched.count(), 1);
 
-        // XA-7: the same lookups for an account without a secret by design.
+        // the same lookups for an account without a secret by design.
         source.setSecretOptional(true);
         source.fetch(emptyStored.at(0).at(0).toUInt());
         QVERIFY(fetched.wait(15000));
@@ -622,7 +611,7 @@ private slots:
         source.fetch(credentialsId + 1000);
         QVERIFY(fetched.wait(15000));
         QCOMPARE(fetched.count(), 3);
-        source.fetch(credentialsId);   // a stored secret is still returned
+        source.fetch(credentialsId);
         QVERIFY(fetched.wait(15000));
         QCOMPARE(fetched.at(3).at(0).value<Credentials>().secret, QByteArray("s3cret pass"));
         QCOMPARE(failed.count(), 3);

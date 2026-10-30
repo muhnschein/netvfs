@@ -3,7 +3,7 @@
 // JavaScript, imports, types and property names are checked against the real
 // Sailfish.Silica, Sailfish.Accounts and Sailfish.Pickers modules, the built
 // org.netvfs.accounts module and stubs of the closed agent types that carry
-// only the members of SPEC 7.1 (risk R1).
+// only the members of.
 //
 // With --create each document is also instantiated and every QML warning
 // that names one of the checked files (binding errors such as unknown

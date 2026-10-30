@@ -16,7 +16,7 @@ namespace NetVfs::Ops {
 
 namespace {
 
-// A directory tree deeper than PATH_MAX allows is a hostile or broken server.
+// Tree deeper than PATH_MAX allows = hostile or broken server.
 constexpr int MaxTreeDepth = 4096;
 
 bool isFatal(const Result &r)
@@ -32,8 +32,7 @@ void countRemoved(TreeCounts *counts, bool isDir)
         ++counts->files;
 }
 
-// Collects a whole listing; the backend is not re-entered while a folder is
-// being processed.
+// Collects a whole listing; backend not re-entered while a folder is processed.
 class CollectSink : public ListSink
 {
 public:
@@ -48,8 +47,7 @@ private:
     QVector<Entry> *m_out;
 };
 
-// Collapses "." and ".." against `base` (an identity, see Walker). ".." above
-// the start of a relative identity is kept literally.
+// Collapses "." and ".." against `base`; ".." above a relative identity's start is kept literally.
 QString resolveTarget(const QString &base, const QString &target)
 {
     const bool absolute = target.startsWith(QLatin1Char('/'));
@@ -75,7 +73,7 @@ struct Frame {
     QString path;
     QString identity;
     Entry entry;
-    int depth = -1;              // depth of the folder's own entry; the root has -1
+    int depth = -1;
     QVector<Entry> children;
     int next = 0;
 };
@@ -93,7 +91,6 @@ private:
     Result pushFolder(const QString &path, const QString &identity, const Entry &entry, int depth);
     Result step(const Frame &parent, const Entry &entry);
     Result finish(const Frame &frame);
-    // Follow policy: is `entry` a symlink to a folder, and which folder is it?
     bool followTarget(const QString &path, const Frame &parent, const Entry &entry, QString *identity);
     Result leaf(const QString &path, const Entry &entry, int depth);
 
@@ -101,7 +98,7 @@ private:
     WalkVisitor *m_visitor;
     WalkOptions m_options;
     QVector<Frame> m_stack;
-    QSet<QString> m_branch;      // identities of the folders on the current branch
+    QSet<QString> m_branch;
 };
 
 Result Walker::list(Frame *frame)
@@ -165,7 +162,7 @@ Result Walker::step(const Frame &parent, const Entry &entry)
     bool folder = entry.type == EntryType::Directory;
     if (!folder && entry.type == EntryType::Symlink && m_options.symlinks == SymlinkPolicy::Follow)
         folder = followTarget(path, parent, entry, &identity);
-    // A loop is skipped, not an error: the link is reported as a leaf.
+    // Loop is skipped, not an error: link reported as a leaf.
     if (!folder || m_branch.contains(identity))
         return leaf(path, entry, depth);
 
@@ -213,7 +210,7 @@ Result Walker::run(const QString &root)
         const int index = m_stack.size() - 1;
         if (Frame &top = m_stack[index]; top.next < top.children.size()) {
             const Entry entry = top.children.at(top.next++);
-            // `step` appends to the stack: hand it a copy of the parent data.
+            // `step` appends to the stack: pass a copy of the parent data.
             Frame parent;
             parent.path = top.path;
             parent.identity = top.identity;
@@ -231,8 +228,7 @@ Result Walker::run(const QString &root)
     return Result::success();
 }
 
-} // namespace
-
+}
 Result walk(Backend *backend, const QString &root, WalkVisitor *visitor, const WalkOptions &options)
 {
     QString normalized;
@@ -241,8 +237,6 @@ Result walk(Backend *backend, const QString &root, WalkVisitor *visitor, const W
     Walker walker(backend, visitor, options);
     return walker.run(normalized);
 }
-
-// ------------------------------------------------------------ removeTree (XH-2)
 
 namespace {
 
@@ -262,7 +256,7 @@ public:
         if (const Result r = m_backend->lstat(path, &real); !r.ok() || real.type != EntryType::Directory) {
             *descend = false;
             if (r.error() == Error::NotFound)
-                return true;       // already gone
+                return true;
             return r.ok() ? removeEntry(path, false) : fail(path, r);
         }
         m_marks.append(m_failures);
@@ -273,13 +267,12 @@ public:
     {
         Q_UNUSED(entry) Q_UNUSED(depth)
         if (const qint64 mark = m_marks.takeLast(); mark != m_failures)
-            return true;       // something below is left: removing the folder would fail
+            return true;
         return removeEntry(path, true);
     }
 
     bool listFailed(const QString &path, const Result &result) override { return fail(path, result); }
 
-    // Removes `path` (a file or an empty folder). False stops the walk.
     bool removeEntry(const QString &path, bool isDir)
     {
         const Result r = isDir ? m_backend->removeDir(path) : m_backend->removeFile(path);
@@ -381,8 +374,7 @@ Result removeContents(Backend *backend, const QString &path, TreeProgress *progr
     return removed;
 }
 
-} // namespace
-
+}
 Result removeTree(Backend *backend, const QString &path, TreeProgress *progress,
                   const RemoveTreeOptions &options, TreeCounts *counts)
 {
@@ -411,19 +403,15 @@ Result removeTree(Backend *backend, const QString &path, TreeProgress *progress,
     return removeContents(backend, normalized, progress, options, tally);
 }
 
-// ------------------------------------------------------------ copyAcross (XH-5)
-
 namespace {
 
-// Source side, on the worker thread: touches only the pipe, never the
-// caller's Progress (which belongs to the calling thread).
+// Source side, worker thread: touches only the pipe, never the caller's Progress.
 class SourceProgress : public Progress
 {
 public:
     explicit SourceProgress(BoundedPipe *pipe) : m_pipe(pipe) {}
     void update(qint64, qint64) override
     {
-        // The caller's Progress belongs to the calling thread; the destination side reports.
     }
     bool canceled() const override { return !m_pipe->result().ok(); }
 
@@ -431,8 +419,8 @@ private:
     BoundedPipe *m_pipe;
 };
 
-// Destination side, on the calling thread: forwards to the caller's Progress
-// and turns its cancel request into a pipe failure.
+// Destination side, calling thread: forwards to the caller's Progress, turns its cancel into a pipe
+// failure.
 class DestinationProgress : public Progress
 {
 public:
@@ -467,7 +455,7 @@ struct FileJob {
     QString destinationPath;
     qint64 size = -1;
     QDateTime modified;
-    qint64 base = 0;             // bytes of earlier files, for progress
+    qint64 base = 0;
     qint64 total = -1;
 };
 
@@ -485,7 +473,6 @@ Transfer::TransferPolicy policyFor(const FileJob &job, const CopyAcrossOptions &
     return policy;
 }
 
-// Runs the source download on a worker thread into `pipe`.
 class DownloadWorker
 {
 public:
@@ -535,12 +522,12 @@ Result copyFile(const FileJob &job, const CopyAcrossOptions &options, Progress *
     if (const Result uploaded = Transfer::upload(job.destination, pipe.reader(), job.size, job.destinationPath,
                                                  &destinationProgress, policyFor(job, options));
         !uploaded.ok()) {
-        pipe.fail(uploaded);       // wakes a download blocked on a full pipe
+        pipe.fail(uploaded);
         worker.join();
         return pipe.result();
     }
-    // The destination is done. A source that still has data fails on its
-    // next write, so the worker cannot block here.
+    // Destination done. A source with data left fails on its next write, so the worker cannot block
+    // here.
     const bool sourceHadFailed = !pipe.result().ok();
     pipe.reader()->close();
     worker.join();
@@ -600,8 +587,7 @@ private:
         return r;
     }
 
-    // Links to files are copied as files; links to folders (loops) and
-    // dangling links are skipped.
+    // Links to files copied as files; links to folders (loops) and dangling links skipped.
     Result copyLinked(const QString &path, const QString &target)
     {
         Entry resolved;
@@ -631,8 +617,7 @@ Result copyTree(Backend *source, const QString &sourcePath, Backend *destination
     return visitor.result().ok() ? r : visitor.result();
 }
 
-} // namespace
-
+}
 Result copyAcross(Backend *source, const QString &sourcePath, Backend *destination, const QString &destinationPath,
                   const CopyAcrossOptions &options, Progress *progress)
 {
@@ -669,4 +654,4 @@ Result copyAcross(Backend *source, const QString &sourcePath, Backend *destinati
     return copyFile(job, options, progress);
 }
 
-} // namespace NetVfs::Ops
+}

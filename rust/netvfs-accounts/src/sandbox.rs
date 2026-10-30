@@ -1,15 +1,10 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! The confinement of netvfs-accounts (SPEC-v2 XB-2a), which any process of
-//! the user can start with the group `privileged`, and the process state of a
-//! set-id start. In `main()`, before anything else: `close_inherited_descriptors()`,
-//! `reset_process_state()`, `prepare_set_id_process()`, then
-//! `restrict_filesystem()` and `restrict_syscalls()`. After the database
-//! work: `drop_set_id_group()`.
-//!
-//! Landlock and seccomp are best-effort: the Jolla Phone 2026 kernel (6.12)
-//! has seccomp but no Landlock, a later kernel may have both.
-//!
-//! The one module with `unsafe`: every call into libc is here.
+//! Confinement of netvfs-accounts, which any process of the user can start with the group
+//! `privileged`. Call order in `main()`: `close_inherited_descriptors()`, `reset_process_state()`,
+//! `prepare_set_id_process()`, `restrict_filesystem()`, `restrict_syscalls()`; after the database
+//! work `drop_set_id_group()`.
+//! Landlock and seccomp are best-effort: kernel 6.12 here has seccomp, no Landlock.
+//! Only module with `unsafe`.
 #![allow(unsafe_code)]
 
 use std::ffi::{CStr, CString, OsStr};
@@ -41,8 +36,7 @@ pub fn runtime_dir() -> PathBuf {
     Path::new(RUNTIME_ROOT).join(uid().to_string())
 }
 
-/// `CLOCK_MONOTONIC` as seconds and nanoseconds, as libaccounts-glib stamps
-/// its change signals.
+/// `CLOCK_MONOTONIC` as libaccounts-glib stamps its change signals.
 #[must_use]
 pub fn monotonic_time() -> (u64, u32) {
     let mut ts = libc::timespec { tv_sec: 0, tv_nsec: 0 };
@@ -51,18 +45,13 @@ pub fn monotonic_time() -> (u64, u32) {
     (u64::try_from(ts.tv_sec).unwrap_or(0), u32::try_from(ts.tv_nsec).unwrap_or(0))
 }
 
-// ---- descriptors and process state ----
-
-/// Closes every inherited descriptor but 0, 1 and 2. Those are open already:
-/// Rust's runtime opens /dev/null on any the caller closed before `main()`
-/// (or aborts), so that no file the helper opens becomes its stdout; the
-/// probe's `descriptors` test checks that it still does.
+/// Closes every inherited descriptor but 0, 1, 2. Rust's runtime reopens a closed 0..2 on
+/// /dev/null, so no opened file becomes stdout.
 pub fn close_inherited_descriptors() {
     close_from(3);
 }
 
-/// Closes every descriptor from `lowest` on, by what /proc lists (also
-/// before `close_range()`, Linux 5.9).
+/// Closes every descriptor from `lowest` on, by /proc listing.
 fn close_from(lowest: i32) {
     let Ok(entries) = std::fs::read_dir("/proc/self/fd") else { return };
     let open: Vec<i32> = entries
@@ -70,22 +59,19 @@ fn close_from(lowest: i32) {
         .filter(|fd| *fd >= lowest)
         .collect();
     for fd in open {
-        // SAFETY: closing a descriptor nothing in this process uses; the
-        // listing's own one is already closed (EBADF, ignored).
+        // SAFETY: nothing in this process uses the descriptor; the listing's own is already closed
+        // (EBADF, ignored).
         unsafe { libc::close(fd) };
     }
 }
 
-/// umask 077, default signal handlers and an empty signal mask, and the file
-/// size soft limit raised to the hard one (a caller's small limit would cut
-/// the attention write short).
+/// umask 077, default signal handlers, empty signal mask, file size soft limit raised to hard (a
+/// small caller limit would cut the attention write short).
 pub fn reset_process_state() {
     // SAFETY: plain process-state calls on valid arguments.
     unsafe {
-        // The tightest mask: nothing the helper creates is readable by others.
         libc::umask(0o077);
-        // A caller's handlers do not survive exec, but ignored signals and
-        // the mask do (Rust's runtime also ignores SIGPIPE).
+        // Ignored signals and the mask survive exec, handlers do not.
         for sig in 1..NSIG {
             if sig != libc::SIGKILL && sig != libc::SIGSTOP {
                 libc::signal(sig, libc::SIG_DFL); // EINVAL for glibc's own signals
@@ -102,8 +88,6 @@ pub fn reset_process_state() {
     }
 }
 
-// ---- set-id ----
-
 /// The kernel started this process with `AT_SECURE` (set-id exec).
 #[must_use]
 pub fn running_set_id() -> bool {
@@ -111,10 +95,9 @@ pub fn running_set_id() -> bool {
     unsafe { libc::getauxval(libc::AT_SECURE) != 0 }
 }
 
-/// Variables of the caller kept in a set-id process: locale, time zone, the
-/// runtime folder and the session bus. Everything else could make the
-/// privileged process use another database (HOME, XDG_*_HOME, ACCOUNTS) or
-/// behave as its caller chose.
+/// Caller variables kept in a set-id process: locale, time zone, runtime folder, session bus.
+/// Anything else could redirect the database (HOME, XDG_*_HOME, ACCOUNTS) or steer the privileged
+/// process.
 #[must_use]
 pub fn kept_in_set_id_process(name: &OsStr) -> bool {
     let name = name.as_bytes();
@@ -122,7 +105,6 @@ pub fn kept_in_set_id_process(name: &OsStr) -> bool {
         || [&b"LANG"[..], b"LANGUAGE", b"TZ", b"XDG_RUNTIME_DIR", b"DBUS_SESSION_BUS_ADDRESS"].contains(&name)
 }
 
-/// The home folder of `uid` in passwd.
 fn home_of(uid: u32) -> Option<PathBuf> {
     // SAFETY: sysconf has no preconditions.
     let suggested = unsafe { libc::sysconf(libc::_SC_GETPW_R_SIZE_MAX) };
@@ -148,7 +130,6 @@ pub fn privileged_ids() -> Option<(u32, u32)> {
     user_ids(c"privileged")
 }
 
-/// The uid and gid of the user `name` in passwd.
 fn user_ids(name: &CStr) -> Option<(u32, u32)> {
     let mut buffer = vec![0u8; 16384];
     // SAFETY: as in home_of.
@@ -172,19 +153,16 @@ fn owned_directory(path: &Path, uid: u32) -> bool {
     std::fs::symlink_metadata(path).is_ok_and(|m| m.is_dir() && m.uid() == uid)
 }
 
-/// First thing in `main()` of a set-id process: removes the variables not
-/// kept (returns their names), sets HOME to the home folder of the real uid
-/// (passwd), and a missing XDG_RUNTIME_DIR to /run/user/<uid> when that is
-/// the uid's folder. The soft core limit becomes 0: a core file would be the
-/// user's and hold memory of the `privileged` group. `None` when the real
-/// uid has no home folder.
+/// First in `main()` of a set-id process: removes variables not kept (returns names), sets HOME to
+/// the real uid's passwd home, sets a missing XDG_RUNTIME_DIR to /run/user/<uid> if that is the
+/// uid's folder, soft core limit 0 (a core file would hold memory of group `privileged`). `None`
+/// without home folder.
 #[must_use]
 pub fn prepare_set_id_process() -> Option<Vec<String>> {
     let removed: Vec<_> =
         std::env::vars_os().map(|(name, _)| name).filter(|n| !kept_in_set_id_process(n)).collect();
     for name in &removed {
-        // SAFETY: called first thing in `main()`, while the process has one
-        // thread, so nothing reads the environment concurrently.
+        // SAFETY: first thing in `main()`, one thread, no concurrent environment reads.
         unsafe { std::env::remove_var(name) };
     }
     let mut core = libc::rlimit { rlim_cur: 0, rlim_max: 0 };
@@ -206,8 +184,8 @@ pub fn prepare_set_id_process() -> Option<Vec<String>> {
     Some(removed.iter().map(|n| n.to_string_lossy().into_owned()).collect())
 }
 
-/// Gives up the group of a set-id start for good: real, effective and saved
-/// gid become the real one. False if any of them is still another.
+/// Drops the set-id group for good: real, effective and saved gid become the real one. False if any
+/// is still another.
 #[must_use]
 pub fn drop_set_id_group() -> bool {
     // SAFETY: plain id calls on valid pointers.
@@ -221,8 +199,6 @@ pub fn drop_set_id_group() -> bool {
             && s == real
     }
 }
-
-// ---- Landlock ----
 
 /// `<linux/landlock.h>` as of ABI 7; the target's headers predate it.
 pub mod landlock {
@@ -314,13 +290,11 @@ pub mod landlock {
     }
 }
 
-/// The Landlock ABI versions this code knows; it uses what the kernel offers
-/// of them: 1 files, 2 renames and links across folders, 3 truncation, 4 TCP,
-/// 5 device ioctls, 6 abstract unix sockets and signals beyond the sandbox,
-/// 7 audit logging of denials (on by default, nothing to set).
+/// Landlock ABIs known; the kernel's is used up to this: 1 files, 2 cross-folder rename/link, 3
+/// truncate, 4 TCP, 5 device ioctl, 6 abstract unix sockets and signals, 7 denial audit logging.
 pub const LANDLOCK_NEWEST_ABI: i32 = 7;
 
-/// What a ruleset handles (restricts) with a kernel of Landlock ABI `abi`.
+/// Rights a ruleset handles with Landlock ABI `abi`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct LandlockAccess {
     /// The file system rights.
@@ -331,9 +305,8 @@ pub struct LandlockAccess {
     pub scoped: u64,
 }
 
-/// Each version's rights up to `abi`; newer ones are unknown to it. With
-/// `allow_abstract_sockets` (a test's session bus may be one) the abstract
-/// socket scope stays off.
+/// Rights up to `abi`. `allow_abstract_sockets` (test session bus may be abstract) leaves that
+/// scope off.
 #[must_use]
 pub fn landlock_access(abi: i32, allow_abstract_sockets: bool) -> LandlockAccess {
     use landlock as l;
@@ -389,9 +362,8 @@ mod nr {
     pub const FCHMODAT2: i64 = 452;
 }
 
-/// One Landlock rule below `path`, for what of `access` the ruleset handles.
-/// A missing path needs no rule. A refused rule is reported as `label`,
-/// never as the path: it may hold the uid or the home folder.
+/// One rule below `path` for the `access` the ruleset handles. Missing path: no rule. A refused
+/// rule is reported as `label`, never the path (uid, home).
 fn allow_beneath(ruleset: i32, handled: u64, path: &Path, label: &str, mut access: u64) {
     let Some(c) = c_path(path) else { return };
     // SAFETY: a NUL-terminated path; the descriptor is closed below.
@@ -423,19 +395,15 @@ fn allow_beneath(ruleset: i32, handled: u64, path: &Path, label: &str, mut acces
     unsafe { libc::close(fd) };
 }
 
-/// Folders the build adds to the confinement: where coverage counters go,
-/// `coverage` (NETVFS_RUST_COVERAGE_DIR when it was built).
+/// Build-added folders: `coverage` (NETVFS_RUST_COVERAGE_DIR at build) for coverage counters.
 fn build_folders(coverage: Option<&str>) -> Vec<PathBuf> {
     coverage.map(PathBuf::from).into_iter().collect()
 }
 
-/// Landlock: reads only below the system folders (/usr, /etc, /lib*, /proc)
-/// and the uid's runtime folder; reads and writes only below `writable` and
-/// /dev/null; executes nothing; with ABI 4 connects and binds no TCP port;
-/// with ABI 6 signals no process and connects to no abstract unix socket
-/// outside the sandbox (unless `allow_abstract_sockets`). Without Landlock
-/// nothing happens and `enforced` is false; a kernel that has it but refuses
-/// the rules is reported on stderr.
+/// Landlock: reads only below /usr, /etc, /lib*, /proc and the uid's runtime folder; read/write
+/// only below `writable` and /dev/null; no exec; ABI 4 no TCP bind/connect; ABI 6 no signals or
+/// abstract unix sockets outside the sandbox (unless `allow_abstract_sockets`). No Landlock:
+/// nothing happens, `enforced` false; a kernel that refuses the rules is reported on stderr.
 #[must_use]
 pub fn restrict_filesystem(writable: &[PathBuf], allow_abstract_sockets: bool) -> FilesystemRestriction {
     let mut result = FilesystemRestriction::default();
@@ -453,8 +421,7 @@ pub fn restrict_filesystem(writable: &[PathBuf], allow_abstract_sockets: bool) -
     }
     result.abi = i32::try_from(abi).unwrap_or(LANDLOCK_NEWEST_ABI);
     let handled = landlock_access(result.abi, allow_abstract_sockets);
-    // An older kernel takes the larger struct as long as its unknown fields
-    // are zero.
+    // Older kernels take the larger struct if unknown fields are zero.
     let attr = landlock::RulesetAttr {
         handled_access_fs: handled.fs,
         handled_access_net: handled.net,
@@ -479,8 +446,7 @@ pub fn restrict_filesystem(writable: &[PathBuf], allow_abstract_sockets: bool) -
         allow_beneath(ruleset, fs, Path::new(system), "system folder", landlock::READ_ONLY);
     }
     allow_beneath(ruleset, fs, Path::new("/dev/null"), "null device", landlock::NULL_DEVICE);
-    // The uid's own runtime folder (the session bus), never XDG_RUNTIME_DIR:
-    // the caller sets that.
+    // Uid's own runtime folder, never XDG_RUNTIME_DIR (caller-set).
     allow_beneath(ruleset, fs, &runtime_dir(), "runtime folder", landlock::READ_ONLY);
     for dir in writable {
         allow_beneath(ruleset, fs, dir, "database folder", landlock::READ_WRITE);
@@ -501,25 +467,20 @@ pub fn restrict_filesystem(writable: &[PathBuf], allow_abstract_sockets: bool) -
     result
 }
 
-// ---- seccomp ----
-
 /// seccomp-bpf, assembled.
 #[derive(Debug, Default)]
 pub struct Filter {
     program: Vec<libc::sock_filter>,
-    /// A syscall number that does not fit 32 bits was named: `install()`
-    /// refuses the program then.
+    /// A syscall number over 32 bits was named: `install()` refuses the program.
     broken: bool,
 }
 
 mod bpf {
-    /// BPF_LD | BPF_W | BPF_ABS (both 0) | 0x20.
     pub const LD_W_ABS: u16 = 0x20;
     pub const JMP_JEQ_K: u16 = 0x05 | 0x10;
     pub const JMP_JGE_K: u16 = 0x05 | 0x30;
     pub const JMP_JSET_K: u16 = 0x05 | 0x40;
     pub const RET_K: u16 = 0x06;
-    // struct seccomp_data
     pub const NR: u32 = 0;
     pub const ARCH: u32 = 4;
     pub const ARGS: u32 = 16;
@@ -550,8 +511,7 @@ impl Filter {
         self.program.push(libc::sock_filter { code, jt, jf, k });
     }
 
-    /// `JEQ` on the number of syscall `nr`, with `jt` and `jf` as `jump()`.
-    /// A number that does not fit 32 bits marks the filter broken.
+    /// `JEQ` on syscall `nr`. A number over 32 bits marks the filter broken.
     fn jump_number(&mut self, nr: i64, jt: u8, jf: u8) {
         let Ok(k) = u32::try_from(nr) else {
             self.broken = true;
@@ -570,9 +530,8 @@ impl Filter {
         self.stmt(bpf::LD_W_ABS, bpf::ARCH);
     }
 
-    /// The low 32 bits of an argument (all targets are little-endian). An index
-    /// past the arguments saturates to an offset the kernel refuses, so the
-    /// filter does not install.
+    /// Low 32 bits of an argument (little-endian targets). An index past the arguments saturates to
+    /// an offset the kernel refuses.
     pub fn load_argument(&mut self, i: u32) {
         self.stmt(bpf::LD_W_ABS, bpf::ARGS.saturating_add(i.saturating_mul(8)));
     }
@@ -582,14 +541,13 @@ impl Filter {
         self.stmt(bpf::RET_K, action);
     }
 
-    /// With the number loaded: `action` for syscall `nr`.
+    /// With number loaded: `action` for `nr`.
     pub fn on(&mut self, nr: i64, action: u32) {
         self.jump_number(nr, 0, 1);
         self.ret(action);
     }
 
-    /// With the number loaded: EPERM for `nr` when argument `i` has any of
-    /// `bits`; the number is loaded again afterwards.
+    /// With number loaded: EPERM for `nr` if argument `i` has any of `bits`; reloads the number.
     pub fn deny_argument_bits(&mut self, nr: i64, i: u32, bits: u32) {
         self.jump_number(nr, 0, 4);
         self.load_argument(i);
@@ -598,9 +556,8 @@ impl Filter {
         self.load_number();
     }
 
-    /// With the number loaded: EPERM for `nr` when it creates a file (flags
-    /// in argument `flags`) whose mode (argument `mode`) has any of `bits`.
-    /// Without O_CREAT or O_TMPFILE the mode is unused and may be garbage.
+    /// With number loaded: EPERM for `nr` creating a file (flags in argument `flags`) whose mode
+    /// (argument `mode`) has any of `bits`. Without O_CREAT or O_TMPFILE the mode may be garbage.
     pub fn deny_created_mode_bits(&mut self, nr: i64, flags: u32, mode: u32, bits: u32) {
         self.jump_number(nr, 0, 6);
         self.load_argument(flags);
@@ -616,7 +573,7 @@ impl Filter {
         self.load_number();
     }
 
-    /// With the number loaded: EPERM for `nr` unless argument `i` is `value`.
+    /// With number loaded: EPERM for `nr` unless argument `i` is `value`.
     pub fn deny_argument_other_than(&mut self, nr: i64, i: u32, value: u32) {
         self.jump_number(nr, 0, 4);
         self.load_argument(i);
@@ -661,8 +618,7 @@ const NATIVE_ARCH: Option<u32> = Some(0x4000_0028); // AUDIT_ARCH_ARM
 )))]
 const NATIVE_ARCH: Option<u32> = None;
 
-/// Syscalls the helper never needs and that would widen what code run
-/// inside it could do with the group.
+/// Syscalls the helper never needs; would widen what code inside it could do with the group.
 fn denied_syscalls() -> Vec<i64> {
     let mut list = vec![
         libc::SYS_execve,
@@ -737,7 +693,7 @@ pub fn syscall_filter(native_arch: u32) -> Filter {
     for nr in denied_syscalls() {
         f.on(nr, Filter::DENY);
     }
-    // Arguments behind a pointer are out of the filter's sight.
+    // Arguments behind a pointer are invisible to the filter.
     f.on(nr::CLONE3, Filter::NO_SYS);
     f.on(nr::OPENAT2, Filter::NO_SYS);
     f.deny_argument_bits(libc::SYS_clone, 0, NEW_NAMESPACES.cast_unsigned());
@@ -761,14 +717,11 @@ pub fn syscall_filter(native_arch: u32) -> Filter {
     f
 }
 
-/// no_new_privs and a seccomp filter that fails these with EPERM: exec,
-/// ptrace, sockets other than `AF_UNIX`, new namespaces, mounts, modules,
-/// kexec, BPF, `io_uring`, userfaultfd, perf, keyrings, file handles; and any
-/// chmod, open, mkdir or mknod that would set a setuid or setgid bit (a file
-/// of the group `privileged` left behind with it would hand the group to
-/// anyone). clone3 and openat2 fail with ENOSYS so that glibc falls back to
-/// clone and openat, whose arguments the filter can see. False when the
-/// kernel or the architecture has no seccomp.
+/// no_new_privs and a seccomp filter failing with EPERM: exec, ptrace, non-`AF_UNIX` sockets, new
+/// namespaces, mounts, modules, kexec, BPF, `io_uring`, userfaultfd, perf, keyrings, file handles,
+/// and any chmod/open/mkdir/mknod setting setuid or setgid (a leftover file of group `privileged`
+/// would hand the group to anyone). clone3 and openat2 fail with ENOSYS so glibc falls back to
+/// clone and openat, whose arguments the filter sees. False without kernel or architecture seccomp.
 #[must_use]
 pub fn restrict_syscalls() -> bool {
     let Some(arch) = NATIVE_ARCH else { return false };
@@ -810,9 +763,8 @@ mod tests {
         let scopes = landlock::SCOPE_SIGNAL | landlock::SCOPE_ABSTRACT_UNIX_SOCKET;
         assert_eq!(levels[6].scoped, scopes);
         assert_eq!(abstract_bus, LandlockAccess { scoped: landlock::SCOPE_SIGNAL, ..levels[6] });
-        // <linux/landlock.h>: the rights of ABI 1 are bits 0 to 12, and a
-        // rule on a file (LANDLOCK_ACCESS_FS_FILE) may hold execute, write,
-        // read, truncate and device ioctl.
+        // ABI 1 rights are bits 0 to 12; a file rule may hold execute, write, read, truncate,
+        // device ioctl.
         assert_eq!(landlock::ABI1_FS, 0x1fff);
         assert_eq!(landlock::FILE_RIGHTS, 0xc007);
         assert_eq!(levels[6].fs, 0xffff);
@@ -820,7 +772,6 @@ mod tests {
 
     #[test]
     fn uid_is_the_real_uid() {
-        // The first of real, effective, saved and file system uid.
         let status = std::fs::read_to_string("/proc/self/status").unwrap();
         let ids = status.lines().find_map(|l| l.strip_prefix("Uid:")).unwrap();
         assert_eq!(Some(uid().to_string().as_str()), ids.split_whitespace().next());
@@ -876,7 +827,6 @@ mod tests {
     fn filter_shape() {
         let f = syscall_filter(0x1234);
         let program = f.instructions();
-        // The architecture first, allow last.
         assert_eq!((program[0].code, program[0].k), (bpf::LD_W_ABS, bpf::ARCH));
         assert_eq!((program[1].code, program[1].k), (bpf::JMP_JEQ_K, 0x1234));
         assert_eq!((program[2].code, program[2].k), (bpf::RET_K, Filter::DENY));
@@ -911,12 +861,10 @@ mod tests {
         let before = clock();
         let now = monotonic_time();
         let after = clock();
-        // The machine has been up for more than a second.
         assert!(before.0 >= 1, "{before:?}");
         assert!(before <= now && now <= after, "{before:?} {now:?} {after:?}");
     }
 
-    /// The ids of `name` in /etc/passwd, read without libc.
     fn passwd_ids(name: &str) -> Option<(u32, u32)> {
         let passwd = std::fs::read_to_string("/etc/passwd").unwrap();
         passwd.lines().find_map(|line| {

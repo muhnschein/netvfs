@@ -8,12 +8,12 @@
 
 namespace NetVfs {
 
-// Single error taxonomy (SPEC 5.4). Library-specific codes never leave a backend.
-// Values are only ever appended; errorName() strings are stable (SPEC-v2 XC-21).
+// Single error taxonomy. Backend-specific codes never leave a backend. Values only appended;
+// errorName() strings stable.
 enum class Error {
     None,
     Canceled,
-    NetworkUnreachable,     // could not reach the server
+    NetworkUnreachable,
     Timeout,
     ServerIdentityUnknown,
     ServerIdentityChanged,
@@ -26,16 +26,15 @@ enum class Error {
     Unsupported,
     ProtocolError,
     Internal,
-    // Added with API v2, see XC-21
-    ConnectionLost,         // an established connection dropped
+    ConnectionLost,
     NotADirectory,
     IsADirectory,
     DirectoryNotEmpty,
     InvalidName,
     ReadOnlyFilesystem,
-    Locked,                 // SMB sharing violation
-    TooManyConnections,     // MaxSessions, SMB connection limits, the bridge's own limits
-    RateLimited             // the server asks to wait (Retry-After)
+    Locked,
+    TooManyConnections,
+    RateLimited
 };
 
 NETVFS_EXPORT QString errorName(Error error);
@@ -47,8 +46,7 @@ public:
     Result() = default;
     explicit Result(Error error, const QString &message = QString())
         : m_error(error), m_message(message) {}
-    // XC-24: `detail` is the protocol status for logs and a "Details" view
-    // (never secrets; C-17 debug rules apply to paths in it).
+    // `detail`: protocol status for logs and "Details" view. Never secrets.
     Result(Error error, const QString &message, const QString &detail, qint64 retryAfterMs = -1)
         : m_error(error), m_message(message), m_detail(detail), m_retryAfterMs(retryAfterMs) {}
 
@@ -58,12 +56,11 @@ public:
     Error error() const { return m_error; }
     QString message() const { return m_message; }
     QString detail() const { return m_detail; }
-    qint64 retryAfterMs() const { return m_retryAfterMs; }   // -1: none
+    qint64 retryAfterMs() const { return m_retryAfterMs; }
 
     Result &setDetail(const QString &detail) { m_detail = detail; return *this; }
     Result &setRetryAfterMs(qint64 ms) { m_retryAfterMs = ms; return *this; }
 
-    // "<ErrorName>: <message>" or just the name; suitable for logs and Buteo messages.
     QString toString() const;
 
 private:
@@ -73,6 +70,5 @@ private:
     qint64 m_retryAfterMs = -1;
 };
 
-} // namespace NetVfs
-
+}
 #endif

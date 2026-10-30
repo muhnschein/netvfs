@@ -3,13 +3,10 @@ import QtQuick 2.0
 import Sailfish.Silica 1.0
 import org.netvfs.accounts 1.0
 
-// Input dialog of the creation flow (SPEC 7.3 step 1), rendered from the
-// provider descriptor (SPEC-v2 XA-5, NetVfsProviders): connection fields,
-// the services to set up (backup only where the provider offers it and the
-// settings allow it, XA-4), the sign-in method and the secret. With
-// credentialsOnly set it asks only for the sign-in method and the secret,
-// for the credentials update flow (SPEC 7.5; for SFTP the choices of S-18).
-// Input is validated before any connection is made (M-9).
+// Input dialog of the creation flow, rendered from the provider descriptor: connection fields,
+// services (backup only where the provider offers it and settings allow it), sign-in method,
+// secret. credentialsOnly asks only for sign-in method and secret (credentials update flow). Input
+// validated before any connection.
 Dialog {
     id: dialog
 
@@ -24,7 +21,7 @@ Dialog {
     readonly property var descriptor: NetVfsProviders.descriptor(provider)
     readonly property var fields: descriptor["fields"] || []
     readonly property var authModes: descriptor["authModes"] || []
-    // SPEC-v2 XP-1: the backup services come with netvfs-backup.
+    // Backup services come with netvfs-backup.
     readonly property bool offersBackup: NetVfsProviders.offersService(provider, "backup")
                                          && NetVfsHelpers.isServiceInstalled(NetVfsHelpers.backupServiceName(provider))
     readonly property bool offersFiles: NetVfsProviders.offersService(provider, "files")
@@ -40,7 +37,7 @@ Dialog {
     readonly property string authMode: authModeEntry["id"] || "password"
     // "generate" or "import" (key mode only)
     readonly property string keySource: authModeEntry["source"] === "import" ? "import" : "generate"
-    // "password", "key" or "none" (XA-7)
+    // "password", "key" or "none"
     readonly property string secretKind: NetVfsProviders.secretKind(provider, values)
     readonly property string password: passwordField.text
     readonly property string backupsPath: NetVfsProviders.serviceValue(provider, values, "backups_path")
@@ -50,8 +47,8 @@ Dialog {
     readonly property bool connectionValid: services.length > 0
                                             && NetVfsProviders.isValid(provider, values, services)
 
-    // Connection parameters for NetVfsProbe and NetVfsAccountSetup;
-    // `pinOptions` are the accepted identity's (serverIdentity.pinOptions), or {}.
+    // Connection parameters for NetVfsProbe and NetVfsAccountSetup; `pinOptions` are the accepted
+    // identity's (serverIdentity.pinOptions), or {}.
     function connectionParams(pinOptions) {
         return NetVfsProviders.makeParams(provider, values, pinOptions)
     }
@@ -176,7 +173,6 @@ Dialog {
                     readonly property var field: modelData
                     readonly property string type: field["type"]
                     readonly property string key: field["key"]
-                    // Service settings follow the service switches (second Repeater).
                     readonly property bool shown: field["service"] === undefined
                                                   && NetVfsProviders.isVisible(field, dialog.values, dialog.services)
                                                   && (!dialog.credentialsOnly || type === "note")
@@ -326,7 +322,6 @@ Dialog {
                 text: qsTrId("settings-accounts-netvfs-la-no_service")
             }
 
-            // Service settings (backups folder, start folder) follow their switches.
             Repeater {
                 model: dialog.credentialsOnly ? [] : dialog.fields
 

@@ -37,7 +37,6 @@ QString nameOf(const QString &key)
     return key.mid(key.lastIndexOf(QLatin1Char('/')) + 1);
 }
 
-// Applies `target` (absolute or relative to `base`) to `base`; ".." above the root is clamped.
 QString applyTarget(const QString &base, const QString &target)
 {
     QStringList parts = target.startsWith(QLatin1Char('/')) ? QStringList()

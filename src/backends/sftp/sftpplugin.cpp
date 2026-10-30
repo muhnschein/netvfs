@@ -30,4 +30,4 @@ Result SftpPlugin::describe(const QByteArray &privateKey, SshKeyMaterial *out)
     return Rs::RsKeyTools().describe(privateKey, out);
 }
 
-} // namespace NetVfs
+}

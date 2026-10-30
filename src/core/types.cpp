@@ -46,11 +46,11 @@ constexpr std::array<CapabilityName, 21> capabilityNames = { {
     { Capability::ShareEnumeration, "ShareEnumeration" },
     { Capability::ETags, "ETags" },
 } };
-// One name per capability: a size left over would add a nameless entry.
+// One name per capability: a leftover size would add a nameless entry.
 static_assert(capabilityNames.size() == static_cast<std::size_t>(Capability::ETags) + 1
                   && capabilityNames.back().capability == Capability::ETags,
               "one name per capability");
-} // namespace
+}
 
 QString capabilityName(Capability c)
 {
@@ -147,4 +147,4 @@ void Credentials::wipe()
     secureWipe(secret);
 }
 
-} // namespace NetVfs
+}

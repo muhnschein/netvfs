@@ -11,7 +11,7 @@
 
 #include <functional>
 
-// Stand-in for the platform backup service (SPEC 3.4) on its own session bus
+// Stand-in for the platform backup service on its own session bus
 // connection: org.sailfishos.backup at /sailfishbackup.
 class FakeBackupService : public QObject, protected QDBusContext
 {
@@ -25,7 +25,6 @@ public:
     bool registerOnBus();
     void reset();
 
-    // Behaviour
     QString deviceId;
     bool failDeviceId = false;
     bool failCreate = false;
@@ -35,9 +34,8 @@ public:
     QByteArray archiveContent;
     std::function<void()> onCreate;      // runs before createBackupForSyncProfile() replies
 
-    // Observations
     QStringList createCalls;
-    QStringList serverLogAtCreate;       // FakeServer log when the archive was requested
+    QStringList serverLogAtCreate;
     QList<QPair<QString, QStringList>> cloudBackups;
     QString lastArchivePath;
     QString archiveRoot() const { return m_dir.path(); }

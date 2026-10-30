@@ -1,12 +1,7 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! [`Smb`]: the [`Backend`] of provider `smb` (SPEC-smb, SPEC-v2 XM-*).
+//! [`Smb`]: the [`Backend`] of provider `smb`.
 //!
-//! One TCP connection and one session per backend (design §5.1). Share
-//! mode works in the share of option `share`; server mode (no `share`)
-//! shows the shares as the root's folders, keeps IPC$ as its main tree and
-//! connects up to [`MAX_SHARE_TREES`] shares, the least recently used one
-//! disconnected for another unless files are open on it (XM-2). The
-//! password is used for the sign-in only and not kept.
+//! One TCP connection and one session per backend. Share mode works in the share of option `share`. Server mode (no `share`) shows the shares as the root's folders, keeps IPC$ as main tree and connects up to [`MAX_SHARE_TREES`] shares, least recently used disconnected for another unless files are open on it. The password is used for sign-in only, not kept.
 
 use std::future::{Future, poll_fn};
 use std::net::SocketAddr;
@@ -36,23 +31,22 @@ use crate::session::{self, Session, Tree};
 use crate::status::NtStatus;
 use crate::transport;
 
-/// Shares connected at once in server mode (XM-2).
+/// Shares connected at once in server mode.
 pub const MAX_SHARE_TREES: usize = 4;
 /// UTF-8 bytes of a name (Samba on Linux file systems, NTFS in ASCII).
 pub const MAX_NAME_BYTES: u64 = 255;
 /// The share of server mode's main tree.
 pub const IPC_SHARE: &str = "IPC$";
-/// C-14.
+/// Default connect timeout.
 const DEFAULT_CONNECT_TIMEOUT_MS: u64 = 15_000;
-/// C-14.
+/// Default request timeout.
 const DEFAULT_REQUEST_TIMEOUT_MS: u64 = 60_000;
-/// The times SMB stores, in ms: after 1970-01-01T00:00:01 and before the
-/// end of 30828 (FILETIME).
+/// Times SMB stores, in ms: after 1970-01-01T00:00:01 and before the end of 30828 (FILETIME).
 const TIME_RANGE_MS: std::ops::Range<i64> = 1000..910_692_730_085_000;
-/// XC-11.
+/// Reason for times outside that range.
 pub const TIMES_UNSUPPORTED: &str = "SMB stores times between 1970 and 30828 only";
 
-/// XM-2: what the root of server mode allows.
+/// What the root of server mode allows.
 fn root_denied(what: &str) -> Status {
     Status::permission_denied(format!("{what}: the server root holds only the shares"))
 }
@@ -65,10 +59,7 @@ fn established(e: Error, context: &str) -> Status {
     e.status(context, Phase::Established)
 }
 
-/// A refused TREE_CONNECT (a share of server mode) is reported like a
-/// refused sign-in, because the share is part of what the user signs in to
-/// (SPEC-smb 5): its statuses and policies with the setup texts, the
-/// connection's failures as they are.
+/// A refused TREE_CONNECT (share of server mode) is reported like a refused sign-in: statuses and policies with the setup texts, connection failures as they are.
 fn tree_refused(e: Error) -> Status {
     let phase =
         if matches!(e, Error::Status(_) | Error::Policy(_)) { Phase::Setup } else { Phase::Established };
@@ -103,8 +94,7 @@ fn flag_or(params: &Params, key: &str, fallback: bool) -> bool {
     if params.options.contains_key(key) { params.flag(key) } else { fallback }
 }
 
-/// XM-3: the valid names of option `shares` (a list, or comma-separated),
-/// each once, ignoring case.
+/// The valid names of option `shares` (a list, or comma-separated), each once, ignoring case.
 #[must_use]
 pub fn configured_shares(params: &Params) -> Vec<String> {
     let raw: Vec<String> = match params.options.get("shares") {
@@ -210,8 +200,7 @@ impl Smb {
         self.params.host.trim().to_owned()
     }
 
-    /// The share, the path in it and the name (M-8, M-9: invalid names
-    /// are refused before anything else).
+    /// The share, the path in it and the name; invalid names are refused first.
     fn split(&self, path: &[u8]) -> std::result::Result<Place, Status> {
         let parts = components(path)?;
         let name = parts.last().map(|p| p.to_vec()).unwrap_or_default();
@@ -241,13 +230,12 @@ impl Smb {
         Ok(place)
     }
 
-    /// XM-2: a share itself, or the root, in server mode.
+    /// A share itself, or the root, in server mode.
     fn share_level(&self, path: &[u8]) -> bool {
         self.server_mode() && self.split(path).is_ok_and(|p| p.path.is_empty())
     }
 
-    /// The tree of `place` (which is not the root): the main one, or in
-    /// server mode that of its share, connected when needed (XM-2).
+    /// The tree of `place` (not the root): the main one, or in server mode that of its share, connected when needed.
     async fn tree(&mut self, place: &Place, cancel: &CancelToken) -> std::result::Result<Arc<Tree>, Status> {
         let host = self.host();
         let server_mode = self.server_mode();
@@ -280,7 +268,6 @@ impl Smb {
                     )
                 })?;
             let gone = s.shares.remove(oldest);
-            // Best effort: the tree goes with the session at the latest.
             drop(session::tree_disconnect(s.conn(), &gone.tree, cancel).await);
         }
         let tree =
@@ -289,7 +276,7 @@ impl Smb {
         Ok(tree)
     }
 
-    /// XM-3: the shares the user saved, then what enumeration finds.
+    /// The shares the user saved, then what enumeration finds.
     async fn list_root(
         &self,
         options: ListOptions,
@@ -324,7 +311,7 @@ impl Smb {
         Ok(())
     }
 
-    /// XM-7: on by default in server mode.
+    /// On by default in server mode.
     fn enumerates(&self) -> bool {
         self.server_mode() && flag_or(&self.params, "share_enumeration", true)
     }
@@ -364,7 +351,7 @@ impl Smb {
         options: &WriteOptions,
         cancel: &CancelToken,
     ) -> std::result::Result<SmbWrite, Status> {
-        // XM-2: no files beside the shares ("/name" is a share, not a file).
+        // No files beside the shares ("/name" is a share, not a file).
         if self.share_level(path) {
             return Err(root_denied("open"));
         }
@@ -400,7 +387,6 @@ impl Smb {
         let position = if options.disposition == Disposition::Resume { options.resume_offset } else { 0 };
         let open = Open { conn: s.conn().clone(), tree, file_id: created.file_id };
         let writer = SmbWrite::new(open, place.path, position, options.mtime_ms, s.write_chunk);
-        // Resume: the remote size must be where the caller continues.
         if options.disposition == Disposition::Resume && created.end_of_file != options.resume_offset {
             writer.abort().await;
             return Err(Status::new(
@@ -455,10 +441,7 @@ impl Backend for Smb {
         let port = port_of(params.port)?;
         let timeout = timeout_of(params.connect_timeout_ms, DEFAULT_CONNECT_TIMEOUT_MS);
         let host = self.host();
-        // M-10: resolve and check that the port answers; the session needs
-        // the credentials and starts in authenticate(). SMB has no server
-        // identity (SPEC-smb 3): the session key, from the password, signs
-        // the server's answers instead.
+        // Resolve and check that the port answers. Session starts in authenticate(). SMB has no server identity: the password-derived session key signs the server's answers instead.
         let addr = or_canceled(cancel, async {
             let addrs = transport::resolve(&host, port).await?;
             let (stream, addr) = transport::connect(&addrs, timeout).await?;
@@ -477,12 +460,10 @@ impl Backend for Smb {
         _prompter: Option<&mut dyn Prompter>,
         cancel: &CancelToken,
     ) -> std::result::Result<(), Status> {
-        // NTLMSSP has no interactive step.
         let Some(addr) = self.address.filter(|_| self.signed.is_none()) else {
             return Err(Status::internal("authenticate() needs a successful connect()"));
         };
-        // XM-1: the profile given is enforced; XSEC-2: a failure is never
-        // retried with a weaker one.
+        // Profile given is enforced; a failure is never retried with a weaker one.
         let profile = Profile::parse(self.params.option("security_profile").as_deref())?;
         let share = self.share_option();
         if share.as_deref().is_some_and(|s| !valid_share_name(s)) {
@@ -546,17 +527,15 @@ impl Backend for Smb {
             return caps;
         }
         caps.flags.extend([
-            Capability::NativeNoReplace, // XM-5
+            Capability::NativeNoReplace,
             Capability::AtomicReplace,
-            Capability::ReadHandles, // XM-6
+            Capability::ReadHandles,
             Capability::EfficientRanges,
             Capability::WriteResume,
             Capability::SetModified,
             Capability::SetModifiedOnUpload,
-            Capability::SpaceInfo, // XM-8
-            // XM-4, M-9: SMB clients treat every share as case-insensitive
-            // (Windows does, Samba's default "case sensitive = auto" does
-            // for clients without POSIX extensions).
+            Capability::SpaceInfo,
+            // SMB clients treat every share as case-insensitive (Windows; Samba default "case sensitive = auto" without POSIX extensions).
             Capability::CaseInsensitive,
             Capability::WindowsNames,
         ]);
@@ -575,7 +554,6 @@ impl Backend for Smb {
     }
 
     async fn keep_alive(&mut self, cancel: &CancelToken) -> std::result::Result<(), Status> {
-        // XM-8: SMB2 ECHO.
         let s = self.signed_in()?;
         session::echo(s.conn(), cancel).await.map_err(|e| established(e, "keep-alive"))
     }
@@ -588,7 +566,7 @@ impl Backend for Smb {
     ) -> std::result::Result<Entry, Status> {
         let place = self.place(path)?;
         let Some(share) = place.share.clone() else {
-            // XM-2: the server root is a folder of shares.
+            // The server root is a folder of shares.
             return Ok(Entry { kind: EntryType::Directory, ..Entry::default() });
         };
         let tree = self.tree(&place, cancel).await?;
@@ -631,14 +609,12 @@ impl Backend for Smb {
         }
         let tree = match self.tree(&place, cancel).await {
             Ok(tree) => tree,
-            // XM-2: a share that does not exist cannot be made.
             Err(e) if e.name == ErrorName::NotFound && self.server_mode() && place.path.is_empty() => {
                 return Err(root_denied(WHAT));
             }
             Err(e) => return Err(e),
         };
         if place.path.is_empty() {
-            // The share root exists.
             return if exclusive {
                 Err(Status::new(ErrorName::AlreadyExists, "create folder: the share root exists"))
             } else {
@@ -687,8 +663,7 @@ impl Backend for Smb {
         mode: RenameMode,
         cancel: &CancelToken,
     ) -> std::result::Result<(), Status> {
-        // XM-2: the root and the shares themselves are refused before any
-        // share is connected.
+        // The root and the shares themselves are refused before any share is connected.
         if self.share_level(from) || self.share_level(to) {
             return Err(share_root_denied("rename"));
         }
@@ -703,9 +678,7 @@ impl Backend for Smb {
             return Err(Status::unsupported("rename: SMB cannot move between shares"));
         }
         let s = self.signed_in()?;
-        // XM-5, XC-10: without Replace the server refuses an existing
-        // target (NativeNoReplace); with it ReplaceIfExists replaces it in
-        // the same request (AtomicReplace).
+        // Without Replace the server refuses an existing target (NativeNoReplace); with it ReplaceIfExists replaces it in the same request (AtomicReplace).
         let replace = mode == RenameMode::Replace;
         fs::rename(s.conn(), source_tree.target(), &source.path, &target.path, replace, cancel)
             .await
@@ -719,7 +692,7 @@ impl Backend for Smb {
         cancel: &CancelToken,
     ) -> std::result::Result<(), Status> {
         const WHAT: &str = "set attributes";
-        // XC-11: every field is checked before anything changes.
+        // Every field is checked before anything changes.
         if changes.mode.is_some() {
             return Err(Status::unsupported("SMB has no permission bits"));
         }
@@ -836,13 +809,13 @@ impl Backend for Smb {
                 if progress.canceled() {
                     return Err(Status::canceled());
                 }
-                // XM-6: up to 4 MiB on the way while this chunk is stored.
+                // Up to 4 MiB on the way while this chunk is stored.
                 reader.read_ahead(at, end.saturating_sub(at));
                 let want = usize::try_from(end.saturating_sub(at)).unwrap_or(usize::MAX).min(chunk);
                 let buf = buffer.get_mut(..want).unwrap_or_default();
                 let n = reader.read(at, buf, cancel).await?;
                 let Some(data) = buf.get(..n).filter(|d| !d.is_empty()) else {
-                    break; // the file shrank; the caller compares sizes
+                    break;
                 };
                 sink.write(data)?;
                 at = at.saturating_add(u64::try_from(n).unwrap_or(u64::MAX));

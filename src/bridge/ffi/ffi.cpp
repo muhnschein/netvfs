@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-// libnetvfs-bridge-ffi.so: the table of the C ABI (netvfs_bridge_ffi.h), the
-// process and Qt event loop part (T1, T2) and the helpers. SPEC-v2 §8a;
-// design: phase2-design.md §1.
+// libnetvfs-bridge-ffi.so: table of the C ABI (netvfs_bridge_ffi.h), process and Qt event loop
+// part, helpers.
 #include "ffi_p.h"
 
 #include "backendloader.h"
@@ -22,7 +21,6 @@ namespace NetVfs::Ffi {
 
 namespace {
 
-// A functor posted to the Qt thread.
 class FunctorEvent : public QEvent
 {
 public:
@@ -44,7 +42,6 @@ private:
     std::function<void()> m_fn;
 };
 
-// Runs the posted functors on the Qt thread, in order (design §1.2).
 class MainQueue : public QObject
 {
 public:
@@ -56,21 +53,19 @@ protected:
         if (event->type() != FunctorEvent::eventType())
             return QObject::event(event);
         const auto *functor = static_cast<const FunctorEvent *>(event);
-        guardedVoid([functor]() { functor->run(); });   // T7: never into Qt's event loop
+        guardedVoid([functor]() { functor->run(); });
         return true;
     }
 };
 
-// The application of init() (T1). `mutex` orders post() and quit() from any
-// thread against shutdown().
 struct App {
     std::mutex mutex;
     std::unique_ptr<QCoreApplication> app;
-    MainQueue *queue = nullptr;                 // child of `app`
+    MainQueue *queue = nullptr;
     bool initialized = false;
     bool quitting = false;
     std::atomic<int32_t> exitCode { 0 };
-    // Design §1.2: argc = 1, argv = { app_name } for the life of the app.
+    // argc = 1, argv = { app_name } for the life of the app.
     QByteArray name;
     int argc = 1;
     std::array<char *, 2> argv { nullptr, nullptr };
@@ -92,7 +87,7 @@ int32_t init(nvb_bytes appName) noexcept
         a.name = toByteArray(appName);
         a.argv[0] = a.name.data();
         a.app = std::make_unique<QCoreApplication>(a.argc, a.argv.data());
-        a.queue = new MainQueue(a.app.get());   // owned by the application
+        a.queue = new MainQueue(a.app.get());
         a.initialized = true;
         return 0;
     });
@@ -106,10 +101,9 @@ int32_t run() noexcept
             std::scoped_lock lock(a.mutex);
             if (!a.app)
                 return -1;
-            a.quitting = false;   // a quit() from before still ends the loop: its call is queued
+            a.quitting = false;
         }
         QCoreApplication::exec();
-        // The loop is over: post() accepts nothing until the next run().
         std::scoped_lock lock(a.mutex);
         a.quitting = true;
         return a.exitCode.load();
@@ -148,7 +142,6 @@ void shutdown() noexcept
             owned = std::move(a.app);
             a.queue = nullptr;
         }
-        // A functor that post() accepted runs: its context may own memory.
         if (queue)
             QCoreApplication::sendPostedEvents(queue, FunctorEvent::eventType());
         owned.reset();
@@ -167,7 +160,7 @@ int32_t providerAvailable(nvb_bytes provider) noexcept
     });
 }
 
-// XH-6: Url::parse stays in C++ (design §1.2, "Url ownership").
+// Url::parse stays in C++.
 nvb_error *urlParse(nvb_bytes url, nvb_url **out) noexcept
 {
     if (out)
@@ -201,7 +194,6 @@ nvb_error *urlFormat(const nvb_params *params, nvb_bytes path, nvb_blob **out) n
     });
 }
 
-// Field order as in the header.
 const nvb_ffi Table = {
     init,
     run,
@@ -246,10 +238,9 @@ const nvb_ffi Table = {
     discoveryFree,
 };
 
-} // namespace
-
-// The one place that looks into what a table function caught (T7). Any type
-// can arrive: std::exception gives a message, anything else none.
+}
+// The one place that looks into what a table function caught. std::exception gives a message,
+// anything else none.
 Result internalResult(const std::exception_ptr &thrown)
 {
     QString what = QStringLiteral("no exception");
@@ -259,7 +250,7 @@ Result internalResult(const std::exception_ptr &thrown)
     } catch (const std::exception &e) {
         what = QString::fromLocal8Bit(e.what());
     } catch (...) {
-        what = QStringLiteral("unknown exception");   // not a std::exception: no message
+        what = QStringLiteral("unknown exception");
     }
     qCWarning(lcNetVfsFfi).noquote() << "Internal error:" << what;
     return Result(Error::Internal, QStringLiteral("Internal error: %1").arg(what));
@@ -289,8 +280,7 @@ bool onQtThread()
     return application && QThread::currentThread() == application->thread();
 }
 
-} // namespace NetVfs::Ffi
-
+}
 extern "C" __attribute__((visibility("default"))) const nvb_ffi *nvb_ffi_get()
 {
     return &NetVfs::Ffi::Table;

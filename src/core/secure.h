@@ -9,11 +9,10 @@
 
 namespace NetVfs {
 
-// SEC-5: overwrite secret material before release (best effort; detaches first
-// so a shared copy is not left behind by this call).
+// Overwrite secret material before release (best effort; detaches first so a shared copy is not
+// left behind).
 NETVFS_EXPORT void secureWipe(QByteArray &data);
 NETVFS_EXPORT void secureWipe(QString &data);
 
-} // namespace NetVfs
-
+}
 #endif

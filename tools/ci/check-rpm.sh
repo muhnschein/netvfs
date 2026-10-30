@@ -1,35 +1,25 @@
 #!/bin/sh
 # SPDX-License-Identifier: LGPL-2.1-or-later
 # Checks the built RPMs (RPMS/*.rpm) in the Sailfish OS Platform SDK:
-#   - the package dependencies of SPEC-v2 XP-1: every package requires
-#     netvfs of the same build (XC-1a), libnetvfs requires QtNetwork
-#     (discovery, XD-1), only netvfs-backup depends on Buteo (XP-4), no
-#     package requires the bridge (XP-5) and only its accounts helper is
-#     setgid privileged (XB-2a);
-#   - the bridge's %post stops running bridges (XP-7);
-#   - the Rust binaries of the bridge package link only the libraries they
-#     should (the setgid helper libc, libgcc_s and SQLite; netvfs-bridge no
-#     Qt, which it reaches only through its C ABI), need no newer glibc than
-#     the target's and are hardened (check-linked-libs.sh);
-#   - that C ABI, libnetvfs-bridge-ffi.so, exports one symbol, is hardened and
-#     sits where netvfs-bridge loads it from, next to the backend folder of
-#     libnetvfs's BackendLoader (check-ffi-lib.sh; doc/RUST.md);
-#   - libnetvfs-rs.so, the Rust backends, exports one symbol, links only the
-#     C runtime, needs no newer glibc than the target's, is hardened and sits
-#     where the plugins that load it look for it (check-rs-lib.sh), the SMB
-#     plugin among them;
-#   - no file of the main package links libssh or libcrypto (SSH is in
-#     libnetvfs-rs.so);
-#   - all packages install into the SDK target (resolving Requires from the
-#     release repositories), every ELF file resolves its libraries and none
-#     carries a library search path from the build.
+#   - package dependencies: every package requires netvfs of the same build, libnetvfs requires QtNetwork, only
+#     netvfs-backup depends on Buteo, no package requires the bridge, only the accounts helper is setgid privileged;
+#   - bridge %post stops running bridges;
+#   - Rust binaries of the bridge package link only the libraries they should (setgid helper: libc, libgcc_s,
+#     SQLite; netvfs-bridge: no Qt), need no newer glibc than the target's and are hardened (check-linked-libs.sh);
+#   - libnetvfs-bridge-ffi.so exports one symbol, is hardened and sits where netvfs-bridge loads it from, next to
+#     the backend folder of libnetvfs's BackendLoader (check-ffi-lib.sh);
+#   - libnetvfs-rs.so exports one symbol, links only the C runtime, needs no newer glibc, is hardened and sits
+#     where the plugins that load it look for it, SMB plugin included (check-rs-lib.sh);
+#   - no file of the main package links libssh or libcrypto;
+#   - all packages install into the SDK target (Requires from the release repositories), every ELF file resolves
+#     its libraries and none carries a build library search path.
 # Env: SDK_IMAGE (container image), TARGET (sb2 target name).
 set -eu
 : "${SDK_IMAGE:?}" "${TARGET:?}"
 
 if [ "${1:-}" != --in-sdk ]; then
     root=$(cd "$(dirname "$0")/../.." && pwd)
-    # The SDK runs as mersdk (uid 100000).
+    # SDK runs as mersdk (uid 100000).
     sudo chown -R 100000:100000 "$root"
     trap 'sudo chown -R "$(id -u):$(id -g)" "$root"' EXIT
     docker run --rm -e TARGET -e SDK_IMAGE -v "$root:/home/mersdk/src" -w /home/mersdk/src "$SDK_IMAGE" \
@@ -69,22 +59,20 @@ for r in $rpms; do
     echo "== $name"
     echo "$requires" | sed 's/^/  requires: /'
     rpm -qp --recommends "$r" | sed 's/^/  recommends: /'
-    # XC-1a
     if [ "$name" != netvfs ] && ! echo "$requires" | grep -qxF "$main_dependency"; then
         fail "$name does not require $main_dependency"
     fi
-    # XP-4: Buteo only for the backup package.
+    # Buteo only for the backup package.
     if [ "$name" != netvfs-backup ] && echo "$requires" | grep -qi buteo; then
         fail "$name depends on Buteo"
     fi
-    # XP-5: the setgid helper only where it is asked for.
+    # Setgid helper only where asked for.
     if echo "$requires" | grep -q '^netvfs-bridge'; then
         fail "$name requires netvfs-bridge"
     fi
 done
 
-# SPEC-v2 XB-2a: the accounts helper reads the accounts database as group
-# privileged; the bridge itself runs without it.
+# Accounts helper reads the accounts database as group privileged; the bridge runs without it.
 if bridge_rpm=$(rpm_of netvfs-bridge); then
     modes=$(rpm -qp --qf '[%{FILEMODES:perms} %{FILEUSERNAME}:%{FILEGROUPNAME} %{FILENAMES}\n]' "$bridge_rpm")
     helper_mode=$(echo "$modes" | grep ' /usr/libexec/netvfs/netvfs-accounts$' || true)
@@ -95,13 +83,13 @@ if bridge_rpm=$(rpm_of netvfs-bridge); then
     if [ "${bridge_mode%% *}" != "-rwxr-xr-x" ]; then
         fail "netvfs-bridge is set-id: $bridge_mode"
     fi
-    # XP-7: an upgrade stops bridges still running the old binary.
+    # An upgrade stops bridges still running the old binary.
     if ! rpm -qp --qf '%{POSTIN}' "$bridge_rpm" | grep -qxF "systemctl-user stop 'netvfs-bridge@*.service' || :"; then
         fail "netvfs-bridge %post does not stop running bridges"
     fi
 fi
 
-# SPEC-v2 XD-1: libnetvfs links QtNetwork, so netvfs requires it.
+# libnetvfs links QtNetwork, so netvfs requires it.
 if ! rpm -qp --requires "$main_rpm" | grep -q '^libQt5Network\.so\.5'; then
     fail "netvfs does not require libQt5Network.so.5"
 fi
@@ -114,11 +102,8 @@ extract() {
 }
 extract "$main_rpm" "$work/main"
 
-# SPEC-v2 XB-2a: the setgid helper links only libc, libgcc_s and the
-# system SQLite (no Qt, GLib or libaccounts); netvfs-bridge only libc,
-# libgcc_s and libm (Qt and the backends come with its C ABI, by dlopen).
-# Both need no newer glibc than the target's and are hardened PIEs
-# (check-linked-libs.sh).
+# Setgid helper links only libc, libgcc_s, system SQLite (no Qt, GLib, libaccounts); netvfs-bridge only libc, libgcc_s,
+# libm (Qt and backends come via its C ABI, dlopen). Both: no newer glibc than the target's, hardened PIEs.
 target_glibc=$(sb2 -t "$TARGET" rpm -q --qf '%{VERSION}' glibc)
 if bridge_rpm=$(rpm_of netvfs-bridge); then
     extract "$bridge_rpm" "$work/bridge"
@@ -126,9 +111,8 @@ if bridge_rpm=$(rpm_of netvfs-bridge); then
         "libc.so.6 libgcc_s.so.1 libsqlite3.so.0" "$target_glibc" || fail "netvfs-accounts: see above"
     sh tools/ci/check-linked-libs.sh "$work/bridge/usr/libexec/netvfs/netvfs-bridge" \
         "libc.so.6 libgcc_s.so.1 libm.so.6" "$target_glibc" || fail "netvfs-bridge: see above"
-    # The C ABI where the package puts it: the path compiled into the
-    # bridge, and next to the backend folder compiled into libnetvfs
-    # (BackendLoader::searchPaths, a UTF-16 string literal).
+    # C ABI where the package puts it: path compiled into the bridge, and next to the backend folder compiled into
+    # libnetvfs (BackendLoader::searchPaths, a UTF-16 string literal).
     ffi_path=$(rpm -qpl "$bridge_rpm" | grep '/libnetvfs-bridge-ffi\.so$' || true)
     if [ -z "$ffi_path" ]; then
         fail "netvfs-bridge contains no libnetvfs-bridge-ffi.so"
@@ -146,8 +130,7 @@ if bridge_rpm=$(rpm_of netvfs-bridge); then
     fi
 fi
 
-# The Rust backends: the library in the main package, and every plugin of it
-# (a backend that looks up nvr_get) looks for it where the package puts it.
+# Rust backends: library in the main package; every plugin of it (backend that looks up nvr_get) looks for it where the package puts it.
 rs_path=$(rpm -qpl "$main_rpm" | grep '/libnetvfs-rs\.so$' || true)
 if [ -z "$rs_path" ]; then
     fail "netvfs contains no libnetvfs-rs.so"
@@ -162,8 +145,7 @@ else
         || fail "libnetvfs-rs.so: see above"
 fi
 
-# SSH comes from libnetvfs-rs.so (russh over ring): no file of the main
-# package links libssh or the platform's libcrypto.
+# SSH comes from libnetvfs-rs.so (russh over ring): no file of the main package links libssh or libcrypto.
 for file in $(find "$work/main" -type f); do
     [ "$(head -c 4 "$file" | od -An -c | tr -d ' ')" = '177ELF' ] || continue
     if readelf -d "$file" | grep -E '\(NEEDED\).*\[lib(ssh|crypto)\.so'; then

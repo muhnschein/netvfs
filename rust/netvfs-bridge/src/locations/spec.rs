@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! [`LocationSpec`]: one location a consumer may see (XB-7), an account
-//! with the Files service or an ad-hoc location it created (port of
-//! `location.cpp`), and [`Attention`] (XB-14).
+//! [`LocationSpec`]: one location a consumer may see, an account with the Files service or an ad-hoc location it created, and [`Attention`].
 
 use super::state::ConnectionState;
 use crate::ffi::Params;
@@ -12,7 +10,7 @@ use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 use zbus::zvariant::{OwnedValue, Str, Value};
 use zeroize::Zeroizing;
 
-/// Why an account needs the user (XB-14): the platform part's type.
+/// Why an account needs the user.
 pub use crate::accounts::Attention;
 
 /// Which kind of location.
@@ -27,9 +25,7 @@ pub enum LocationKind {
     AdHoc,
 }
 
-/// The secret a consumer gave for an ad-hoc location (XB-16), held for the
-/// connections of its pool and wiped when the location goes away. Shared
-/// by every copy of the spec, so one wipe reaches all of them.
+/// The secret a consumer gave for an ad-hoc location, held for the connections of its pool and wiped when the location goes away.
 pub struct AdHocSecret {
     user: String,
     secret: Mutex<Zeroizing<Vec<u8>>>,
@@ -48,7 +44,7 @@ impl AdHocSecret {
         &self.user
     }
 
-    /// A copy of the secret (wiped when dropped); empty after a wipe.
+    /// A copy of the secret (wiped when dropped).
     #[must_use]
     pub fn secret(&self) -> Zeroizing<Vec<u8>> {
         self.secret.lock().unwrap_or_else(PoisonError::into_inner).clone()
@@ -67,23 +63,19 @@ impl fmt::Debug for AdHocSecret {
     }
 }
 
-/// The id of an account's location: `account:<n>`.
+/// The id of an account's location.
 #[must_use]
 pub fn account_location_id(account_id: i32) -> String {
     format!("account:{account_id}")
 }
 
-/// The id of the `n`th ad-hoc location of the bridge run `run`:
-/// `adhoc:<run>-<n>`, `run` as 16 hex digits (XB-10). Ad-hoc locations
-/// end with the run while consumers may still hold their ids; `run`
-/// differs between runs, so a later run never gives such an id to another
-/// location.
+/// The id of the `n`th ad-hoc location of the bridge run `run`.
 #[must_use]
 pub fn ad_hoc_location_id(run: u64, n: u64) -> String {
     format!("adhoc:{run:016x}-{n}")
 }
 
-/// One location (`LocationSpec`). The parameters never hold a secret.
+/// One location.
 #[derive(Debug, Clone)]
 pub struct LocationSpec {
     /// `account:<n>` or `adhoc:<run>-<n>`.
@@ -94,21 +86,19 @@ pub struct LocationSpec {
     pub provider: String,
     /// The display name.
     pub name: String,
-    /// What a connection needs (for an account the listed parameters;
-    /// connections use what the helper's `files` answer gives).
+    /// What a connection needs.
     pub params: Params,
     /// The start folder (`files_root`, the URL's path), protocol bytes.
     pub start_path: Vec<u8>,
     /// An account's attention state.
     pub attention: Attention,
-    /// Ad hoc only: the secret the consumer gave.
+    /// Ad hoc only.
     pub ad_hoc_secret: Option<Arc<AdHocSecret>>,
-    /// `info()`'s URL, formatted once per spec.
     url: OnceLock<Option<String>>,
 }
 
 impl LocationSpec {
-    /// The location of a Files account (`specFor`).
+    /// The location of a Files account.
     #[must_use]
     pub fn account(
         account_id: i32,
@@ -131,8 +121,7 @@ impl LocationSpec {
         }
     }
 
-    /// An ad-hoc location with the id `id` (from
-    /// [`LocationBook::reserve_ad_hoc_id`](super::book::LocationBook::reserve_ad_hoc_id)).
+    /// An ad-hoc location with the id `id` (from [`LocationBook::reserve_ad_hoc_id`](super::book::LocationBook::reserve_ad_hoc_id)).
     #[must_use]
     pub fn ad_hoc(
         id: impl Into<String>,
@@ -154,7 +143,7 @@ impl LocationSpec {
         }
     }
 
-    /// The account's id; `None` for an ad-hoc location.
+    /// The account's id.
     #[must_use]
     pub const fn account_id(&self) -> Option<i32> {
         match self.kind {
@@ -163,15 +152,13 @@ impl LocationSpec {
         }
     }
 
-    /// `<provider>://<host>:<port>` with the host in lower case: the
-    /// per-host limit (XB-12) and the known_hosts key (XB-14).
+    /// `<provider>://<host>:<port>` with the host in lower case.
     #[must_use]
     pub fn host_key(&self) -> String {
         format!("{}://{}:{}", self.provider, self.params.host.to_lowercase(), self.params.port)
     }
 
-    /// Whether `other` connects the same way (`sameConnection`: provider,
-    /// host, port, user and options; not the timeouts).
+    /// Whether `other` connects the same way.
     #[must_use]
     pub fn same_connection(&self, other: &Params) -> bool {
         let a = &self.params;
@@ -182,10 +169,7 @@ impl LocationSpec {
             && a.options == other.options
     }
 
-    /// The `a{sv}` of `ListLocations`: `kind`, `host`, `port` (when set),
-    /// `user` (when set), `path`, `url` (when `format_url` gives one; asked
-    /// once per spec), `state` (of `state`, XB-12) with `stateError` when
-    /// it failed, and for accounts `accountId` and `attention` (when set).
+    /// The `a{sv}` of `ListLocations`.
     pub fn info(
         &self,
         state: ConnectionState,
@@ -237,7 +221,6 @@ impl LocationSpec {
     }
 }
 
-/// A string value.
 fn text(s: &str) -> OwnedValue {
     OwnedValue::from(Str::from(s.to_owned()))
 }
@@ -289,7 +272,6 @@ mod tests {
         assert_eq!(account_location_id(12), "account:12");
         assert_eq!(ad_hoc_location_id(0x1f, 3), "adhoc:000000000000001f-3");
         assert_eq!(ad_hoc_location_id(u64::MAX, 12), "adhoc:ffffffffffffffff-12");
-        // The longest is still a location id the bridge takes back.
         assert!(is_valid_location_id(&ad_hoc_location_id(u64::MAX, u64::MAX)));
         let account = LocationSpec::account(
             7,
@@ -359,16 +341,13 @@ mod tests {
         assert_eq!(string(&info, "state").as_deref(), Some("failed"));
         assert_eq!(string(&info, "stateError").as_deref(), Some("AuthFailed"));
         assert_eq!(info.len(), 10);
-        // The URL is formatted once per spec.
         let again = spec.info(ConnectionState::Connected, |_: &Params, _: &[u8]| -> Option<String> {
             panic!("formatted twice")
         });
         assert_eq!(string(&again, "url").as_deref(), Some("sftp://srv/home/\u{fffd}"));
         assert_eq!(asked.get(), 1);
-        // Only a failed state has an error.
         assert_eq!(string(&again, "state").as_deref(), Some("connected"));
         assert!(!again.contains_key("stateError"));
-        // No attention, no port, no user, no URL.
         spec = LocationSpec::account(5, "sftp", "Five", params("srv", 0), Vec::new(), Attention::None);
         spec.params.username.clear();
         let info = spec.info(ConnectionState::Disconnected, |_: &Params, _: &[u8]| None);
@@ -384,7 +363,6 @@ mod tests {
         let info = spec.info(ConnectionState::Connecting, |_: &Params, _: &[u8]| Some(String::new()));
         assert_eq!(string(&info, "kind").as_deref(), Some("adhoc"));
         assert_eq!(string(&info, "state").as_deref(), Some("connecting"));
-        // An empty URL is no URL; ad-hoc locations have no account id.
         assert!(
             !info.contains_key("url") && !info.contains_key("accountId") && !info.contains_key("attention")
         );
@@ -396,7 +374,6 @@ mod tests {
         );
         assert_eq!(string(&wire.info, "state").as_deref(), Some("failed"));
         assert_eq!(string(&wire.info, "stateError").as_deref(), Some("NetworkUnreachable"));
-        // The cache holds what the first call gave: no URL.
         assert!(!wire.info.contains_key("url"));
         let fresh = LocationSpec::ad_hoc("adhoc:2", "Two", params("h", 21), b"/x".to_vec(), None);
         let wire =

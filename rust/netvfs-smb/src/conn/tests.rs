@@ -38,7 +38,6 @@ async fn an_unprotected_call_and_its_credits() {
         let req = peer.recv_one().await;
         assert_eq!(req.command(), Command::Echo);
         assert_eq!((req.header.message_id, req.header.credit_charge), (0, 1));
-        // Asks for enough to come back to the target.
         assert_eq!(req.header.credits, 128);
         assert!(!req.header.is_signed() && !req.encrypted);
         peer.send(&[fake::response(&req, NtStatus::SUCCESS, &four(), 10)], false).await;
@@ -47,7 +46,6 @@ async fn an_unprotected_call_and_its_credits() {
     let (r, mut peer) = tokio::join!(conn.call(Target::SESSION, echo(), &c), server);
     r.unwrap().ok().unwrap();
     assert_eq!(conn.credits(), 10);
-    // The next request has the next message id.
     let (r, ()) = tokio::join!(conn.call(Target::SESSION, echo(), &c), async {
         let req = peer.recv_one().await;
         assert_eq!((req.header.message_id, req.header.credits), (1, 119));
@@ -63,7 +61,6 @@ async fn statuses_and_error_bodies() {
     let c = CancelToken::new();
     let (r, ()) = tokio::join!(conn.call(Target::SESSION, echo(), &c), async {
         let req = peer.recv_one().await;
-        // An error without a well-formed ERROR body.
         peer.send(&[fake::response(&req, NtStatus::ACCESS_DENIED, &[9, 0], 1)], false).await;
     });
     let r = r.unwrap();
@@ -129,7 +126,6 @@ async fn notifications_are_skipped() {
         peer.send(&[fake::response(&req, NtStatus::SUCCESS, &four(), 3)], false).await;
     });
     r.unwrap().ok().unwrap();
-    // The notification's credits were not counted.
     assert_eq!(conn.credits(), 3);
 }
 
@@ -147,7 +143,7 @@ async fn signed_requests_need_signed_responses() {
         peer
     });
     r.unwrap().ok().unwrap();
-    // Unsigned: refused, and the connection is gone (XC-21).
+    // Unsigned: refused, and the connection is gone.
     let (r, ()) = tokio::join!(conn.call(Target::SESSION, echo(), &c), async {
         let req = peer.recv_one().await;
         peer.send(&[error(&req, NtStatus::ACCESS_DENIED, 1)], false).await;
@@ -282,7 +278,6 @@ async fn send_now_goes_only_with_enough_credits() {
     let tickets = conn.send_now(Target::SESSION, &[echo()]).unwrap().unwrap();
     assert_eq!(tickets.len(), 1);
     assert_eq!(peer.recv_one().await.command(), Command::Echo);
-    // No credit left: nothing goes, and that is no error.
     assert!(conn.send_now(Target::SESSION, &[echo()]).unwrap().is_none());
     assert_eq!(conn.0.lock().next_mid, 1);
 }
@@ -299,7 +294,6 @@ async fn encrypted_requests_need_encrypted_responses() {
             peer
         });
         r.unwrap().ok().unwrap();
-        // An error response in the clear: refused.
         let (r, ()) = tokio::join!(conn.call(Target::SESSION, echo(), &c), async {
             let req = peer.recv_one().await;
             let mut msg = error(&req, NtStatus::ACCESS_DENIED, 1);
@@ -338,7 +332,6 @@ async fn an_encrypting_tree_on_a_signing_session() {
         peer.send(&[fake::response(&req, NtStatus::SUCCESS, &four(), 1)], true).await;
     });
     r.unwrap().ok().unwrap();
-    // Without a cipher there is nothing to encrypt with.
     let (conn, _peer) = established(None, false, 8).await;
     assert!(!conn.can_encrypt());
     assert!(matches!(conn.call(tree, echo(), &c).await, Err(Error::Protocol(_))));
@@ -403,7 +396,6 @@ async fn sealed_compounds_and_responses_in_separate_frames() {
     let (r, ()) = tokio::join!(conn.compound(Target::SESSION, vec![echo(), echo()], &c), async {
         let reqs = peer.recv().await;
         assert!(reqs.iter().all(|r| r.encrypted && !r.header.is_signed()));
-        // Answered one by one.
         peer.send(&[fake::response(&reqs[1], NtStatus::SUCCESS, &four(), 1)], true).await;
         peer.send(&[fake::response(&reqs[0], NtStatus::SUCCESS, &four(), 1)], true).await;
     });
@@ -431,7 +423,6 @@ async fn large_requests_take_several_credits() {
     });
     r.unwrap();
     assert_eq!(conn.credits(), 40);
-    // Without multi-credit a large payload is a local error.
     conn.set_limits(1 << 20, false);
     let big = Element::new(Command::Read, vec![]).payload(CREDIT_UNIT + 1);
     assert!(matches!(conn.call(Target::SESSION, big, &c).await, Err(Error::Local(_))));
@@ -442,7 +433,6 @@ async fn requests_wait_for_credits() {
     let (conn, mut peer) = established(None, false, 1).await;
     let c = CancelToken::new();
     let first = conn.send(Target::SESSION, vec![echo()], &c).await.unwrap();
-    // No credit left: the second waits until the first's response grants one.
     let (r, ()) = tokio::join!(conn.call(Target::SESSION, echo(), &c), async {
         let req = peer.recv_one().await;
         tokio::time::sleep(Duration::from_millis(50)).await;
@@ -459,7 +449,6 @@ async fn requests_wait_for_credits() {
     for t in first {
         t.wait(&c).await.unwrap();
     }
-    // Nothing outstanding and too few credits: an error, not a hang.
     conn.0.lock().credits = 0;
     let e = conn.call(Target::SESSION, echo(), &c).await.unwrap_err();
     assert!(matches!(e, Error::Protocol(ref m) if m.contains("granted 0 credits")), "{e}");
@@ -478,14 +467,12 @@ async fn cancel_sends_cancel_and_keeps_the_connection() {
         assert_eq!((cancel.header.message_id, cancel.header.tree_id), (req.header.message_id, 5));
         assert_eq!((cancel.header.credit_charge, cancel.header.credits), (0, 0));
         assert!(cancel.header.is_signed());
-        // The canceled request ends; its response is discarded.
         let mut msg = error(&req, NtStatus::CANCELLED, 1);
         peer.sign(&mut msg);
         peer.send(&[msg], false).await;
         peer
     });
     assert_eq!(r, Err(Error::Canceled));
-    // The next message id follows; CANCEL took none.
     let c = CancelToken::new();
     let (r, ()) = tokio::join!(conn.call(Target::SESSION, echo(), &c), async {
         let req = peer.recv_one().await;
@@ -535,7 +522,6 @@ async fn an_abandoned_create_is_closed() {
     drop(tickets);
     let cancel = peer.recv_one().await;
     assert_eq!(cancel.command(), Command::Cancel);
-    // The server opened the file anyway.
     let mut body = vec![0u8; 88];
     body[..2].copy_from_slice(&89u16.to_le_bytes());
     body[64..80].copy_from_slice(&[0xAB; 16]);
@@ -546,7 +532,6 @@ async fn an_abandoned_create_is_closed() {
     assert_eq!(close.command(), Command::Close);
     assert_eq!(close.header.tree_id, 4);
     assert_eq!(&close.body()[8..24], &[0xAB; 16]);
-    // Taken but not read: the same.
     let tickets = conn
         .send(tree, vec![Element::new(Command::Create, create.encode().unwrap()).owning()], &c)
         .await
@@ -567,7 +552,6 @@ async fn a_request_times_out_and_the_connection_ends() {
     let c = CancelToken::new();
     let (r, _req) = tokio::join!(conn.call(Target::SESSION, echo(), &c), peer.recv_one());
     assert_eq!(r, Err(Error::Timeout));
-    // Before sign-in the reason stays; after it, it is a lost connection.
     assert_eq!(conn.usable(), Err(Error::Timeout));
     conn.0.lock().established = true;
     assert_eq!(conn.usable(), Err(Error::Lost("the server did not answer in time".into())));
@@ -597,7 +581,6 @@ async fn close_logs_off_and_later_calls_fail() {
     assert!(logoff.encrypted);
     let c = CancelToken::new();
     assert_eq!(conn.call(Target::SESSION, echo(), &c).await, Err(Error::Lost(CLOSED.into())));
-    // The socket is closed.
     assert!(read_frame_eof(&mut peer).await);
     conn.abort();
 }

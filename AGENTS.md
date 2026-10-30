@@ -1,6 +1,6 @@
 # AGENTS.md
 
-How to work on netvfs. What it is: `README.md`, `doc/` (index `doc/README.md`; requirement IDs such as `C-9`, `XB-10`, `M-9`). Read `doc/RUST.md` before first change. User's words in chat beat this file.
+How to work on netvfs. What it is: `README.md`, `doc/SPEC.md` (platform contract, trust model, budgets, limits, roadmap). Read `doc/RUST.md` before first change. User's words in chat beat this file.
 
 ## Ground rules
 
@@ -33,7 +33,7 @@ PR opens as draft on first push. Mark ready for review only once steps 1–7 hol
 
 Backend and core code runs in every process that loads a backend (bridge, msyncd via Buteo, `netvfs-cli`, account UI) → cover all it reaches. Behaviour both protocols share → change and test SFTP and SMB.
 
-User tests RPMs on phone; that test judges feel, lag, real servers. Say exactly what to check on device (SPEC 12.3, 12.4 for accounts and backups).
+User tests RPMs on phone; that test judges feel, lag, real servers. Say exactly what to check on device. Accounts and backups: create account per auth mode (wrong input: specific message, no account); manual backup, list, restore byte-identical; scheduled backup, screen off; server unreachable or upload cut: no leftover, no file without `.part`; changed host key or password: run fails, account not signed in, update flow fixes; account delete leaves server files.
 
 ## Device tests
 
@@ -64,11 +64,11 @@ User tests RPMs on phone; that test judges feel, lag, real servers. Say exactly 
 - Server and consumer data = hostile: every length checked against its cap before allocating. New decoder → fuzz target (`rust/fuzz`, `tests/fuzz`).
 - Mutant exclusion (`rust/.cargo/mutants.toml`) only with proof it changes no observable behaviour, written beside it. `crypto.rs`: none.
 - Tests wait on signals or conditions, not fixed sleeps or wall-clock asserts (those flake on loaded runners).
-- New dependency must earn its keep: well maintained, widely used, more than someone's pet project, builds at Rust 1.95, `cargo deny` clean (second version only with reason in `rust/deny.toml`). Say why in RUST.md's dependency list (protocol or crypto crate: SPEC 10.1 too). Update with pinned cargo: `cd rust && cargo update -p <crate>`. `russh` pins RustCrypto pre-releases: bump as one unit. `rust/vendor/ssh-key`, `rust/vendor/picky-asn1-der` = patched copies (`README.netvfs.md` in each).
+- New dependency must earn its keep: well maintained, widely used, more than someone's pet project, builds at Rust 1.95, `cargo deny` clean (second version only with reason in `rust/deny.toml`). Say why in RUST.md's dependency list. Update with pinned cargo: `cd rust && cargo update -p <crate>`. `russh` pins RustCrypto pre-releases: bump as one unit. `rust/vendor/ssh-key`, `rust/vendor/picky-asn1-der` = patched copies (`README.netvfs.md` in each).
 
 ## UI and words
 
-- Account UI (`accounts/ui`, *Settings → Accounts*): Silica stock components, platform account types as SPEC §7 lists; built like existing pages.
+- Account UI (`accounts/ui`, *Settings → Accounts*): Silica stock components, platform account types of `jolla-settings-accounts` (`AccountCreationAgent`, `AccountSettingsAgent`, `AccountCredentialsAgent`, `AccountBusyPage`, `StandardAccountSettingsPullDownMenu`); no `OnlineSync*`, `AccountFactory` (assume HTTP); built like existing pages.
 - "Design first" / "no PR yet" → mockup, wait for approval, then code.
 - Every string `qsTrId()` with `//%` engineering English; catalogue generated at build (`translations/translations.pro`).
 - Host QML tests (`tests/unit/qml`) and target load (`tests/qmltarget`, real Silica) don't prove looks: unproven until device test. Say so.
@@ -77,9 +77,9 @@ User tests RPMs on phone; that test judges feel, lag, real servers. Say exactly 
 ## Comments and docs
 
 - Caveman-full = drop articles, filler, pleasantries, hedging. Fragments OK, short words. Identifiers, paths, code, errors exact. E.g. "`rust/Cargo.lock` from pinned cargo: resolver v3 prefers crates whose `rust-version` fits 1.95."
-- Code comments, `doc/*.md`, this file: caveman-full. What is true now and why; keep constraints; cite sections and requirement IDs. No changelog, bug report, history, story (git's job): delete comment rather than turn it into history. Existing prose: rewrite what you touch, not more.
+- Code comments, `doc/*.md`, this file: caveman-full. What is true now and why; keep constraints. No changelog, bug report, history, story (git's job): delete comment rather than turn it into history. Existing prose: rewrite what you touch, not more.
 - Default: no comment. One only for constraint, external quirk, invariant code can't show; one line where possible, four max. Applies to new and touched code; trim old long comments when changing that code anyway, no sweep.
-- SPDX header on every source file. Behaviour change → SPEC, RUST.md updated, same PR; specs describe what exists, no change notes.
+- SPDX header on every source file. Change to what `doc/SPEC.md` or `doc/RUST.md` states → update it, same PR; describe what exists, no change notes. Details stay in code and tests.
 - `README.md`, `CHANGELOG.md`, release notes, forum posts: plain prose for users, as short and to the point as possible.
 - User-visible change → line in `CHANGELOG.md` under `## Unreleased` (file or section missing → create it), same PR.
 - No plans, research notes, scratch files in repo.

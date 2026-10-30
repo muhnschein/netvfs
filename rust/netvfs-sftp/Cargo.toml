@@ -12,7 +12,7 @@ workspace = true
 
 [dependencies]
 netvfs-vfs = { path = "../netvfs-vfs" }
-# The SSH transport (doc/RUST.md "netvfs-sftp"). Exact version: russh pins
+# The SSH transport. Exact version: russh pins
 # pre-releases of ssh-key and rsa, so it moves as one unit. `ring` is the
 # crypto provider (no aws-lc, no C build beyond ring's); `rsa` only to
 # verify rsa-sha2 host signatures (RSA user keys are refused).

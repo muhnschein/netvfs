@@ -1,10 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: LGPL-2.1-or-later
-# Prove tools/ci/core-backtraces.sh turns a test's core into a readable backtrace.
-#
-# Real core of a real binary (gdb writes it, stopped at its first
-# instruction), named as ci.yml's `kernel.core_pattern` names it. Needs gdb:
-# missing = SKIP locally, FAIL in CI.
+# Prove core-backtraces.sh turns a test's core into a readable backtrace. Real core of a real binary (gdb writes it, stopped at first instruction), named as ci.yml's `kernel.core_pattern`. Needs gdb: missing = SKIP locally, FAIL in CI.
 set -u
 
 root=$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd)
@@ -38,7 +34,7 @@ check() {
     return 0
 }
 
-# Binary of our own, so "gone" can be made true.
+# Own binary, so "gone" can be made true.
 exe="$work/bin/crasher"
 mkdir -p "$work/bin"
 cp "$(command -v sleep)" "$exe"

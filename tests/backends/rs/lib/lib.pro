@@ -1,10 +1,5 @@
 # SPDX-License-Identifier: LGPL-2.1-or-later
-# libnetvfs-rs.so with the mem backend (feature "testing") for the shim's
-# tests, from cargo's rs-test profile (unoptimised, panics unwind as in
-# rs-release). Never installed; the tests load it with $NETVFS_RS_LIB. It
-# stays uninstrumented under NETVFS_SANITIZE (only the C++ side runs under
-# ASan); under NETVFS_COVERAGE it counts, as the bridge does
-# (src/bridge/rust/rust.pro), and tools/ci/rust-coverage.sh reads it.
+# libnetvfs-rs.so with the mem backend (feature "testing") for the shim's tests, from cargo's rs-test profile (unoptimised, panics unwind). Never installed; tests load it via $NETVFS_RS_LIB. Uninstrumented under NETVFS_SANITIZE; counts under NETVFS_COVERAGE (tools/ci/rust-coverage.sh reads it).
 include(../../../../common.pri)
 include(../rstest.pri)
 

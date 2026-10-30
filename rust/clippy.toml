@@ -1,4 +1,4 @@
-# Tests may unwrap, panic and index: a failing test is the point.
+# Tests may unwrap, panic, index.
 allow-unwrap-in-tests = true
 allow-expect-in-tests = true
 allow-panic-in-tests = true
