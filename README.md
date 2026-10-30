@@ -21,25 +21,10 @@ The SFTP client is for OpenSSH servers; the SMB client speaks SMB 3.1.1 only
 
 ## Where it sits
 
-```
-  Settings                          Apps (sandboxed)
- ┌──────────┐  ┌──────────┐        ┌───────────────┐
- │ Accounts │  │  Backup  │        │    Lautta     │
- └────┬─────┘  └────┬─────┘        └───────┬───────┘
-      │             │ backup service,      │ socket in the
-      │             │ sync framework       │ app's own folder
-      │        ┌────▼─────┐        ┌───────▼───────┐
-      │        │  backup  │        │ netvfs-bridge ├───► UDisks2: memory
-      │        │  plugins │        │ one per app   │     cards, USB drives
-      │        └────┬─────┘        └───────┬───────┘
- ┌────▼─────────────▼──────────────────────▼───────┐
- │ libnetvfs: accounts, sessions                   ├───► accounts and
- ├─────────────────────────────────────────────────┤     credential store
- │ SFTP and SMB clients (Rust)                     │
- └────────────────────────┬────────────────────────┘
-                          ▼
-                 SFTP and SMB servers
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset=".github/readme/stack-dark.png">
+  <img alt="netvfs between Settings, the Sailfish OS services, sandboxed apps such as Lautta, and SFTP and SMB servers" src=".github/readme/stack-light.png" width="880">
+</picture>
 
 - An account is made and edited only in Settings. Apps hand off to Settings
   for that; the bridge never changes an account.
@@ -65,10 +50,10 @@ one go.
 
 ## Limitations
 
-- No protocol or crypto of our own: the cryptography comes from established
-  Rust crates.
-- No legacy crypto: SSH only with Curve25519 or hybrid post-quantum key
-  exchange, AEAD ciphers, no SHA-1 or DSA host keys; SMB 3.1.1 only.
+- We never roll our own crypto: the cryptography comes from established Rust
+  crates.
+- Only modern crypto wherever possible: SSH only with Curve25519/hybrid PQC
+  key exchange, AEAD ciphers; SMB 3.1.1 only.
 - No folder sync, no mounting servers as file systems.
 - Not for the Jolla Store: it installs system files and a setgid helper.
 
@@ -97,8 +82,18 @@ $ ./tools/ci/cargo-tool.sh cargo-nextest 0.9.148
 $ make check
 ```
 
+## Attributions
+
+* [russh](https://github.com/Eugeny/russh), for SSH in Rust.
+* [sspi-rs](https://github.com/Devolutions/sspi-rs), for NTLM sign-in.
+* [ring](https://github.com/briansmith/ring) and
+  [RustCrypto](https://github.com/RustCrypto), for the cryptography.
+* Jolla's Nextcloud account, for showing how a backup account plugs into
+  Sailfish OS. netvfs's backup plugin is adapted from it.
+
 ## License
 
-Licensed LGPL-2.1-or-later, see the LICENSE file for details.
+Licensed LGPL-2.1-or-later, see the LICENSE file for details. The backup
+plugin parts adapted from Jolla are BSD-3-Clause; each file says so.
 
 Copyright © netvfs contributors.
