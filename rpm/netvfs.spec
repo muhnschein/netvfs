@@ -70,6 +70,7 @@ Headers and pkg-config file for building applications on libnetvfs.
 
 %package backup
 Summary:    SFTP and SMB backups
+License:    LGPL-2.1-or-later AND BSD-3-Clause
 Requires:   %{name} = %{version}-%{release}
 Requires:   buteo-syncfw-qt5-msyncd
 Requires:   jolla-vault
@@ -173,6 +174,7 @@ systemctl-user daemon-reload || :
 %{_libdir}/pkgconfig/netvfs.pc
 
 %files backup
+%license src/buteo/lib/BSD-3-Clause.txt
 %{_datadir}/accounts/services/sftp-backup.service
 %{_libdir}/buteo-plugins-qt5/oopp/libsftp-backup-client.so
 %{_libdir}/buteo-plugins-qt5/oopp/libsftp-backupquery-client.so

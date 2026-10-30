@@ -656,10 +656,11 @@ fn connections_are_reused_and_dropped(env: &Env) {
     rig.book.disconnect(&id);
     wait_until("disconnected", || f.live_backends() == 0);
     connect(&mut rig, &id).unwrap();
-    wait_until("idle", || {
-        rig.book.maintain(Instant::now() + Duration::from_secs(61), Duration::from_mins(1))
+    // `maintain` also reports reaping the disconnected worker: wait on the backend, not its result.
+    wait_until("closed when idle", || {
+        rig.book.maintain(Instant::now() + Duration::from_secs(61), Duration::from_mins(1));
+        f.live_backends() == 0
     });
-    wait_until("closed when idle", || f.live_backends() == 0);
     drop(rig);
     assert_eq!(f.live_backends(), 0);
 }
