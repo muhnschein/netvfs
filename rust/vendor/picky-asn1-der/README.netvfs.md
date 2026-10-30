@@ -6,7 +6,9 @@ Everything in this folder but this file is the crate as published on
 crates.io (`picky-asn1-der-0.5.7.crate`, SHA-256
 `b4467118a2c640f4040aea27d01293620984b0b3f3ef0c53577c3bbf6bab4256`;
 Devolutions/picky-rs commit `59487be05e6db1f01f5faa72fc926eb5fb4751b1`,
-folder `picky-asn1-der`), except one line.
+folder `picky-asn1-der`), except one line, and without its `Cargo.lock`
+(cargo ignores a path dependency's lockfile; its old pins only drew advisory
+alerts).
 
 ## What was changed
 
