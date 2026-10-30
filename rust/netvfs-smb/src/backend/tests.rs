@@ -699,8 +699,7 @@ async fn upload_writes_commits_and_sets_the_time() {
         assert_eq!(write.command(), Command::Write);
         let next = peer.recv_one().await;
         assert_eq!((next.command(), next.header.message_id), (Command::Cancel, write.header.message_id));
-        let close = peer.recv_one().await;
-        assert_eq!(close.command(), Command::Close);
+        answer_close(&mut peer).await;
     });
     assert_eq!(r.unwrap_err().message, "the local file went");
     // Stopped by the progress.
@@ -711,7 +710,7 @@ async fn upload_writes_commits_and_sets_the_time() {
         let write = peer.recv_one().await;
         assert_eq!(write.command(), Command::Write);
         assert_eq!(peer.recv_one().await.command(), Command::Cancel);
-        assert_eq!(peer.recv_one().await.command(), Command::Close);
+        answer_close(&mut peer).await;
     });
     assert_eq!(r.unwrap_err().name, ErrorName::Canceled);
 }
@@ -742,7 +741,7 @@ async fn open_write_refusals() {
     let (r, ()) = tokio::join!(smb.open_write(b"/f", &resume, &c), async {
         let req = create(&mut peer, NtStatus::SUCCESS, 0x20, 10).await;
         assert_eq!(create_of(&req), (0x0010_0083, 1, 0x40));
-        assert_eq!(peer.recv_one().await.command(), Command::Close);
+        answer_close(&mut peer).await;
     });
     let e = r.unwrap_err();
     assert_eq!(
@@ -754,8 +753,7 @@ async fn open_write_refusals() {
         tokio::join!(smb.open_write(b"/f", &resume, &c), create(&mut peer, NtStatus::SUCCESS, 0x20, 5));
     let w = r.unwrap();
     assert_eq!(w.position(), 5);
-    w.abort().await;
-    assert_eq!(peer.recv_one().await.command(), Command::Close);
+    tokio::join!(w.abort(), answer_close(&mut peer));
     // A resumed upload: the total counts what is there already.
     let mut source = Bytes { data: b"abc".to_vec(), at: 0, fail: false };
     let mut progress = Moves::default();

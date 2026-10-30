@@ -62,6 +62,13 @@ impl Open {
         resp.ok()?;
         check_close_response(&resp.msg)
     }
+
+    /// CLOSE, waited for also after a cancel: Samba holds a CLOSE until the
+    /// handle's WRITEs are done, and a remove before that only marks the
+    /// file for deletion (C-12). After a cancel, GRACE ends the wait.
+    async fn close_anyway(&self) {
+        drop(self.close(&CancelToken::new()).await);
+    }
 }
 
 fn status(e: Error, context: &str) -> Status {
@@ -458,7 +465,7 @@ impl WriteHandle for SmbWrite {
         let closed = if r.is_ok() {
             open.close(cancel).await.map_err(|e| status(e, "close"))
         } else {
-            open.conn.close_detached(open.target(), &open.file_id);
+            open.close_anyway().await;
             Ok(())
         };
         r?;
@@ -473,8 +480,12 @@ impl WriteHandle for SmbWrite {
         Ok(())
     }
 
-    /// Dropping the handle is the abort: see `Drop` below.
-    async fn abort(self) {}
+    async fn abort(mut self) {
+        self.drop_in_flight();
+        if let Some(open) = self.open.take() {
+            open.close_anyway().await;
+        }
+    }
 }
 
 impl Drop for SmbWrite {

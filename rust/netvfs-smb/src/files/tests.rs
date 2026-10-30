@@ -1,4 +1,7 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
+use std::future::Future;
+use std::pin::{Pin, pin};
+use std::task::{Context, Waker};
 use std::time::Duration;
 
 use super::*;
@@ -450,7 +453,7 @@ async fn a_write_of_nothing_fails_the_commit_and_closes() {
                     .await;
             }
             // No FLUSH and no times: the file is closed.
-            expect_close(&mut peer).await;
+            answer_close(&mut peer).await;
         });
         let e = r.unwrap_err();
         assert_eq!(
@@ -487,10 +490,14 @@ async fn a_failed_write_fails_every_later_call() {
     // Sticky: nothing more is sent, and commit only closes.
     assert_eq!(h.write(b"x", &c).await.unwrap_err(), e);
     assert_eq!(h.position(), u64::try_from(MAX_IN_FLIGHT).unwrap());
-    let (r, ()) = tokio::join!(h.commit(&c), async {
-        expect_close(&mut peer).await;
-    });
-    assert_eq!(r.unwrap_err(), e);
+    // As after a canceled upload: commit still waits for the CLOSE (C-12).
+    c.cancel();
+    let mut commit = pin!(h.commit(&c));
+    assert!(!done_now(commit.as_mut()));
+    let close = expect_close(&mut peer).await;
+    assert!(!done_now(commit.as_mut()));
+    peer.send(&[fake::response(&close, NtStatus::SUCCESS, &close_body(), 1)], false).await;
+    assert_eq!(commit.await.unwrap_err(), e);
 }
 
 #[tokio::test]
@@ -519,18 +526,31 @@ async fn commit_sets_the_modification_time_after_the_close() {
     assert_eq!(r, Ok(()));
 }
 
+/// Whether `f` is done when polled now.
+fn done_now(f: Pin<&mut impl Future>) -> bool {
+    let mut cx = Context::from_waker(Waker::noop());
+    f.poll(&mut cx).is_ready()
+}
+
 #[tokio::test]
-async fn abort_and_drop_close_without_flushing() {
+async fn abort_waits_for_the_close_and_drop_closes_without_flushing() {
     let (conn, mut peer) = started().await;
     let c = CancelToken::new();
     let mut h = SmbWrite::new(open_of(&conn), vec![u16::from(b'f')], 0, Some(MS), 1000);
     h.write(&content(0, 1500), &c).await.unwrap();
     let (first, _) = next(&mut peer).await;
-    h.abort().await;
+    // As after a canceled upload: the tripped token does not stop the CLOSE.
+    c.cancel();
+    let mut abort = pin!(h.abort());
+    assert!(!done_now(abort.as_mut()));
     // The WRITE on the way is canceled, the buffered rest never sent.
     let (close, cancels) = next(&mut peer).await;
     assert_eq!((close.command(), cancels), (Command::Close, 1));
     peer.send(&[fake::error(&first, NtStatus::CANCELLED, 1)], false).await;
+    // C-12: done only once the server closed the file.
+    assert!(!done_now(abort.as_mut()));
+    peer.send(&[fake::response(&close, NtStatus::SUCCESS, &close_body(), 1)], false).await;
+    abort.await;
     let h = SmbWrite::new(open_of(&conn), vec![u16::from(b'f')], 0, None, 1000);
     drop(h);
     expect_close(&mut peer).await;
