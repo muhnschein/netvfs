@@ -31,6 +31,8 @@ In this order; later step only once earlier ones hold:
 
 PR opens as draft on first push. Mark ready for review only once steps 1–7 hold and their evidence is in PR body.
 
+Docs-only change (docs, comments, no code or string change): steps 6–7 skipped; no phone run.
+
 Backend and core code runs in every process that loads a backend (bridge, msyncd via Buteo, `netvfs-cli`, account UI) → cover all it reaches. Behaviour both protocols share → change and test SFTP and SMB.
 
 User tests RPMs on phone; that test judges feel, lag, real servers. Say exactly what to check on device (SPEC 12.3, 12.4 for accounts and backups).
