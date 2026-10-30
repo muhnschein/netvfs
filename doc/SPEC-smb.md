@@ -111,7 +111,7 @@ What remains:
 
 - **M-10** `Backend::connect()` sends nothing: NEGOTIATE and SESSION_SETUP need the profile and the credentials, so `connect()` only resolves the server and checks that the port answers, and `authenticate()` signs in.
 - **M-11** READ and WRITE chunks are the server's MaxReadSize and MaxWriteSize, each capped at 1 MiB, or 64 KiB when the server does not allow multi-credit requests **[test]**. Up to 4 MiB is in flight per transfer or handle.
-- **M-12** `cancel()` makes the waiting call return `Canceled` at once. The client sends SMB2 CANCEL for the abandoned request and keeps the connection; a CREATE whose caller went away is closed when its response comes **[test]**.
+- **M-12** `cancel()` makes the waiting call return `Canceled` at once. The client sends SMB2 CANCEL for the abandoned request and keeps the connection; a CREATE whose caller went away is closed when its response comes **[test]**. A canceled or failed upload, and the abort of a write handle, wait for the CLOSE of the file before they return, within C-9's 2 s: Samba holds a CLOSE until the handle's WRITEs are done, and a delete before that only marks the `.part` file for deletion, so it stays listed (C-12, M-T17) **[test]**.
 - **M-13** Each backend has its own TCP connection and session; backends share no state, so several run in parallel on different threads. A backend is used by one thread at a time (SPEC.md C-8) **[test]**.
 
 A listing skips entries named `""`, `.` or `..` and entries whose name contains `/` or NUL; the rest of the listing is delivered without an error (SPEC-v2 XC-6).
