@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! Tests only: a [`Backend`] without C++, recording what workers do with
-//! their connections.
+//! Tests only: a [`Backend`] without C++, recording what workers do with their connections.
 #![allow(clippy::arithmetic_side_effects, clippy::missing_panics_doc, missing_docs)]
 
 use super::TaskContext;
@@ -15,7 +14,6 @@ use std::sync::{Arc, Mutex, PoisonError, mpsc};
 use std::thread;
 use std::time::{Duration, Instant};
 
-/// A fake connection: logs its free.
 #[derive(Debug)]
 pub struct MockConn {
     pub id: u64,
@@ -36,7 +34,6 @@ impl Drop for MockConn {
     }
 }
 
-/// A fake read handle: logs its close.
 #[derive(Debug)]
 pub struct MockHandle {
     pub name: String,
@@ -60,13 +57,9 @@ pub struct Inner {
     log: Mutex<Vec<String>>,
     next: AtomicU64,
     live: AtomicUsize,
-    /// Results of the next `create`s; `Ok` when empty.
     create: Mutex<VecDeque<Result<(), Status>>>,
-    /// Results of the next `establish`es; `Ok` when empty.
     establish: Mutex<VecDeque<Result<(), Status>>>,
-    /// While set, `establish` waits (until its connection is canceled).
     hold: AtomicBool,
-    /// While set, `create` waits.
     hold_create: AtomicBool,
 }
 
@@ -76,7 +69,6 @@ impl Inner {
     }
 }
 
-/// The fake backend; clones share the state.
 #[derive(Debug, Default, Clone)]
 pub struct Mock(pub Arc<Inner>);
 
@@ -117,7 +109,6 @@ impl Mock {
         self.0.hold.store(on, Ordering::Release);
     }
 
-    /// Waits until `prefix` was logged `n` times.
     pub fn wait_for(&self, prefix: &str, n: usize) {
         let deadline = Instant::now() + Duration::from_secs(10);
         while self.count(prefix) < n {
@@ -185,12 +176,10 @@ pub fn task() -> TaskContext {
     TaskContext::detached()
 }
 
-/// What a work item saw.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Seen {
     Conn(u64),
     Failed(ErrorName),
-    /// Ran on the core (no worker).
     Pending(ErrorName),
 }
 
@@ -202,7 +191,6 @@ fn seen(turn: &Turn<'_, Mock>) -> Seen {
     }
 }
 
-/// A work item that reports what it saw and returns `result`.
 pub fn reporting(tx: &mpsc::Sender<Seen>, result: Result<(), Status>) -> Work<Mock> {
     let tx = tx.clone();
     Box::new(move |turn: Turn<'_, Mock>| {
@@ -211,8 +199,6 @@ pub fn reporting(tx: &mpsc::Sender<Seen>, result: Result<(), Status>) -> Work<Mo
     })
 }
 
-/// A work item that reports, then waits for `go` (or its cancel through
-/// the connection) before returning `result`.
 pub fn blocking(tx: &mpsc::Sender<Seen>, go: mpsc::Receiver<()>, result: Result<(), Status>) -> Work<Mock> {
     let tx = tx.clone();
     Box::new(move |turn: Turn<'_, Mock>| {

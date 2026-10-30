@@ -30,7 +30,7 @@ public:
 private:
     QVector<Entry> *m_out;
 };
-} // namespace
+}
 
 Result Backend::lstat(const QString &path, Entry *out)
 {
@@ -166,4 +166,4 @@ Result Backend::makePath(const QString &dir)
     return Result::success();
 }
 
-} // namespace NetVfs
+}

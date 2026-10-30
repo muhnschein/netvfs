@@ -1,35 +1,14 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: LGPL-2.1-or-later
-# Install Ubuntu packages on CI runner, without others' apt repo breaking the
-# build.
-#
-# `apt-get update` exits 100 if ANY repo fails. Runner image ships extra repos
-# this project never uses: one bad index kills every job.
-#
-# So third-party lists dropped before update. Ubuntu's kept wherever image puts
-# them (sources.list, or .list/.sources under sources.list.d). List dropped only
-# if no ubuntu.com host in it, so the archive we install from is never deleted.
-#
-# Mirror pick: azure.archive.ubuntu.com trickles debs on some runners while
-# neighbours in same run install in 16 s (seen: 26 kB/s, 98 MB, 1 h). Indexes
-# no guide: same mirror served them at 9 MB/s. So after index, each mirror
-# timed on 2 MiB of biggest deb install needs, fastest first in mirror list.
-#
-# Mirror slow or down anyway: apt retries each file, gives up on a stalled one;
-# still failing = next mirror, once (older image's lists: Ubuntu's own
-# archive.ubuntu.com). Trickling mirror never stalls (seen: 120 kB/s, 124 MB,
-# 9.5 min of 20): first try's index and download each capped at
-# APT_FIRST_TRY_SECONDS (240), then next. Download only under cap: killed
-# apt-get mid-dpkg leaves system half-installed. Debs fetched stay, reused.
+# Install Ubuntu packages on a CI runner without others' apt repos breaking the build.
+# `apt-get update` exits 100 if ANY repo fails; runner images ship extra repos. Third-party lists are dropped before update. Ubuntu's are kept wherever the image puts them; a list is dropped only if it has no ubuntu.com host.
+# Mirror pick: azure.archive.ubuntu.com trickles debs on some runners (seen: 26 kB/s) while indexes come fast. After index, each mirror is timed on 2 MiB of the biggest deb needed, fastest first.
+# Mirror slow or down: apt retries each file, gives up on a stalled one; still failing = next mirror, once (older images: archive.ubuntu.com). A trickling mirror never stalls: first try's index and download are each capped at APT_FIRST_TRY_SECONDS (240). Only the download is capped: killing apt-get mid-dpkg leaves a half-installed system. Fetched debs are reused.
 #
 # Usage:  tools/ci/apt-install.sh <package>...
 #         tools/ci/apt-install.sh --prune-only     (drop lists, install nothing)
 #
-# APT_SOURCES_DIR, APT_SOURCES_LIST, APT_MIRROR_LIST override pruned dir,
-# sources.list and apt-mirrors.txt;
-# APT_GET, APT_CURL stand in for `sudo apt-get`, `curl`:
-# tools/ci/apt-install-selftest.sh tests its own dir, a failing or slow apt, mirrors
-# of chosen speed.
+# APT_SOURCES_DIR, APT_SOURCES_LIST, APT_MIRROR_LIST override pruned dir, sources.list, apt-mirrors.txt; APT_GET, APT_CURL stand in for `sudo apt-get`, `curl` (see apt-install-selftest.sh).
 set -euo pipefail
 
 sources_dir=$(printenv APT_SOURCES_DIR || true)
@@ -40,8 +19,7 @@ sources_list=$(printenv APT_SOURCES_LIST || true)
 if [[ -z "$sources_list" ]]; then
     sources_list=/etc/apt/sources.list
 fi
-# Current image: ubuntu.sources says `mirror+file:` this list; hosts live here
-# (azure first). apt moves on only when a request errors; trickle never does.
+# Current image: ubuntu.sources says `mirror+file:` this list (azure first). apt moves on only when a request errors; a trickle never does.
 mirror_list=$(printenv APT_MIRROR_LIST || true)
 if [[ -z "$mirror_list" ]]; then
     mirror_list=/etc/apt/apt-mirrors.txt
@@ -55,8 +33,7 @@ curl_cmd=$(printenv APT_CURL || true)
 if [[ -z "$curl_cmd" ]]; then
     curl_cmd=curl
 fi
-# Probed beside mirror list's own. Official Ubuntu mirror, run by kernel.org;
-# not in Azure, so not behind same slowdown.
+# Probed beside mirror list's own. Official mirror run by kernel.org, not in Azure, so not behind the same slowdown.
 extra_mirrors=(https://mirrors.edge.kernel.org/ubuntu/)
 probe_seconds=5
 
@@ -66,7 +43,7 @@ if [[ "$#" -ge 1 ]] && [[ "$1" = "--prune-only" ]]; then
     shift
 fi
 
-# rm as owner if writable, else sudo. Selftest dir must not prompt for password.
+# rm as owner if writable, else sudo.
 drop() {
     local list=$1
     if [[ -w "$(dirname -- "$list")" ]]; then
@@ -101,8 +78,7 @@ if [[ "$#" -eq 0 ]]; then
     exit 1
 fi
 
-# Per file: 3 retries, 30 s without data = stalled. `--within <s>`: killed
-# after s seconds (timeout under sudo: must reach root apt-get).
+# Per file: 3 retries, 30 s without data = stalled. `--within <s>`: killed after s seconds (timeout under sudo: must reach root apt-get).
 apt_get() {
     local options=(-o Acquire::Retries=3 -o Acquire::http::Timeout=30
         -o Acquire::https::Timeout=30)
@@ -119,9 +95,7 @@ apt_get() {
     return $?
 }
 
-# Country or cloud mirror (azure.archive.ubuntu.com) to archive.ubuntu.com, in
-# every list left. security.ubuntu.com, ports.ubuntu.com: not mirrors, kept.
-# Mirror list: next_mirror_first.
+# Country or cloud mirror (azure.archive.ubuntu.com) to archive.ubuntu.com in every list left. security.ubuntu.com, ports.ubuntu.com kept.
 use_main_archive() {
     local list mirror='://[a-z0-9.-]+\.archive\.ubuntu\.com'
     local rewrite="s#$mirror#://archive.ubuntu.com#g"
@@ -137,7 +111,7 @@ use_main_archive() {
     done
 }
 
-# write_mirrors <url>...: mirror list, in that order. Same form as image's.
+# write_mirrors <url>...: mirror list, in that order.
 write_mirrors() {
     local url priority=0 text=''
     for url in "$@"; do
@@ -152,8 +126,7 @@ write_mirrors() {
     return 0
 }
 
-# Mirror list's URLs, in order: archives in `mirrors`, security.ubuntu.com
-# (only its own pocket's debs, never picked first) in `security`.
+# Mirror list's URLs in order: archives in `mirrors`, security.ubuntu.com (own pocket only, never first) in `security`.
 mirrors=()
 security=()
 read_mirrors() {
@@ -170,8 +143,7 @@ read_mirrors() {
     return 0
 }
 
-# Bytes per second <url> gives over its first 2 MiB, at most probe_seconds
-# long; 0 if error status or nothing came. Cut short = rate so far.
+# Bytes per second <url> gives over its first 2 MiB, at most probe_seconds; 0 on error status or nothing. Cut short = rate so far.
 probe() {
     local url=$1 out code size seconds
     out=$("$curl_cmd" -sS -o /dev/null -r 0-2097151 --max-time "$probe_seconds" \
@@ -189,8 +161,7 @@ probe() {
     return 0
 }
 
-# After index: biggest deb install needs, timed from each mirror; fastest
-# first. Nothing to fetch, no mirror list, or nothing answered = list as was.
+# After index: time the biggest deb needed from each mirror, fastest first. Nothing to fetch, no list, or no answer = list as was.
 fastest_mirror_first() {
     [[ -f "$mirror_list" ]] || return 0
     local pool
@@ -226,7 +197,7 @@ fastest_mirror_first() {
     return 0
 }
 
-# Fallback: first mirror let us down. Next goes first, it goes last.
+# Fallback: first mirror failed. Next goes first, it goes last.
 next_mirror_first() {
     [[ -f "$mirror_list" ]] || return 0
     read_mirrors

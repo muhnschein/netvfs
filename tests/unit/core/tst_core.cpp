@@ -43,7 +43,7 @@ public:
 };
 
 // Implements only the pure virtual methods, so that the defaults and the
-// non-virtual helpers of Backend can be checked (SPEC-v2 §4.10).
+// non-virtual helpers of Backend can be checked.
 class MinimalBackend : public Backend
 {
 public:
@@ -141,7 +141,6 @@ private slots:
         QVERIFY(!Result(Error::Canceled).ok());
     }
 
-    // XC-21: the names of the v2 errors are part of the API (CLI, bridge).
     void errorNamesV2_data()
     {
         QTest::addColumn<int>("error");
@@ -167,7 +166,6 @@ private slots:
         QCOMPARE(static_cast<int>(errorFromName(name)), error);
     }
 
-    // XC-24
     void resultDetailAndRetryAfter()
     {
         const Result plain(Error::NotFound, QStringLiteral("gone"));
@@ -180,7 +178,7 @@ private slots:
         QCOMPARE(limited.message(), QStringLiteral("slow down"));
         QCOMPARE(limited.detail(), QStringLiteral("HTTP 429"));
         QCOMPARE(limited.retryAfterMs(), qint64(1500));
-        QCOMPARE(limited.toString(), QStringLiteral("RateLimited: slow down"));   // detail stays out
+        QCOMPARE(limited.toString(), QStringLiteral("RateLimited: slow down"));
 
         Result chained(Error::ProtocolError);
         chained.setDetail(QStringLiteral("status 4")).setRetryAfterMs(20);
@@ -190,7 +188,6 @@ private slots:
         QCOMPARE(defaulted.retryAfterMs(), qint64(-1));
     }
 
-    // XC-2, XC-3
     void entryTypes()
     {
         Entry e;
@@ -215,11 +212,10 @@ private slots:
         e.targetType = EntryType::Symlink;
         QVERIFY(!e.isDir() && !e.isFile());
         e.type = EntryType::File;
-        e.targetType = EntryType::Directory;   // ignored for non-links
+        e.targetType = EntryType::Directory;
         QVERIFY(e.isFile() && !e.isDir());
     }
 
-    // XC-5
     void capabilityNames()
     {
         const QVector<Capability> all = allCapabilities();
@@ -334,7 +330,6 @@ private slots:
         QVERIFY(ed25519('a') != ed25519('b'));
     }
 
-    // XC-16: SSH pins keep their format.
     void pinsV2()
     {
         const ServerIdentity ssh = ServerIdentity::fromPin(ed25519('k').toPin());
@@ -371,7 +366,7 @@ private slots:
         QCOMPARE(checkServerIdentity(seen, otherAlgorithm.toPin()).error(), Error::ServerIdentityChanged);
     }
 
-    // SEC-1 / C-7: no authentication request before the identity matches.
+    // /: no authentication request before the identity matches.
     void establishChecksIdentityBeforeAuth()
     {
         FakeServer *server = FakeServer::instance();
@@ -417,7 +412,7 @@ private slots:
         Credentials c(QStringLiteral("u"), secret);
         secureWipe(secret);
         QVERIFY(secret.isEmpty());
-        QCOMPARE(c.secret, QByteArray("hunter2"));   // deep copy
+        QCOMPARE(c.secret, QByteArray("hunter2"));
         Credentials copy(c);
         Credentials assigned;
         assigned = c;
@@ -493,7 +488,7 @@ private slots:
         const QByteArray key("-----BEGIN OPENSSH PRIVATE KEY-----\nabc\n-----END OPENSSH PRIVATE KEY-----\n");
         const QByteArray secret = encodeKeySecret(key);
         QVERIFY(secret.startsWith("netvfs-key-v1:"));
-        QVERIFY(!secret.contains('\n'));   // A-4: single line
+        QVERIFY(!secret.contains('\n'));
         QVERIFY(isKeySecret(secret));
         QVERIFY(!isKeySecret("hunter2"));
         QByteArray decoded;
@@ -524,7 +519,6 @@ private slots:
         QCOMPARE(server->fileData(QStringLiteral(".ssh/authorized_keys")), QByteArray("ssh-ed25519 AAAAC3Nza sailfish-backup\n"));
         QVERIFY(server->log.contains(QStringLiteral("rename:.ssh/authorized_keys.part->.ssh/authorized_keys:replace")));
 
-        // Already present (other comment, with options): unchanged.
         server->addFile(QStringLiteral(".ssh/authorized_keys"), "no-pty ssh-ed25519 AAAAC3Nza old comment");
         QVERIFY(NetVfs::installAuthorizedKey(&backend, line).ok());
         QCOMPARE(server->fileData(QStringLiteral(".ssh/authorized_keys")), QByteArray("no-pty ssh-ed25519 AAAAC3Nza old comment"));
@@ -561,7 +555,6 @@ private slots:
         QVERIFY(bogus.open(QIODevice::WriteOnly));
         bogus.write("not an ELF file");
         bogus.close();
-        // The fake plugin under another provider's name.
         QVERIFY(QFile::copy(QStringLiteral(NETVFS_TEST_FAKE_BACKEND_DIR "/libnetvfs-fake.so"),
                             dir.filePath(QStringLiteral("libnetvfs-other.so"))));
         qputenv("NETVFS_BACKEND_PATH", dir.path().toLocal8Bit());
@@ -573,12 +566,11 @@ private slots:
         QCOMPARE(BackendLoader::searchPaths().size(), 1);
     }
 
-    // §4.10: methods with a default implementation are Unsupported.
     void backendDefaults()
     {
         MinimalBackend b;
         Entry e;
-        QVERIFY(b.lstat(QStringLiteral("x"), &e).ok());   // lstat defaults to stat
+        QVERIFY(b.lstat(QStringLiteral("x"), &e).ok());
         QCOMPARE(b.calls, QStringList({ QStringLiteral("stat:x") }));
         QCOMPARE(e.type, EntryType::Symlink);
         QCOMPARE(b.removeTreeNative(QStringLiteral("x")).error(), Error::Unsupported);
@@ -686,11 +678,11 @@ private slots:
         QByteArray out;
         QVERIFY(b.read(QStringLiteral("f"), 5, 10, &out).ok());
         QCOMPARE(out, big.mid(5, 10));
-        QVERIFY(b.read(QStringLiteral("f"), 100, -1, &out).ok());   // to EOF, several handle reads
+        QVERIFY(b.read(QStringLiteral("f"), 100, -1, &out).ok());
         QCOMPARE(out, big.mid(100));
         QVERIFY(server->log.filter(QStringLiteral("read:f")).size() > 2);
         QVERIFY(server->log.contains(QStringLiteral("close:f")));
-        QVERIFY(b.read(QStringLiteral("f"), big.size() - 3, 10, &out).ok());   // short read at EOF
+        QVERIFY(b.read(QStringLiteral("f"), big.size() - 3, 10, &out).ok());
         QCOMPARE(out, big.right(3));
         QVERIFY(b.read(QStringLiteral("f"), big.size() + 10, 10, &out).ok());
         QVERIFY(out.isEmpty());
@@ -719,7 +711,6 @@ private slots:
         QCOMPARE(bytes, qint64(123));
     }
 
-    // XC-4: lossless names.
     void namesValidUtf8_data()
     {
         QTest::addColumn<QByteArray>("bytes");
@@ -749,7 +740,7 @@ private slots:
     void namesInvalidUtf8_data()
     {
         QTest::addColumn<QByteArray>("bytes");
-        QTest::addColumn<QString>("expected");   // '~' stands for "escape of the byte at this position"
+        QTest::addColumn<QString>("expected");
         QTest::newRow("latin1") << QByteArray("caf\xe9") << QStringLiteral("caf~");
         QTest::newRow("overlong 2") << QByteArray("\xc0\xaf") << QStringLiteral("~~");
         QTest::newRow("overlong 3") << QByteArray("\xe0\x80\xaf") << QStringLiteral("~~~");
@@ -821,7 +812,6 @@ private slots:
             const int length = static_cast<int>(next() % 24);
             for (int i = 0; i < length; ++i) {
                 const quint32 r = next();
-                // Bias towards multi-byte lead and continuation bytes.
                 bytes.append(static_cast<char>(r < 64 ? r : 0x80 | (r & 0x7F)));
             }
             const QString decoded = Names::decode(bytes);
@@ -841,7 +831,7 @@ private slots:
         QVERIFY(!Names::hasEscapes(high));
         QCOMPARE(Names::encode(high), QByteArray("a\xef\xbf\xbd" "b"));
         QCOMPARE(Names::display(high), QString(QStringLiteral("a") + QChar(0xFFFD) + QStringLiteral("b")));
-        const QString escapedAscii = QString(QChar(0xDC41));   // an "escape" of a byte below 0x80
+        const QString escapedAscii = QString(QChar(0xDC41));
         QVERIFY(!Names::isEncodable(escapedAscii));
         QVERIFY(!Names::hasEscapes(escapedAscii));
         const QString lowFirst = QString(QChar(0xDE00)) + QChar(0xD800);
@@ -852,7 +842,6 @@ private slots:
         QVERIFY(!Names::hasEscapes(pair + QStringLiteral("x")));
         QVERIFY(Names::hasEscapes(pair + Names::decode(QByteArray("\xfe"))));
     }
-    // XC-15, XC-22: BlockingPrompter waits for another thread.
     void blockingPrompterAnswers()
     {
         QVector<BlockingPrompter::Question> asked;
@@ -875,7 +864,7 @@ private slots:
         QCOMPARE(asked.first().instruction, QStringLiteral("i"));
         QCOMPARE(asked.first().prompts.first().text, prompt.text);
         QVERIFY(!prompter.waiting());
-        prompter.respond({ QByteArray("late") });   // nobody waits: ignored
+        prompter.respond({ QByteArray("late") });
         prompter.decline();
     }
 
@@ -888,12 +877,12 @@ private slots:
         self = &prompter;
         QVector<QByteArray> answers { QByteArray("stale") };
         QVERIFY(!prompter.answer(QString(), QString(), { AuthPrompt() }, &answers));
-        QCOMPARE(answers, QVector<QByteArray>({ QByteArray("stale") }));   // untouched
+        QCOMPARE(answers, QVector<QByteArray>({ QByteArray("stale") }));
     }
 
     void blockingPrompterCancel()
     {
-        // XC-22: cancel() from another thread ends a wait nobody answers,
+        // cancel() from another thread ends a wait nobody answers
         // and stays in effect until reset().
         BlockingPrompter prompter([](const BlockingPrompter::Question &) { /* nobody answers */ });
         QElapsedTimer timer;
@@ -907,7 +896,7 @@ private slots:
         canceler.join();
         QVERIFY(timer.elapsed() < 2000);
         QVERIFY(answers.isEmpty());
-        QVERIFY(!prompter.answer(QString(), QString(), { AuthPrompt() }, &answers));   // still canceled
+        QVERIFY(!prompter.answer(QString(), QString(), { AuthPrompt() }, &answers));
         prompter.reset();
         BlockingPrompter *self = &prompter;
         std::thread answerer([self]() {

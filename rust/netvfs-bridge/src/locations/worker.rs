@@ -1,29 +1,14 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! One backend connection on its own std thread (C-8, port of
-//! `worker.cpp`, design §3.3).
+//! One backend connection on its own std thread.
 //!
-//! Work items run in order. The connection is created
-//! ([`Backend::create`], `conn_new`) and established
-//! ([`Backend::establish`], the connector) lazily by the first item. An
-//! item that ends with `Canceled`, `ConnectionLost`, `Timeout` or
-//! `NetworkUnreachable`, or whose cancel flag is set, drops the connection
-//! and its read handles, so that the next item starts clean (XB-13);
-//! otherwise the connection's cancel state is reset. [`Worker::stop`]
-//! cancels, has every queued item end with `Canceled` and ends the thread;
-//! [`Worker::finished`] says when it has.
+//! Work items run in order. The first item creates ([`Backend::create`]) and establishes ([`Backend::establish`]) the connection lazily.
+//! An item that ends with `Canceled`, `ConnectionLost`, `Timeout` or `NetworkUnreachable`, or whose cancel flag is set, drops the connection and its read handles so the next item starts clean; otherwise the connection's cancel state is reset.
+//! [`Worker::stop`] cancels, ends every queued item with `Canceled` and ends the thread; [`Worker::finished`] says when it has.
 //!
-//! The worker reports where its connection is ([`Worker::phase`]) and how
-//! an attempt to connect ended to its pool's [`StateTracker`] (XB-12): an
-//! attempt that fails is recorded unless it was canceled (`Canceled`, or
-//! the request's flag set: by the consumer, or by a stop), one that
-//! succeeds clears that record. The record is set before the phase leaves
-//! `Connecting`, so that the pool never shows the end of a failed attempt
-//! as a plain disconnect.
+//! The worker reports its phase ([`Worker::phase`]) and how a connect attempt ended to its pool's [`StateTracker`]: a failed attempt is recorded unless canceled (`Canceled`, or the request's flag set by the consumer or a stop); a success clears the record.
+//! The record is set before the phase leaves `Connecting`, so the pool never shows the end of a failed attempt as a plain disconnect.
 //!
-//! Shared with the core are only the queue, the phase and the connection's
-//! cancel handle, under one mutex: a cancel never overlaps or follows the
-//! free of the connection (T4), because the thread takes the handle out
-//! under it first.
+//! Shared with the core: only the queue, phase and the connection's cancel handle, under one mutex: a cancel never overlaps or follows the free of the connection, because the thread takes the handle out under it first.
 
 use super::spec::LocationSpec;
 use super::state::{Phase, StateTracker};
@@ -41,14 +26,11 @@ use std::time::Instant;
 /// The name of worker threads.
 pub const THREAD_NAME: &str = "nvb-w";
 
-/// What a worker needs of the backends: the production one is
-/// [`Connector`](super::connector::Connector) over the C ABI; tests use a
-/// fake. Called on the worker thread, except [`Backend::cancel`], which
-/// any thread may call.
+/// What a worker needs of the backends.
 pub trait Backend: Send + Sync + 'static {
-    /// A connection; owned by the thread that created it.
+    /// A connection.
     type Conn: 'static;
-    /// A read handle of a connection; owned by the same thread.
+    /// A read handle of a connection.
     type Handle: 'static;
     /// What cancels a connection's running call from another thread.
     type Cancel: Send + 'static;
@@ -65,8 +47,7 @@ pub trait Backend: Send + Sync + 'static {
     /// Cancels the connection's running call (any thread).
     fn cancel(&self, handle: &Self::Cancel);
 
-    /// Connects, checks the identity and authenticates (C-7, XB-14) for
-    /// `task`'s request.
+    /// Connects, checks the identity and authenticates for `task`'s request.
     ///
     /// # Errors
     /// The failure; the connection is then dropped.
@@ -77,8 +58,7 @@ pub trait Backend: Send + Sync + 'static {
     fn reset_cancel(&self, conn: &mut Self::Conn);
 }
 
-/// A worker, unique in the process: what a read handle's owner is recorded
-/// as (the C++ `Worker *`).
+/// A worker, unique in the process.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct WorkerId(pub u64);
 
@@ -89,8 +69,7 @@ impl WorkerId {
     }
 }
 
-/// The read handles of a worker's connection (worker thread only), by
-/// number from 1. They go before their connection does.
+/// The read handles of a worker's connection (worker thread only), by number from 1.
 pub struct Handles<H> {
     map: BTreeMap<u32, H>,
     next: u32,
@@ -118,7 +97,7 @@ impl<H> Handles<H> {
         self.count.store(self.map.len(), Ordering::Release);
     }
 
-    /// Keeps `handle`; its number.
+    /// Keeps `handle`.
     pub fn add(&mut self, handle: H) -> u32 {
         let id = self.next;
         self.next = self.next.wrapping_add(1);
@@ -160,13 +139,11 @@ impl<H> Handles<H> {
 
 /// What a work item gets.
 pub struct Turn<'a, B: Backend> {
-    /// The established connection, or why there is none (establish failed,
-    /// the item was canceled while queued, the worker is stopping).
+    /// The established connection, or why there is none (establish failed, the item was canceled while queued, the worker is stopping).
     pub ready: Result<&'a mut B::Conn, Status>,
-    /// The connection's read handles; `None` when the item ends without
-    /// reaching a worker (canceled while pending in its pool).
+    /// The connection's read handles.
     pub handles: Option<&'a mut Handles<B::Handle>>,
-    /// The worker running the item; `None` as for `handles`.
+    /// The worker running the item.
     pub worker: Option<WorkerId>,
 }
 
@@ -187,12 +164,10 @@ impl<B: Backend> Turn<'_, B> {
     }
 }
 
-/// A work item: runs once on the worker thread (or, when it never gets
-/// there, on the core's with [`Turn::failed`]) and returns its result,
-/// which decides whether the connection is kept.
+/// A work item.
 pub type Work<B> = Box<dyn for<'a> FnOnce(Turn<'a, B>) -> Result<(), Status> + Send>;
 
-/// Whether a result drops the connection (`dropsConnection`).
+/// Whether a result drops the connection.
 #[must_use]
 pub fn drops_connection(result: &Result<(), Status>) -> bool {
     result.as_ref().is_err_and(|s| {
@@ -235,7 +210,6 @@ impl<B: Backend> Shared<B> {
         self.state.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// The connection is now in `phase`; a change is signalled.
     fn set_phase(&self, phase: Phase) {
         let before = std::mem::replace(&mut self.lock().phase, phase);
         if before != phase {
@@ -244,8 +218,7 @@ impl<B: Backend> Shared<B> {
     }
 }
 
-/// One connection's thread (`Worker`). Dropping it stops the thread and
-/// waits for it.
+/// One connection's thread.
 pub struct Worker<B: Backend> {
     id: WorkerId,
     lane: Lane,
@@ -312,15 +285,13 @@ impl<B: Backend> Worker<B> {
         self.lane
     }
 
-    /// Queues `work` for `task`. Also while stopping: the item then ends
-    /// with `Canceled`, so it is never lost.
+    /// Queues `work` for `task`.
     pub fn post(&self, task: TaskContext, work: Work<B>) {
         self.shared.lock().queue.push_back(Item { task, work });
         self.shared.wake.notify_all();
     }
 
-    /// Cancels the running item's backend call if its cancel flag is set
-    /// (after the core set flags).
+    /// Cancels the running item's backend call if its cancel flag is set (after the core set flags).
     pub fn kick(&self) {
         let state = self.shared.lock();
         if state.current.as_ref().is_some_and(|c| c.load(Ordering::Acquire))
@@ -330,8 +301,7 @@ impl<B: Backend> Worker<B> {
         }
     }
 
-    /// Without waiting: cancels the running item and its backend call, has
-    /// the queued items end with `Canceled`, and ends the thread.
+    /// Without waiting.
     pub fn stop(&self) {
         let mut state = self.shared.lock();
         state.stopping = true;
@@ -358,8 +328,7 @@ impl<B: Backend> Worker<B> {
         state.queue.len().saturating_add(usize::from(state.running))
     }
 
-    /// When the last item ended (or the worker started); `None` while
-    /// busy.
+    /// When the last item ended (or the worker started).
     #[must_use]
     pub fn idle_since(&self) -> Option<Instant> {
         let state = self.shared.lock();
@@ -396,15 +365,12 @@ impl<B: Backend> Drop for Worker<B> {
     }
 }
 
-/// The thread's connection and handles.
 struct Local<B: Backend> {
     conn: Option<B::Conn>,
     handles: Handles<B::Handle>,
 }
 
 impl<B: Backend> Local<B> {
-    /// `resetBackend`: the handles go before their connection; the cancel
-    /// handle leaves the shared state before the connection is freed.
     fn reset(&mut self, shared: &Shared<B>) {
         self.handles.clear();
         shared.lock().cancel = None;
@@ -412,9 +378,6 @@ impl<B: Backend> Local<B> {
         shared.set_phase(Phase::Closed);
     }
 
-    /// `ensureBackend`: the established connection, created on first use.
-    /// The attempt's outcome goes to the tracker before the phase leaves
-    /// `Connecting`.
     fn ensure(&mut self, shared: &Shared<B>, spec: &LocationSpec, task: &TaskContext) -> Result<(), Status> {
         if self.conn.is_some() {
             return Ok(());
@@ -438,8 +401,6 @@ impl<B: Backend> Local<B> {
         established
     }
 
-    /// Creates and establishes the connection; it is kept even when
-    /// establishing fails (the caller resets it then).
     fn connect(&mut self, shared: &Shared<B>, spec: &LocationSpec, task: &TaskContext) -> Result<(), Status> {
         let backend = &shared.backend;
         let mut conn = backend.create(spec)?;
@@ -457,7 +418,6 @@ impl<B: Backend> Local<B> {
     }
 }
 
-/// The worker thread (`Worker::run`).
 fn run<B: Backend>(shared: &Shared<B>, spec: &LocationSpec, id: WorkerId) {
     let mut local: Local<B> = Local { conn: None, handles: Handles::new(Arc::clone(&shared.handles)) };
     loop {

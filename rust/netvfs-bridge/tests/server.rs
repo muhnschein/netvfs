@@ -1,10 +1,5 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! The bridge end to end (design §4.1, chunk E): the core with the socket
-//! front, in-process ([`Fixture`]), against the real
-//! `libnetvfs-bridge-ffi.so` and the fake backend, through the protocol
-//! crate's client. The Rust side of netvfs 0.4's C++ `tst_bridgeserver`.
-//! Without the C ABI (the variables of [`testing::VARIABLES`]) every test
-//! says it is skipped and passes.
+//! The bridge end to end: the core with the socket front, in-process ([`Fixture`]), against the real `libnetvfs-bridge-ffi.so` and the fake backend, through the protocol crate's client. Without the C ABI (variables of [`testing::VARIABLES`]) every test says it is skipped and passes.
 #![allow(
     missing_docs,
     clippy::unwrap_used,
@@ -95,8 +90,6 @@ fn no_opts() -> Opts {
     Opts::new()
 }
 
-// ---------------------------------------------------------------- tests
-
 fn hello_first(h: &Harness) {
     let f = Fixture::new(h, Consent::Granted);
     block_on(async {
@@ -105,7 +98,6 @@ fn hello_first(h: &Harness) {
         assert_eq!(error_name(&early), name(ErrorName::ProtocolError));
         assert_eq!(c.proxy().hello("t").await.unwrap(), env!("CARGO_PKG_VERSION"));
         assert_eq!(c.proxy().get_consent().await.unwrap(), "granted");
-        // A second Hello is answered as well.
         assert!(c.proxy().hello("t").await.is_ok());
         assert_eq!(f.prompt.state().shown, 0);
     });
@@ -133,7 +125,7 @@ fn consent_unknown_then_granted(h: &Harness) {
     block_on(async {
         let c = f.hello_client().await;
         let mut signals = c.signals();
-        assert_eq!(f.prompt.state().shown, 1); // XB-6: first Hello while unknown
+        assert_eq!(f.prompt.state().shown, 1);
         assert_eq!(f.prompt.state().display_name, "Test");
         assert_eq!(c.proxy().get_consent().await.unwrap(), "unknown");
         assert!(c.proxy().list_locations().await.unwrap().is_empty());
@@ -141,7 +133,7 @@ fn consent_unknown_then_granted(h: &Harness) {
         assert_eq!(error_name(&stat), name(ErrorName::PermissionDenied));
         assert_eq!(error_name(&c.proxy().discover(true).await), name(ErrorName::PermissionDenied));
         c.proxy().hello("t").await.unwrap();
-        assert_eq!(f.prompt.state().shown, 1); // not again while shown
+        assert_eq!(f.prompt.state().shown, 1);
         f.answer_prompt(true);
         let changed = wait_signal(&mut signals, WAIT, |s| matches!(s, Signal::ConsentChanged(_))).await;
         assert!(matches!(changed, Some(Signal::ConsentChanged(ref v)) if v == "granted"), "{changed:?}");
@@ -192,7 +184,6 @@ fn revocation_mid_job(h: &Harness) {
         let (_job, reader) = slow_download(&f, &c).await;
         let probe = f.probe();
         assert_eq!(probe.wait_until(WAIT, |n| n.jobs == 1).await.unwrap().jobs, 1);
-        // netvfs-ui revokes: bridge.conf changes on disk.
         let started = Instant::now();
         f.set_consent(Consent::Denied);
         assert!(wait_disconnected(&mut signals, Duration::from_secs(3)).await);
@@ -201,7 +192,6 @@ fn revocation_mid_job(h: &Harness) {
         assert_eq!((after.jobs, after.sessions, after.pools), (0, 0, 0));
         assert!(started.elapsed() < Duration::from_secs(3), "{:?}", started.elapsed());
         drop(reader);
-        // A new client is still refused location calls.
         let again = f.hello_client().await;
         assert!(again.proxy().list_locations().await.unwrap().is_empty());
         assert_eq!(again.proxy().get_consent().await.unwrap(), "denied");
@@ -240,7 +230,6 @@ fn list_streams_batches(h: &Harness) {
         }
         assert_eq!(total, 1000);
         assert!(batches >= 10, "{batches}");
-        // A missing folder: ListDone carries the error name.
         let missing = c.proxy().list(ACCOUNT_LOC, b"/nope", "", 0).await.unwrap();
         assert!(missing > request);
         let done = wait_signal(&mut signals, WAIT, |s| matches!(s, Signal::ListDone { .. })).await;
@@ -260,8 +249,7 @@ enum Arrived {
     Done(u32),
 }
 
-/// The next message on `stream` that belongs to the `List` call `serial`
-/// or to a listing: its reply, a `ListBatch`, a `ListDone`.
+/// The next message on `stream` that belongs to the `List` call `serial` or to a listing: its reply, a `ListBatch`, a `ListDone`.
 async fn next_arrival(stream: &mut zbus::MessageStream, serial: std::num::NonZeroU32) -> Arrived {
     use futures_lite::StreamExt as _;
     loop {
@@ -291,8 +279,7 @@ async fn next_arrival(stream: &mut zbus::MessageStream, serial: std::num::NonZer
     }
 }
 
-// Design §3.4, §4.2: one writer per session keeps the reply to List ahead
-// of its ListBatch signals and those ahead of ListDone, every time.
+// One writer per session keeps the reply to List ahead of its ListBatch signals and those ahead of ListDone, every time.
 fn zbus_send_ordering(h: &Harness) {
     let f = Fixture::new(h, Consent::Granted);
     for i in 0..3 {
@@ -345,7 +332,6 @@ fn cancel_job(h: &Harness) {
             }
             other => panic!("{other:?}"),
         }
-        // An id that already finished: nothing to do.
         c.proxy().cancel(job).await.unwrap();
         let counters = f.probe().wait_until(WAIT, |n| n.jobs == 0 && n.ops == 0).await.unwrap();
         assert_eq!((counters.jobs, counters.ops), (0, 0));
@@ -371,7 +357,6 @@ fn idle_exit(h: &Harness) {
     let mut f = Fixture::with_idle_exit(h, Consent::Granted, Duration::from_millis(300));
     block_on(async {
         let c = f.hello_client().await;
-        // Not while a consumer is connected.
         tokio::time::sleep(Duration::from_millis(600)).await;
         assert!(f.probe().counters().await.is_some());
         assert_eq!(c.proxy().get_consent().await.unwrap(), "granted");
@@ -430,7 +415,6 @@ fn metadata_and_namespace(h: &Harness) {
             .await
             .unwrap();
         assert_eq!(fake.node_mode(b"/docs"), Some(0o700));
-        // Nothing to change: no round trip, also for a missing file.
         let calls = fake.log_count("");
         p.set_attributes(ACCOUNT_LOC, b"/docs/none", &no_opts()).await.unwrap();
         assert_eq!(fake.log_count(""), calls);
@@ -463,7 +447,7 @@ fn path_validation(h: &Harness) {
         let p = c.proxy();
         assert_eq!(error_name(&p.stat(ACCOUNT_LOC, b"a/../b", true, "").await), name(ErrorName::InvalidName));
         assert_eq!(error_name(&p.remove_file(ACCOUNT_LOC, b"a\0b").await), name(ErrorName::InvalidName));
-        assert_eq!(h.fake.log_count("remove"), 0); // nothing reached the backend
+        assert_eq!(h.fake.log_count("remove"), 0);
         assert_eq!(h.fake.log_count("connect"), 0);
     });
 }
@@ -495,7 +479,6 @@ fn handles(h: &Harness) {
         assert_eq!(error_name(&p.close(handle).await), name(ErrorName::NotFound));
         assert_eq!(error_name(&p.open_read(ACCOUNT_LOC, b"/none", "").await), name(ErrorName::NotFound));
         assert_eq!(probe.counters().await.unwrap().handles, 1);
-        // Disconnect drops the location's connections: the handle is gone.
         p.disconnect(ACCOUNT_LOC).await.unwrap();
         assert_eq!(error_name(&p.read(second, 0, 1).await), name(ErrorName::ConnectionLost));
         assert_eq!(error_name(&p.read_ahead(second, 0, 1).await), name(ErrorName::ConnectionLost));
@@ -517,7 +500,6 @@ fn handle_limit(h: &Harness) {
         assert_eq!(error_name(&over), name(ErrorName::TooManyConnections));
         let probe = f.probe();
         assert_eq!(probe.counters().await.unwrap().handles, MAX_HANDLES);
-        // A failing open gives its slot back.
         let c2 = f.hello_client().await;
         c.close().await;
         drop(c);
@@ -549,9 +531,7 @@ fn request_limit(h: &Harness) {
         assert_eq!(error_name(&over), name(ErrorName::TooManyConnections));
         let over = netvfs_bridge_proto::BridgeError::from(over.unwrap_err());
         assert!(format!("{over:?}").contains("1000"), "{over:?}");
-        // Session-level calls are not limited by pending location work.
         assert_eq!(c.proxy().get_consent().await.unwrap(), "granted");
-        // Disconnecting cancels the waits (XB-13).
         c.close().await;
         drop(c);
         let after = probe.wait_until(Duration::from_secs(5), |n| n.requests == 0).await.unwrap();
@@ -614,8 +594,7 @@ fn upload_and_download_regular(h: &Harness) {
         assert_eq!(error, "", "{message}");
         assert_eq!(count(&extra, "bytes"), 5);
         assert_eq!(h.fake.file_data(b"/up.bin").as_deref(), Some(&b"23456"[..]));
-        assert_eq!(rd.stream_position().unwrap(), 7); // pread: the consumer's offset is untouched
-        // CreateNew is the default: a second upload to the same name fails.
+        assert_eq!(rd.stream_position().unwrap(), 7);
         let rd2 = File::open(&local).unwrap();
         let job = c.proxy().upload(ACCOUNT_LOC, b"/up.bin", Fd::from(rd2.as_fd()), &no_opts()).await.unwrap();
         assert_eq!(finished(&mut signals, job).await.0, "AlreadyExists");
@@ -630,7 +609,6 @@ fn upload_and_download_regular(h: &Harness) {
         assert_eq!(error, "", "{message}");
         assert_eq!(count(&extra, "bytes"), 5);
         assert_eq!(std::fs::read(&target).unwrap(), b"...defgh");
-        // A missing remote file.
         let wr = OpenOptions::new().write(true).open(&target).unwrap();
         let job = c.proxy().download(ACCOUNT_LOC, b"/none", Fd::from(wr.as_fd()), &no_opts()).await.unwrap();
         assert_eq!(finished(&mut signals, job).await.0, "NotFound");
@@ -666,7 +644,6 @@ fn transfer_through_pipes(h: &Harness) {
         let (error, message, _) = finished(&mut signals, job).await;
         assert_eq!(error, "", "{message}");
         let mut data = Vec::new();
-        // The bridge closed its copy at the end of the job: EOF.
         down_reader.read_to_end(&mut data).unwrap();
         assert_eq!(data, b"streamed");
     });
@@ -696,7 +673,6 @@ fn fd_validation(h: &Harness) {
             error_name(&p.upload(ACCOUNT_LOC, b"/x", Fd::from(write_only.as_fd()), &no_opts()).await),
             denied
         );
-        // Checked before the location: an unknown one is not looked at.
         assert_eq!(
             error_name(&p.upload("account:9", b"/x", Fd::from(write_only.as_fd()), &no_opts()).await),
             denied
@@ -712,7 +688,7 @@ fn fd_validation(h: &Harness) {
         );
         let counters = f.probe().counters().await.unwrap();
         assert_eq!(counters.jobs, 0);
-        assert_eq!(h.fake.log_count("connect"), 0); // refused before any network work
+        assert_eq!(h.fake.log_count("connect"), 0);
         assert!(!h.fake.exists(b"/x"));
     });
 }
@@ -757,7 +733,6 @@ fn walk_remove_tree_copy_across(h: &Harness) {
         let (error, message, _) = finished(&mut signals, job).await;
         assert_eq!(error, "", "{message}");
         assert_eq!(fake.file_data(b"/copy/a/2").as_deref(), Some(&b"22"[..]));
-        // Again: the target exists.
         let job = c.proxy().copy_across(ACCOUNT_LOC, b"/t", "account:2", b"/copy", &opts).await.unwrap();
         assert_eq!(finished(&mut signals, job).await.0, "AlreadyExists");
         assert_eq!(
@@ -801,7 +776,7 @@ fn walk_batch_limit(h: &Harness) {
             .await
             {
                 Some(Signal::WalkBatch { entries, .. }) => {
-                    assert!(entries.len() <= MAX_LIST_BATCH as usize, "{}", entries.len()); // XB-17
+                    assert!(entries.len() <= MAX_LIST_BATCH as usize, "{}", entries.len());
                     total += entries.len();
                 }
                 Some(Signal::JobFinished { job: j, error, .. }) => {
@@ -837,15 +812,13 @@ fn account_identity_changed_sets_attention(h: &Harness) {
         let (id, attention, pin) = f.accounts.state().attention[0].clone();
         assert_eq!((id, attention), (1, Attention::ServerIdentityChanged));
         assert_eq!(pin, PIN_A);
-        assert_eq!(h.fake.log_count("authenticate"), 0); // C-7
+        assert_eq!(h.fake.log_count("authenticate"), 0);
         assert_eq!(state_of(&c, ACCOUNT_LOC).await, failed(ErrorName::ServerIdentityChanged));
-        // The accounts are listed again (attention) and the consumer told.
         assert!(wait_signal(&mut signals, WAIT, |s| matches!(s, Signal::LocationsChanged)).await.is_some());
         let questions =
             wait_signal(&mut signals, Duration::from_millis(100), |s| matches!(s, Signal::Question { .. }))
                 .await;
         assert!(questions.is_none(), "accounts are resolved in Settings");
-        // The helper's data fail: the connection fails with them.
         f.accounts.state().files_error =
             Some(netvfs_bridge::Status::new(ErrorName::NotFound, "No such account"));
         c.proxy().disconnect(ACCOUNT_LOC).await.unwrap();
@@ -875,7 +848,6 @@ fn ad_hoc_identity_question(h: &Harness) {
     block_on(async {
         let c = f.hello_client().await;
         let mut signals = c.signals();
-        // Declined: no credentials are sent.
         let proxy = c.proxy().clone();
         let connecting = tokio::spawn(async move { proxy.connect_ad_hoc(URL, b"", &Opts::new()).await });
         let (id, kind, details) = question(&mut signals).await;
@@ -892,7 +864,6 @@ fn ad_hoc_identity_question(h: &Harness) {
         assert_eq!(c.proxy().list_locations().await.unwrap().len(), 1);
         assert_eq!(f.probe().counters().await.unwrap().pools, 0);
 
-        // Accepted: pinned in known_hosts; the next connection does not ask.
         let proxy = c.proxy().clone();
         let connecting = tokio::spawn(async move { proxy.connect_ad_hoc(URL, b"", &Opts::new()).await });
         let (id, _, _) = question(&mut signals).await;
@@ -914,14 +885,12 @@ fn ad_hoc_identity_question(h: &Harness) {
                 .await;
         assert!(asked.is_none(), "{asked:?}");
 
-        // A changed identity is an error, not a question (XB-14).
         c.proxy().disconnect(&loc).await.unwrap();
         h.fake.set_identity_pin(PIN_B);
         assert_eq!(
             error_name(&c.proxy().stat(&loc, b"/", true, "").await),
             name(ErrorName::ServerIdentityChanged)
         );
-        // ForgetAdHoc drops the location and the pin.
         c.proxy().forget_ad_hoc(&loc).await.unwrap();
         assert!(wait_signal(&mut signals, WAIT, |s| matches!(s, Signal::LocationsChanged)).await.is_some());
         assert_eq!(pin(), "");
@@ -930,7 +899,6 @@ fn ad_hoc_identity_question(h: &Harness) {
         assert_eq!(c.proxy().list_locations().await.unwrap().len(), 1);
         assert_eq!(error_name(&c.proxy().open_account_settings(&loc).await), name(ErrorName::NotFound));
 
-        // The session goes away while the question is open: no location.
         h.fake.set_identity_pin(PIN_A);
         let c2 = f.hello_client().await;
         let mut signals2 = c2.signals();
@@ -947,9 +915,7 @@ fn ad_hoc_identity_question(h: &Harness) {
     });
 }
 
-/// A restarted bridge (XB-2) forgot its ad-hoc locations, but the consumer
-/// may still hold their ids (URIs on its clipboard): they name nothing now,
-/// never a location the new run connected.
+/// A restarted bridge forgot its ad-hoc locations, but the consumer may still hold their ids (URIs on its clipboard): they name nothing now, never a location the new run connected.
 fn ad_hoc_ids_after_a_restart(h: &Harness) {
     let mut f = Fixture::new(h, Consent::Granted);
     let old = block_on(async {
@@ -985,15 +951,12 @@ fn keyboard_interactive(h: &Harness) {
             OptsBuilder::new().bool("accept", true).byte_arrays("answers", &[b"123456".to_vec()]).build();
         c.proxy().answer(&id, &answers).await.unwrap();
         stat.await.unwrap().unwrap();
-        // An answered question is gone.
         assert_eq!(error_name(&c.proxy().answer(&id, &answers).await), name(ErrorName::NotFound));
 
-        // Canceling the request ends the wait: disconnect while the question is open.
         c.proxy().disconnect(ACCOUNT_LOC).await.unwrap();
         let proxy = c.proxy().clone();
         let stat = tokio::spawn(async move { proxy.stat(ACCOUNT_LOC, b"/", true, "").await });
         let (id, _, _) = question(&mut signals).await;
-        // Another session cannot answer it.
         let other = f.hello_client().await;
         assert_eq!(error_name(&other.proxy().answer(&id, &answers).await), name(ErrorName::NotFound));
         let probe = f.probe();
@@ -1012,10 +975,9 @@ fn connect_ad_hoc_refusals(h: &Harness) {
         let c = f.hello_client().await;
         let p = c.proxy();
         let refused = p.connect_ad_hoc("sftp://user:pw@host/", b"s", &no_opts()).await;
-        assert_eq!(error_name(&refused), name(ErrorName::SecurityPolicy)); // XH-6
+        assert_eq!(error_name(&refused), name(ErrorName::SecurityPolicy));
         let local = p.connect_ad_hoc("file:///etc", b"", &no_opts()).await;
-        assert_eq!(error_name(&local), name(ErrorName::PermissionDenied)); // XB-11: never local paths
-        // A scheme no backend has is refused before any backend.
+        assert_eq!(error_name(&local), name(ErrorName::PermissionDenied));
         for url in ["dav://host/", "davs://host/", "ftp://host/", "ftps://host/"] {
             let unknown = p.connect_ad_hoc(url, b"", &no_opts()).await;
             assert_eq!(error_name(&unknown), name(ErrorName::Unsupported), "{url}");
@@ -1029,14 +991,13 @@ fn connect_ad_hoc_refusals(h: &Harness) {
             )
         );
         let missing = p.connect_ad_hoc("sftp://host/", b"", &no_opts()).await;
-        assert_eq!(error_name(&missing), name(ErrorName::Unsupported)); // no sftp backend in the tests
+        assert_eq!(error_name(&missing), name(ErrorName::Unsupported));
         let bad =
             p.connect_ad_hoc("sftp://host/", b"", &OptsBuilder::new().str("password", "x").build()).await;
         assert_eq!(error_name(&bad).as_deref(), Some("org.freedesktop.DBus.Error.InvalidArgs"));
         let profile = OptsBuilder::new().str("security_profile", "guest").build();
         let not_smb = p.connect_ad_hoc("fake://user@h/", b"", &profile).await;
         assert_eq!(error_name(&not_smb).as_deref(), Some("org.freedesktop.DBus.Error.InvalidArgs"));
-        // The user option replaces the URL's: the fake server knows `user` only.
         let user = OptsBuilder::new().str("user", "other").build();
         let wrong = p.connect_ad_hoc("fake://user@h/", b"", &user).await;
         assert_eq!(error_name(&wrong), name(ErrorName::AuthFailed));
@@ -1052,7 +1013,6 @@ fn connect_ad_hoc_refusals(h: &Harness) {
 fn peer_check_refuses(h: &Harness) {
     let f = Fixture::start(h, Setup { executable: Some("/bin/sh".to_owned()), ..Setup::default() });
     block_on(async {
-        // Closed without a reply.
         if let Ok(c) = netvfs_bridge_proto::connect(&f.socket).await {
             assert!(c.proxy().hello("x").await.is_err());
         }
@@ -1079,7 +1039,6 @@ fn discovery(h: &Harness) {
         assert!(f.link().nearby(vec![server.clone()]));
         let found = wait_signal(&mut signals, WAIT, |s| matches!(s, Signal::NearbyChanged(_))).await;
         assert!(matches!(found, Some(Signal::NearbyChanged(ref l)) if *l == [server.clone()]), "{found:?}");
-        // Another session that does not discover is not told.
         let other = f.hello_client().await;
         let mut other_signals = other.signals();
         assert!(f.link().nearby(vec![]));
@@ -1090,7 +1049,7 @@ fn discovery(h: &Harness) {
         .await;
         assert!(heard.is_none(), "{heard:?}");
         c.proxy().discover(false).await.unwrap();
-        assert_eq!(f.nearby.calls(), [true, false]); // XD-5
+        assert_eq!(f.nearby.calls(), [true, false]);
         assert!(!f.probe().counters().await.unwrap().discovering);
         c.proxy().discover(true).await.unwrap();
         assert!(f.probe().counters().await.unwrap().discovering);
@@ -1126,7 +1085,6 @@ fn handoff(h: &Harness) {
             name(ErrorName::Unsupported)
         );
         assert_eq!(error_name(&c.proxy().add_account("smb").await), name(ErrorName::Unsupported));
-        // Without the entry: no storage settings (XB-19).
         assert_eq!(c.proxy().get_features().await.unwrap(), ["drives"]);
         assert_eq!(error_name(&c.proxy().open_storage_settings().await), name(ErrorName::Unsupported));
         assert_eq!(f.launcher.calls().len(), 0);
@@ -1137,13 +1095,11 @@ const STORAGE_CONF: &str =
     "[OpenStorageSettings]\nService=a.b\nPath=/c\nInterface=a.b\nMethod=page\nArguments=s:system/storage\n";
 
 fn storage_settings(h: &Harness) {
-    // Neither needs consent: they show nothing of the user's locations.
     for consent in [Consent::Unknown, Consent::Denied, Consent::Granted] {
         let setup = Setup { consent, handoff_conf: Some(STORAGE_CONF.to_owned()), ..Setup::default() };
         let f = Fixture::start(h, setup);
         block_on(async {
             let c = f.client().await;
-            // Hello first, as for every call.
             assert_eq!(error_name(&c.proxy().get_features().await), name(ErrorName::ProtocolError));
             c.proxy().hello("t").await.unwrap();
             assert_eq!(c.proxy().get_features().await.unwrap(), ["storage-settings", "drives"]);
@@ -1154,7 +1110,6 @@ fn storage_settings(h: &Harness) {
                 (calls[0].method.as_str(), calls[0].arguments.as_slice()),
                 ("page", &[HandoffArg::Str("system/storage".to_owned())][..])
             );
-            // The account handoffs of the same table are not configured.
             if consent == Consent::Granted {
                 assert_eq!(error_name(&c.proxy().add_account("smb").await), name(ErrorName::Unsupported));
             } else {
@@ -1168,15 +1123,13 @@ fn storage_settings(h: &Harness) {
 }
 
 fn drives(h: &Harness) {
-    // XB-20: without consent, which they do not need.
     let f = Fixture::new(h, Consent::Denied);
     f.drives.state().drives = vec![FakeDrives::card("mmcblk1p1", "CARD"), FakeDrives::card("sda1", "")];
     block_on(async {
         let c = f.client().await;
-        // Hello first, as for every call.
         assert_eq!(error_name(&c.proxy().list_drives().await), name(ErrorName::ProtocolError));
         c.proxy().hello("t").await.unwrap();
-        let quiet = f.client().await; // no Hello: no signals
+        let quiet = f.client().await;
         let mut quiet_signals = quiet.signals();
         let mut signals = c.signals();
         let listed = c.proxy().list_drives().await.unwrap();
@@ -1188,18 +1141,14 @@ fn drives(h: &Harness) {
         assert_eq!(c.proxy().list_drives().await.unwrap()[1].mount_point, b"/run/media/user/sda1");
         c.proxy().unmount("sda1").await.unwrap();
         assert_eq!(error_name(&c.proxy().mount("sdz9").await), name(ErrorName::NotFound));
-        // An id that is not one never reaches the drives.
         let bad = c.proxy().mount("../sda1").await;
         assert_eq!(error_name(&bad).as_deref(), Some("org.freedesktop.DBus.Error.InvalidArgs"));
-        // What UDisks2 answered.
         f.drives.state().error = Some(netvfs_bridge::Status::new(ErrorName::Locked, "UDisks2 failed"));
         assert_eq!(error_name(&c.proxy().unmount("mmcblk1p1").await), name(ErrorName::Locked));
         let calls = f.drives.state().calls.clone();
         let expected = [(true, "sda1"), (false, "sda1"), (true, "sdz9"), (false, "mmcblk1p1")];
         assert_eq!(calls, expected.map(|(mount, id)| (mount, id.to_owned())));
-        // Each was a request (XB-17), and gave its slot back.
         assert_eq!(f.probe().counters().await.unwrap().requests, 0);
-        // A change: DrivesChanged to the sessions that said Hello.
         f.drives_changed();
         assert!(wait_signal(&mut signals, WAIT, |s| matches!(s, Signal::DrivesChanged)).await.is_some());
         let heard = wait_signal(&mut quiet_signals, Duration::from_millis(200), |_| true).await;
@@ -1212,7 +1161,7 @@ fn locations_changed(h: &Harness) {
     let f = Fixture::new(h, Consent::Granted);
     block_on(async {
         let c = f.hello_client().await;
-        let quiet = f.client().await; // no Hello: no signals
+        let quiet = f.client().await;
         let mut quiet_signals = quiet.signals();
         let mut signals = c.signals();
         f.accounts.state().accounts.push(FakeAccounts::fake_account(5));
@@ -1221,10 +1170,8 @@ fn locations_changed(h: &Harness) {
         assert_eq!(c.proxy().list_locations().await.unwrap().len(), 2);
         let heard = wait_signal(&mut quiet_signals, Duration::from_millis(200), |_| true).await;
         assert!(heard.is_none(), "{heard:?}");
-        // A pool of an account that is gone goes with it.
         c.proxy().capabilities("account:5").await.unwrap();
         assert_eq!(f.probe().counters().await.unwrap().pools, 1);
-        // (Its connection's state is told first.)
         assert!(wait_signal(&mut signals, WAIT, |s| matches!(s, Signal::LocationsChanged)).await.is_some());
         assert_eq!(state_of(&c, "account:5").await, connected());
         f.accounts.state().accounts.truncate(1);
@@ -1259,71 +1206,55 @@ fn is_locations_changed(s: &Signal) -> bool {
     matches!(s, Signal::LocationsChanged)
 }
 
-/// A while in which a pending `LocationsChanged` (250 ms after a change)
-/// would come.
+/// A while in which a pending `LocationsChanged` (250 ms after a change) would come.
 const QUIET: Duration = Duration::from_millis(750);
 
-/// XB-12: the state of the consumer's pool for a location, and
-/// `LocationsChanged` when it changes, only then.
+/// The state of the consumer's pool for a location, and `LocationsChanged` when it changes, only then.
 fn connection_states(h: &Harness) {
     let f = Fixture::new(h, Consent::Granted);
     block_on(async {
         let c = f.hello_client().await;
         let mut signals = c.signals();
-        // Never used.
         assert_eq!(state_of(&c, ACCOUNT_LOC).await, disconnected());
-        // The first request connects; the consumer is told.
         c.proxy().capabilities(ACCOUNT_LOC).await.unwrap();
         assert_eq!(state_of(&c, ACCOUNT_LOC).await, connected());
         assert!(wait_signal(&mut signals, WAIT, is_locations_changed).await.is_some());
-        // Work on the established connection, and ListLocations, change no
-        // state: no signal.
         c.proxy().stat(ACCOUNT_LOC, b"/", true, "").await.unwrap();
         assert_eq!(
             error_name(&c.proxy().stat(ACCOUNT_LOC, b"/none", true, "").await),
             name(ErrorName::NotFound)
         );
-        // Nor does another connection of the pool (a bulk one): it connects,
-        // but the location was connected and stays so.
         let before = h.fake.live_backends();
         c.proxy().stat(ACCOUNT_LOC, b"/", true, "bulk").await.unwrap();
         assert!(h.fake.live_backends() > before, "a second connection");
         assert_eq!(state_of(&c, ACCOUNT_LOC).await, connected());
         let heard = wait_signal(&mut signals, QUIET, is_locations_changed).await;
         assert!(heard.is_none(), "{heard:?}");
-        // Disconnect: disconnected at once.
         c.proxy().disconnect(ACCOUNT_LOC).await.unwrap();
         assert_eq!(state_of(&c, ACCOUNT_LOC).await, disconnected());
         assert!(wait_signal(&mut signals, WAIT, is_locations_changed).await.is_some());
-        // An attempt that fails: failed, with the error.
         h.fake.fail_op("connect", ErrorName::NetworkUnreachable);
         let stat = c.proxy().stat(ACCOUNT_LOC, b"/", true, "").await;
         assert_eq!(error_name(&stat), name(ErrorName::NetworkUnreachable));
         assert_eq!(state_of(&c, ACCOUNT_LOC).await, failed(ErrorName::NetworkUnreachable));
         assert!(wait_signal(&mut signals, WAIT, is_locations_changed).await.is_some());
-        // The next one that succeeds clears it.
         c.proxy().stat(ACCOUNT_LOC, b"/", true, "").await.unwrap();
         assert_eq!(state_of(&c, ACCOUNT_LOC).await, connected());
         assert!(wait_signal(&mut signals, WAIT, is_locations_changed).await.is_some());
-        // Every session of the consumer sees the same pool.
         let other = f.hello_client().await;
         assert_eq!(state_of(&other, ACCOUNT_LOC).await, connected());
-        // A failure and a Disconnect: disconnected, the failure forgotten.
         c.proxy().disconnect(ACCOUNT_LOC).await.unwrap();
         h.fake.fail_op("connect", ErrorName::Timeout);
         assert_eq!(error_name(&c.proxy().stat(ACCOUNT_LOC, b"/", true, "").await), name(ErrorName::Timeout));
         assert_eq!(state_of(&other, ACCOUNT_LOC).await, failed(ErrorName::Timeout));
         c.proxy().disconnect(ACCOUNT_LOC).await.unwrap();
         assert_eq!(state_of(&other, ACCOUNT_LOC).await, disconnected());
-        // That burst is told (in one signal, or more if it took longer than
-        // the delay), then nothing more comes.
         assert!(wait_signal(&mut signals, WAIT, is_locations_changed).await.is_some());
         let mut more = 0;
         while wait_signal(&mut signals, QUIET, is_locations_changed).await.is_some() {
             more += 1;
             assert!(more < 3, "LocationsChanged keeps coming");
         }
-        // A Disconnect of a disconnected location changes nothing.
         c.proxy().disconnect(ACCOUNT_LOC).await.unwrap();
         assert_eq!(state_of(&c, ACCOUNT_LOC).await, disconnected());
         let heard = wait_signal(&mut signals, QUIET, is_locations_changed).await;
@@ -1331,8 +1262,7 @@ fn connection_states(h: &Harness) {
     });
 }
 
-/// XB-12: connections closed when idle leave the location disconnected,
-/// and the consumer is told.
+/// Connections closed when idle leave the location disconnected, and the consumer is told.
 fn connection_states_of_idle_connections(h: &Harness) {
     let setup = Setup { connection_idle: Duration::from_millis(100), ..Setup::default() };
     let f = Fixture::start(h, setup);
@@ -1342,13 +1272,10 @@ fn connection_states_of_idle_connections(h: &Harness) {
         c.proxy().capabilities(ACCOUNT_LOC).await.unwrap();
         assert_eq!(state_of(&c, ACCOUNT_LOC).await, connected());
         assert!(wait_signal(&mut signals, WAIT, is_locations_changed).await.is_some());
-        // The next maintenance closes the connection.
         let changed = wait_signal(&mut signals, MAINTENANCE_INTERVAL + WAIT, is_locations_changed).await;
         assert!(changed.is_some(), "no LocationsChanged after the idle close");
         assert_eq!(state_of(&c, ACCOUNT_LOC).await, disconnected());
         assert!(wait_for(WAIT, || h.fake.live_backends() == 0).await);
-        // A failed attempt, then one that succeeds: once that connection is
-        // closed too, the location is disconnected, not failed.
         h.fake.fail_op("connect", ErrorName::NetworkUnreachable);
         let caps = c.proxy().capabilities(ACCOUNT_LOC).await;
         assert_eq!(error_name(&caps), name(ErrorName::NetworkUnreachable));
@@ -1372,11 +1299,11 @@ fn ffi_nearby_lives_on_the_qt_thread(h: &Harness) {
     let f = Fixture::new(h, Consent::Granted);
     let mut source = nearby::FfiNearby::new(h.ffi, f.link().clone());
     assert_eq!(live_discoveries(h), 0);
-    source.set_running(false); // nothing to stop: nothing made
+    source.set_running(false);
     assert_eq!(live_discoveries(h), 0);
     source.set_running(true);
     assert_eq!(live_discoveries(h), 1);
-    source.set_running(false); // stopped, kept for the next start
+    source.set_running(false);
     assert_eq!(live_discoveries(h), 1);
     source.set_running(true);
     assert_eq!(live_discoveries(h), 1);
@@ -1424,8 +1351,6 @@ fn cancel_pending_job(h: &Harness) {
             assert!(started.elapsed() < WAIT, "accounts 2 and 3 never came");
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
-        // The host's connections (POOL_PER_HOST), each stuck on a pipe
-        // nobody reads: two of account 1, two of account 2.
         let mut pipes = Vec::new();
         let mut download = async |loc: &str| {
             let (reader, writer) = std::io::pipe().unwrap();
@@ -1437,11 +1362,9 @@ fn cancel_pending_job(h: &Harness) {
             download(loc).await;
         }
         assert_eq!(POOL_PER_HOST, 4);
-        // Account 3 has no connection and the host none to spare: it waits.
         let pending = download("account:3").await;
         assert_eq!(probe.wait_until(WAIT, |n| n.jobs == 5).await.unwrap().jobs, 5);
         c.proxy().cancel(pending).await.unwrap();
-        // XB-13: waiting work ends at once, not when a connection comes free.
         assert_eq!(finished(&mut signals, pending).await.0, "Canceled");
         assert_eq!(probe.wait_until(WAIT, |n| n.jobs == 4).await.unwrap().jobs, 4);
         drop(pipes);
@@ -1455,7 +1378,6 @@ fn idle_exit_after_an_answer(h: &Harness) {
         assert_eq!(f.prompt.state().shown, 1);
         c.close().await;
         drop(c);
-        // The answer is stored after the consumer left; then the bridge goes.
         f.answer_prompt(false);
         assert_eq!(f.wait_exit(Duration::from_secs(5)).await, Some(ExitCode::SUCCESS));
         assert_eq!(f.stored_consent(), Consent::Denied);

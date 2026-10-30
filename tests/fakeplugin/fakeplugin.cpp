@@ -17,7 +17,6 @@ QString keyOfHex(const QByteArray &hex)
     return FakeServer::keyFor(NetVfs::Names::decode(QByteArray::fromHex(hex)));
 }
 
-// One line of a seed file (server mutex held); unknown lines are ignored.
 void seedLine(FakeServer *server, const QByteArray &line)
 {
     const QList<QByteArray> words = line.simplified().split(' ');
@@ -30,12 +29,11 @@ void seedLine(FakeServer *server, const QByteArray &line)
         server->userName = QString::fromUtf8(words.at(1));
         server->secret = QByteArray::fromHex(words.value(2));
     } else if (kind == "identity" && words.size() > 1) {
-        // The pin itself holds a space: "<algorithm> <base64 key>".
         server->identity = NetVfs::ServerIdentity::fromPin(QString::fromUtf8(line.simplified().mid(kind.size() + 1)));
     }
 }
 
-// Design §4.1: NETVFS_FAKE_SEED=<file> prepares the FakeServer of a process
+// NETVFS_FAKE_SEED=<file> prepares the FakeServer of a process
 // a test starts (the bridge binary), on the first backend created. Lines:
 //   file <path-hex> <data-hex>
 //   dir <path-hex>

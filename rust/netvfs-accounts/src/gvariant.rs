@@ -1,30 +1,21 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! Setting values in `accounts.db`: libaccounts-glib stores each as its
-//! `GVariant` type string and `g_variant_print()` text, and reads it back with
-//! `g_variant_parse()` (`_ag_value_from_string`, ag-util.c).
-//!
-//! This parses the text format for the types libaccounts-qt turns into a
-//! `QVariant` (`gVariantToQVariant`): `s`, `b`, `i`, `u`, `x`, `t`, `as` and
-//! `a{sv}`. Every other type is read as `Value::Invalid`, which is what
-//! libaccounts-qt makes of it too; so is text that does not parse, which
-//! libaccounts-glib keeps as a key without a value (`got_account_setting`).
+//! Setting values in `accounts.db`: libaccounts-glib stores each as `GVariant` type string plus
+//! `g_variant_print()` text and reads it with `g_variant_parse()`.
+//! Parses the types libaccounts-qt turns into a `QVariant`: `s`, `b`, `i`, `u`, `x`, `t`, `as`,
+//! `a{sv}`. Any other type, and unparsable text, reads as `Value::Invalid`, as in libaccounts-qt.
 
 use std::fmt::Write as _;
 
 use crate::qvariant::Value;
 
-/// The `QVariant` libaccounts-qt makes of a stored setting. `text` is the
-/// value column (`None` for SQL NULL).
-///
-/// The text of a type this module does not parse is not checked: it reads
-/// as `Value::Invalid` whether it parses or not, as both do for
-/// libaccounts-qt.
+/// The `QVariant` libaccounts-qt makes of a stored setting. `text` is the value column (`None` for
+/// SQL NULL). Text of an unparsed type is not checked.
 #[must_use]
 pub fn from_db(type_string: &[u8], text: Option<&[u8]>) -> Value {
     let Some(text) = text else { return Value::Invalid };
     // g_variant_parse() and g_variant_new_string() refuse invalid UTF-8.
     let Ok(text) = std::str::from_utf8(text) else { return Value::Invalid };
-    // libaccounts-glib takes an unquoted string as it is (for the XML files).
+    // libaccounts-glib takes an unquoted string as is (XML files).
     if type_string == b"s" && !text.starts_with(['\'', '"']) {
         return Value::String(text.to_owned());
     }
@@ -36,9 +27,8 @@ pub fn from_db(type_string: &[u8], text: Option<&[u8]>) -> Value {
     }
 }
 
-/// `g_variant_print(value, FALSE)` of a string, as libaccounts-glib stores
-/// it. Characters other than printable ASCII are written as `\u` escapes,
-/// which `g_variant_parse()` reads back to the same string.
+/// `g_variant_print(value, FALSE)` of a string. Non-printable-ASCII characters become `\u` escapes,
+/// which `g_variant_parse()` reads back.
 #[must_use]
 pub fn print_string(s: &str) -> String {
     let quote = if s.contains('\'') { '"' } else { '\'' };
@@ -60,7 +50,6 @@ pub fn print_string(s: &str) -> String {
             '\t' => out.push_str("\\t"),
             '\u{b}' => out.push_str("\\v"),
             c if u32::from(c) < 0x1_0000 => {
-                // Writing to a String cannot fail.
                 write!(out, "\\u{:04x}", u32::from(c)).ok();
             }
             c => {
@@ -78,7 +67,6 @@ pub fn print_bool(b: bool) -> &'static str {
     if b { "true" } else { "false" }
 }
 
-/// The types this parser knows by name.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Kind {
     String,
@@ -89,7 +77,6 @@ enum Kind {
     UInt64,
     StringArray,
     VarDict,
-    /// Parsed, but not a type libaccounts-qt converts.
     Other(Other),
 }
 
@@ -146,14 +133,12 @@ impl Kind {
     }
 }
 
-/// A parse failure; the value is then unusable as a whole.
 #[derive(Debug)]
 struct Unparsable;
 
 type Parsed<T> = Result<T, Unparsable>;
 
-/// Nesting deeper than this is refused: no stored setting needs it, and it
-/// bounds the recursion.
+/// Nesting limit; bounds recursion.
 const MAX_DEPTH: usize = 16;
 
 struct Parser<'a> {
@@ -162,13 +147,11 @@ struct Parser<'a> {
 }
 
 impl Parser<'_> {
-    /// Moves past `n` bytes the parser has just seen, so within the text.
     fn advance(&mut self, n: usize) {
         self.pos = self.pos.saturating_add(n);
     }
 
     fn skip_space(&mut self) {
-        // g_ascii_isspace
         while self
             .text
             .get(self.pos)
@@ -197,14 +180,12 @@ impl Parser<'_> {
         }
     }
 
-    /// A run of characters that `token_stream_prepare` keeps together.
     fn word(&mut self, also: &[u8]) -> &str {
         self.skip_space();
         let start = self.pos;
         while self.text.get(self.pos).is_some_and(|b| b.is_ascii_alphanumeric() || also.contains(b)) {
             self.advance(1);
         }
-        // ASCII only, so always UTF-8.
         let word = self.text.get(start..self.pos).unwrap_or_default();
         std::str::from_utf8(word).unwrap_or_default()
     }
@@ -230,7 +211,6 @@ impl Parser<'_> {
             b'[' => self.array(expected, depth),
             b'{' => self.dict(expected, depth),
             b'<' => {
-                // A variant: libaccounts-qt does not convert one.
                 self.advance(1);
                 self.value_at(None, depth.saturating_add(1))?;
                 self.expect(b'>')?;
@@ -251,8 +231,7 @@ impl Parser<'_> {
         }
     }
 
-    /// An optional type annotation (`uint32 5`, `@as []`); the type the
-    /// value must then have.
+    /// Optional type annotation (`uint32 5`, `@as []`); the type the value must then have.
     fn annotation(&mut self, expected: Option<Kind>) -> Parsed<Option<Kind>> {
         let annotated = match self.peek() {
             Some(b'@') => {
@@ -358,7 +337,7 @@ impl Parser<'_> {
         };
         let magnitude = strtoull(digits)?;
         let negative = negative && magnitude != 0;
-        // Every u64 and its negation fit an i128, so each range check below is exact.
+        // u64 and its negation fit i128: range checks are exact.
         let wide = i128::from(magnitude);
         let signed = if negative { wide.checked_neg().ok_or(Unparsable)? } else { wide };
         let value = match kind {
@@ -376,8 +355,7 @@ impl Parser<'_> {
     }
 
     fn array(&mut self, expected: Option<Kind>, depth: usize) -> Parsed<Value> {
-        // Only arrays of strings convert; an untyped one is `as` when its
-        // first item is a string.
+        // Only string arrays convert; an untyped one is `as` if its first item is a string.
         match expected {
             None | Some(Kind::StringArray) => {}
             Some(_) => return Err(Unparsable),
@@ -386,7 +364,7 @@ impl Parser<'_> {
         let mut items = Vec::new();
         if self.peek() == Some(b']') {
             self.advance(1);
-            // An empty array needs its type from an annotation.
+            // An empty array needs an annotation.
             return if expected.is_some() { Ok(Value::StringList(items)) } else { Err(Unparsable) };
         }
         loop {
@@ -437,19 +415,16 @@ impl Parser<'_> {
     }
 }
 
-/// Any failure of a conversion reads as an unparsable value.
 fn or_unparsable<T, E>(result: Result<T, E>) -> Parsed<T> {
     result.ok().ok_or(Unparsable)
 }
 
-/// `value` as a `T`, if it lies in the range of `T`.
 fn within<T: TryFrom<i128>>(value: i128) -> Parsed<T> {
     or_unparsable(T::try_from(value))
 }
 
-/// `g_ascii_strtoull(token, &end, 0)` that must use the whole token: an
-/// optional sign (a `-` negates modulo 2^64), then hex after `0x`, octal
-/// after `0`, else decimal.
+/// `g_ascii_strtoull(token, &end, 0)` over the whole token: optional sign (`-` negates mod 2^64),
+/// hex after `0x`, octal after `0`, else decimal.
 fn strtoull(token: &str) -> Parsed<u64> {
     let (negate, rest) = match token.strip_prefix('-') {
         Some(rest) => (true, rest),
@@ -489,11 +464,9 @@ mod tests {
         assert_eq!(parse("s", r"'\a\b\f\n\r\t\v'"), s("\u{7}\u{8}\u{c}\n\r\t\u{b}"));
         assert_eq!(parse("s", "'a\\\nb'"), s("ab"));
         assert_eq!(parse("s", r"'é\U0001f600'"), s("é\u{1f600}"));
-        // Only a value that starts with a quote is parsed.
         assert_eq!(parse("s", "  'x'  "), s("  'x'  "));
         assert_eq!(parse("s", "string 'x'"), s("string 'x'"));
         assert_eq!(parse("s", "'x'  "), s("x"));
-        // Unquoted: taken as it is.
         assert_eq!(parse("s", "plain \\n text"), s("plain \\n text"));
         assert_eq!(parse("s", ""), s(""));
         for bad in ["'x", "'x' 'y'", r"'\u00'", r"'\u0000'", r"'\ud800'", r"'\U00110000'", "'\\"] {
@@ -545,7 +518,6 @@ mod tests {
             ("i", "uint32 5"),
             ("i", "5 6"),
             ("i", "--5"),
-            // A sign is taken once, before any 0x or 0.
             ("i", "++5"),
             ("i", "0x+5"),
             ("i", "0+5"),
@@ -608,8 +580,6 @@ mod tests {
         }
         let deep = format!("{{'k': {}'x'{}}}", "<".repeat(40), ">".repeat(40));
         assert_eq!(parse("a{sv}", &deep), Value::Invalid);
-        // Depth 16 (the dictionary is 0, its value 1, each further variant
-        // one more) is the deepest that parses.
         let nested = |n: usize| format!("{{'k': {}'x'{}}}", "<".repeat(n), ">".repeat(n));
         assert_eq!(MAX_DEPTH, 16);
         assert_eq!(parse("a{sv}", &nested(16)), Value::Map(vec![("k".into(), Value::Invalid)]));
@@ -618,8 +588,6 @@ mod tests {
 
     #[test]
     fn annotations_name_every_type() {
-        // A keyword or a type string makes the value that type; the types
-        // libaccounts-qt does not convert parse, then read as Invalid.
         for (annotated, value) in [
             ("string 'x'", s("x")),
             ("@s 'x'", s("x")),
@@ -645,7 +613,6 @@ mod tests {
                 "{annotated}"
             );
         }
-        // An annotation must match the value.
         for bad in
             ["@y 256", "@n 32768", "@q -1", "@h 2147483648", "@d 'x'", "@o 5", "@g 5", "@z 5", "string 5"]
         {
@@ -673,7 +640,6 @@ mod tests {
         }
         assert_eq!(print_string("auth-failed"), "'auth-failed'");
         assert_eq!(print_string("it's"), "\"it's\"");
-        // \u up to U+FFFF, \U beyond.
         assert_eq!(print_string("\u{e9}\u{7f}"), r"'\u00e9\u007f'");
         assert_eq!(print_string("\u{fffd}\u{ffff}"), r"'\ufffd\uffff'");
         assert_eq!(print_string("\u{10000}\u{1f600}"), r"'\U00010000\U0001f600'");

@@ -1,17 +1,16 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! [`Status`]: a failure as netvfs reports it (XC-21, XC-24), from a backend
-//! or from the bridge's own checks, and [`ErrorName`], its XC-21 name. The
-//! bridge sends the name as the D-Bus error `org.netvfs.Error.<Name>`
-//! (SPEC-v2 XB-9); the C ABIs carry it as text (`nvb_error.name`).
+//! [`Status`]: a failure as netvfs reports it, from a backend or the bridge's own checks, and
+//! [`ErrorName`], its name. The bridge sends the name as D-Bus error `org.netvfs.Error.<Name>`; the
+//! C ABIs carry it as text (`nvb_error.name`).
 
 use std::fmt;
 
-/// Prefix of the D-Bus error names (XB-9).
+/// Prefix of the D-Bus error names.
 pub const ERROR_PREFIX: &str = "org.netvfs.Error.";
 
 macro_rules! error_names {
     ($($(#[$doc:meta])* $name:ident),* $(,)?) => {
-        /// An XC-21 error name, in the order of `src/core/error.h`.
+        /// An error name, in the order of `src/core/error.h`.
         #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
         pub enum ErrorName {
             $($(#[$doc])* $name,)*
@@ -57,7 +56,7 @@ error_names! {
     AuthFailed,
     /// A mandatory security requirement could not be met.
     SecurityPolicy,
-    /// Not allowed (also: no consent, XB-6).
+    /// Not allowed (also: no consent).
     PermissionDenied,
     /// No such file, location, handle, job or question.
     NotFound,
@@ -111,12 +110,11 @@ impl fmt::Display for ErrorName {
     }
 }
 
-/// A failed operation: an XC-21 name, a human message, a protocol detail
-/// for logs (XC-24) and, for `RateLimited` and `TooManyConnections`, when to
-/// try again.
+/// A failed operation: a name, a human message, a protocol detail for logs and, for `RateLimited`
+/// and `TooManyConnections`, when to try again.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Status {
-    /// The XC-21 name.
+    /// The error name.
     pub name: ErrorName,
     /// UTF-8, may be empty.
     pub message: String,
@@ -148,7 +146,7 @@ impl Status {
     }
 
     /// A malformed call (`ProtocolError`; the bridge's dispatch replies
-    /// `org.freedesktop.DBus.Error.InvalidArgs` for it, XSEC-7).
+    /// `org.freedesktop.DBus.Error.InvalidArgs` for it).
     #[must_use]
     pub fn invalid_args(message: impl Into<String>) -> Self {
         Self::new(ErrorName::ProtocolError, message)
@@ -172,13 +170,13 @@ impl Status {
         Self::new(ErrorName::Internal, message)
     }
 
-    /// `Canceled` (C-9), without a message.
+    /// `Canceled`, without a message.
     #[must_use]
     pub fn canceled() -> Self {
         Self::new(ErrorName::Canceled, "")
     }
 
-    /// `Unsupported`: the backend cannot do this (XC-5).
+    /// `Unsupported`: the backend cannot do this.
     #[must_use]
     pub fn unsupported(message: impl Into<String>) -> Self {
         Self::new(ErrorName::Unsupported, message)
@@ -202,7 +200,7 @@ impl std::error::Error for Status {}
 mod tests {
     use super::*;
 
-    // The 23 XC-21 names of src/core/error.cpp (all but `None`), in order.
+    // The 23 names of src/core/error.cpp (all but `None`), in order.
     #[test]
     fn names_are_the_xc21_names() {
         let names: Vec<&str> = ErrorName::ALL.iter().map(|n| n.as_str()).collect();

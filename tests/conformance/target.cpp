@@ -80,8 +80,8 @@ QVector<Target> defaultTargets(const QString &scratch)
     relative.fifoStall = true;
     QDir().mkpath(relative.hostPath);
 
-    // "local-absolute": default root "/", absolute paths (L-1), and the
-    // link()+unlink() / stat-check fallback of rename(NoReplace) (L-3).
+    // "local-absolute": default root "/", absolute paths, and the
+    // link()+unlink() / stat-check fallback of rename(NoReplace).
     Target absolute;
     absolute.name = QStringLiteral("local-absolute");
     absolute.params.provider = QStringLiteral("local");

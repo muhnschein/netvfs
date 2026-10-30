@@ -1,20 +1,12 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! `libnetvfs-rs.so`: the Rust backends behind the C++ backend plugins
-//! (phase 3 design §1, doc/RUST.md "netvfs-backend").
+//! `libnetvfs-rs.so`: the Rust backends behind the C++ backend plugins.
 //!
-//! - [`ffi`]: the C ABI of `src/backends/rs/netvfs_rs.h`, the table that
-//!   `nvr_get`, the library's one export, hands out.
-//! - `runtime`: one tokio runtime per process (two `nvr-io-*` workers);
-//!   every call runs with `block_on` on the caller's thread, and is cut
-//!   1 s after a cancel that it does not end itself (C-9).
-//! - `erased`: the netvfs-vfs traits behind `dyn`, for backends picked by
-//!   provider name.
-//! - `mem` (feature `testing`): an in-memory backend, provider `mem`, for
-//!   the shim's tests and the conformance suite.
+//! - [`ffi`]: C ABI table handed out by `nvr_get`, the one export.
+//! - `runtime`: one tokio runtime per process; calls `block_on` on the caller's thread, cut 1 s after a cancel.
+//! - `erased`: netvfs-vfs traits behind `dyn`, backends picked by provider name.
+//! - `mem` (feature `testing`): in-memory backend, provider `mem`.
 //!
-//! The library is built with the `rs-release` profile (`panic = "unwind"`,
-//! so that a panic reaches the table function that reports it); see
-//! rust/Cargo.toml.
+//! Built with the `rs-release` profile (`panic = "unwind"`: a panic must reach the table function that reports it).
 
 mod erased;
 pub mod ffi;

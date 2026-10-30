@@ -1,9 +1,5 @@
 name: CodeQL
-# Advanced setup, because default setup cannot leave paths out. Scans the
-# code that ships (.github/codeql/codeql-config.yml; Rust:
-# codeql-config-rust.yml, with our copy of one stock query in rust-queries/).
-# Default setup must be off (Settings > Code security): GitHub refuses this
-# upload while it is on.
+# Advanced setup: default setup cannot leave paths out and must be off (Settings > Code security), else GitHub refuses the upload. Scope: .github/codeql/codeql-config.yml, codeql-config-rust.yml, our query copy in rust-queries/.
 on:
   push:
     branches:
@@ -30,9 +26,7 @@ jobs:
       matrix:
         language: [actions, c-cpp, python, rust]
     env:
-      # Rust as the shipped build sees it (`cargo build --release`,
-      # tools/ci/cross-build.sh): no cfg(test), default features only (every
-      # other feature is test support).
+      # Rust as the shipped build sees it (`cargo build --release`, tools/ci/cross-build.sh): no cfg(test), default features only.
       CODEQL_EXTRACTOR_RUST_OPTION_CARGO_CFG_OVERRIDES: -test
       CODEQL_EXTRACTOR_RUST_OPTION_CARGO_FEATURES: default
     steps:
@@ -46,8 +40,7 @@ jobs:
           build-mode: none
           config-file: ./.github/codeql/${{ matrix.language == 'rust' && 'codeql-config-rust.yml' || 'codeql-config.yml' }}
       - uses: github/codeql-action/analyze@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
-      # Our query against planted cases: real findings reported, false
-      # positives it exists for silent.
+      # Our query against planted cases: real findings reported, false positives silent.
       - if: matrix.language == 'rust'
         run: '"$CODEQL" test run --additional-packs .github/codeql .github/codeql/rust-queries-tests'
         env:

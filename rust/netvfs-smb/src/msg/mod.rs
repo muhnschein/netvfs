@@ -1,12 +1,7 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! SMB2 message codecs (MS-SMB2 2.2). Pure functions over byte slices: no
-//! I/O, no crypto.
+//! SMB2 message codecs (MS-SMB2 2.2). Pure functions over byte slices: no I/O, no crypto.
 //!
-//! Offsets in SMB2 bodies count from the start of the SMB2 header, so every
-//! decoder takes the whole message, header included. Every length and
-//! offset from the wire is checked against the message before use, and
-//! nothing is allocated from a wire length that was not checked against the
-//! message or a cap.
+//! Offsets in SMB2 bodies count from the start of the SMB2 header, so decoders take the whole message. Every length and offset from the wire is checked against the message or a cap before use or allocation.
 
 pub mod file;
 pub mod negotiate;
@@ -27,8 +22,7 @@ pub const PROTOCOL_ID: [u8; 4] = [0xFE, b'S', b'M', b'B'];
 pub const COMPRESSED_PROTOCOL_ID: [u8; 4] = [0xFC, b'S', b'M', b'B'];
 /// MessageId of unsolicited notifications (OPLOCK_BREAK).
 pub const NOTIFICATION_MID: u64 = u64::MAX;
-/// Most elements accepted in one received compound chain (we send at most
-/// four).
+/// Most elements accepted in one received compound chain.
 pub const MAX_CHAIN: usize = 16;
 
 /// SMB2 commands (MS-SMB2 2.2.1.2).
@@ -428,7 +422,6 @@ mod tests {
         let d = Header::decode(&msg).unwrap();
         assert_eq!(d, a);
         assert!(d.is_response() && d.is_interim() && !d.is_signed());
-        // PENDING in a sync header is not an interim response.
         let mut s = d;
         s.async_id = None;
         assert!(!s.is_interim());
@@ -450,9 +443,9 @@ mod tests {
     fn error_response_bounds() {
         let mut body = vec![9, 0, 0, 0, 0, 0, 0, 0, 0];
         check_error_response(&response(Command::Create, 1, 0, &body)).unwrap();
-        body[4] = 1; // one byte of ErrorData: present
+        body[4] = 1;
         check_error_response(&response(Command::Create, 1, 0, &body)).unwrap();
-        body[4] = 2; // beyond the message
+        body[4] = 2;
         check_error_response(&response(Command::Create, 1, 0, &body)).unwrap_err();
         check_error_response(&response(Command::Create, 1, 0, &[9, 0, 0, 0, 0, 0])).unwrap_err();
         check_error_response(&response(Command::Create, 1, 0, &[8, 0, 0, 0, 0, 0, 0, 0, 0])).unwrap_err();
@@ -466,24 +459,20 @@ mod tests {
         let chain = [first.clone(), second].concat();
         assert_eq!(split_chain(&chain).unwrap(), [0..72, 72..138]);
         assert_eq!(split_chain(&second_only()).unwrap(), vec![0..66]);
-        // NextCommand inside the header, unaligned, at or past the end.
         for next in [8u32, 70, 138, 4096] {
             let mut bad = chain.clone();
             bad[20..24].copy_from_slice(&next.to_le_bytes());
             split_chain(&bad).unwrap_err();
         }
-        // Inside the header, or unaligned, even with a header there.
         for next in [32usize, 68] {
             let mut bad = response(Command::Echo, 1, u32::try_from(next).unwrap(), &[]);
             bad.resize(next, 0);
             bad.extend_from_slice(&response(Command::Echo, 2, 0, &[]));
             split_chain(&bad).unwrap_err();
         }
-        // NextCommand 64 is a header without a body: allowed.
         let mut bare = response(Command::Echo, 1, 64, &[]);
         bare.extend_from_slice(&response(Command::Echo, 2, 0, &[]));
         assert_eq!(split_chain(&bare).unwrap(), [0..64, 64..128]);
-        // A chain of MAX_CHAIN + 1 elements.
         let element = response(Command::Echo, 1, 64, &[]);
         let mut long: Vec<u8> = element.repeat(MAX_CHAIN);
         long.extend_from_slice(&response(Command::Echo, 1, 0, &[]));

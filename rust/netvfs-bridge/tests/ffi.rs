@@ -1,16 +1,7 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! The C ABI through `netvfs_bridge::ffi`, against the real
-//! `libnetvfs-bridge-ffi.so` (`NETVFS_BRIDGE_FFI`) with the fake backend
-//! (`NETVFS_BACKEND_PATH`, provider "fake") steered through
-//! `libnetvfs-bridge-ffi-fake.so` (`NETVFS_BRIDGE_FFI_FAKE`); design §4.1,
-//! the Rust side of `tests/bridge/ffi/tst_bridgeffi.cpp`. `make
-//! check-rust-ffi` sets the variables; without them every test says it is
-//! skipped and passes, so that a plain `cargo nextest` needs no C++ build.
+//! The C ABI through `netvfs_bridge::ffi`, against the real `libnetvfs-bridge-ffi.so` (`NETVFS_BRIDGE_FFI`) with the fake backend (`NETVFS_BACKEND_PATH`, provider "fake") steered through `libnetvfs-bridge-ffi-fake.so` (`NETVFS_BRIDGE_FFI_FAKE`). `make check-rust-ffi` sets the variables; without them every test says it is skipped and passes, so plain `cargo nextest` needs no C++ build.
 //!
-//! Its own harness: `init` must run on the main thread, which then serves
-//! the Qt event loop (T1). It speaks enough of libtest's command line for
-//! nextest (`--list --format terse`, `<name> --exact`), which runs each
-//! test in a process of its own; `cargo test` runs them all in one.
+//! Own harness: `init` must run on the main thread, which then serves the Qt event loop. Speaks enough of libtest's command line for nextest (`--list --format terse`, `<name> --exact`), which runs each test in its own process; `cargo test` runs them all in one.
 #![allow(
     missing_docs,
     clippy::unwrap_used,
@@ -38,8 +29,6 @@ use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 use std::time::{Duration, Instant};
 use zeroize::Zeroizing;
-
-// ------------------------------------------------------------- harness
 
 #[derive(Clone, Copy)]
 struct Env {
@@ -73,14 +62,12 @@ const TESTS: &[(&str, Test)] = &[
     ("results_are_freed", results_are_freed),
 ];
 
-/// A test that runs longer than this hangs: the process says so and ends.
-/// The slowest takes about 7 s under ASan, printing backtraces of panics.
+/// A test that runs longer than this hangs: the process says so and ends. The slowest takes about 7 s under ASan, printing backtraces of panics.
 const HANG: Duration = Duration::from_secs(30);
 
 const VARIABLES: [&str; 3] = ["NETVFS_BRIDGE_FFI", fake::PATH_ENV, "NETVFS_BACKEND_PATH"];
 
 impl Env {
-    /// `None` when the libraries are not named.
     fn load() -> Option<Self> {
         if VARIABLES.iter().any(|v| std::env::var_os(v).is_none()) {
             return None;
@@ -120,7 +107,6 @@ fn main() -> ExitCode {
         println!("skipped: {} not set (make check-rust-ffi sets them)", VARIABLES.join(", "));
         return ExitCode::SUCCESS;
     };
-    // T1: first of all, on the main thread.
     env.ffi.init("netvfs-bridge-ffi-test").unwrap();
     let mut failed = 0;
     for (name, test) in tests {
@@ -135,9 +121,7 @@ fn main() -> ExitCode {
     if failed == 0 { ExitCode::SUCCESS } else { ExitCode::FAILURE }
 }
 
-/// Ends the process when the test is not done within [`HANG`]: a test
-/// waiting for the event loop would otherwise wait for good. Dropping the
-/// sender says it is done.
+/// Ends the process when the test is not done within [`HANG`]; dropping the sender says it is done.
 #[allow(clippy::exit)]
 fn watch(name: &'static str) -> mpsc::Sender<()> {
     let (done, finished) = mpsc::channel::<()>();
@@ -149,8 +133,6 @@ fn watch(name: &'static str) -> mpsc::Sender<()> {
     });
     done
 }
-
-// ------------------------------------------------------------- helpers
 
 /// Quits the event loop when it goes, also when the work panicked.
 struct QuitOnDrop(Ffi);
@@ -164,7 +146,6 @@ impl Drop for QuitOnDrop {
 /// Waits until the Qt event loop runs a posted function.
 fn wait_for_loop(ffi: Ffi) {
     let (tx, rx) = mpsc::channel();
-    // Refused while the loop of an earlier run is quitting.
     loop {
         let tx = tx.clone();
         if ffi.post(move || tx.send(()).unwrap()) {
@@ -175,8 +156,7 @@ fn wait_for_loop(ffi: Ffi) {
     rx.recv().unwrap();
 }
 
-/// Runs `work` on another thread while this one runs the Qt event loop
-/// (the bridge's layout: workers block, the main thread serves signond).
+/// Runs `work` on another thread while this one runs the Qt event loop.
 fn off_qt_thread<R: Send>(env: &Env, work: impl FnOnce() -> R + Send) -> R {
     let ffi = env.ffi;
     thread::scope(|s| {
@@ -299,8 +279,6 @@ fn names(batch: &[WireEntry]) -> Vec<Vec<u8>> {
     batch.iter().map(|e| e.name.clone()).collect()
 }
 
-// --------------------------------------------------------------- tests
-
 fn loading(env: &Env) {
     let path = library_path();
     let again = Ffi::load_from(&path).unwrap();
@@ -311,7 +289,6 @@ fn loading(env: &Env) {
         matches!(Ffi::load_from(&fake_path), Err(LoadError::NoEntry { entry, .. }) if entry == "nvb_ffi_get")
     );
     assert!(matches!(Ffi::load_from(&fake_path.with_file_name("nothing.so")), Err(LoadError::Open { .. })));
-    // T1: init once, on the main thread; run and shutdown only there.
     assert!(env.ffi.on_qt_thread());
     assert_eq!(name_of(&env.ffi.init("again")), Some(ErrorName::Internal));
     let ffi = env.ffi;
@@ -343,17 +320,14 @@ fn conn_lifecycle(env: &Env) {
     f.add_file(b"/a", b"0123456789");
     let (handle, size) = conn.open_read(b"/a").unwrap();
     assert_eq!(size, 10);
-    // The handle keeps the connection: nothing is closed yet (O4).
     drop(conn);
     assert_eq!((f.live_backends(), f.log_count("close:a"), f.log_count("disconnect")), (1, 0, 0));
     assert!(format!("{cancel:?}").contains("live: true"));
     drop(handle);
     assert_eq!((f.log_count("close:a"), f.live_backends(), f.log_count("disconnect")), (1, 0, 1));
-    // T4: a cancel after conn_free does nothing.
     assert!(!cancel.cancel());
     assert!(format!("{cancel:?}").contains("live: false"));
 
-    // conn_free disconnects an idle connection.
     let conn = connected(env);
     assert!(format!("{conn:?}").starts_with("Conn"));
     drop(conn);
@@ -429,10 +403,8 @@ fn establish_identity_verdicts(env: &Env) {
         let (id, check, authenticated_before) = &seen[0];
         assert_eq!((*check, *authenticated_before), (case.check, 0), "{n}");
         assert_eq!((id.kind, id.pin.as_str()), (IdentityKind::Ssh, pin_for(b"k1").as_str()), "{n}");
-        // XC-16: filled in when the backend gave none.
         assert!(id.fingerprint.starts_with("SHA256:") && id.fingerprint.len() == 50, "{n}");
         assert_eq!(id.public_key, b"k1", "{n}");
-        // C-7: a refusal sends nothing and disconnects.
         let ok = case.error.is_none();
         assert_eq!(
             (f.log_count("authenticate"), f.log_count("disconnect")),
@@ -440,7 +412,6 @@ fn establish_identity_verdicts(env: &Env) {
             "{n}"
         );
     }
-    // No hook: an unknown identity fails before authenticate.
     f.reset();
     f.set_identity_pin(&pin_for(b"k1"));
     let mut conn = env.ffi.conn_new("fake").unwrap();
@@ -489,7 +460,6 @@ fn establish_prompt_replies(env: &Env) {
         );
         assert_eq!(f.log_count("answers:"), delivered, "{name}");
     }
-    // No prompt hook: no prompter, so the second factor fails.
     f.reset();
     f.set_otp(b"246810");
     let mut conn = env.ffi.conn_new("fake").unwrap();
@@ -500,22 +470,18 @@ fn establish_prompt_replies(env: &Env) {
 
 fn establish_phases(env: &Env) {
     let f = env.fake;
-    // Connect fails: nothing to disconnect.
     f.fail_op("connect", ErrorName::NetworkUnreachable);
     let mut conn = env.ffi.conn_new("fake").unwrap();
     let err = establish(&mut conn, "", &secret(b"secret")).unwrap_err();
     assert_eq!((err.phase, err.status.name), (Phase::Connect, ErrorName::NetworkUnreachable));
     assert_eq!(f.log_count("disconnect"), 0);
-    // Wrong secret.
     let mut conn = env.ffi.conn_new("fake").unwrap();
     let err = establish(&mut conn, "", &secret(b"wrong")).unwrap_err();
     assert_eq!((err.phase, err.status.name), (Phase::Authenticate, ErrorName::AuthFailed));
     assert_eq!(f.log_count("disconnect"), 1);
-    // No secret.
     f.set_credentials("user", b"");
     let mut conn = env.ffi.conn_new("fake").unwrap();
     establish(&mut conn, "", &Secret::None { user: "user".into() }).unwrap();
-    // A signond lookup cannot wait on the Qt thread (this one).
     let mut conn = env.ffi.conn_new("fake").unwrap();
     let signon = Secret::Signon { user: "user".into(), credentials_id: 0, secret_optional: true };
     let err = establish(&mut conn, "", &signon).unwrap_err();
@@ -523,8 +489,6 @@ fn establish_phases(env: &Env) {
 }
 
 fn establish_signon_off_qt_thread(env: &Env) {
-    // XA-7: credentials id 0 with an optional secret: empty credentials
-    // without signond; A-6: no stored secret is AuthFailed otherwise.
     let f = env.fake;
     for optional in [true, false] {
         f.reset();
@@ -533,7 +497,6 @@ fn establish_signon_off_qt_thread(env: &Env) {
         let (result, disconnects) = off_qt_thread(env, move || {
             let mut conn = ffi.conn_new("fake").unwrap();
             let signon = Secret::Signon { user: "user".into(), credentials_id: 0, secret_optional: optional };
-            // Counted while the connection lives: conn_free disconnects too.
             (establish(&mut conn, "", &signon), f.log_count("disconnect"))
         });
         if optional {
@@ -560,9 +523,7 @@ fn list_batches_and_stop(env: &Env) {
         true
     })
     .unwrap();
-    // One sink call per backend batch.
     assert_eq!(batches.iter().map(Vec::len).collect::<Vec<_>>(), [3, 3, 3, 2]);
-    // XC-4: names cross as protocol bytes.
     assert_eq!(batches[3].last().unwrap(), b"n\xff");
 
     let mut calls = 0;
@@ -612,7 +573,6 @@ fn remove_tree_counts(env: &Env) {
     result.unwrap();
     assert_eq!(counts, TreeCounts { files: 3, dirs: 2 });
     assert!(!f.exists(b"/r"));
-    // Design §1.2: update(files + dirs, -1) per removed entry.
     assert_eq!(ticks.updates.len(), 5);
     assert_eq!(ticks.updates.last(), Some(&(5, -1)));
 
@@ -622,7 +582,6 @@ fn remove_tree_counts(env: &Env) {
     let (counts, result) = conn.remove_tree(b"/s", Some(&mut stopping));
     assert_eq!((name_of(&result), counts.files), (Some(ErrorName::Canceled), 1));
     assert!(f.exists(b"/s"));
-    // Without progress.
     let (counts, result) = conn.remove_tree(b"/s", None);
     result.unwrap();
     assert_eq!(counts, TreeCounts { files: 1, dirs: 1 });
@@ -662,7 +621,6 @@ fn metadata_and_namespace(env: &Env) {
     assert_eq!(f.node_mode(b"/m/none"), None);
     assert_eq!(c.stat(b"/m/hard", true).unwrap().mtime_ms, 1000);
 
-    // sha256("abc")
     let digest = c.checksum(b"/m/hard", "sha256").unwrap();
     assert_eq!(digest[..4], [0xba, 0x78, 0x16, 0xbf]);
     assert_eq!(digest.len(), 32);
@@ -695,7 +653,6 @@ fn handles_read_eof(env: &Env) {
     let mut buf = [0u8; 8];
     assert_eq!(h.read(2, &mut buf[..4]).unwrap(), 4);
     assert_eq!(&buf[..4], b"2345");
-    // XC-13: short only at EOF; at or past EOF nothing.
     assert_eq!(h.read(7, &mut buf).unwrap(), 3);
     assert_eq!(&buf[..3], b"789");
     assert_eq!(h.read(40, &mut buf).unwrap(), 0);
@@ -704,15 +661,12 @@ fn handles_read_eof(env: &Env) {
     h.close().unwrap();
     assert_eq!(f.log_count("close:h"), 1);
     assert_eq!(name_of(&conn.open_read(b"/nope")), Some(ErrorName::NotFound));
-    // Dropping a handle closes it; the connection stays.
     let (h, _) = conn.open_read(b"/h").unwrap();
     drop(h);
     assert_eq!((f.log_count("close:h"), f.log_count("disconnect")), (2, 0));
-    // A read error.
     let (mut h, _) = conn.open_read(b"/h").unwrap();
     f.fail_op("read", ErrorName::ConnectionLost);
     assert_eq!(name_of(&h.read(0, &mut buf)), Some(ErrorName::ConnectionLost));
-    // A close error: a failed establish disconnected the handle's backend.
     assert!(establish(&mut conn, "", &secret(b"wrong")).is_err());
     assert_eq!(f.log_count("disconnect"), 1);
     assert_eq!(name_of(&h.close()), Some(ErrorName::ConnectionLost));
@@ -732,30 +686,25 @@ fn upload_download_via_io(env: &Env) {
     assert_eq!(f.file_data(b"/none"), None);
     assert_eq!(ticks.updates.last().map(|u| u.0), Some(size));
     assert_eq!(conn.stat(b"/up", true).unwrap().mtime_ms, 5000);
-    // CreateNew refuses an existing file.
     let mut again = Memory { data: data.clone(), ..Memory::default() };
     let refused = conn.upload(b"/up", &options, &mut again, (false, size), None);
     assert_eq!(name_of(&refused), Some(ErrorName::AlreadyExists));
 
-    // Short writes into a regular file are retried until all is written.
     let mut sink = Memory { max_write: Some(1000), ..Memory::default() };
     conn.download(b"/up", (100, 70_000), &mut sink, (false, 0), None).unwrap();
     assert_eq!(sink.data, data[100..70_100]);
     assert!(sink.writes >= 70);
 
-    // A failing write (-1) is an error.
     let mut failing = Memory { fail_writes: true, ..Memory::default() };
     assert!(conn.download(b"/up", (0, -1), &mut failing, (false, 0), None).is_err());
     assert!(failing.writes >= 1);
 
-    // canceled() stops the transfer.
     let mut source = Memory { data, ..Memory::default() };
     let mut stopping = Ticks { cancel_after: Some(1), ..Ticks::default() };
     let truncate = UploadOptions::Truncate { mode: None, expected_size: None, mtime_ms: None };
     let stopped = conn.upload(b"/up", &truncate, &mut source, (false, size), Some(&mut stopping));
     assert_eq!(name_of(&stopped), Some(ErrorName::Canceled));
 
-    // Resume appends at the offset; a FIFO is read sequentially.
     let mut tail = Memory { data: b"tail".to_vec(), ..Memory::default() };
     let resume = UploadOptions::Resume { offset: 3, expected_size: None, mtime_ms: None };
     f.add_file(b"/r", b"abc");
@@ -794,11 +743,9 @@ fn cancel_from_other_thread_during_list(env: &Env) {
         (result, canceled_at.lock().unwrap().map(|t| t.elapsed()))
     });
     assert_eq!(name_of(&result), Some(ErrorName::Canceled));
-    // C-9: within 2 s of the cancel.
     let elapsed = elapsed.unwrap();
     assert!(elapsed < Duration::from_secs(2), "{elapsed:?}");
     assert!(batches < 40);
-    // Usable again after reset_cancel.
     conn.reset_cancel().unwrap();
     f.set_chunk_delay_ms(0);
     let mut after = 0;
@@ -845,7 +792,6 @@ fn url_parse_format(env: &Env) {
     assert_eq!(url.path, b"/home/a\xffb");
     assert_eq!(p.connect_timeout_ms, 15000);
     assert_eq!(ffi.url_format(&url.params, &url.path).unwrap(), "sftp://alice@host.example:2222/home/a%FFb");
-    // XH-6: a password is refused; IDN; smb share and file://.
     assert_eq!(name_of(&ffi.url_parse("sftp://alice:pw@host/")), Some(ErrorName::SecurityPolicy));
     assert_eq!(ffi.url_parse("sftp://xn--bcher-kva.de/x").unwrap().params.host, "bücher.de");
     let smb = ffi.url_parse("smb://nas/share/dir").unwrap();
@@ -858,7 +804,6 @@ fn url_parse_format(env: &Env) {
     assert_eq!((dav.name, dav.message.as_str()), (ErrorName::Unsupported, "Unsupported URL scheme \"davs\""));
     let unknown = Params { provider: "fake".into(), ..Params::default() };
     assert_eq!(name_of(&ffi.url_format(&unknown, b"/")), Some(ErrorName::Unsupported));
-    // Options of every kind reach C++ (an unknown one is not carried).
     let mut typed = smb.params.clone();
     typed.options.insert("x-int".into(), Value::Int(3));
     typed.options.insert("x-bool".into(), Value::Bool(true));
@@ -879,7 +824,6 @@ fn error_mapping(env: &Env) {
         assert_eq!(status, expected);
     }
     conn.stat(b"/x", true).unwrap();
-    // The phase travels with an establish failure.
     f.fail_op("authenticate", ErrorName::Locked);
     let mut fresh = env.ffi.conn_new("fake").unwrap();
     let err = establish(&mut fresh, "", &secret(b"secret")).unwrap_err();
@@ -891,8 +835,6 @@ fn error_mapping(env: &Env) {
 
 fn post_and_quit(env: &Env) {
     let ffi = env.ffi;
-    // From another thread while the loop runs: on the Qt thread, and its
-    // quit() ends run() with the code.
     let ran = Arc::new(AtomicUsize::new(0));
     let on_qt = Arc::new(AtomicBool::new(false));
     let poster = {
@@ -911,7 +853,6 @@ fn post_and_quit(env: &Env) {
     assert_eq!(ran.load(Ordering::SeqCst), 1);
     assert!(on_qt.load(Ordering::SeqCst));
 
-    // Quitting: not queued, never runs, and the function is dropped.
     let late = Arc::new(AtomicUsize::new(0));
     let held = Arc::clone(&late);
     assert!(!ffi.post(move || {
@@ -919,7 +860,6 @@ fn post_and_quit(env: &Env) {
     }));
     assert_eq!((Arc::strong_count(&late), late.load(Ordering::SeqCst)), (1, 0));
 
-    // A quit() before run() still ends the next run().
     ffi.quit(5);
     assert_eq!(ffi.run(), Ok(5));
 }
@@ -936,7 +876,6 @@ fn callback_panics_do_not_unwind(env: &Env) {
             (ErrorName::Internal, format!("callback panicked: {text}").as_str())
         );
     };
-    // List sink: stops (0) and is not called again.
     let mut calls = 0;
     let r = conn.list(b"/p", 1, |_| {
         calls += 1;
@@ -944,22 +883,17 @@ fn callback_panics_do_not_unwind(env: &Env) {
     });
     panicked(&r, "sink broke");
     assert_eq!(calls, 1);
-    // Walk visitor.
     let r = conn.walk(b"/p", &WalkOptions::default(), |_, _| panic!("visit broke"));
     panicked(&r, "visit broke");
-    // Progress (update panics; canceled() then stops).
     let mut ticks = Ticks { panic: true, ..Ticks::default() };
     let (_, r) = conn.remove_tree(b"/p", Some(&mut ticks));
     panicked(&r, "progress broke");
-    // nvb_io read: -1.
     let mut source = Memory { data: b"data".to_vec(), panic_on_read: true, ..Memory::default() };
     let options = UploadOptions::Truncate { mode: None, expected_size: None, mtime_ms: None };
     let r = conn.upload(b"/p/up", &options, &mut source, (false, 4), None);
     panicked(&r, "read broke");
-    // The connection still works.
     assert_eq!(conn.stat(b"/p", true).unwrap().kind, entry_kind::DIRECTORY);
 
-    // Identity hook: cancels, nothing is sent.
     f.reset();
     f.set_identity_pin(&pin_for(b"k1"));
     let mut identity = |_: &Identity, _: Option<&Status>| -> Verdict { panic!("identity broke") };
@@ -971,7 +905,6 @@ fn callback_panics_do_not_unwind(env: &Env) {
         (Phase::Identity, "callback panicked: identity broke")
     );
     assert_eq!(f.log_count("authenticate"), 0);
-    // Prompt hook: declines.
     f.reset();
     f.set_otp(b"1");
     let mut prompt = |_: &PromptRequest, _: &mut Reply<'_>| -> bool { panic!("prompt broke") };
@@ -984,7 +917,6 @@ fn callback_panics_do_not_unwind(env: &Env) {
     );
     assert_eq!(f.log_count("answers:"), 0);
 
-    // A posted function: kept for take_orphan_panics.
     drop(take_orphan_panics());
     let ffi = env.ffi;
     off_qt_thread(env, move || {
@@ -997,7 +929,6 @@ fn callback_panics_do_not_unwind(env: &Env) {
 }
 
 fn calls_from_callbacks_refused(env: &Env) {
-    // T6: inside a callback only conn_cancel, reply_set and free.
     let f = env.fake;
     f.add_file(b"/c/a", b"a");
     let mut conn = connected(env);
@@ -1013,19 +944,15 @@ fn calls_from_callbacks_refused(env: &Env) {
         true
     });
     assert_eq!(refused, [Some(ErrorName::Internal); 3]);
-    // The cancel from inside counts: the listing ends Canceled or done.
     assert!(r.is_ok() || name_of(&r) == Some(ErrorName::Canceled));
     conn.reset_cancel().unwrap();
     other.stat(b"/c/a", true).unwrap();
 }
 
 fn discovery_start_stop(env: &Env) {
-    // T3: only on the Qt thread.
     let ffi = env.ffi;
     let off = thread::spawn(move || Discovery::new(ffi, |_| {}).map(|_| ())).join().unwrap();
     assert_eq!(name_of(&off), Some(ErrorName::Internal));
-    // On it, inside a posted function. Sockets may be unavailable in a
-    // sandbox, so only the bookkeeping is checked.
     let (opened, free_calls) = off_qt_thread(env, move || {
         let (tx, rx) = mpsc::channel();
         assert!(ffi.post(move || {
@@ -1043,39 +970,31 @@ fn discovery_start_stop(env: &Env) {
             assert_eq!(d.set_running(true), open);
             assert_eq!(d.take_panic(), None);
             drop(d);
-            // Dropping frees the C++ discovery and the hook's context.
             let grown = heap_growth(|| drop(Discovery::new(ffi, |_| {}).unwrap())).unwrap_or(0);
             assert!(grown < LEAK_LIMIT, "{grown} bytes more in use after dropping discoveries");
             tx.send((open, calls.load(Ordering::SeqCst))).unwrap();
         }));
         rx.recv().unwrap()
     });
-    // Whatever was reported, nothing panicked and nothing is left behind.
     println!("discovery socket open: {opened}, reports: {free_calls}");
     assert_eq!(take_orphan_panics().len(), 0);
 }
 
-/// Heap growth allowed over [`ROUNDS`] calls: far below one leaked block
-/// per call.
+/// Heap growth allowed over [`ROUNDS`] calls: far below one leaked block per call.
 const LEAK_LIMIT: usize = 256 * 1024;
 const ROUNDS: usize = 4000;
 
-/// Bytes `malloc` has handed out and not taken back, in all arenas.
-/// `None` under ASan, whose allocator glibc's counters do not see (LSan
-/// finds leaks there).
+/// Bytes `malloc` has handed out and not taken back, in all arenas. `None` under ASan, whose allocator glibc's counters do not see (LSan finds leaks there).
 #[allow(unsafe_code)]
 fn heap_in_use() -> Option<usize> {
-    // SAFETY: dlsym takes RTLD_DEFAULT and a C string; mallinfo2 has no
-    // preconditions.
+    // SAFETY: dlsym takes RTLD_DEFAULT and a C string; mallinfo2 has no preconditions.
     unsafe {
         let asan = !libc::dlsym(libc::RTLD_DEFAULT, c"__asan_init".as_ptr()).is_null();
         (!asan).then(|| libc::mallinfo2().uordblks)
     }
 }
 
-/// Bytes more in use after `ROUNDS` calls of `f` than before, after a
-/// warm-up (caches, arenas, Qt's one-time allocations); `None` when the
-/// heap cannot be measured. The measure is checked to see a block first.
+/// Bytes more in use after `ROUNDS` calls of `f` than before, after a warm-up (caches, arenas, Qt's one-time allocations); `None` when the heap cannot be measured.
 fn heap_growth(mut f: impl FnMut()) -> Option<usize> {
     let before = heap_in_use()?;
     let probe = std::hint::black_box(vec![1u8; 64 * 1024]);
@@ -1088,7 +1007,6 @@ fn heap_growth(mut f: impl FnMut()) -> Option<usize> {
 }
 
 fn results_are_freed(env: &Env) {
-    // O3: every block a call returns is freed once read.
     let ffi = env.ffi;
     let grown = heap_growth(|| {
         let url = ffi.url_parse("sftp://alice@host.example:2222/home/a%FFb").unwrap();

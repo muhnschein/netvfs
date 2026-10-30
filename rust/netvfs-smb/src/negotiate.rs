@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! NEGOTIATE policy: offer exactly SMB 3.1.1 with SHA-512 preauth,
-//! AES-128/256-GCM and AES-CMAC, and refuse any response that picks
-//! something else (M-1, defence in depth).
+//! NEGOTIATE policy: offer exactly SMB 3.1.1 with SHA-512 preauth, AES-128/256-GCM and AES-CMAC; refuse any response that picks something else.
 
 use crate::crypto::{self, Cipher};
 use crate::error::{Error, Result, policy, protocol};
@@ -12,7 +10,7 @@ use crate::msg::negotiate::{
 
 /// The smallest MaxRead/MaxWrite/MaxTransact accepted (MS-SMB2 requires 64 KiB for 2.1+).
 pub const MIN_MAX_SIZE: usize = 65_536;
-/// Sizes above this are clamped (design §3.2: ≤ 8 MiB + header).
+/// Sizes above this are clamped (8 MiB + header).
 pub const MAX_MAX_SIZE: usize = 8 * 1024 * 1024;
 
 /// What the client offers.
@@ -131,7 +129,7 @@ pub fn check_response(offer: &Offer, resp: &NegotiateResponse) -> Result<Negotia
             ctx::COMPRESSION => {
                 return Err(policy("the server sent a compression context; compression is not offered"));
             }
-            _ => continue, // contexts we did not offer carry nothing we act on
+            _ => continue,
         };
         if slot.replace(&c.data).is_some() {
             return Err(protocol(format!("duplicate negotiate context 0x{:04X}", c.kind)));
@@ -144,7 +142,7 @@ pub fn check_response(offer: &Offer, resp: &NegotiateResponse) -> Result<Negotia
     let cipher = match encryption {
         None => None,
         Some(data) => match u16_list(data)?.as_slice() {
-            [0] => None, // no common cipher: encryption unavailable
+            [0] => None,
             [id] => Some(offer.ciphers.iter().copied().find(|c| cipher_id(*c) == *id).ok_or_else(|| {
                 policy(format!("the server selected {} which was not offered", cipher_name(*id)))
             })?),
@@ -208,7 +206,6 @@ mod tests {
         let mut h = crate::msg::Header::request(crate::msg::Command::Negotiate, 0, 0, 0);
         h.flags = 0;
         let msg = crate::msg::build(&h, &body);
-        // Decode our own request's contexts by reusing the response context walker layout:
         assert_eq!(u16::from_le_bytes([msg[66], msg[67]]), 1, "one dialect");
         assert_eq!(u16::from_le_bytes([msg[100], msg[101]]), DIALECT_311);
         assert_eq!(u16::from_le_bytes([msg[96], msg[97]]), 3, "three contexts");
@@ -223,7 +220,6 @@ mod tests {
         .unwrap();
         assert_eq!(n.cipher, Some(Cipher::Aes256Gcm));
         assert!(n.multi_credit);
-        // No signing context: AES-CMAC is the default; cipher 0: no encryption.
         let n = check(DIALECT_311, &[preauth_context(&[0; 32]), enc(&[0])]).unwrap();
         assert_eq!(n.cipher, None);
     }
@@ -246,7 +242,6 @@ mod tests {
             let e = check(DIALECT_311, &[preauth_context(&[0; 32]), enc(&[c])]).unwrap_err();
             assert_eq!(e, policy(format!("the server selected {name} which was not offered")));
         }
-        // AES-256-GCM when only AES-128-GCM was offered
         let only128 = Offer { ciphers: vec![Cipher::Aes128Gcm], ..offer() };
         let resp = NegotiateResponse::decode(&response(
             DIALECT_311,
@@ -258,7 +253,6 @@ mod tests {
             check_response(&only128, &resp).unwrap_err(),
             policy("the server selected AES-256-GCM which was not offered")
         );
-        // two ciphers in the response
         check(DIALECT_311, &[preauth_context(&[0; 32]), enc(&[2, 4])]).unwrap_err();
     }
 

@@ -1,31 +1,27 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! What a `QLockFile`-compatible lock needs from libc: `flock()` and
-//! `kill(pid, 0)`.
+//! `flock()` and `kill(pid, 0)` for the `QLockFile`-compatible lock.
 
 use std::io;
 use std::os::fd::{AsRawFd, BorrowedFd};
 
-/// `flock(fd, LOCK_EX | LOCK_NB)`, as `QLockFile`'s `setNativeLocking`.
+/// `flock(fd, LOCK_EX | LOCK_NB)` as `QLockFile`.
 ///
 /// # Errors
 /// `WouldBlock` when another descriptor holds it.
 pub fn lock_exclusive_nonblocking(fd: BorrowedFd<'_>) -> io::Result<()> {
-    // SAFETY: flock takes a descriptor (open for the lifetime of `fd`) and
-    // flags; nothing is passed by pointer.
+    // SAFETY: flock takes a live descriptor and flags; no pointers.
     let rc = unsafe { libc::flock(fd.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
     if rc == 0 { Ok(()) } else { Err(io::Error::last_os_error()) }
 }
 
-/// Whether process `pid` exists: `kill(pid, 0)` fails with `ESRCH` only
-/// when it does not (`EPERM`: it exists, but is another user's).
+/// Whether `pid` exists: `kill(pid, 0)` fails with `ESRCH` only when not (`EPERM`: exists).
 #[must_use]
 pub fn process_exists(pid: i32) -> bool {
     if pid <= 0 {
-        // 0 and negative pids name process groups, not a process.
+        // 0 and negative pids name process groups.
         return false;
     }
-    // SAFETY: signal 0 sends nothing; kill only checks that the target
-    // exists and may be signalled.
+    // SAFETY: signal 0 sends nothing.
     let rc = unsafe { libc::kill(pid, 0) };
     if rc == 0 {
         return true;
@@ -53,7 +49,6 @@ mod tests {
     #[test]
     fn processes() {
         assert!(process_exists(i32::try_from(std::process::id()).unwrap()));
-        // pid 1 exists and is not ours to signal when unprivileged.
         assert!(process_exists(1));
         assert!(!process_exists(0));
         assert!(!process_exists(-1));

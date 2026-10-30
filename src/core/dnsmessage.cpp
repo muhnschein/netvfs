@@ -7,15 +7,15 @@ namespace NetVfs::Dns {
 
 namespace {
 
-constexpr int PointerFlag = 0xC0;          // top two bits of a length byte: compression pointer
+constexpr int PointerFlag = 0xC0;
 constexpr int PointerOffsetMask = 0x3F;
-constexpr int MaxPointerTarget = 0x3FFF;   // a pointer has 14 offset bits
-constexpr quint16 CacheFlushBit = 0x8000;  // class: cache-flush (records), QU (questions)
-constexpr int QuestionMinSize = 5;         // root name + type + class
-constexpr int RecordMinSize = 11;          // root name + type + class + ttl + rdlength
+constexpr int MaxPointerTarget = 0x3FFF;
+constexpr quint16 CacheFlushBit = 0x8000;
+constexpr int QuestionMinSize = 5;
+constexpr int RecordMinSize = 11;
 constexpr int Ipv4Size = 4;
 constexpr int Ipv6Size = 16;
-constexpr int SrvFixedSize = 6;            // priority, weight, port
+constexpr int SrvFixedSize = 6;
 constexpr int MaxTxtStringSize = 255;
 constexpr int MaxRdataSize = 0xFFFF;
 constexpr int OpcodeShift = 11;
@@ -44,11 +44,10 @@ void appendEscaped(QByteArray *out, char c)
         out->append(static_cast<char>('0' + (u / DecimalBase) % DecimalBase));
         out->append(static_cast<char>('0' + u % DecimalBase));
     } else {
-        out->append(c);   // includes bytes >= 0x80: UTF-8 stays readable
+        out->append(c);
     }
 }
 
-// Cursor over the packet. Every read checks its bounds first.
 class Reader
 {
 public:
@@ -95,17 +94,14 @@ public:
         return true;
     }
 
-    // Reads a (possibly compressed) name at the cursor. The cursor ends after
-    // the name as it appears at this position: after the first pointer, or after
-    // the root label. A pointer must point strictly backwards, so a chain of
-    // pointers ends; labels between pointers add to the name length, which is
-    // capped, so a cycle through labels ends too.
+    // Pointers must point strictly backwards (chains end); labels add to the capped name length
+    // (cycles through labels end).
     bool name(QByteArray *out, QString *error)
     {
         QByteArray result;
         int p = m_pos;
         int resume = -1;
-        int wireLength = 1;                      // the root label
+        int wireLength = 1;
         for (;;) {
             if (p >= m_size)
                 return fail(error, "name runs past the end of the packet");
@@ -176,7 +172,7 @@ bool decodeQuestion(Reader *r, Question *q, QString *error)
 bool decodeTxt(Reader *r, int end, QList<QByteArray> *txt, QString *error)
 {
     if (r->pos() == end) {
-        txt->append(QByteArray());       // RFC 6763 section 6.1: zero length equals one empty string
+        txt->append(QByteArray());
         return true;
     }
     while (r->pos() < end) {
@@ -291,8 +287,6 @@ bool decodeBody(Reader *r, const Counts &c, Message *msg, QString *error)
         && decodeRecords(r, c.additional, &msg->additional, error);
 }
 
-// Appends to a growing packet; remembers where name suffixes were written so
-// later names can point at them.
 class Writer
 {
 public:
@@ -384,7 +378,7 @@ void writeAddress(Writer *w, const Record &rec)
 void writeTxt(Writer *w, const QList<QByteArray> &txt)
 {
     if (txt.isEmpty()) {
-        w->u8(0);                       // RFC 6763 section 6.1: a TXT record is never empty
+        w->u8(0);
         return;
     }
     for (const QByteArray &s : txt) {
@@ -452,8 +446,7 @@ void writeSection(Writer *w, const QVector<Record> &records)
         writeRecord(w, r);
 }
 
-} // namespace
-
+}
 bool decode(const QByteArray &packet, Message *out, QString *error)
 {
     *out = Message();
@@ -469,8 +462,7 @@ bool decode(const QByteArray &packet, Message *out, QString *error)
     r.u16(&c.answers);
     r.u16(&c.authority);
     r.u16(&c.additional);
-    // Counts that cannot fit into the packet are rejected before anything is
-    // allocated for them.
+    // Counts that cannot fit the packet are rejected before allocating.
     if (c.questions + c.records() > MaxRecords)
         return fail(error, "too many records");
     if (c.questions * QuestionMinSize + c.records() * RecordMinSize > r.remaining())
@@ -510,7 +502,6 @@ QByteArray encode(const Message &message, bool compress)
 
 namespace {
 
-// Parses "\DDD" or "\X" at name[*i] == '\\'; appends the byte, advances *i.
 bool parseEscape(const QByteArray &name, int *i, QByteArray *label)
 {
     const int n = name.size();
@@ -537,8 +528,7 @@ bool parseEscape(const QByteArray &name, int *i, QByteArray *label)
     return true;
 }
 
-} // namespace
-
+}
 QList<QByteArray> splitName(const QByteArray &name, bool *ok)
 {
     QList<QByteArray> labels;
@@ -583,4 +573,4 @@ QByteArray canonicalName(const QByteArray &name)
     return name.toLower();
 }
 
-} // namespace NetVfs::Dns
+}

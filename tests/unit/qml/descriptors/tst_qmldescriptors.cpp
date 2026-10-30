@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-// SPEC-v2 XA-5 provider descriptors (the shipped ones and the validator) and
-// the XB-6 consent model behind "Apps using network locations".
+// provider descriptors (the shipped ones and the validator) and
+// the consent model behind "Apps using network locations".
 #include "consentmodel.h"
 #include "consentstore.h"
 #include "netvfshelpers.h"
@@ -37,7 +37,6 @@ QJsonObject sftpJson()
     return readJson(DescriptorDir + QStringLiteral("/sftp.json"));
 }
 
-// A copy of `object` with `edit` applied to its first field.
 QJsonObject withFirstField(QJsonObject object, const std::function<void(QJsonObject *)> &edit)
 {
     QJsonArray fields = object.value(QStringLiteral("fields")).toArray();
@@ -111,7 +110,6 @@ private slots:
         ProviderDescriptors descriptors;
         for (const QString &service : { QStringLiteral("backup"), QStringLiteral("files") })
             QCOMPARE(descriptors.offersService(provider, service), offered.contains(service));
-        // The connection and the service settings every account UI relies on.
         QVERIFY(!field(descriptor, QStringLiteral("host")).isEmpty());
         QVERIFY(!field(descriptor, QStringLiteral("port")).isEmpty());
         QVERIFY(!field(descriptor, QStringLiteral("username")).isEmpty());
@@ -132,7 +130,6 @@ private slots:
 
     void textIdsAreUsed()
     {
-        // Every known id is used by a shipped descriptor, and translated.
         QSet<QString> used;
         for (const QString &provider : { QStringLiteral("sftp"), QStringLiteral("smb") }) {
             QFile file(DescriptorDir + QLatin1Char('/') + provider + QStringLiteral(".json"));
@@ -260,7 +257,6 @@ private slots:
     void validatorAccepts()
     {
         QVERIFY(ProviderDescriptors::validate(sftpJson(), QStringLiteral("sftp")).ok());
-        // A switch with a bool default and a choice with a listed default are fine.
         QJsonObject choice = withFirstField(sftpJson(), [](QJsonObject *f) {
             f->insert(QStringLiteral("type"), QStringLiteral("choice"));
             f->insert(QStringLiteral("default"), QStringLiteral("a"));
@@ -300,7 +296,7 @@ private slots:
         QCOMPARE(values.value(QStringLiteral("auth_mode")).toString(), QStringLiteral("password"));
         QVERIFY(!values.contains(QStringLiteral("key_mode_hint")));   // notes carry no value
         QCOMPARE(d.secretKind(p, values), QStringLiteral("password"));
-        QVERIFY(!d.isValid(p, values, services(true, true)));   // host and user missing
+        QVERIFY(!d.isValid(p, values, services(true, true)));
 
         values.insert(QStringLiteral("host"), QStringLiteral("[fe80::1]"));
         values.insert(QStringLiteral("username"), QStringLiteral(" alice "));
@@ -313,13 +309,12 @@ private slots:
         QVERIFY(d.problem(p, field(d.descriptor(p), QStringLiteral("backups_path")), values,
                           services(false, true)).isEmpty());
         values.insert(QStringLiteral("backups_path"), QStringLiteral("Backups"));
-        values.insert(QStringLiteral("port"), QString());   // optional
+        values.insert(QStringLiteral("port"), QString());
         QVERIFY(d.isValid(p, values, services(true, true)));
         values.insert(QStringLiteral("port"), QStringLiteral("99999"));
         QVERIFY(!d.isValid(p, values, services(true, true)));
         values.insert(QStringLiteral("port"), QStringLiteral("2222"));
 
-        // Key modes and interactive sign-in.
         values.insert(QStringLiteral("auth_mode"), QStringLiteral("publickey"));
         values.insert(QStringLiteral("key_source"), QStringLiteral("import"));
         QCOMPARE(d.authMode(p, values).value(QStringLiteral("source")).toString(), QStringLiteral("import"));
@@ -367,7 +362,7 @@ private slots:
                 .options.value(QStringLiteral("show_admin_shares")).isNull());
         QCOMPARE(d.secretKind(p, values), QStringLiteral("password"));
 
-        // Guest: no user, no secret, explicit consent (XM-1, XA-7).
+        // Guest: no user, no secret, explicit consent.
         values.insert(QStringLiteral("security_profile"), QStringLiteral("guest"));
         QCOMPARE(d.secretKind(p, values), QStringLiteral("none"));
         QVERIFY(!d.isValid(p, values, services(false, true)));
@@ -386,7 +381,6 @@ private slots:
         QVERIFY(checkServicePolicy(guest, Service::Files).ok());
         QVERIFY(secretOptional(guest));
 
-        // Settings page view.
         const QVariantList details = d.details(p, params);
         QStringList labels;
         QStringList shown;
@@ -401,7 +395,6 @@ private slots:
         QVERIFY(!labels.contains(QStringLiteral("User name")));
     }
 
-    // XB-3 registrations as the page lists them (the store itself is tested with the bridge).
     void consumers()
     {
         writeFile(consumersDir.filePath(QStringLiteral("lautta.conf")),
@@ -419,7 +412,6 @@ private slots:
         QCOMPARE(list.at(1).displayName, QStringLiteral("Lautta"));
     }
 
-    // ... and the model of the page "Apps using network locations".
     void consentModel()
     {
         const QString path = configDir.filePath(QStringLiteral("model/bridge.conf"));
@@ -452,7 +444,7 @@ private slots:
         QVERIFY(model.grant(QStringLiteral("lautta")));
         QCOMPARE(changed.count(), 1);
         QCOMPARE(model.data(model.index(1), NetVfsUi::ConsentModel::roleId(NetVfsUi::ConsentModel::Role::Consent)).toString(), QStringLiteral("granted"));
-        QCOMPARE(ConsentStore(path).consent(QStringLiteral("lautta")), Consent::Granted);   // the bridge's view
+        QCOMPARE(ConsentStore(path).consent(QStringLiteral("lautta")), Consent::Granted);
         QCOMPARE(model.consent(QStringLiteral("lautta")), QStringLiteral("granted"));
         QVERIFY(model.revoke(QStringLiteral("lautta")));
         QCOMPARE(ConsentStore(path).consent(QStringLiteral("lautta")), Consent::Denied);

@@ -1,10 +1,8 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-// Upload and Download (XB-11): the backend streams through a QIODevice whose
-// local side is the caller's nvb_io. The caller checked the descriptor and
-// does the pread/pwrite (regular file) or read/write (FIFO); this device
-// keeps the semantics of the C++ bridge's FdDevice (fdcheck.h): random
-// access within the range for regular files, sequential for FIFOs, and every
-// failure or cancel is -1.
+// Upload and Download: the backend streams through a QIODevice whose local side is the caller's
+// nvb_io. The caller checked the descriptor and does pread/pwrite (regular file) or read/write
+// (FIFO). Random access within the range for regular files, sequential for FIFOs; every failure or
+// cancel is -1.
 #include "ffi_p.h"
 
 #include <QtCore/QIODevice>
@@ -39,7 +37,7 @@ private:
     qint64 position() const { return isSequential() ? m_streamPos : pos(); }
 
     nvb_io m_io;
-    qint64 m_streamPos = 0;            // FIFO bytes consumed or produced
+    qint64 m_streamPos = 0;
 };
 
 qint64 CallbackDevice::readData(char *data, qint64 maxSize)
@@ -49,7 +47,7 @@ qint64 CallbackDevice::readData(char *data, qint64 maxSize)
     const qint64 at = position();
     qint64 want = maxSize;
     if (!isSequential())
-        want = std::min(want, m_io.size - at);   // the range ends at size()
+        want = std::min(want, m_io.size - at);
     if (want <= 0)
         return 0;
     const int64_t n = m_io.read(m_io.ctx, at, reinterpret_cast<uint8_t *>(data), static_cast<size_t>(want));
@@ -59,8 +57,8 @@ qint64 CallbackDevice::readData(char *data, qint64 maxSize)
     return n;
 }
 
-// FIFOs: one call, which may be short. Regular files: until everything is
-// written, as pwrite in FdDevice; a stop after some bytes reports those.
+// FIFOs: one call, may be short. Regular files: until everything is written; a stop after some
+// bytes reports those.
 qint64 CallbackDevice::writeData(const char *data, qint64 maxSize)
 {
     if (!m_io.write)
@@ -103,7 +101,6 @@ WriteOptions::Disposition dispositionOf(uint32_t disposition)
     }
 }
 
-// Design §1.2: UploadOptions.write from nvb_upload_opts.
 UploadOptions uploadOptionsOf(const nvb_upload_opts *opts)
 {
     UploadOptions options;
@@ -118,8 +115,7 @@ UploadOptions uploadOptionsOf(const nvb_upload_opts *opts)
     return options;
 }
 
-} // namespace
-
+}
 void ProgressAdapter::update(qint64 done, qint64 total)
 {
     if (m_progress && m_progress->update)
@@ -164,4 +160,4 @@ nvb_error *connDownload(nvb_conn *conn, nvb_bytes path, int64_t offset, int64_t 
     });
 }
 
-} // namespace NetVfs::Ffi
+}

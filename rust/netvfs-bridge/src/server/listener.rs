@@ -1,12 +1,7 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! The listening socket (XB-2) and the accept loop: every connection is
-//! peer-checked on the raw descriptor before a single byte is read from it
-//! (XB-5); a refused peer is closed without a reply.
+//! Listening socket and accept loop: every connection is peer-checked on the raw descriptor before a byte is read; a refused peer is closed without a reply.
 //!
-//! Addresses (the C++ `--listen` values): `systemd:` takes the socket
-//! systemd passed (`LISTEN_PID`, `LISTEN_FDS`, fd 3; the rendezvous stays
-//! exactly the socket systemd created in the consumer's folder, XB-4);
-//! `unix:path=<path>` binds a new socket (development and tests).
+//! Addresses: `systemd:` takes the socket systemd passed (`LISTEN_PID`, `LISTEN_FDS`, fd 3; the rendezvous stays the socket systemd created in the consumer's folder); `unix:path=<path>` binds a new socket (development and tests).
 
 use super::{Event, EventSink, SessionId, session};
 use crate::peer::PeerChecker;
@@ -21,16 +16,14 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::net::{UnixListener, UnixStream};
 
-/// Pause after a failed `accept` (descriptors exhausted), so the loop does
-/// not spin.
 const ACCEPT_BACKOFF: Duration = Duration::from_millis(100);
 
 /// Where the bridge listens.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ListenAddress {
-    /// `systemd:`: the activated socket.
+    /// `systemd:`.
     Systemd,
-    /// `unix:path=<path>`: a new socket at the path.
+    /// `unix:path=<path>`.
     Path(PathBuf),
 }
 
@@ -56,8 +49,6 @@ impl ListenAddress {
     }
 }
 
-/// D-Bus address value unescaping: `%xx` is a byte; `,` and `;` end the
-/// value (not supported here).
 fn unescape(value: &str) -> Option<Vec<u8>> {
     let mut out = Vec::with_capacity(value.len());
     let mut bytes = value.bytes();
@@ -78,8 +69,6 @@ fn hex_digit(b: u8) -> Option<u8> {
     char::from(b).to_digit(16).and_then(|d| u8::try_from(d).ok())
 }
 
-/// `sd_listen_fds`: the passed socket when `LISTEN_PID` is this process
-/// and `LISTEN_FDS` at least 1.
 fn systemd_socket(
     listen_pid: Option<&str>,
     listen_fds: Option<&str>,
@@ -100,7 +89,7 @@ fn systemd_socket(
 /// Opens the listening socket. Must run inside the tokio runtime.
 ///
 /// # Errors
-/// `NetworkUnreachable` "Cannot listen on …" (the C++ wording).
+/// `NetworkUnreachable` "Cannot listen on …".
 pub fn bind(address: &ListenAddress) -> Result<UnixListener, Status> {
     let std_listener = match address {
         ListenAddress::Systemd => systemd_socket(
@@ -133,10 +122,7 @@ impl Listener {
         Self { socket: listener, checker: Arc::new(checker), sink, next: 1 }
     }
 
-    /// Accepts connections until the task is dropped or `accept` fails for
-    /// good; each connection runs as a task of its own. Transient failures
-    /// (descriptors or memory exhausted, an aborted connection) pause the
-    /// loop briefly.
+    /// Accepts connections until the task is dropped or `accept` fails for good.
     pub async fn serve(mut self) -> io::Error {
         loop {
             match self.socket.accept().await {
@@ -152,7 +138,6 @@ impl Listener {
     }
 }
 
-/// An `accept` failure after which the listener stays usable.
 fn is_transient(e: &io::Error) -> bool {
     matches!(
         e.kind(),
@@ -166,8 +151,6 @@ fn is_transient(e: &io::Error) -> bool {
     )
 }
 
-/// XB-5 before anything else, on the blocking pool (it reads `/proc` and
-/// may compare executables); then the session.
 async fn connection(stream: UnixStream, sid: SessionId, checker: Arc<PeerChecker>, sink: EventSink) {
     let verdict = match stream.as_fd().try_clone_to_owned() {
         Ok(probe) => tokio::task::spawn_blocking(move || checker.check(probe.as_fd()).map(|()| probe))

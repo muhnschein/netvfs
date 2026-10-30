@@ -8,12 +8,12 @@ namespace NetVfs {
 namespace {
 void wipeBytes(char *data, size_t count)
 {
-    // Stores through a volatile pointer cannot be elided by the compiler.
+    // Stores through a volatile pointer cannot be elided.
     volatile char *p = data;
     while (count--)
         *p++ = 0;
 }
-} // namespace
+}
 
 void secureWipe(QByteArray &data)
 {
@@ -30,4 +30,4 @@ void secureWipe(QString &data)
     data.clear();
 }
 
-} // namespace NetVfs
+}

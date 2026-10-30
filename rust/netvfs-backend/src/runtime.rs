@@ -1,13 +1,8 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! The library's tokio runtime (design §1.4): one per process, made at the
-//! first call that needs it, never shut down. Two workers named
-//! `nvr-io-<n>` do the background protocol work; every C ABI call runs its
-//! future with `block_on` on the caller's thread, so the callbacks the
-//! future makes (sinks, prompts, `nvb_io`, progress) run there too.
+//! One tokio runtime per process, made on first use, never shut down. Workers `nvr-io-<n>`; every C ABI call
+//! runs its future with `block_on` on the caller's thread, so callbacks run there too.
 //!
-//! Cancel (C-9): a backend ends a canceled call itself, soon after its
-//! [`CancelToken`] trips. [`GRACE`] after the cancel the call is dropped
-//! and reports `Canceled` anyway, so that one backend await that misses
+//! A canceled call is dropped [`GRACE`] after the cancel and reports `Canceled`, so one backend await that misses
 //! the token cannot break the 2 s bound.
 
 use netvfs_vfs::{CancelToken, Status};
@@ -19,12 +14,11 @@ use std::task::Poll;
 use std::time::Duration;
 use tokio::runtime::{Builder, Runtime};
 
-/// Worker threads of the runtime.
+/// Worker threads.
 pub const WORKERS: usize = 2;
-/// Name prefix of the worker threads.
+/// Worker thread name prefix.
 pub const THREAD_PREFIX: &str = "nvr-io-";
-/// How long a call may run on after its token tripped (C-9 allows 2 s from
-/// cancel to return).
+/// Time a call may run on after its token tripped.
 pub const GRACE: Duration = Duration::from_secs(1);
 
 static RUNTIME: OnceLock<Result<Runtime, String>> = OnceLock::new();
@@ -39,7 +33,6 @@ fn build() -> Result<Runtime, String> {
         .map_err(|e| e.to_string())
 }
 
-/// The runtime, made on first use.
 fn runtime() -> Result<&'static Runtime, Status> {
     RUNTIME
         .get_or_init(build)
@@ -47,8 +40,6 @@ fn runtime() -> Result<&'static Runtime, Status> {
         .map_err(|e| Status::internal(format!("Cannot start the Rust backend runtime: {e}")))
 }
 
-/// Runs `work` on this thread until it ends, or until [`GRACE`] after
-/// `cancel` trips (`None`).
 fn drive<T>(cancel: &CancelToken, work: impl Future<Output = T>) -> Result<Option<T>, Status> {
     Ok(runtime()?.block_on(async {
         let mut work = pin!(work);
@@ -69,19 +60,16 @@ fn drive<T>(cancel: &CancelToken, work: impl Future<Output = T>) -> Result<Optio
     }))
 }
 
-/// A call: `Canceled` at once when `cancel` is tripped, else `work`'s
-/// result, or `Canceled` when it runs on [`GRACE`] past a cancel.
+/// `Canceled` at once if `cancel` is tripped, else `work`'s result, or `Canceled` if it runs [`GRACE`] past a cancel.
 ///
 /// # Errors
-/// What `work` returns, `Canceled`, or `Internal` without a runtime.
+/// `work`'s error, `Canceled`, or `Internal` without a runtime.
 pub fn run<T>(cancel: &CancelToken, work: impl Future<Output = Result<T, Status>>) -> Result<T, Status> {
     cancel.check()?;
     drive(cancel, work)?.unwrap_or_else(|| Err(Status::canceled()))
 }
 
-/// Teardown (`disconnect`, `abort`, closing what `conn_free` finds): runs
-/// also when `cancel` is tripped, and is dropped [`GRACE`] after a cancel
-/// (or not run without a runtime).
+/// Teardown: runs even when `cancel` is tripped; dropped [`GRACE`] after a cancel, not run without a runtime.
 pub fn finish(cancel: &CancelToken, work: impl Future<Output = ()>) {
     drop(drive(cancel, work));
 }

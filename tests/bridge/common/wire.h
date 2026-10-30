@@ -18,29 +18,22 @@
 struct DBusMessage;
 struct DBusMessageIter;
 
-// The consumer side of SPEC-v2 XB-8 for the black-box tests of the bridge
-// (design §4.3): a client that speaks peer-to-peer D-Bus through libdbus,
-// independent of the bridge's own zbus, so that the tests show the two
-// interoperate (EXTERNAL authentication, Unix fd passing, error replies with
-// their a{sv}). QtDBus cannot be that client: in Qt 5.6 a peer-to-peer
-// QDBusConnection never negotiates Unix fd passing
-// (QDBusConnectionPrivate::setPeer leaves the capabilities at 0), so the "h"
-// arguments of Upload and Download (XB-11) could not be sent.
-//
-// This file holds the message codec: arguments of replies and signals are
-// decoded into plain Qt values, calls are written with WireWriter. It is the
-// codec of the C++ bridge of netvfs 0.4, which libdbus served.
+// Consumer side of the black-box bridge tests: a client speaking peer-to-peer D-Bus through libdbus,
+// independent of the bridge's zbus so the tests show the two interoperate (EXTERNAL authentication, Unix fd
+// passing, error replies with a{sv}). QtDBus cannot be that client: in Qt 5.6 a peer-to-peer
+// QDBusConnection never negotiates Unix fd passing (QDBusConnectionPrivate::setPeer leaves capabilities at
+// 0), so the "h" arguments of Upload and Download could not be sent. This file is the message codec:
+// replies and signals decode into plain Qt values, calls are written with WireWriter.
 namespace NetVfs::BridgeTest {
 
-// Owning pointer to a libdbus message.
 struct MessageUnref {
     void operator()(DBusMessage *message) const;
 };
 using MessagePtr = std::unique_ptr<DBusMessage, MessageUnref>;
 
 struct DecodeLimits {
-    int maxDepth = 8;                 // nested containers
-    int maxElements = 4096;           // per array or map
+    int maxDepth = 8;
+    int maxElements = 4096;
 };
 
 // Decodes every argument of `message`:
@@ -91,7 +84,7 @@ private:
     DBusMessageIter *top();
     void open(int type, const char *signature);
     template <typename T>
-    void appendBasic(int type, const T *value);   // the basic value libdbus copies
+    void appendBasic(int type, const T *value);
     bool appendVariantValue(const QVariant &v);
 
     std::vector<std::unique_ptr<DBusMessageIter>> m_stack;

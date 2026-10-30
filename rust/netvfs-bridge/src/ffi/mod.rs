@@ -1,28 +1,17 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! The C++ backends through the C ABI of `libnetvfs-bridge-ffi.so`
-//! (`src/bridge/ffi/netvfs_bridge_ffi.h`; design §1, §3.3).
+//! The C++ backends through the C ABI of `libnetvfs-bridge-ffi.so` (`src/bridge/ffi/netvfs_bridge_ffi.h`).
 //!
-//! Plain Rust in, `Result<_, Status>` out. The rules of the header are
-//! kept by the types:
+//! Plain Rust in, `Result<_, Status>` out. The header's rules are kept by the types:
 //!
-//! - T1: [`Ffi::init`] only on the process's main thread, which becomes the
-//!   Qt thread; [`Ffi::run`] and [`Ffi::shutdown`] only there.
-//! - T3: a [`Discovery`] is made on the Qt thread (inside a function given
-//!   to [`Ffi::post`]) and, being `!Send`, stays there.
-//! - T4: a [`Conn`] and its [`Handle`]s are `!Send`: the thread that made
-//!   the connection is its owner. [`CancelHandle`] is the one part that
-//!   crosses threads; it shares a lock with the connection, so a cancel
-//!   never overlaps or follows `conn_free`.
-//! - T6: callbacks get plain Rust values; inside one, the connection
-//!   methods of the thread refuse to run.
-//! - T7: a panic in a callback is caught before it reaches C++ and reported
-//!   as `Internal` by the call (see [`callback`]).
-//! - O3: every block C++ returns is read into Rust values and freed at once.
-//! - O5: secrets go in as [`Zeroizing`](zeroize::Zeroizing) buffers, which
-//!   C++ copies and wipes; no copy is made on this side.
+//! - [`Ffi::init`] only on the process's main thread, which becomes the Qt thread; [`Ffi::run`] and [`Ffi::shutdown`] only there.
+//! - A [`Discovery`] is made on the Qt thread (inside a function given to [`Ffi::post`]) and, being `!Send`, stays there.
+//! - A [`Conn`] and its [`Handle`]s are `!Send`: the making thread owns them. [`CancelHandle`] crosses threads; it shares a lock with the connection, so a cancel never overlaps or follows `conn_free`.
+//! - Callbacks get plain Rust values; inside one, the connection methods of the thread refuse to run.
+//! - A panic in a callback is caught before C++ and reported as `Internal` by the call (see [`callback`]).
+//! - Every block C++ returns is read into Rust values and freed at once.
+//! - Secrets go in as [`Zeroizing`](zeroize::Zeroizing) buffers, which C++ copies and wipes; no copy on this side.
 //!
-//! This module and a later `sys` are the only ones with `unsafe`; every
-//! block says why it holds.
+//! With `sys`, the only modules with `unsafe`; every block says why it holds.
 #![allow(unsafe_code)]
 
 pub mod callback;
@@ -61,8 +50,7 @@ pub const PATH_ENV: &str = "NETVFS_BRIDGE_FFI";
 /// The thread `init` made the Qt thread.
 static QT_THREAD: OnceLock<ThreadId> = OnceLock::new();
 
-/// The loaded table. Cheap to copy, `Send` and `Sync`: the library is never
-/// unloaded.
+/// The loaded table. Cheap to copy, `Send` and `Sync`: the library is never unloaded.
 #[derive(Clone, Copy)]
 pub struct Ffi {
     t: &'static NvbFfi,
@@ -74,7 +62,7 @@ impl std::fmt::Debug for Ffi {
     }
 }
 
-/// A block C++ allocated (O3), freed when this goes.
+/// A block C++ allocated, freed when this goes.
 struct Owned<T> {
     ffi: Ffi,
     ptr: *mut T,
@@ -86,8 +74,7 @@ impl<T> Owned<T> {
     }
 
     fn get(&self) -> Option<&T> {
-        // SAFETY: NULL or a block C++ handed over (O3), valid until freed
-        // in `drop`.
+        // SAFETY: NULL or a block C++ handed over, valid until freed in `drop`.
         unsafe { self.ptr.as_ref() }
     }
 }
@@ -105,7 +92,6 @@ pub fn library_path() -> PathBuf {
     std::env::var_os(PATH_ENV).map_or_else(|| PathBuf::from(DEFAULT_PATH), PathBuf::from)
 }
 
-/// Whether this is the process's main thread.
 fn on_main_thread() -> bool {
     // SAFETY: getpid and gettid have no preconditions.
     unsafe { libc::getpid() == libc::gettid() }
@@ -115,7 +101,7 @@ impl Ffi {
     /// Loads the library at [`library_path`].
     ///
     /// # Errors
-    /// When it cannot be loaded.
+    /// It cannot be loaded.
     pub fn load() -> Result<Self, LoadError> {
         Self::load_from(&library_path())
     }
@@ -123,33 +109,27 @@ impl Ffi {
     /// Loads the library at `path`.
     ///
     /// # Errors
-    /// When it cannot be loaded.
+    /// It cannot be loaded.
     pub fn load_from(path: &Path) -> Result<Self, LoadError> {
         loader::load_table::<NvbFfi>(path, c"nvb_ffi_get").map(|t| Self { t })
     }
 
-    /// `Err` with the block's status, `Ok` for NULL; frees the block.
     fn check(self, error: *mut NvbError) -> Result<(), Status> {
-        // SAFETY: the block is readable until `owned` frees it (O3).
+        // SAFETY: the block is readable until `owned` frees it.
         Owned::new(self, error).get().map_or(Ok(()), |e| Err(unsafe { marshal::status(e) }))
     }
 
-    /// Reads and frees a block a call returned through its out-pointer.
     fn take<T, R>(self, ptr: *mut T, read: impl FnOnce(&T) -> R) -> Result<R, Status> {
         let owned = Owned::new(self, ptr);
         owned.get().map(read).ok_or_else(|| Status::internal("no result from the C ABI"))
     }
 
-    /// The bytes of a blob, freed.
     fn take_blob(self, blob: *mut NvbBlob) -> Result<Vec<u8>, Status> {
-        // SAFETY: the blob's bytes live in its block (O3).
+        // SAFETY: the blob's bytes live in its block.
         self.take(blob, |b| unsafe { marshal::slice(b.data) }.to_vec())
     }
 
-    // ------------------------------------------------ process and Qt loop
-
-    /// Creates the `QCoreApplication` (T1): first of all calls, on the
-    /// process's main thread, which becomes the Qt thread.
+    /// Creates the `QCoreApplication`: first of all calls, on the process's main thread, which becomes the Qt thread.
     ///
     /// # Errors
     /// `Internal` off the main thread or when the application exists.
@@ -157,7 +137,7 @@ impl Ffi {
         if !on_main_thread() {
             return Err(Status::internal("init must run on the main thread"));
         }
-        // SAFETY: on the main thread (T1); the name is borrowed (O1).
+        // SAFETY: main thread; the name is borrowed.
         if unsafe { (self.t.init)(NvbBytes::of(app_name.as_bytes())) } != 0 {
             return Err(Status::internal("the Qt application exists already"));
         }
@@ -182,24 +162,21 @@ impl Ffi {
     /// `Internal` off the Qt thread.
     pub fn run(&self) -> Result<i32, Status> {
         self.require_qt_thread()?;
-        // SAFETY: on the Qt thread, after init (T1).
+        // SAFETY: Qt thread, after init.
         Ok(unsafe { (self.t.run)() })
     }
 
     /// Ends [`Ffi::run`] with `code`; any thread.
     pub fn quit(&self, code: i32) {
-        // SAFETY: any thread (T2).
+        // SAFETY: any thread.
         unsafe { (self.t.quit)(code) }
     }
 
-    /// Runs `f` on the Qt thread. False when it was not queued (no
-    /// application, or quitting): then it never runs. A panic in `f` is
-    /// kept for [`take_orphan_panics`].
+    /// Runs `f` on the Qt thread. False when not queued (no application, or quitting): then it never runs. A panic in `f` is kept for [`take_orphan_panics`].
     pub fn post<F: FnOnce() + Send + 'static>(&self, f: F) -> bool {
         let posted: Box<callback::Posted> = Box::new(Box::new(f));
         let ctx = Box::into_raw(posted);
-        // SAFETY: any thread (T2); `ctx` is a leaked box that `run_posted`
-        // takes back when C++ runs it.
+        // SAFETY: any thread; `ctx` is a leaked box that `run_posted` takes back when C++ runs it.
         if unsafe { (self.t.post)(Some(callback::run_posted), ctx.cast()) } == 1 {
             return true;
         }
@@ -208,38 +185,34 @@ impl Ffi {
         false
     }
 
-    /// Deletes the application after [`Ffi::run`]; functions posted and
-    /// queued before run first.
+    /// Deletes the application after [`Ffi::run`]; functions posted and queued before run first.
     ///
     /// # Errors
     /// `Internal` off the Qt thread.
     pub fn shutdown(&self) -> Result<(), Status> {
         self.require_qt_thread()?;
-        // SAFETY: on the Qt thread (T1).
+        // SAFETY: Qt thread.
         unsafe { (self.t.shutdown)() };
         Ok(())
     }
 
-    // ------------------------------------------------------------ helpers
-
     /// Whether a backend plugin for `provider` is installed.
     #[must_use]
     pub fn provider_available(&self, provider: &str) -> bool {
-        // SAFETY: any thread (T2); borrowed (O1).
+        // SAFETY: any thread; borrowed.
         unsafe { (self.t.provider_available)(NvbBytes::of(provider.as_bytes())) == 1 }
     }
 
-    /// `Url::parse` (XH-6): parameters and path of a location URL.
+    /// `Url::parse`: parameters and path of a location URL.
     ///
     /// # Errors
-    /// The parser's refusal (`SecurityPolicy` for a password, `Unsupported`
-    /// for an unknown scheme, …).
+    /// The parser's refusal (`SecurityPolicy` for a password, `Unsupported` for an unknown scheme, …).
     pub fn url_parse(&self, url: &str) -> Result<ParsedUrl, Status> {
         let mut out: *mut NvbUrl = std::ptr::null_mut();
-        // SAFETY: any thread (T2); `url` borrowed (O1); `out` is ours.
+        // SAFETY: any thread; `url` borrowed; `out` is ours.
         let error = unsafe { (self.t.url_parse)(NvbBytes::of(url.as_bytes()), &raw mut out) };
         self.check(error)?;
-        // SAFETY: the block holds everything it points to (O3).
+        // SAFETY: the block holds everything it points to.
         self.take(out, |u| unsafe {
             ParsedUrl { params: marshal::params(&u.params), path: marshal::slice(u.path).to_vec() }
         })
@@ -248,18 +221,17 @@ impl Ffi {
     /// `Url::format`: the URL of parameters and a path.
     ///
     /// # Errors
-    /// `Unsupported` for a provider without a URL form, `ProtocolError` for
-    /// unusable parameters.
+    /// `Unsupported` for a provider without a URL form, `ProtocolError` for unusable parameters.
     pub fn url_format(&self, params: &Params, path: &[u8]) -> Result<String, Status> {
         let buf = ParamsBuf::new(params);
         let mut out: *mut NvbBlob = std::ptr::null_mut();
-        // SAFETY: any thread (T2); `buf` and `path` live across the call (O1).
+        // SAFETY: any thread; `buf` and `path` live across the call.
         let error = unsafe { (self.t.url_format)(buf.raw(), NvbBytes::of(path), &raw mut out) };
         self.check(error)?;
         self.take_blob(out).map(|b| String::from_utf8_lossy(&b).into_owned())
     }
 
-    /// A connection for `provider`, owned by this thread (T4).
+    /// A connection for `provider`, owned by this thread.
     ///
     /// # Errors
     /// `Unsupported` when there is no such backend.

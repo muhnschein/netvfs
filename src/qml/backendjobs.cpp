@@ -73,4 +73,4 @@ void BackendJobs::cancel()
     m_token.reset();
 }
 
-} // namespace NetVfsUi
+}

@@ -9,20 +9,17 @@
 
 namespace NetVfs {
 
-// Locates backend plugins (SPEC C-3). The search directory is the install
-// location, overridable with NETVFS_BACKEND_PATH (colon separated) for tests.
+// Search directory: install location, overridable with NETVFS_BACKEND_PATH (colon separated) for
+// tests.
 class NETVFS_EXPORT BackendLoader
 {
 public:
     static QStringList searchPaths();
-    // Returns a new backend for `provider`, or nullptr with `*result` set:
-    // Unsupported without a plugin, else the plugin's reason.
+    // nullptr with `*result` set: Unsupported without a plugin, else the plugin's reason.
     static Backend *create(const QString &provider, Result *result = nullptr);
     static bool isAvailable(const QString &provider);
-    // The SFTP plugin's key operations, or nullptr if it is not installed.
     static SshKeyTools *sshKeyTools();
 };
 
-} // namespace NetVfs
-
+}
 #endif

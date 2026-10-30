@@ -1,9 +1,5 @@
 # SPDX-License-Identifier: LGPL-2.1-or-later
-# The conformance suite (tests/conformance) on the mem backend of
-# libnetvfs-rs.so, through the shim and the test plugin libnetvfs-mem.so
-# (design §6.1), as one more "make check" run of tst_conformance. mem.json:
-# a store of its own, and a stall proxy that is the same backend with the
-# option stall=true (every call after authenticate waits for cancel).
+# Conformance suite on the mem backend of libnetvfs-rs.so through the shim and libnetvfs-mem.so. mem.json: own store, and a stall proxy (same backend, option stall=true: every call after authenticate waits for cancel).
 include(../../../../common.pri)
 include(../rstest.pri)
 

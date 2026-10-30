@@ -1,11 +1,11 @@
 #!/bin/sh
 # SPDX-License-Identifier: LGPL-2.1-or-later
-# Container entry point for the SFTP interop servers (SPEC-sftp 8, 9).
+# Container entry point for the SFTP interop servers.
 # Creates the test users and starts one sshd per instance named in
 # $INSTANCES, each on its own port and log file:
 #   default  2201  password and keys; user "twofactor" needs key + password,
 #                  user "nosession" may open no session (MaxSessions 0)
-#   hardened 2202  SPEC-sftp section 9 (OpenSSH 10.x only)
+#   hardened 2202  hardened configuration (OpenSSH 10.x only)
 #   kbdint   2203  keyboard-interactive only, via PAM (distribution sshd)
 #   nosftp   2204  no sftp subsystem
 #   noext    2205  sftp-server behind sftpproxy.py, which hides all extensions
@@ -40,10 +40,9 @@ for user in alice carol twofactor conf otp keyotp pwotp twoprompt nosession; do
     echo "$user:$TEST_PASSWORD" | chpasswd
 done
 
-# Chrooted, key-only account of the hardened configuration. The jail is
-# root-owned; the account writes below /data. Its keys live outside the jail.
+# Chrooted, key-only account of the hardened configuration. Jail is root-owned; the account writes below /data. Its keys live outside the jail.
 id backup >/dev/null 2>&1 || useradd -M -s /usr/sbin/nologin backup
-# Ubuntu already has a system user "backup"; section 9 uses that name.
+# Ubuntu already has a system user "backup"; the hardened configuration uses that name.
 usermod -d /data -s /usr/sbin/nologin backup
 usermod -p '*' backup
 mkdir -p /srv/sftpjail/data /etc/ssh/authorized_keys
@@ -62,11 +61,9 @@ if [ -d /srv/conformance ]; then
     chown conf /srv/conformance
 fi
 
-# PAM stack of the otp instance: user-specific blocks in front of the
-# distribution's stack (pam_netvfs_otp.c says what each argument does).
-# pwotp also signs in with the password method, which runs the same stack
-# and answers every hidden prompt with the password: a wrong code falls
-# through to pam_unix there.
+# PAM stack of the otp instance: user-specific blocks in front of the distribution's stack (pam_netvfs_otp.c documents the arguments).
+# pwotp also signs in with the password method, which runs the same stack and answers every hidden prompt with the
+# password: a wrong code falls through to pam_unix there.
 if [ "${USE_PAM:-0}" = 1 ] && [ -n "${TEST_OTP:-}" ] && ! grep -q pam_netvfs_otp /etc/pam.d/sshd; then
     {
         echo "# netvfs interop: one-time password stub (start-sshd.sh)"
@@ -85,7 +82,7 @@ if [ "${USE_PAM:-0}" = 1 ] && [ -n "${TEST_OTP:-}" ] && ! grep -q pam_netvfs_otp
     mv /etc/pam.d/sshd.new /etc/pam.d/sshd
 fi
 
-# Key of the reference OpenSSH client inside this container (S-T8).
+# Key of the reference OpenSSH client inside this container.
 if [ ! -f /setup/client_key ]; then
     "$SSH_KEYGEN" -q -t ed25519 -N '' -C crosscheck -f /setup/client_key
 fi
@@ -114,9 +111,8 @@ EOF
     penalties
 }
 
-# OpenSSH 9.8+ penalises sources with many failed or unauthenticated
-# connections; the suite makes such connections on purpose, all from the
-# Docker gateway address.
+# OpenSSH 9.8+ penalises sources with many failed or unauthenticated connections; the suite makes such connections on
+# purpose, all from the Docker gateway address.
 penalties() {
     if [ "${PENALTIES:-0}" = 1 ]; then
         echo "PerSourcePenalties no"

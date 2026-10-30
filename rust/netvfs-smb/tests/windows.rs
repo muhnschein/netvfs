@@ -1,12 +1,5 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! M-T11: netvfs-smb against Windows's own SMB server (the `windows-smb`
-//! job of .github/workflows/ci.yml: a local account and a share on the
-//! runner, reached over loopback, which is real SMB 3.1.1). The job sets
-//! `NETVFS_INTEROP_SMB_WINDOWS` (the address), `..._USER`, `..._PASSWORD`
-//! and `..._SHARE`; without them every test passes at once, saying so.
-// A test crate: the helpers outside `#[test]` may panic, index and do plain
-// arithmetic (clippy.toml relaxes that only inside `#[test]`), and the tests
-// print what Windows chose.
+//! netvfs-smb against Windows's own SMB server (the `windows-smb` job of .github/workflows/ci.yml: a local account and a share on the runner, reached over loopback, real SMB 3.1.1). The job sets `NETVFS_INTEROP_SMB_WINDOWS` (the address), `..._USER`, `..._PASSWORD` and `..._SHARE`; without them every test passes at once, saying so.
 #![allow(
     clippy::unwrap_used,
     clippy::panic,
@@ -133,8 +126,7 @@ impl Progress for Quiet {
     }
 }
 
-/// strict and signed: SMB 3.1.1; strict encrypts, signed signs (the share
-/// does not ask for encryption).
+/// strict and signed: SMB 3.1.1; strict encrypts, signed signs (the share does not ask for encryption).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn profiles() {
     let Some(windows) = Windows::get() else { return };
@@ -164,8 +156,7 @@ async fn profiles() {
     );
 }
 
-/// Transfers and the namespace on the share, with the server's READ and
-/// WRITE sizes (multi-credit).
+/// Transfers and the namespace on the share, with the server's READ and WRITE sizes (multi-credit).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_share_round_trip() {
     let Some(windows) = Windows::get() else { return };

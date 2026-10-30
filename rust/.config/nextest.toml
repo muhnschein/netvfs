@@ -1,10 +1,7 @@
-# cargo nextest (make check-rust). CI runs the "ci" profile: no retries, so
-# a flaky test fails the build instead of hiding.
+# CI uses the "ci" profile: no retries, a flaky test fails the build.
 [profile.default]
 slow-timeout = { period = "60s", terminate-after = 5 }
-# Tests mostly wait on sockets, child processes, timers: 32 at once, whatever
-# the cores (4 cores: 14 s down to 8 s). Makefile drops to one per core under
-# SANITIZE=1.
+# Tests mostly wait on sockets, children, timers: 32 at once. Makefile uses one per core under SANITIZE=1.
 test-threads = 32
 
 [profile.ci]

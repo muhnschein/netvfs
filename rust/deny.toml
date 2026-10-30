@@ -1,30 +1,18 @@
 # SPDX-License-Identifier: LGPL-2.1-or-later
-# cargo-deny for the crates the helper and the bridge link (CI job "Rust
-# supply chain"): known vulnerabilities, yanked versions, licences, sources.
+# cargo-deny for crates the helper and bridge link (CI "Rust supply chain").
 
 [graph]
 all-features = true
-# The targets netvfs ships for (Sailfish OS aarch64) and builds and tests on
-# (x86_64 CI). This leaves out crates only other systems link
-# (windows-sys), sspi's macOS DNS-SD client (async-dnssd, on bitflags 1) and
-# getrandom's UEFI backend (r-efi, in two versions).
+# Targets: Sailfish OS aarch64 and x86_64 CI. Leaves out windows-sys, sspi's macOS async-dnssd (bitflags 1), getrandom's UEFI r-efi.
 targets = ["aarch64-unknown-linux-gnu", "x86_64-unknown-linux-gnu"]
 
 [advisories]
 version = 2
 yanked = "deny"
 ignore = [
-    # rsa: Marvin timing side channel in RSA decryption and signing, no fixed
-    # release. Two paths into the tree, neither with an RSA private-key
-    # operation: netvfs-sftp refuses RSA user keys, so its only RSA operation
-    # is verifying a server's rsa-sha2 host signature; netvfs-smb uses sspi
-    # (through picky) for NTLM only (the Negotiate package is limited to
-    # "ntlm": no Kerberos, no PKINIT, no certificate).
+    # rsa: Marvin timing side channel, no fix. No RSA private-key operation: netvfs-sftp refuses RSA user keys (only verifies rsa-sha2 host signatures); netvfs-smb uses sspi/picky for NTLM only.
     { id = "RUSTSEC-2023-0071", reason = "no RSA private-key operation: RSA user keys refused, sspi limited to NTLM" },
-    # zvariant, zvariant_derive, zbus_names: unmaintained as standalone
-    # crates because zbus 6 folds them in (z-galaxy/zbus#2043). They are
-    # parts of zbus 5, which still gets its releases; moving to zbus 6 is a
-    # change of its own.
+    # zvariant, zvariant_derive, zbus_names: unmaintained standalone, folded into zbus 6 (z-galaxy/zbus#2043). Still part of zbus 5; moving to zbus 6 is separate.
     { id = "RUSTSEC-2026-0370", reason = "zvariant is part of zbus 5; zbus 6 folds it in" },
     { id = "RUSTSEC-2026-0371", reason = "zbus_names is part of zbus 5; zbus 6 folds it in" },
     { id = "RUSTSEC-2026-0372", reason = "zvariant_derive is part of zbus 5; zbus 6 folds it in" },
@@ -32,57 +20,43 @@ ignore = [
 
 [licenses]
 version = 2
-# netvfs is LGPL-2.1-or-later and links these statically into a setgid
-# binary: permissive licences only, so no GPL-only crate. The list holds
-# what the locked crates use; another licence is a decision to review.
+# LGPL-2.1-or-later, linked statically into a setgid binary: permissive licences only.
 allow = ["Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "MIT"]
 confidence-threshold = 0.9
-# Named exceptions, each for one crate.
+# Exceptions, one crate each.
 exceptions = [
-    # Unicode tables in a proc-macro helper (zbus and serde derives, through
-    # proc-macro2): "(MIT OR Apache-2.0) AND Unicode-3.0". Build-time only,
-    # nothing of it is linked; Unicode-3.0 is a permissive data licence.
+    # Unicode tables in proc-macro helper (zbus, serde derives via proc-macro2): "(MIT OR Apache-2.0) AND Unicode-3.0". Build-time only; permissive data licence.
     { crate = "unicode-ident", allow = ["Unicode-3.0"] },
-    # ring (russh's crypto provider): "Apache-2.0 AND ISC", the ISC part
-    # from BoringSSL.
+    # ring (russh crypto): "Apache-2.0 AND ISC", ISC from BoringSSL.
     { crate = "ring", allow = ["ISC"] },
-    # untrusted, ring's input parser: ISC.
+    # untrusted (ring input parser): ISC.
     { crate = "untrusted", allow = ["ISC"] },
-    # IDNA mapping tables (sspi -> url -> idna -> idna_adapter 1.1, pinned in
-    # Cargo.lock to keep the ICU4X crates out): "(Apache-2.0 OR MIT) AND
-    # Unicode-3.0", a permissive data licence.
+    # IDNA tables (sspi -> url -> idna -> idna_adapter 1.1, pinned to keep ICU4X out): "(Apache-2.0 OR MIT) AND Unicode-3.0".
     { crate = "idna_mapping", allow = ["Unicode-3.0"] },
 ]
 
-# The workspace's own crates (publish = false) are netvfs.
+# Own crates (publish = false).
 [licenses.private]
 ignore = true
 
 [bans]
 multiple-versions = "deny"
 wildcards = "deny"
-# Path dependencies between the workspace's own unpublished crates.
+# Path deps between own unpublished crates.
 allow-wildcard-paths = true
-# Duplicates allowed by name, each with the reason.
+# Allowed duplicates, with reason.
 skip = [
-    # Proc-macro (build-time) only: enumflags2_derive (zvariant) and
-    # tracing-attributes (tokio, zbus) have no release on syn 3 yet, the rest
-    # of the zbus tree is on syn 3.
+    # Proc-macro only: enumflags2_derive (zvariant), tracing-attributes (tokio, zbus) lack syn 3 releases; rest of zbus tree on syn 3.
     { crate = "syn@2", reason = "enumflags2_derive and tracing-attributes are still on syn 2" },
-    # russh's tree. ring 0.17 is on getrandom 0.2, the RustCrypto
-    # pre-releases (ssh-key, rsa, crypto-bigint) on 0.4.
+    # russh tree: ring 0.17 on getrandom 0.2, RustCrypto pre-releases (ssh-key, rsa, crypto-bigint) on 0.4.
     { crate = "getrandom@0.2", reason = "ring 0.17 has no release on getrandom 0.3 or later" },
-    # ml-kem 0.3 (russh's mlkem768x25519-sha256) is on sha3 0.11, the rest
-    # of russh's tree on 0.12.
+    # ml-kem 0.3 (russh mlkem768x25519-sha256) on sha3 0.11, rest of russh on 0.12.
     { crate = "sha3@0.11", reason = "ml-kem 0.3 has no release on sha3 0.12" },
-    # sspi 0.23 (netvfs-smb) depends on getrandom 0.3 directly; RustCrypto's
-    # current releases are on 0.4.
+    # sspi 0.23 (netvfs-smb) uses getrandom 0.3; current RustCrypto on 0.4.
     { crate = "getrandom@0.3", reason = "sspi 0.23 depends on getrandom 0.3 directly" },
-    # sspi's picky 7.0.0-rc.26 is on base64 0.22, its picky-asn1-x509 0.15
-    # on 0.23.
+    # sspi's picky 7.0.0-rc.26 on base64 0.22, picky-asn1-x509 0.15 on 0.23.
     { crate = "base64@0.22", reason = "picky 7.0.0-rc.26 (sspi) has no release on base64 0.23" },
-    # Both trees together: sspi's crypto-mac 0.11 is on generic-array 0.14,
-    # russh on 1.x (whose compat-0_14 feature links 0.14 as well).
+    # sspi crypto-mac 0.11 on generic-array 0.14, russh on 1.x (compat-0_14 links 0.14 too).
     { crate = "generic-array@0.14", reason = "crypto-mac 0.11 (sspi) has no release on generic-array 1" },
 ]
 

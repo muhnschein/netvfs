@@ -17,7 +17,7 @@ inline bool installEngineeringEnglish(QObject *parent)
     if (!translator->load(QStringLiteral("netvfs_eng_en"), QStringLiteral(NETVFS_TEST_BUILD_DIR "/translations")))
         return false;
     const bool installed = QCoreApplication::installTranslator(translator.get());
-    translator.release();   // owned by `parent`
+    translator.release();
     return installed;
 }
 

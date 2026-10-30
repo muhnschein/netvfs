@@ -1,17 +1,11 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! Path validation (XSEC-7, XC-4): `Paths::normalize` of `src/core/paths.cpp`
-//! on protocol bytes (design §1.2). `/`, `.` and NUL are ASCII and never
-//! occur inside a UTF-8 sequence or a surrogate-escaped byte (0x80–0xFF), so
-//! normalising the bytes gives the same result as
-//! `normalize(Names::decode(bytes))`.
+//! Path validation on protocol bytes. `/`, `.` and NUL are ASCII and never occur inside a UTF-8 sequence or a surrogate-escaped byte (0x80–0xFF), so normalising the bytes equals normalising the decoded name.
 
 use crate::status::Status;
 use netvfs_bridge_proto::limits::MAX_PATH;
 use std::fmt;
 
-/// A normalised path in protocol bytes: no empty, `.` or `..` components, no
-/// NUL, at most [`MAX_PATH`] bytes, a leading `/` only when absolute, no
-/// trailing `/`. The empty path is the location's root.
+/// A normalised path in protocol bytes.
 #[derive(Clone, PartialEq, Eq, Hash, Default)]
 pub struct NPath(Vec<u8>);
 
@@ -84,7 +78,6 @@ mod tests {
         normalize(raw).unwrap_err().name
     }
 
-    // netvfs 0.4's C++ tst_bridgeunits paths_data: the same 8 rows.
     #[test]
     fn normalize_table() {
         assert_eq!(ok(b"docs/a.txt"), b"docs/a.txt");

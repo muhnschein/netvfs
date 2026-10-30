@@ -1,27 +1,20 @@
-# Backend conformance suite (SPEC-v2 XT-1)
+# Backend conformance suite
 
-`tst_conformance` runs one set of QtTest functions against every configured
-*target* (a backend instance: provider, connection parameters, credentials and
-a base folder). It covers every `Backend` method and every capability claim:
+`tst_conformance`: one QtTest set against every configured target (backend instance: provider, connection, credentials, base folder). Covers every `Backend` method and capability claim:
 
-- a capability the backend reports must pass its tests;
-- a capability it does not report must make the matching call return
-  `Unsupported` **without side effects** (`unsupportedWithoutSideEffects`
-  compares a recursive snapshot of the test folder before and after).
+- reported capability: its tests pass;
+- unreported capability: matching call returns `Unsupported`, no side effects (`unsupportedWithoutSideEffects` compares folder snapshot before/after).
 
-The binary links only `libnetvfs` and QtTest and loads backends through
-`BackendLoader` (`NETVFS_BACKEND_PATH`, defaulting to the build tree's
-`lib/netvfs/backends`).
+Links only `libnetvfs` and QtTest; loads backends via `BackendLoader` (`NETVFS_BACKEND_PATH`, default build tree's `lib/netvfs/backends`).
 
 ## Running
 
-Without configuration it tests the local backend in a fresh temporary folder,
-in two configurations, and is part of `make check-unit`:
+No config: local backend in fresh temp folder, two targets, part of `make check-unit`:
 
-| target | what it exercises |
+| target | exercises |
 |---|---|
 | `local` | option `root`, relative paths below it, `NativeNoReplace` |
-| `local-absolute` | default root `/`, absolute paths (L-1), the `link()`+`unlink()` / stat-check fallback of `rename(NoReplace)` (`native_noreplace=false`, L-3) |
+| `local-absolute` | default root `/`, absolute paths, `link()`+`unlink()` / stat-check fallback of `rename(NoReplace)` (`native_noreplace=false`) |
 
 ```sh
 build/tests/conformance/tst_conformance                       # default targets
@@ -29,19 +22,15 @@ build/tests/conformance/tst_conformance renameFolders symlinks # some functions
 NETVFS_CONFORMANCE_CONFIG=/path/config.json build/tests/conformance/tst_conformance
 ```
 
-Environment:
-
 | variable | meaning |
 |---|---|
-| `NETVFS_CONFORMANCE_CONFIG` | JSON file with the targets (below) |
-| `NETVFS_CONFORMANCE_TARGETS` | comma separated target names to run (others are ignored) |
-| `NETVFS_CONFORMANCE_HEAVY` | `0`: skip heavy cases; `1`: run them even where expensive (upload 4 GiB without `hostPath`); unset: run where cheap |
-| `NETVFS_CONFORMANCE_KEEP` | `1`: keep the run folder for inspection |
-| `NETVFS_BACKEND_PATH` | where the backend plugins are |
+| `NETVFS_CONFORMANCE_CONFIG` | JSON file with targets (below) |
+| `NETVFS_CONFORMANCE_TARGETS` | comma-separated target names to run |
+| `NETVFS_CONFORMANCE_HEAVY` | `0`: skip heavy cases; `1`: run even where expensive (4 GiB upload without `hostPath`); unset: where cheap |
+| `NETVFS_CONFORMANCE_KEEP` | `1`: keep run folder |
+| `NETVFS_BACKEND_PATH` | backend plugin folder |
 
-The test object runs once per target (`QTest::qExec` per target); the exit code
-is non-zero if any target failed. Every run works in
-`<baseDir>/run-<pid>-<ms>/<testFunction>/` and removes the run folder at the end.
+`QTest::qExec` once per target; non-zero exit if any target failed. Each run works in `<baseDir>/run-<pid>-<ms>/<testFunction>/`, removed at end.
 
 ## Configuration
 
@@ -78,91 +67,41 @@ is non-zero if any target failed. Every run works in
 
 | key | meaning |
 |---|---|
-| `name` | label in the output and for `NETVFS_CONFORMANCE_TARGETS` (default: provider) |
-| `provider`, `host`, `port`, `user`, `options`, `connectTimeoutMs`, `requestTimeoutMs` | `ConnectionParams`; `options` are the provider options without the `netvfs/<provider>/` prefix |
-| `secretEnv` | environment variable holding the secret (never put secrets in the file) |
-| `trustOnFirstUse` | without `options.host_key`, accept the identity seen on the first connect (containers with fresh keys) |
-| `baseDir` | backend path the suite works below; created with `makePath` |
-| `hostPath` | optional: the same folder as seen from the host (bind mount). Enables fast fixture creation (the 10 000-entry listing), sparse files > 4 GiB via `ftruncate`, and FIFO stalls |
-| `listCount` | entries in `listBatches` (default 10 000; lower it only for very slow servers) |
-| `fifoStall` | FIFOs created under `hostPath` stall the backend (default: true for `local` with a `hostPath`) |
-| `stallProxy` | a second way into the same server through a stalling proxy: `host`/`port`/`options` override the target's parameters; `engage` / `release` are shell commands run before / after each stalled call (empty: the proxy stalls by itself once signed in) |
-| `restart` | optional shell command that restarts the server; `keepAlive` must then return `ConnectionLost` |
-| `skip` | test function → reason; the function is skipped for this target with that reason |
+| `name` | label; name for `NETVFS_CONFORMANCE_TARGETS` (default: provider) |
+| `provider`, `host`, `port`, `user`, `options`, `connectTimeoutMs`, `requestTimeoutMs` | `ConnectionParams`; `options` without `netvfs/<provider>/` prefix |
+| `secretEnv` | env var holding secret; never secrets in file |
+| `trustOnFirstUse` | without `options.host_key`: accept first identity seen (containers with fresh keys) |
+| `baseDir` | backend path suite works below; `makePath` creates it |
+| `hostPath` | same folder seen from host (bind mount): fast fixtures (10 000-entry listing), sparse > 4 GiB files via `ftruncate`, FIFO stalls |
+| `listCount` | entries in `listBatches` (default 10 000) |
+| `fifoStall` | FIFOs under `hostPath` stall backend (default true for `local` with `hostPath`) |
+| `stallProxy` | same server via stalling proxy: `host`/`port`/`options` override target's; `engage`/`release` shell commands before/after each stalled call (empty: proxy stalls by itself once signed in) |
+| `restart` | shell command restarting server; `keepAlive` then returns `ConnectionLost` |
+| `skip` | test function → reason; skipped for this target |
 
-## Stalls and cancel (C-9, C-14)
+## Stalls and cancel
 
-- `cancelStalledFifo` (targets with `fifoStall`): the suite creates a FIFO and
-  holds it open for reading and writing, so reads find no data and writes fill
-  the pipe. `download`, `ReadHandle::read`, `checksum`, `upload` and
-  `WriteHandle::write` on it must return `Canceled` within 2 s of `cancel()`
-  from another thread. `stallTimeoutFifo` checks that the request timeout ends
-  the same wait with `Timeout`.
-- `cancelStalledProxy` (targets with `stallProxy`): for each blocking method
-  (stat, lstat, list, makeDir, removeDir, rename, download, upload, keepAlive)
-  a fresh backend connects through the proxy, `engage` runs, the call starts,
-  `cancel()` follows after 300 ms and must end the call with `Canceled` within
-  2 s; then `release` runs. Proxies: `tests/interop/sftp/docker/sftpproxy.py`
-  (`--hold-file` for SFTP replies; `--relay` holds a whole SSH connection,
-  keep-alive replies included), `tests/interop/smb/server/flipproxy.py`
-  (`stall` mode), and the planned `httpstall.py` / `ftpstall.py`.
+- `cancelStalledFifo` (`fifoStall`): FIFO held open both ways; `download`, `ReadHandle::read`, `checksum`, `upload`, `WriteHandle::write` on it return `Canceled` within 2 s of `cancel()` from another thread. `stallTimeoutFifo`: request timeout ends same wait with `Timeout`.
+- `cancelStalledProxy` (`stallProxy`): per blocking method (stat, lstat, list, makeDir, removeDir, rename, download, upload, keepAlive) fresh backend via proxy, `engage`, call, `cancel()` after 300 ms, `Canceled` within 2 s, `release`. Proxies: `tests/interop/sftp/docker/sftpproxy.py` (`--hold-file` holds SFTP replies; `--relay` whole SSH connection), `tests/interop/smb/server/flipproxy.py` (`stall` mode).
 
-`tests/interop/sftp/run.sh` runs the suite against OpenSSH 10.3p1 (copy
-through the `copy-data` extension, checksums computed locally), with a
-`--relay` stall proxy, a restart command (`restart-instance.sh`) and a
-bind-mounted `hostPath`.
-
-## Hooking a container target in (interop `run.sh`)
-
-An interop script that already starts a server container writes a config and
-runs the suite after its own driver:
-
-```sh
-conformance_config="$work/conformance.json"
-cat > "$conformance_config" <<JSON
-{ "targets": [ {
-    "name": "sftp-openssh",
-    "provider": "sftp",
-    "host": "127.0.0.1", "port": $port,
-    "user": "alice", "secretEnv": "NETVFS_CONFORMANCE_SECRET",
-    "trustOnFirstUse": true,
-    "baseDir": "conformance",
-    "hostPath": "$work/data/conformance"
-} ] }
-JSON
-mkdir -p "$work/data/conformance"
-NETVFS_CONFORMANCE_SECRET="$password" NETVFS_CONFORMANCE_CONFIG="$conformance_config" \
-    NETVFS_BACKEND_PATH="$build/lib/netvfs/backends" \
-    "$build/tests/conformance/tst_conformance" || status=1
-```
-
-Notes:
-
-- `hostPath` needs the server's folder bind-mounted from the host
-  (`docker run -v "$work/data:/srv/data"`), writable by the server's user;
-  leave it out if that is awkward: the suite then creates fixtures through the
-  backend and skips the > 4 GiB case unless `NETVFS_CONFORMANCE_HEAVY=1`.
-- Several targets (one per server flavour) go into one file; use `skip` with
-  a reason for documented server limitations instead of weakening a test.
-- Publish container ports to ephemeral host ports (`-p 127.0.0.1::PORT`) and
-  name containers with a unique prefix, as `tests/interop/sftp/run.sh` does.
+`tests/interop/sftp/run.sh` runs suite against OpenSSH 10.3p1 with `--relay` stall proxy, restart command (`restart-instance.sh`), bind-mounted `hostPath`: copy it to hook a container target in. `hostPath` needs server folder bind-mounted writable; without it fixtures go through backend and > 4 GiB case skips unless `NETVFS_CONFORMANCE_HEAVY=1`. Server limitation → `skip` with reason, never weaker test. Ephemeral host ports (`-p 127.0.0.1::PORT`), unique container prefix.
 
 ## What is covered
 
-| function | SPEC | gated by |
+| function | gated by |
 |---|---|---|
-| `capabilities`, `cancelBeforeCall`, `keepAlive` | XC-5, C-9, XC-20 | — |
-| `entryFields`, `statAndLstat`, `listing` | XC-2, XC-6, XC-7 | `PosixModes`, `Ownership`, `ETags` for field checks |
-| `listBatches` | XC-6: batches ≤ batchSize, sink `false` → `Canceled`, cancel mid-listing | — |
-| `makeDir`, `removeFile`, `removeDir`, `removeTreeNative` | XC-8, XC-9 | `RecursiveDelete` |
-| `renameFiles`, `renameFolders`, `renameCaseOnly` | XC-10 | `CaseInsensitive` changes expectations |
-| `namesUtf8`, `namesNormalization`, `namesNonUtf8`, `namesLong`, `namesWindowsInvalid` | XC-4 | `WindowsNames`, `maxNameBytes`; non-UTF-8 skips with the server's reason |
-| `setAttributes` | XC-11 | `PosixModes`, `SetModified` |
-| `symlinks`, `symlinkFolder`, `symlinkDangling`, `symlinkLoop`, `hardlinks` | XC-12, XC-7 | `Symlinks`, `Hardlinks` |
-| `readHandle`, `readHelper`, `downloadRanges` | XC-13, XC-14: ranges at EOF boundaries | `ReadHandles` |
-| `writeHandle`, `writeResume`, `handlesAfterDisconnect` | XC-13, XC-23: dispositions, modes, resume offsets | `WriteResume`, `PosixModes` |
-| `uploadDownload`, `uploadOptions`, `progressCancel` | XC-14 | `SetModifiedOnUpload`, `PosixModes` |
-| `largeSparse` | files > 4 GiB | heavy |
-| `copy`, `checksum`, `spaceInfo` | XC-17..XC-19 | `ServerCopy(Recursive)`, `Checksums`, `SpaceInfo` |
-| `unsupportedWithoutSideEffects` | XT-1 | every unreported capability |
-| `cancelStalledFifo`, `stallTimeoutFifo`, `cancelStalledProxy` | C-9, C-14 | `fifoStall`, `stallProxy` |
+| `capabilities`, `cancelBeforeCall`, `keepAlive` | — |
+| `entryFields`, `statAndLstat`, `listing` | `PosixModes`, `Ownership`, `ETags` for field checks |
+| `listBatches` (batches ≤ batchSize, sink `false` → `Canceled`, cancel mid-listing) | — |
+| `makeDir`, `removeFile`, `removeDir`, `removeTreeNative` | `RecursiveDelete` |
+| `renameFiles`, `renameFolders`, `renameCaseOnly` | `CaseInsensitive` changes expectations |
+| `namesUtf8`, `namesNormalization`, `namesNonUtf8`, `namesLong`, `namesWindowsInvalid` | `WindowsNames`, `maxNameBytes`; non-UTF-8 skips with the server's reason |
+| `setAttributes` | `PosixModes`, `SetModified` |
+| `symlinks`, `symlinkFolder`, `symlinkDangling`, `symlinkLoop`, `hardlinks` | `Symlinks`, `Hardlinks` |
+| `readHandle`, `readHelper`, `downloadRanges` (ranges at EOF boundaries) | `ReadHandles` |
+| `writeHandle`, `writeResume`, `handlesAfterDisconnect` (dispositions, modes, resume offsets) | `WriteResume`, `PosixModes` |
+| `uploadDownload`, `uploadOptions`, `progressCancel` | `SetModifiedOnUpload`, `PosixModes` |
+| `largeSparse` (files > 4 GiB) | heavy |
+| `copy`, `checksum`, `spaceInfo` | `ServerCopy(Recursive)`, `Checksums`, `SpaceInfo` |
+| `unsupportedWithoutSideEffects` | every unreported capability |
+| `cancelStalledFifo`, `stallTimeoutFifo`, `cancelStalledProxy` | `fifoStall`, `stallProxy` |

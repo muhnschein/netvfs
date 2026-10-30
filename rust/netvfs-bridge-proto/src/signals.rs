@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! Typed signals of the bridge. Consumers read them from one ordered stream
-//! (`Connection::signals`), because per-signal proxy streams may be observed
-//! out of order relative to each other (`ListBatch` before `ListDone`).
+//! Typed signals of the bridge, read from one ordered stream (`Connection::signals`): per-signal
+//! proxy streams may be observed out of order (`ListBatch` before `ListDone`).
 
 use crate::errors::BridgeError;
 use crate::methods::INTERFACE;
@@ -72,7 +71,7 @@ pub enum Signal {
         /// What to show.
         details: HashMap<String, OwnedValue>,
     },
-    /// The drives changed; `ListDrives` has the new list (XB-20).
+    /// The drives changed; `ListDrives` has the new list.
     DrivesChanged,
 }
 
@@ -83,9 +82,8 @@ where
     msg.body().deserialize::<T>().map_err(|e| BridgeError::Protocol(e.to_string()))
 }
 
-/// Decodes a message into a [`Signal`]. `Ok(None)` for messages that are not
-/// signals of `org.netvfs.Bridge1` (and for signals of a newer protocol that
-/// this client does not know, which are ignored).
+/// Decodes a message into a [`Signal`]. `Ok(None)` for messages that are no `org.netvfs.Bridge1`
+/// signal, and for newer signals this client does not know.
 ///
 /// # Errors
 /// [`BridgeError::Protocol`] for a known signal with another body.
@@ -144,7 +142,6 @@ mod tests {
     use crate::wire::{entry_kind, value_i64, value_str};
     use zbus::zvariant::{DynamicType, Value};
 
-    /// A signal of `iface` called `member` with `body`, as a peer sends it.
     fn signal<B: serde::Serialize + DynamicType>(iface: &str, member: &str, body: &B) -> Message {
         Message::signal("/org/netvfs/Bridge", iface, member).unwrap().build(body).unwrap()
     }
@@ -221,7 +218,6 @@ mod tests {
 
     #[test]
     fn only_signals_of_the_bridge_are_decoded() {
-        // A signal of another interface, a method call, and a newer signal.
         let other = signal("org.example.Other", "JobProgress", &(1u32, 2i64, 3i64));
         assert!(decode_signal(&other).unwrap().is_none());
         let call = Message::method_call("/org/netvfs/Bridge", "JobProgress")

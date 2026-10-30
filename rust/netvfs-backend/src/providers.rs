@@ -4,10 +4,10 @@
 use crate::erased::DynBackend;
 use netvfs_vfs::Status;
 
-/// A new, unconnected backend of `provider`.
+/// New, unconnected backend of `provider`.
 ///
 /// # Errors
-/// `Unsupported` for a provider this build has no backend for.
+/// `Unsupported` for an unknown provider.
 pub fn create(provider: &[u8]) -> Result<Box<dyn DynBackend>, Status> {
     match provider {
         b"sftp" => Ok(Box::new(netvfs_sftp::backend::Sftp::new())),

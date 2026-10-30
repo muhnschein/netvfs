@@ -30,10 +30,8 @@ public:
     // (disconnected()). Return value ignored; libdbus answers Peer.Ping itself.
     using Handler = std::function<void(DBusMessage *message)>;
 
-    // Connects to `address` ("unix:path=...").
     static WireConnection *connectTo(const QString &address, Result *result, QObject *parent = nullptr);
 
-    // Takes a new reference on `connection` and integrates it into the event loop.
     explicit WireConnection(DBusConnection *connection, QObject *parent = nullptr);
     ~WireConnection() override;
 
@@ -43,13 +41,12 @@ public:
     bool isAuthenticated() const;
     bool canPassUnixFds() const;
 
-    // Queues `message` (consumed); returns its serial, 0 on failure.
     quint32 send(MessagePtr message);
     // Closes the connection without sending anything else; disconnected()
     // follows from the event loop.
     void close();
 
-    struct Integration;   // libdbus main loop glue (wireconnection.cpp)
+    struct Integration;
 
 Q_SIGNALS:
     void disconnected();

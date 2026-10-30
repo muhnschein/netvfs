@@ -1,17 +1,14 @@
 #!/bin/sh
 # SPDX-License-Identifier: LGPL-2.1-or-later
 #
-# Builds every tests/fuzz/fuzz_*.cpp as a libFuzzer binary (clang, ASan +
-# UBSan) and runs each one for a fixed time budget.
-#
+# Builds every tests/fuzz/fuzz_*.cpp as a libFuzzer binary (clang, ASan + UBSan) and runs each for a fixed time.
+# 
 #   tests/fuzz/run.sh <build-dir> [seconds]     (default 60 seconds per harness)
-#
-# Needs clang++ with the libFuzzer runtime (Ubuntu: clang libclang-rt-dev) and
-# Qt5Core development files. Independent of qmake: each harness is compiled
-# together with the core sources it names (see tests/fuzz/README.md). Binaries
-# go to <build-dir>/fuzz, new corpus entries to <build-dir>/fuzz/work/<name>,
-# crash reproducers to <build-dir>/fuzz/artifacts. Set FUZZ_ONLY="names url" to
-# run a subset. Exit status is non-zero if any harness fails to build or crashes.
+# 
+# Needs clang++ with libFuzzer runtime (Ubuntu: clang libclang-rt-dev) and Qt5Core dev files. Independent of qmake: each
+# harness is compiled with the core sources it names. Binaries: <build-dir>/fuzz; new corpus entries:
+# <build-dir>/fuzz/work/<name>; crash reproducers: <build-dir>/fuzz/artifacts. FUZZ_ONLY="names url" runs a subset.
+# Non-zero exit if any harness fails to build or crashes.
 set -eu
 
 here=$(cd "$(dirname "$0")" && pwd)

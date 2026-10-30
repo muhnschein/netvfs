@@ -1,20 +1,12 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! SPEC-v2 XB-10 questions (`QuestionBroker` of questions.cpp):
-//! `Question(s id, s kind, a{sv})` goes to the session whose request needs
-//! the answer; `Answer(s id, a{sv})` resolves it. Kinds:
+//! Question broker: `Question(s id, s kind, a{sv})` goes to the session whose request needs the answer; `Answer(s id, a{sv})` resolves it. Kinds:
 //!
-//! - `identity-unknown`: ad-hoc first contact (XB-14); answer `{accept: b}`;
-//! - `keyboard-interactive`: a prompt of the server (XC-15); answer
-//!   `{accept: b, answers: aay}`;
-//! - `insecure-consent`: an ad-hoc SMB location with the `guest` profile
-//!   (XM-1); answer `{accept: b}`.
+//! - `identity-unknown`: ad-hoc first contact; answer `{accept: b}`;
+//! - `keyboard-interactive`: server prompt; answer `{accept: b, answers: aay}`;
+//! - `insecure-consent`: ad-hoc SMB location with the `guest` profile; answer `{accept: b}`.
 //!
-//! A question ends unanswered when its session goes away, its request is
-//! canceled or the worker that asked stops waiting (the question timeout).
-//!
-//! The broker only keeps the books: each pending question holds a waiter
-//! `W` that the core resolves with the answer, or without one, from what
-//! the broker hands back. Core actor only.
+//! A question ends unanswered when its session goes away, its request is canceled or the worker stops waiting (question timeout).
+//! Books only: each pending question holds a waiter `W` the core resolves. Core actor only.
 
 use crate::server::SessionId;
 use std::collections::BTreeMap;
@@ -49,9 +41,7 @@ impl<W> Default for QuestionBroker<W> {
 }
 
 impl<W> QuestionBroker<W> {
-    /// Records a question to `session` resolved through `waiter`; its new
-    /// id, for the `Question` signal. If the signal cannot be sent the
-    /// caller withdraws it with [`QuestionBroker::cancel`].
+    /// Records a question to `session` resolved through `waiter`.
     pub fn ask(&mut self, session: SessionId, waiter: W) -> String {
         let id = format!("q{}", self.next);
         self.next = self.next.saturating_add(1);
@@ -59,9 +49,7 @@ impl<W> QuestionBroker<W> {
         id
     }
 
-    /// `Answer` from `session`: the waiter of its pending question `id`;
-    /// `None` when there is none (answers to other sessions' questions are
-    /// refused and leave them pending).
+    /// `Answer` from `session`.
     pub fn answer(&mut self, session: SessionId, id: &str) -> Option<W> {
         if self.pending.get(id).is_none_or(|(owner, _)| *owner != session) {
             return None;
@@ -69,14 +57,12 @@ impl<W> QuestionBroker<W> {
         self.pending.remove(id).map(|(_, waiter)| waiter)
     }
 
-    /// Withdraws question `id`: its waiter, to be resolved without an
-    /// answer; `None` if it is not pending.
+    /// Withdraws question `id`.
     pub fn cancel(&mut self, id: &str) -> Option<W> {
         self.pending.remove(id).map(|(_, waiter)| waiter)
     }
 
-    /// The session went away: the waiters of its questions, to be resolved
-    /// without an answer.
+    /// The session went away.
     pub fn drop_session(&mut self, session: SessionId) -> Vec<W> {
         let ids: Vec<String> = self
             .pending
@@ -98,7 +84,6 @@ impl<W> QuestionBroker<W> {
 mod tests {
     use super::*;
 
-    /// The port of `tst_BridgeUnits::questions`.
     #[test]
     fn broker() {
         let mut b: QuestionBroker<&str> = QuestionBroker::default();
@@ -110,17 +95,14 @@ mod tests {
         assert_eq!((q1.as_str(), q2.as_str(), q3.as_str()), ("q1", "q2", "q3"));
         assert_eq!(b.pending(), 3);
         assert!(format!("{b:?}").contains("q2"));
-        // Another session's question is refused and stays pending.
         assert_eq!(b.answer(s2, &q1), None);
         assert_eq!(b.answer(s1, "q99"), None);
         assert_eq!(b.pending(), 3);
         assert_eq!(b.answer(s1, &q1), Some("first"));
         assert_eq!(b.answer(s1, &q1), None);
         assert_eq!(b.pending(), 2);
-        // Withdrawn once.
         assert_eq!(b.cancel(&q3), Some("third"));
         assert_eq!(b.cancel(&q3), None);
-        // A session going away ends its questions only.
         let q4 = b.ask(s2, "fourth");
         assert_eq!(q4, "q4");
         assert_eq!(b.drop_session(s1), ["second"]);

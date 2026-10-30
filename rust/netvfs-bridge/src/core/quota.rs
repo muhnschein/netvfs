@@ -1,21 +1,18 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! XB-17: what one consumer may have in flight (`ConsumerQuota` of
-//! serverparts.cpp): 64 requests, 16 open files and 8 jobs. Above a limit
-//! a call fails with `TooManyConnections` and `retryAfterMs` 1000. The
-//! core re-evaluates the idle exit after every change (XB-2).
+//! Per-consumer in-flight limits: 64 requests, 16 open files, 8 jobs. Above a limit a call fails with `TooManyConnections`, `retryAfterMs` 1000.
+//! The core re-evaluates the idle exit after every change.
 
 use crate::Status;
 use netvfs_bridge_proto::ErrorName;
 use netvfs_bridge_proto::limits::{MAX_HANDLES, MAX_JOBS, MAX_REQUESTS, RETRY_AFTER_MS};
 
-/// `TooManyConnections` with `message` and the retry time (XB-17).
+/// `TooManyConnections` with `message` and the retry time.
 #[must_use]
 pub fn too_many(message: &str) -> Status {
     Status::new(ErrorName::TooManyConnections, message)
         .with_retry_after_ms(i64::try_from(RETRY_AFTER_MS).unwrap_or(i64::MAX))
 }
 
-/// One counter with its limit.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Counter {
     used: usize,
@@ -61,7 +58,7 @@ impl Quota {
         Self { requests: Counter::new(requests), handles: Counter::new(handles), jobs: Counter::new(jobs) }
     }
 
-    /// Takes a request slot; false at the limit.
+    /// Takes a request slot.
     pub fn acquire_request(&mut self) -> bool {
         self.requests.acquire()
     }
@@ -71,7 +68,7 @@ impl Quota {
         self.requests.release();
     }
 
-    /// Takes an open-file slot; false at the limit.
+    /// Takes an open-file slot.
     pub fn acquire_handle(&mut self) -> bool {
         self.handles.acquire()
     }
@@ -81,7 +78,7 @@ impl Quota {
         self.handles.release();
     }
 
-    /// Takes a job slot; false at the limit.
+    /// Takes a job slot.
     pub fn acquire_job(&mut self) -> bool {
         self.jobs.acquire()
     }

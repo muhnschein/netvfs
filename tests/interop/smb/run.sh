@@ -1,14 +1,12 @@
 #!/bin/sh
 # SPDX-License-Identifier: LGPL-2.1-or-later
-# SMB interop suite (SPEC-smb section 7, SPEC 12.2, SPEC-v2 XT-1/XT-2):
-# containerised Samba servers, the QtTest driver tst_interop_smb, one
-# netvfs-cli round trip and the backend conformance suite (two targets: a
-# share, and server mode).
+# SMB interop suite: containerised Samba servers, the QtTest driver tst_interop_smb, one netvfs-cli round trip and the
+# backend conformance suite (two targets: a share, and server mode).
 # Usage: run.sh <build dir> [test functions...]   (the latter are passed to the
 # driver; the CLI round trip and the conformance suite then do not run)
 #
 # Environment:
-#   NETVFS_SMB_CURRENT_BASE  base image for the "current Samba" server (M-T10),
+#   NETVFS_SMB_CURRENT_BASE  base image for the "current Samba" server,
 #                            default mirror.gcr.io/library/ubuntu:26.04
 #   NETVFS_SMB_CONFORMANCE_ONLY  1: run only the conformance suite
 #   NETVFS_SMB_RUST          0: skip the Rust tests (rust/netvfs-smb/tests/samba.rs)
@@ -86,9 +84,8 @@ ready() {
 if [ "$reuse" = 0 ]; then
     docker build -q -t "$image" "$here/server" >/dev/null
     docker build -q --build-arg BASE="$current_base" -t "$current_image" "$here/server" >/dev/null
-    # M-T16: "small" is a 16 MiB tmpfs on the strict server.
-    # XT-1: "conf" is a strict server of its own for the conformance suite, which
-    # ends its connections; its backup share is a folder of this host (hostPath).
+    # "small" is a 16 MiB tmpfs on the strict server.
+    # "conf" is a strict server of its own for the conformance suite, which ends its connections; its backup share is a folder of this host (hostPath).
     mkdir -p "$work/conf-data"
     chmod 777 "$work/conf-data"
     samba strict "$image" strict --tmpfs /srv/smb/small:size=16m
@@ -101,7 +98,7 @@ if [ "$reuse" = 0 ]; then
         ready "$s"
     done
 
-    # M-T12 and the stall tests: proxies on 4450.. in front of the servers.
+    # Proxies on 4450.. in front of the servers (stall tests).
     encoff=$(address encoff)
     strict=$(address strict)
     conf=$(address conf)
@@ -145,18 +142,17 @@ fi
 
 echo "Samba: $(docker exec "$prefix-strict" smbd --version), current: $(docker exec "$prefix-current" smbd --version)"
 
-# Sanitizer builds (M-T19, gate G-SMB item 3): every UBSan report is fatal.
-# No effect on other builds.
+# Sanitizer builds: every UBSan report is fatal. No effect on other builds.
 export UBSAN_OPTIONS="${UBSAN_OPTIONS:+$UBSAN_OPTIONS:}print_stacktrace=1:halt_on_error=1"
 export NETVFS_BACKEND_PATH="$build/lib/netvfs/backends"
-# The SMB plugin loads the Rust library of the same build.
+# SMB plugin loads the Rust library of the same build.
 export NETVFS_RS_LIB="$build/lib/netvfs/libnetvfs-rs.so"
 export NETVFS_SMB_PREFIX="$prefix"
 export NETVFS_SMB_PASSWORD="$password"
 for setting in $(settings); do
     export "${setting?}"
 done
-# SPEC 12.2, SPEC-v2 XC-CLI: the command-line tool end to end.
+# The command-line tool end to end.
 cli() {
     NETVFS_SECRET="$password" "$build/bin/netvfs-cli" --provider smb --host "$strict" --user backup \
         --option share=backup "$@"
@@ -225,7 +221,7 @@ cli_round_trip() {
     cmp -s "$work/cli.bin" "$work/cli.out"
     expect_code 20 env NETVFS_SECRET="$password" "$build/bin/netvfs-cli" --url "file://$work/cpsrc" cp -r \
         --to-url "smb://backup@$strict/backup/CLI%20run" sub tree2
-    # and back: the share as the source, read on copyAcross's worker thread (M-13 hand-over)
+    # and back: the share as the source, read on copyAcross's worker thread
     mkdir -p "$work/cpdst"
     NETVFS_SECRET="$password" "$build/bin/netvfs-cli" --url "smb://backup@$strict/backup/CLI%20run" cp -r \
         --to-url "file://$work/cpdst" tree2 back
@@ -241,7 +237,7 @@ cli_round_trip() {
     cli --profile signed ls "CLI run" | grep -q "cli.bin$"
     expect_code 17 "$build/bin/netvfs-cli" --url "smb://backup:pw@$strict/backup" ls ""
     cli rm "CLI run/cli.bin"
-    # shares: the server's shares (server mode, XM-2/XM-7)
+    # shares: the server's shares (server mode)
     NETVFS_SECRET="$password" "$build/bin/netvfs-cli" --provider smb --host "$strict" --user backup shares \
         > "$work/cli.shares"
     grep -qx backup "$work/cli.shares"
@@ -276,11 +272,9 @@ if [ "${NETVFS_SMB_CONFORMANCE_ONLY:-0}" != 1 ]; then
     fi
 fi
 
-# SPEC-v2 XT-1: the conformance suite, strict profile, against a share and
-# in server mode. The proxy on 4458 stalls every connection after sign-in.
-# "restart" ends every client connection of "conf" the way a restarting smbd
-# does (keepAlive -> ConnectionLost); a real container restart would change
-# the server's address under the following tests.
+# Conformance suite, strict profile, against a share and in server mode. The proxy on 4458 stalls every connection after
+# sign-in. "restart" ends every client connection of "conf" the way a restarting smbd does (keepAlive -> ConnectionLost);
+# a real container restart would change the server's address under the following tests.
 mkdir -p "$work/conf-data/conformance" "$work/conf-data/conformance-server"
 chmod 777 "$work/conf-data/conformance" "$work/conf-data/conformance-server"
 cat > "$work/conformance.json" <<JSON

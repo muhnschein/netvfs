@@ -1,8 +1,5 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! Plain Rust values on both sides of the C ABI: what Rust hands to C
-//! ([`Params`] through [`ParamsBuf`]) and what it reads out of C++'s blocks
-//! and callback arguments (entries, identities, URLs, capabilities,
-//! errors). Readers copy: nothing returned borrows C memory (O2, O3).
+//! Plain Rust values on both sides of the C ABI: what Rust hands to C ([`Params`] through [`ParamsBuf`]) and what it reads out of C++'s blocks and callback arguments (entries, identities, URLs, capabilities, errors). Readers copy: nothing returned borrows C memory.
 
 use super::raw::{
     NVB_IDENTITY_NONE, NVB_IDENTITY_SSH, NVB_VALUE_BOOL, NVB_VALUE_BYTES, NVB_VALUE_INT, NVB_VALUE_STRING,
@@ -18,7 +15,7 @@ pub use netvfs_vfs::{Params, Prompt, PromptRequest, Value, ValueMap};
 pub struct ParsedUrl {
     /// The connection parameters.
     pub params: Params,
-    /// The normalised path, protocol bytes (XC-4).
+    /// The normalised path, protocol bytes.
     pub path: Vec<u8>,
 }
 
@@ -52,7 +49,7 @@ impl IdentityKind {
     }
 }
 
-/// The `ServerIdentity` seen during connect (XC-16).
+/// The `ServerIdentity` seen during connect.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Identity {
     /// Its kind.
@@ -67,13 +64,10 @@ pub struct Identity {
     pub pin: String,
 }
 
-// ----------------------------------------------------------- C -> Rust
-
 /// The bytes of `b`.
 ///
 /// # Safety
-/// `b.ptr` is NULL or points to `b.len` readable bytes that stay valid and
-/// unchanged for `'a` (O2: the callback, O3: until the block is freed).
+/// `b.ptr` is NULL or points to `b.len` readable bytes that stay valid and unchanged for `'a` (the callback, or until the block is freed).
 #[must_use]
 pub unsafe fn slice<'a>(b: NvbBytes) -> &'a [u8] {
     if b.ptr.is_null() || b.len == 0 {
@@ -192,8 +186,7 @@ pub unsafe fn params(p: &NvbParams) -> Params {
     }
 }
 
-/// An entry in wire form (XB-9): `owner`, `group` and `contentType` lossy
-/// UTF-8 without NUL.
+/// An entry in wire form: `owner`, `group` and `contentType` lossy UTF-8 without NUL.
 ///
 /// # Safety
 /// Everything `e` points to is valid (as for [`slice`]).
@@ -298,12 +291,7 @@ pub unsafe fn status(e: &NvbError) -> Status {
     Status { name, message, detail, retry_after_ms: e.retry_after_ms }
 }
 
-// ----------------------------------------------------------- Rust -> C
-
-/// Owns the bytes and arrays that `nvb_*` structs built for one call point
-/// to. Append-only: nothing it handed out moves or goes until it is dropped
-/// (the heap blocks of the inner `Vec`s stay where they are when the outer
-/// `Vec`s grow).
+/// Owns the bytes and arrays that `nvb_*` structs built for one call point to. Append-only: nothing handed out moves or goes until drop (the inner `Vec`s' heap blocks stay put when the outer `Vec`s grow).
 #[derive(Debug, Default)]
 struct Arena {
     bytes: Vec<Vec<u8>>,
@@ -312,7 +300,6 @@ struct Arena {
 }
 
 impl Arena {
-    /// A copy of `data`; the empty slice is (NULL, 0).
     fn bytes(&mut self, data: &[u8]) -> NvbBytes {
         if data.is_empty() {
             return NvbBytes::EMPTY;
@@ -367,9 +354,7 @@ impl Arena {
     }
 }
 
-/// `nvb_params` for one call, with the `nvb_kv` and `nvb_bytes` arrays it
-/// points to. It holds copies, so the [`Params`] it came from may change
-/// or go while it lives.
+/// `nvb_params` for one call, with the `nvb_kv` and `nvb_bytes` arrays it points to. Holds copies, so the [`Params`] it came from may change or go.
 #[derive(Debug)]
 pub struct ParamsBuf {
     arena: Arena,
@@ -394,20 +379,18 @@ impl ParamsBuf {
     /// Reads the C form back, as C++ would see it.
     #[must_use]
     pub fn read_back(&self) -> Params {
-        // SAFETY: every pointer in `raw` points into `arena`, which lives
-        // and does not change as long as `self`.
+        // SAFETY: every pointer in `raw` points into `arena`, which lives and does not change as long as `self`.
         unsafe { params(&self.raw) }
     }
 
-    /// The number of separate byte strings it holds (empty ones need none).
+    /// Number of separate byte strings it holds (empty ones need none).
     #[must_use]
     pub fn byte_strings(&self) -> usize {
         self.arena.bytes.len()
     }
 }
 
-/// `nvb_entry` built from a wire entry, as C++ hands entries to the list
-/// sink; for tests and the `ffi_marshal` fuzz target.
+/// `nvb_entry` built from a wire entry, as C++ hands entries to the list sink; for tests and the `ffi_marshal` fuzz target.
 #[cfg(any(test, feature = "testing"))]
 #[derive(Debug)]
 pub struct EntryBuf {
@@ -496,8 +479,6 @@ impl IdentityBuf {
 
 #[cfg(test)]
 mod tests {
-    // Tests call the trampolines and readers as C++ would, on data they
-    // made themselves; they may index, count and cast freely.
     #![allow(
         clippy::undocumented_unsafe_blocks,
         clippy::arithmetic_side_effects,
@@ -534,7 +515,6 @@ mod tests {
         let mut p = sample_params();
         let buf = ParamsBuf::new(&p);
         let expected = p.clone();
-        // A copy, not a borrow: changing the source changes nothing.
         p.host.push('x');
         p.options.clear();
         drop(p);
@@ -544,7 +524,6 @@ mod tests {
         assert_eq!((raw.port, raw.connect_timeout_ms, raw.request_timeout_ms), (2222, 15000, 60000));
         // SAFETY: the arrays are owned by `buf`.
         let kvs = unsafe { items(raw.options, raw.n_options) };
-        // Sorted, unique keys.
         let keys: Vec<String> = kvs.iter().map(|kv| text(unsafe { slice(kv.key) })).collect();
         assert_eq!(keys, ["anon", "empty", "list", "n", "off", "raw", "share"]);
         assert_eq!((kvs[0].value.kind, kvs[0].value.number), (NVB_VALUE_BOOL, 1));
@@ -569,7 +548,6 @@ mod tests {
 
     #[test]
     fn readers_accept_null_with_a_length() {
-        // A NULL pointer reads as empty, whatever the length says.
         let b = NvbBytes { ptr: ptr::null(), len: 5 };
         assert_eq!(unsafe { slice(b) }.len(), 0);
         assert!(unsafe { items::<NvbKv>(ptr::null(), 3) }.is_empty());

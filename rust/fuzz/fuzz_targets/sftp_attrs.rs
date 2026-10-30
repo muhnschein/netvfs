@@ -1,9 +1,5 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! SFTP v3 attribute blocks (draft-02 §5) from a server: decoding never
-//! panics; what decodes encodes to a block that decodes to the same
-//! attributes (extended pairs dropped, unknown flag bits ignored), and the
-//! entry made of them keeps the permission bits within 0o7777 and the
-//! type the mode says.
+//! SFTP v3 attribute blocks: decode never panics; decoded attrs re-encode to the same attrs; entry keeps permission bits within 0o7777.
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
@@ -18,7 +14,6 @@ fuzz_target!(|data: &[u8]| {
         return;
     };
     let packet = attrs.encode(Packet::request(0)).finish(7).expect("an attribute block fits a packet");
-    // uint32 length, byte type, uint32 id, then the block.
     let mut again = Reader::new(&packet[9..]);
     assert_eq!(Attrs::decode(&mut again), Ok(attrs));
     assert!(again.is_empty(), "the block is all that was written");

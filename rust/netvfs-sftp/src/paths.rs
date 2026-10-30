@@ -1,11 +1,9 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! Remote paths: the C-15 rules for the paths a caller gives, the start
-//! folder relative paths are resolved against (S-19), and names as text
-//! for messages.
+//! Remote paths: normalizing, resolving against the start folder, names as text for messages.
 
 use netvfs_vfs::Status;
 
-/// A path with empty components dropped; `.`, `..` and NUL refused (C-15).
+/// Drops empty components; refuses `.`, `..` and NUL.
 ///
 /// # Errors
 /// `InvalidName`.
@@ -29,7 +27,7 @@ pub fn normalize(path: &[u8]) -> Result<Vec<u8>, Status> {
     Ok(out)
 }
 
-/// `dir` and `name` with one `/` between them.
+/// `dir` and `name` with one `/` between.
 #[must_use]
 pub fn join(dir: &[u8], name: &[u8]) -> Vec<u8> {
     if dir.is_empty() {
@@ -44,9 +42,7 @@ pub fn join(dir: &[u8], name: &[u8]) -> Vec<u8> {
     out
 }
 
-/// Whether a name a server lists (READDIR) names an entry of the folder:
-/// not `.` or `..`, not empty, without `/` and NUL. Joined to the folder's
-/// path, any other name would be a path elsewhere, or none.
+/// Whether a listed name is an entry of the folder: not `.` or `..`, not empty, no `/` or NUL.
 #[must_use]
 pub fn is_entry_name(name: &[u8]) -> bool {
     !(name.is_empty() || name == b"." || name == b".." || name.contains(&b'/') || name.contains(&0))
@@ -58,11 +54,10 @@ pub fn last_component(path: &[u8]) -> &[u8] {
     path.rsplit(|&b| b == b'/').next().unwrap_or(path)
 }
 
-/// The remote path of a caller's path: absolute as it is, relative below
-/// `home` (the start folder), empty as `home` (or `.` without one).
+/// Absolute as is, relative below `home`, empty as `home` (or `.` without one).
 ///
 /// # Errors
-/// `InvalidName` (C-15).
+/// `InvalidName`.
 pub fn resolve(home: &[u8], path: &[u8]) -> Result<Vec<u8>, Status> {
     let normalized = normalize(path)?;
     Ok(if normalized.first() == Some(&b'/') {
@@ -74,8 +69,7 @@ pub fn resolve(home: &[u8], path: &[u8]) -> Result<Vec<u8>, Status> {
     })
 }
 
-/// Bytes as text for a message: one U+FFFD for each byte that is not
-/// part of well-formed UTF-8 (as `Names::display` shows escapes).
+/// One U+FFFD per byte that is not part of well-formed UTF-8.
 #[must_use]
 pub fn display(bytes: &[u8]) -> String {
     let mut out = String::with_capacity(bytes.len());

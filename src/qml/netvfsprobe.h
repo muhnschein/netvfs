@@ -22,28 +22,26 @@ namespace NetVfsUi {
 struct ProbeOutcome {
     NetVfs::Result result;
     NetVfs::ServerIdentity identity;
-    NetVfs::Result identityCheck;      // identityCheckFor() against the pin
+    NetVfs::Result identityCheck;
     qint64 freeBytes = -1;
-    bool refusedByPolicy = false;      // checkServicePolicy() refused; nothing was sent
+    bool refusedByPolicy = false;
 };
 
-// checkServerIdentity() against the pin in params.options["host_key"] (XC-16).
+// checkServerIdentity() against the pin in params.options["host_key"].
 NetVfs::Result identityCheckFor(const NetVfs::ServerIdentity &seen, const NetVfs::ConnectionParams &params);
 
-// Phase 1 (SPEC 7.3 step 2, C-7): connect and report the server identity.
-// No credentials are sent. The backend is disconnected afterwards.
+// Phase 1: connect and report the server identity. No credentials sent; the backend is disconnected
+// afterwards.
 ProbeOutcome runIdentify(NetVfs::Backend *backend, const NetVfs::ConnectionParams &params);
-// Phase 2 (SPEC 7.2, SPEC-v2-review 2.19). The configuration is first
-// checked against the service (XA-4; refused without connecting). Then
-// establish() with the pin in params.options["host_key"] (SEC-1) and:
-//  - Backup: verifyAccess(): makePath, probe file, free space;
-//  - Files: verifyBrowseAccess(): stat of the start folder, nothing written.
-// auth_mode=interactive needs a person to answer the server, so only the
-// connection and the identity are checked (no credentials are sent).
+// Phase 2: the configuration is first checked against the service (refused without connecting).
+// Then establish() with the pin in params.options["host_key"] and:
+//   Backup: verifyAccess(): makePath, probe file, free space
+//   Files: verifyBrowseAccess(): stat of the start folder, nothing written
+// auth_mode=interactive needs a person: only connection and identity are checked.
 ProbeOutcome runVerify(NetVfs::Backend *backend, const NetVfs::ConnectionParams &params,
                        const NetVfs::Credentials &credentials, const QString &folder, NetVfs::Service service);
 
-// Asynchronous two-phase connection test for the account UI (SPEC 7.2).
+// Asynchronous two-phase connection test for the account UI.
 class NetVfsProbe : public QObject
 {
     Q_OBJECT
@@ -61,7 +59,7 @@ public:
     enum class State { Idle, Identifying, Identified, Verifying, Verified, Failed };
     Q_ENUM(State)
 
-    // Mirrors NetVfs::Error (SPEC 5.4).
+    // Mirrors NetVfs::Error.
     enum class ErrorCode {
         NoError, Canceled, NetworkUnreachable, Timeout, ServerIdentityUnknown, ServerIdentityChanged,
         AuthFailed, SecurityPolicy, PermissionDenied, NotFound, AlreadyExists, NoSpace, Unsupported,
@@ -90,14 +88,13 @@ public:
 
     // params: { provider, host, port, username, options: {...} } (Helpers::makeParams).
     Q_INVOKABLE void identify(const QVariantMap &params);
-    // credentials: { username, secret }. The secret is wiped after use.
-    // service: "backup" (folder = backups folder) or "files" (folder = start folder).
+    // credentials: { username, secret }; secret wiped after use. service: "backup" (folder =
+    // backups folder) or "files" (folder = start folder).
     Q_INVOKABLE void verify(const QVariantMap &params, const QVariantMap &credentials,
                             const QString &folder, const QString &service = QStringLiteral("backup"));
-    // Verifies a stored account with its stored secret (read through signond
-    // by the core, never exposed to QML), for `service`. Non-empty
-    // `pinOptions` (serverIdentity.pinOptions) replace the stored pin, for
-    // the update flow after the user accepted a new identity.
+    // Verifies a stored account with its stored secret (read through signond by the core, never
+    // exposed to QML) for `service`. Non-empty `pinOptions` replace the stored pin, for the update
+    // flow after the user accepted a new identity.
     Q_INVOKABLE void verifyAccount(int accountId, const QVariantMap &pinOptions = QVariantMap(),
                                    const QString &service = QStringLiteral("backup"));
     Q_INVOKABLE void cancel();
@@ -131,9 +128,8 @@ private:
     qint64 m_freeBytes = -1;
     SessionFactory m_sessionFactory;
     QPointer<NetVfs::AccountSession> m_session;
-    BackendJobs m_jobs;   // last member: destroyed (and joined) first
+    BackendJobs m_jobs;
 };
 
-} // namespace NetVfsUi
-
+}
 #endif

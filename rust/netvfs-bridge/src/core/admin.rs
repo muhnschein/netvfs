@@ -1,10 +1,5 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! The session, consent, locations, questions and the handoff (`Session::
-//! Admin` of session.cpp, the consent half of bridgeserver.cpp): `Hello`,
-//! `GetConsent`, `RequestConsent`, `ListLocations`, `Capabilities`,
-//! `Disconnect`, `ConnectAdHoc`, `ForgetAdHoc`, `Discover`, `Cancel`,
-//! `Answer`, `OpenAccountSettings`, `AddAccount`, `GetFeatures` and
-//! `OpenStorageSettings`.
+//! Session, consent, locations, questions and settings handoff calls.
 
 use super::questions::INSECURE_CONSENT;
 use super::{Core, Event};
@@ -27,43 +22,20 @@ use std::sync::atomic::Ordering;
 use tokio::time::Instant;
 use zbus::zvariant::{OwnedValue, Str};
 
-/// Longest provider name a parsed URL may have.
 const MAX_PROVIDER: usize = 32;
 
-/// An ad-hoc location waiting for its first connection (or for the
-/// consumer's answer to `insecure-consent`).
 pub(crate) struct PendingAdHoc {
-    /// Its name: the host.
     pub(crate) name: String,
-    /// How to connect.
     pub(crate) params: Params,
-    /// The path of the URL.
     pub(crate) path: Vec<u8>,
-    /// The consumer's secret (XB-16).
     pub(crate) secret: Arc<AdHocSecret>,
 }
 
-/// Who waits for the answer to a question.
 pub(crate) enum Waiter {
-    /// A worker (identity-unknown, keyboard-interactive).
-    Worker {
-        /// The worker's id of the question.
-        ask: AskId,
-        /// Where the answer goes.
-        answer: std::sync::mpsc::Sender<Option<Answer>>,
-    },
-    /// `ConnectAdHoc` of an insecure location (`insecure-consent`).
-    Insecure {
-        /// The session that called.
-        sid: SessionId,
-        /// The location.
-        pending: Box<PendingAdHoc>,
-        /// The answer slot of `ConnectAdHoc`.
-        reply: ReplyTo,
-    },
+    Worker { ask: AskId, answer: std::sync::mpsc::Sender<Option<Answer>> },
+    Insecure { sid: SessionId, pending: Box<PendingAdHoc>, reply: ReplyTo },
 }
 
-/// The text of option `key`, as the C++ `ConnectionParams::option` gave it.
 fn option_text(params: &Params, key: &str) -> Option<String> {
     match params.options.get(key)? {
         Value::Str(s) => Some(s.clone()),
@@ -73,19 +45,10 @@ fn option_text(params: &Params, key: &str) -> Option<String> {
     }
 }
 
-/// XM-1: an ad-hoc SMB location with the `guest` profile needs the
-/// consumer's `insecure-consent` (`needsInsecureConsent`).
 pub(crate) fn needs_insecure_consent(params: &Params) -> bool {
     params.provider == "smb" && option_text(params, "security_profile").is_some_and(|v| v == "guest")
 }
 
-/// Checks a parsed ad-hoc URL (`parseAdHoc`): never local files (XB-11),
-/// an installed backend, `security_profile` for SMB only. The C++ parser's
-/// output is checked as well (a provider token, a port).
-///
-/// # Errors
-/// `PermissionDenied`, `Unsupported`, or `ProtocolError` (the dispatch
-/// refuses it as invalid arguments).
 pub(crate) fn check_ad_hoc(
     parsed: &ParsedUrl,
     opts: &AdHocOpts,
@@ -107,12 +70,10 @@ pub(crate) fn check_ad_hoc(
     Ok(())
 }
 
-/// A string value of a question's details.
 fn text(s: &str) -> OwnedValue {
     OwnedValue::from(Str::from(s.to_owned()))
 }
 
-/// What an `insecure-consent` question shows: `url`, `provider`, `host`.
 fn insecure_details(url: &str, params: &Params) -> HashMap<String, OwnedValue> {
     HashMap::from([
         ("url".to_owned(), text(url)),
@@ -122,8 +83,6 @@ fn insecure_details(url: &str, params: &Params) -> HashMap<String, OwnedValue> {
 }
 
 impl Core {
-    // ----------------------------------------------------------- session
-
     pub(super) fn on_hello(&mut self, sid: SessionId, reply: ReplyTo, client: &str) {
         if let Some(session) = self.session(sid) {
             session.hello = true;
@@ -131,7 +90,7 @@ impl Core {
         crate::log::debug(format_args!("Hello from {client}"));
         reply.ok(&Reply::Hello);
         if self.consent == Consent::Unknown {
-            self.request_consent(); // XB-6: first Hello while unknown
+            self.request_consent();
         }
     }
 
@@ -139,7 +98,6 @@ impl Core {
         reply.ok(&Reply::Text(self.consent.as_str().to_owned()));
     }
 
-    /// XB-19: what this bridge offers besides the methods of netvfs 0.4.
     pub(super) fn on_get_features(&self, reply: ReplyTo) {
         let mut features = Vec::new();
         if self.handoff.offers_storage_settings() {
@@ -157,7 +115,7 @@ impl Core {
     }
 
     pub(super) fn on_list_locations(&mut self, reply: ReplyTo) {
-        // XB-6: nothing until granted.
+        // Nothing until granted.
         let locations = if self.consent == Consent::Granted {
             let ffi = self.ffi;
             let states = self.book.states();
@@ -169,7 +127,7 @@ impl Core {
                     spec.wire(state, |params, path| ffi.url_format(params, path).ok())
                 })
                 .collect();
-            // XB-12: a state not announced yet is, soon, to every session.
+            // A state not announced yet goes to every session soon.
             self.states.listed(&states, Instant::now());
             locations
         } else {
@@ -190,8 +148,6 @@ impl Core {
         self.book.disconnect(loc.as_str());
         reply.ok(&Reply::Empty);
     }
-
-    // --------------------------------------------------------- ad-hoc
 
     pub(super) fn on_connect_ad_hoc(
         &mut self,
@@ -219,7 +175,7 @@ impl Core {
         if let Some(profile) = opts.security_profile {
             params.options.insert("security_profile".to_owned(), Value::Str(profile));
         }
-        // XB-16: the call's copy moves into the location's.
+        // The call's copy moves into the location's.
         let secret = AdHocSecret::new(params.username.clone(), secret.into_inner());
         let pending = PendingAdHoc { name: params.host.clone(), params, path, secret };
         if !needs_insecure_consent(&pending.params) {
@@ -232,8 +188,6 @@ impl Core {
         self.emit_question(sid, &id, INSECURE_CONSENT, details);
     }
 
-    /// The consumer answered `insecure-consent` (or did not: `accepted`
-    /// false).
     pub(super) fn insecure_answered(
         &mut self,
         sid: SessionId,
@@ -254,9 +208,6 @@ impl Core {
         self.connect_ad_hoc(sid, reply, pending);
     }
 
-    /// An accepted ad-hoc location: its pool connects first (XB-14), on an
-    /// empty item of the interactive lane; [`Core::on_ad_hoc_done`] makes
-    /// it visible.
     fn connect_ad_hoc(&mut self, sid: SessionId, reply: ReplyTo, pending: PendingAdHoc) {
         let id = self.book.reserve_ad_hoc_id();
         let secret = Arc::clone(&pending.secret);
@@ -282,7 +233,6 @@ impl Core {
         self.book.submit(&id, Lane::Interactive, TaskContext::new(sid, cancel), work);
     }
 
-    /// The first connection of ad-hoc location `loc` ended its attempt.
     pub(super) fn on_ad_hoc_done(&mut self, sid: SessionId, op: u64, loc: &str, result: Result<(), Status>) {
         self.quota.release_request();
         let reply = self.take_reply(sid, op);
@@ -312,8 +262,6 @@ impl Core {
         reply.ok(&Reply::Empty);
     }
 
-    // ------------------------------------------------- discovery, cancel
-
     pub(super) fn on_discover(&mut self, sid: SessionId, reply: ReplyTo, on: bool) {
         self.nearby.set_discovering(sid, on, Instant::now());
         reply.ok(&Reply::Empty);
@@ -330,7 +278,7 @@ impl Core {
             reply.fail(&Status::new(ErrorName::NotFound, "No such request or job"));
             return;
         }
-        reply.ok(&Reply::Empty); // an id that already finished: nothing to do
+        reply.ok(&Reply::Empty);
     }
 
     pub(super) fn on_answer(
@@ -349,8 +297,6 @@ impl Core {
         self.resolve(waiter, Some(answer));
         reply.ok(&Reply::Empty);
     }
-
-    // ----------------------------------------------------------- handoff
 
     pub(super) fn on_open_account_settings(&self, reply: ReplyTo, loc: &LocId) {
         let account =
@@ -379,16 +325,11 @@ impl Core {
         }
     }
 
-    // ----------------------------------------------------------- consent
-
-    /// `bridge.conf` changed on disk (`reloadConsent`).
     pub(super) fn reload_consent(&mut self) {
         let consent = self.consent_store.consent(&self.config.consumer.id);
         self.apply_consent(consent);
     }
 
-    /// The consent is now `consent` (`applyConsent`): tells every session;
-    /// a revocation closes them all and drops the locations (XB-6).
     pub(super) fn apply_consent(&mut self, consent: Consent) {
         if consent == self.consent {
             return;
@@ -400,8 +341,7 @@ impl Core {
         }
         self.broadcast(&OutSignal::ConsentChanged(consent.as_str().to_owned()));
         if previous == Consent::Granted {
-            // XB-6: revocation closes the consumer's connections at once and
-            // cancels its work; ad-hoc locations and their secrets go.
+            // Revocation closes the consumer's connections at once and cancels its work; ad-hoc locations and secrets go.
             crate::log::warning(format_args!("Consent revoked; closing all connections"));
             let sids: Vec<SessionId> = self.sessions.keys().copied().collect();
             for sid in sids {
@@ -416,7 +356,6 @@ impl Core {
         }
     }
 
-    /// Shows the consent question unless granted or shown (`requestConsent`).
     pub(super) fn request_consent(&mut self) {
         if self.consent == Consent::Granted || self.prompt.is_shown() {
             return;
@@ -424,7 +363,6 @@ impl Core {
         self.prompt.show(&self.config.consumer.display_name);
     }
 
-    /// The prompt was answered (stored, then applied) or dismissed.
     pub(super) fn on_prompt(&mut self, event: PromptEvent) {
         let PromptEvent::Answered(allow) = event else { return };
         let consent = if allow { Consent::Granted } else { Consent::Denied };
@@ -440,7 +378,6 @@ impl Core {
         drop(writing);
     }
 
-    /// The answer to the prompt was stored.
     pub(super) fn on_consent_stored(&mut self, consent: Consent) {
         self.consent_writes = self.consent_writes.saturating_sub(1);
         self.apply_consent(consent);
@@ -467,7 +404,7 @@ mod tests {
         assert!(!needs_insecure_consent(&params("smb", &[("security_profile", s("signed"))])));
         assert!(!needs_insecure_consent(&params("smb", &[])));
         assert!(!needs_insecure_consent(&params("sftp", &[("security_profile", s("guest"))])));
-        // Options of other types as the C++ QVariant::toString gave them.
+        // Other option types stringified like QVariant::toString.
         assert!(!needs_insecure_consent(&params("smb", &[("security_profile", Value::Bool(true))])));
         assert!(!needs_insecure_consent(&params(
             "smb",

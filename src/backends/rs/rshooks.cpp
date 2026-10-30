@@ -11,7 +11,7 @@ namespace NetVfs::Rs {
 
 namespace {
 
-// SEC-5: the answers are wiped however the prompt ends.
+// Answers are wiped however the prompt ends.
 struct Answers {
     QVector<QByteArray> items;
 
@@ -30,8 +30,7 @@ Hooks *hooksOf(void *ctx)
     return static_cast<Hooks *>(ctx);
 }
 
-} // namespace
-
+}
 template <typename T, typename Body>
 T Hooks::guard(T refusal, const Body &body) noexcept
 {
@@ -47,7 +46,6 @@ Result Hooks::result(const Result &call) const
 {
     if (!m_thrown)
         return call;
-    // The detail: how the call ended, which the callback no longer decided.
     return Result(Error::Internal, QStringLiteral("A callback of the Rust backend failed"),
                   call.ok() ? QString() : call.toString());
 }
@@ -123,8 +121,7 @@ int Hooks::progressCanceled(void *ctx) noexcept
     return hooks->guard(1, [hooks]() { return hooks->m_progressSink->canceled() ? 1 : 0; });
 }
 
-// The upload's size is what the source holds from its position (the
-// header's nvb_io note); a sequential source has none.
+// Upload size is what the source holds from its position; a sequential source has none.
 const nvb_io *Hooks::source(QIODevice *device)
 {
     m_device = device;
@@ -141,7 +138,6 @@ const nvb_io *Hooks::sink(QIODevice *device)
     return &m_io;
 }
 
-// Rust reads and writes in order, so `pos` is where the device is anyway.
 int64_t Hooks::readSource(void *ctx, int64_t, uint8_t *buf, size_t cap) noexcept
 {
     Hooks *hooks = hooksOf(ctx);
@@ -158,4 +154,4 @@ int64_t Hooks::writeSink(void *ctx, int64_t, const uint8_t *buf, size_t len) noe
     });
 }
 
-} // namespace NetVfs::Rs
+}

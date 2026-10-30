@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! Read and write handles (XC-13, XM-6): READ and WRITE requests in
-//! chunks of min(MaxReadSize/MaxWriteSize, 1 MiB) (M-11), up to
-//! [`MAX_IN_FLIGHT`] bytes on the way per handle (C-10).
+//! Read and write handles: READ and WRITE requests in chunks of min(MaxReadSize/MaxWriteSize, 1 MiB), up to [`MAX_IN_FLIGHT`] bytes on the way per handle.
 
 use std::collections::VecDeque;
 use std::sync::Arc;
@@ -18,12 +16,12 @@ use crate::msg::file::{
 use crate::session::Tree;
 use crate::status::NtStatus;
 
-/// Bytes requested ahead and not yet handed out, per handle (XM-6).
+/// Bytes requested ahead and not yet handed out, per handle.
 pub const MAX_IN_FLIGHT: usize = 4 * 1024 * 1024;
-/// The largest chunk (M-11).
+/// The largest chunk.
 pub const MAX_CHUNK: usize = 1024 * 1024;
 
-/// The chunk for a server maximum (M-11); one credit's worth without
+/// The chunk for a server maximum; one credit's worth without multi-credit requests.
 /// multi-credit requests.
 #[must_use]
 pub fn chunk(server_max: usize, multi_credit: bool) -> usize {
@@ -55,7 +53,6 @@ impl Open {
             .call(self.target(), Element::new(Command::Close, close_request(&self.file_id)), cancel)
             .await;
         if matches!(resp, Err(Error::Canceled)) {
-            // A canceled call still closes the file, without waiting.
             self.conn.close_detached(self.target(), &self.file_id);
         }
         let resp = resp?;
@@ -63,9 +60,7 @@ impl Open {
         check_close_response(&resp.msg)
     }
 
-    /// CLOSE, waited for also after a cancel: Samba holds a CLOSE until the
-    /// handle's WRITEs are done, and a remove before that only marks the
-    /// file for deletion (C-12). After a cancel, GRACE ends the wait.
+    /// CLOSE, waited for also after a cancel: Samba holds a CLOSE until the handle's WRITEs are done, and a remove before that only marks the file for deletion. After a cancel, GRACE ends the wait.
     async fn close_anyway(&self) {
         drop(self.close(&CancelToken::new()).await);
     }
@@ -182,7 +177,6 @@ impl SmbRead {
         if front.used < front.data.len() {
             return Ok((take, false));
         }
-        // A short read is the end of the file; what was asked beyond is moot.
         let eof = front.data.len() < front.count;
         self.queue.pop_front();
         if eof {
@@ -193,19 +187,18 @@ impl SmbRead {
 
     async fn read_inner(&mut self, offset: u64, buf: &mut [u8], cancel: &CancelToken) -> Result<usize> {
         self.open()?;
-        // C-9: also when what is asked for has arrived already.
+        // Checked also when the requested data has already arrived.
         if cancel.is_canceled() {
             return Err(Error::Canceled);
         }
         if self.queue.front().is_some_and(|c| c.next() != offset) {
-            self.discard(); // not where the queue continues: a new position
+            self.discard();
         }
         let end = offset.saturating_add(u64::try_from(buf.len()).unwrap_or(u64::MAX));
         let mut filled = 0usize;
         while filled < buf.len() {
             let at = offset.saturating_add(u64::try_from(filled).unwrap_or(u64::MAX));
-            // Up to the size at open time in parallel; past it one chunk at
-            // a time, in case the file grew.
+            // Parallel up to the size at open; past it one chunk at a time, in case the file grew.
             let to = if at < self.size {
                 end.min(self.size)
             } else {
@@ -253,7 +246,6 @@ impl ReadHandle for SmbRead {
         }
         let window = u64::try_from(MAX_IN_FLIGHT).unwrap_or(u64::MAX);
         let to = offset.saturating_add(bytes.min(window)).min(self.size.max(offset));
-        // A hint: a request that cannot go now is simply not made.
         while let Some((at, count)) = self.due(offset, to) {
             let Ok(element) = self.request(at, count) else { return };
             let Some(open) = self.open.as_ref() else { return };
@@ -422,8 +414,7 @@ impl SmbWrite {
         Ok(())
     }
 
-    /// Everything sent and answered, FLUSH (C-12: stable storage before
-    /// the caller's size check and rename).
+    /// Everything sent and answered, FLUSH (stable storage before the caller's size check and rename).
     async fn finish(&mut self, cancel: &CancelToken) -> Result<()> {
         if !self.buffer.is_empty() {
             self.send(cancel).await?;
@@ -470,8 +461,7 @@ impl WriteHandle for SmbWrite {
         };
         r?;
         closed?;
-        // XC-14: the time is set after the close, so that no later write
-        // of this handle can move it again.
+        // Time is set after the close so that no later write of this handle moves it.
         if let Some(ft) = self.mtime_ms.and_then(filetime_of_ms) {
             fs::set_times(&open.conn, open.target(), &self.path, Some(ft), None, cancel)
                 .await

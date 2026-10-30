@@ -8,11 +8,9 @@
 
 namespace NetVfsUi {
 
-// SPEC-v2 XB-6: the registered consumers of netvfs-bridge and the user's
-// consent for each, for the page "Apps using network locations"
-// (NetVfsConsentPage). grant()/revoke() write bridge.conf at once
-// (ConsentStore), which a running bridge watches: a revocation closes that
-// app's connections immediately.
+// Registered consumers of netvfs-bridge and the user's consent for each (NetVfsConsentPage).
+// grant()/revoke() write bridge.conf at once (ConsentStore); a running bridge watches it and closes
+// a revoked app's connections immediately.
 class ConsentModel : public QAbstractListModel
 {
     Q_OBJECT
@@ -35,7 +33,6 @@ public:
     QVariant data(const QModelIndex &index, int role) const override;
     QHash<int, QByteArray> roleNames() const override;
 
-    // Re-reads the consumers directory and the consent file.
     Q_INVOKABLE void reload();
     // Return false when the consent could not be stored.
     Q_INVOKABLE bool grant(const QString &consumerId);
@@ -56,6 +53,5 @@ private:
     QVector<NetVfs::Consent> m_consents;
 };
 
-} // namespace NetVfsUi
-
+}
 #endif

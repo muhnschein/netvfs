@@ -1,25 +1,18 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! A zbus [`Message`] from a frame the bridge read itself
-//! (`crate::server::inbound` reads frames so that it can refuse oversized
-//! ones before reading their body, design §8).
+//! A zbus [`Message`] from a frame the bridge read itself (so oversized frames are refused before the body is read).
 
 use std::os::fd::OwnedFd;
 use zbus::Message;
 use zbus::zvariant::Endian;
 use zbus::zvariant::serialized::{Context, Data};
 
-/// The message in `bytes` (one complete frame: header, padding, body) with
-/// the descriptors that came with it.
+/// The message in `bytes` (one complete frame) with its descriptors.
 ///
 /// # Errors
-/// zbus refuses a malformed header or header fields.
+/// zbus refuses a malformed header.
 pub fn message_from_frame(bytes: Vec<u8>, fds: Vec<OwnedFd>, endian: Endian) -> zbus::Result<Message> {
     let data = Data::new_fds(bytes, Context::new_dbus(endian, 0), fds);
-    // SAFETY: `from_bytes` is unsafe only because the bytes may be malformed;
-    // it runs the same checks as zbus's own socket reader
-    // (`Message::from_raw_parts`: endianness, primary header, header fields)
-    // and the body is checked when it is deserialised. No memory safety
-    // depends on the content.
+    // SAFETY: `from_bytes` is unsafe only for malformed bytes; same checks as zbus's socket reader, body checked on deserialise.
     unsafe { Message::from_bytes(data) }
 }
 

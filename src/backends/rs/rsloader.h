@@ -7,14 +7,11 @@
 
 namespace NetVfs::Rs {
 
-// The table of libnetvfs-rs.so (design §1.3). The first call that finds the
-// library loads it with dlopen(RTLD_NOW | RTLD_LOCAL) from $NETVFS_RS_LIB
-// (tests only) or the installed path, and it stays loaded for the life of
-// the process. Without it: nullptr, and Internal "netvfs Rust backends not
-// installed" in `*result`, with the loader's reason as the detail; the next
-// call looks again.
+// First call loads the library with dlopen(RTLD_NOW | RTLD_LOCAL) from $NETVFS_RS_LIB (tests only)
+// or the installed path; stays loaded. Missing:
+// nullptr and Internal "netvfs Rust backends not installed" in `*result`; the next call looks
+// again.
 const nvr_table *table(Result *result);
 
-} // namespace NetVfs::Rs
-
+}
 #endif

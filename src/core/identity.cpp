@@ -40,4 +40,4 @@ Result establish(Backend *backend, const ConnectionParams &params, const Credent
     return r;
 }
 
-} // namespace NetVfs
+}

@@ -37,7 +37,7 @@ const std::array<ErrorNameEntry, 24> errorNames = { {
     { Error::TooManyConnections, "TooManyConnections" },
     { Error::RateLimited, "RateLimited" },
 } };
-} // namespace
+}
 
 QString errorName(Error error)
 {
@@ -64,4 +64,4 @@ QString Result::toString() const
     return errorName(m_error) + QStringLiteral(": ") + m_message;
 }
 
-} // namespace NetVfs
+}

@@ -72,7 +72,7 @@ Activity verifyActivity(const ProbeOutcome &outcome, Service service)
         return Activity::Browse;
     return outcome.refusedByPolicy ? Activity::ServicePolicy : Activity::Connect;
 }
-} // namespace
+}
 
 Result identityCheckFor(const ServerIdentity &seen, const ConnectionParams &params)
 {
@@ -94,7 +94,7 @@ ProbeOutcome runVerify(Backend *backend, const ConnectionParams &params, const C
                        const QString &folder, Service service)
 {
     ProbeOutcome outcome;
-    outcome.result = checkServicePolicy(params, service);   // XA-4, before anything is sent
+    outcome.result = checkServicePolicy(params, service);
     if (!outcome.result.ok()) {
         outcome.refusedByPolicy = true;
         return outcome;
@@ -106,7 +106,7 @@ ProbeOutcome runVerify(Backend *backend, const ConnectionParams &params, const C
     outcome.result = establish(backend, params, credentials, &outcome.identity);
     outcome.identityCheck = identityCheckFor(outcome.identity, params);
     if (outcome.result.ok()) {
-        // SPEC-v2-review 2.19: Files never writes (read-only shares, guests).
+        // Files never writes (read-only shares, guests).
         outcome.result = service == Service::Backup ? verifyAccess(backend, folder, &outcome.freeBytes)
                                                     : verifyBrowseAccess(backend, folder, &outcome.freeBytes);
         backend->disconnect();
@@ -184,7 +184,7 @@ void NetVfsProbe::verifyAccount(int accountId, const QVariantMap &pinOptions, co
     });
     connect(session, &AccountSession::failed, this, [this, service](const NetVfs::Result &result) {
         closeSession();
-        // XA-4: the session refuses a configuration before reading the secret.
+        // The session refuses a configuration before reading the secret.
         Activity activity = Activity::StoredSecret;
         if (result.error() == Error::SecurityPolicy)
             activity = service == Service::Backup ? Activity::ServicePolicy : Activity::Connect;
@@ -231,10 +231,10 @@ void NetVfsProbe::startVerify(const ConnectionParams &params, const Credentials 
     qCDebug(lcNetVfsUi) << "Verifying" << params.host << serviceId(service) << folder;
     setState(State::Verifying);
     auto outcome = std::make_shared<ProbeOutcome>();
-    // A backup verify creates the backups folder the way backups do (S-20).
+    // A backup verify creates the backups folder the way backups do.
     const ConnectionParams serviceParams = service == Service::Backup ? withBackupDirMode(params) : params;
     m_jobs.start([backend, serviceParams, credentials, folder, service, outcome](CancelToken *token) {
-        // The captured credentials wipe themselves when the job is released (SEC-5).
+        // Captured credentials wipe themselves when the job is released.
         std::unique_ptr<Backend> owned(backend);
         token->attach(backend);
         *outcome = runVerify(backend, serviceParams, credentials, folder, service);
@@ -299,4 +299,4 @@ void NetVfsProbe::closeSession()
     session->deleteLater();
 }
 
-} // namespace NetVfsUi
+}

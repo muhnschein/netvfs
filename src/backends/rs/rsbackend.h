@@ -2,11 +2,8 @@
 #ifndef NETVFS_RSBACKEND_H
 #define NETVFS_RSBACKEND_H
 
-// The C++ side of the Rust backends (design §1, §2): a NetVfs::Backend over
-// one connection of libnetvfs-rs.so. A plugin's BackendFactory::create()
-// is createBackend() with its provider; the rest of netvfs sees an ordinary
-// backend. Rust takes one call at a time per connection, from any thread
-// (S1), which is what C-8 promises.
+// Backend over one connection of libnetvfs-rs.so. A plugin's BackendFactory::create() is
+// createBackend() with its provider. Rust takes one call at a time per connection, from any thread.
 #include "backend.h"
 #include "netvfs_rs.h"
 
@@ -14,8 +11,7 @@
 
 namespace NetVfs::Rs {
 
-// A new backend of `provider` in `*out`; Internal when libnetvfs-rs.so is
-// missing, Unsupported when it has no such provider.
+// Internal when libnetvfs-rs.so is missing, Unsupported when it has no such provider.
 Result createBackend(const QString &provider, Backend **out);
 
 class RsBackend final : public Backend
@@ -58,14 +54,12 @@ public:
     void resetCancel() override;
     void disconnect() override;
 
-    // Backend's non-virtual helpers stay visible next to the overrides.
     using Backend::authenticate;
     using Backend::list;
 
 private:
     Result statWith(const QString &path, bool follow, Entry *out);
     Result fetchCapabilities(Capabilities *out) const;
-    // A table call on the bytes of one or two paths (XC-4).
     template <typename Call>
     Result onPath(const QString &path, const Call &call) const;
     template <typename Call>
@@ -73,16 +67,13 @@ private:
 
     const nvr_table *m_t;
     nvr_conn *m_conn;
-    // The provider option "domain" of connect() (SMB), for authenticate().
     QString m_domain;
-    // XC-5: stable once authenticated.
     bool m_authenticated = false;
     Capabilities m_capabilities;
-    // XC-22: the prompter of a running authenticate(), which cancel() wakes.
+    // Prompter of a running authenticate(), which cancel() wakes.
     std::mutex m_prompterMutex;
     AuthPrompter *m_prompter = nullptr;
 };
 
-} // namespace NetVfs::Rs
-
+}
 #endif

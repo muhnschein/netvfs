@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-// The single loader of all Buteo plugins (SPEC 8.1). Each plugin compiles it
-// with its own provider, operation and plugin IID (plugin.pri).
+// Single loader of all Buteo plugins. Each plugin compiles it with its own provider, operation and
+// plugin IID (plugin.pri).
 #ifndef NETVFS_BUTEO_LOADER_H
 #define NETVFS_BUTEO_LOADER_H
 

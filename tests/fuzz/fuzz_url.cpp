@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-// SPEC-v2 XT-3: the Url parser (XH-6). parse() must never crash, a password
+// the Url parser. parse() must never crash, a password
 // must never be accepted, and whatever parse() accepts must survive
 // parse -> format -> parse unchanged.
 //
@@ -47,7 +47,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
     QString path;
     const Result r = Url::parse(url, &params, &path);
     if (!r.ok()) {
-        require(params.provider.isEmpty() && params.host.isEmpty() && path.isEmpty());   // untouched on failure
+        require(params.provider.isEmpty() && params.host.isEmpty() && path.isEmpty());
         return 0;
     }
     QString normalized;

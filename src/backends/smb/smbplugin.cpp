@@ -11,8 +11,7 @@ QString SmbBackendFactory::provider() const
 
 Result SmbBackendFactory::create(Backend **out)
 {
-    // rust/netvfs-smb through libnetvfs-rs.so; the caller owns the backend.
     return Rs::createBackend(provider(), out);
 }
 
-} // namespace NetVfs
+}

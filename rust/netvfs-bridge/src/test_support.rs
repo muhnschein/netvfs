@@ -1,12 +1,11 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 //! Helpers of the in-crate tests.
-// Restriction lints that only add noise to tests (doc/RUST.md "Lints").
 #![allow(clippy::assertions_on_result_states, clippy::arithmetic_side_effects)]
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-/// A temporary folder, removed on drop.
+/// Temporary folder, removed on drop.
 #[derive(Debug)]
 pub struct TempDir(PathBuf);
 
@@ -37,9 +36,7 @@ pub fn write_file(path: &Path, data: &[u8]) {
     std::fs::write(path, data).unwrap();
 }
 
-/// Both ends of a session after the p2p handshake: the server's message
-/// stream (with the bridge's inbound limits), a duplicate of the server
-/// socket (the shutdown handle) and a zbus client.
+/// Both ends of a session after the p2p handshake: server message stream (with inbound limits), duplicate of the server socket (shutdown handle), zbus client.
 pub struct Pair {
     pub server: zbus::MessageStream,
     pub shutdown: std::os::unix::net::UnixStream,
@@ -52,7 +49,7 @@ impl std::fmt::Debug for Pair {
     }
 }
 
-/// A connected [`Pair`] over a socket pair.
+/// Connected [`Pair`] over a socket pair.
 pub async fn pair() -> Pair {
     use std::os::fd::AsFd as _;
     let (a, b) = tokio::net::UnixStream::pair().unwrap();
@@ -64,15 +61,14 @@ pub async fn pair() -> Pair {
     Pair { server: server.unwrap(), shutdown, client: client.unwrap() }
 }
 
-/// A consumer that speaks the wire by hand: it can pipeline a call behind
-/// `BEGIN`, send oversized frames, and stop reading.
+/// Consumer that speaks the wire by hand: pipelines a call behind `BEGIN`, sends oversized frames, stops reading.
 #[derive(Debug)]
 pub struct RawClient {
     pub stream: tokio::net::UnixStream,
 }
 
 impl RawClient {
-    /// Connects and authenticates (EXTERNAL); `BEGIN` is still to be sent.
+    /// Connects and authenticates (EXTERNAL); `BEGIN` still to send.
     pub async fn authenticate(mut stream: tokio::net::UnixStream) -> Self {
         use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
         let uid = crate::sys::peer::effective_uid().to_string();
@@ -106,12 +102,12 @@ impl RawClient {
         self.stream.write_all(bytes).await.unwrap();
     }
 
-    /// The next message, or `None` at the end of the stream.
+    /// Next message, `None` at stream end.
     pub async fn receive(&mut self) -> Option<zbus::Message> {
         read_message(&mut self.stream).await
     }
 
-    /// Reads until the server closes the connection; false after `limit`.
+    /// Reads until the server closes; false after `limit`.
     pub async fn closed_within(&mut self, limit: std::time::Duration) -> bool {
         use tokio::io::AsyncReadExt as _;
         let drain = async {
@@ -122,8 +118,7 @@ impl RawClient {
     }
 }
 
-/// The server end of a session (after the handshake), its shutdown handle,
-/// and a [`RawClient`] that sent `BEGIN`.
+/// Server end of a session after the handshake, its shutdown handle, and a [`RawClient`] that sent `BEGIN`.
 pub async fn raw_pair() -> (zbus::MessageStream, std::os::unix::net::UnixStream, RawClient) {
     use std::os::fd::AsFd as _;
     let (a, b) = tokio::net::UnixStream::pair().unwrap();
@@ -137,7 +132,7 @@ pub async fn raw_pair() -> (zbus::MessageStream, std::os::unix::net::UnixStream,
     (server.unwrap(), shutdown, client)
 }
 
-/// The next message from a raw stream, or `None` at its end.
+/// Next message from a raw stream, `None` at its end.
 pub async fn read_message<R: tokio::io::AsyncRead + Unpin>(reader: &mut R) -> Option<zbus::Message> {
     use tokio::io::AsyncReadExt as _;
     let mut header = [0u8; 16];
@@ -149,7 +144,7 @@ pub async fn read_message<R: tokio::io::AsyncRead + Unpin>(reader: &mut R) -> Op
     Some(crate::sys::frame::message_from_frame(bytes, Vec::new(), size.endian).unwrap())
 }
 
-/// The resident set of this process in bytes.
+/// Resident set of this process in bytes.
 pub fn resident_bytes() -> usize {
     let status = std::fs::read_to_string("/proc/self/status").unwrap();
     let line = status.lines().find(|l| l.starts_with("VmRSS:")).unwrap();
@@ -157,7 +152,7 @@ pub fn resident_bytes() -> usize {
     kib * 1024
 }
 
-/// An entry of about 300 bytes on the wire.
+/// Entry of about 300 bytes on the wire.
 pub fn wire_entry() -> netvfs_bridge_proto::WireEntry {
     netvfs_bridge_proto::WireEntry {
         name: vec![b'x'; 200],
@@ -178,7 +173,7 @@ pub fn wire_entry() -> netvfs_bridge_proto::WireEntry {
     }
 }
 
-/// What the [`stub_core`] saw, in order.
+/// What [`stub_core`] saw, in order.
 #[derive(Debug)]
 pub enum Seen {
     Accepted(crate::server::SessionId, crate::server::Outbox),
@@ -187,11 +182,7 @@ pub enum Seen {
     Refused(crate::Status),
 }
 
-/// A core for the server's tests: answers `Hello` (not to client "old"),
-/// `GetConsent` ("unknown"), `RequestConsent`, `ListLocations` (empty),
-/// `Upload` (the number of bytes its descriptor holds); refuses other
-/// consent-gated calls with `PermissionDenied` and drops the rest
-/// unanswered. Reports every event.
+/// Core for server tests: answers `Hello` (not to client "old"), `GetConsent` ("unknown"), `RequestConsent`, `ListLocations` (empty), `Upload` (bytes in its descriptor); other consent-gated calls get `PermissionDenied`, the rest go unanswered. Reports every event.
 pub fn stub_core() -> (crate::server::EventSink, tokio::sync::mpsc::UnboundedReceiver<Seen>) {
     use crate::server::{Event, EventSink};
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel();

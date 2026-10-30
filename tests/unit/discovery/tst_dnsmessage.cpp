@@ -18,7 +18,7 @@ QByteArray avahiResponse()
 {
     Pkt p;
     p.header(0, 0x8400, 0, 1, 0, 3);
-    const int typeName = p.size();                       // "_smb._tcp.local" at offset 12
+    const int typeName = p.size();
     p.name("_smb._tcp.local");
     const int localOffset = typeName + 10;               // "local" after two 5 byte labels
     p.u16(TypePtr).u16(ClassIn).u32(4500);
@@ -47,7 +47,6 @@ bool rejects(const QByteArray &packet)
     return !ok && !why.isEmpty() && m.answers.isEmpty() && m.questions.isEmpty();
 }
 
-// A packet with one question whose name is `name` (bytes as given), then type/class.
 QByteArray questionWith(const QByteArray &nameBytes)
 {
     Pkt p;
@@ -111,7 +110,7 @@ Message sampleMessage()
     m.additional.append(aaaa);
     Record other;
     other.name = "box.local";
-    other.type = 47;           // NSEC: carried verbatim
+    other.type = 47;
     other.ttl = 120;
     other.rdata = hexBytes("00010203");
     m.additional.append(other);
@@ -165,7 +164,7 @@ private slots:
         Pkt p;
         p.header(0x42, 0, 2, 0, 0, 0);
         p.name("_ssh._tcp.local").u16(TypePtr).u16(0x8001);
-        p.label("host").ptr(12 + 10).u16(TypeAny).u16(ClassIn);       // "host.local", pointer into "local"
+        p.label("host").ptr(12 + 10).u16(TypeAny).u16(ClassIn);
         Message m;
         QVERIFY(decode(p.bytes(), &m));
         QCOMPARE(m.id, quint16(0x42));
@@ -219,7 +218,6 @@ private slots:
         QCOMPARE(m.questions[0].name, utf8 + ".local");
     }
 
-    // ----------------------------------------------------------- malformed
 
     void rejectsShortAndOversizedPackets()
     {
@@ -227,7 +225,7 @@ private slots:
         QVERIFY(rejects(QByteArray(11, '\0')));
         QVERIFY(rejects(QByteArray(MaxPacketSize + 1, '\0')));
         Message m;
-        QVERIFY(decode(QByteArray(HeaderSize, '\0'), &m));        // an empty message is fine
+        QVERIFY(decode(QByteArray(HeaderSize, '\0'), &m));
     }
 
     void rejectsCountsThatCannotFit()
@@ -236,28 +234,23 @@ private slots:
         p.header(0, 0x8400, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF);
         QVERIFY(rejects(p.bytes()));
         Pkt q;
-        q.header(0, 0, 1, 0, 0, 0);                               // promises a question, has none
+        q.header(0, 0, 1, 0, 0, 0);
         QVERIFY(rejects(q.bytes()));
         Pkt r;
-        r.header(0, 0x8400, 0, 700, 0, 0);                        // fits the packet, more than MaxRecords
+        r.header(0, 0x8400, 0, 700, 0, 0);
         r.raw(QByteArray(11 * 700, '\0'));
         QVERIFY(rejects(r.bytes()));
     }
 
     void rejectsCompressionPointerLoops()
     {
-        // A pointer to itself.
         QVERIFY(rejects(questionWith(hexBytes("c00c"))));
-        // A pointer pointing forward.
         QVERIFY(rejects(questionWith(hexBytes("c00e") + hexBytes("0161") + hexBytes("00"))));
-        // Two pointers to each other: the second one points forward.
         Pkt p;
         p.header(0, 0, 1, 0, 0, 0);
         p.ptr(14).ptr(12).u16(TypePtr).u16(ClassIn);
         QVERIFY(rejects(p.bytes()));
-        // A pointer past the end of the packet.
         QVERIFY(rejects(questionWith(hexBytes("c3ff"))));
-        // A truncated pointer.
         Pkt t;
         t.header(0, 0, 1, 0, 0, 0);
         t.u8(0xC0);
@@ -280,11 +273,11 @@ private slots:
         longName.header(0, 0, 1, 0, 0, 0);
         const QByteArray sixtyThree(63, 'x');
         for (int i = 0; i < 4; ++i)
-            longName.label(sixtyThree);                           // 4 * 64 = 256 > 255
+            longName.label(sixtyThree);
         longName.u8(0).u16(TypePtr).u16(ClassIn);
         QVERIFY(rejects(longName.bytes()));
 
-        Pkt maxName;                                              // 3 * 64 + 61 + 1 = 254 bytes: fine
+        Pkt maxName;
         maxName.header(0, 0, 1, 0, 0, 0);
         for (int i = 0; i < 3; ++i)
             maxName.label(sixtyThree);
@@ -292,13 +285,13 @@ private slots:
         Message m;
         QVERIFY(decode(maxName.bytes(), &m));
 
-        QVERIFY(rejects(questionWith(hexBytes("40") + QByteArray(64, 'x') + hexBytes("00"))));   // 01xxxxxx
-        QVERIFY(rejects(questionWith(hexBytes("80") + hexBytes("00"))));                         // 10xxxxxx
+        QVERIFY(rejects(questionWith(hexBytes("40") + QByteArray(64, 'x') + hexBytes("00"))));
+        QVERIFY(rejects(questionWith(hexBytes("80") + hexBytes("00"))));
     }
 
     void rejectsLabelsPastTheEnd()
     {
-        QVERIFY(rejects(questionWith(hexBytes("3f6161"))));       // claims 63 bytes, has 2
+        QVERIFY(rejects(questionWith(hexBytes("3f6161"))));
         Pkt p;
         p.header(0, 0, 1, 0, 0, 0);
         p.label("abc");                                           // no root label, no type/class
@@ -307,21 +300,16 @@ private slots:
 
     void rejectsBadRecords()
     {
-        // rdlength beyond the packet, for a type that is skipped
         QVERIFY(rejects(answerWith(99, hexBytes("0102"), 3)));
         QVERIFY(rejects(answerWith(99, hexBytes("0102"), 0xFFFF)));
-        // address records of the wrong size
         QVERIFY(rejects(answerWith(TypeA, hexBytes("c0000207"), 3)));
         QVERIFY(rejects(answerWith(TypeA, hexBytes("c000020700"))));
         QVERIFY(rejects(answerWith(TypeA, hexBytes("c00002"))));
         QVERIFY(rejects(answerWith(TypeAaaa, QByteArray(15, '\x01'))));
         QVERIFY(rejects(answerWith(TypeAaaa, QByteArray(17, '\x01'))));
-        // SRV too short, with a target running past the record
         QVERIFY(rejects(answerWith(TypeSrv, hexBytes("000000000050"))));
         QVERIFY(rejects(answerWith(TypeSrv, hexBytes("00000000005003") + QByteArray("abc"))));
-        // PTR whose name is longer than its rdlength
         QVERIFY(rejects(answerWith(TypePtr, hexBytes("026162") + hexBytes("00"), 2)));
-        // TXT string overruns the record: at the end of the packet, and into a following record
         QVERIFY(rejects(answerWith(TypeTxt, hexBytes("0561626364"))));
         Pkt overrun;
         overrun.header(0, 0x8400, 0, 2, 0, 0);
@@ -330,12 +318,10 @@ private slots:
         QVERIFY(rejects(overrun.bytes()));
         // trailing garbage after a PTR name inside the record
         QVERIFY(rejects(answerWith(TypePtr, hexBytes("0161000000"))));
-        // truncated question: the class is missing
         Pkt question;
         question.header(0, 0, 1, 0, 0, 0);
         question.name("x.local").u16(TypePtr);
         QVERIFY(rejects(question.bytes()));
-        // truncated record header
         Pkt p;
         p.header(0, 0x8400, 0, 1, 0, 0);
         p.name("x.local").u16(TypePtr).u16(ClassIn).u16(0);
@@ -368,10 +354,9 @@ private slots:
                     QVERIFY(m.answers.isEmpty() && m.additional.isEmpty() && m.questions.isEmpty());
             }
         }
-        QVERIFY(decoded > 0);                // the mutations that keep the packet valid exist
+        QVERIFY(decoded > 0);
     }
 
-    // -------------------------------------------------------------- encoder
 
     void roundTripsAMessageWithEveryRecordType()
     {
@@ -408,7 +393,6 @@ private slots:
         const QByteArray compressed = encode(in, true);
         const QByteArray plain = encode(in, false);
         QVERIFY(compressed.size() < plain.size());
-        // The compressed form contains a pointer to the question name at offset 12.
         QVERIFY(compressed.contains(hexBytes("c00c")));
         QVERIFY(!plain.contains(hexBytes("c00c")));
 
@@ -459,7 +443,7 @@ private slots:
         Message out;
         QVERIFY(decode(wire, &out));
         QCOMPARE(canonicalName(out.questions[1].name), QByteArray("bar.local"));
-        QVERIFY(wire.contains(hexBytes("c0")));                  // "local" of the second name is a pointer
+        QVERIFY(wire.contains(hexBytes("c0")));
     }
 
     void encoderRefusesWhatCannotBeRepresented()
@@ -469,10 +453,10 @@ private slots:
         q.type = TypeA;
         q.name = QByteArray(64, 'x') + ".local";
         m.questions = {q};
-        QVERIFY(encode(m).isEmpty());                            // label of 64 bytes
+        QVERIFY(encode(m).isEmpty());
         q.name = QByteArray(63, 'x') + "." + QByteArray(63, 'y') + "." + QByteArray(63, 'z') + "." + QByteArray(63, 'w');
         m.questions = {q};
-        QVERIFY(encode(m).isEmpty());                            // 256 bytes on the wire
+        QVERIFY(encode(m).isEmpty());
         q.name = "a..b";
         m.questions = {q};
         QVERIFY(encode(m).isEmpty());
@@ -486,7 +470,7 @@ private slots:
         txt.type = TypeTxt;
         txt.txt = {QByteArray(256, 'v')};
         t.answers = {txt};
-        QVERIFY(encode(t).isEmpty());                            // string over 255 bytes
+        QVERIFY(encode(t).isEmpty());
         txt.txt = {QByteArray(255, 'v')};
         t.answers = {txt};
         QVERIFY(!encode(t).isEmpty());
@@ -497,7 +481,7 @@ private slots:
         a.type = TypeA;
         a.address = QHostAddress(QStringLiteral("::1"));
         wrong.answers = {a};
-        QVERIFY(encode(wrong).isEmpty());                        // IPv6 address in an A record
+        QVERIFY(encode(wrong).isEmpty());
         Record aaaa;
         aaaa.name = "x.local";
         aaaa.type = TypeAaaa;
@@ -512,12 +496,12 @@ private slots:
         unknown.rdata = QByteArray(1000, 'z');
         for (int i = 0; i < 10; ++i)
             big.answers.append(unknown);
-        QVERIFY(encode(big).isEmpty());                          // over MaxPacketSize
+        QVERIFY(encode(big).isEmpty());
         Record huge = unknown;
         huge.rdata = QByteArray(70000, 'z');
         Message h;
         h.answers = {huge};
-        QVERIFY(encode(h).isEmpty());                            // rdlength over 65535
+        QVERIFY(encode(h).isEmpty());
     }
 
     void emptyTxtEncodesAsOneEmptyString()
@@ -532,7 +516,6 @@ private slots:
         QCOMPARE(out.answers[0].txt, QList<QByteArray>{QByteArray()});
     }
 
-    // ---------------------------------------------------------------- names
 
     void splitsAndJoinsNames()
     {

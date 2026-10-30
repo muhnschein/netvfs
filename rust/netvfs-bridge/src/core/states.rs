@@ -1,17 +1,7 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! When the sessions hear that a location's connection state changed
-//! (SPEC-v2 XB-10, XB-12): `LocationsChanged`, at most every 250 ms, and
-//! only when a state differs from what the sessions were last told.
-//!
-//! `ListLocations` shows the states as they are; this keeps the ones the
-//! last `LocationsChanged` stood for (or the location list, when it was
-//! set). A change of a pool's state wakes the core
-//! ([`StateSignal`](crate::locations::state::StateSignal)), which looks
-//! [`STATES_DELAY`] later: a burst of changes (an attempt that connects or
-//! fails at once, several connections of a pool) costs one look, and a
-//! state that went and came back costs no signal, unless a `ListLocations`
-//! in between showed it. Work on an established connection changes no
-//! state, and `ListLocations` changes none, so neither causes a signal.
+//! `LocationsChanged` for connection-state changes: at most every 250 ms, only when a state differs from what sessions were last told.
+//! A pool state change wakes the core ([`StateSignal`](crate::locations::state::StateSignal)), which looks [`STATES_DELAY`] later:
+//! bursts cost one look; a state that went and came back costs no signal unless a `ListLocations` showed it in between.
 
 use crate::locations::state::ConnectionState;
 use std::collections::BTreeMap;
@@ -27,16 +17,13 @@ pub type States = BTreeMap<String, ConnectionState>;
 /// What the sessions were told, and when to look again.
 #[derive(Debug, Default)]
 pub struct StateReport {
-    /// The states the last `LocationsChanged` (or location list) stood for.
     announced: States,
-    /// A `ListLocations` answer showed states that were not announced.
     listed: bool,
     due: Option<Instant>,
 }
 
 impl StateReport {
-    /// A connection state may have changed at `now`: look
-    /// [`STATES_DELAY`] later, unless a look is due already.
+    /// A connection state may have changed at `now`.
     pub fn changed(&mut self, now: Instant) {
         if self.due.is_none() {
             self.due = now.checked_add(STATES_DELAY);
@@ -49,8 +36,7 @@ impl StateReport {
         self.due
     }
 
-    /// `ListLocations` answered with `states` at `now`: if they were not
-    /// announced, the next look tells every session, whatever it finds.
+    /// `ListLocations` answered with `states` at `now`.
     pub fn listed(&mut self, states: &States, now: Instant) {
         if *states != self.announced {
             self.listed = true;
@@ -58,15 +44,13 @@ impl StateReport {
         }
     }
 
-    /// `LocationsChanged` was sent, or the location list set, with
-    /// `states`.
+    /// `LocationsChanged` was sent, or the location list set, with `states`.
     pub fn announced(&mut self, states: States) {
         self.announced = states;
         self.listed = false;
     }
 
-    /// The look is due, and finds `states`: whether `LocationsChanged` must
-    /// tell them. They count as announced from now on.
+    /// The look is due, and finds `states`.
     pub fn check(&mut self, states: States) -> bool {
         self.due = None;
         let tell = self.listed || states != self.announced;
@@ -95,21 +79,17 @@ mod tests {
         assert_eq!(report.due(), None);
         report.changed(start);
         assert_eq!(report.due(), start.checked_add(STATES_DELAY));
-        // More changes in the meantime: the same look.
         report.changed(after(start, 100));
         assert_eq!(report.due(), start.checked_add(STATES_DELAY));
         assert!(report.check(states(&[("account:1", ConnectionState::Connected)])));
         assert_eq!(report.due(), None);
-        // Nothing changed since: no signal.
         report.changed(after(start, 1000));
         assert_eq!(report.due(), after(start, 1000).checked_add(STATES_DELAY));
         assert!(!report.check(states(&[("account:1", ConnectionState::Connected)])));
-        // Another state, or only another error.
         let failed = |name| states(&[("account:1", ConnectionState::Failed(name))]);
         assert!(report.check(failed(ErrorName::Timeout)));
         assert!(!report.check(failed(ErrorName::Timeout)));
         assert!(report.check(failed(ErrorName::AuthFailed)));
-        // A location more or less.
         let two = states(&[
             ("account:1", ConnectionState::Disconnected),
             ("adhoc:x-1", ConnectionState::Connected),
@@ -124,11 +104,9 @@ mod tests {
         let start = Instant::now();
         let mut report = StateReport::default();
         let disconnected = states(&[("account:1", ConnectionState::Disconnected)]);
-        // The list as the bridge starts: nothing to tell.
         report.announced(disconnected.clone());
         report.changed(start);
         assert!(!report.check(disconnected));
-        // A LocationsChanged of its own told the sessions already.
         let connected = states(&[("account:1", ConnectionState::Connected)]);
         report.changed(start);
         report.announced(connected.clone());
@@ -142,7 +120,6 @@ mod tests {
         let disconnected = states(&[("account:1", ConnectionState::Disconnected)]);
         let connecting = states(&[("account:1", ConnectionState::Connecting)]);
         report.announced(disconnected.clone());
-        // Listed as announced: nothing to do.
         report.listed(&disconnected, start);
         assert_eq!(report.due(), None);
         // A session saw "connecting", then the attempt was canceled: the
@@ -151,8 +128,6 @@ mod tests {
         assert_eq!(report.due(), start.checked_add(STATES_DELAY));
         assert!(report.check(disconnected.clone()));
         assert!(!report.check(disconnected.clone()));
-        // A LocationsChanged told every session of "connecting": going back
-        // is a change for all of them.
         report.listed(&connecting, start);
         report.announced(connecting);
         assert!(report.check(disconnected));

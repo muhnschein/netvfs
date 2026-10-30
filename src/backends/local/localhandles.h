@@ -6,8 +6,7 @@
 
 namespace NetVfs::Local {
 
-// XC-13 over one descriptor. Regular files are read with pread(); streams
-// (FIFOs, devices) only sequentially, at the position reached so far.
+// Regular files read with pread(); streams (FIFOs, devices) only sequentially.
 class LocalReadHandle : public ReadHandle
 {
 public:
@@ -29,8 +28,7 @@ private:
     qint64 m_streamPosition = 0;
 };
 
-// XC-13 sequential writes. commit() is fsync + futimens (WriteOptions::
-// modified) + close (L-7).
+// commit() is fsync + futimens (WriteOptions::modified) + close.
 class LocalWriteHandle : public WriteHandle
 {
 public:
@@ -51,6 +49,5 @@ private:
     QDateTime m_modified;
 };
 
-} // namespace NetVfs::Local
-
+}
 #endif

@@ -22,8 +22,7 @@ Library &library()
     return loaded;
 }
 
-} // namespace
-
+}
 const nvr_table *table(Result *result)
 {
     Library &lib = library();
@@ -34,8 +33,8 @@ const nvr_table *table(Result *result)
             path = QByteArrayLiteral(NETVFS_RS_LIB_PATH);
         void *handle = dlopen(path.constData(), RTLD_NOW | RTLD_LOCAL);
         void *symbol = handle ? dlsym(handle, NVR_ENTRY) : nullptr;
-        // POSIX gives data and function pointers one representation; C++17
-        // has no cast between them but a copy of the bytes.
+        // POSIX gives data and function pointers one representation; C++17 has no cast between them
+        // but a byte copy.
         nvr_get_fn get = nullptr;
         static_assert(sizeof get == sizeof symbol);
         std::memcpy(&get, &symbol, sizeof get);
@@ -52,4 +51,4 @@ const nvr_table *table(Result *result)
     return lib.table;
 }
 
-} // namespace NetVfs::Rs
+}

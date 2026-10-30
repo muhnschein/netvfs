@@ -1,11 +1,10 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! The commands of netvfs-accounts (SPEC-v2 XB-2a), answered as
-//! `AccountsHelper::serve` of the C++ bridge (netvfs 0.4) did:
+//! Commands of netvfs-accounts, answered as the C++ bridge's `AccountsHelper::serve` did:
 //!
 //! ```text
-//! netvfs-accounts list                          the Files accounts (XA-1)
-//! netvfs-accounts files <id>                    what a connection needs, policy checked (XA-4)
-//! netvfs-accounts attention <id> <state> [pin]  records auth-failed or server-identity-changed (XB-14)
+//! netvfs-accounts list                          the Files accounts
+//! netvfs-accounts files <id>                    what a connection needs, policy checked
+//! netvfs-accounts attention <id> <state> [pin]  records auth-failed or server-identity-changed
 //! ```
 
 use crate::db::{Database, Environment, NewSetting, PrivilegedOwner, Unusable};
@@ -58,8 +57,7 @@ impl Command {
     }
 }
 
-/// A change to announce on the session bus, as libaccounts-glib's writers
-/// do (dbus.rs).
+/// Change to announce on the session bus, as libaccounts-glib's writers do.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Change {
     /// The account's id.
@@ -129,7 +127,6 @@ fn write_params(s: &mut Stream, p: &ConnectionParams) {
     s.i32(p.request_timeout_ms);
 }
 
-/// The listed account `id` (XA-1), loaded.
 fn load_listed(store: &Store, id: &str) -> Result<crate::store::AccountConfig, Outcome> {
     let not_found = || Outcome::failure(Error::NotFound, "No such account");
     let account_id = qvariant::to_int(id).filter(|i| *i > 0).ok_or_else(not_found)?;
@@ -164,7 +161,7 @@ fn serve_files(store: &Store, id: &str) -> Served {
         Ok(config) => config,
         Err(outcome) => return Served::failure(&outcome),
     };
-    // XA-4: refused before the secret is read.
+    // Refused before the secret is read.
     let policy = check_files_policy(&config.params);
     if !policy.ok() {
         return Served::failure(&policy);
@@ -177,7 +174,7 @@ fn serve_files(store: &Store, id: &str) -> Served {
 }
 
 fn serve_attention(store: &mut Store, id: &str, state: &str, pin: Option<&str>) -> Served {
-    // XB-14 records attention; clearing it is the update flow's (Settings).
+    // Records attention; clearing it is the update flow's (Settings).
     let attention = Attention::from_qstring(Some(state));
     if attention == Attention::None {
         return Served::failure(&Outcome::failure(Error::Unsupported, "Unknown attention state"));
@@ -260,9 +257,8 @@ mod tests {
         );
     }
 
-    /// A database with three listed accounts: 1 usable, 2 refused by the
-    /// policy, and 2^32, whose id reads as 0; 5 is a WebDAV account with its
-    /// Files service enabled, which is not handed out. Its path.
+    /// Three listed accounts: 1 usable, 2 refused by policy, 2^32 (id reads as 0); 5 is WebDAV with
+    /// Files enabled, not handed out. Returns its path.
     fn listed_accounts(name: &str) -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(format!("netvfs-accounts-serve-{name}-{}", std::process::id()));
         std::fs::remove_dir_all(&dir).ok();
@@ -300,8 +296,6 @@ mod tests {
         Store::new(Database::open(path, false).unwrap())
     }
 
-    /// The connection parameters of an smb account whose one option is
-    /// `security_profile`, as written.
     fn write_params_of(s: &mut Stream, host: &str, port: i32, username: Option<&str>, profile: &str) {
         s.string(Some("smb"));
         s.string(Some(host));
@@ -366,7 +360,6 @@ mod tests {
         let env = Environment { accounts: Some("/dev/null/accounts".into()), ..Environment::default() };
         let served = serve(&args(&["list"]), &env, &NoOwner);
         assert_eq!(served.change, None);
-        // PermissionDenied
         assert_eq!(served.answer[..4], [0, 0, 0, 8]);
         // Also before the usage is checked, as the C++ helper did.
         assert_eq!(serve(&args(&["bogus"]), &env, &NoOwner).answer[..4], [0, 0, 0, 8]);

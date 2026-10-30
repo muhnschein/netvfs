@@ -11,13 +11,13 @@ const char Share[] = "share";
 const char Shares[] = "shares";
 const char ShowAdminShares[] = "show_admin_shares";
 const char AllowInsecure[] = "allow_insecure";
-} // namespace OptionKeys
+}
 
 namespace SecurityProfiles {
 const char Strict[] = "strict";
 const char Signed[] = "signed";
 const char Guest[] = "guest";
-} // namespace SecurityProfiles
+}
 
 namespace {
 const char ProviderSmb[] = "smb";
@@ -46,7 +46,6 @@ Result refused(const QString &reason)
     return Result(Error::SecurityPolicy, reason);
 }
 
-// Rows of the XA-4 table that only concern Backup.
 Result checkBackup(const ConnectionParams &params, bool insecure)
 {
     if (params.flag(str(OptionKeys::AllowInsecure)))
@@ -59,7 +58,7 @@ Result checkBackup(const ConnectionParams &params, bool insecure)
         return refused(QStringLiteral("SMB backups need a share"));
     return Result::success();
 }
-} // namespace
+}
 
 QString serviceName(const QString &provider, Service service)
 {
@@ -123,4 +122,4 @@ QVariantMap pinOptions(const ServerIdentity &identity)
     return options;
 }
 
-} // namespace NetVfs
+}

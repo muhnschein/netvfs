@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! The file operations over an SFTP [`Client`] (SPEC-sftp 6, 7; SPEC-v2
-//! XS-1..XS-8): paths against the start folder, entries, the server's
-//! extensions, and the checks that turn OpenSSH's plain failures into the
-//! XC-21 names (an existing target, a folder, a non-empty folder).
+//! File operations over an SFTP [`Client`]: paths against the start folder, entries, the server's extensions, and
+//! the checks that turn OpenSSH's plain failures into proper error names (existing target, folder, non-empty folder).
 
 use crate::client::{Client, Field, PathOf, Simple, ok};
 use crate::errors::Failure;
@@ -17,17 +15,17 @@ use netvfs_vfs::{
 };
 use std::collections::{BTreeSet, HashMap};
 
-/// Largest READ or WRITE (S-21).
+/// Largest READ or WRITE.
 pub const MAX_CHUNK: u32 = 256 * 1024;
 /// READ and WRITE size without `limits@openssh.com`.
 pub const FALLBACK_CHUNK: u32 = 32 * 1024;
 /// Requests in flight per transfer or handle.
 pub const WINDOW: usize = 16;
-/// Symlink targets stat'ed per listing (XS-3).
+/// Symlink targets stat'ed per listing.
 const MAX_SYMLINK_RESOLUTIONS: u32 = 512;
-/// Names cached per kind (XS-2).
+/// Names cached per kind.
 const MAX_CACHED_NAMES: usize = 4096;
-/// Mode of a new folder without `dir_mode` (S-20 comes through options).
+/// Mode of a new folder without `dir_mode`.
 pub const DEFAULT_DIR_MODE: u32 = 0o777;
 /// Mode of a new file without a create mode.
 pub const DEFAULT_FILE_MODE: u32 = 0o666;
@@ -70,7 +68,7 @@ impl Extensions {
     }
 }
 
-/// READ and WRITE sizes (S-21).
+/// READ and WRITE sizes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Chunks {
     /// READ length.
@@ -79,8 +77,7 @@ pub struct Chunks {
     pub write: u32,
 }
 
-/// The chunk for a server limit: the limit up to [`MAX_CHUNK`], or
-/// [`FALLBACK_CHUNK`] without one.
+/// The limit up to [`MAX_CHUNK`], or [`FALLBACK_CHUNK`] without one.
 #[must_use]
 pub fn chunk(limit: Option<u64>) -> u32 {
     match limit {
@@ -89,7 +86,7 @@ pub fn chunk(limit: Option<u64>) -> u32 {
     }
 }
 
-/// Owner and group names by id (XS-2).
+/// Owner and group names by id.
 #[derive(Debug, Default)]
 struct Owners {
     users: HashMap<u32, String>,
@@ -138,7 +135,7 @@ pub fn entry_from(attrs: &Attrs, name: &[u8]) -> Entry {
         entry.uid = Some(u64::from(uid));
         entry.gid = Some(u64::from(gid));
     }
-    // XS-2: Hidden is never set; dot names are a consumer convention.
+    // Hidden is never set; dot names are a consumer convention.
     if std::str::from_utf8(name).is_err() {
         entry.flags = entry.flags.union(EntryFlags::NAME_NOT_UTF8);
     }
@@ -156,7 +153,7 @@ fn seconds(ms: i64) -> Option<u32> {
     u32::try_from(ms.checked_div(1000)?).ok()
 }
 
-/// XC-11, XS-5: the mode and both times fit SFTP v3.
+/// The mode and both times fit SFTP v3.
 ///
 /// # Errors
 /// `Internal`, before anything changes.
@@ -172,7 +169,7 @@ pub fn check_attributes(changes: &Attributes) -> Result<(), Status> {
     Ok(())
 }
 
-/// The space of `statvfs` in bytes (XS-8).
+/// The space of `statvfs` in bytes.
 #[must_use]
 pub fn space_from(s: &Statvfs) -> SpaceInfo {
     let unit = if s.frsize == 0 { s.bsize } else { s.frsize };
@@ -197,9 +194,8 @@ pub async fn statvfs(client: &Client, remote: &[u8], cancel: &CancelToken) -> Re
     }
 }
 
-/// The failure of a WRITE, CLOSE or fsync of `remote`: `NoSpace` when the
-/// server reports a plain failure and its free space is below `attempted`
-/// bytes.
+/// The failure of a WRITE, CLOSE or fsync of `remote`: `NoSpace` when the server reports a plain failure and its
+/// free space is below `attempted` bytes.
 pub async fn write_failure(
     client: &Client,
     ext: &Extensions,
@@ -261,8 +257,7 @@ pub struct Remote {
 }
 
 impl Remote {
-    /// Learns what the server offers: limits, the start folder (S-19), and
-    /// whether it names owners (XS-2).
+    /// Learns what the server offers: limits, the start folder, and whether it names owners.
     ///
     /// # Errors
     /// The failure of the limits request.
@@ -318,7 +313,7 @@ impl Remote {
         &self.home
     }
 
-    /// XC-5: what this backend implements on this server.
+    /// What this backend implements on this server.
     #[must_use]
     pub fn capabilities(&self) -> Capabilities {
         let mut flags: BTreeSet<Capability> = [
@@ -349,7 +344,7 @@ impl Remote {
     /// The remote path of a caller's path.
     ///
     /// # Errors
-    /// `InvalidName` (C-15).
+    /// `InvalidName`.
     pub fn resolve(&self, path: &[u8]) -> Result<Vec<u8>, Status> {
         resolve(&self.home, path)
     }
@@ -386,8 +381,7 @@ impl Remote {
         }
     }
 
-    /// XS-2: names the owners of `entries`, one request for the ids the
-    /// cache does not know yet.
+    /// Names the owners of `entries`: one request for the ids the cache does not know yet.
     async fn name_owners(&mut self, entries: &mut [Entry], cancel: &CancelToken) {
         let Some(owners) = &self.owners else {
             return;
@@ -454,9 +448,8 @@ impl Remote {
         Ok(entry)
     }
 
-    /// XC-6: batches of at most `batch_size` entries, one per READDIR reply
-    /// at least; `.` and `..` dropped; symlink targets stat'ed on request
-    /// (XS-3).
+    /// Batches of at most `batch_size` entries, one per READDIR reply at least; `.` and `..` dropped; symlink
+    /// targets stat'ed on request.
     ///
     /// # Errors
     /// As the server reports it; `Canceled` when the sink stops.
@@ -531,8 +524,8 @@ impl Remote {
         }
     }
 
-    /// XS-3: at most [`MAX_SYMLINK_RESOLUTIONS`] per listing; beyond, and
-    /// for targets that cannot be stat'ed, `TARGET_UNKNOWN`.
+    /// At most [`MAX_SYMLINK_RESOLUTIONS`] per listing; beyond, and for targets that cannot be stat'ed,
+    /// `TARGET_UNKNOWN`.
     async fn resolve_target(&self, dir: &[u8], entry: &mut Entry, budget: &mut u32, cancel: &CancelToken) {
         let target = if *budget > 0 {
             self.stat_remote(&join(dir, &entry.name), true, cancel).await.ok()
@@ -558,8 +551,7 @@ impl Remote {
         if more { Ok(()) } else { Err(Status::new(ErrorName::Canceled, "The listing was stopped")) }
     }
 
-    /// XC-8: MKDIR with the folder mode; an existing folder is success
-    /// unless `exclusive`.
+    /// MKDIR with the folder mode; an existing folder is success unless `exclusive`.
     ///
     /// # Errors
     /// As the server reports it; `AlreadyExists`.
@@ -591,7 +583,7 @@ impl Remote {
         Err(Status::new(ErrorName::AlreadyExists, format!("{} exists and is not a folder", display(&remote))))
     }
 
-    /// XC-9: a folder is `IsADirectory`.
+    /// A folder is `IsADirectory`.
     ///
     /// # Errors
     /// As the server reports it.
@@ -601,7 +593,7 @@ impl Remote {
             return Ok(());
         };
         let status = f.status(&display(&remote));
-        // XC-9: OpenSSH reports EISDIR as a plain failure.
+        // OpenSSH reports EISDIR as a plain failure.
         if !fatal(&status)
             && let Ok(entry) = self.stat_remote(&remote, false, cancel).await
             && entry.kind == EntryType::Directory
@@ -611,7 +603,7 @@ impl Remote {
         Err(status)
     }
 
-    /// XC-9: a non-empty folder is `DirectoryNotEmpty`.
+    /// A non-empty folder is `DirectoryNotEmpty`.
     ///
     /// # Errors
     /// As the server reports it.
@@ -627,8 +619,7 @@ impl Remote {
         let Ok(entry) = self.stat_remote(&remote, false, cancel).await else {
             return Err(status);
         };
-        // XC-9: OpenSSH reports ENOTDIR as "no such file" and ENOTEMPTY as
-        // a plain failure.
+        // OpenSSH reports ENOTDIR as "no such file" and ENOTEMPTY as a plain failure.
         if entry.kind != EntryType::Directory {
             return Err(Status::new(
                 ErrorName::NotADirectory,
@@ -668,7 +659,7 @@ impl Remote {
         Status::new(ErrorName::AlreadyExists, format!("{} exists", display(remote)))
     }
 
-    /// XC-10, XS-6.
+    /// Renames `from` to `to`; a folder is never replaced.
     ///
     /// # Errors
     /// As the server reports it; `AlreadyExists`.
@@ -693,8 +684,7 @@ impl Remote {
         target: &[u8],
         cancel: &CancelToken,
     ) -> Result<(), Status> {
-        // XS-6: OpenSSH fails a plain RENAME on an existing target,
-        // atomically for files (NativeNoReplace).
+        // OpenSSH fails a plain RENAME on an existing target, atomically for files.
         let Err(f) = self.client.simple(Simple::Rename(source, target), cancel).await else {
             return Ok(());
         };
@@ -720,7 +710,7 @@ impl Remote {
             if source == target {
                 return Ok(());
             }
-            // XC-10: a folder is never replaced.
+            // A folder is never replaced.
             if entry.kind == EntryType::Directory {
                 return Err(Status::new(
                     ErrorName::AlreadyExists,
@@ -728,8 +718,7 @@ impl Remote {
                 ));
             }
         }
-        // With posix-rename@openssh.com the target is replaced atomically
-        // (AtomicReplace); a plain RENAME does not replace (S-22): remove
+        // With posix-rename@openssh.com the target is replaced atomically; a plain RENAME does not replace: remove
         // first.
         if !self.ext.posix_rename && existing.is_some() {
             self.client
@@ -747,8 +736,7 @@ impl Remote {
             self.client.simple(Simple::Rename(source, target), cancel).await
         };
         renamed.map_err(|f| f.status(&display(source)))?;
-        // rename(2) of one hard link onto another of the same file succeeds
-        // and keeps both names; XC-10 leaves one.
+        // rename(2) of one hard link onto another of the same file succeeds and keeps both names: remove one.
         if self.ext.posix_rename
             && existing.is_some_and(|e| e.kind == EntryType::File)
             && self.stat_remote(source, false, cancel).await.is_ok()
@@ -761,7 +749,7 @@ impl Remote {
         Ok(())
     }
 
-    /// XC-11, XS-5: every field is checked first.
+    /// Every field is checked first.
     ///
     /// # Errors
     /// `Internal` for values SFTP v3 cannot store; as the server reports it.
@@ -779,7 +767,7 @@ impl Remote {
         set_times(&self.client, &remote, changes.mtime_ms, changes.atime_ms, changes.mode, cancel).await
     }
 
-    /// XC-12: the target verbatim.
+    /// The target verbatim.
     ///
     /// # Errors
     /// `InvalidName` for an entry that is no link; as the server reports it.
@@ -800,7 +788,7 @@ impl Remote {
         }
     }
 
-    /// XC-12: `target` verbatim.
+    /// Creates a link to `target`, verbatim.
     ///
     /// # Errors
     /// `InvalidName` for an empty target or one with NUL; `AlreadyExists`.
@@ -820,7 +808,7 @@ impl Remote {
         Err(self.exists_as(&remote, f.status(&display(&remote)), cancel).await)
     }
 
-    /// XC-12 with `hardlink@openssh.com`.
+    /// Hard link, with `hardlink@openssh.com`.
     ///
     /// # Errors
     /// `Unsupported` without the extension; `AlreadyExists`.
@@ -850,7 +838,7 @@ impl Remote {
         Err(self.exists_as(&target, status, cancel).await)
     }
 
-    /// XC-19 with `statvfs@openssh.com`.
+    /// Space info, with `statvfs@openssh.com`.
     ///
     /// # Errors
     /// `Unsupported` without the extension; as the server reports it.
@@ -865,7 +853,7 @@ impl Remote {
             .map_err(|f| f.status(&display(&remote)))
     }
 
-    /// XC-17 with `copy-data`: a file, never a folder (`ServerCopy` only).
+    /// Server-side copy with `copy-data`: a file, never a folder.
     ///
     /// # Errors
     /// `Unsupported` without the extension or for a folder with

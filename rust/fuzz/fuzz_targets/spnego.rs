@@ -1,9 +1,5 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! SPNEGO from the server, raw: the token of the first SESSION_SETUP
-//! response (a NegTokenResp with the NTLM challenge) and of the final one
-//! (accept-completed with the mechListMIC), after a well-formed challenge.
-//! None may panic, and a final token is accepted only with a valid MIC,
-//! which arbitrary input does not carry.
+//! SPNEGO tokens raw: first SESSION_SETUP response and the final one after a well-formed challenge. No panic; final token accepted only with a valid MIC.
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
@@ -36,7 +32,7 @@ fn av(id: u16, value: &[u8]) -> Vec<u8> {
     v
 }
 
-/// The MS-NLMP 4.2.4.3 CHALLENGE_MESSAGE layout in a NegTokenResp.
+/// MS-NLMP 4.2.4.3 CHALLENGE_MESSAGE in a NegTokenResp.
 fn challenge() -> Vec<u8> {
     const FLAGS: u32 = 0xe28a_8233;
     let name = utf16("Server");
@@ -72,11 +68,9 @@ fuzz_target!(|data: &[u8]| {
     if data.len() > 60_000 {
         return;
     }
-    // The first response's token, raw.
     let (mut first, _) = Authenticator::start(&account(), "srv").unwrap();
     let _ = first.step(data);
 
-    // The final response's token after a well-formed challenge.
     let (mut auth, _) = Authenticator::start(&account(), "srv").unwrap();
     let Ok(Step::Continue(_)) = auth.step(&challenge()) else {
         panic!("the well-formed challenge was refused");

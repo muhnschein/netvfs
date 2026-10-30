@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! The `RemoveTree` body (`removeTreeOnWorker`): progress counts files
-//! and folders removed; `JobFinished` carries `files` and `dirs`, also
-//! after a failure.
+//! The `RemoveTree` body: progress counts files and folders removed; `JobFinished` carries `files` and `dirs`, also after a failure.
 
 use super::progress::JobProgress;
 use super::{Extra, JobOutcome, count};
@@ -17,7 +15,7 @@ pub fn tree_extra(counts: TreeCounts) -> Extra {
     extra
 }
 
-/// Removes `path` and everything below it; `report` gets the progress.
+/// Removes `path` and everything below it.
 pub fn remove_tree<F: FnMut(i64, i64)>(
     conn: &mut Conn,
     path: &[u8],

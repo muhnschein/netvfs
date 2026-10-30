@@ -1,12 +1,5 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! Callbacks from C++ into Rust (T6, T7). Every trampoline runs its Rust
-//! code through [`enter`]: a panic is caught there and never unwinds into
-//! C++; the trampoline returns its "stop" value instead (0, -1 or
-//! `NVB_ID_CANCEL`), every later call of the same context returns it at
-//! once, and the call that passed the context reports the panic as an
-//! `Internal` [`Status`]. (Release builds abort on a panic: nothing unwinds
-//! there either.) While a callback runs, the `Conn` and `Handle` methods of
-//! this thread refuse to run (T6), see [`active`].
+//! Callbacks from C++ into Rust. Every trampoline runs its Rust code through [`enter`]: a panic is caught there and never unwinds into C++; the trampoline returns its "stop" value (0, -1 or `NVB_ID_CANCEL`), every later call of the same context returns it at once, and the call that passed the context reports the panic as an `Internal` [`Status`]. (Release builds abort on a panic.) While a callback runs, the `Conn` and `Handle` methods of this thread refuse to run, see [`active`].
 
 use super::Ffi;
 use super::marshal::{self, Identity, PromptRequest};
@@ -24,12 +17,10 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Mutex;
 
 thread_local! {
-    /// How many callbacks this thread is inside.
     static DEPTH: Cell<u32> = const { Cell::new(0) };
 }
 
-/// Panics of callbacks that no call returns to (posted functions,
-/// discovery hooks), oldest first, at most [`MAX_ORPHANS`].
+/// Panics of callbacks no call returns to (posted functions, discovery hooks), oldest first, at most [`MAX_ORPHANS`].
 static ORPHANS: Mutex<Vec<String>> = Mutex::new(Vec::new());
 const MAX_ORPHANS: usize = 16;
 
@@ -39,7 +30,6 @@ pub fn active() -> bool {
     DEPTH.with(|d| d.get() > 0)
 }
 
-/// Marks the thread as inside a callback while it lives.
 struct Inside;
 
 impl Inside {
@@ -55,7 +45,6 @@ impl Drop for Inside {
     }
 }
 
-/// The text of a panic's payload.
 fn panic_text(payload: &(dyn Any + Send)) -> String {
     if let Some(s) = payload.downcast_ref::<&str>() {
         (*s).to_owned()
@@ -66,7 +55,6 @@ fn panic_text(payload: &(dyn Any + Send)) -> String {
     }
 }
 
-/// Keeps the panic of a callback no call returns to.
 pub(super) fn record_orphan(text: String) {
     let mut orphans = ORPHANS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     if orphans.len() >= MAX_ORPHANS {
@@ -81,8 +69,7 @@ pub fn take_orphan_panics() -> Vec<String> {
     std::mem::take(&mut *ORPHANS.lock().unwrap_or_else(std::sync::PoisonError::into_inner))
 }
 
-/// The context of one callback target: what the trampolines reach through
-/// their `void *ctx`, and the first panic of the target.
+/// The context of one callback target: what the trampolines reach through `void *ctx`, and the target's first panic.
 #[derive(Debug)]
 pub(super) struct Ctx<T> {
     target: T,
@@ -94,19 +81,16 @@ impl<T> Ctx<T> {
         Self { target, panic: None }
     }
 
-    /// The `void *ctx` for C. Valid while `self` stays where it is and is
-    /// not otherwise used.
+    /// The `void *ctx` for C. Valid while `self` stays where it is and is not otherwise used.
     pub(super) fn as_ctx(&mut self) -> *mut c_void {
         std::ptr::from_mut(self).cast()
     }
 
-    /// The panic, if the target panicked.
     pub(super) fn take_panic(&mut self) -> Option<String> {
         self.panic.take()
     }
 
-    /// `result` of the call that passed this context, unless the target
-    /// panicked: then `Internal`.
+    /// `result` of the call that passed this context, unless the target panicked: then `Internal`.
     pub(super) fn finish<R>(mut self, result: Result<R, Status>) -> Result<R, Status> {
         match self.take_panic() {
             Some(text) => Err(panicked(&text)),
@@ -121,14 +105,10 @@ pub fn panicked(text: &str) -> Status {
     Status::internal(format!("callback panicked: {text}"))
 }
 
-/// Runs `f` on the target behind `ctx`, catching a panic. Returns
-/// `fallback` when `ctx` is NULL, when the target panicked before, or when
-/// it panics now.
+/// Runs `f` on the target behind `ctx`, catching a panic. Returns `fallback` when `ctx` is NULL, the target panicked before, or panics now.
 ///
 /// # Safety
-/// `ctx` is NULL or the `as_ctx()` of a live `Ctx<T>` that nothing else
-/// uses while the callback runs (T6: callbacks run on the calling thread,
-/// during the call that passed the context).
+/// `ctx` is NULL or the `as_ctx()` of a live `Ctx<T>` that nothing else uses while the callback runs (callbacks run on the calling thread, during the call that passed the context).
 pub(super) unsafe fn enter<T, R>(ctx: *mut c_void, fallback: R, f: impl FnOnce(&mut T) -> R) -> R {
     // SAFETY: NULL or a live, otherwise unused `Ctx<T>` (contract).
     let Some(ctx) = (unsafe { ctx.cast::<Ctx<T>>().as_mut() }) else {
@@ -147,16 +127,13 @@ pub(super) unsafe fn enter<T, R>(ctx: *mut c_void, fallback: R, f: impl FnOnce(&
     }
 }
 
-// --------------------------------------------------------- list and walk
-
 /// `nvb_list_sink_fn` over `F`: true goes on.
 pub(super) unsafe extern "C" fn list_sink<F: FnMut(&[WireEntry]) -> bool>(
     ctx: *mut c_void,
     entries: *const NvbEntry,
     n: usize,
 ) -> c_int {
-    // SAFETY: `ctx` is the `Ctx<F>` of the conn_list call running on this
-    // thread; `entries` are `n` entries borrowed for this callback (O2).
+    // SAFETY: `ctx` is the `Ctx<F>` of the conn_list call running on this thread; `entries` are `n` entries borrowed for this callback.
     unsafe {
         enter::<F, c_int>(ctx, 0, |sink| {
             let batch: Vec<WireEntry> =
@@ -172,8 +149,7 @@ pub(super) unsafe extern "C" fn walk_visit<F: FnMut(&[u8], WireEntry) -> bool>(
     path: NvbBytes,
     entry: *const NvbEntry,
 ) -> c_int {
-    // SAFETY: `ctx` is the `Ctx<F>` of the walk call running on this thread;
-    // `path` and `entry` are borrowed for this callback (O2).
+    // SAFETY: `ctx` is the `Ctx<F>` of the walk call running on this thread; `path` and `entry` are borrowed for this callback.
     unsafe {
         enter::<F, c_int>(ctx, 0, |visit| match entry.as_ref() {
             Some(e) => c_int::from(visit(marshal::slice(path), marshal::entry(e))),
@@ -181,8 +157,6 @@ pub(super) unsafe extern "C" fn walk_visit<F: FnMut(&[u8], WireEntry) -> bool>(
         })
     }
 }
-
-// --------------------------------------------------- progress and local io
 
 /// Progress of a tree operation or transfer (`nvb_progress`).
 pub trait Progress {
@@ -196,15 +170,13 @@ pub trait Progress {
 
 /// The local side of an upload: reads at a position of the range.
 pub trait ReadAt {
-    /// Fills `buf` from position `pos` (ignored for a FIFO): the bytes read,
-    /// 0 at the end, `None` on an error or cancel.
+    /// Fills `buf` from `pos` (ignored for a FIFO): bytes read, 0 at the end, `None` on error or cancel.
     fn read_at(&mut self, pos: i64, buf: &mut [u8]) -> Option<usize>;
 }
 
 /// The local side of a download: writes at a position of the range.
 pub trait WriteAt {
-    /// Writes `data` at position `pos` (ignored for a FIFO): the bytes
-    /// written, which may be fewer, `None` on an error or cancel.
+    /// Writes `data` at `pos` (ignored for a FIFO): bytes written (may be fewer), `None` on error or cancel.
     fn write_at(&mut self, pos: i64, data: &[u8]) -> Option<usize>;
 }
 
@@ -222,7 +194,6 @@ pub(super) unsafe extern "C" fn progress_canceled<P: Progress + ?Sized>(ctx: *mu
     unsafe { enter::<&mut P, c_int>(ctx, 1, |p| c_int::from(p.canceled())) }
 }
 
-/// -1 unless `n` fits in `cap` (and in an `i64`).
 fn io_count(n: Option<usize>, cap: usize) -> i64 {
     n.filter(|n| *n <= cap).and_then(|n| i64::try_from(n).ok()).unwrap_or(-1)
 }
@@ -233,8 +204,7 @@ pub(super) unsafe extern "C" fn io_read<R: ReadAt + ?Sized>(
     buf: *mut u8,
     cap: usize,
 ) -> i64 {
-    // SAFETY: `ctx` is the `Ctx<&mut R>` of the conn_upload call running on
-    // this thread; `buf` is NULL or `cap` writable bytes for this callback.
+    // SAFETY: `ctx` is the `Ctx<&mut R>` of the conn_upload call running on this thread; `buf` is NULL or `cap` writable bytes for this callback.
     unsafe {
         enter::<&mut R, i64>(ctx, -1, |r| {
             let buf: &mut [u8] =
@@ -250,16 +220,13 @@ pub(super) unsafe extern "C" fn io_write<W: WriteAt + ?Sized>(
     data: *const u8,
     len: usize,
 ) -> i64 {
-    // SAFETY: `ctx` is the `Ctx<&mut W>` of the conn_download call running
-    // on this thread; `data` is NULL or `len` bytes for this callback.
+    // SAFETY: `ctx` is the `Ctx<&mut W>` of the conn_download call running on this thread; `data` is NULL or `len` bytes for this callback.
     unsafe {
         enter::<&mut W, i64>(ctx, -1, |w| {
             io_count(w.write_at(pos, marshal::slice(NvbBytes { ptr: data, len })), len)
         })
     }
 }
-
-// ------------------------------------------------------------- establish
 
 /// The identity hook's verdict (`NVB_ID_*`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -284,9 +251,7 @@ impl Verdict {
     }
 }
 
-/// The answer slot of a prompt: [`Reply::set`] fills it; the last call
-/// counts. C++ copies the answers and wipes its copies (O5); the caller
-/// wipes its own (`Zeroizing`).
+/// The answer slot of a prompt: [`Reply::set`] fills it; the last call counts. C++ copies the answers and wipes its copies; the caller wipes its own (`Zeroizing`).
 #[derive(Debug)]
 pub struct Reply<'r> {
     ffi: Ffi,
@@ -299,26 +264,22 @@ impl Reply<'_> {
     pub fn set<A: AsRef<[u8]>>(&mut self, answers: &[A]) {
         // Pointers to the caller's bytes: no copy of a secret on this side.
         let items: Vec<NvbBytes> = answers.iter().map(|a| NvbBytes::of(a.as_ref())).collect();
-        // SAFETY: `raw` is the slot of the prompt hook running now (T6
-        // allows reply_set there); `items` are borrowed for the call (O1).
+        // SAFETY: `raw` is the slot of the prompt hook running now (reply_set is allowed there); `items` are borrowed for the call.
         unsafe { (self.ffi.t.reply_set)(self.raw, items.as_ptr(), items.len()) }
     }
 }
 
-/// The identity hook: the identity seen, the check's failure (`None`: it
-/// passed).
+/// The identity hook: the identity seen, the check's failure (`None`: it passed).
 pub type IdentityHook<'a> = &'a mut dyn FnMut(&Identity, Option<&Status>) -> Verdict;
 /// The prompt hook: fill the reply and return true, or decline.
 pub type PromptHook<'a> = &'a mut dyn FnMut(&PromptRequest, &mut Reply<'_>) -> bool;
 
-/// The hooks of `conn_establish`. A missing identity hook lets the check
-/// stand; without a prompt hook there is no prompter, so a second factor
-/// fails.
+/// The hooks of `conn_establish`. A missing identity hook lets the check stand; without a prompt hook a second factor fails.
 #[derive(Default)]
 pub struct EstablishHooks<'a> {
     /// After connect, before anything is sent.
     pub identity: Option<IdentityHook<'a>>,
-    /// Keyboard-interactive (XC-15); may block, should give up on cancel.
+    /// Keyboard-interactive; may block, should give up on cancel.
     pub prompt: Option<PromptHook<'a>>,
 }
 
@@ -331,7 +292,6 @@ impl std::fmt::Debug for EstablishHooks<'_> {
     }
 }
 
-/// What the establish trampolines reach: the hooks and the table.
 pub(super) struct EstablishCtx<'h, 'a> {
     pub(super) ffi: Ffi,
     pub(super) hooks: &'h mut EstablishHooks<'a>,
@@ -342,9 +302,7 @@ pub(super) unsafe extern "C" fn identity_hook(
     seen: *const NvbIdentity,
     check: *const NvbError,
 ) -> u32 {
-    // SAFETY: `ctx` is the `Ctx<EstablishCtx>` of the conn_establish call
-    // running on this thread; `seen` and `check` are NULL or borrowed for
-    // this callback (O2). A panic cancels: nothing is sent.
+    // SAFETY: `ctx` is the `Ctx<EstablishCtx>` of the conn_establish call running on this thread; `seen` and `check` are NULL or borrowed for this callback. A panic cancels: nothing is sent.
     unsafe {
         enter::<EstablishCtx<'_, '_>, u32>(ctx, NVB_ID_CANCEL, |c| {
             let (Some(hook), Some(seen)) = (c.hooks.identity.as_mut(), seen.as_ref()) else {
@@ -364,9 +322,7 @@ pub(super) unsafe extern "C" fn prompt_hook(
     n: usize,
     reply: *mut NvbReply,
 ) -> c_int {
-    // SAFETY: `ctx` is the `Ctx<EstablishCtx>` of the conn_establish call
-    // running on this thread; the rest is borrowed for this callback (O2).
-    // A panic declines.
+    // SAFETY: `ctx` is the `Ctx<EstablishCtx>` of the conn_establish call running on this thread; the rest is borrowed for this callback. A panic declines.
     unsafe {
         enter::<EstablishCtx<'_, '_>, c_int>(ctx, 0, |c| {
             let Some(hook) = c.hooks.prompt.as_mut() else { return 0 };
@@ -381,15 +337,11 @@ pub(super) unsafe extern "C" fn prompt_hook(
     }
 }
 
-// ------------------------------------------------------ discovery, post
-
 /// The discovery hook: the full current list after each change.
 pub(super) type NearbyHook = Box<dyn FnMut(Vec<WireNearby>)>;
 
 pub(super) unsafe extern "C" fn discovery_changed(ctx: *mut c_void, items: *const NvbNearby, n: usize) {
-    // SAFETY: `ctx` is the `Ctx<NearbyHook>` a live `Discovery` owns; its
-    // hook runs on the Qt thread only, where the `Discovery` lives (T3);
-    // `items` are borrowed for this callback (O2).
+    // SAFETY: `ctx` is the `Ctx<NearbyHook>` a live `Discovery` owns; its hook runs on the Qt thread only, where the `Discovery` lives; `items` are borrowed for this callback.
     unsafe {
         enter::<NearbyHook, ()>(ctx, (), |hook| {
             hook(marshal::items(items, n).iter().map(|i| marshal::nearby(i)).collect());
@@ -404,8 +356,7 @@ pub(super) unsafe extern "C" fn run_posted(ctx: *mut c_void) {
     if ctx.is_null() {
         return;
     }
-    // SAFETY: `ctx` is the `Box<Posted>` that `Ffi::post` leaked for this
-    // one call; C++ runs each accepted function exactly once.
+    // SAFETY: `ctx` is the `Box<Posted>` that `Ffi::post` leaked for this call; C++ runs each accepted function exactly once.
     let posted = unsafe { Box::from_raw(ctx.cast::<Posted>()) };
     let _inside = Inside::enter();
     if let Err(payload) = catch_unwind(AssertUnwindSafe(posted)) {
@@ -416,8 +367,6 @@ pub(super) unsafe extern "C" fn run_posted(ctx: *mut c_void) {
 #[cfg(test)]
 mod tests {
     //! The trampolines called directly, as C++ would call them.
-    // Tests call the trampolines and readers as C++ would, on data they
-    // made themselves; they may index, count and cast freely.
     #![allow(
         clippy::undocumented_unsafe_blocks,
         clippy::arithmetic_side_effects,
@@ -430,7 +379,6 @@ mod tests {
     use crate::ffi::marshal::EntryBuf;
     use netvfs_bridge_proto::ErrorName;
 
-    // The contexts must have exactly the trampoline's type.
     type Sink<'a> = &'a mut dyn FnMut(&[WireEntry]) -> bool;
     type Visit<'a> = &'a mut dyn FnMut(&[u8], WireEntry) -> bool;
 
@@ -470,13 +418,11 @@ mod tests {
         let p = ctx.as_ctx();
         assert_eq!(unsafe { list_sink::<Sink<'_>>(p, std::ptr::null(), 0) }, 0);
         assert!(!active());
-        // Not called again after its panic.
         assert_eq!(unsafe { list_sink::<Sink<'_>>(p, std::ptr::null(), 0) }, 0);
         assert_eq!(calls.get(), 1);
         let err = ctx.finish(Ok(())).unwrap_err();
         assert_eq!(err.name, ErrorName::Internal);
         assert_eq!(err.message, "callback panicked: sink broke");
-        // A NULL context is the fallback, not a crash.
         assert_eq!(unsafe { list_sink::<Sink<'_>>(std::ptr::null_mut(), std::ptr::null(), 0) }, 0);
     }
 
@@ -498,7 +444,6 @@ mod tests {
         let mut ctx = Ctx::<Visit<'_>>::new(&mut visit);
         let p = ctx.as_ctx();
         assert_eq!(unsafe { walk_visit::<Visit<'_>>(p, NvbBytes::of(b"/t/x"), e.raw()) }, 0);
-        // A NULL entry stops without calling the visitor.
         assert_eq!(unsafe { walk_visit::<Visit<'_>>(p, NvbBytes::of(b"/t/y"), std::ptr::null()) }, 0);
         drop(ctx);
         assert_eq!(got, [(b"/t/x".to_vec(), b"x".to_vec())]);
@@ -573,7 +518,6 @@ mod tests {
         assert_eq!(unsafe { io_read::<dyn ReadAt>(p, 9, buf.as_mut_ptr(), 3) }, 0);
         assert_eq!(unsafe { io_read::<dyn ReadAt>(p, 0, std::ptr::null_mut(), 0) }, 0);
         drop(ctx);
-        // More than asked for is an error.
         c.fail = true;
         let mut ctx = Ctx::new(&mut c as &mut dyn ReadAt);
         assert_eq!(unsafe { io_read::<dyn ReadAt>(ctx.as_ctx(), 0, buf.as_mut_ptr(), 3) }, -1);

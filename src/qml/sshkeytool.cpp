@@ -32,7 +32,7 @@ QString localPath(const QString &path)
         return QUrl(path).toLocalFile();
     return path;
 }
-} // namespace
+}
 
 Result readKeyFile(const QString &path, QByteArray *contents)
 {
@@ -74,7 +74,7 @@ void SshKeyTool::generate()
 void SshKeyTool::importFile(const QString &path, const QString &passphrase)
 {
     SshKeyTools *tools = m_tools;
-    // One shared, self-wiping copy of the passphrase (SEC-5).
+    // One shared, self-wiping copy of the passphrase.
     const auto secret = std::make_shared<Credentials>(QString(), passphrase.toUtf8());
     runKeyJob([tools, path, secret](SshKeyMaterial *out) {
         QByteArray contents;
@@ -118,8 +118,8 @@ void SshKeyTool::finishKeyJob(const Result &result, const SshKeyMaterial &materi
         return;
     }
     if (job != KeyJob::Generate && result.error() == Error::AuthFailed) {
-        // An encrypted file: ask for the passphrase. The message is shown
-        // only when a passphrase was given and was wrong.
+        // An encrypted file: ask for the passphrase. Message shown only when a passphrase was given
+        // and was wrong.
         m_state = State::NeedsPassphrase;
         m_errorText = job == KeyJob::ImportWithPassphrase ? userErrorText(Error::AuthFailed, Activity::KeyFile)
                                                           : QString();
@@ -158,7 +158,7 @@ void SshKeyTool::installWithPassword(const QVariantMap &paramsMap, const QString
     }
     ConnectionParams params = paramsFromVariant(paramsMap);
     params.options.insert(QStringLiteral("auth_mode"), QStringLiteral("password"));
-    params = withBackupDirMode(params);   // ~/.ssh stays private (S-20)
+    params = withBackupDirMode(params);
     Result result;
     Backend *backend = BackendLoader::create(params.provider, &result);
     if (!backend) {
@@ -178,7 +178,7 @@ void SshKeyTool::installWithPassword(const QVariantMap &paramsMap, const QString
         std::unique_ptr<Backend> owned(backend);
         token->attach(backend);
         Result r = establish(backend, params, *credentials);
-        credentials->wipe();   // S-16: used once, not stored
+        credentials->wipe();
         if (r.ok()) {
             r = installAuthorizedKey(backend, publicLine);
             backend->disconnect();
@@ -236,4 +236,4 @@ void SshKeyTool::clear()
     emit installStateChanged();
 }
 
-} // namespace NetVfsUi
+}

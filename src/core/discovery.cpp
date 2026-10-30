@@ -15,16 +15,13 @@ namespace NetVfs {
 
 namespace {
 
-constexpr int MaxQueryBytes = 1400;               // stay well below the interface MTU
+constexpr int MaxQueryBytes = 1400;
 constexpr int QuestionsPerPacket = 20;
 constexpr int MaxBackoffShift = 16;
 constexpr int MaxBrowseCount = 31;
 constexpr int MinTimerDelayMs = 1;
 
-} // namespace
-
-// ------------------------------------------------------------ DiscoveredService
-
+}
 QString DiscoveredService::key() const
 {
     return (serviceType + QLatin1Char('/') + instanceName).toLower();
@@ -64,8 +61,6 @@ ConnectionParams toConnectionParams(const DiscoveredService &service)
     return p;
 }
 
-// ------------------------------------------------------------------ clock
-
 DiscoveryClock::~DiscoveryClock() = default;
 
 qint64 DiscoveryClock::monotonicMs() const
@@ -82,8 +77,6 @@ QDateTime DiscoveryClock::wallTime() const
 {
     return QDateTime::currentDateTimeUtc();
 }
-
-// -------------------------------------------------------------- Discovery
 
 class Discovery::Private
 {
@@ -116,7 +109,7 @@ public:
     QTimer timer;
     qint64 nextBrowseAt = 0;
     int browseCount = 0;
-    quint64 generation = 0;      // bumped whenever the cache is dropped; aborts stale emissions
+    quint64 generation = 0;
 };
 
 int Discovery::queryIntervalMs(int n)
@@ -256,7 +249,7 @@ void Discovery::Private::sendBrowse(qint64 at) const
         question.type = Dns::TypePtr;
         message.questions.append(question);
     }
-    // Known-answer suppression (RFC 6762 section 7.1): as many as fit.
+    // Known-answer suppression (RFC 6762 section 7.1).
     const QVector<Dns::Record> known = cache.knownAnswers(at);
     for (const Dns::Record &r : known) {
         message.answers.append(r);
@@ -305,4 +298,4 @@ void Discovery::Private::arm()
     timer.start(static_cast<int>(std::min<qint64>(delay, INT_MAX)));
 }
 
-} // namespace NetVfs
+}

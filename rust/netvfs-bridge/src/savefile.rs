@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! Atomic file replacement, as `QSaveFile` does it: a temporary file in the
-//! same folder, written and synced, then renamed over the target. Readers
-//! see the old file or the new one, never a part.
+//! Atomic file replacement like `QSaveFile`: temporary file in the same folder, synced, renamed over the target.
 
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
@@ -9,21 +7,19 @@ use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 
-/// The mode of the new file.
+/// Mode of the new file.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Mode {
-    /// The replaced file's permission bits; a new file is the owner's only
-    /// (`0600`, where `QSaveFile` gives `0666` less the umask).
+    /// Replaced file's permission bits; a new file gets `0600`.
     KeepOrDefault,
-    /// Exactly these bits (`QFileDevice::setPermissions` after opening).
+    /// Exactly these bits.
     Exactly(u32),
 }
 
 /// Replaces `path` by `contents`, creating it if needed.
 ///
 /// # Errors
-/// When the folder is not writable or the disk is full; `path` is then
-/// unchanged and no temporary file is left.
+/// Folder not writable or disk full; `path` is then unchanged and no temporary file is left.
 pub fn save(path: &Path, contents: &[u8], mode: Mode) -> io::Result<()> {
     static NEXT: AtomicU32 = AtomicU32::new(0);
     let (temp, mut file) = create_temporary(path, &NEXT)?;
@@ -46,8 +42,7 @@ fn write_synced(file: &mut File, path: &Path, contents: &[u8], mode: Mode) -> io
     file.sync_all()
 }
 
-/// `<name>.<pid>-<n>` next to `path`, created exclusively; `next` counts
-/// the names tried. A name left by an earlier process is skipped.
+/// `<name>.<pid>-<n>` next to `path`, created exclusively; names left by an earlier process are skipped.
 fn create_temporary(path: &Path, next: &AtomicU32) -> io::Result<(PathBuf, File)> {
     let name = path.file_name().ok_or_else(|| io::Error::from(io::ErrorKind::InvalidInput))?;
     let mut last = io::Error::from(io::ErrorKind::AlreadyExists);
@@ -91,11 +86,9 @@ mod tests {
         assert_eq!((fs::read(&path).unwrap(), mode(&path)), (b"two".to_vec(), 0o640));
         save(&path, b"three", Mode::Exactly(0o600)).unwrap();
         assert_eq!(mode(&path), 0o600);
-        // A new file: the owner's only, as the temporary file was created.
         let fresh = dir.join("g");
         save(&fresh, b"", Mode::KeepOrDefault).unwrap();
         assert_eq!(mode(&fresh), 0o600);
-        // Nothing else is left in the folder.
         let mut names: Vec<_> = fs::read_dir(dir.path()).unwrap().map(|e| e.unwrap().file_name()).collect();
         names.sort();
         assert_eq!(names, ["f", "g"]);
@@ -105,7 +98,6 @@ mod tests {
     fn failures_leave_nothing() {
         let dir = TempDir::new();
         save(&dir.join("missing/f"), b"x", Mode::KeepOrDefault).unwrap_err();
-        // Renaming over a folder fails after the write.
         fs::create_dir(dir.join("d")).unwrap();
         fs::write(dir.join("d/inside"), b"").unwrap();
         save(&dir.join("d"), b"x", Mode::KeepOrDefault).unwrap_err();
@@ -125,7 +117,6 @@ mod tests {
         let (b, _) = create_temporary(&path, &next).unwrap();
         assert_eq!(a, dir.join(&format!("f.{}-0", std::process::id())));
         assert_eq!(b, dir.join(&format!("f.{}-1", std::process::id())));
-        // Names in use are skipped; up to 16 are tried.
         for n in 2..4 {
             dir.write(&format!("f.{}-{n}", std::process::id()), "");
         }
@@ -136,7 +127,6 @@ mod tests {
         }
         assert_eq!(create_temporary(&path, &next).unwrap_err().kind(), io::ErrorKind::AlreadyExists);
         assert_eq!(next.load(Ordering::Relaxed), 21);
-        // Other failures are not retried.
         let missing = dir.join("missing/f");
         assert_eq!(create_temporary(&missing, &next).unwrap_err().kind(), io::ErrorKind::NotFound);
         assert_eq!(next.load(Ordering::Relaxed), 22);

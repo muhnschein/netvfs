@@ -11,7 +11,7 @@
 namespace NetVfs {
 
 namespace {
-const char AuthMethod[] = "password";   // signond method and mechanism name
+const char AuthMethod[] = "password";
 }
 
 SecretSource::SecretSource(QObject *parent)
@@ -89,16 +89,16 @@ void SignonSecretSource::noSecret(const Result &lookup, const QString &userName)
 
 Result secretErrorFromSignon(int signonErrorType)
 {
-    // A-6: only an identity or secret that cannot be used is AuthFailed (and
-    // thus flags the account, SPEC 6.4); a signond outage is not.
+    // Only an unusable identity or secret is AuthFailed (flags the account); a signond outage is
+    // not.
     switch (signonErrorType) {
-    case SignOn::Error::PermissionDenied:          // signond's answer for an unknown identity
+    case SignOn::Error::PermissionDenied:
     case SignOn::Error::IdentityNotFound:
     case SignOn::Error::CredentialsNotAvailable:
     case SignOn::Error::MissingData:
     case SignOn::Error::InvalidCredentials:
     case SignOn::Error::NotAuthorized:
-    case SignOn::Error::UserInteraction:           // the password plugin wants input: no usable secret
+    case SignOn::Error::UserInteraction:
         return Result(Error::AuthFailed, QStringLiteral("The stored credentials cannot be used"));
     default:
         return Result(Error::Internal, QStringLiteral("The credentials service is not available"));
@@ -124,4 +124,4 @@ void SignonSecretSource::finish()
     m_session.clear();
 }
 
-} // namespace NetVfs
+}

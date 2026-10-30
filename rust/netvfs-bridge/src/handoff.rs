@@ -1,8 +1,5 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! The settings handoff (SPEC-v2 XB-15): `OpenAccountSettings`,
-//! `AddAccount` and `OpenStorageSettings` call the platform's settings D-Bus
-//! interface on the session bus, as a table in `handoff.conf` (QSettings INI
-//! syntax) says:
+//! Settings handoff: `OpenAccountSettings`, `AddAccount`, `OpenStorageSettings` call the platform's settings D-Bus interface on the session bus, as the table in `handoff.conf` (QSettings INI syntax) says:
 //!
 //! ```ini
 //! [OpenAccountSettings]
@@ -13,8 +10,7 @@
 //! Arguments=
 //! ```
 //!
-//! `Arguments` is a list of typed values `s:text`, `i:42`, `u:42` and
-//! `b:true`, with the placeholders `{accountId}` and `{provider}`.
+//! `Arguments` is a list of typed values `s:text`, `i:42`, `u:42`, `b:true`, with placeholders `{accountId}` and `{provider}`.
 
 use crate::ini::IniFile;
 use crate::status::Status;
@@ -74,8 +70,7 @@ pub struct Handoff<L> {
 }
 
 impl<L: Launcher> Handoff<L> {
-    /// The table in `config` (normally [`DEFAULT_CONFIG`]); a missing
-    /// file makes every handoff `Unsupported`.
+    /// The table in `config` (normally [`DEFAULT_CONFIG`]); a missing file makes every handoff `Unsupported`.
     pub fn new(config: impl Into<PathBuf>, launcher: L) -> Self {
         Self { config: config.into(), launcher }
     }
@@ -104,8 +99,7 @@ impl<L: Launcher> Handoff<L> {
         self.run(OPEN_STORAGE_SETTINGS, 0, "")
     }
 
-    /// Whether the table has a valid `OpenStorageSettings` entry: the
-    /// feature `storage-settings` of `GetFeatures` (XB-19).
+    /// Whether the table has a valid `OpenStorageSettings` entry (feature `storage-settings` of `GetFeatures`).
     #[must_use]
     pub fn offers_storage_settings(&self) -> bool {
         self.resolve(OPEN_STORAGE_SETTINGS, 0, "").is_ok()
@@ -146,7 +140,7 @@ impl<L: Launcher> Handoff<L> {
         for spec in file.string_list(&key("Arguments")) {
             let spec = qt_trimmed(&spec);
             if spec.is_empty() {
-                continue; // "Arguments=" is an empty list
+                continue;
             }
             let argument = parse_argument(spec, account_id, provider).ok_or_else(|| {
                 Status::new(ErrorName::InvalidName, format!("Invalid settings handoff argument in {group}"))
@@ -164,13 +158,11 @@ fn is_valid_entry(call: &HandoffCall) -> bool {
         && call.path.strip_prefix('/').is_some_and(|rest| is_dbus_name(rest, '/'))
 }
 
-/// 1 to 255 characters of ASCII letters and digits, `_` and `separator`
-/// (a coarse check: the bus refuses what is still invalid).
+/// 1 to 255 ASCII letters, digits, `_` and `separator` (coarse: the bus refuses the rest).
 fn is_dbus_name(s: &str, separator: char) -> bool {
     (1..=255).contains(&s.len()) && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == separator)
 }
 
-/// `QChar::isSpace`.
 const fn is_qt_space(c: char) -> bool {
     matches!(
         c,
@@ -188,7 +180,6 @@ const fn is_qt_space(c: char) -> bool {
     )
 }
 
-/// `QString::trimmed`.
 fn qt_trimmed(s: &str) -> &str {
     s.trim_matches(is_qt_space)
 }
@@ -227,7 +218,7 @@ impl SessionBusLauncher {
 }
 
 impl Launcher for SessionBusLauncher {
-    /// Builds the message now and sends it on the current tokio runtime.
+    /// Builds the message now, sends on the current tokio runtime.
     fn launch(&self, call: &HandoffCall) -> Result<(), Status> {
         let failed = || Status::new(ErrorName::Unsupported, "Settings cannot be opened");
         let bus = self.bus.clone().ok_or_else(failed)?;
@@ -300,7 +291,6 @@ mod tests {
 
     #[test]
     fn resolve_table() {
-        // tst_BridgeUnits::handoff
         let dir = TempDir::new();
         let missing = Handoff::new(dir.join("handoff.conf"), Recorder::default());
         let status = missing.add_account("sftp").unwrap_err();
@@ -328,7 +318,6 @@ mod tests {
         assert_eq!(status.to_string(), "InvalidName: Invalid settings handoff entry AddAccount");
         assert_eq!(handoff.launcher.0.borrow().len(), 1);
 
-        // The shipped table parses.
         let shipped = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../src/bridge/data/handoff.conf");
         let shipped = Handoff::new(shipped, Recorder::default());
         for group in [OPEN_ACCOUNT_SETTINGS, ADD_ACCOUNT] {
@@ -338,7 +327,6 @@ mod tests {
                 ("com.jolla.settings", "/com/jolla/settings/ui", "showAccounts", 0)
             );
         }
-        // jolla-settings' showPage(path) with the Storage page's entry path.
         assert!(shipped.offers_storage_settings());
         shipped.open_storage_settings().unwrap();
         let storage = shipped.launcher.0.borrow().clone();
@@ -357,17 +345,14 @@ mod tests {
     #[test]
     fn storage_settings_entry() {
         let dir = TempDir::new();
-        // A table without the entry offers no storage settings.
         let accounts_only = table(&dir, &entry(""));
         assert!(!accounts_only.offers_storage_settings());
         let status = accounts_only.open_storage_settings().unwrap_err();
         assert_eq!(status.to_string(), "Unsupported: No settings handoff is configured");
-        // An invalid entry neither.
         let invalid = table(&dir, "[OpenStorageSettings]\nService=s.x\nPath=p\nInterface=i.x\nMethod=m\n");
         assert!(!invalid.offers_storage_settings());
         assert_eq!(invalid.open_storage_settings().unwrap_err().name, ErrorName::InvalidName);
         assert!(invalid.launcher.0.borrow().is_empty());
-        // Placeholders: no account, no provider.
         let storage = table(
             &dir,
             "[OpenStorageSettings]\nService=s.x\nPath=/p\nInterface=i.x\nMethod=m\nArguments=i:{accountId},s:{provider}\n",
@@ -386,11 +371,9 @@ mod tests {
         let unsupported = Status::new(ErrorName::Unsupported, "No settings handoff is configured");
         assert_eq!(handoff.open_account_settings(1, "x").unwrap_err(), unsupported);
         assert_eq!(handoff.add_account("x").unwrap_err(), unsupported);
-        // A folder in place of the file reads as empty.
         std::fs::create_dir(dir.join("d")).unwrap();
         let folder = Handoff::new(dir.join("d"), Recorder::default());
         assert_eq!(folder.add_account("x").unwrap_err(), unsupported);
-        // Either the service or the method is enough to be configured.
         for text in ["[AddAccount]\nService=s.x\n", "[AddAccount]\nMethod=m\n"] {
             let handoff = table(&dir, text);
             assert_eq!(handoff.add_account("x").unwrap_err().name, ErrorName::InvalidName);
@@ -411,7 +394,6 @@ mod tests {
         let too_long = "a".repeat(256);
         assert_eq!(check("org.x_1", "/a/b_2", "org.y", "M_3"), Ok(()));
         assert_eq!(check(&long, &format!("/{long}"), &long, &long), Ok(()));
-        // The method's separator is NUL, as in the C++ (QChar()).
         assert_eq!(check("s", "/p", "i", "a\0b"), Ok(()));
         for (service, path, interface, method) in [
             (too_long.as_str(), "/p", "i", "m"),
@@ -452,7 +434,6 @@ mod tests {
         assert_eq!(arguments("i:{accountId}, u:{accountId}"), Ok(vec![Int(12), UInt(12)]));
         assert_eq!(arguments("i:-2147483648,i:+7,i:007"), Ok(vec![Int(i32::MIN), Int(7), Int(7)]));
         assert_eq!(arguments("u:4294967295,u:+1"), Ok(vec![UInt(u32::MAX), UInt(1)]));
-        // QString::toInt trims all of Qt's white space (written as INI escapes).
         assert_eq!(arguments("\"i: \\xa0\\t5\""), Ok(vec![Int(5)]));
         assert_eq!(arguments("\"u:\\x3000\\t5 \""), Ok(vec![UInt(5)]));
         assert_eq!(arguments("b:true,b:false"), Ok(vec![Bool(true), Bool(false)]));
@@ -528,7 +509,6 @@ mod tests {
         call.arguments.clear();
         call.method = "plain".into();
         launcher.launch(&call).unwrap();
-        // The bus refuses what the table check lets through.
         call.path = "/a//b".into();
         assert_eq!(launcher.launch(&call).unwrap_err().message, "Settings cannot be opened");
 

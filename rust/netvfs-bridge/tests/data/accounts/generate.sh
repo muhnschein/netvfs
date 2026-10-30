@@ -1,11 +1,7 @@
 #!/bin/sh
 # SPDX-License-Identifier: LGPL-2.1-or-later
-# Regenerates the netvfs-accounts answers of netvfs-bridge's `accounts::qds`
-# tests with the helper's own encoder (golden.rs includes its wire.rs and
-# qvariant.rs). Built with rustc alone, outside the workspace and its lints;
-# run from anywhere:
-#
-#   rust/netvfs-bridge/tests/data/accounts/generate.sh
+# Regenerates the netvfs-accounts answers for the `accounts::qds` tests with the helper's own encoder.
+# Built with rustc alone, outside the workspace.
 set -eu
 here=$(cd "$(dirname "$0")" && pwd)
 work=$(mktemp -d)

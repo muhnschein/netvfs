@@ -171,8 +171,7 @@ impl Writer {
         self
     }
 
-    /// Pads with zeros to a multiple of 8 (the alignment of negotiate
-    /// contexts, compound elements and directory entries).
+    /// Pads with zeros to a multiple of 8 (negotiate contexts, compound elements, directory entries).
     pub fn align8(&mut self) -> &mut Self {
         while !self.buf.len().is_multiple_of(8) {
             self.buf.push(0);

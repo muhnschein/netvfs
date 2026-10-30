@@ -1,16 +1,10 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! netvfs-sftp against real servers: the interop containers of
-//! tests/interop/sftp (OpenSSH 10.3p1, 9.6p1 and 8.9p1), which `run.sh`
-//! starts and describes in the file that NETVFS_SFTP_INTEROP_CONFIG names.
-//! Without it every test passes at once and says that it was skipped.
+//! netvfs-sftp against real servers: the interop containers of tests/interop/sftp (OpenSSH 10.3p1, 9.6p1 and 8.9p1),
+//! which `run.sh` starts and describes in the file `NETVFS_SFTP_INTEROP_CONFIG` names. Without it every test passes at
+//! once and says it was skipped.
 //!
-//! The C++ matrix (tst_interop_sftp) checks the SPEC rows through the
-//! plugin; these check the crate's own decisions where only a real server
-//! can tell: the algorithms negotiated, the narrowing to a pinned key type,
-//! the sign-in methods, what each server offers, and the requests as they
-//! land on the server's disk. Tests run in parallel against shared
-//! servers, so each works in folders of its own, and a server log is only
-//! read for lines that a test's own connection adds.
+//! Tests run in parallel against shared servers: each works in folders of its own, and reads a server log only for
+//! lines its own connection adds.
 #![allow(
     missing_docs,
     clippy::unwrap_used,
@@ -230,8 +224,8 @@ async fn get(sftp: &mut Sftp, path: &str, offset: u64, length: Option<u64>) -> R
     Ok(sink.0)
 }
 
-/// S-2, S-4: what each server negotiates with the hardened lists, read from
-/// the lines this test's own sign-in adds to the server's log.
+/// What each server negotiates with the hardened lists, read from the lines this test's own sign-in adds to the
+/// server's log.
 #[tokio::test]
 async fn negotiates_the_hardened_lists() {
     let Some(s) = servers() else { return };
@@ -258,8 +252,8 @@ async fn negotiates_the_hardened_lists() {
     }
 }
 
-/// S-2: the lists are never widened; a server that offers only what they
-/// leave out is refused, and the message says what it offers.
+/// The lists are never widened; a server that offers only what they leave out is refused, and the message says what
+/// it offers.
 #[tokio::test]
 async fn refuses_what_the_lists_leave_out() {
     let Some(s) = servers() else { return };
@@ -282,9 +276,8 @@ async fn refuses_what_the_lists_leave_out() {
     }
 }
 
-/// S-5, S-6, S-7, SEC-1: each host key type pins (the list is narrowed to
-/// the pinned type, rsa-sha2-512 for RSA); a pinned type the server no
-/// longer offers reports the key it has now, and nothing is sent.
+/// Each host key type pins (the list is narrowed to the pinned type, rsa-sha2-512 for RSA); a pinned type the server
+/// no longer offers reports the key it has now, and nothing is sent.
 #[tokio::test]
 async fn pins_each_host_key_type() {
     let Some(s) = servers() else { return };
@@ -336,8 +329,7 @@ async fn pins_each_host_key_type() {
     }
 }
 
-/// S-10, S-12, S-14: passwords and Ed25519/ECDSA keys; a password is never
-/// tried as a key nor a key as a password.
+/// Passwords and Ed25519/ECDSA keys; a password is never tried as a key nor a key as a password.
 #[tokio::test]
 async fn signs_in_with_passwords_and_keys() {
     let Some(s) = servers() else { return };
@@ -384,7 +376,7 @@ async fn signs_in_with_passwords_and_keys() {
     assert_eq!(as_password.err().map(|e| e.name), Some(ErrorName::AuthFailed));
     assert_eq!(s.log_count("o103", "default", &probe), 0);
 
-    // S-14: a key-only server says so; the password is not offered.
+    // A key-only server says so; the password is not offered.
     let probe = unique("pwprobe");
     let refused =
         sign_in(&s.params("o103", "hardened", &probe, None), &s.credentials(&probe)).await.err().unwrap();
@@ -392,7 +384,7 @@ async fn signs_in_with_passwords_and_keys() {
     assert!(refused.message.contains("only accepts SSH keys"), "{refused:?}");
     assert_eq!(s.log_count("o103", "hardened", &format!("method password for invalid user {probe}")), 0);
 
-    // S-13: a second step without a prompter is refused, not half done.
+    // A second step without a prompter is refused, not half done.
     let twofactor = keys::generate().unwrap();
     s.authorize("o103", "twofactor", &twofactor);
     let credentials = key_credentials("twofactor", &twofactor);
@@ -404,8 +396,7 @@ async fn signs_in_with_passwords_and_keys() {
     assert!(partial.message.contains("second sign-in step"), "{partial:?}");
 }
 
-/// S-11, XS-11: keyboard-interactive with the stored password, and with a
-/// prompter through PAM's one-time code stub.
+/// Keyboard-interactive with the stored password, and with a prompter through PAM's one-time code stub.
 #[tokio::test]
 async fn keyboard_interactive() {
     let Some(s) = servers() else { return };
@@ -437,7 +428,7 @@ async fn keyboard_interactive() {
     assert_eq!(failed.name, ErrorName::AuthFailed);
 }
 
-/// What each server offers, and so what the backend reports (XC-5).
+/// What each server offers, and so what the backend reports.
 #[tokio::test]
 async fn capabilities_of_each_server() {
     let Some(s) = servers() else { return };
@@ -482,8 +473,7 @@ async fn capabilities_of_each_server() {
     }
 }
 
-/// XC-8 to XC-14, XS-4, XS-5 as the server's disk shows them, on OpenSSH
-/// with its extensions and without them.
+/// Directory operations as the server's disk shows them, on OpenSSH with its extensions and without them.
 #[tokio::test]
 async fn files_on_the_servers_disk() {
     let Some(s) = servers() else { return };
@@ -551,7 +541,7 @@ async fn files_on_the_servers_disk() {
             sftp.rename(at("data").as_bytes(), at("sub").as_bytes(), RenameMode::Replace, &c()).await;
         assert_eq!(onto_folder.unwrap_err().name, ErrorName::AlreadyExists);
 
-        // XS-4: SYMLINK in OpenSSH's order lands as asked.
+        // SYMLINK in OpenSSH's order lands as asked.
         sftp.make_symlink(b"../sub dir/target", at("link").as_bytes(), &c()).await.unwrap();
         assert_eq!(s.text("o103", &format!("readlink '{}'", on_disk("link"))), "../sub dir/target");
         assert_eq!(sftp.read_link(at("link").as_bytes(), &c()).await.unwrap(), b"../sub dir/target");
@@ -559,7 +549,7 @@ async fn files_on_the_servers_disk() {
         assert_eq!(link.kind, EntryType::Symlink);
         assert_eq!(sftp.stat(at("link").as_bytes(), true, &c()).await.unwrap_err().name, ErrorName::NotFound);
 
-        // XS-5: modes and times.
+        // Modes and times.
         let changes = Attributes { mode: Some(0o604), mtime_ms: Some(1_200_000_000_000), atime_ms: None };
         sftp.set_attributes(at("data").as_bytes(), &changes, &c()).await.unwrap();
         assert_eq!(s.text("o103", &format!("stat -c '%a %Y' '{}'", on_disk("data"))), "604 1200000000");
@@ -623,8 +613,8 @@ async fn files_on_the_servers_disk() {
     }
 }
 
-/// C-9, C-14: cancel ends a request the server holds back (sftpproxy.py
-/// --hold-file), the connection goes on; a request timeout ends it too.
+/// Cancel ends a request the server holds back (sftpproxy.py --hold-file), the connection goes on; a request
+/// timeout ends it too.
 #[tokio::test]
 async fn cancel_and_request_timeout() {
     let Some(s) = servers() else { return };
@@ -660,7 +650,7 @@ async fn cancel_and_request_timeout() {
 }
 
 /// Refusals after sign-in: no session (MaxSessions 0), no SFTP subsystem.
-/// A dropped connection is ConnectionLost (XC-20).
+/// A dropped connection is ConnectionLost.
 #[tokio::test]
 async fn sessions_and_lost_connections() {
     let Some(s) = servers() else { return };

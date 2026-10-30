@@ -1,13 +1,7 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! Batching of streamed signals (`Batcher` and `EntryBatcher` of
-//! streaming.h, XB-17) and the `List` body (`listOnWorker` of
-//! sessionfiles.cpp).
+//! Batching of streamed signals and the `List` body.
 //!
-//! A [`Batcher`] collects items into batches of at most `max_items` items
-//! or [`MAX_LIST_BATCH_BYTES`] bytes. Before it hands a batch on it takes
-//! the batch's bytes from the session's [`FlowBudget`] (C-10, design §3.4):
-//! the emitter then owns them and gives them to [`Outbox::send_streamed`],
-//! which returns them once written.
+//! A [`Batcher`] collects items into batches of at most `max_items` items or [`MAX_LIST_BATCH_BYTES`] bytes. Before handing a batch on it takes the batch's bytes from the session's [`FlowBudget`]; the emitter then owns them and gives them to [`Outbox::send_streamed`], which returns them once written.
 
 use crate::ffi::Conn;
 use crate::server::encode::OutSignal;
@@ -18,12 +12,10 @@ use netvfs_bridge_proto::{WireEntry, WireWalkItem};
 use std::fmt;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-/// Bytes counted for an entry besides its variable-size fields: the
-/// fixed-size fields and alignment.
+/// Bytes counted for an entry besides its variable-size fields.
 pub const ENTRY_FIXED_BYTES: usize = 96;
 
-/// The wire size of an entry, for the batch byte limit. C++ estimated
-/// 3 × the UTF-16 length; the UTF-8 strings here give the exact size.
+/// The wire size of an entry, for the batch byte limit.
 #[must_use]
 pub const fn entry_wire_size(entry: &WireEntry) -> usize {
     ENTRY_FIXED_BYTES
@@ -34,16 +26,13 @@ pub const fn entry_wire_size(entry: &WireEntry) -> usize {
         .saturating_add(entry.etag.len())
 }
 
-/// The wire size of a `WalkBatch` item: its entry and its path.
+/// The wire size of a `WalkBatch` item.
 #[must_use]
 pub const fn walk_item_wire_size(item: &WireWalkItem) -> usize {
     entry_wire_size(&item.entry).saturating_add(item.path.len())
 }
 
-/// Collects items into batches and hands each full batch, with the bytes
-/// it took from the budget, to `emit` (on the worker thread). `emit`
-/// returns false when the batch could not be sent (session closed), which
-/// stops the producer.
+/// Collects items into batches and hands each full batch, with the bytes it took from the budget, to `emit` (on the worker thread).
 pub struct Batcher<'a, T, E: FnMut(Vec<T>, usize) -> bool> {
     max_items: usize,
     size: fn(&T) -> usize,
@@ -76,9 +65,7 @@ impl<'a, T, E: FnMut(Vec<T>, usize) -> bool> Batcher<'a, T, E> {
         Self { max_items: max_items.max(1), size, emit, budget, cancel, items: Vec::new(), bytes: 0 }
     }
 
-    /// Adds an item, first sending what is collected if the item would
-    /// take the batch over the byte limit, and sending the batch once it
-    /// is full. False to stop: canceled, or a batch could not be sent.
+    /// Adds an item, first sending what is collected if the item would take the batch over the byte limit, and sending the batch once it is full.
     pub fn add(&mut self, item: T) -> bool {
         let bytes = (self.size)(&item);
         if !self.items.is_empty() && self.bytes.saturating_add(bytes) > MAX_LIST_BATCH_BYTES && !self.flush()
@@ -93,9 +80,7 @@ impl<'a, T, E: FnMut(Vec<T>, usize) -> bool> Batcher<'a, T, E> {
         !self.cancel.load(Ordering::Acquire)
     }
 
-    /// Sends what is collected (nothing when empty) once the budget has
-    /// room. False when canceled, when the session is gone, or when the
-    /// batch could not be sent.
+    /// Sends what is collected (nothing when empty) once the budget has room.
     pub fn flush(&mut self) -> bool {
         if self.cancel.load(Ordering::Acquire) {
             return false;
@@ -110,9 +95,7 @@ impl<'a, T, E: FnMut(Vec<T>, usize) -> bool> Batcher<'a, T, E> {
         (self.emit)(std::mem::take(&mut self.items), bytes)
     }
 
-    /// Adds every entry of one backend batch, then sends them, so that
-    /// entries reach the consumer as the protocol produces them (XC-6,
-    /// `EntryBatcher::entries`).
+    /// Adds every entry of one backend batch, then sends them, so that entries reach the consumer as the protocol produces them.
     pub fn add_all(&mut self, batch: &[T]) -> bool
     where
         T: Clone,
@@ -137,9 +120,7 @@ pub fn drain<T, E: FnMut(Vec<T>, usize) -> bool>(
     result
 }
 
-/// The `List` body: lists `dir` in backend batches of `batch` entries and
-/// hands every batch to `emit` (see [`list_batches`]). The caller sends
-/// `ListDone` with the result afterwards, through the core.
+/// The `List` body: lists `dir` in backend batches of `batch` entries and hands every batch to `emit` (see [`list_batches`]). The caller sends `ListDone` through the core afterwards.
 ///
 /// # Errors
 /// The backend's failure; `Canceled` when canceled or when a batch could

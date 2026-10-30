@@ -9,7 +9,6 @@ namespace NetVfs::Rs {
 
 namespace {
 
-// One read fills one QByteArray.
 constexpr qint64 MaxReadBytes = std::numeric_limits<int>::max() / 2;
 
 Result invalid(const char *what)
@@ -17,10 +16,7 @@ Result invalid(const char *what)
     return Result(Error::Internal, QStringLiteral("Invalid %1").arg(QLatin1String(what)));
 }
 
-} // namespace
-
-// ---- read
-
+}
 RsReadHandle::~RsReadHandle()
 {
     if (m_h)
@@ -53,11 +49,9 @@ Result RsReadHandle::close()
     return resultOf(m_t, m_t->read_close(std::exchange(m_h, nullptr)));
 }
 
-// ---- write
-
 RsWriteHandle::~RsWriteHandle()
 {
-    m_t->abort(m_h);   // nothing when committed or aborted (NULL)
+    m_t->abort(m_h);
 }
 
 Result RsWriteHandle::write(const char *data, qint64 length)
@@ -82,4 +76,4 @@ void RsWriteHandle::abort()
     m_t->abort(std::exchange(m_h, nullptr));
 }
 
-} // namespace NetVfs::Rs
+}

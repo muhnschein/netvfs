@@ -21,11 +21,10 @@ namespace {
 const QByteArray PrivateKey("-----BEGIN OPENSSH PRIVATE KEY-----\nAAAAfake\n-----END OPENSSH PRIVATE KEY-----\n");
 const QString PublicLine = QStringLiteral("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFake sailfish-backup");
 
-// Test double for the SFTP plugin's key operations (SPEC-sftp 5.1).
 class FakeKeyTools : public SshKeyTools
 {
 public:
-    QSemaphore *gate = nullptr;   // when set, generate() waits for it
+    QSemaphore *gate = nullptr;
 
     Result generate(SshKeyMaterial *out) override
     {
@@ -147,7 +146,6 @@ private slots:
         QCOMPARE(tool.fingerprint(), QStringLiteral("SHA256:fake"));
         QVERIFY(tool.errorText().isEmpty());
 
-        // SPEC-sftp 2: "netvfs-key-v1:" + base64 of the private key.
         const QString secret = tool.secret();
         QCOMPARE(secret, QStringLiteral("netvfs-key-v1:") + QString::fromLatin1(PrivateKey.toBase64()));
         QByteArray decoded;
@@ -180,7 +178,6 @@ private slots:
 
     void importEncrypted()
     {
-        // SPEC-sftp 5.1: asks for the passphrase when the file is encrypted.
         const QString path = writeFile(QStringLiteral("id_encrypted"), "ENCRYPTED " + PrivateKey);
         SshKeyTool tool(&tools, nullptr);
         tool.importFile(path);
@@ -214,7 +211,6 @@ private slots:
 
     void importRejected()
     {
-        // S-15
         QFETCH(QString, name);
         QFETCH(QByteArray, contents);
         QFETCH(QString, text);
@@ -271,12 +267,10 @@ private slots:
 
     void realSftpPlugin()
     {
-        // Against the real SFTP plugin when it is built in this tree.
         if (!QFileInfo::exists(QStringLiteral(NETVFS_TEST_BACKEND_DIR "/libnetvfs-sftp.so")))
             QSKIP("SFTP backend not built");
         const QByteArray saved = qgetenv("NETVFS_BACKEND_PATH");
         qputenv("NETVFS_BACKEND_PATH", NETVFS_TEST_BACKEND_DIR);
-        // The plugin loads the Rust library of this build on its first call.
         qputenv("NETVFS_RS_LIB", NETVFS_TEST_RS_RELEASE_LIB);
         SshKeyTool tool;
         qputenv("NETVFS_BACKEND_PATH", saved);
@@ -301,13 +295,12 @@ private slots:
         QTest::qWait(100);
         QCOMPARE(tool.state(), SshKeyTool::State::Empty);
         QVERIFY(tool.secret().isEmpty());
-        tool.cancel();   // nothing running
+        tool.cancel();
         QCOMPARE(tool.state(), SshKeyTool::State::Empty);
     }
 
     void installWithPassword()
     {
-        // S-16, S-17
         FakeServer *server = FakeServer::instance();
         server->identity = serverIdentity();
         SshKeyTool tool(&tools, nullptr);
@@ -320,7 +313,7 @@ private slots:
         QCOMPARE(server->fileData(QStringLiteral(".ssh/authorized_keys")), PublicLine.toUtf8() + '\n');
         QVERIFY(logHas(QStringLiteral("authenticate")));
         QVERIFY(changed.count() >= 2);
-        QCOMPARE(tool.state(), SshKeyTool::State::Ready);   // the key itself is unchanged
+        QCOMPARE(tool.state(), SshKeyTool::State::Ready);
     }
 
     void installWrongPassword()
@@ -337,7 +330,7 @@ private slots:
 
     void installChecksPin()
     {
-        // SEC-1: the password is not sent to a server with another key.
+        // the password is not sent to a server with another key.
         FakeServer::instance()->identity = serverIdentity();
         SshKeyTool tool(&tools, nullptr);
         makeReady(&tool);

@@ -1,12 +1,5 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! The shared contract (SPEC-v2 XT-7; C++ `tst_contract` introspection and
-//! goldenSequences) against the `netvfs-bridge` binary with the C ABI and
-//! the fake backend (design §4.2): the introspection it serves is the
-//! contract's XML byte for byte, and every golden sequence of
-//! `tests/bridge/contract` replays, each on a bridge of its own with the
-//! fake accounts helper (account 1) and the sequence's files seeded through
-//! `NETVFS_FAKE_SEED`. Without the C ABI (the variables of `tests/ffi.rs`)
-//! the tests say they are skipped.
+//! Shared contract against the `netvfs-bridge` binary with C ABI and fake backend: served introspection equals the contract XML byte for byte; every golden sequence replays on its own bridge. Skipped without the C ABI.
 #![allow(missing_docs, clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::print_stdout)]
 
 use netvfs_bridge::consent::Consent;
@@ -22,7 +15,7 @@ const HELPER: &str = env!("CARGO_BIN_EXE_netvfs-accounts-fake");
 const FFI_VARIABLES: [&str; 2] = ["NETVFS_BRIDGE_FFI", "NETVFS_BACKEND_PATH"];
 const CONSUMER: &str = "contract";
 
-/// Whether the C ABI is there; says the test is skipped when not.
+/// Whether the C ABI is there; says skipped if not.
 fn have_ffi() -> bool {
     let missing = FFI_VARIABLES.iter().any(|v| std::env::var_os(v).is_none());
     if missing {
@@ -39,14 +32,13 @@ fn runtime() -> tokio::runtime::Runtime {
     tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap()
 }
 
-/// A bridge with the fake accounts helper and `consent`.
+/// Bridge with the fake accounts helper and `consent`.
 fn bridge(consent: Consent) -> BridgeRun {
     let mut run = BridgeRun::new(Path::new(BRIDGE), CONSUMER);
     run.with_consent(consent).with_fake_accounts(Path::new(HELPER));
     run
 }
 
-// tst_contract introspection.
 #[test]
 fn introspection_verbatim_and_ping() {
     if !have_ffi() {
@@ -58,20 +50,16 @@ fn introspection_verbatim_and_ping() {
     runtime().block_on(async {
         let c = run.client().await;
         let z = c.zbus();
-        // Before Hello, and without consent: introspection is no protocol
-        // call.
         for interface in [Some("org.freedesktop.DBus.Introspectable"), None] {
             let reply = z.call_method(None::<&str>, OBJECT_PATH, interface, "Introspect", &()).await.unwrap();
             let served: String = reply.body().deserialize().unwrap();
             assert!(served.as_bytes() == contract.as_slice(), "the served XML differs from the contract");
         }
-        // Peer on any path.
         for path in [OBJECT_PATH, "/", "/other"] {
             let reply =
                 z.call_method(None::<&str>, path, Some("org.freedesktop.DBus.Peer"), "Ping", &()).await;
             assert!(reply.unwrap().body().is_empty(), "{path}");
         }
-        // Introspection of another object is no contract of ours.
         let other = z.call_method(None::<&str>, "/other", None::<&str>, "Introspect", &()).await;
         match other {
             Err(zbus::Error::MethodError(name, _, _)) => {
@@ -91,8 +79,7 @@ fn consent_of(seq: &Sequence) -> Consent {
     }
 }
 
-/// Replays `seq` on a bridge of its own: the consent and the files of the
-/// sequence, on the server of account 1.
+/// Replays `seq` on a bridge of its own.
 async fn replay_on_the_binary(seq: &Sequence) -> Result<(), String> {
     let mut run = BridgeRun::new(Path::new(BRIDGE), CONSUMER);
     let socket = run.socket.clone();
@@ -118,7 +105,6 @@ async fn replay_on_the_binary(seq: &Sequence) -> Result<(), String> {
     outcome.map_err(|e| format!("{e}\n--- netvfs-bridge's stderr:\n{}", run.log()))
 }
 
-// tst_contract goldenSequences.
 #[test]
 fn golden_sequences() {
     if !have_ffi() {

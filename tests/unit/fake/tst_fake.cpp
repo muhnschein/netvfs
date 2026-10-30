@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 // The in-memory FakeBackend is the reference double for consumers and core
-// helpers, so its v2 semantics (SPEC-v2 §4) are tested here.
+// helpers, so its v2 semantics are tested here.
 #include "fakebackend.h"
 #include "identity.h"
 #include "names.h"
@@ -116,7 +116,6 @@ private slots:
         QCOMPARE(e.size, qint64(-1));
         QVERIFY(b->stat(QString(), &e).ok());
         QVERIFY(e.isDir());
-        // XC-7
         QVERIFY(b->stat(QStringLiteral("d/l"), &e).ok());
         QCOMPARE(e.type, EntryType::File);
         QCOMPARE(e.name, QStringLiteral("l"));
@@ -165,7 +164,6 @@ private slots:
         QVERIFY(server->exists(QStringLiteral("a/b/f")));
     }
 
-    // XC-6
     void listingInBatches()
     {
         for (int i = 0; i < 10; ++i)
@@ -192,7 +190,6 @@ private slots:
         QCOMPARE(all.size(), 1);
     }
 
-    // XC-8, XC-9
     void namespaceOperations()
     {
         QVERIFY(b->makeDir(QStringLiteral("d"), true).ok());
@@ -209,7 +206,6 @@ private slots:
         QCOMPARE(b->removeFile(QStringLiteral("none")).error(), Error::NotFound);
         QVERIFY(b->removeFile(QStringLiteral("d/f")).ok());
         QVERIFY(b->removeDir(QStringLiteral("d")).ok());
-        // dir_mode as the SFTP backend reads it.
         ConnectionParams params;
         params.options.insert(QStringLiteral("dir_mode"), QStringLiteral("0700"));
         FakeBackend other;
@@ -218,14 +214,12 @@ private slots:
         QCOMPARE(server->node(QStringLiteral("p/q")).mode, 0700);
         QVERIFY(b->makeDir(QStringLiteral("r"), true).ok());
         QCOMPARE(server->node(QStringLiteral("r")).mode, FakeServer::DefaultDirMode);
-        // Native tree delete.
         QVERIFY(b->removeTreeNative(QStringLiteral("p")).ok());
         QVERIFY(!server->exists(QStringLiteral("p/q")));
         server->capabilities.flags.remove(Capability::RecursiveDelete);
         QCOMPARE(b->removeTreeNative(QStringLiteral("r")).error(), Error::Unsupported);
     }
 
-    // XC-10
     void renameModes()
     {
         server->addFile(QStringLiteral("a"), "A");
@@ -246,7 +240,6 @@ private slots:
         QVERIFY(server->log.contains(QStringLiteral("rename:dir->moved")));
     }
 
-    // XC-11, XC-12
     void attributesAndLinks()
     {
         server->addFile(QStringLiteral("f"), "data");
@@ -259,7 +252,7 @@ private slots:
         server->capabilities.flags.remove(Capability::SetModified);
         changes.mode = 0644;
         QCOMPARE(b->setAttributes(QStringLiteral("f"), changes).error(), Error::Unsupported);
-        QCOMPARE(server->node(QStringLiteral("f")).mode, 0600);   // nothing changed
+        QCOMPARE(server->node(QStringLiteral("f")).mode, 0600);
         QVERIFY(b->makeHardlink(QStringLiteral("f"), QStringLiteral("h")).ok());
         UploadOptions truncate;
         truncate.write.disposition = WriteOptions::Disposition::Truncate;
@@ -269,7 +262,6 @@ private slots:
         QCOMPARE(b->makeHardlink(QStringLiteral("d"), QStringLiteral("d2")).error(), Error::PermissionDenied);
     }
 
-    // XC-13, XC-14
     void handlesAndTransfers()
     {
         QByteArray data(200 * 1024, Qt::Uninitialized);
@@ -279,7 +271,7 @@ private slots:
         options.write.createMode = 0600;
         QVERIFY(put(QStringLiteral("f"), data, options));
         QCOMPARE(server->node(QStringLiteral("f")).mode, 0600);
-        QVERIFY(!put(QStringLiteral("f"), "again"));   // CreateNew
+        QVERIFY(!put(QStringLiteral("f"), "again"));
         QCOMPARE(server->fileData(QStringLiteral("f")), data);
 
         ReadHandle *raw = nullptr;
@@ -317,7 +309,6 @@ private slots:
         QVERIFY(b->download(QStringLiteral("f"), &sink, range, nullptr).ok());
         QCOMPARE(received, data.mid(100, 70000));
 
-        // Handles go stale with the connection.
         QVERIFY(b->openRead(QStringLiteral("f"), &raw).ok());
         reader.reset(raw);
         b->disconnect();
@@ -325,7 +316,6 @@ private slots:
         QCOMPARE(b->keepAlive().error(), Error::Internal);   // not signed in
     }
 
-    // XC-17..20
     void serverSideWork()
     {
         server->addFile(QStringLiteral("d/f"), "abc");
@@ -350,7 +340,6 @@ private slots:
         QCOMPARE(b->keepAlive().error(), Error::ConnectionLost);
     }
 
-    // XC-15
     void secondFactor()
     {
         server->otp = "123456";

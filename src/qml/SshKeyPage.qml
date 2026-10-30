@@ -4,9 +4,8 @@ import Sailfish.Silica 1.0
 import Sailfish.Pickers 1.0
 import org.netvfs.accounts 1.0
 
-// SPEC-sftp 5.1: generates or imports the account's key, shows the public
-// line with "Copy to clipboard" and offers "Install on server using
-// password" (S-16). The password is used once and not stored.
+// Generates or imports the account's key, shows the public line with "Copy to clipboard" and offers
+// "Install on server using password". The password is used once and not stored.
 Dialog {
     id: dialog
 
@@ -17,7 +16,6 @@ Dialog {
     property var params: ({})
 
     property string _keyPath
-    // Null-safe views of the tool, for the bindings below.
     readonly property int _state: keyTool ? keyTool.state : SshKeyTool.Empty
     readonly property int _installState: keyTool ? keyTool.installState : SshKeyTool.InstallIdle
     readonly property bool _hasKey: keyTool !== null && keyTool.hasKey

@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-// The netvfs-bridge binary under socket activation (SPEC-v2 XB-2, XB-4):
+// The netvfs-bridge binary under socket activation:
 // the test plays systemd (a listening socket on fd 3, LISTEN_FDS and
 // LISTEN_PID), talks to the bridge through it from libdbus and expects the
 // idle exit. The bridge lists its accounts through the built netvfs-accounts
-// (XB-2a), as it does on the device.
+// as it does on the device.
 #include "accountsfixture.h"
 #include "bridgetest.h"
 
@@ -136,7 +136,7 @@ void tst_BridgeProcess::socketActivation()
               + "\nDataDir=.local/share/proc-test\n");
     writeFile(dir.path() + QStringLiteral("/config/netvfs/bridge.conf"), "[Consent]\nproc-test=granted\n");
     QDir().mkpath(dir.path() + QStringLiteral("/home"));
-    // XB-2a: one Files account in a private database, which the bridge reads
+    // one Files account in a private database, which the bridge reads
     // through the accounts helper (ACCOUNTS and AG_* are in the environment).
     NetVfs::Test::AccountsFixture accounts({ QStringLiteral("sftp") });
     const int accountId = accounts.createAccount(
@@ -165,14 +165,13 @@ void tst_BridgeProcess::socketActivation()
         QCOMPARE(client.call("GetConsent").args.value(0).toString(), QStringLiteral("granted"));
         const QVariantList locations = client.call("ListLocations").args.value(0).toList();
         QCOMPARE(locations.size(), 1);
-        const QVariantList location = locations.at(0).toList();   // (id, provider, name, info)
+        const QVariantList location = locations.at(0).toList();
         QCOMPARE(location.value(0).toString(), QStringLiteral("account:%1").arg(accountId));
         QCOMPARE(location.value(3).toMap().value(QStringLiteral("host")).toString(), QStringLiteral("files.example"));
         client.close();
     }
-    // XB-2: gone after the idle time with no client and no job.
+    // gone after the idle time with no client and no job.
     QCOMPARE(waitExit(pid, 10000), 0);
-    // XB-4: the bridge wrote nothing into the consumer's folder.
     QVERIFY(!QFileInfo::exists(dir.path() + QStringLiteral("/home/.local/share/proc-test")));
 }
 

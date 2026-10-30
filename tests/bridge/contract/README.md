@@ -1,17 +1,9 @@
-# netvfs-bridge protocol contract (SPEC-v2 XT-7)
+# netvfs-bridge protocol contract
 
-Shared with consumers (the file browser's fake bridge replays the same files).
+Shared with consumers: lautta's `tests/bridge-contract/` holds same JSON and XML, byte for byte.
 
-- `org.netvfs.Bridge1.xml`: the introspection data the bridge serves. The Rust bridge serves
-  its copy, `rust/netvfs-bridge-proto/org.netvfs.Bridge1.xml`; the crate's `tests/contract.rs`
-  fails when the two differ or when the method table or the signals differ from the XML, and
-  `tst_contract` when the running bridge serves anything else or a reply or signal has another
-  signature.
-- `*.json`: golden message sequences, replayed against the `netvfs-bridge` binary by
-  `tst_contract` (a libdbus client, C++) and by `rust/netvfs-bridge/tests/contract.rs` (zbus),
-  both with the in-memory FakeBackend behind one account, `account:1` (provider `fake`, name
-  `Fake 1`, host `fake.example`), and against the fake bridge by the protocol crate's
-  `tests/contract.rs`.
+- `org.netvfs.Bridge1.xml`: introspection data bridge serves. Copy in `rust/netvfs-bridge-proto/org.netvfs.Bridge1.xml`; crate's `tests/contract.rs` fails when copies, method table or signals differ; `tst_contract` when running bridge serves anything else or reply/signal signature differs.
+- `*.json`: golden message sequences, replayed against `netvfs-bridge` by `tst_contract` (libdbus, C++) and `rust/netvfs-bridge/tests/contract.rs` (zbus), with in-memory FakeBackend behind one account `account:1` (provider `fake`, name `Fake 1`, host `fake.example`); and against fake bridge by protocol crate's `tests/contract.rs`.
 
 ## Sequence format
 
@@ -28,13 +20,8 @@ Shared with consumers (the file browser's fake bridge replays the same files).
 }
 ```
 
-Steps run in order on one connection. A `call` waits for its reply; a `signal` step waits for
-the next signal of that name (signals of other names may arrive in between).
+Steps in order, one connection. `call` waits for reply; `signal` waits for next signal of that name (others may arrive between).
 
-Values: numbers for `y q u i x`, `true`/`false` for `b`, strings for `s`, `{"bytes": "text"}`
-(UTF-8) or `{"hex": "00ff"}` for `ay`, arrays for arrays and structs, objects for `a{sv}`
-(integer values are sent as `x`).
+Values: numbers for `y q u i x`; `true`/`false` for `b`; strings for `s`; `{"bytes": "text"}` (UTF-8) or `{"hex": "00ff"}` for `ay`; arrays for arrays and structs; objects for `a{sv}` (integers sent as `x`).
 
-Matching replies and signals: `"*"` matches anything; `"$name"` binds the value on first use
-and must be equal afterwards (and is substituted in later `args`); an object matches the keys
-it lists; an array whose last element is `"..."` matches a prefix.
+Matching: `"*"` anything; `"$name"` binds on first use, equal afterwards, substituted in later `args`; object matches keys it lists; array ending in `"..."` matches prefix.

@@ -1,17 +1,9 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! The connection state of a location (SPEC-v2 XB-12; `state` and
-//! `stateError` of `ListLocations`, XB-10): what the connections of its
-//! pool are doing now, as their workers report it.
+//! The connection state of a location (`state` and `stateError` of `ListLocations`): what the connections of its pool are doing now, as their workers report it.
 //!
-//! The pools live in the consumer's bridge process (XB-2: one per
-//! consumer), shared by all of its sessions, so a state is the consumer's,
-//! the same for each of its sessions. Each worker has a [`Phase`]; the
-//! pool's [`StateTracker`], shared with its workers, holds the outcome of
-//! the last attempt to connect and raises the [`StateSignal`] when either
-//! changes. Only the pool's live connections count: one being closed
-//! (`Disconnect`, idle, evicted) is not established any more, and its
-//! failure would say nothing about the server. `CopyAcross` connects
-//! outside the pools and is not counted.
+//! The pools live in the consumer's bridge process, shared by all its sessions, so a state is the consumer's, the same for each session.
+//! Each worker has a [`Phase`]; the pool's [`StateTracker`], shared with its workers, holds the outcome of the last connect attempt and raises the [`StateSignal`] when either changes.
+//! Only the pool's live connections count: one being closed (`Disconnect`, idle, evicted) is not established any more, and its failure says nothing about the server. `CopyAcross` connects outside the pools and is not counted.
 
 use netvfs_bridge_proto::ErrorName;
 use netvfs_bridge_proto::location_state;
@@ -22,18 +14,14 @@ use std::sync::{Arc, Mutex, PoisonError};
 /// What `ListLocations` says of a location's connections.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ConnectionState {
-    /// None is established or being established: never used yet, closed
-    /// after [`CONNECTION_IDLE`](super::pool::CONNECTION_IDLE), dropped, or
-    /// after `Disconnect`.
+    /// None is established or being established.
     #[default]
     Disconnected,
-    /// None is established, at least one is being established (connect,
-    /// identity, sign-in, a question to the consumer).
+    /// None is established, at least one is being established (connect, identity, sign-in, a question to the consumer).
     Connecting,
     /// At least one is established (connected and authenticated).
     Connected,
-    /// As `Disconnected`, but the last attempt to connect failed, with this
-    /// error; the next attempt that succeeds, or `Disconnect`, clears it.
+    /// As `Disconnected`, but the last attempt to connect failed, with this error.
     Failed(ErrorName),
 }
 
@@ -49,7 +37,7 @@ impl ConnectionState {
         }
     }
 
-    /// The value of `stateError`: the XC-21 name of a failed state.
+    /// The value of `stateError`.
     #[must_use]
     pub const fn error(self) -> Option<ErrorName> {
         match self {
@@ -62,12 +50,12 @@ impl ConnectionState {
 /// Where a worker's connection is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Phase {
-    /// No connection: none yet, or it was dropped or freed.
+    /// No connection.
     #[default]
     Closed,
     /// Being created and established.
     Connecting,
-    /// Established: connected and authenticated.
+    /// Established.
     Established,
 }
 
@@ -76,10 +64,7 @@ struct Signal {
     wake: Box<dyn Fn() + Send + Sync>,
 }
 
-/// Tells the core that a connection state may have changed: the first
-/// [`raise`](StateSignal::raise) calls the wake function, later ones only
-/// once the core has looked ([`take`](StateSignal::take)), so a burst of
-/// changes costs one wake-up. Any thread; cheap to clone.
+/// Tells the core that a connection state may have changed.
 #[derive(Clone)]
 pub struct StateSignal(Arc<Signal>);
 
@@ -90,15 +75,13 @@ impl fmt::Debug for StateSignal {
 }
 
 impl Default for StateSignal {
-    /// A signal nobody listens to.
     fn default() -> Self {
         Self::new(|| {})
     }
 }
 
 impl StateSignal {
-    /// Calls `wake` on a change; it must not block (it runs on worker
-    /// threads and on the core's).
+    /// Calls `wake` on a change.
     pub fn new(wake: impl Fn() + Send + Sync + 'static) -> Self {
         Self(Arc::new(Signal { raised: AtomicBool::new(false), wake: Box::new(wake) }))
     }
@@ -110,16 +93,14 @@ impl StateSignal {
         }
     }
 
-    /// The core looks at the states now: whether one may have changed
-    /// since it last did. The next change wakes it again.
+    /// The core looks at the states now.
     #[must_use]
     pub fn take(&self) -> bool {
         self.0.raised.swap(false, Ordering::AcqRel)
     }
 }
 
-/// The outcome of a pool's last attempt to connect, shared by the pool and
-/// its workers, and the signal of its changes and theirs.
+/// The outcome of a pool's last attempt to connect, shared by the pool and its workers, and the signal of its changes and theirs.
 #[derive(Debug, Default)]
 pub struct StateTracker {
     failure: Mutex<Option<ErrorName>>,
@@ -127,7 +108,7 @@ pub struct StateTracker {
 }
 
 impl StateTracker {
-    /// No attempt yet; changes raise `signal`.
+    /// No attempt yet.
     #[must_use]
     pub fn new(signal: StateSignal) -> Arc<Self> {
         Arc::new(Self { failure: Mutex::new(None), signal })
@@ -152,7 +133,7 @@ impl StateTracker {
         self.set_failure(Some(name));
     }
 
-    /// An attempt succeeded, or the user disconnected: no failure to show.
+    /// An attempt succeeded, or the user disconnected.
     pub fn clear(&self) {
         self.set_failure(None);
     }
@@ -199,7 +180,6 @@ mod tests {
         let (woken, signal) = counting();
         assert!(!signal.take());
         signal.raise();
-        // A clone is the same signal.
         let clone = signal.clone();
         clone.raise();
         assert_eq!(woken.load(Ordering::Acquire), 1);
@@ -208,7 +188,6 @@ mod tests {
         assert!(!signal.take());
         signal.raise();
         assert_eq!(woken.load(Ordering::Acquire), 2);
-        // Nobody listens.
         StateSignal::default().raise();
     }
 

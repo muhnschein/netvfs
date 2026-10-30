@@ -68,8 +68,7 @@ bool toVariant(const nvb_value &value, QVariant *out)
     }
 }
 
-} // namespace
-
+}
 Result toParams(const nvb_params &in, ConnectionParams *out)
 {
     ConnectionParams params;
@@ -140,8 +139,7 @@ const nvb_bytes *fillStrings(Arena &arena, const QStringList &strings, size_t *c
     return items;
 }
 
-} // namespace
-
+}
 nvb_capabilities *packCapabilities(const Capabilities &capabilities)
 {
     return pack<nvb_capabilities>([&capabilities](auto &arena, nvb_capabilities *out) {
@@ -167,4 +165,4 @@ nvb_url *packUrl(const ConnectionParams &params, const QString &path)
     });
 }
 
-} // namespace NetVfs::Ffi
+}

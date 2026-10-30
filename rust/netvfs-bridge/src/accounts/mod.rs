@@ -1,12 +1,7 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! The accounts (SPEC-v2 XB-2a, XB-7): netvfs accounts whose Files service
-//! is enabled. Only `/usr/libexec/netvfs/netvfs-accounts` (setgid
-//! `privileged`) can read the accounts database; the bridge runs it once per
-//! request ([`helper`]), reads its answer ([`qds`]) and refreshes when a
-//! writer announces a change on the session bus ([`watch`]).
+//! netvfs accounts whose Files service is enabled. Only `/usr/libexec/netvfs/netvfs-accounts` (setgid `privileged`) can read the accounts database; the bridge runs it per request ([`helper`]), reads its answer ([`qds`]), and refreshes on a change announced on the session bus ([`watch`]).
 //!
-//! Secrets stay with signond: [`FilesAccess`] carries the credentials id,
-//! which the C++ side looks up.
+//! Secrets stay with signond: [`FilesAccess`] carries the credentials id, which the C++ side looks up.
 
 pub mod helper;
 pub mod qds;
@@ -60,7 +55,7 @@ pub struct ConnectionParams {
     pub request_timeout_ms: i32,
 }
 
-/// Why an account needs the user (XB-14), as Buteo records it.
+/// Why an account needs the user, as Buteo records it.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Attention {
     /// Nothing to do.
@@ -121,14 +116,12 @@ pub struct FilesAccess {
     pub params: ConnectionParams,
     /// The signond identity holding the secret.
     pub credentials_id: u32,
-    /// A connection may go on without a secret (XA-7).
+    /// A connection may go on without a secret.
     pub secret_optional: bool,
 }
 
 impl Value {
-    /// The value as the C ABI carries it (`nvb_value`): integers widen to
-    /// 64 bits; `None` for what it cannot carry (an invalid value, a
-    /// `qulonglong` above `i64::MAX`, a nested map: design §6.10).
+    /// The value as the C ABI carries it (`nvb_value`): integers widen to 64 bits; `None` for what it cannot carry (invalid, `qulonglong` above `i64::MAX`, nested map).
     #[must_use]
     pub fn to_ffi(&self) -> Option<crate::ffi::Value> {
         use crate::ffi::Value as V;
@@ -147,8 +140,7 @@ impl Value {
 }
 
 impl ConnectionParams {
-    /// The parameters as the C ABI carries them; options it cannot carry
-    /// are left out with a warning (design §6.10: none exist today).
+    /// The parameters as the C ABI carries them; uncarriable options are left out with a warning.
     #[must_use]
     pub fn to_ffi(&self) -> crate::ffi::Params {
         let options = self
@@ -174,16 +166,13 @@ impl ConnectionParams {
     }
 }
 
-/// The accounts database, behind a trait so that tests run without the
-/// helper.
+/// The accounts database, behind a trait so tests run without the helper.
 pub trait AccountDirectory {
     /// The Files accounts; none when they cannot be listed (logged).
     fn list(&self) -> impl Future<Output = Vec<AccountLocation>>;
-    /// What a connection to the listed account `id` needs, policy checked
-    /// (XA-4).
+    /// What a connection to listed account `id` needs, policy checked.
     fn files(&self, id: i32) -> impl Future<Output = Result<FilesAccess, Status>>;
-    /// Records `attention` for `id` with the pin seen (XB-14), as Buteo
-    /// does after a failed run; failures are logged.
+    /// Records `attention` for `id` with the pin seen, as Buteo does after a failed run; failures are logged.
     fn set_attention(&self, id: i32, attention: Attention, pin: &str) -> impl Future<Output = ()>;
 }
 

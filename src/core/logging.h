@@ -6,9 +6,8 @@
 
 #include <QtCore/QLoggingCategory>
 
-// SPEC C-16: categories, default level warning.
-// SPEC C-17: never log secrets, keys or SMB challenge material; host names,
-// user names and remote paths at debug level only.
+// Never log secrets, keys or SMB challenge material; host names, user names, remote paths at debug
+// level only.
 NETVFS_EXPORT Q_DECLARE_LOGGING_CATEGORY(lcNetVfsCore)
 NETVFS_EXPORT Q_DECLARE_LOGGING_CATEGORY(lcNetVfsSftp)
 NETVFS_EXPORT Q_DECLARE_LOGGING_CATEGORY(lcNetVfsSmb)

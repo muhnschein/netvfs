@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! The SFTP backend (phase 3 design §4).
+//! SFTP backend.
 #![forbid(unsafe_code)]
 
 pub mod auth;

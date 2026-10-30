@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! The Files slice of `AccountStore` (src/core/accountstore.cpp) over the
-//! database, with what libaccounts-qt does in between: setting keys as
+//! Files slice of `AccountStore` over the database, with what libaccounts-qt does between: keys as
 //! Latin-1, values as `QVariant`s.
 
 use crate::db::{Database, NewSetting, Setting, Unusable};
@@ -9,7 +8,7 @@ use crate::policy::ConnectionParams;
 use crate::qvariant::{QString, Value, cut_to_int, trimmed};
 use crate::wire::{Error, Outcome};
 
-/// The setting keys the helper reads and writes.
+/// Setting keys the helper reads and writes.
 pub mod keys {
     /// The server host.
     pub const HOST: &str = "netvfs/host";
@@ -27,16 +26,16 @@ pub mod keys {
     pub const CREDENTIALS_NEED_UPDATE: &str = "CredentialsNeedUpdate";
     /// The service that asked for the update.
     pub const CREDENTIALS_NEED_UPDATE_FROM: &str = "CredentialsNeedUpdateFrom";
-    /// The pinned host key, below the provider's `netvfs/<provider>/` prefix.
+    /// Pinned host key, below the provider's `netvfs/<provider>/` prefix.
     pub const HOST_KEY_SEEN: &str = "host_key_seen";
     /// A service's enabled flag.
     pub const ENABLED: &str = "enabled";
 }
 
-/// The service type of the Files services (SPEC-v2 XA-1).
+/// Service type of the Files services.
 pub const FILES_SERVICE_TYPE: &str = "netvfs-files";
 
-/// `Attention` (src/core/accountstore.h).
+/// `Attention` of src/core/accountstore.h.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Attention {
     /// No attention.
@@ -69,8 +68,7 @@ impl Attention {
     }
 }
 
-/// What `AccountStore::load(id, Service::Files)` reads, as far as the
-/// helper answers it.
+/// What `AccountStore::load(id, Service::Files)` reads, as far as the helper answers it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AccountConfig {
     /// The account's id.
@@ -89,14 +87,13 @@ pub struct AccountConfig {
     pub attention: Attention,
 }
 
-/// `QString::fromLatin1`: how libaccounts-qt lists keys.
+/// `QString::fromLatin1`, as libaccounts-qt lists keys.
 #[must_use]
 pub fn latin1(bytes: &[u8]) -> String {
     bytes.iter().map(|&b| char::from(b)).collect()
 }
 
-/// `QString::toLatin1`: how libaccounts-qt names a key to libaccounts-glib;
-/// characters beyond Latin-1 become `?`.
+/// `QString::toLatin1`, as libaccounts-qt names keys; characters beyond Latin-1 become `?`.
 #[must_use]
 pub fn to_latin1(s: &str) -> Vec<u8> {
     s.chars().map(|c| u8::try_from(u32::from(c)).unwrap_or(b'?')).collect()
@@ -111,9 +108,8 @@ fn string_of(settings: &[Setting], key: &str) -> QString {
     value_of(settings, key).and_then(Value::to_qstring)
 }
 
-/// The providers whose accounts the helper hands out. An account of any
-/// other provider (say of a removed backend, still in the database) is not
-/// listed.
+/// Providers whose accounts the helper hands out; other providers' accounts (removed backends) are
+/// not listed.
 pub const PROVIDERS: [&str; 2] = ["sftp", "smb"];
 
 /// `serviceName(provider, Service::Files)`.
@@ -135,8 +131,6 @@ impl Store {
         Self { db }
     }
 
-    /// A Files service's settings and whether it is enabled; none when the
-    /// service is not in the database.
     fn files_service(&self, account: i64, provider: Option<&str>) -> Result<(Vec<Setting>, bool), Unusable> {
         let Some(service) = self.db.service_id(&files_service_name(provider))? else {
             return Ok((Vec::new(), false));
@@ -146,11 +140,11 @@ impl Store {
         Ok((settings, enabled))
     }
 
-    /// `filesAccounts()` (XA-1): enabled accounts of one of [`PROVIDERS`]
-    /// whose Files service is enabled, in ascending id order.
+    /// `filesAccounts()`: enabled accounts of a [`PROVIDERS`] provider with an enabled Files
+    /// service, ascending id.
     ///
     /// # Errors
-    /// When the database cannot be read.
+    /// Database unreadable.
     pub fn files_accounts(&self) -> Result<Vec<i32>, Unusable> {
         let mut ids = Vec::new();
         for id in self.db.accounts_with_service_type(FILES_SERVICE_TYPE)? {
@@ -159,7 +153,7 @@ impl Store {
                 continue;
             }
             if self.files_service(id, account.provider.as_deref())?.1 {
-                // AgAccountId is 32 bits: the id as sqlite3_column_int reads it.
+                // AgAccountId is 32 bits: id as sqlite3_column_int reads it.
                 ids.push(cut_to_int(id));
             }
         }
@@ -171,8 +165,7 @@ impl Store {
     /// `load(id, Service::Files)`.
     ///
     /// # Errors
-    /// The outcome to answer: a missing account, one without a server, or
-    /// an unreadable database.
+    /// Outcome to answer: missing account, no server, unreadable database.
     pub fn load(&self, account_id: i32) -> Result<AccountConfig, Outcome> {
         let unusable = |e: Unusable| unusable_outcome(&e);
         let id = i64::from(u32::from_ne_bytes(account_id.to_ne_bytes()));
@@ -201,7 +194,7 @@ impl Store {
         if params.host.as_deref().is_none_or(str::is_empty) {
             return Err(Outcome::failure(Error::Internal, format!("Account {account_id} has no server")));
         }
-        // Account::credentialsId(): the value as an int, as unsigned.
+        // Account::credentialsId(): value as int, then unsigned.
         let credentials_id = value_of(&global, keys::CREDENTIALS_ID)
             .and_then(Value::to_int)
             .map_or(0, |v| u32::from_ne_bytes(v.to_ne_bytes()));
@@ -216,8 +209,8 @@ impl Store {
         })
     }
 
-    /// `setAttention(id, Service::Files, attention, pin)` (XB-14) for a
-    /// loaded account: what it writes, which `write_attention` stores.
+    /// `setAttention(id, Service::Files, attention, pin)` for a loaded account: what it writes,
+    /// which `write_attention` stores.
     #[must_use]
     pub fn attention_settings(
         config: &AccountConfig,
@@ -248,10 +241,10 @@ impl Store {
     /// Stores `settings` for the account.
     ///
     /// # Errors
-    /// `Internal` when the write fails, as `AccountStore` reports it.
+    /// `Internal` when the write fails.
     pub fn write_attention(&mut self, account_id: i32, settings: &[NewSetting]) -> Result<(), Outcome> {
         let id = i64::from(u32::from_ne_bytes(account_id.to_ne_bytes()));
-        // The SQLite reason stays out of the answer: the bridge shows this message as it is.
+        // SQLite reason stays out: the bridge shows this message as is.
         if self.db.store_global(id, settings).is_err() {
             return Err(Outcome::failure(Error::Internal, "Cannot write the accounts database"));
         }
@@ -259,7 +252,7 @@ impl Store {
     }
 }
 
-/// What `databaseUsable()` answers for an unreadable database.
+/// `databaseUsable()` for an unreadable database.
 #[must_use]
 pub fn unusable_outcome(e: &Unusable) -> Outcome {
     Outcome::failure(
@@ -271,9 +264,9 @@ pub fn unusable_outcome(e: &Unusable) -> Outcome {
     )
 }
 
-/// `Paths::normalize()` (SPEC C-15): `None` for an invalid path. Repeated
-/// and trailing separators go, a leading one stays; "." and ".." and NUL are
-/// refused. An empty result is the null string, as `QStringList::join` makes it.
+/// `Paths::normalize()`: `None` for an invalid path. Repeated and trailing separators go, a leading
+/// one stays; ".", ".." and NUL refused. Empty result is the null string, as `QStringList::join`
+/// makes it.
 #[must_use]
 pub fn normalize(path: Option<&str>) -> Option<QString> {
     let path = path.unwrap_or_default();
@@ -370,7 +363,6 @@ mod tests {
         assert_eq!(with_pin[3].text, "'SHA256:x'");
     }
 
-    /// A fresh folder for a test's database.
     fn tempdir(name: &str) -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(format!("netvfs-accounts-store-{name}-{}", std::process::id()));
         std::fs::remove_dir_all(&dir).ok();
@@ -378,8 +370,6 @@ mod tests {
         dir
     }
 
-    /// A database as libaccounts-glib creates it (see db.rs), with accounts
-    /// listed or not for each reason `files_accounts` has.
     fn create(path: &std::path::Path) {
         let c = rusqlite::Connection::open(path).unwrap();
         c.execute_batch(crate::db::TEST_SCHEMA).unwrap();
@@ -440,7 +430,6 @@ mod tests {
                     host: Some("nas".into()),
                     port: 445,
                     username: Some("alice".into()),
-                    // Only the provider's own global settings.
                     options: vec![("security_profile".into(), Value::String("signed".into()))],
                     ..ConnectionParams::default()
                 },
@@ -451,8 +440,7 @@ mod tests {
         );
         assert_eq!(store.load(2).unwrap_err(), Outcome::failure(Error::Internal, "Account 2 has no server"));
         assert_eq!(store.load(3).unwrap_err(), Outcome::failure(Error::NotFound, "Account 3 does not exist"));
-        // A negative id is the account's unsigned id; the credentials id is
-        // read as an int, then taken as unsigned.
+        // Negative id is the account's unsigned id; credentials id read as int, then unsigned.
         let unsigned = store.load(-1).unwrap();
         assert_eq!((unsigned.account_id, unsigned.params.port, unsigned.params.username), (-1, 0, None));
         assert_eq!(unsigned.credentials_id, 4_294_967_294);
@@ -481,14 +469,12 @@ mod tests {
             NewSetting { key: b"CredentialsNeedUpdate".to_vec(), type_string: "b", text: "true".into() },
         ];
         let failed = Outcome::failure(Error::Internal, "Cannot write the accounts database");
-        // Read-only, and no database at all: the write fails.
         let mut read_only = Store::new(Database::open(&path, false).unwrap());
         assert_eq!(read_only.write_attention(1, &settings).unwrap_err(), failed);
         assert_eq!(Store::new(Database::empty()).write_attention(1, &settings).unwrap_err(), failed);
 
         let mut store = Store::new(Database::open(&path, true).unwrap());
         store.write_attention(1, &settings).unwrap();
-        // A negative id is the account's unsigned id.
         store.write_attention(-2, &settings[1..]).unwrap();
         let db = Database::open(&path, false).unwrap();
         let mut global = db.settings(1, 0).unwrap();

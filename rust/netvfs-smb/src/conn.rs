@@ -1,31 +1,17 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! One SMB connection with one session (design §5): message ids and the
-//! credit window, the integrity rules, and two tasks: one writes frames,
-//! one reads them and hands each response to the request waiting for it.
+//! One SMB connection with one session: message ids, credit window, integrity rules, and two tasks (one writes frames, one reads them and hands each response to its waiting request).
 //!
-//! Integrity rules, applied to every received message before anything in
-//! it is used:
-//! - Before the session has keys (NEGOTIATE, SESSION_SETUP rounds) nothing
-//!   can be checked; the preauth hash binds those messages to the keys.
-//! - A request that went encrypted must be answered in a TRANSFORM_HEADER
-//!   that authenticates, errors and interim responses too.
-//! - A signed request must be answered signed, with a valid AES-CMAC
-//!   signature, except by an interim STATUS_PENDING response
-//!   (MS-SMB2 3.2.5.1.3).
+//! Integrity rules, applied to every received message before use:
+//! - Before the session has keys (NEGOTIATE, SESSION_SETUP) nothing can be checked; the preauth hash binds those messages to the keys.
+//! - A request that went encrypted must be answered in a TRANSFORM_HEADER that authenticates, errors and interim responses too.
+//! - A signed request must be answered signed with a valid AES-CMAC signature, except by an interim STATUS_PENDING response (MS-SMB2 3.2.5.1.3).
 //! - A protected message must name the session.
-//! - A compressed frame (0xFC 'SMB') is refused: compression is never
-//!   offered.
-//! - A response must answer an outstanding request, by message id and
-//!   command; a replayed response finds none.
+//! - A compressed frame (0xFC 'SMB') is refused: compression is never offered.
+//! - A response must answer an outstanding request by message id and command; a replayed response finds none.
 //!
-//! Any violation ends the connection: nothing of the message is used, and
-//! what else an attacker or a broken server did cannot be known.
+//! Any violation ends the connection: nothing of the message is used.
 //!
-//! A request is built, signed or sealed and queued for the writer in one
-//! step under the state lock, so that a call dropped at any await (the
-//! runtime drops a call one GRACE after cancel) never leaves half a
-//! request. A dropped [`Ticket`] sends SMB2 CANCEL, and its response is
-//! discarded when it comes; a CREATE abandoned that way is closed then.
+//! A request is built, signed or sealed and queued in one step under the state lock, so a call dropped at any await (runtime drops a call one GRACE after cancel) never leaves half a request. A dropped [`Ticket`] sends SMB2 CANCEL, its response is discarded; a CREATE abandoned that way is closed then.
 
 use std::collections::HashMap;
 use std::future::{Future, poll_fn};
@@ -53,9 +39,9 @@ use crate::msg::{
 use crate::status::NtStatus;
 use crate::transport::{self, INITIAL_MAX_FRAME};
 
-/// Credits kept in hand: requests ask for enough to come back to this.
+/// Credits kept in hand: requests ask for enough to return to this.
 pub const CREDIT_TARGET: u32 = 128;
-/// Never count more credits than this; the server cannot grow the state.
+/// Never count more credits than this.
 const CREDIT_CAP: u32 = 8192;
 /// Interim responses accepted for one request.
 const MAX_INTERIM: u8 = 8;
@@ -77,8 +63,7 @@ pub enum Protect {
     Encrypt,
 }
 
-/// Where a request goes: a tree (0: the session itself) and whether the
-/// tree wants encryption (ENCRYPT_DATA).
+/// Where a request goes: a tree (0: the session itself) and whether the tree wants encryption.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Target {
     /// TreeId.
@@ -238,8 +223,7 @@ pub struct Conn(Arc<Shared>);
 
 impl Shared {
     fn lock(&self) -> MutexGuard<'_, State> {
-        // Nothing panics while holding the lock; if something did, the
-        // state is still consistent enough to fail the calls.
+        // Nothing panics while holding the lock; if one did, state is still good enough to fail the calls.
         self.state.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
@@ -251,8 +235,7 @@ impl Shared {
 }
 
 impl State {
-    /// What a call sees of a failure: once established, every way of
-    /// losing the connection is [`Error::Lost`] (XC-21).
+    /// What a call sees of a failure: once established, every way of losing the connection is [`Error::Lost`].
     fn failure(&self, error: &Error) -> Error {
         match error {
             Error::Lost(_) => error.clone(),
@@ -274,7 +257,6 @@ impl State {
         self.tx = None;
         for (_, entry) in self.pending.drain() {
             if let Some(tx) = entry.tx {
-                // The caller may be gone already.
                 drop(tx.send(Err(seen.clone())));
             }
         }
@@ -322,8 +304,7 @@ impl State {
             return Err(protocol(format!("{total} credits needed, {} granted", self.credits)));
         }
         let first_mid = self.next_mid;
-        // `end` is one past the last id this chain takes, so that one is
-        // below u64::MAX, NOTIFICATION_MID, which no request may use.
+        // `end` is one past the last id this chain takes: below u64::MAX, NOTIFICATION_MID, which no request may use.
         let end = first_mid.checked_add(u64::from(total)).ok_or_else(|| protocol("message ids used up"))?;
         let left = self.credits.saturating_sub(total);
         let top_up = CREDIT_TARGET.saturating_sub(left);
@@ -499,7 +480,6 @@ impl State {
             (Protect::None, _) => Some(msg),
             (Protect::Sign, None) => None,
         };
-        // A CANCEL that cannot go is only a request that runs to its end.
         if let (Some(wire), Some(tx)) = (wire, self.tx.as_ref())
             && let Ok(frame) = transport::frame(&wire)
         {
@@ -512,7 +492,6 @@ impl State {
         if self.credits == 0 {
             return;
         }
-        // Best effort: on failure the handle lives until the session ends.
         drop(self.dispatch(tree_id, protect, &[Element::new(Command::Close, close_request(file_id))], true));
     }
 }
@@ -782,8 +761,6 @@ impl Conn {
             let mut st = self.0.lock();
             if logoff && st.established {
                 let protect = st.protect(Target::SESSION);
-                // Best effort: the session ends with the socket anyway (and
-                // dispatch refuses on a broken connection or without credits).
                 drop(st.dispatch(0, protect, &[Element::new(Command::Logoff, four_byte_request())], true));
             }
             st.fail(Error::Lost(CLOSED.into()));
@@ -844,8 +821,6 @@ impl Ticket {
         let shared = Arc::clone(&self.shared);
         let mut canceled = pin!(cancel.canceled());
         loop {
-            // No entry: the response or the failure is in `rx` already, or
-            // is about to be.
             let deadline = shared.lock().pending.get(&self.mid).map(|p| p.deadline);
             let mut sleep = pin!(async move {
                 match deadline {
@@ -923,7 +898,6 @@ impl Drop for Ticket {
             st.send_cancel(self.mid);
             return;
         }
-        // The response came and nobody took it: an owned handle is closed.
         if let (Some((tree_id, protect)), Ok(Ok(response))) = (self.cleanup, self.rx.try_recv())
             && response.header.command == Command::Create.code()
             && response.status() == NtStatus::SUCCESS
@@ -957,7 +931,6 @@ async fn write_loop(shared: Arc<Shared>, mut wr: OwnedWriteHalf, mut rx: mpsc::U
             return;
         }
     }
-    // The connection is over either way.
     drop(wr.shutdown().await);
 }
 
@@ -993,8 +966,7 @@ fn response(shared: &Shared, element: &[u8], encrypted: bool, keys: Option<&Keys
     }
     let mid = header.message_id;
     if mid == NOTIFICATION_MID {
-        // Oplock and lease breaks, server-to-client notifications: none is
-        // asked for, and nothing in them is used (credits included).
+        // Oplock and lease breaks: none is asked for, nothing in them is used (credits included).
         return Ok(());
     }
     let (protect, session_id) = {
@@ -1015,7 +987,6 @@ fn response(shared: &Shared, element: &[u8], encrypted: bool, keys: Option<&Keys
     let delivery = shared.lock().accept(&header, element)?;
     shared.credits.notify_waiters();
     if let Some(tx) = delivery {
-        // A caller that went just now drops the response with the receiver.
         drop(tx.send(Ok(Response { header, msg: element.to_vec() })));
     }
     Ok(())

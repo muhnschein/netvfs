@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! The confinement (SPEC-v2 XB-2a), each part applied to a fresh probe
-//! process (src/bin/probe.rs), and the helper's own run.
+//! Confinement parts applied to a fresh probe process (src/bin/probe.rs), and the helper's own run.
 #![cfg(feature = "probe")]
 #![allow(clippy::unwrap_used)]
-// The setgid copies need ids and file system flags from libc.
+// Setgid copies need ids and file system flags from libc.
 #![allow(unsafe_code)]
 
 use std::path::{Path, PathBuf};
@@ -14,14 +13,12 @@ const HELPER: &str = env!("CARGO_BIN_EXE_netvfs-accounts");
 const NO_LANDLOCK: i32 = 77;
 const NO_SECCOMP: i32 = 99;
 
-/// Writes to the test's stderr, which the harness shows when a test fails.
-/// The one place this file writes to stderr.
+/// Writes to the test's stderr, shown when a test fails.
 #[allow(clippy::print_stderr)]
 fn note(text: &str) {
     eprintln!("{text}");
 }
 
-/// A fresh folder below the temporary one, removed on drop.
 struct TempDir(PathBuf);
 
 impl TempDir {
@@ -47,7 +44,6 @@ impl Drop for TempDir {
     }
 }
 
-/// A probe's exit status and how many checks it ran.
 fn outcome(output: &std::process::Output) -> (i32, u32) {
     note(String::from_utf8_lossy(&output.stderr).trim_end());
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -59,8 +55,6 @@ fn probe(args: &[&str]) -> (i32, u32) {
     outcome(&Command::new(PROBE).args(args).stdin(Stdio::null()).output().unwrap())
 }
 
-/// Whether this kernel and architecture have seccomp filters (as
-/// `restrict_syscalls()` must then install), asked without the helper.
 fn seccomp_filters() -> bool {
     cfg!(any(
         target_arch = "x86_64",
@@ -70,7 +64,6 @@ fn seccomp_filters() -> bool {
         .is_ok_and(|actions| actions.split_whitespace().any(|a| a == "errno"))
 }
 
-/// The kernel's Landlock ABI, 0 without Landlock, asked without the helper.
 fn landlock_abi() -> i64 {
     // SAFETY: the version query takes no attribute.
     unsafe { libc::syscall(444, std::ptr::null::<u8>(), 0usize, 1u32) }.max(0)
@@ -78,8 +71,7 @@ fn landlock_abi() -> i64 {
 
 #[test]
 fn descriptors() {
-    // A caller's closed stdio becomes /dev/null, so that no file the helper
-    // opens receives its answer; other inherited descriptors close.
+    // Caller's closed stdio becomes /dev/null; other inherited descriptors close.
     let output = Command::new("/bin/sh")
         .args(["-c", "exec \"$0\" descriptors 3 3</dev/null 0<&- 2>&-", PROBE])
         .output()
@@ -89,9 +81,8 @@ fn descriptors() {
 
 #[test]
 fn probe_reports_the_first_failed_check() {
-    // The probe's exit status is the number of the first check that failed:
-    // here the first, a descriptor the caller did not leave open (stderr,
-    // a pipe and not /dev/null, fails the third as well).
+    // Exit status is the first failed check: here the first (stderr, a pipe not /dev/null, fails
+    // the third too).
     let output =
         Command::new("/bin/sh").args(["-c", "exec \"$0\" descriptors 9 9<&-", PROBE]).output().unwrap();
     assert_eq!(outcome(&output), (1, 4));
@@ -114,7 +105,6 @@ fn syscalls() {
     }
 }
 
-/// The file system part, with the folders, files and socket it expects.
 fn filesystem_probe(abstract_bus: bool) {
     use std::os::linux::net::SocketAddrExt;
     use std::os::unix::ffi::OsStrExt;
@@ -127,7 +117,6 @@ fn filesystem_probe(abstract_bus: bool) {
     let fifo = std::ffi::CString::new(denied.path().join("fifo").as_os_str().as_bytes()).unwrap();
     // SAFETY: a valid, NUL-terminated path.
     assert_eq!(unsafe { libc::mkfifo(fifo.as_ptr(), 0o600) }, 0);
-    // An abstract socket from outside the sandbox.
     let bus = format!("netvfs-accounts-bus-{}-{abstract_bus}", std::process::id());
     let listener = UnixListener::bind_addr(&SocketAddr::from_abstract_name(&bus).unwrap()).unwrap();
     listener.set_nonblocking(true).unwrap();
@@ -139,8 +128,6 @@ fn filesystem_probe(abstract_bus: bool) {
     let outcome = probe(&args);
     let abi = landlock_abi();
     if abi > 0 {
-        // One more for TCP from ABI 4, for signals and for abstract sockets
-        // from ABI 6.
         let checks = [abi >= 4, abi >= 6, abi >= 6]
             .into_iter()
             .fold(23u32, |n, more| n.saturating_add(u32::from(more)));
@@ -150,10 +137,8 @@ fn filesystem_probe(abstract_bus: bool) {
         assert_eq!(outcome, (NO_LANDLOCK, 0));
     }
     if abi >= 6 {
-        // The probe's connection arrived only with an abstract bus.
         assert_eq!(listener.accept().is_ok(), abstract_bus);
     }
-    // Nothing was made, removed or changed in the denied folder.
     let mut names: Vec<_> = std::fs::read_dir(denied.path())
         .unwrap()
         .map(|e| e.unwrap().file_name().into_string().unwrap())
@@ -173,15 +158,13 @@ fn filesystem_with_an_abstract_bus() {
     filesystem_probe(true);
 }
 
-/// A user's uid, gid and home folder.
 struct User {
     uid: u32,
     gid: u32,
     home: String,
 }
 
-/// The user `key` (a name or a uid) in the user database, as getpwuid_r
-/// sees it (also users that are not in /etc/passwd).
+/// User `key` (name or uid) as getpwuid_r sees it (also users not in /etc/passwd).
 fn passwd_user(key: &str) -> Option<User> {
     let output = Command::new("getent").args(["passwd", key]).output().unwrap();
     let entry = String::from_utf8(output.stdout).unwrap();
@@ -193,8 +176,8 @@ fn passwd_user(key: &str) -> Option<User> {
     })
 }
 
-/// The arguments of the set-id-environment part for `user`: its home, and
-/// the XDG_RUNTIME_DIR it gets when the caller sets none.
+/// Arguments of the set-id-environment part for `user`: its home and the XDG_RUNTIME_DIR it gets
+/// when the caller sets none.
 fn set_id_environment_args(user: &User) -> [String; 3] {
     use std::os::unix::fs::MetadataExt;
     let runtime = PathBuf::from(format!("/run/user/{}", user.uid));
@@ -216,9 +199,8 @@ fn set_id_environment() {
 fn set_id_environment_of_another_user() {
     use std::os::unix::fs::PermissionsExt;
     use std::os::unix::process::CommandExt;
-    // Run by root, set_id_environment says nothing of the real uid (the
-    // ids are all 0): the same for another user, whose home and runtime
-    // folder are not root's.
+    // As root, set_id_environment says nothing of the real uid (all ids 0); same for another user,
+    // whose home and runtime folder are not root's.
     // SAFETY: geteuid cannot fail.
     if unsafe { libc::geteuid() } != 0 {
         note("skipped: not root; set_id_environment runs as another user already");
@@ -228,7 +210,7 @@ fn set_id_environment_of_another_user() {
         note("skipped: no user nobody");
         return;
     };
-    // A copy the user can run: the target folder may be private.
+    // Target folder may be private: copy the user can run.
     let dir = TempDir::new("nobody");
     std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
     let searchable =
@@ -259,8 +241,8 @@ fn group_refused() {
     assert_eq!(probe(&["group-refused"]), (0, 3));
 }
 
-/// A gid other than the effective one that this process may give a file:
-/// any as root, else one of its supplementary groups.
+/// A gid other than the effective one this process may give a file: any as root, else a
+/// supplementary group.
 fn other_group() -> Option<libc::gid_t> {
     // SAFETY: plain id calls; the buffer holds `count` entries.
     unsafe {
@@ -276,8 +258,8 @@ fn other_group() -> Option<libc::gid_t> {
     }
 }
 
-/// A setgid copy of `binary` with another group, None (the test skips) when
-/// there is no such group or the file system ignores set-id bits.
+/// A setgid copy of `binary` with another group; None (test skips) without such a group or if the
+/// file system ignores set-id bits.
 fn set_id_copy(binary: &str, name: &str) -> Option<PathBuf> {
     use std::os::unix::ffi::OsStrExt;
     use std::os::unix::fs::PermissionsExt;
@@ -299,8 +281,8 @@ fn set_id_copy(binary: &str, name: &str) -> Option<PathBuf> {
     Some(copy)
 }
 
-/// Runs a fresh copy. Another test's child forked while the copy was being
-/// written holds it open for writing until that child's exec: ETXTBSY.
+/// Runs a fresh copy. A child forked by another test while the copy was written holds it open for
+/// writing until its exec: ETXTBSY.
 fn run_copy(command: &mut Command) -> std::process::Output {
     for _ in 0..100 {
         match command.output() {
@@ -315,7 +297,6 @@ fn run_copy(command: &mut Command) -> std::process::Output {
 
 #[test]
 fn set_id_group() {
-    // A real set-id start: the group it brings is given up for good.
     let Some(copy) = set_id_copy(PROBE, "probe") else {
         note("skipped: no other group, or a nosuid file system");
         return;
@@ -327,8 +308,6 @@ fn set_id_group() {
 
 #[test]
 fn set_id_helper() {
-    // The whole set-id start (environment, home, confinement, group) up to
-    // an answer, for a request that reads no database.
     let Some(copy) = set_id_copy(HELPER, "helper") else {
         note("skipped: no other group, or a nosuid file system");
         return;
@@ -356,14 +335,12 @@ fn helper(args: &[&str], accounts: &Path) -> (Option<i32>, Vec<u8>) {
     (output.status.code(), output.stdout)
 }
 
-/// An answer's first item: the error.
 fn header(error: u8) -> Vec<u8> {
     vec![0, 0, 0, error]
 }
 
 #[test]
 fn helper_answers_without_a_database() {
-    // No database yet: no accounts, and none is created.
     let dir = TempDir::new("helper");
     let missing = dir.path().join("missing");
     let (status, answer) = helper(&["list"], &missing);
@@ -400,8 +377,8 @@ fn helper_reports_an_answer_it_cannot_write() {
 
 #[test]
 fn helper_records_attention() {
-    // A database with one listed account: the attention is written, and the
-    // change it cannot announce (no session bus) is reported on stderr.
+    // One listed account: attention is written; the change it cannot announce (no session bus) is
+    // reported on stderr.
     let dir = TempDir::new("attention");
     let db = rusqlite::Connection::open(dir.path().join("accounts.db")).unwrap();
     db.execute_batch(
@@ -427,7 +404,6 @@ fn helper_records_attention() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     note(stderr.trim_end());
     assert_eq!(output.status.code(), Some(0));
-    // Success: no error, a null message.
     let mut success = header(0);
     success.extend_from_slice(&[0xff, 0xff, 0xff, 0xff]);
     assert_eq!(output.stdout, success);

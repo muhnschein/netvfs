@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! [`Conn`]: one backend connection, owned by one thread (T4), with its
-//! read [`Handle`]s and its [`CancelHandle`], the one part another thread
-//! may use.
+//! [`Conn`]: one backend connection, owned by one thread, with its read [`Handle`]s and its [`CancelHandle`], the one part another thread may use.
 
 use super::Ffi;
 use super::callback::{self, Ctx, EstablishCtx, EstablishHooks, Progress, ReadAt, WriteAt};
@@ -21,15 +19,11 @@ use std::rc::Rc;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use zeroize::Zeroizing;
 
-/// The connection pointer, for `conn_cancel` only.
 struct CancelPtr(NonNull<NvbConn>);
 
-// SAFETY: the pointer is used for conn_cancel only, which T4 allows from
-// any thread; the mutex around it orders that against conn_free.
+// SAFETY: the pointer is used for conn_cancel only, which is allowed from any thread; the mutex around it orders that against conn_free.
 unsafe impl Send for CancelPtr {}
 
-/// What a [`CancelHandle`] and its connection share: the pointer while the
-/// connection lives, `None` from its `conn_free` on.
 struct CancelShared {
     ffi: Ffi,
     conn: Mutex<Option<CancelPtr>>,
@@ -41,11 +35,7 @@ impl CancelShared {
     }
 }
 
-/// Cancels a connection's running call from any thread (C-9; also ends a
-/// signond wait). T4 says a cancel must never overlap or follow
-/// `conn_free`: the handle and the connection share a lock, the connection
-/// clears the pointer under it before `conn_free`, so a cancel after that
-/// does nothing and one in progress delays the free.
+/// Cancels a connection's running call from any thread (also ends a signond wait). A cancel must never overlap or follow `conn_free`: handle and connection share a lock, the connection clears the pointer under it before `conn_free`, so a cancel after that does nothing and one in progress delays the free.
 #[derive(Clone)]
 pub struct CancelHandle(Arc<CancelShared>);
 
@@ -53,8 +43,7 @@ impl CancelHandle {
     /// Cancels; false when the connection is gone.
     #[must_use = "false: the connection is gone"]
     pub fn cancel(&self) -> bool {
-        // SAFETY: the pointer is there only while the connection lives: its
-        // free clears it under the lock held for this call (T4: any thread).
+        // SAFETY: the pointer is there only while the connection lives: its free clears it under the lock held for this call.
         self.0.lock().as_ref().map(|conn| unsafe { (self.0.ffi.t.conn_cancel)(conn.0.as_ptr()) }).is_some()
     }
 }
@@ -65,8 +54,7 @@ impl fmt::Debug for CancelHandle {
     }
 }
 
-/// The connection itself; its handles keep it alive (O4: `conn_free`
-/// would close them).
+/// The connection itself; its handles keep it alive (`conn_free` would close them).
 struct Core {
     ffi: Ffi,
     raw: NonNull<NvbConn>,
@@ -74,7 +62,7 @@ struct Core {
 }
 
 impl Core {
-    /// T6: no connection call from inside a callback.
+    /// No connection call from inside a callback.
     fn ready(&self) -> Result<*mut NvbConn, Status> {
         if callback::active() {
             return Err(Status::internal("connection call from inside a callback (T6)"));
@@ -85,10 +73,8 @@ impl Core {
 
 impl Drop for Core {
     fn drop(&mut self) {
-        // No cancel can start after this, and one in progress has ended.
         *self.cancel.lock() = None;
-        // SAFETY: the owner thread (Core is !Send), no handle left (each
-        // holds a Core), no call running, no cancel to follow (T4).
+        // SAFETY: owner thread (Core is !Send), no handle left (each holds a Core), no call running, no cancel to follow.
         unsafe { (self.ffi.t.conn_free)(self.raw.as_ptr()) }
     }
 }
@@ -109,8 +95,7 @@ pub enum Phase {
 }
 
 impl Phase {
-    /// The phase of `NVB_PHASE_*`; an unknown value is `Connect` (no
-    /// attention).
+    /// The phase of `NVB_PHASE_*`; an unknown value is `Connect` (no attention).
     #[must_use]
     pub const fn from_raw(phase: u32) -> Self {
         match phase {
@@ -140,21 +125,20 @@ pub enum Secret {
         /// User name.
         user: String,
     },
-    /// Ad hoc (XB-16): C++ copies the secret and wipes its copy.
+    /// Ad hoc: C++ copies the secret and wipes its copy.
     Bytes {
         /// User name.
         user: String,
         /// The secret, wiped when this goes.
         secret: Zeroizing<Vec<u8>>,
     },
-    /// An account's secret from signond, fetched on the Qt thread after the
-    /// identity verdict (XA-6, XA-7).
+    /// An account's secret from signond, fetched on the Qt thread after the identity verdict.
     Signon {
-        /// Used when the fetched user name is empty (A-6).
+        /// Used when the fetched user name is empty.
         user: String,
         /// The account's credentials id.
         credentials_id: u32,
-        /// No stored secret is fine (XA-7).
+        /// No stored secret is fine.
         secret_optional: bool,
     },
 }
@@ -215,7 +199,7 @@ impl Attributes {
 pub enum UploadOptions {
     /// Fails when the file exists.
     CreateNew {
-        /// Mode of the new file, `None`: the backend's default (XC-23).
+        /// Mode of the new file, `None`: the backend's default.
         mode: Option<i32>,
         /// Bytes expected, if known.
         expected_size: Option<i64>,
@@ -273,7 +257,7 @@ pub struct WalkOptions {
     pub max_depth: Option<u32>,
     /// Follow symlinks to folders.
     pub follow_symlinks: bool,
-    /// A no-op on the wire (design §6.9).
+    /// A no-op on the wire.
     pub post_order: bool,
     /// Stop at an unreadable sub-folder instead of skipping it.
     pub stop_on_list_error: bool,
@@ -330,9 +314,7 @@ fn opt_ptr<T>(value: Option<&T>) -> *const T {
     value.map_or(ptr::null(), ptr::from_ref)
 }
 
-/// One backend connection (`nvb_conn`), owned by the thread that made it:
-/// `!Send`, as are its handles (T4). Freed when it and its handles are
-/// gone: the C++ side then closes what is still open and disconnects.
+/// One backend connection (`nvb_conn`), owned by the thread that made it: `!Send`, as are its handles. Freed when it and its handles are gone: the C++ side then closes what is still open and disconnects.
 pub struct Conn {
     core: Rc<Core>,
 }
@@ -343,9 +325,7 @@ impl fmt::Debug for Conn {
     }
 }
 
-/// A conn call that returns only an error.
 type PathCall = unsafe extern "C" fn(*mut NvbConn, NvbBytes) -> *mut NvbError;
-/// A conn call on two paths.
 type TwoPathCall = unsafe extern "C" fn(*mut NvbConn, NvbBytes, NvbBytes) -> *mut NvbError;
 
 impl Conn {
@@ -354,7 +334,7 @@ impl Conn {
             return Err(Status::internal("connection call from inside a callback (T6)"));
         }
         let mut out: *mut NvbConn = ptr::null_mut();
-        // SAFETY: this thread becomes the owner (T4); `provider` borrowed (O1).
+        // SAFETY: this thread becomes the owner; `provider` borrowed.
         let error = unsafe { (ffi.t.conn_new)(NvbBytes::of(provider.as_bytes()), &raw mut out) };
         ffi.check(error)?;
         let raw = NonNull::new(out).ok_or_else(|| Status::internal("conn_new gave no connection"))?;
@@ -378,18 +358,15 @@ impl Conn {
     /// `Internal` inside a callback.
     pub fn reset_cancel(&mut self) -> Result<(), Status> {
         let conn = self.core.ready()?;
-        // SAFETY: owner thread, no call running (T4).
+        // SAFETY: owner thread, no call running.
         unsafe { (self.ffi().t.conn_reset_cancel)(conn) };
         Ok(())
     }
 
-    /// Connects, has `hooks` judge the server's identity against `pin`,
-    /// gets the credentials and authenticates (C-7, XSEC-1, XA-6), in one
-    /// call: nothing is sent before the identity is accepted.
+    /// Connects, has `hooks` judge the server's identity against `pin`, gets the credentials and authenticates, in one call: nothing is sent before the identity is accepted.
     ///
     /// # Errors
-    /// The failure and the phase it happened in; the connection is then
-    /// disconnected.
+    /// The failure and the phase it happened in; the connection is then disconnected.
     pub fn establish(
         &mut self,
         params: &Params,
@@ -411,8 +388,7 @@ impl Conn {
             prompt: has.1.then_some(prompt),
         };
         let mut phase = NVB_PHASE_CONNECT;
-        // SAFETY: owner thread (T4); params, secret and hooks live across
-        // the call (O1); the hooks' context is `ctx`, unused until it returns.
+        // SAFETY: owner thread; params, secret and hooks live across the call; the hooks' context is `ctx`, unused until it returns.
         let error = unsafe {
             (ffi.t.conn_establish)(
                 conn,
@@ -434,10 +410,10 @@ impl Conn {
     pub fn capabilities(&mut self) -> Result<WireCapabilities, Status> {
         let conn = self.core.ready()?;
         let mut out: *mut NvbCapabilities = ptr::null_mut();
-        // SAFETY: owner thread (T4); `out` is ours.
+        // SAFETY: owner thread; `out` is ours.
         let error = unsafe { (self.ffi().t.conn_capabilities)(conn, &raw mut out) };
         self.ffi().check(error)?;
-        // SAFETY: the block holds everything it points to (O3).
+        // SAFETY: the block holds everything it points to.
         self.ffi().take(out, |c| unsafe { marshal::capabilities(c) })
     }
 
@@ -448,11 +424,11 @@ impl Conn {
     pub fn stat(&mut self, path: &[u8], follow: bool) -> Result<WireEntry, Status> {
         let conn = self.core.ready()?;
         let mut out: *mut NvbEntry = ptr::null_mut();
-        // SAFETY: owner thread (T4); `path` borrowed (O1); `out` is ours.
+        // SAFETY: owner thread; `path` borrowed; `out` is ours.
         let error =
             unsafe { (self.ffi().t.conn_stat)(conn, NvbBytes::of(path), i32::from(follow), &raw mut out) };
         self.ffi().check(error)?;
-        // SAFETY: the block holds everything it points to (O3).
+        // SAFETY: the block holds everything it points to.
         self.ffi().take(out, |e| unsafe { marshal::entry(e) })
     }
 
@@ -469,8 +445,7 @@ impl Conn {
     ) -> Result<(), Status> {
         let conn = self.core.ready()?;
         let mut ctx = Ctx::new(sink);
-        // SAFETY: owner thread (T4); `dir` borrowed (O1); the sink's context
-        // is `ctx`, unused until the call returns (T6).
+        // SAFETY: owner thread; `dir` borrowed; the sink's context is `ctx`, unused until the call returns.
         let error = unsafe {
             (self.ffi().t.conn_list)(
                 conn,
@@ -490,7 +465,7 @@ impl Conn {
     pub fn read_link(&mut self, path: &[u8]) -> Result<Vec<u8>, Status> {
         let conn = self.core.ready()?;
         let mut out: *mut NvbBlob = ptr::null_mut();
-        // SAFETY: owner thread (T4); `path` borrowed (O1); `out` is ours.
+        // SAFETY: owner thread; `path` borrowed; `out` is ours.
         let error = unsafe { (self.ffi().t.conn_read_link)(conn, NvbBytes::of(path), &raw mut out) };
         self.ffi().check(error)?;
         self.ffi().take_blob(out)
@@ -502,9 +477,8 @@ impl Conn {
     /// The backend's failure.
     pub fn space_info(&mut self, path: &[u8]) -> Result<Space, Status> {
         let conn = self.core.ready()?;
-        // Written in full on success.
         let mut out = Space::default();
-        // SAFETY: owner thread (T4); `path` borrowed (O1); `out` is ours.
+        // SAFETY: owner thread; `path` borrowed; `out` is ours.
         let error = unsafe { (self.ffi().t.conn_space_info)(conn, NvbBytes::of(path), &raw mut out) };
         self.ffi().check(error)?;
         Ok(out)
@@ -518,7 +492,7 @@ impl Conn {
         let conn = self.core.ready()?;
         let mut out: *mut NvbBlob = ptr::null_mut();
         let algorithm = NvbBytes::of(algorithm.as_bytes());
-        // SAFETY: owner thread (T4); `path` and `algorithm` borrowed (O1).
+        // SAFETY: owner thread; `path` and `algorithm` borrowed.
         let error =
             unsafe { (self.ffi().t.conn_checksum)(conn, NvbBytes::of(path), algorithm, &raw mut out) };
         self.ffi().check(error)?;
@@ -531,23 +505,21 @@ impl Conn {
     /// The backend's failure (`AlreadyExists` when `exclusive`).
     pub fn make_dir(&mut self, path: &[u8], exclusive: bool) -> Result<(), Status> {
         let conn = self.core.ready()?;
-        // SAFETY: owner thread (T4); `path` borrowed (O1).
+        // SAFETY: owner thread; `path` borrowed.
         let error = unsafe { (self.ffi().t.conn_make_dir)(conn, NvbBytes::of(path), i32::from(exclusive)) };
         self.ffi().check(error)
     }
 
     fn path_call(&mut self, call: PathCall, path: &[u8]) -> Result<(), Status> {
         let conn = self.core.ready()?;
-        // SAFETY: a conn call of the table: owner thread (T4), `path`
-        // borrowed (O1).
+        // SAFETY: a conn call of the table: owner thread, `path` borrowed.
         let error = unsafe { call(conn, NvbBytes::of(path)) };
         self.ffi().check(error)
     }
 
     fn two_path_call(&mut self, call: TwoPathCall, a: &[u8], b: &[u8]) -> Result<(), Status> {
         let conn = self.core.ready()?;
-        // SAFETY: a conn call of the table: owner thread (T4), paths
-        // borrowed (O1).
+        // SAFETY: a conn call of the table: owner thread, paths borrowed.
         let error = unsafe { call(conn, NvbBytes::of(a), NvbBytes::of(b)) };
         self.ffi().check(error)
     }
@@ -591,7 +563,7 @@ impl Conn {
     pub fn rename(&mut self, from: &[u8], to: &[u8], replace: bool) -> Result<(), Status> {
         let conn = self.core.ready()?;
         let (from, to) = (NvbBytes::of(from), NvbBytes::of(to));
-        // SAFETY: owner thread (T4); paths borrowed (O1).
+        // SAFETY: owner thread; paths borrowed.
         let error = unsafe { (self.ffi().t.conn_rename)(conn, from, to, i32::from(replace)) };
         self.ffi().check(error)
     }
@@ -604,7 +576,7 @@ impl Conn {
         let conn = self.core.ready()?;
         let (from, to) = (NvbBytes::of(from), NvbBytes::of(to));
         let (recursive, replace) = (i32::from(recursive), i32::from(replace));
-        // SAFETY: owner thread (T4); paths borrowed (O1).
+        // SAFETY: owner thread; paths borrowed.
         let error = unsafe { (self.ffi().t.conn_copy)(conn, from, to, recursive, replace) };
         self.ffi().check(error)
     }
@@ -616,7 +588,7 @@ impl Conn {
     pub fn set_attributes(&mut self, path: &[u8], changes: &Attributes) -> Result<(), Status> {
         let conn = self.core.ready()?;
         let changes = changes.raw();
-        // SAFETY: owner thread (T4); `path` and `changes` borrowed (O1).
+        // SAFETY: owner thread; `path` and `changes` borrowed.
         let error =
             unsafe { (self.ffi().t.conn_set_attributes)(conn, NvbBytes::of(path), &raw const changes) };
         self.ffi().check(error)
@@ -629,9 +601,8 @@ impl Conn {
     pub fn open_read(&mut self, path: &[u8]) -> Result<(Handle, i64), Status> {
         let conn = self.core.ready()?;
         let mut out: *mut NvbHandle = ptr::null_mut();
-        // Written on success.
         let mut size = 0_i64;
-        // SAFETY: owner thread (T4); `path` borrowed (O1); outs are ours.
+        // SAFETY: owner thread; `path` borrowed; outs are ours.
         let error =
             unsafe { (self.ffi().t.conn_open_read)(conn, NvbBytes::of(path), &raw mut out, &raw mut size) };
         self.ffi().check(error)?;
@@ -665,8 +636,7 @@ impl Conn {
         };
         let mut progress = ProgressArg::new(progress);
         let raw_progress = progress.raw();
-        // SAFETY: owner thread (T4); everything borrowed lives across the
-        // call (O1); the contexts are unused until it returns (T6).
+        // SAFETY: owner thread; everything borrowed lives across the call; the contexts are unused until it returns.
         let error = unsafe {
             (self.ffi().t.conn_upload)(
                 conn,
@@ -731,8 +701,7 @@ impl Conn {
         };
         let mut progress = ProgressArg::new(progress);
         let raw_progress = progress.raw();
-        // SAFETY: owner thread (T4); `path` and the progress live across the
-        // call (O1); its context is unused until it returns (T6).
+        // SAFETY: owner thread; `path` and the progress live across the call; its context is unused until it returns.
         let error = unsafe {
             (self.ffi().t.remove_tree)(
                 conn,
@@ -759,8 +728,7 @@ impl Conn {
         let conn = self.core.ready()?;
         let options = options.raw();
         let mut ctx = Ctx::new(visit);
-        // SAFETY: owner thread (T4); `root` and `options` borrowed (O1); the
-        // visitor's context is unused until the call returns (T6).
+        // SAFETY: owner thread; `root` and `options` borrowed; the visitor's context is unused until the call returns.
         let error = unsafe {
             (self.ffi().t.walk)(
                 conn,
@@ -773,8 +741,7 @@ impl Conn {
         ctx.finish(self.ffi().check(error))
     }
 
-    /// `Ops::copyAcross` from this connection to `destination`, both owned
-    /// by this thread (T5).
+    /// `Ops::copyAcross` from this connection to `destination`, both owned by this thread.
     ///
     /// # Errors
     /// The backends' failure; `Internal` when `progress` panicked.
@@ -791,8 +758,7 @@ impl Conn {
         let mut progress = ProgressArg::new(progress);
         let raw_progress = progress.raw();
         let (source_path, destination_path) = (NvbBytes::of(source_path), NvbBytes::of(destination_path));
-        // SAFETY: both connections belong to this thread (T5; `&mut` makes
-        // them two); paths and progress live across the call (O1).
+        // SAFETY: both connections belong to this thread (`&mut` makes them two); paths and progress live across the call.
         let error = unsafe {
             (self.ffi().t.copy_across)(
                 source,
@@ -808,8 +774,7 @@ impl Conn {
     }
 }
 
-/// An open read handle (`nvb_handle`, XC-13), owned by its connection's
-/// thread; it keeps the connection alive. Closed when it goes.
+/// An open read handle (`nvb_handle`), owned by its connection's thread; keeps the connection alive. Closed when it goes.
 pub struct Handle {
     core: Rc<Core>,
     raw: Option<NonNull<NvbHandle>>,
@@ -834,8 +799,7 @@ impl Handle {
     pub fn read(&mut self, offset: i64, buf: &mut [u8]) -> Result<usize, Status> {
         let handle = self.ready()?;
         let mut len = 0;
-        // SAFETY: owner thread (T4); `buf` is ours for the call; C++ writes
-        // at most `buf.len()` bytes into it.
+        // SAFETY: owner thread; `buf` is ours for the call; C++ writes at most `buf.len()` bytes into it.
         let error = unsafe {
             (self.core.ffi.t.handle_read)(handle, offset, buf.as_mut_ptr(), buf.len(), &raw mut len)
         };
@@ -849,7 +813,7 @@ impl Handle {
     /// `ReadHandle::readAhead`: a hint.
     pub fn read_ahead(&mut self, offset: i64, bytes: i64) {
         if let Ok(handle) = self.ready() {
-            // SAFETY: owner thread (T4), a live handle.
+            // SAFETY: owner thread, a live handle.
             unsafe { (self.core.ffi.t.handle_read_ahead)(handle, offset, bytes) }
         }
     }
@@ -864,8 +828,7 @@ impl Handle {
 
     fn close_now(&mut self) -> Result<(), Status> {
         let Some(handle) = self.raw.take() else { return Ok(()) };
-        // SAFETY: owner thread (T4); handle_close always frees, and `raw` no
-        // longer holds the pointer.
+        // SAFETY: owner thread; handle_close always frees, and `raw` no longer holds the pointer.
         let error = unsafe { (self.core.ffi.t.handle_close)(handle.as_ptr()) };
         self.core.ffi.check(error)
     }
@@ -873,15 +836,12 @@ impl Handle {
 
 impl Drop for Handle {
     fn drop(&mut self) {
-        // Nobody to tell about a failure to close; the handle is gone.
         self.close_now().unwrap_or_default();
     }
 }
 
 #[cfg(test)]
 mod tests {
-    // Tests call the trampolines and readers as C++ would, on data they
-    // made themselves; they may index, count and cast freely.
     #![allow(
         clippy::undocumented_unsafe_blocks,
         clippy::arithmetic_side_effects,
@@ -983,7 +943,6 @@ mod tests {
         let raw = arg.raw().unwrap();
         let ctx_ptr = raw.ctx;
         assert_eq!(ctx_ptr, arg.ctx.as_mut().map(Ctx::as_ctx).unwrap());
-        // As C++ calls it.
         unsafe { raw.update.unwrap()(raw.ctx, 3, -1) };
         assert_eq!(unsafe { raw.canceled.unwrap()(raw.ctx) }, 0);
         assert!(!opt_ptr(Some(&raw)).is_null());

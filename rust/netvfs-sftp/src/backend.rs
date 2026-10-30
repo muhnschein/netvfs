@@ -1,12 +1,9 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! The SFTP [`Backend`] (provider `sftp`): [`crate::session`] connects,
-//! [`crate::auth`] signs in, then [`Remote`] does the file operations and
-//! [`crate::io`] the transfers and handles.
+//! The SFTP [`Backend`] (provider `sftp`): [`crate::session`] connects, [`crate::auth`] signs in, then [`Remote`] does
+//! file operations and [`crate::io`] transfers and handles.
 //!
-//! A sign-in owns the session while it runs: if its future is dropped
-//! part way (the C ABI drops a call that misses its cancel), the session
-//! goes with it and the connection is left signed out, never half signed
-//! in with russh's replies out of step.
+//! A sign-in owns the session while it runs: if its future is dropped part way, the session goes with it and the
+//! connection is left signed out, never half signed in with russh's replies out of step.
 
 use crate::auth::{Login, Mode};
 use crate::client::Client;
@@ -21,9 +18,9 @@ use netvfs_vfs::{
 };
 use std::time::Duration;
 
-/// C-14: the connect timeout when the caller gives none.
+/// Connect timeout when the caller gives none.
 pub const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
-/// C-14: the request timeout when the caller gives none.
+/// Request timeout when the caller gives none.
 pub const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_mins(1);
 
 /// What `connect` takes from the parameters.
@@ -54,8 +51,7 @@ impl Settings {
     /// The settings of `params`.
     ///
     /// # Errors
-    /// `Internal` for a host that is empty or holds `@`, or a port out of
-    /// range.
+    /// `Internal` for an empty host or one holding `@`, or a port out of range.
     pub fn of(params: &Params) -> Result<Self, Status> {
         if params.host.is_empty() || params.host.contains('@') {
             return Err(Status::internal("Invalid server name"));
@@ -88,8 +84,7 @@ impl Settings {
         })
     }
 
-    /// Whether `identity` differs from the pin (SEC-1): a pin that cannot
-    /// be read matches nothing.
+    /// Whether `identity` differs from the pin; a pin that cannot be read matches nothing.
     #[must_use]
     pub fn mismatch(&self, identity: &ServerIdentity) -> bool {
         self.pin.as_deref().is_some_and(|pin| {
@@ -100,9 +95,8 @@ impl Settings {
     }
 }
 
-/// A pin, `<algorithm> <base64 blob>` (SPEC-sftp 2), read as strictly as
-/// the C++ `ServerIdentity::fromPin`: two fields, canonical base64, a
-/// blob that is not empty.
+/// A pin, `<algorithm> <base64 blob>`, read as strictly as the C++ `ServerIdentity::fromPin`: two fields, canonical
+/// base64, non-empty blob.
 #[must_use]
 pub fn parse_pin(pin: &str) -> Option<(String, Vec<u8>)> {
     let fields: Vec<&str> = pin.trim().split(' ').filter(|f| !f.is_empty()).collect();
@@ -148,8 +142,7 @@ fn not_signed_in() -> Status {
     Status::internal("Not signed in")
 }
 
-/// The user to sign in as: the credentials', the account's, else the
-/// local user's (as ssh does).
+/// The user to sign in as: the credentials', the account's, else the local user's (as ssh does).
 fn user_name(credentials: &Credentials, settings: &Settings) -> String {
     if !credentials.user.is_empty() {
         return credentials.user.clone();
@@ -178,8 +171,7 @@ async fn sign_in(
     let on_end = async move { drop(channel.close().await) };
     let (client, version) =
         Client::start(reader, writer, on_end, settings.request_timeout, cancel).await.map_err(|e| {
-            // A subsystem that ends before it answers: SFTP is not set up
-            // for this account (a forced command, for example).
+            // Subsystem ended before answering: SFTP is not set up for this account (a forced command, say).
             if e.name == ErrorName::ConnectionLost { sftp_not_enabled() } else { e }
         })?;
     Remote::new(client, &version, settings.dir_mode, cancel).await
@@ -254,7 +246,7 @@ impl Backend for Sftp {
             }
         };
         let checked = if connected.mismatch {
-            // SEC-1: no credentials go to a server whose key is not the pin.
+            // No credentials go to a server whose key is not the pin.
             Err(Status::new(
                 ErrorName::ServerIdentityChanged,
                 "The server key does not match the saved key; not signing in",

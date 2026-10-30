@@ -1,13 +1,7 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! Asking the user whether a consumer may use the network locations
-//! (SPEC-v2 XB-6). The bridge, not the consumer, handles the answer.
+//! Asking the user whether a consumer may use the network locations; the bridge handles the answer.
 //!
-//! [`NotificationPrompt`] posts an `org.freedesktop.Notifications`
-//! notification "<DisplayName> wants to use your network locations" with the
-//! actions `allow` (Allow) and `deny` (Don't allow), answered through
-//! `ActionInvoked`. Whether lipstick on Sailfish OS 5.2 shows freedesktop
-//! actions and emits `ActionInvoked` to a process that owns no bus name is
-//! unverified on a device; Settings can always grant or revoke.
+//! [`NotificationPrompt`] posts an `org.freedesktop.Notifications` notification "<DisplayName> wants to use your network locations" with actions `allow` and `deny`, answered through `ActionInvoked`. Unverified on device: lipstick on Sailfish OS 5.2 showing freedesktop actions and emitting `ActionInvoked` to a process owning no bus name; Settings can always grant or revoke.
 
 use futures_lite::StreamExt;
 use std::collections::HashMap;
@@ -31,7 +25,7 @@ const NOTIFY_TIMEOUT: Duration = Duration::from_secs(5);
 pub enum PromptEvent {
     /// The user allowed (`true`) or refused.
     Answered(bool),
-    /// Closed without an answer, or it could not be shown.
+    /// Closed without an answer, or could not be shown.
     Dismissed,
 }
 
@@ -39,13 +33,13 @@ pub enum PromptEvent {
 pub trait ConsentPrompt {
     /// Shows (or replaces) the question for `display_name`.
     fn show(&mut self, display_name: &str);
-    /// Removes a shown question (the decision was taken elsewhere).
+    /// Removes a shown question.
     fn withdraw(&mut self);
-    /// Whether a question is shown and not answered yet.
+    /// Whether a question is shown and unanswered.
     fn is_shown(&self) -> bool;
 }
 
-/// What the owner sees, and the number of its last request.
+/// What the owner sees, and its last request number.
 #[derive(Debug, Default)]
 struct Shared {
     shown: bool,
@@ -58,12 +52,7 @@ enum Command {
     Withdraw { generation: u64 },
 }
 
-/// The question as a notification on the session bus.
-///
-/// The calls run on a task of their own: `show` returns at once and
-/// [`is_shown`](ConsentPrompt::is_shown) is true from then on, until the
-/// question is answered, closed or withdrawn, or cannot be posted (which
-/// reports [`PromptEvent::Dismissed`]).
+/// The question as a session-bus notification. Calls run on a task of their own: `show` returns at once and [`is_shown`](ConsentPrompt::is_shown) is true until answered, closed, withdrawn, or unpostable (reports [`PromptEvent::Dismissed`]).
 #[derive(Debug)]
 pub struct NotificationPrompt {
     shared: Arc<Mutex<Shared>>,
@@ -71,9 +60,7 @@ pub struct NotificationPrompt {
 }
 
 impl NotificationPrompt {
-    /// Starts the prompt on the current tokio runtime. `bus` is the session
-    /// bus (`None`: none, every question is dismissed); `events` receives
-    /// the outcome of the questions.
+    /// Starts the prompt on the current tokio runtime. `bus`: session bus (`None`: every question is dismissed); `events` receives outcomes.
     pub fn start(bus: Option<Connection>, events: impl Fn(PromptEvent) + Send + 'static) -> Self {
         let shared = Arc::new(Mutex::new(Shared::default()));
         let (commands, receiver) = mpsc::unbounded_channel();
@@ -97,7 +84,6 @@ impl NotificationPrompt {
             shared.shown = shown;
             shared.generation
         };
-        // The task ends only with this sender.
         self.commands.send(command(generation)).ok();
     }
 }
@@ -129,18 +115,13 @@ fn lock(shared: &Mutex<Shared>) -> MutexGuard<'_, Shared> {
     shared.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-/// The task that talks to the notification service.
 struct Actor {
     bus: Option<Connection>,
     events: Box<dyn Fn(PromptEvent) + Send>,
     shared: Arc<Mutex<Shared>>,
-    /// The last request handled.
     generation: u64,
-    /// The shown notification, `0` for none.
     id: u32,
-    /// The service that posted it.
     owner: Option<OwnedUniqueName>,
-    /// `ActionInvoked` and `NotificationClosed`, from the first question on.
     signals: Option<MessageStream>,
 }
 
@@ -191,7 +172,6 @@ impl Actor {
         self.finish(PromptEvent::Dismissed);
     }
 
-    /// Reports `event` unless the owner asked for something else since.
     fn finish(&self, event: PromptEvent) {
         let current = {
             let mut shared = lock(&self.shared);
@@ -250,7 +230,6 @@ impl Actor {
     }
 }
 
-/// Subscribes to the signals of the notification service.
 async fn subscribe(bus: &Connection) -> Option<MessageStream> {
     let rule = format!("type='signal',sender='{SERVICE}',path='{PATH}',interface='{INTERFACE}'");
     match MessageStream::for_match_rule(rule.as_str(), bus, None).await {
@@ -262,7 +241,6 @@ async fn subscribe(bus: &Connection) -> Option<MessageStream> {
     }
 }
 
-/// The next signal, or never when there is no subscription.
 async fn next_signal(signals: &mut Option<MessageStream>) -> Message {
     loop {
         let Some(stream) = signals else {

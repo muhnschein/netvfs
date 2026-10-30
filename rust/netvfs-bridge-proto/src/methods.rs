@@ -1,22 +1,19 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! Names, the method table and the signals of `org.netvfs.Bridge1`
-//! (SPEC-v2 XB-8..XB-10). The table is in the order of the C++ bridge's
-//! `args.cpp` (netvfs 0.4), which is also the order of the introspection
-//! XML; `tests/contract.rs` checks both against the XML.
+//! Names, method table and signals of `org.netvfs.Bridge1`. Table order is the C++ bridge's
+//! `args.cpp` and the introspection XML; `tests/contract.rs` checks both against the XML.
 
-/// Object path of the bridge (XB-8).
+/// Object path of the bridge.
 pub const OBJECT_PATH: &str = "/org/netvfs/Bridge";
-/// The bridge interface (XB-8).
+/// The bridge interface.
 pub const INTERFACE: &str = "org.netvfs.Bridge1";
-/// Signature of the `Entry` struct (XB-9).
+/// Signature of the `Entry` struct.
 pub const ENTRY_SIGNATURE: &str = "(ayyyxxxxixxssqays)";
-/// The introspection data the bridge serves, byte for byte (design §3.5). A
-/// copy of the contract's `tests/bridge/contract/org.netvfs.Bridge1.xml`;
-/// `tests/contract.rs` keeps the two equal.
+/// Introspection data the bridge serves, byte for byte; copy of the contract's
+/// `tests/bridge/contract/org.netvfs.Bridge1.xml`, kept equal by `tests/contract.rs`.
 pub const INTROSPECTION_XML: &str = include_str!("../org.netvfs.Bridge1.xml");
 
-/// The connection pool a call runs in (XB-12). A call may hint a lane; an
-/// empty hint selects the method's default.
+/// Connection pool a call runs in. A call may hint a lane; an empty hint selects the method's
+/// default.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Lane {
     /// Short calls the user waits for.
@@ -38,8 +35,8 @@ impl Lane {
         }
     }
 
-    /// A lane from its wire name, or `None` for an unknown name. The empty
-    /// hint is not a name: see [`Lane::from_hint`].
+    /// A lane from its wire name, `None` if unknown. The empty hint is not a name: see
+    /// [`Lane::from_hint`].
     #[must_use]
     pub fn parse(name: &str) -> Option<Self> {
         match name {
@@ -68,7 +65,7 @@ pub struct MethodInfo {
     pub output: &'static str,
     /// The lane the method runs in unless the call hints another.
     pub lane: Lane,
-    /// XB-6: fails with `PermissionDenied` until the user granted consent.
+    /// Fails with `PermissionDenied` until the user granted consent.
     pub needs_consent: bool,
 }
 
@@ -84,16 +81,14 @@ const fn method(
 
 use Lane::{Bulk, Interactive, Stream};
 
-/// The methods, in the order of `args.cpp` and of the XML; the methods
-/// netvfs 0.4 did not have follow their groups' older members.
+/// The methods, in the order of `args.cpp` and of the XML.
 pub const METHODS: [MethodInfo; 40] = [
     method("Hello", "s", "s", Interactive, false),
     method("GetConsent", "", "s", Interactive, false),
     method("RequestConsent", "", "", Interactive, false),
-    // What the consumer may use besides the methods of netvfs 0.4 (XB-19);
-    // it reveals nothing of the user's locations.
+    // Consumer feature probe; reveals nothing of the user's locations.
     method("GetFeatures", "", "as", Interactive, false),
-    // Without consent it returns nothing instead of failing (XB-6).
+    // Without consent returns nothing instead of failing.
     method("ListLocations", "", "a(sssa{sv})", Interactive, false),
     method("Capabilities", "s", "(asasx)", Interactive, true),
     method("Disconnect", "s", "", Interactive, true),
@@ -122,15 +117,14 @@ pub const METHODS: [MethodInfo; 40] = [
     method("CopyAcross", "saysaya{sv}", "u", Bulk, true),
     method("RemoveTree", "say", "u", Bulk, true),
     method("Walk", "saya{sv}", "u", Bulk, true),
-    // Cancel and Answer need no consent (args.cpp).
+    // Cancel and Answer need no consent.
     method("Cancel", "u", "", Interactive, false),
     method("Answer", "sa{sv}", "", Interactive, false),
     method("OpenAccountSettings", "s", "", Interactive, true),
     method("AddAccount", "s", "", Interactive, true),
-    // Settings › Storage shows nothing of the user's locations (XB-15).
+    // Shows nothing of the user's locations.
     method("OpenStorageSettings", "", "", Interactive, false),
-    // Memory cards and USB drives show nothing of the user's locations, and
-    // polkit lets any process of the user mount them (XB-20).
+    // Shows nothing of the user's locations; polkit lets any process of the user mount.
     method("ListDrives", "", "a(ssaya{sv})", Interactive, false),
     method("Mount", "s", "ay", Interactive, false),
     method("Unmount", "s", "", Interactive, false),
@@ -150,10 +144,9 @@ pub const SIGNALS: [(&str, &str); 10] = [
     ("DrivesChanged", ""),
 ];
 
-/// `GetFeatures`: the bridge opens Settings › Storage (`OpenStorageSettings`,
-/// XB-15).
+/// `GetFeatures`: the bridge opens Settings > Storage (`OpenStorageSettings`).
 pub const FEATURE_STORAGE_SETTINGS: &str = "storage-settings";
-/// `GetFeatures`: `ListDrives`, `Mount`, `Unmount` and `DrivesChanged` (XB-20).
+/// `GetFeatures`: `ListDrives`, `Mount`, `Unmount` and `DrivesChanged`.
 pub const FEATURE_DRIVES: &str = "drives";
 
 /// The method called `name`.
@@ -172,7 +165,7 @@ pub fn find_signal(name: &str) -> Option<&'static str> {
 mod tests {
     use super::*;
 
-    // netvfs 0.4's tst_bridgeunits methodTable: every method of XB-10 exactly once.
+    // every method exactly once
     #[test]
     fn method_table_order_and_consent() {
         let expected = [

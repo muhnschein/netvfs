@@ -1,15 +1,11 @@
 #!/bin/sh
 # SPDX-License-Identifier: LGPL-2.1-or-later
-# Checks libnetvfs-bridge-ffi.so, the C ABI of the C++ backends that
-# netvfs-bridge loads with dlopen (doc/RUST.md), from its ELF headers and
-# against the bridge:
-#   - it exports one symbol, nvb_ffi_get (phase2-design.md §1);
-#   - it links libnetvfs.so.1, whose BackendLoader finds the backends;
-#   - no GLIBC symbol version above the given one (the target's glibc is the
-#     floor, as for the Rust binaries: check-linked-libs.sh);
+# Checks libnetvfs-bridge-ffi.so (C ABI of the C++ backends, dlopen'd by netvfs-bridge) from ELF headers:
+#   - exports one symbol, nvb_ffi_get;
+#   - links libnetvfs.so.1, whose BackendLoader finds the backends;
+#   - no GLIBC symbol version above the given one (target glibc is the floor);
 #   - full RELRO, immediate binding, no executable stack;
-#   - netvfs-bridge looks for it where it is installed: the bridge contains
-#     that path (its compiled-in default, rust/netvfs-bridge/src/ffi/mod.rs).
+#   - netvfs-bridge contains the installed path (compiled-in default, rust/netvfs-bridge/src/ffi/mod.rs).
 # Usage: check-ffi-lib.sh <library> <installed path> <netvfs-bridge> <max glibc version>
 set -eu
 library=$1

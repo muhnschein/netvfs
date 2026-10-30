@@ -28,8 +28,6 @@ const int MillisPerSecond = 1000;
 const int OctalBase = 8;
 const char DefaultChecksum[] = "sha256";
 
-// ------------------------------------------------------------ argument values
-
 bool parseCount(const QString &text, qint64 *out)
 {
     bool ok = false;
@@ -48,7 +46,7 @@ bool parseMode(const QString &text, qint32 *out)
     return true;
 }
 
-// ISO 8601; a time without zone is UTC (not the local zone).
+// A time without zone is UTC (not local).
 bool parseTime(const QString &text, QDateTime *out)
 {
     QDateTime time = QDateTime::fromString(text, Qt::ISODate);
@@ -71,10 +69,8 @@ RenameMode modeOf(const CommandLine &cmd)
     return cmd.has(QStringLiteral("replace")) ? RenameMode::Replace : RenameMode::NoReplace;
 }
 
-// ------------------------------------------------------------------- output
-
-// Raw bytes of `cat` onto the output stream: the underlying device when there
-// is one (stdout), else, for a string-backed stream (tests), Latin-1 text.
+// Raw `cat` bytes onto the output stream: the underlying device when there is one (stdout), else
+// Latin-1 text for a string-backed stream (tests).
 class OutputSink final : public QIODevice
 {
 public:
@@ -105,7 +101,6 @@ private:
     QTextStream &m_out;
 };
 
-// Entries sorted by name for stable output.
 class Collector : public ListSink
 {
 public:
@@ -137,8 +132,6 @@ void printEntries(const Context &c, const QVector<Entry> &entries, bool longForm
     for (const Entry &e : entries)
         c.out << (longFormat ? longLine(e) : shortLine(e)) << '\n';
 }
-
-// ----------------------------------------------------------------- handlers
 
 Result cmdIdentify(const Context &c)
 {
@@ -244,8 +237,8 @@ Result cmdMv(const Context &c)
     return c.backend->rename(c.cmd.positional.at(0), c.cmd.positional.at(1), modeOf(c.cmd));
 }
 
-// Another location for `cp --to-url`: the URL, then --to-option and
-// --to-host-key on top; the secret variable defaults to the main one.
+// Another location for `cp --to-url`: the URL, then --to-option and --to-host-key on top; secret
+// variable defaults to the main one.
 Result targetLocation(const Context &c, Location *target)
 {
     QVariantMap overrides;
@@ -276,7 +269,6 @@ Result cmdCp(const Context &c)
     const QString &source = c.cmd.positional.at(0);
 
     if (!crossLocation) {
-        // XC-17: a server-side copy when the server can do it.
         const Capabilities caps = c.backend->capabilities();
         if (caps.has(Capability::ServerCopy) && (!recursive || caps.has(Capability::ServerCopyRecursive))) {
             CopyOptions options;
@@ -285,8 +277,6 @@ Result cmdCp(const Context &c)
             return c.backend->copy(source, destination, options);
         }
     }
-    // XH-5: across two connections, a second one to the same location unless
-    // --to-url names another.
     QScopedPointer<Backend> second;
     if (const Result opened = c.connector.open(target, &second); !opened.ok())
         return opened;
@@ -404,8 +394,7 @@ Result cmdCaps(const Context &c)
     return Result::success();
 }
 
-// The shares of an SMB server: the folders at the root of a location without
-// a share (SPEC-v2 XM-2, server mode).
+// Folders at the root of a location without a share (server mode).
 Result cmdShares(const Context &c)
 {
     Collector collector;
@@ -440,8 +429,6 @@ Result cmdDiscover(const Context &c)
         c.out << serviceLine(view) << '\n';
     return Result::success();
 }
-
-// ----------------------------------------------------------------- checkers
 
 QString checkMkdir(const CommandLine &cmd, const Options &)
 {
@@ -513,7 +500,6 @@ QString checkShares(const CommandLine &, const Options &options)
 
 void adjustShares(Options *options)
 {
-    // The root of a location without a share lists the shares (XM-2).
     options->overrides.insert(QStringLiteral("share"), QString());
 }
 
@@ -557,8 +543,6 @@ const std::array<CommandSpec, 22> &table()
     } };
     return commands;
 }
-
-// ------------------------------------------------------------- flag parsing
 
 struct FlagSpec {
     QString longName;
@@ -604,8 +588,6 @@ const FlagSpec *findShort(const QVector<FlagSpec> &flags, QChar name)
     return nullptr;
 }
 
-// Takes the flag at args[index]; `*consumed` is the number of arguments it used
-// (the flag, and its value when it has one).
 bool takeFlag(const QVector<FlagSpec> &flags, const QStringList &args, int index, int *consumed, CommandLine *out,
               QString *error)
 {
@@ -642,8 +624,7 @@ bool isFlag(const QString &arg)
     return arg.size() > 1 && arg.startsWith(QLatin1Char('-'));
 }
 
-} // namespace
-
+}
 const CommandSpec *findCommand(const QString &name)
 {
     for (const CommandSpec &spec : table()) {
@@ -694,4 +675,4 @@ Result resolvePath(const QString &basePath, const QString &argument, QString *ou
     return Paths::normalize(path, out);
 }
 
-} // namespace NetVfs::Cli
+}

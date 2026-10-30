@@ -15,10 +15,9 @@
 
 namespace NetVfs {
 
-// Client of the platform backup service (SPEC 3.4): session bus,
-// org.sailfishos.backup at /sailfishbackup. Calls are asynchronous so the
-// plugin thread keeps serving its event loop; each callback runs at most
-// once, on the owning thread, and never after the service object is gone.
+// Client of the platform backup service: session bus, org.sailfishos.backup at /sailfishbackup.
+// Calls are asynchronous so the plugin thread keeps serving its event loop; each callback runs at
+// most once, on the owning thread, never after the service object is gone.
 class BackupService : public QObject
 {
     Q_OBJECT
@@ -53,11 +52,10 @@ private:
               const std::function<void(const QDBusMessage &)> &done);
 
     QDBusConnection m_connection;
-    // Handlers are held by value; a delivered one is only dropped on the next
-    // call or at destruction, never while its own callback is running.
+    // Handlers are held by value; a delivered one is dropped only on the next call or at
+    // destruction, never while its own callback runs.
     std::list<ReplyHandler> m_calls;
 };
 
-} // namespace NetVfs
-
+}
 #endif

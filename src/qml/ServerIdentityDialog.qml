@@ -3,11 +3,9 @@ import QtQuick 2.0
 import Sailfish.Silica 1.0
 import org.netvfs.accounts 1.0
 
-// Server identity confirmation (SPEC-sftp S-7, S-8; SPEC-v2 XA-5, XC-16).
-// The key's algorithm and full SHA256 fingerprint (monospace). Explicit
-// acceptance is required. With storedIdentity set (update flow, SPEC 7.5)
-// the stored and the newly seen identity are shown together; a changed
-// identity is never accepted silently (S-9).
+// Server identity confirmation: key algorithm and full SHA256 fingerprint (monospace). Explicit
+// acceptance required. With storedIdentity set (update flow) stored and newly seen identity are
+// shown together; a changed identity is never accepted silently.
 Dialog {
     id: dialog
 

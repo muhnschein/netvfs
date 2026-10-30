@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-// Buteo backup plugins (SPEC 8) driven through the Buteo::ClientPlugin API
+// Buteo backup plugins driven through the Buteo::ClientPlugin API
 // against a fake org.sailfishos.backup service and the in-memory FakeServer.
 #include "accountsession.h"
 #include "accountsfixture.h"
@@ -34,7 +34,6 @@ using Minor = Buteo::SyncResults::MinorCode;
 
 namespace {
 
-// Secret source that answers asynchronously, like signond.
 class QueuedSecretSource : public SecretSource
 {
 public:
@@ -70,14 +69,14 @@ struct SessionSource
         auto secrets = std::make_unique<QueuedSecretSource>(secretResult, Credentials(QStringLiteral("user"), secret));
         auto session = std::make_unique<AccountSession>(manager.get(), secrets.release(), parent);
         manager.release()->setParent(session.get());
-        AccountSession *raw = session.release();   // owned by `parent`
+        AccountSession *raw = session.release();
         QTimer::singleShot(0, raw, [raw, accountId]() { raw->start(accountId, Service::Backup); });
         last = raw;
         return raw;
     }
 };
 
-// Records what a plugin reports (B-7: exactly one of success/error). Copies
+// Records what a plugin reports (: exactly one of success/error). Copies
 // share the record, so the connections never outlive it.
 struct Outcome
 {
@@ -326,7 +325,7 @@ private slots:
         sessions.secret = "secret";
     }
 
-    // SPEC 8.2: generated from one template per kind; only the names and the
+    // generated from one template per kind; only the names and the
     // sync protocol differ.
     void profiles_data()
     {
@@ -352,7 +351,6 @@ private slots:
         const QByteArray syncXml = readFile(dir + sync + QStringLiteral(".xml"));
         QCOMPARE(QString::fromUtf8(syncXml), expectedSyncProfile(sync, client, provider));
 
-        // And Buteo reads them as intended.
         QDomDocument doc;
         QVERIFY(doc.setContent(syncXml));
         Buteo::SyncProfile profile(doc.documentElement());
@@ -369,7 +367,7 @@ private slots:
         QCOMPARE(clientProfile.type(), QStringLiteral("client"));
     }
 
-    // SPEC 3.3 / 8.1: six plugins from one loader source, unique IIDs, each
+    // / 8.1: six plugins from one loader source, unique IIDs, each
     // creating the shared client for its provider and operation.
     void loaders()
     {
@@ -392,7 +390,7 @@ private slots:
                 QCOMPARE(plugin->property("provider").toString(), QString::fromLatin1(provider));
                 QCOMPARE(plugin->property("operationName").toString(), QString::fromLatin1(operation));
                 QCOMPARE(plugin->getPluginName(), client);
-                QVERIFY(!plugin->init());   // B-1: no account id
+                QVERIFY(!plugin->init());   // no account id
             }
         }
         QCOMPARE(iids.size(), 6);
@@ -422,14 +420,12 @@ private slots:
         QVERIFY(plugin->uninit());
     }
 
-    // SPEC 8.7.
     void minorCodes()
     {
         QCOMPARE(BackupClient::minorCodeFor(Error::None), Buteo::SyncResults::NO_ERROR);
         QCOMPARE(BackupClient::minorCodeFor(Error::Canceled), Buteo::SyncResults::ABORTED);
         QCOMPARE(BackupClient::minorCodeFor(Error::NetworkUnreachable), Buteo::SyncResults::CONNECTION_ERROR);
         QCOMPARE(BackupClient::minorCodeFor(Error::Timeout), Buteo::SyncResults::CONNECTION_ERROR);
-        // XC-21: a dropped connection and server limits are retryable like an unreachable server.
         QCOMPARE(BackupClient::minorCodeFor(Error::ConnectionLost), Buteo::SyncResults::CONNECTION_ERROR);
         QCOMPARE(BackupClient::minorCodeFor(Error::TooManyConnections), Buteo::SyncResults::CONNECTION_ERROR);
         QCOMPARE(BackupClient::minorCodeFor(Error::RateLimited), Buteo::SyncResults::CONNECTION_ERROR);
@@ -453,7 +449,6 @@ private slots:
         QCOMPARE(BackupClient::minorCodeForAbort(Sync::SYNC_PLUGIN_TIMEOUT), Buteo::SyncResults::PLUGIN_TIMEOUT);
     }
 
-    // B-1
     void initNeedsAccountId_data()
     {
         QTest::addColumn<QString>("value");
@@ -487,7 +482,6 @@ private slots:
         QCOMPARE(client->operation(), Op::Backup);
     }
 
-    // SPEC 8.4, B-2, C-12: the full backup flow.
     void backupSuccess()
     {
         const int id = createAccount();
@@ -528,24 +522,22 @@ private slots:
         QVERIFY(!serverHas(remote + QStringLiteral(".part")));
         QVERIFY(serverHas(dir + QStringLiteral("/recent.tar.part")));
         QVERIFY(!serverHas(dir + QStringLiteral("/old.tar.part")));
-        // A fresh connection for the upload.
         QCOMPARE(serverLog().count(QStringLiteral("connect")), 2);
         QCOMPARE(serverLog().count(QStringLiteral("disconnect")), 2);
         QVERIFY(serverLog().contains(QStringLiteral("upload:") + remote + QStringLiteral(".part")));
-        // XT-6: backup behaviour unchanged by API v2: private files and
-        // folders (S-20), ".part" naming, Replace on commit.
+        // backup behaviour unchanged by API v2: private files and
+        // folders, ".part" naming, Replace on commit.
         QVERIFY(serverLog().contains(QStringLiteral("rename:") + remote + QStringLiteral(".part->") + remote
                                      + QStringLiteral(":replace")));
         QCOMPARE(FakeServer::instance()->node(remote).mode, 0600);
         QCOMPARE(FakeServer::instance()->lastParams.option(QStringLiteral("dir_mode")), QStringLiteral("0700"));
         QCOMPARE(FakeServer::instance()->liveBackends, 0);
 
-        // The local archive and its directory are gone.
         QVERIFY(!QFile::exists(archive));
         QVERIFY(!QFileInfo::exists(QFileInfo(archive).absolutePath()));
         QCOMPARE(client->getSyncResults().majorCode(), Buteo::SyncResults::SYNC_RESULT_SUCCESS);
         QCOMPARE(client->getSyncResults().minorCode(), Buteo::SyncResults::NO_ERROR);
-        // SEC-5: the session no longer holds the secret.
+        // the session no longer holds the secret.
         QVERIFY(sessions.last);
         QVERIFY(sessions.last->credentials().secret.isEmpty());
         QVERIFY(fixture->value(id, QStringLiteral("netvfs/attention")).toString().isEmpty());
@@ -562,7 +554,6 @@ private slots:
         Outcome outcome = run(makeClient(Op::Backup, id));
         QCOMPARE(outcome.d->successes, 1);
         QVERIFY(serverHas(QStringLiteral("Backups/device-1/") + QFileInfo(service->lastArchivePath).fileName()));
-        // S-20 kept by XC-23: folders the backup creates are private.
         QCOMPARE(FakeServer::instance()->node(QStringLiteral("Backups")).mode, 0700);
         QCOMPARE(FakeServer::instance()->node(QStringLiteral("Backups/device-1")).mode, 0700);
     }
@@ -611,7 +602,6 @@ private slots:
                                           << QStringLiteral("DiskFull no room");
     }
 
-    // SPEC 8.4 step 4, step 6 on failure.
     void backupServiceFailures()
     {
         QFETCH(QString, kind);
@@ -636,7 +626,6 @@ private slots:
         QCOMPARE(client->getSyncResults().majorCode(), Buteo::SyncResults::SYNC_RESULT_FAILED);
         QCOMPARE(int(client->getSyncResults().minorCode()), code);
 
-        // Late signals change nothing (B-7).
         service->emitBackupStatus(id, QStringLiteral("UploadingBackup"));
         QTest::qWait(50);
         QCOMPARE(outcome.total(), 1);
@@ -660,7 +649,7 @@ private slots:
         QVERIFY(outcome.d->message.contains(QStringLiteral("createBackupForSyncProfile")));
     }
 
-    // SPEC 8.4 step 2: a failing pre-flight ends the run before any archive is built.
+    // step 2: a failing pre-flight ends the run before any archive is built.
     void backupPreflightFailures_data()
     {
         QTest::addColumn<QString>("op");
@@ -699,7 +688,6 @@ private slots:
         QVERIFY(!fixture->value(id, QStringLiteral("CredentialsNeedUpdate")).toBool());
     }
 
-    // SPEC 8.7 / 6.4: authentication failures flag the account.
     void backupAuthFailed()
     {
         FakeServer::instance()->secret = "other";
@@ -734,7 +722,7 @@ private slots:
         QTest::newRow("unknown") << QString();
     }
 
-    // SEC-1, SPEC-sftp S-7: no authentication; seen key recorded.
+    // no authentication; seen key recorded.
     void backupIdentity()
     {
         QFETCH(QString, pin);
@@ -757,7 +745,6 @@ private slots:
         QTest::newRow("no space") << true;
     }
 
-    // C-12, C-13 through the plugin; local archive removed on failure.
     void backupUploadFailures()
     {
         QFETCH(bool, noSpace);
@@ -783,8 +770,8 @@ private slots:
         QVERIFY(!QFile::exists(archive));
     }
 
-    // B-4: abort cancels the in-flight upload and reports Buteo's code;
-    // B-3: the plugin thread keeps running its event loop meanwhile.
+    // abort cancels the in-flight upload and reports Buteo's code
+    // the plugin thread keeps running its event loop meanwhile.
     void abortDuringUpload()
     {
         const int id = createAccount();
@@ -859,7 +846,7 @@ private slots:
         QCOMPARE(outcome.total(), 1);
     }
 
-    // B-7: abort racing a completed upload whose result is not yet delivered.
+    // abort racing a completed upload whose result is not yet delivered.
     void abortRacesCompletion()
     {
         const int id = createAccount();
@@ -926,7 +913,7 @@ private slots:
         QVERIFY(client->init());
         QCOMPARE(outcome.total(), 0);
         QVERIFY(client->startSync());
-        QVERIFY(!client->startSync());   // one run at a time
+        QVERIFY(!client->startSync());
         QVERIFY(outcome.wait());
         QCOMPARE(outcome.d->successes, 1);
         client->abortSync();
@@ -982,7 +969,6 @@ private slots:
         QVERIFY(service->cloudBackups.isEmpty());
     }
 
-    // B-5
     void connectivityIgnored()
     {
         const int id = createAccount();
@@ -998,7 +984,6 @@ private slots:
         QCOMPARE(outcome.d->successes, 1);
     }
 
-    // B-6
     void cleanUpKeepsServerFiles()
     {
         const int id = createAccount();
@@ -1014,7 +999,6 @@ private slots:
         QVERIFY(client->uninit());
     }
 
-    // SPEC 8.5
     void query()
     {
         const int id = createAccount();
@@ -1029,7 +1013,7 @@ private slots:
         QCOMPARE(serverLog().count(QStringLiteral("disconnect")), 1);
     }
 
-    // SPEC 8.5, XT-6: every non-folder entry except ".part" files is listed,
+    // every non-folder entry except ".part" files is listed
     // as in API v1, also symlinks whose target type is unknown and specials.
     void queryListsNonFolders()
     {
@@ -1048,7 +1032,6 @@ private slots:
                                << QStringLiteral("Backups/device-1/fifo") << QStringLiteral("Backups/device-1/link.tar"));
     }
 
-    // B-2 with an absolute, untidy backups_path.
     void queryRemoteDirectory()
     {
         const int id = createAccount(QStringLiteral("/srv//backups/"));
@@ -1068,7 +1051,7 @@ private slots:
         QCOMPARE(outcome.d->successes, 1);
         QCOMPARE(service->cloudBackups.size(), 1);
         QVERIFY(service->cloudBackups.at(0).second.isEmpty());
-        QVERIFY(!serverHas(QStringLiteral("Backups")));   // nothing created
+        QVERIFY(!serverHas(QStringLiteral("Backups")));
     }
 
     void queryFailures()
@@ -1113,7 +1096,6 @@ private slots:
         // No such account.
         Outcome outcome = run(makeClient(Op::BackupQuery, 99999));
         QCOMPARE(outcome.d->code, int(Buteo::SyncResults::INTERNAL_ERROR));
-        // An account of another provider.
         const int sftp = createAccount(QStringLiteral("Backups"), QString(), QStringLiteral("sftp"));
         outcome = run(makeClient(Op::BackupQuery, sftp));
         QCOMPARE(outcome.d->code, int(Buteo::SyncResults::INTERNAL_ERROR));
@@ -1121,7 +1103,6 @@ private slots:
         QVERIFY(serverLog().isEmpty());
     }
 
-    // SPEC 8.6
     void restore()
     {
         const int id = createAccount();
@@ -1207,7 +1188,7 @@ private slots:
         QCOMPARE(outcome.total(), 1);
     }
 
-    // C-17: the secret never reaches a log, even at debug level.
+    // the secret never reaches a log, even at debug level.
     void noSecretsLogged()
     {
         sessions.secret = "s3cr3t-Value";
@@ -1232,7 +1213,6 @@ private slots:
             QVERIFY2(!message.contains(QStringLiteral("s3cr3t")), qPrintable(message));
     }
 
-    // The production session path with a real signond identity, when signond works here.
     void realSignondBackup()
     {
         if (QStandardPaths::findExecutable(QStringLiteral("signond")).isEmpty())
@@ -1263,7 +1243,6 @@ private slots:
         QCOMPARE(outcome.d->successes, 1);
     }
 
-    // The worker in isolation.
     void networkJob()
     {
         ConnectionParams params;

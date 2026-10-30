@@ -1,6 +1,5 @@
 # SPDX-License-Identifier: LGPL-2.1-or-later
-# Common settings for a backend plugin libnetvfs-<NETVFS_PROVIDER>.so
-# (SPEC 4.1, SEC-7).
+# Backend plugin libnetvfs-<NETVFS_PROVIDER>.so.
 include(../../common.pri)
 
 TEMPLATE = lib

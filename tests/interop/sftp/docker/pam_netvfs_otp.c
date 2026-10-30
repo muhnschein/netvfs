@@ -1,10 +1,8 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 /*
- * One-time password stub for the SFTP interop suite (SPEC-v2 XT-2, XS-11).
- * Asks "Verification code: " (no echo) through the PAM conversation, which
- * OpenSSH turns into a keyboard-interactive round, and accepts one fixed
- * code. Never install this anywhere but a test container.
- *
+ * One-time password stub for the SFTP interop suite. Asks "Verification code: " (no echo) through the PAM
+ * conversation, which OpenSSH turns into a keyboard-interactive round, and accepts one fixed code.
+ * Never install outside a test container.
  * Arguments:
  *   code=VALUE    the code that is accepted (required)
  *   wrong=ignore  a wrong answer is PAM_IGNORE instead of PAM_AUTH_ERR, so

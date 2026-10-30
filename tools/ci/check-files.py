@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: LGPL-2.1-or-later
-"""Checks the %files sections of the RPM spec against an install tree
-(SPEC-v2 XP-1): every installed file belongs to exactly one package, every
+"""Checks the %files sections of the RPM spec against an install tree:
+every installed file belongs to exactly one package, every
 %files entry matches something, and every netvfs directory is owned by
 exactly one package. rpmbuild only reports unpackaged files; this runs on the
 host build in seconds and also finds files listed in two packages.
@@ -27,7 +27,7 @@ import sys
 
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# rpm macros of the Sailfish OS 5.2 target that the spec may use.
+# rpm macros of the Sailfish OS 5.2 target the spec may use.
 SAILFISH_MACROS = {
     "_prefix": "/usr",
     "_exec_prefix": "/usr",

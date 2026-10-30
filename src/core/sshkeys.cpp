@@ -24,7 +24,7 @@ QByteArray keyPart(const QByteArray &line)
     }
     return QByteArray();
 }
-} // namespace
+}
 
 SshKeyMaterial::SshKeyMaterial(const SshKeyMaterial &other)
     : privateKey(other.privateKey.constData(), other.privateKey.size())
@@ -122,4 +122,4 @@ Result installAuthorizedKey(Backend *backend, const QString &publicLine)
     return Transfer::upload(backend, &source, updated.size(), QLatin1String(AuthorizedKeys));
 }
 
-} // namespace NetVfs
+}

@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-// The bridge protocol contract (SPEC-v2 XT-7), shared with the consumer's
+// The bridge protocol contract, shared with the consumer's
 // fake bridge: the introspection XML in this folder and the golden message
 // sequences (*.json, format in README.md) replayed against the netvfs-bridge
 // binary with the FakeBackend (provider "fake", account "account:1"). The
-// client is libdbus, the bridge zbus (design §4.3): these cases also show
+// client is libdbus, the bridge zbus: these cases also show
 // that the two agree on authentication, fd passing and error replies.
 #include "bridgetest.h"
 
@@ -119,7 +119,6 @@ private Q_SLOTS:
 
 void tst_Contract::introspection()
 {
-    // XB-8: the XML the bridge serves is the contract's, byte for byte.
     BridgeProcess f;
     QVERIFY(f.start());
     auto c = f.client();
@@ -128,7 +127,6 @@ void tst_Contract::introspection()
                                                            "org.freedesktop.DBus.Introspectable"));
     QVERIFY2(reply.valid && !reply.isError, qPrintable(reply.name));
     QCOMPARE(reply.args.value(0).toString().toUtf8(), readFile(ContractDir + QStringLiteral("/org.netvfs.Bridge1.xml")));
-    // org.freedesktop.DBus.Peer, as libdbus answered it for the C++ bridge.
     const TestClient::Message ping = c->waitReply(c->send("Ping", TestClient::Args(), "org.freedesktop.DBus.Peer"));
     QVERIFY(ping.valid && !ping.isError);
     // Nothing else lives on the connection.
@@ -153,7 +151,7 @@ void tst_Contract::signalsOfTheXml()
 
 void tst_Contract::unixFdPassing()
 {
-    // XB-11: Upload and Download take an fd the consumer opened; libdbus
+    // Upload and Download take an fd the consumer opened; libdbus
     // sends it, the bridge's zbus must have negotiated fd passing.
     BridgeProcess f;
     QVERIFY(f.start());
@@ -170,7 +168,7 @@ void tst_Contract::unixFdPassing()
     const TestClient::Message upload = c->call("Upload", [&](WireWriter &w) {
         w.string(QStringLiteral("account:1")).bytes("/uploaded.txt").unixFd(readFd).variantMap(QVariantMap());
     });
-    ::close(readFd);   // the message carried a duplicate
+    ::close(readFd);
     QVERIFY2(upload.valid && !upload.isError, qPrintable(upload.name + QLatin1Char(' ') + upload.args.value(0).toString()));
     const uint uploadJob = upload.args.value(0).toUInt();
     const TestClient::Message uploaded = c->waitSignal(QStringLiteral("JobFinished"), [&](const QVariantList &args) {
@@ -201,7 +199,7 @@ void tst_Contract::unixFdPassing()
 
 void tst_Contract::errorDetails()
 {
-    // XB-17, XC-24: an error reply carries the message and an a{sv} with
+    // an error reply carries the message and an a{sv} with
     // retryAfterMs, as libdbus decodes it.
     BridgeProcess f;
     f.addFile("f.txt", "12345");

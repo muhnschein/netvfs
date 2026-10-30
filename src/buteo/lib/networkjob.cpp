@@ -62,4 +62,4 @@ void NetworkJob::run()
     m_result = r;
 }
 
-} // namespace NetVfs
+}

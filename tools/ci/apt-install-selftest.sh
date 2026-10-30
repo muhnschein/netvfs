@@ -1,10 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: LGPL-2.1-or-later
-# Prove tools/ci/apt-install.sh drops the right apt lists, keeps the rest.
-#
-# Catastrophic failure: delete Ubuntu archive with third-party repos, every job
-# installs nothing. Runner images put archive in /etc/apt/sources.list or a
-# .sources file under sources.list.d: cases cover both.
+# Prove apt-install.sh drops the right apt lists, keeps the rest. Deleting the Ubuntu archive (sources.list or a .sources file under sources.list.d) is the catastrophic failure: cases cover both.
 set -u
 
 root=$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd)
@@ -31,8 +27,7 @@ EOF
     cat >"$work/sources/microsoft-prod.list" <<'EOF'
 deb [arch=amd64] https://packages.microsoft.com/ubuntu/22.04/prod jammy main
 EOF
-    # Ubuntu archive, deb822 (current image). Dropping it is the mistake that
-    # matters.
+    # Ubuntu archive, deb822 (current image). Dropping it is the mistake that matters.
     cat >"$work/sources/ubuntu.sources" <<'EOF'
 Types: deb
 URIs: http://azure.archive.ubuntu.com/ubuntu/
@@ -44,8 +39,7 @@ EOF
     cat >"$work/sources/archive.list" <<'EOF'
 deb http://archive.ubuntu.com/ubuntu jammy main
 EOF
-    # Not a source list. apt ignores anything without the two extensions; so
-    # must this.
+    # Not a source list: apt ignores anything without the two extensions.
     cat >"$work/sources/google-chrome.list.save" <<'EOF'
 deb [arch=amd64] https://dl.google.com/linux/chrome/deb/ stable main
 EOF
@@ -88,8 +82,7 @@ survives ubuntu.sources yes "the archive in deb822 form is kept"
 survives archive.list yes "the archive in one-line form is kept"
 survives google-chrome.list.save yes "a file apt would not read is left alone"
 
-# Log is what reader sees when job installs wrong thing: name each file acted
-# on.
+# Log names each file acted on.
 cases=$((cases + 1))
 if grep -q "dropping google-chrome.list" <<<"$out" &&
     grep -q "keeping ubuntu.sources" <<<"$out"; then
@@ -100,9 +93,7 @@ else
     status=1
 fi
 
-# Empty and missing dir both fine (image keeps sources in
-# /etc/apt/sources.list). "accepted", not "not an error": Sonar S7677 reads any
-# message with "error" as an error.
+# Empty and missing dir both fine. "accepted", not "not an error": Sonar S7677 reads any message with "error" as an error.
 rm -rf "$work/sources"
 mkdir -p "$work/sources"
 cases=$((cases + 1))
@@ -121,8 +112,7 @@ else
     status=1
 fi
 
-# No packages, no --prune-only: workflow lost its list. Refuse, not silent no-op
-# (next step would fail with "command not found").
+# No packages, no --prune-only: workflow lost its list. Refuse, not silent no-op.
 stage
 cases=$((cases + 1))
 if APT_SOURCES_DIR="$work/sources" "$script" >/dev/null 2>&1; then
@@ -132,11 +122,7 @@ else
     echo "selftest: ok   naming no packages is refused"
 fi
 
-# Mirror down: stand-in apt fails `update` while $APT_DOWN holds "once" (first
-# call) or "always"; `install` alike with "install-once", "install-always"
-# (index fine, package download fails). Trickling mirror: "update-slow",
-# "download-slow" hang that call once. "installed": nothing left to fetch.
-# `--print-uris` names two debs, big one first. Logs every call.
+# Mirror down: stand-in apt fails `update` while $APT_DOWN holds "once" or "always"; `install` alike with "install-once", "install-always". "update-slow", "download-slow" hang that call once. "installed": nothing left to fetch. `--print-uris` names two debs, big one first. Logs every call.
 cat >"$work/apt-get" <<'EOF'
 #!/usr/bin/env bash
 echo "$*" >>"$APT_LOG"
@@ -179,8 +165,7 @@ exit 0
 EOF
 chmod +x "$work/apt-get"
 
-# Stand-in curl: answers as $APT_SPEEDS says for URL's host ("<host> <status>
-# <bytes> <seconds>"); host not there = no connection. Logs every call.
+# Stand-in curl: answers per $APT_SPEEDS for URL's host ("<host> <status> <bytes> <seconds>"); unlisted host = no connection. Logs every call.
 cat >"$work/curl" <<'EOF'
 #!/usr/bin/env bash
 echo "$*" >>"$APT_PROBES"
@@ -196,8 +181,7 @@ exit 7
 EOF
 chmod +x "$work/curl"
 
-# Mirror speeds for next run_install. Default: azure fastest, as on a good
-# runner.
+# Mirror speeds for next run_install. Default: azure fastest.
 default_speeds() {
     printf '%s\n' 'azure.archive.ubuntu.com 206 2097152 0.2' \
         'archive.ubuntu.com 206 2097152 1.0' \
@@ -213,8 +197,7 @@ image_mirrors() {
     return 0
 }
 
-# run_install <down mode>: script with stand-in apt and curl, staged lists.
-# Speeds from $work/speeds, reset to default after.
+# run_install <down mode>: script with stand-in apt and curl, staged lists. Speeds from $work/speeds, reset after.
 run_install() {
     local mode=$1
     stage
@@ -301,8 +284,7 @@ check "a failed download is tried once more" test "$(grep -c '' "$work/apt.log")
 check "the download retry goes to archive.ubuntu.com" \
     grep -q 'URIs: http://archive.ubuntu.com/ubuntu/' "$work/sources/ubuntu.sources"
 
-# slow <mode> <why>: trickling call cut at cap, rest from archive, well before
-# stand-in's 60 s.
+# slow <mode> <why>: trickling call cut at cap, rest from archive, well before stand-in's 60 s.
 slow() {
     local mode=$1 why=$2 began=$SECONDS
     run_install "$mode"
@@ -315,8 +297,7 @@ slow() {
 slow update-slow "a trickling index is cut short and fetched again"
 slow download-slow "a trickling download is cut short and fetched again"
 
-# Mirror pick. Slow runner's case: azure trickles, others fast. Security
-# fastest of all, still never first: carries own pocket's debs only.
+# Mirror pick. Slow runner: azure trickles, others fast. Security fastest, still never first: own pocket's debs only.
 set_speeds 'azure.archive.ubuntu.com 206 131072 5.0' \
     'archive.ubuntu.com 206 2097152 0.4' \
     'mirrors.edge.kernel.org 206 2097152 0.8' \

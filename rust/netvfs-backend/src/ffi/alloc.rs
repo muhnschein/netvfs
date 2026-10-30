@@ -1,11 +1,8 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! R3: an object returned through an out-pointer is one `calloc`'d block
-//! holding the object and every byte it points to; the table's `free`
-//! wipes the whole block and releases it. A hidden header in front of the
-//! object keeps the block's size for the wipe.
+//! An object returned through an out-pointer is one `calloc`'d block: object plus every byte it points to.
+//! `free` wipes the whole block; a hidden header before the object keeps the size.
 //!
-//! [`pack`] builds a block in two passes over the same function: the first
-//! counts what the object needs, the second writes it.
+//! [`pack`] runs its function twice: first pass counts, second writes.
 
 use super::raw::NvbBytes;
 use std::cell::Cell;
@@ -14,12 +11,10 @@ use std::mem::{align_of, size_of};
 use std::ptr;
 use zeroize::Zeroize;
 
-/// Bytes in front of the object: its size, padded so that the object keeps
-/// `calloc`'s 16-byte alignment.
+/// Header size; keeps `calloc`'s 16-byte alignment for the object.
 const HEADER: usize = 16;
 
 thread_local! {
-    /// Blocks this thread made minus blocks it freed.
     static LIVE: Cell<isize> = const { Cell::new(0) };
 }
 
@@ -27,22 +22,17 @@ fn count(delta: isize) {
     LIVE.with(|live| live.set(live.get().wrapping_add(delta)));
 }
 
-/// Blocks this thread made minus blocks it freed: tests check for leaks
-/// with it (a block freed on another thread counts there).
+/// Blocks this thread made minus freed; leak check for tests.
 pub fn live_blocks() -> isize {
     LIVE.with(Cell::get)
 }
 
-/// Where [`pack`]'s function puts the bytes and lists an object points to.
+/// Where [`pack`]'s function puts bytes and lists.
 pub trait Out {
-    /// A copy of `data` in the block.
     fn bytes(&mut self, data: &[u8]) -> NvbBytes;
-    /// A copy of `items` (an array of `nvb_bytes` and their bytes) in the
-    /// block; `items.len()` is its length.
     fn list(&mut self, items: &[&[u8]]) -> *const NvbBytes;
 }
 
-/// The first pass: counts list slots and bytes; `None` on overflow.
 struct Count {
     slots: Option<usize>,
     bytes: Option<usize>,
@@ -63,7 +53,6 @@ impl Out for Count {
     }
 }
 
-/// The second pass: writes slots and bytes where the first pass made room.
 struct Fill {
     slots: *mut NvbBytes,
     bytes: *mut u8,
@@ -72,10 +61,7 @@ struct Fill {
 impl Out for Fill {
     fn bytes(&mut self, data: &[u8]) -> NvbBytes {
         let at = self.bytes;
-        // SAFETY: the first pass counted `data.len()` bytes for this call, so
-        // `at` has room for them inside the block; source and block do not
-        // overlap (the block is new). `add` stays within the block (or one
-        // past its end).
+        // SAFETY: first pass counted `data.len()` bytes, so `at` has room inside the new block.
         unsafe {
             ptr::copy_nonoverlapping(data.as_ptr(), at, data.len());
             self.bytes = at.add(data.len());
@@ -87,9 +73,7 @@ impl Out for Fill {
         let first = self.slots;
         for item in items {
             let slot = self.bytes(item);
-            // SAFETY: the first pass counted one slot per item, so `self.slots`
-            // points to room for one `NvbBytes` in the block, aligned (the
-            // slots start at a multiple of 8 and are 16 bytes each).
+            // SAFETY: first pass counted one aligned slot per item.
             unsafe {
                 self.slots.write(slot);
                 self.slots = self.slots.add(1);
@@ -99,9 +83,8 @@ impl Out for Fill {
     }
 }
 
-/// One block holding what `build` makes: `build` runs twice and must
-/// produce the same calls to [`Out`] each time. `None` when the size
-/// overflows or `calloc` fails.
+/// One block holding what `build` makes; `build` runs twice and must make the same [`Out`] calls. `None` on
+/// overflow or `calloc` failure.
 #[allow(clippy::cast_ptr_alignment, reason = "calloc's blocks are aligned for any type; the offsets keep 8")]
 pub fn pack<T>(build: impl Fn(&mut dyn Out) -> T) -> Option<*mut T> {
     const { assert!(align_of::<T>() <= HEADER && align_of::<NvbBytes>() <= HEADER) };
@@ -111,15 +94,12 @@ pub fn pack<T>(build: impl Fn(&mut dyn Out) -> T) -> Option<*mut T> {
     let slot_bytes = needs.slots?.checked_mul(size_of::<NvbBytes>())?;
     let size = slots_at.checked_add(slot_bytes)?.checked_add(needs.bytes?)?;
     let total = size.checked_add(HEADER)?;
-    // SAFETY: calloc with a non-zero size; the result is checked for NULL.
+    // SAFETY: non-zero size; NULL checked.
     let base = unsafe { libc::calloc(1, total) }.cast::<u8>();
     if base.is_null() {
         return None;
     }
-    // SAFETY: `base` is a fresh, zeroed block of `total` bytes, aligned for
-    // any type (16 on LP64): the header (a usize at its start) and the
-    // object at `HEADER` fit and are aligned (the const assert above); the
-    // slots start at `HEADER + slots_at`, the bytes after them, all inside.
+    // SAFETY: fresh zeroed block of `total` bytes, 16-aligned; header, object, slots, bytes all fit inside.
     unsafe {
         base.cast::<usize>().write(size);
         let object = base.add(HEADER);
@@ -134,14 +114,11 @@ pub fn pack<T>(build: impl Fn(&mut dyn Out) -> T) -> Option<*mut T> {
     }
 }
 
-/// Wipes the block of `p` and returns its start, for `libc::free`.
-///
 /// # Safety
 /// `p` is an object [`pack`] returned and not yet released.
 #[allow(clippy::cast_ptr_alignment, reason = "the header is at the block's start, which calloc aligned")]
 unsafe fn wipe(p: *mut c_void) -> *mut u8 {
-    // SAFETY: `pack` put the size in the header right in front of `p`; the
-    // block holds `HEADER + size` initialised bytes (calloc).
+    // SAFETY: header sits right before `p`; block holds `HEADER + size` initialised bytes.
     unsafe {
         let base = p.cast::<u8>().sub(HEADER);
         let size = base.cast::<usize>().read();
@@ -150,8 +127,7 @@ unsafe fn wipe(p: *mut c_void) -> *mut u8 {
     }
 }
 
-/// The table's `free` (R3): wipes and releases a block; NULL is a no-op.
-/// Nothing in it can panic.
+/// Table `free`: wipes and releases a block; NULL is a no-op.
 ///
 /// # Safety
 /// `p` is NULL or an object this library returned and not yet released.
@@ -159,7 +135,7 @@ pub unsafe extern "C" fn free(p: *mut c_void) {
     if p.is_null() {
         return;
     }
-    // SAFETY: `p` is a live block of this library (the caller's contract).
+    // SAFETY: caller's contract.
     unsafe { libc::free(wipe(p).cast()) };
     count(-1);
 }
@@ -201,7 +177,6 @@ mod tests {
         let algos = unsafe { std::slice::from_raw_parts(caps.checksum_algorithms, 1) };
         assert_eq!(slice(algos[0]), b"sha256");
         assert_eq!(caps.max_name_bytes, 255);
-        // Everything lies inside the block: header, object, slots, bytes.
         // SAFETY: test: the header is in front of `p`.
         let size = unsafe { p.cast::<u8>().sub(HEADER).cast::<usize>().read() };
         assert_eq!(size, size_of::<NvbCapabilities>() + 4 * 16 + 9 + 8 + 6);
@@ -220,8 +195,7 @@ mod tests {
     #[test]
     fn wipe_clears_the_whole_block() {
         let p = pack(|out| out.bytes(b"secret secret secret")).unwrap();
-        // SAFETY: test: `p` is a live block; it is wiped, read and released
-        // by hand instead of `free`.
+        // SAFETY: test: `p` is a live block, wiped and read by hand.
         unsafe {
             let size = p.cast::<u8>().sub(HEADER).cast::<usize>().read();
             let base = wipe(p.cast());

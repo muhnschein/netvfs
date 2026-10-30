@@ -1,14 +1,12 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! The hardened algorithm lists (S-1, S-2, S-5) and the name of the list a
-//! failed negotiation found nothing in.
+//! Hardened algorithm lists and the name of the list a failed negotiation found nothing in.
 
 use russh::keys::{Algorithm, EcdsaCurve, HashAlg};
 use russh::{AlgorithmKind, Preferred, SshId, cipher, client, compression, kex, mac};
 use std::borrow::Cow;
 
-/// Key exchange: hybrid ML-KEM, X25519 (both names), then the client
-/// markers for ext-info (RFC 8308) and OpenSSH's strict kex; russh never
-/// picks a marker.
+/// Hybrid ML-KEM, X25519 (both names), then the client markers for ext-info (RFC 8308) and OpenSSH strict kex;
+/// russh never picks a marker.
 pub const KEX: &[kex::Name] = &[
     kex::MLKEM768X25519_SHA256,
     kex::CURVE25519,
@@ -20,15 +18,13 @@ pub const KEX: &[kex::Name] = &[
 /// AEAD ciphers only.
 pub const CIPHERS: &[cipher::Name] = &[cipher::CHACHA20_POLY1305, cipher::AES_256_GCM, cipher::AES_128_GCM];
 
-/// Unused with AEAD ciphers; encrypt-then-MAC SHA-2 so that nothing weaker
-/// can be picked.
+/// Unused with AEAD ciphers; encrypt-then-MAC SHA-2 so nothing weaker can be picked.
 pub const MACS: &[mac::Name] = &[mac::HMAC_SHA512_ETM, mac::HMAC_SHA256_ETM];
 
 /// No compression.
 pub const COMPRESSION: &[compression::Name] = &[compression::NONE];
 
-/// Host-key algorithms, preferred first: no `ssh-rsa` signatures (SHA-1),
-/// no DSA, no certificates.
+/// Preferred first: no `ssh-rsa` signatures (SHA-1), no DSA, no certificates.
 pub const HOST_KEYS: &[Algorithm] = &[
     Algorithm::Ed25519,
     Algorithm::Ecdsa { curve: EcdsaCurve::NistP256 },
@@ -38,9 +34,8 @@ pub const HOST_KEYS: &[Algorithm] = &[
     Algorithm::Rsa { hash: Some(HashAlg::Sha256) },
 ];
 
-/// The host-key algorithm of a pinned key type (an identity's algorithm,
-/// `ssh-keygen`'s key type name); `None` for a type this app does not
-/// accept, which then narrows nothing (S-5).
+/// Host-key algorithm of a pinned key type (`ssh-keygen`'s name); `None` for an unaccepted type, which narrows
+/// nothing.
 #[must_use]
 pub fn pinned_algorithm(key_type: &str) -> Option<Algorithm> {
     match key_type {
@@ -53,8 +48,7 @@ pub fn pinned_algorithm(key_type: &str) -> Option<Algorithm> {
     }
 }
 
-/// The lists, the host keys narrowed to the pinned type (S-5). An RSA pin
-/// keeps both `rsa-sha2-*`: the key is the same, the hash differs.
+/// The lists, host keys narrowed to the pinned type. An RSA pin keeps both `rsa-sha2-*`: same key, other hash.
 #[must_use]
 pub fn preferred(pin: Option<&Algorithm>) -> Preferred {
     let key: Cow<'static, [Algorithm]> = match pin {
@@ -74,8 +68,7 @@ pub fn preferred(pin: Option<&Algorithm>) -> Preferred {
     }
 }
 
-/// The client configuration: the lists, no automatic keepalive or
-/// inactivity timeout (`keepAlive()` is the caller's, XS-12).
+/// The lists, no automatic keepalive or inactivity timeout (`keepAlive()` is the caller's).
 #[must_use]
 pub fn config(pin: Option<&Algorithm>) -> client::Config {
     client::Config {
@@ -86,9 +79,8 @@ pub fn config(pin: Option<&Algorithm>) -> client::Config {
     }
 }
 
-/// For a negotiation that found nothing in common: the list (as the
-/// message names it) and what the server offered in it, without the
-/// ext-info and strict-kex markers.
+/// For a negotiation with nothing in common: the list name and what the server offered, minus ext-info and
+/// strict-kex markers.
 #[must_use]
 pub fn no_common_algorithm(e: &russh::Error) -> Option<(&'static str, Vec<String>)> {
     let russh::Error::NoCommonAlgo { kind, theirs, .. } = e else {
@@ -105,8 +97,7 @@ pub fn no_common_algorithm(e: &russh::Error) -> Option<(&'static str, Vec<String
     Some((list, offered))
 }
 
-/// Whether the negotiation failed on the host-key list (a pin the server
-/// no longer offers, S-5).
+/// Whether negotiation failed on the host-key list (a pin the server no longer offers).
 #[must_use]
 pub fn is_host_key_mismatch(e: &russh::Error) -> bool {
     matches!(e, russh::Error::NoCommonAlgo { kind: AlgorithmKind::Key, .. })

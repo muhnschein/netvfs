@@ -1,21 +1,9 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! Files in `QSettings::IniFormat`, read as Qt 5 reads them and edited in
-//! place: `bridge.conf` (XB-6, also written by the account UI) and
-//! `handoff.conf` (XB-15).
+//! Files in `QSettings::IniFormat`, read as Qt 5 reads them and edited in place: `bridge.conf` (also written by the account UI) and `handoff.conf`.
 //!
-//! Reading follows `qsettings.cpp` of Qt 5 (`readIniLine`, `readIniSection`,
-//! `iniUnescapedKey`, `iniUnescapedStringList`, `stringToVariant`): logical
-//! lines (quotes and `\` continue them, `;` starts a comment), sections
-//! sorted by name and the last definition of a key winning, `%XX`/`%UXXXX`
-//! key escapes, `\` escapes and `,` lists in values, `@`-prefixed types. No
-//! codec is set, so bytes are Latin-1 unless the file starts with a UTF-8
-//! BOM. `@Variant(…)`, `@DateTime(…)`, `@Rect(…)`, `@Size(…)` and `@Point(…)`
-//! values are kept as [`IniValue::Other`], which is not a string.
+//! Reading follows `qsettings.cpp` of Qt 5 (`readIniLine`, `readIniSection`, `iniUnescapedKey`, `iniUnescapedStringList`, `stringToVariant`): logical lines (quotes and `\` continue them, `;` starts a comment), sections sorted by name and the last definition of a key winning, `%XX`/`%UXXXX` key escapes, `\` escapes and `,` lists in values, `@`-prefixed types. No codec is set: bytes are Latin-1 unless the file starts with a UTF-8 BOM. `@Variant(…)`, `@DateTime(…)`, `@Rect(…)`, `@Size(…)`, `@Point(…)` values are kept as [`IniValue::Other`], not a string.
 //!
-//! Writing changes only the lines of the key it sets or removes and keeps
-//! every other byte (unknown groups, keys, comments), where `QSettings`
-//! would rewrite the whole file; new lines are escaped as `QSettings`
-//! escapes them, so Qt reads back what it would have written.
+//! Writing changes only the lines of the key it sets or removes and keeps every other byte (unknown groups, keys, comments), where `QSettings` rewrites the whole file; new lines are escaped as `QSettings` does, so Qt reads back what it would have written.
 
 use std::collections::BTreeMap;
 
@@ -46,7 +34,6 @@ impl IniValue {
                 [only] => only.clone(),
                 _ => Vec::new(),
             },
-            // QString::fromUtf8(constData()): up to the first NUL.
             Self::ByteArray(bytes) => {
                 let end = bytes.iter().position(|b| *b == 0).unwrap_or(bytes.len());
                 String::from_utf8_lossy(bytes.get(..end).unwrap_or_default()).encode_utf16().collect()
@@ -178,7 +165,6 @@ impl IniFile {
         let mut data = std::mem::take(&mut self.data);
         if let Some(at) = end {
             let mut insert = Vec::new();
-            // `at` ends a header or key line, so it is past the start.
             if !matches!(data.get(at.saturating_sub(1)), Some(b'\n' | b'\r')) {
                 insert.push(b'\n');
             }
@@ -206,8 +192,6 @@ impl IniFile {
         *self = Self::parse(data);
     }
 
-    /// Where a new key of the section with `prefix` goes: after the
-    /// physical end of the section's last header or key line.
     fn section_end(&self, prefix: &[u16]) -> Option<usize> {
         let mut current: &[u16] = &[];
         let mut end = None;
@@ -225,7 +209,6 @@ impl IniFile {
     }
 }
 
-/// The key prefix of a section: `"<group>/"`, or `""` for the general one.
 fn section_prefix(group: &str) -> Vec<u16> {
     let mut prefix: Vec<u16> = group.encode_utf16().collect();
     if !prefix.is_empty() {
@@ -234,8 +217,6 @@ fn section_prefix(group: &str) -> Vec<u16> {
     prefix
 }
 
-/// Appends `[group]` (an empty one as `[General]`) with `line`, separated
-/// from what precedes by an empty line, as `QSettings` separates sections.
 fn append_section(data: &mut Vec<u8>, group: &str, line: &[u8]) {
     if !data.strip_prefix(BOM).unwrap_or(data).is_empty() {
         if !matches!(data.last(), Some(b'\n' | b'\r')) {
@@ -253,14 +234,12 @@ fn append_section(data: &mut Vec<u8>, group: &str, line: &[u8]) {
     data.extend_from_slice(line);
 }
 
-/// The start of the physical line holding `pos`.
 fn physical_start(data: &[u8], pos: usize) -> usize {
     let before = data.get(..pos).unwrap_or_default();
     let bom = if data.starts_with(BOM) { BOM.len() } else { 0 };
     before.iter().rposition(|b| matches!(b, b'\n' | b'\r')).map_or(bom, |i| i.saturating_add(1)).max(bom)
 }
 
-/// One past the line terminator (`\n`, `\r` or `\r\n`) at or after `pos`.
 fn physical_end(data: &[u8], pos: usize) -> usize {
     let rest = data.get(pos..).unwrap_or_default();
     let Some(offset) = rest.iter().position(|b| matches!(b, b'\n' | b'\r')) else {
@@ -275,14 +254,11 @@ fn physical_end(data: &[u8], pos: usize) -> usize {
     }
 }
 
-/// `QSettingsPrivate::normalizedKey`: no leading, trailing or doubled `/`.
 fn normalized_key(key: &str) -> Vec<u16> {
     let parts: Vec<&str> = key.split('/').filter(|p| !p.is_empty()).collect();
     parts.join("/").encode_utf16().collect()
 }
 
-/// Every key's value: sections in name order, each in file order, the last
-/// definition winning (`readIniFile` keeps unparsed sections in a map).
 fn resolve(lines: &[Line]) -> BTreeMap<Vec<u16>, IniValue> {
     let mut keys: Vec<(&[u16], &[u16], &IniValue)> = lines
         .iter()
@@ -295,19 +271,14 @@ fn resolve(lines: &[Line]) -> BTreeMap<Vec<u16>, IniValue> {
     keys.into_iter().map(|(_, key, value)| (key.to_vec(), value.clone())).collect()
 }
 
-// ------------------------------------------------------------------ lines
-
-/// `charTraits` Space: `\t`, `\n`, `\r`, space.
 const fn is_space(b: u8) -> bool {
     matches!(b, b' ' | b'\t' | b'\n' | b'\r')
 }
 
-/// `charTraits` Special.
 const fn is_special(b: u8) -> bool {
     matches!(b, b'=' | b'\n' | b'\r' | b'\\' | b'"' | b';')
 }
 
-/// A logical line: `[start, end)` and its first `=` outside quotes.
 #[derive(Clone, Copy, Debug)]
 struct RawLine {
     start: usize,
@@ -315,10 +286,7 @@ struct RawLine {
     equals: Option<usize>,
 }
 
-/// `readIniLine`: the next logical line from `pos`, and where the next one
-/// starts; `None` at the end. Qt's case of a line end at the line's start
-/// cannot happen here (nor in Qt): the white space skipped before a line
-/// and after a comment includes line ends.
+/// `readIniLine`: the next logical line from `pos` and where the next starts; `None` at the end. The white space skipped before a line and after a comment includes line ends.
 fn read_ini_line(data: &[u8], pos: usize) -> Option<(RawLine, usize)> {
     let skipped = data.get(pos..).unwrap_or_default().iter().take_while(|b| is_space(**b)).count();
     let start = pos.saturating_add(skipped);
@@ -341,7 +309,6 @@ struct LineScan<'a> {
 }
 
 impl LineScan<'_> {
-    /// Moves past the next special character and returns it.
     fn next_special(&mut self) -> Option<u8> {
         let rest = self.data.get(self.i..).unwrap_or_default();
         let Some(offset) = rest.iter().position(|b| is_special(*b)) else {
@@ -353,7 +320,6 @@ impl LineScan<'_> {
         self.data.get(at).copied()
     }
 
-    /// Handles the special character just passed; true ends the line.
     fn handle(&mut self, ch: u8) -> bool {
         let first = self.i == self.line_start.saturating_add(1);
         match ch {
@@ -375,7 +341,6 @@ impl LineScan<'_> {
                 self.skip_comment();
                 false
             }
-            // A line end or a comment after the line's start.
             _ => self.end_line(),
         }
     }
@@ -388,7 +353,6 @@ impl LineScan<'_> {
         true
     }
 
-    /// After `\`: skips the escaped character, and a `\r\n` or `\n\r` pair.
     fn skip_escaped(&mut self) {
         let Some(&first) = self.data.get(self.i) else { return };
         self.i = self.i.saturating_add(1);
@@ -399,8 +363,6 @@ impl LineScan<'_> {
         }
     }
 
-    /// A `;` comment at the line's start: skipped with the white space
-    /// after it, and the line starts again there.
     fn skip_comment(&mut self) {
         let rest = self.data.get(self.i..).unwrap_or_default();
         let comment = rest.iter().take_while(|b| !matches!(b, b'\n' | b'\r')).count();
@@ -410,7 +372,6 @@ impl LineScan<'_> {
     }
 }
 
-/// Section header, key line or anything else.
 fn classify(data: &[u8], line: &RawLine, section: &[u16], utf8: bool) -> LineKind {
     let text = data.get(line.start..line.end).unwrap_or_default();
     if text.first() == Some(&b'[') {
@@ -427,12 +388,10 @@ fn classify(data: &[u8], line: &RawLine, section: &[u16], utf8: bool) -> LineKin
     LineKind::Key { key, value: parse_value(value, utf8), section: section.to_vec() }
 }
 
-/// `isspace()` of the C locale.
 const fn is_c_space(b: u8) -> bool {
     matches!(b, b' ' | b'\t' | b'\n' | 0x0b | 0x0c | b'\r')
 }
 
-/// `QByteArray::trimmed()`.
 fn trim_qt(bytes: &[u8]) -> &[u8] {
     let start = bytes.iter().take_while(|b| is_c_space(**b)).count();
     let rest = bytes.get(start..).unwrap_or_default();
@@ -440,7 +399,6 @@ fn trim_qt(bytes: &[u8]) -> &[u8] {
     rest.get(..end).unwrap_or_default()
 }
 
-/// The key prefix of a `[…]` line (`text` starts with `[`).
 fn section_name(text: &[u8]) -> Vec<u16> {
     let inner = text.get(1..).unwrap_or_default();
     let inner =
@@ -459,10 +417,7 @@ fn section_name(text: &[u8]) -> Vec<u16> {
     prefix
 }
 
-// ------------------------------------------------------------------ keys
-
-/// `iniUnescapedKey`: `\` is `/`, `%XX` and `%UXXXX` are code units,
-/// anything else Latin-1.
+/// `iniUnescapedKey`: `\` is `/`, `%XX` and `%UXXXX` are code units, anything else Latin-1.
 pub(crate) fn unescape_key(key: &[u8], out: &mut Vec<u16>) {
     let mut i = 0;
     while let Some(&ch) = key.get(i) {
@@ -476,8 +431,6 @@ pub(crate) fn unescape_key(key: &[u8], out: &mut Vec<u16>) {
     }
 }
 
-/// `%XX` or `%UXXXX` at the start of `text`: the unit and the bytes used; a
-/// lone `%` when the digits are missing or bad.
 fn percent_escape(text: &[u8]) -> (u16, usize) {
     let lone = (u16::from(b'%'), 1);
     let (digits_at, count): (usize, usize) = if text.get(1) == Some(&b'U') { (2, 4) } else { (1, 2) };
@@ -488,8 +441,7 @@ fn percent_escape(text: &[u8]) -> (u16, usize) {
     }
 }
 
-/// `QByteArray::toInt(&ok, 16)` cut to a `QChar`: optional white space and
-/// sign, an optional `0x`, then hex digits only.
+/// `QByteArray::toInt(&ok, 16)` cut to a `QChar`: optional white space and sign, optional `0x`, then hex digits only.
 fn qt_hex(digits: &[u8]) -> Option<u16> {
     let text = digits.get(digits.iter().take_while(|b| is_c_space(**b)).count()..).unwrap_or_default();
     let (negative, text) = match text.split_first() {
@@ -505,13 +457,11 @@ fn qt_hex(digits: &[u8]) -> Option<u16> {
     Some(if negative { value.wrapping_neg() } else { value })
 }
 
-/// The value of an ASCII hex digit (0 for anything else).
 fn hex_digit(d: u8) -> u16 {
     char::from(d).to_digit(16).and_then(|v| u16::try_from(v).ok()).unwrap_or(0)
 }
 
-/// `iniEscapedKey`: `/` as `\`, `[A-Za-z0-9_.-]` as is, `%XX` up to 0xff,
-/// `%UXXXX` above (upper-case hex).
+/// `iniEscapedKey`: `/` as `\`, `[A-Za-z0-9_.-]` as is, `%XX` up to 0xff, `%UXXXX` above (upper-case hex).
 fn escape_key(key: &str, out: &mut Vec<u8>) {
     for unit in key.encode_utf16() {
         match u8::try_from(unit) {
@@ -523,12 +473,7 @@ fn escape_key(key: &str, out: &mut Vec<u8>) {
     }
 }
 
-// ------------------------------------------------------------------ values
-
-/// `iniEscapedString` without a codec (or with UTF-8 for a file with a
-/// BOM): `\` escapes, `\xNN` for control and (without a codec) non-ASCII
-/// code units, quotes around a value with `;`, `,` or `=`, or a space at
-/// either end.
+/// `iniEscapedString` without a codec (or UTF-8 for a file with a BOM): `\` escapes, `\xNN` for control and (without a codec) non-ASCII code units, quotes around a value with `;`, `,` or `=`, or a space at either end.
 fn escape_string(value: &str, utf8: bool, out: &mut Vec<u8>) {
     let start = out.len();
     let mut needs_quotes = false;
@@ -561,8 +506,6 @@ fn escape_string(value: &str, utf8: bool, out: &mut Vec<u8>) {
     }
 }
 
-/// One ASCII character of `iniEscapedString`; true when a following hex
-/// digit must be escaped too.
 fn escape_ascii(b: u8, utf8: bool, out: &mut Vec<u8>) -> bool {
     let named = match b {
         0x07 => Some(b'a'),
@@ -591,8 +534,6 @@ fn escape_ascii(b: u8, utf8: bool, out: &mut Vec<u8>) -> bool {
     false
 }
 
-/// A value's text: `iniUnescapedStringList`, then `stringToVariant` or
-/// `stringListToVariantList`.
 fn parse_value(text: &[u8], utf8: bool) -> IniValue {
     let mut scan = ValueScan::new(text, utf8);
     scan.run();
@@ -605,7 +546,6 @@ fn parse_value(text: &[u8], utf8: bool) -> IniValue {
     }
 }
 
-/// `stringListToVariantList`.
 fn list_value(mut list: Vec<Vec<u16>>) -> IniValue {
     let at = u16::from(b'@');
     if list.iter().any(|s| s.first() == Some(&at) && s.get(1) != Some(&at)) {
@@ -619,7 +559,6 @@ fn list_value(mut list: Vec<Vec<u16>>) -> IniValue {
     IniValue::StringList(list)
 }
 
-/// `stringToVariant`.
 fn string_value(s: Vec<u16>) -> IniValue {
     let text = String::from_utf16_lossy(&s);
     if !text.starts_with('@') {
@@ -636,7 +575,6 @@ fn string_value(s: Vec<u16>) -> IniValue {
     IniValue::String(s)
 }
 
-/// An `@Type(…)` value, or `None` when it is a plain string after all.
 fn typed_value(s: &[u16], text: &str) -> Option<IniValue> {
     let inner = |open: usize| s.get(open..s.len().saturating_sub(1)).unwrap_or_default();
     if text.starts_with("@ByteArray(") {
@@ -652,7 +590,6 @@ fn typed_value(s: &[u16], text: &str) -> Option<IniValue> {
     }
     for (prefix, arguments) in [("@Rect(", 4), ("@Size(", 2), ("@Point(", 2)] {
         if text.starts_with(prefix) {
-            // splitArgs: one argument per ' ' and per ')'.
             let open = prefix.encode_utf16().count();
             let found = s.iter().skip(open).filter(|u| matches!(u8::try_from(**u), Ok(b' ' | b')'))).count();
             return (found == arguments).then_some(IniValue::Other);
@@ -661,7 +598,6 @@ fn typed_value(s: &[u16], text: &str) -> Option<IniValue> {
     (text == "@Invalid()").then_some(IniValue::Invalid)
 }
 
-/// The state machine of `iniUnescapedStringList`.
 struct ValueScan<'a> {
     text: &'a [u8],
     i: usize,
@@ -673,7 +609,6 @@ struct ValueScan<'a> {
     chop_limit: usize,
 }
 
-/// Where `iniUnescapedStringList` goes next.
 enum Next {
     SkipSpaces,
     Normal,
@@ -726,7 +661,6 @@ impl<'a> ValueScan<'a> {
         }
     }
 
-    /// `StNormal`.
     fn normal(&mut self) -> Next {
         self.chop_limit = self.result.len();
         while let Some(ch) = self.peek() {
@@ -749,7 +683,6 @@ impl<'a> ValueScan<'a> {
         Next::End
     }
 
-    /// After a `\`.
     fn escape(&mut self) -> Option<Next> {
         self.bump();
         let Some(ch) = self.peek() else { return Some(Next::End) };
@@ -773,7 +706,6 @@ impl<'a> ValueScan<'a> {
                     self.bump();
                 }
             }
-            // Any other escaped character is dropped.
             _ => {}
         }
         self.chop_limit = self.result.len();
@@ -797,7 +729,6 @@ impl<'a> ValueScan<'a> {
         Next::SkipSpaces
     }
 
-    /// Text up to the next `\`, `"` or `,`, through the codec.
     fn run_of_text(&mut self) {
         let rest = self.text.get(self.i..).unwrap_or_default();
         let len = rest
@@ -814,7 +745,6 @@ impl<'a> ValueScan<'a> {
         self.i = self.i.saturating_add(len);
     }
 
-    /// `StHexEscape` (4 bits per digit) and `StOctEscape` (3 bits).
     fn number(&mut self, mut value: u16, bits: u32) -> Next {
         while let Some(digit) = self.peek().and_then(|d| char::from(d).to_digit(1 << bits)) {
             value = value.wrapping_shl(bits).wrapping_add(u16::try_from(digit).unwrap_or(0));
@@ -824,7 +754,6 @@ impl<'a> ValueScan<'a> {
         if self.peek().is_some() { Next::Normal } else { Next::End }
     }
 
-    /// `iniChopTrailingSpaces`.
     fn chop_trailing_spaces(&mut self) {
         let keep = self.result.iter().rposition(|u| !matches!(u8::try_from(*u), Ok(b' ' | b'\t')));
         let keep = keep.map_or(0, |p| p.saturating_add(1)).max(self.chop_limit);
@@ -832,7 +761,6 @@ impl<'a> ValueScan<'a> {
     }
 }
 
-/// The one-character escapes of `iniUnescapedStringList`.
 fn simple_escape(ch: u8) -> Option<u16> {
     let unit = match ch {
         b'a' => 0x07,
@@ -864,7 +792,6 @@ pub(crate) mod tests {
         s.encode_utf16().collect()
     }
 
-    /// As qsettings-golden.cpp escapes: printable ASCII but `\` and `|`.
     fn escaped(units: &[u16]) -> String {
         units
             .iter()
@@ -886,7 +813,6 @@ pub(crate) mod tests {
         }
     }
 
-    /// The dump of qsettings-golden.cpp, from our reading.
     pub(crate) fn dump(file: &IniFile) -> String {
         let mut out = String::new();
         for key in file.keys() {
@@ -903,8 +829,6 @@ pub(crate) mod tests {
         out
     }
 
-    /// Qt's dump without its status line, with the types we do not decode
-    /// as "other".
     pub(crate) fn qt_dump(text: &str) -> String {
         text.lines()
             .filter(|l| !l.starts_with("status|"))
@@ -929,7 +853,6 @@ pub(crate) mod tests {
 
     #[test]
     fn escaped_line_ends_and_comments() {
-        // Qt's dump of the same file (qsettings-golden dump).
         let text = b"k=a\\\r\nb\nl=c\\\n\rd\nm=e\\\nf\n; n=x\n  ;o=y\np=q;r\n";
         let expected = "k|QString|ab|1|ab\nl|QString|cd|1|cd\nm|QString|ef|1|ef\np|QString|q|1|q\n";
         let file = IniFile::parse(text.to_vec());
@@ -983,7 +906,6 @@ pub(crate) mod tests {
         assert_eq!(string_value(utf16("@Variant(x)")), IniValue::Other);
     }
 
-    /// The lines QSettings wrote into bridge-qt.conf, from our escaping.
     #[test]
     fn escapes_as_qsettings_writes() {
         let line = |key: &str, value: &str| {
@@ -1057,8 +979,6 @@ pub(crate) mod tests {
 
     #[test]
     fn set_removes_every_definition() {
-        // The key in two [Consent] sections and as Consent\lautta in
-        // [General]; the new line goes to the last [Consent].
         let mut file = IniFile::parse(
             b"Consent\\lautta=a\n[Consent]\nlautta=b\n[X]\nk=v\n[Consent]\nlau%74ta=c\nq=\"multi\nline\"\n"
                 .to_vec(),
@@ -1082,7 +1002,6 @@ pub(crate) mod tests {
         terminated.set_string("Con/sent", "x", "y");
         assert_eq!(terminated.as_bytes(), b"[A]\nk=v\n\n[Con\\sent]\nx=y\n");
         assert_eq!(terminated.string("Con/sent/x"), "y");
-        // Into a section whose last line ends the file without a newline.
         let mut last = IniFile::parse(b"[Consent]\na=b".to_vec());
         last.set_string("Consent", "x", "y");
         assert_eq!(last.as_bytes(), b"[Consent]\na=b\nx=y\n");
@@ -1114,7 +1033,6 @@ pub(crate) mod tests {
         assert_eq!(physical_start(b"x\ny", 2), 2);
         assert_eq!(physical_start(b"x\ry", 2), 2);
         assert_eq!(physical_start(b"xy", 1), 0);
-        // An old Mac file.
         let file = IniFile::parse(b"[S]\ra=1\rb=2\r".to_vec());
         assert_eq!((file.string("S/a").as_str(), file.string("S/b").as_str()), ("1", "2"));
     }

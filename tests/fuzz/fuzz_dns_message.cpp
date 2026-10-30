@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-// SPEC-v2 XD-1: the DNS message codec behind mDNS discovery. decode() parses
+// the DNS message codec behind mDNS discovery. decode() parses
 // datagrams from the local network and must never crash, hang or read out of
 // bounds. What it accepts must survive encode -> decode unchanged, the encoder
 // must be deterministic, and the name helpers must agree with each other.

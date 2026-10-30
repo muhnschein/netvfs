@@ -1,6 +1,5 @@
 # SPDX-License-Identifier: LGPL-2.1-or-later
-# A QtTest executable that needs only the core library (no fake backend or
-# accounts fixtures), run by "make check".
+# QtTest executable needing only the core library, run by "make check".
 include(../common.pri)
 
 TEMPLATE = app

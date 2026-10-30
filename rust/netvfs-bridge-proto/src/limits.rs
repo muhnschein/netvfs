@@ -1,16 +1,9 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! Limits of the protocol (SPEC-v2 XB-17, XSEC-7) and of the bridge (XB-12,
-//! C-10). The values are those of the C++ bridge of netvfs 0.4: `args.h`
-//! (`Limits`), `bridgeserver.h` (`ConsumerLimits`), `pool.h` (`PoolLimits`),
-//! `streaming.h` (`FlowControl`) and `wire.h` (`DecodeLimits`).
-//!
-//! String lengths (`MAX_URL`, `MAX_SHORT`, `MAX_ID`) were counted by the C++
-//! bridge in UTF-16 code units (`QString::size`); location ids are ASCII, so
-//! only `MAX_URL` and `MAX_SHORT` can differ for non-ASCII text.
+//! Limits of the protocol and of the bridge. String lengths (`MAX_URL`, `MAX_SHORT`, `MAX_ID`) were
+//! UTF-16 code units in the C++ bridge; ids are ASCII, so only `MAX_URL` and `MAX_SHORT` differ for
+//! non-ASCII text.
 
 use crate::methods::Lane;
-
-// ---- calls (args.h Limits) ------------------------------------------------
 
 /// Largest `List` batch a client may ask for, and the entries per `WalkBatch`.
 pub const MAX_LIST_BATCH: u32 = 512;
@@ -45,8 +38,6 @@ pub const MIN_TIME_MS: i64 = -62_135_596_800_000;
 /// Latest time an option may set: 9999-12-31T23:59:59.999Z, in ms since the epoch.
 pub const MAX_TIME_MS: i64 = 253_402_300_799_999;
 
-// ---- per consumer (bridgeserver.h ConsumerLimits, XB-17) -------------------
-
 /// Requests (calls and listings) in flight per consumer.
 pub const MAX_REQUESTS: usize = 64;
 /// Open read handles per consumer.
@@ -57,8 +48,6 @@ pub const MAX_JOBS: usize = 8;
 pub const RETRY_AFTER_MS: u64 = 1000;
 
 const _: () = assert!(DEFAULT_LIST_BATCH <= MAX_LIST_BATCH);
-
-// ---- connection pools (pool.h PoolLimits, XB-12) ---------------------------
 
 /// Connections of the interactive lane per location.
 pub const POOL_INTERACTIVE: usize = 1;
@@ -79,13 +68,9 @@ pub const fn pool_size(lane: Lane) -> usize {
     }
 }
 
-// ---- flow control (streaming.h FlowControl, C-10) --------------------------
-
 /// Bytes of streamed signals (`ListBatch`, `WalkBatch`) not yet written to
 /// the socket above which producers wait.
 pub const FLOW_LIMIT: usize = 4 << 20;
-
-// ---- decoding (wire.h DecodeLimits, design §3.5) ---------------------------
 
 /// Deepest nesting of containers in a decoded argument.
 pub const DECODE_MAX_DEPTH: usize = 8;
@@ -115,7 +100,6 @@ mod tests {
 
     #[test]
     fn time_bounds_are_the_first_and_last_millisecond() {
-        // 0001-01-01T00:00:00Z and 9999-12-31T23:59:59.999Z, in ms since 1970.
         assert_eq!(MIN_TIME_MS, -62_135_596_800_000);
         assert_eq!(MAX_TIME_MS, 253_402_300_799_999);
     }

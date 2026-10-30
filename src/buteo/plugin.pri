@@ -1,9 +1,8 @@
 # SPDX-License-Identifier: LGPL-2.1-or-later
-# One Buteo client plugin lib<provider>-<operation>-client.so with its client
-# profile and sync profile template (SPEC 3.3, 4.1, 8.1, 8.2). Set before
-# including:
-#   NETVFS_PROVIDER   sftp, smb
-#   NETVFS_OPERATION  Backup, BackupQuery, BackupRestore
+# One Buteo client plugin lib<provider>-<operation>-client.so with client profile and sync profile
+# template. Set before including:
+#   NETVFS_PROVIDER: sftp, smb
+#   NETVFS_OPERATION: Backup, BackupQuery, BackupRestore
 include(buteo.pri)
 
 isEmpty(NETVFS_PROVIDER)|isEmpty(NETVFS_OPERATION): error("Set NETVFS_PROVIDER and NETVFS_OPERATION")
@@ -27,13 +26,12 @@ HEADERS = $$PWD/loader/loader.h
 SOURCES = $$PWD/loader/loader.cpp
 LIBS += $$netvfsButeoLibs()
 PRE_TARGETDEPS += $$NETVFS_BUTEO_LIB
-# Tests load the plugin from the build tree; installed plugins find
-# libnetvfs through the system library path (no RUNPATH in packages).
+# Tests load the plugin from the build tree; installed plugins find libnetvfs through the system
+# library path (no RUNPATH in packages).
 !equals(NETVFS_BUILD_TESTS, 0): QMAKE_RPATHDIR += $$NETVFS_LIB_OUT
 QMAKE_LFLAGS += -Wl,--no-undefined
 
-# Profiles generated from one template per kind; only the names and the
-# sync protocol differ between them.
+# Profiles generated from one template per kind; only names and sync protocol differ.
 clientprofile.input = $$PWD/profiles/client.xml.in
 clientprofile.output = $$OUT_PWD/$${NETVFS_CLIENT_PROFILE}.xml
 syncprofile.input = $$PWD/profiles/sync.xml.in

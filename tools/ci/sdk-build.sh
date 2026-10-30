@@ -1,12 +1,8 @@
 #!/bin/bash
 # SPDX-License-Identifier: LGPL-2.1-or-later
-# Runs inside the SDK container: mb2 build of the RPMs. The Rust binaries
-# come prebuilt today (doc/RUST.md "Cross build"); once the spec runs cargo
-# again, this matters again: cargo under scratchbox2 occasionally deadlocks in a forked child before exec (a lock
-# held by another thread at fork time in the sb2 preload; lautta sees the
-# same), so the build is restarted when its log has not grown for 10
-# minutes. What was built is kept between attempts, so a restart only
-# repeats the stuck step.
+# Runs inside the SDK container: mb2 build of the RPMs. Rust binaries come prebuilt today; once the spec runs cargo
+# again: cargo under scratchbox2 occasionally deadlocks in a forked child before exec (lock held at fork time in the sb2
+# preload), so the build restarts when its log has not grown for 10 minutes. Built steps are kept between attempts.
 set -uo pipefail
 target=$1
 stall_limit=600

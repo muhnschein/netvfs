@@ -1,15 +1,8 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! SESSION_SETUP security tokens (M-4, M-6).
+//! SESSION_SETUP security tokens.
 //!
-//! - Users: SPNEGO and NTLMv2 by `sspi`'s `Negotiate` package limited to
-//!   NTLM (`package_list = "ntlm"`: no Kerberos, no KDC lookup, no krb5.conf
-//!   or environment reads). Tokens pass through; sspi computes the NTLMv2
-//!   response, the NTLM MIC, the SPNEGO mechListMIC (and verifies the
-//!   server's), and exports the session key.
-//! - Guest profile: NTLMSSP anonymous (MS-NLMP 3.1.5.1.2), built here. It
-//!   carries no key and no crypto at all (an empty NT response, one zero
-//!   byte of LM response), which is why it is the one token sspi does not
-//!   make: sspi refuses an empty user name.
+//! - Users: SPNEGO and NTLMv2 by `sspi`'s `Negotiate` package limited to NTLM (`package_list = "ntlm"`: no Kerberos, no KDC lookup, no krb5.conf or environment reads). Tokens pass through; sspi does the NTLMv2 response, MIC, mechListMIC (and verifies the server's), session key.
+//! - Guest profile: NTLMSSP anonymous (MS-NLMP 3.1.5.1.2), built here: no key, no crypto (empty NT response, one zero byte LM response). sspi refuses an empty user name.
 
 use std::fmt;
 
@@ -151,10 +144,10 @@ impl fmt::Debug for NtlmSpnego {
     }
 }
 
-/// The user name for which sspi does not require the SPNEGO mechListMIC.
+/// User name for which sspi skips the SPNEGO mechListMIC check.
 const SSPI_GUEST_USER: &str = "/GUEST";
 
-/// A failure inside sspi: the sign-in cannot be trusted.
+/// A failure inside sspi: sign-in cannot be trusted.
 fn sspi_err(e: &sspi::Error) -> Error {
     policy(format!("NTLM sign-in failed: {:?}: {}", e.error_type, e.description))
 }
@@ -167,8 +160,7 @@ fn refused(message: String) -> Error {
 impl NtlmSpnego {
     const FLAGS: ClientRequestFlags = ClientRequestFlags::MUTUAL_AUTH
         .union(ClientRequestFlags::INTEGRITY)
-        // CONFIDENTIALITY makes sspi request NTLMSSP_NEGOTIATE_KEY_EXCH (a random exported
-        // session key), as Windows and Samba clients do for SMB.
+        // CONFIDENTIALITY makes sspi request NTLMSSP_NEGOTIATE_KEY_EXCH (random exported session key).
         .union(ClientRequestFlags::CONFIDENTIALITY)
         .union(ClientRequestFlags::ALLOCATE_MEMORY);
 
@@ -176,20 +168,18 @@ impl NtlmSpnego {
         let username = Username::new(user, (!domain.is_empty()).then_some(domain))
             .map_err(|e| refused(format!("the user name is not valid: {e:?}")))?;
         if username.account_name().eq_ignore_ascii_case(SSPI_GUEST_USER) {
-            // sspi 0.23 skips the mechListMIC requirement when the account name it sends is
-            // this one (src/negotiate/mod.rs:35, 405-409), also as "DOMAIN\/GUEST".
+            // sspi 0.23 skips the mechListMIC requirement for this account name (src/negotiate/mod.rs:35, 405-409), also as "DOMAIN\/GUEST".
             return Err(refused(format!("the user name {SSPI_GUEST_USER} is not supported")));
         }
         if password.starts_with(sspi::NTLM_HASH_PREFIX) {
-            // sspi would take the rest of such a password as an NT hash.
+            // sspi takes the rest of such a password as an NT hash.
             return Err(refused(format!(
                 "passwords starting with {} are not supported",
                 sspi::NTLM_HASH_PREFIX
             )));
         }
         let identity = AuthIdentity { username, password: password.to_owned().into() };
-        // NTLM only: no Kerberos (no KDC discovery, no krb5.conf, no SSPI_KDC_URL), no PKU2U.
-        // Workstation name: none is sent (NtlmConfig::default()).
+        // NTLM only: no Kerberos, no PKU2U. No workstation name sent (NtlmConfig::default()).
         let config =
             NegotiateConfig::new(Box::new(NtlmConfig::default()), Some("ntlm".to_owned()), String::new());
         let mut ctx = Negotiate::new_client(config).map_err(|e| sspi_err(&e))?;
@@ -297,7 +287,7 @@ fn anonymous_negotiate() -> Vec<u8> {
     m.extend_from_slice(NTLMSSP);
     m.extend_from_slice(&1u32.to_le_bytes());
     m.extend_from_slice(&flags.to_le_bytes());
-    m.extend_from_slice(&[0u8; 16]); // DomainNameFields, WorkstationFields: empty
+    m.extend_from_slice(&[0u8; 16]);
     m
 }
 
@@ -329,7 +319,7 @@ fn anonymous_authenticate() -> Vec<u8> {
     let mut m = Vec::new();
     m.extend_from_slice(NTLMSSP);
     m.extend_from_slice(&3u32.to_le_bytes());
-    m.extend_from_slice(&field(1, PAYLOAD)); // LmChallengeResponse: one zero byte
+    m.extend_from_slice(&field(1, PAYLOAD));
     for _ in 0..5 {
         // NtChallengeResponse, DomainName, UserName, Workstation, EncryptedRandomSessionKey
         m.extend_from_slice(&field(0, PAYLOAD + 1));
@@ -417,7 +407,6 @@ mod tests {
         };
         let at = token.windows(12).position(|w| w == b"NTLMSSP\0\x03\0\0\0").unwrap();
         let m = &token[at..];
-        // DomainNameFields: length, maximum length, offset.
         let len = usize::from(u16::from_le_bytes([m[28], m[29]]));
         let offset = usize::try_from(u32::from_le_bytes(m[32..36].try_into().unwrap())).unwrap();
         let units: Vec<u16> =
@@ -427,10 +416,7 @@ mod tests {
 
     #[test]
     fn a_der_length_of_usize_max_is_refused() {
-        // Fuzz target spnego's reproducer (rust/fuzz/seeds/spnego): inside the NegTokenResp, a
-        // DER length of 8 bytes 0xff (usize::MAX). picky-asn1-der adds the header length to
-        // it (rust/vendor/picky-asn1-der); overflow there must be an error, not a panic. The
-        // final token goes through the same decode (sspi's NegTokenTarg1).
+        // Fuzz target spnego reproducer (rust/fuzz/seeds/spnego): NegTokenResp with DER length usize::MAX; picky-asn1-der adds the header length (rust/vendor/picky-asn1-der), overflow must be an error, not a panic. Final token takes the same decode.
         let mut token = vec![0xa1, 0x23, 0x61, 0x2b, 0xa2, 0x00, 0x25, 0x88];
         token.resize(108, 0xff);
         let account = Account::User {
@@ -463,10 +449,8 @@ mod tests {
             password: Zeroizing::new("pw".into()),
         };
         let (_a, token) = Authenticator::start(&account, "server").unwrap();
-        // GSS-API InitialContextToken, SPNEGO OID 1.3.6.1.5.5.2
         assert_eq!(token[0], 0x60);
         assert!(token.windows(8).any(|w| w == [0x06, 0x06, 0x2b, 0x06, 0x01, 0x05, 0x05, 0x02]));
-        // NTLMSSP OID 1.3.6.1.4.1.311.2.2.10 offered; Kerberos OIDs not offered
         assert!(
             token
                 .windows(12)
@@ -482,7 +466,6 @@ mod tests {
                 .windows(11)
                 .any(|w| w == [0x06, 0x09, 0x2a, 0x86, 0x48, 0x82, 0xf7, 0x12, 0x01, 0x02, 0x02])
         );
-        // and the NTLM NEGOTIATE_MESSAGE inside carries no workstation name
         let at = token.windows(8).position(|w| w == b"NTLMSSP\0").unwrap();
         let flags = u32::from_le_bytes(token[at + 12..at + 16].try_into().unwrap());
         assert_eq!(flags & 0x2000, 0, "NTLMSSP_NEGOTIATE_OEM_WORKSTATION_SUPPLIED");
@@ -496,8 +479,7 @@ mod tests {
             domain: String::new(),
             password: Zeroizing::new("x".into()),
         };
-        // sspi accepts the handle but cannot build an NTLMv2 response for an empty user; the
-        // refusal shows up at the latest when the challenge is processed.
+        // sspi accepts the handle but fails at the latest when the challenge is processed.
         if let Ok((mut a, _)) = Authenticator::start(&empty, "h") {
             a.step(b"not a token").unwrap_err();
         }

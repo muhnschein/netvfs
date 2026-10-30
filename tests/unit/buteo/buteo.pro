@@ -5,7 +5,7 @@ include(../../../src/buteo/buteo.pri)
 TARGET = tst_buteo
 QT += dbus xml
 PKGCONFIG += libsignon-qt5
-# The static library first: it needs libnetvfs.
+# Static library first: it needs libnetvfs.
 LIBS = -L$$NETVFS_LIB_OUT -lnetvfs-buteo $$LIBS
 PRE_TARGETDEPS += $$NETVFS_BUTEO_LIB
 DEFINES += NETVFS_TEST_BUTEO_PLUGIN_DIR=\\\"$$NETVFS_BUTEO_PLUGIN_OUT\\\"

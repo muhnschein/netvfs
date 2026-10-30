@@ -5,7 +5,7 @@
 /*
  * Test-only control table of the fake backend (provider "fake",
  * tests/fakeplugin), exported by libnetvfs-bridge-ffi-fake.so; never
- * installed. Design: phase2-design.md §4.1. It links libnetvfstest.so and so
+ * installed. Design: It links libnetvfstest.so and so
  * drives the same FakeServer singleton as the plugin that conn_new loads
  * through NETVFS_BACKEND_PATH.
  *
@@ -36,7 +36,7 @@ typedef struct nvb_fake {
     void (*set_credentials)(nvb_bytes user, nvb_bytes secret);
     void (*set_chunk_delay_ms)(int32_t ms);  /* per 64 KiB chunk and listing batch */
     /* The next call of `op` ("connect", "list", "upload", ...) fails once
-       with the XC-21 error `error_name`. */
+       with the error `error_name`. */
     void (*fail_op)(nvb_bytes op, nvb_bytes error_name);
     /* Log lines starting with `prefix`: "connect", "authenticate",
        "answers:<n>", "disconnect", "<op>:<path>" ... */

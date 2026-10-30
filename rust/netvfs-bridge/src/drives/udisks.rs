@@ -1,9 +1,5 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! The UDisks2 client of the drives (XB-20): `GetManagedObjects`,
-//! `Filesystem.Mount` and `Filesystem.Unmount` on the system bus, and the
-//! watch of UDisks2's signals behind `DrivesChanged`. The connection is
-//! made by the first call, so that a bridge never asked for drives never
-//! connects to the system bus.
+//! UDisks2 client: `GetManagedObjects`, `Filesystem.Mount`/`Unmount` on the system bus, and the signal watch behind `DrivesChanged`. Connects on first call, so a bridge never asked for drives never touches the system bus.
 
 use super::DriveSource;
 use super::classify::{self, Drive, FILESYSTEM, ManagedObjects};
@@ -24,15 +20,14 @@ use zbus::{Connection, MessageStream};
 pub const SERVICE: &str = "org.freedesktop.UDisks2";
 /// UDisks2's object manager.
 pub const MANAGER: &str = "/org/freedesktop/UDisks2";
-/// The interface of `GetManagedObjects`.
+/// Interface of `GetManagedObjects`.
 pub const OBJECT_MANAGER: &str = "org.freedesktop.DBus.ObjectManager";
-/// The prefix of UDisks2's own error names.
+/// Prefix of UDisks2's error names.
 pub const ERROR_PREFIX: &str = "org.freedesktop.UDisks2.Error.";
 /// How long a call waits for UDisks2.
 pub const CALL_TIMEOUT: Duration = Duration::from_mins(1);
-/// From the first signal of a burst to the new listing.
+/// First signal of a burst to the new listing.
 pub const DEBOUNCE: Duration = Duration::from_millis(200);
-/// UDisks2's signals: objects added and removed, properties changed.
 const RULE: &str = "type='signal',sender='org.freedesktop.UDisks2',path_namespace='/org/freedesktop/UDisks2'";
 
 /// Where UDisks2 is.
@@ -50,12 +45,9 @@ pub struct UDisks(Rc<Inner>);
 struct Inner {
     bus: Bus,
     timeout: Duration,
-    /// `None` inside: there is no bus.
     conn: OnceCell<Option<Connection>>,
-    /// The drives listed last; `None` before the first listing.
     last: RefCell<Option<Vec<Drive>>>,
     watching: Cell<bool>,
-    /// Told when the listing changed; false once nobody listens any more.
     changed: Box<dyn Fn() -> bool>,
 }
 
@@ -66,8 +58,7 @@ impl std::fmt::Debug for UDisks {
 }
 
 impl UDisks {
-    /// UDisks2 on the system bus; `changed` is told of changes of the
-    /// listing (false: stop telling).
+    /// UDisks2 on the system bus; `changed` is told of listing changes (false: stop telling).
     #[must_use]
     pub fn system(changed: impl Fn() -> bool + 'static) -> Self {
         Self::new(Bus::System, CALL_TIMEOUT, changed)
@@ -86,13 +77,11 @@ impl UDisks {
         }))
     }
 
-    /// The connection; made on the first call.
     async fn connection(&self) -> Option<&Connection> {
         self.0.conn.get_or_init(|| connect(&self.0.bus)).await.as_ref()
     }
 
-    /// `ListDrives`: the drives now, remembered as the last listing. The
-    /// first listing starts the watch.
+    /// `ListDrives`: drives now, remembered as the last listing. First listing starts the watch.
     async fn listing(&self) -> Vec<Drive> {
         let drives = self
             .within(async {
@@ -109,8 +98,6 @@ impl UDisks {
         drives
     }
 
-    /// Lists again after a burst of signals and tells when the listing
-    /// differs from the last one; false once nobody listens.
     async fn relisted(&self) -> bool {
         let Some(conn) = self.connection().await else { return false };
         let Ok(drives) = self.within(drives(conn)).await else { return true };
@@ -121,9 +108,7 @@ impl UDisks {
         (self.0.changed)()
     }
 
-    /// Follows UDisks2's signals from now on, once: subscribed before the
-    /// listing it starts with, so that no change after that listing is
-    /// missed.
+    /// Follows UDisks2's signals once, subscribed before the first listing so no later change is missed.
     async fn watch(&self, conn: &Connection) {
         if self.0.watching.replace(true) {
             return;
@@ -139,7 +124,6 @@ impl UDisks {
         tokio::task::spawn_local(async move {
             while signals.next().await.is_some() {
                 tokio::time::sleep(DEBOUNCE).await;
-                // What came in the meantime is part of the burst.
                 while let Some(Some(_)) = futures_lite::future::poll_once(signals.next()).await {}
                 if !relist(&inner).await {
                     break;
@@ -148,8 +132,7 @@ impl UDisks {
         });
     }
 
-    /// Mounts (`mount`) or unmounts drive `id` if `ListDrives` lists it
-    /// now: its mount point after a mount.
+    /// Mounts or unmounts drive `id` if `ListDrives` lists it now; mount point after a mount.
     async fn act(&self, id: &str, mount: bool) -> Result<Vec<u8>, Status> {
         let conn = self.connection().await.ok_or_else(no_udisks)?;
         let drive = drives(conn)
@@ -158,14 +141,13 @@ impl UDisks {
             .find(|d| d.id == id)
             .ok_or_else(|| Status::new(ErrorName::NotFound, "No such drive"))?;
         if drive.mount_point.is_empty() != mount {
-            // Mounted already, or not mounted.
             return Ok(drive.mount_point);
         }
         if drive.locked {
-            // XB-20: Settings → Storage unlocks it; the bridge takes no passphrase.
+            // Settings → Storage unlocks it; the bridge takes no passphrase.
             return Err(Status::new(ErrorName::Unsupported, "The drive is locked"));
         }
-        // XB-20: as Settings → Storage mounts, without a question.
+        // As Settings → Storage mounts: no question.
         let options = HashMap::from([("auth.no_user_interaction", Value::from(true))]);
         let path = drive.object_path();
         let member = if mount { "Mount" } else { "Unmount" };
@@ -180,7 +162,6 @@ impl UDisks {
         Ok(point.into_bytes())
     }
 
-    /// `work`, or `Timeout` after the call timeout.
     async fn within<T>(&self, work: impl Future<Output = Result<T, Status>>) -> Result<T, Status> {
         tokio::time::timeout(self.0.timeout, work)
             .await
@@ -202,7 +183,6 @@ impl DriveSource for UDisks {
     }
 }
 
-/// The watch's turn after a burst; false once the client is gone.
 async fn relist(inner: &Weak<Inner>) -> bool {
     match inner.upgrade() {
         Some(inner) => UDisks(inner).relisted().await,
@@ -222,7 +202,6 @@ async fn connect(bus: &Bus) -> Option<Connection> {
     connected.inspect_err(|e| crate::log::warning(format_args!("No system bus, so no drives: {e}"))).ok()
 }
 
-/// The drives UDisks2 has now.
 async fn drives(conn: &Connection) -> Result<Vec<Drive>, Status> {
     let reply = conn
         .call_method(Some(SERVICE), MANAGER, Some(OBJECT_MANAGER), "GetManagedObjects", &())
@@ -241,7 +220,6 @@ fn unexpected(member: &str, e: &zbus::Error) -> Status {
     Status::internal(format!("UDisks2 answered {member} unexpectedly")).with_detail(e.to_string())
 }
 
-/// A failed call to UDisks2 (XB-20).
 fn status(e: zbus::Error) -> Status {
     match e {
         zbus::Error::MethodError(name, message, _) => {
@@ -253,7 +231,7 @@ fn status(e: zbus::Error) -> Status {
     }
 }
 
-/// XB-20: the XC-21 name of an error of UDisks2 or of the bus.
+/// The error name of a UDisks2 or bus error.
 #[must_use]
 pub fn error_name(dbus: &str) -> ErrorName {
     match dbus.strip_prefix(ERROR_PREFIX) {
@@ -271,7 +249,6 @@ pub fn error_name(dbus: &str) -> ErrorName {
     }
 }
 
-/// The bus's errors: no UDisks2, no such object, no answer.
 fn bus_error_name(dbus: &str) -> ErrorName {
     match dbus.strip_prefix("org.freedesktop.DBus.Error.") {
         Some("ServiceUnknown" | "NameHasNoOwner") => ErrorName::Unsupported,

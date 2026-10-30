@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-// netvfs 0.4's C++ tst_bridgeunits wireRoundTrip (entries, maps, NUL in strings) and
-// errorReplies; the reply and signal signatures against the method table.
-// Restriction lints that only add noise to tests (doc/RUST.md "Lints").
+// Restriction lints that only add noise to tests.
 #![allow(clippy::assertions_on_result_states, clippy::arithmetic_side_effects)]
 
 use super::{
@@ -81,7 +79,6 @@ fn reply_signatures_cover_the_method_table() {
 fn entry_and_map_round_trip() {
     let msg = Reply::Entry(entry()).build(&call(1).header()).unwrap();
     let (back,): (WireEntry,) = msg.body().deserialize().unwrap();
-    // NUL cannot be on the wire (it would break the peer): U+FFFD instead.
     assert_eq!(
         back,
         WireEntry {
@@ -128,7 +125,6 @@ fn error_reply_name_message_extra() {
     assert_eq!(text, "busy");
     assert_eq!(value_i64(&extra["retryAfterMs"]), Some(1500));
     assert_eq!(value_str(&extra["detail"]).as_deref(), Some("d"));
-    // Without details: the message only; an empty message is the bare name.
     let plain = error_reply(&call(8).header(), INVALID_ARGS, &Status::invalid_args("")).unwrap();
     assert_eq!(*plain.body().signature(), "s");
     assert_eq!(plain.body().deserialize::<(String,)>().unwrap().0, "InvalidArgs");
@@ -298,7 +294,6 @@ fn job_finished_adds_the_status_details() {
     assert_eq!(value_i64(&map["files"]), Some(3));
     assert_eq!(value_str(&map["detail"]).as_deref(), Some("429"));
     assert_eq!(value_i64(&map["retryAfterMs"]), Some(10));
-    // Without details the job's own values stay.
     let plain = OutSignal::JobFinished { job: 1, result: Err(Status::new(ErrorName::Canceled, "")), extra }
         .build()
         .unwrap();
