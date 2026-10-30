@@ -114,7 +114,7 @@
   {
     "name": "XA-7 session never marks the secret optional",
     "file": "src/core/accountsession.cpp",
-    "search": "    m_secrets->setSecretOptional(secretOptional(m_config.params));   // XA-7",
+    "search": "    m_secrets->setSecretOptional(secretOptional(m_config.params));",
     "replace": "",
     "test": "dbus-run-session -- build/tests/unit/accounts/tst_accounts"
   },
@@ -170,7 +170,7 @@
   {
     "name": "XA-4 probe verify skips the policy",
     "file": "src/qml/netvfsprobe.cpp",
-    "search": "    outcome.result = checkServicePolicy(params, service);   // XA-4, before anything is sent",
+    "search": "    outcome.result = checkServicePolicy(params, service);",
     "replace": "    outcome.result = Result();",
     "test": "dbus-run-session -- build/tests/unit/qml/probe/tst_qmlprobe"
   },

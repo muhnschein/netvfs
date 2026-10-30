@@ -199,7 +199,7 @@ void ServiceCache::handlePtr(const Dns::Record &rec, Context *c)
     if (!type || !instanceLabel(rec.target, typeName, &label))
         return;
     const QByteArray key = Dns::canonicalName(rec.target);
-    if (rec.ttl == 0) {
+    if (rec.ttl == 0) {                             // RFC 6762 section 10.1: goodbye
         removeInstance(key, c);
         return;
     }

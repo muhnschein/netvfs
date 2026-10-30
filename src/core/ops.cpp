@@ -412,6 +412,7 @@ public:
     explicit SourceProgress(BoundedPipe *pipe) : m_pipe(pipe) {}
     void update(qint64, qint64) override
     {
+        // Caller's Progress belongs to calling thread; destination side reports.
     }
     bool canceled() const override { return !m_pipe->result().ok(); }
 

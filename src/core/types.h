@@ -156,10 +156,11 @@ public:
     virtual bool answer(const QString &name, const QString &instruction,
                         const QVector<AuthPrompt> &prompts, QVector<QByteArray> *answers) = 0;
     // Backend::cancel() calls this from any thread while answer() runs. An answer() that waits for
-    // a person must end that wait soon and return false (BlockingPrompter does). Default does
-    // nothing: right only for prompters that never block.
+    // a person must end that wait soon and return false (BlockingPrompter does). Default
+    // fits prompters that never block.
     virtual void cancel()
     {
+        // Nothing to wake: this prompter never blocks.
     }
 };
 

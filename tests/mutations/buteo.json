@@ -100,14 +100,14 @@
   {
     "name": "8.4 empty archive directory kept",
     "file": "src/buteo/lib/backuprun.cpp",
-    "search": "    QDir().rmdir(archive.absolutePath());   // only when now empty",
+    "search": "    QDir().rmdir(archive.absolutePath());",
     "replace": "",
     "test": "dbus-run-session -- build/tests/unit/buteo/tst_buteo"
   },
   {
     "name": "8.4 archive of an ended run kept",
     "file": "src/buteo/lib/backuprun.cpp",
-    "search": "        else\n            removeArchive(path);   // the run ended while the request was pending",
+    "search": "        else\n            removeArchive(path);",
     "replace": "",
     "test": "dbus-run-session -- build/tests/unit/buteo/tst_buteo"
   },
@@ -163,7 +163,7 @@
   {
     "name": "8.7 network errors not CONNECTION_ERROR",
     "file": "src/buteo/lib/backupclient.cpp",
-    "search": "    case Error::NetworkUnreachable:\n    case Error::ConnectionLost:         // XC-21: retryable like an unreachable server\n    case Error::TooManyConnections:\n    case Error::RateLimited:\n    case Error::Timeout:\n        return Buteo::SyncResults::CONNECTION_ERROR;",
+    "search": "    case Error::NetworkUnreachable:\n    case Error::ConnectionLost:  // retryable like an unreachable server\n    case Error::TooManyConnections:\n    case Error::RateLimited:\n    case Error::Timeout:\n        return Buteo::SyncResults::CONNECTION_ERROR;",
     "replace": "",
     "test": "dbus-run-session -- build/tests/unit/buteo/tst_buteo"
   },
@@ -191,7 +191,7 @@
   {
     "name": "SEC-5 session keeps the secret",
     "file": "src/buteo/lib/backuprun.cpp",
-    "search": "        m_session->releaseCredentials();   // SEC-5",
+    "search": "        m_session->releaseCredentials();",
     "replace": "        ;",
     "test": "dbus-run-session -- build/tests/unit/buteo/tst_buteo"
   },
@@ -205,7 +205,7 @@
   {
     "name": "XC-21 lost connection not CONNECTION_ERROR",
     "file": "src/buteo/lib/backupclient.cpp",
-    "search": "    case Error::ConnectionLost:         // XC-21: retryable like an unreachable server\n",
+    "search": "    case Error::ConnectionLost:  // retryable like an unreachable server\n",
     "replace": "",
     "test": "dbus-run-session -- build/tests/unit/buteo/tst_buteo"
   },
