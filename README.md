@@ -2,12 +2,6 @@
 
 [![Security Rating](https://sonarcloud.io/api/project_badges/measure?project=muhnschein_netvfs&metric=security_rating)](https://sonarcloud.io/summary/new_code?id=muhnschein_netvfs)[![Reliability Rating](https://sonarcloud.io/api/project_badges/measure?project=muhnschein_netvfs&metric=reliability_rating)](https://sonarcloud.io/summary/new_code?id=muhnschein_netvfs)[![Coverage](https://sonarcloud.io/api/project_badges/measure?project=muhnschein_netvfs&metric=coverage)](https://sonarcloud.io/summary/new_code?id=muhnschein_netvfs)[![Lines of Code](https://sonarcloud.io/api/project_badges/measure?project=muhnschein_netvfs&metric=ncloc)](https://sonarcloud.io/summary/new_code?id=muhnschein_netvfs)
 
-> 🤖 **This project was developed using AI.** If that provenance troubles
-> you, feel free to use something else.
->
-> 📱 **Modern Sailfish OS only:** Sailfish OS 5.2 or later on aarch64.
-> No effort is made to accommodate older targets.
-
 ## Overview
 
 netvfs adds SFTP and SMB servers to Sailfish OS as a platform service:
@@ -27,37 +21,24 @@ The SFTP client is for OpenSSH servers; the SMB client speaks SMB 3.1.1 only
 
 ## Where it sits
 
-```mermaid
-flowchart TB
-  subgraph apps["Apps (sandboxed)"]
-    lautta["Lautta"]
-  end
-  subgraph settings["Settings"]
-    accui["Accounts:<br/>netvfs account pages"]
-    backupui["Backup"]
-  end
-  subgraph netvfs["netvfs"]
-    bridge["netvfs-bridge<br/>one per app, started on demand"]
-    buteo["Backup plugins"]
-    core["libnetvfs<br/>accounts, sessions"]
-    rs["SFTP and SMB clients (Rust)"]
-  end
-  subgraph platform["Sailfish OS"]
-    sso[("Accounts and<br/>credential store")]
-    msyncd["Sync framework (Buteo)"]
-    vault["Backup service"]
-    udisks["UDisks2"]
-  end
-  servers[("SFTP and SMB servers")]
-
-  lautta -- "socket in the app's own folder" --> bridge
-  accui --> core
-  backupui --> vault --> msyncd --> buteo --> core
-  bridge --> core
-  bridge -- "memory cards, USB drives" --> udisks
-  bridge -. "opens Settings for account changes" .-> accui
-  core <--> sso
-  core --> rs --> servers
+```
+  Settings                          Apps (sandboxed)
+ ┌──────────┐  ┌──────────┐        ┌───────────────┐
+ │ Accounts │  │  Backup  │        │    Lautta     │
+ └────┬─────┘  └────┬─────┘        └───────┬───────┘
+      │             │ backup service,      │ socket in the
+      │             │ sync framework       │ app's own folder
+      │        ┌────▼─────┐        ┌───────▼───────┐
+      │        │  backup  │        │ netvfs-bridge ├───► UDisks2: memory
+      │        │  plugins │        │ one per app   │     cards, USB drives
+      │        └────┬─────┘        └───────┬───────┘
+ ┌────▼─────────────▼──────────────────────▼───────┐
+ │ libnetvfs: accounts, sessions                   ├───► accounts and
+ ├─────────────────────────────────────────────────┤     credential store
+ │ SFTP and SMB clients (Rust)                     │
+ └────────────────────────┬────────────────────────┘
+                          ▼
+                 SFTP and SMB servers
 ```
 
 - An account is made and edited only in Settings. Apps hand off to Settings
@@ -86,7 +67,8 @@ one go.
 
 - No protocol or crypto of our own: the cryptography comes from established
   Rust crates.
-- No Kerberos, no DFS, no SMB older than 3.1.1.
+- No legacy crypto: SSH only with Curve25519 or hybrid post-quantum key
+  exchange, AEAD ciphers, no SHA-1 or DSA host keys; SMB 3.1.1 only.
 - No folder sync, no mounting servers as file systems.
 - Not for the Jolla Store: it installs system files and a setgid helper.
 
@@ -114,15 +96,6 @@ $ ./tools/ci/cargo-tool.sh cargo-nextest 0.9.148
 # OpenSSH and Samba containers (those need Docker).
 $ make check
 ```
-
-## Attributions
-
-* [russh](https://github.com/Eugeny/russh), for SSH in Rust.
-* [sspi-rs](https://github.com/Devolutions/sspi-rs), for NTLM sign-in.
-* [ring](https://github.com/briansmith/ring) and
-  [RustCrypto](https://github.com/RustCrypto), for the cryptography.
-* Jolla's Nextcloud account, for showing how a backup account plugs into
-  Sailfish OS.
 
 ## License
 
