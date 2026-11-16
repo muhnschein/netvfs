@@ -33,6 +33,7 @@ exceptions = [
     { crate = "untrusted", allow = ["ISC"] },
     # IDNA tables (sspi -> url -> idna -> idna_adapter 1.1, pinned to keep ICU4X out): "(Apache-2.0 OR MIT) AND Unicode-3.0".
     { crate = "idna_mapping", allow = ["Unicode-3.0"] },
+    # unicode-normalization (idna_adapter 1.1) held at 0.1.25 in Cargo.lock: 0.1.26 adds Unicode-3.0.
 ]
 
 # Own crates (publish = false).
@@ -50,12 +51,8 @@ skip = [
     { crate = "syn@2", reason = "enumflags2_derive and tracing-attributes are still on syn 2" },
     # russh tree: ring 0.17 on getrandom 0.2, RustCrypto pre-releases (ssh-key, rsa, crypto-bigint) on 0.4.
     { crate = "getrandom@0.2", reason = "ring 0.17 has no release on getrandom 0.3 or later" },
-    # ml-kem 0.3 (russh mlkem768x25519-sha256) on sha3 0.11, rest of russh on 0.12.
-    { crate = "sha3@0.11", reason = "ml-kem 0.3 has no release on sha3 0.12" },
     # sspi 0.23 (netvfs-smb) uses getrandom 0.3; current RustCrypto on 0.4.
     { crate = "getrandom@0.3", reason = "sspi 0.23 depends on getrandom 0.3 directly" },
-    # sspi's picky 7.0.0-rc.26 on base64 0.22, picky-asn1-x509 0.15 on 0.23.
-    { crate = "base64@0.22", reason = "picky 7.0.0-rc.26 (sspi) has no release on base64 0.23" },
     # sspi crypto-mac 0.11 on generic-array 0.14, russh on 1.x (compat-0_14 links 0.14 too).
     { crate = "generic-array@0.14", reason = "crypto-mac 0.11 (sspi) has no release on generic-array 1" },
 ]
