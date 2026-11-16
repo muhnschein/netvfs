@@ -37,7 +37,7 @@ Why each is here; new one → line here.
 - `zbus` 5 (`tokio`, `p2p`; bridge also `bus-impl`), `tokio`, `futures-lite` (in zbus's tree): bridge and protocol crate.
 - `serde`: protocol crate. `serde_json`, `sha2`: test-only features (`fake`, `testing`).
 - `zeroize`: secrets.
-- `russh` exactly 0.64.1 (default features off, `ring`, `rsa`): SSH transport; netvfs links no OpenSSL. Pins RustCrypto pre-releases: bump as one unit. `data-encoding`, `pkcs8` (in russh's tree): key files, encrypted PKCS#8 parameters read before russh decrypts.
+- `russh` exactly 0.65.1 (default features off, `ring`, `rsa`): SSH transport; netvfs links no OpenSSL. Pins RustCrypto pre-releases: bump as one unit. `data-encoding`, `pkcs8` (in russh's tree): key files, encrypted PKCS#8 parameters read before russh decrypts.
 - `ssh-key` 0.7.0-rc.11 from `rust/vendor/ssh-key`: one line changed, ECDSA private scalar shorter than field size left-padded (OpenSSH stores ~1 in 256 P-256 keys with 31 bytes). `README.netvfs.md` there: checksum, diff.
 - `sspi` 0.23 (default features off): NTLMv2 in SPNEGO, incl. RC4 of NTLM key exchange. No Kerberos.
 - `picky-asn1-der` 0.5.7 from `rust/vendor/picky-asn1-der`: one line changed, `checked_add` on raw DER length so near-`usize::MAX` length is `TruncatedData`. `README.netvfs.md` there.
