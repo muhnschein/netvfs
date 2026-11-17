@@ -100,11 +100,9 @@ async fn pump(
     let mut done = 0u64;
     while let Some(chunk) = http.chunk(&mut body).await? {
         let mut data: &[u8] = &chunk;
-        if skip > 0 {
-            let cut = usize::try_from(skip).unwrap_or(usize::MAX).min(data.len());
-            data = data.get(cut..).unwrap_or_default();
-            skip = skip.saturating_sub(cut as u64);
-        }
+        let cut = usize::try_from(skip).unwrap_or(usize::MAX).min(data.len());
+        data = data.get(cut..).unwrap_or_default();
+        skip = skip.saturating_sub(cut as u64);
         if let Some(limit) = limit {
             let left = usize::try_from(limit.saturating_sub(done)).unwrap_or(usize::MAX);
             data = data.get(..left.min(data.len())).unwrap_or_default();

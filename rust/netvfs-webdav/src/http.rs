@@ -16,11 +16,10 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
-use tokio::task::JoinHandle;
 
 use crate::paths::encode;
 
-/// A connection idle this long is reopened before a body that cannot be sent twice.
+/// Default of [`Target::stale_after`].
 pub const STALE_AFTER: Duration = Duration::from_secs(1);
 /// HTTP/1.1 for ALPN.
 pub const ALPN: &[u8] = b"http/1.1";
@@ -132,6 +131,8 @@ pub struct Target {
     pub connect_timeout: Duration,
     /// Bound of each wait for the server: answer head, each body chunk.
     pub request_timeout: Duration,
+    /// A connection idle this long is reopened before a body that cannot be sent twice.
+    pub stale_after: Duration,
 }
 
 impl Target {
@@ -146,16 +147,9 @@ impl Target {
 #[derive(Debug)]
 struct Conn {
     sender: SendRequest<Body>,
-    task: JoinHandle<()>,
     /// A request was sent whose answer was not read to the end.
     busy: bool,
     idle_since: Instant,
-}
-
-impl Drop for Conn {
-    fn drop(&mut self) {
-        self.task.abort();
-    }
 }
 
 /// The connection.
@@ -247,9 +241,9 @@ impl Http {
         let left = t.connect_timeout.saturating_sub(started.elapsed());
         let tls = self.tls.handshake(tcp, left).await?;
         let (sender, conn) = http1::handshake(TokioIo::new(tls)).await.map_err(|e| lost(e.to_string()))?;
-        // Ends with an error when the server closes; the next request reopens.
-        let task = tokio::spawn(async move { drop(conn.await) });
-        self.conn = Some(Conn { sender, task, busy: false, idle_since: Instant::now() });
+        // Ends when the server closes, or once `sender` and any answer body are dropped.
+        tokio::spawn(async move { drop(conn.await) });
+        self.conn = Some(Conn { sender, busy: false, idle_since: Instant::now() });
         Ok(())
     }
 
@@ -264,12 +258,6 @@ impl Http {
         self.ended = true;
     }
 
-    /// Whether a connection is open.
-    #[must_use]
-    pub fn is_open(&self) -> bool {
-        self.conn.as_ref().is_some_and(|c| !c.sender.is_closed())
-    }
-
     /// The answer was read to the end: the connection may carry the next request.
     pub fn done(&mut self) {
         if let Some(c) = &mut self.conn {
@@ -280,7 +268,9 @@ impl Http {
 
     fn usable(&self, fresh_for_stream: bool) -> bool {
         self.conn.as_ref().is_some_and(|c| {
-            !c.busy && !c.sender.is_closed() && (!fresh_for_stream || c.idle_since.elapsed() < STALE_AFTER)
+            !c.busy
+                && !c.sender.is_closed()
+                && (!fresh_for_stream || c.idle_since.elapsed() < self.target.stale_after)
         })
     }
 
@@ -408,3 +398,6 @@ impl Http {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

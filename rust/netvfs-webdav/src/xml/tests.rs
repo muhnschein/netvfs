@@ -204,15 +204,37 @@ fn malformed_bodies() {
 }
 
 #[test]
+fn properties_count_only_in_their_place() {
+    let ok = "<d:status>HTTP/1.1 200 OK</d:status>";
+    let r = one(&format!(
+        "<d:response><d:href>/x</d:href><d:propstat><d:prop><x:wrap xmlns:x=\"urn:x\">\
+         <d:resourcetype><d:collection/></d:resourcetype></x:wrap></d:prop>{ok}</d:propstat></d:response>"
+    ));
+    assert!(!r.props.collection, "a collection outside resourcetype of a prop");
+    let r = one(&format!(
+        "<d:response><d:href>/x</d:href><d:propstat><x:wrap xmlns:x=\"urn:x\"><d:prop>\
+         <d:getcontentlength>9</d:getcontentlength></d:prop></x:wrap>{ok}</d:propstat></d:response>"
+    ));
+    assert_eq!(r.props.length, None, "a prop outside a propstat");
+    let r = one(&format!(
+        "<d:response><d:href>/x</d:href>\
+         <d:propstat><d:prop><d:getcontentlength>5</d:getcontentlength></d:prop>{ok}</d:propstat>\
+         <d:propstat><d:prop><d:getcontentlength>9</d:getcontentlength></d:prop></d:propstat></d:response>"
+    ));
+    assert_eq!(r.props.length, Some(5), "a propstat without status");
+}
+
+#[test]
 fn caps_hold() {
     let deep = format!("{}{}", "<x>".repeat(MAX_DEPTH), "</x>".repeat(MAX_DEPTH));
     malformed(&ms(&deep));
     let shallow = format!("{}{}", "<x>".repeat(MAX_DEPTH - 1), "</x>".repeat(MAX_DEPTH - 1));
     parse(ms(&shallow).as_bytes()).unwrap();
 
-    let long = "a".repeat(MAX_TEXT);
+    // 32 KiB, as doc/SPEC.md says.
+    let long = "a".repeat(32 * 1024);
     let r = one(&response("/x", &format!("<d:getcontenttype>{long}</d:getcontenttype>"), "HTTP/1.1 200 OK"));
-    assert_eq!(r.props.content_type.len(), MAX_TEXT);
+    assert_eq!(r.props.content_type.len(), 32 * 1024);
     malformed(&ms(&response(
         "/x",
         &format!("<d:getcontenttype>{long}b</d:getcontenttype>"),

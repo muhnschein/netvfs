@@ -4,7 +4,7 @@
 //! Options: `base_path` (the account's folder on the server), `host_key` (pinned TLS key). No credentials go
 //! out before the identity check: `connect` only shakes hands, `authenticate` sends the first request.
 
-use crate::http::{ALPN, Body, Http, Req, Target};
+use crate::http::{ALPN, Body, Http, Req, STALE_AFTER, Target};
 use crate::io::{self, WebdavRead};
 use crate::paths::{Base, child_name, encode, last_name, same};
 use crate::status::{Op, error, unresolved};
@@ -80,6 +80,7 @@ impl Settings {
                 port,
                 connect_timeout: timeout_or(params.connect_timeout_ms, DEFAULT_CONNECT_TIMEOUT),
                 request_timeout: timeout_or(params.request_timeout_ms, DEFAULT_REQUEST_TIMEOUT),
+                stale_after: STALE_AFTER,
             },
             base: Base::new(&params.option("base_path").unwrap_or_default())?,
             username: params.username.clone(),

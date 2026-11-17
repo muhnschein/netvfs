@@ -70,6 +70,8 @@ pub struct State {
     /// A connection that served this many requests drops the next one unanswered, as a server closing an idle
     /// connection just when a request arrives.
     pub drop_after: Option<usize>,
+    /// Every request on this path (no trailing `/`) is answered 403.
+    pub forbidden: Option<Vec<u8>>,
 }
 
 #[derive(Debug, Clone)]
@@ -103,6 +105,11 @@ fn config(cert: Cert) -> Arc<ServerConfig> {
         .unwrap();
     config.alpn_protocols = vec![b"http/1.1".to_vec()];
     Arc::new(config)
+}
+
+/// TLS for a hand-scripted server.
+pub fn acceptor(cert: Cert) -> TlsAcceptor {
+    TlsAcceptor::from(config(cert))
 }
 
 impl Fake {
@@ -246,108 +253,128 @@ fn respond(s: &mut State, method: &Method, path: &[u8], headers: &HeaderMap, bod
         return answer(StatusCode::UNAUTHORIZED, "who?");
     }
     let k = key(path);
+    if s.forbidden.as_ref() == Some(&k) {
+        return answer(StatusCode::FORBIDDEN, "");
+    }
     match method.as_str() {
         "OPTIONS" => {
             let mut out = answer(StatusCode::OK, "");
             out.headers_mut().insert("dav", HeaderValue::from_static("1, 2"));
             out
         }
-        "PROPFIND" => {
-            let Some(node) = s.tree.get(&k).cloned() else { return answer(StatusCode::NOT_FOUND, "") };
-            let mut xml = props(&k, &node, s.quota);
-            if node == Node::Dir && headers.get("depth").is_some_and(|d| d == "1") {
-                let prefix = [k.as_slice(), b"/"].concat();
-                for (p, n) in &s.tree {
-                    if let Some(rest) = p.strip_prefix(prefix.as_slice())
-                        && !rest.is_empty()
-                        && !rest.contains(&b'/')
-                    {
-                        xml.push_str(&props(p, n, None));
-                    }
-                }
-            }
-            let body = format!(
-                r#"<?xml version="1.0" encoding="utf-8"?><d:multistatus xmlns:d="DAV:">{xml}</d:multistatus>"#
-            );
-            answer(StatusCode::MULTI_STATUS, body)
-        }
-        "MKCOL" => {
-            if s.tree.contains_key(&k) {
-                answer(StatusCode::METHOD_NOT_ALLOWED, "")
-            } else if s.tree.get(&parent(&k)) != Some(&Node::Dir) {
-                answer(StatusCode::CONFLICT, "")
-            } else {
-                s.tree.insert(k, Node::Dir);
-                answer(StatusCode::CREATED, "")
-            }
-        }
-        "DELETE" => {
-            if !s.tree.contains_key(&k) {
-                return answer(StatusCode::NOT_FOUND, "");
-            }
-            let prefix = [k.as_slice(), b"/"].concat();
-            s.tree.retain(|p, _| *p != k && !p.starts_with(&prefix));
-            answer(StatusCode::NO_CONTENT, "")
-        }
-        "PUT" => match s.tree.get(&k) {
-            Some(Node::Dir) => answer(StatusCode::METHOD_NOT_ALLOWED, ""),
-            Some(_) if headers.get(header::IF_NONE_MATCH).is_some_and(|v| v == "*") => {
-                answer(StatusCode::PRECONDITION_FAILED, "")
-            }
-            existing => {
-                if s.tree.get(&parent(&k)) != Some(&Node::Dir) {
-                    return answer(StatusCode::CONFLICT, "");
-                }
-                let code = if existing.is_some() { StatusCode::NO_CONTENT } else { StatusCode::CREATED };
-                s.tree.insert(k, Node::File(body.to_vec()));
-                answer(code, "")
-            }
-        },
-        "GET" => match s.tree.get(&k).cloned() {
-            None => answer(StatusCode::NOT_FOUND, ""),
-            Some(Node::Dir) => answer(StatusCode::OK, "<html>index</html>"),
-            Some(Node::File(data)) => match byte_range(headers, data.len()) {
-                Some(Ok((first, last))) if !s.no_ranges => {
-                    let mut out = answer(StatusCode::PARTIAL_CONTENT, data[first..=last].to_vec());
-                    let cr = format!("bytes {first}-{last}/{}", data.len());
-                    out.headers_mut().insert(header::CONTENT_RANGE, HeaderValue::from_str(&cr).unwrap());
-                    out
-                }
-                Some(Err(())) if !s.no_ranges => answer(StatusCode::RANGE_NOT_SATISFIABLE, ""),
-                _ => answer(StatusCode::OK, data),
-            },
-        },
-        "MOVE" | "COPY" => {
-            let Some(dest) = headers.get("destination").and_then(|d| href_path(d.as_bytes())) else {
-                return answer(StatusCode::BAD_REQUEST, "");
-            };
-            let dk = key(&dest);
-            let overwrite = headers.get("overwrite").is_none_or(|o| o == "T");
-            if !s.tree.contains_key(&k) {
-                return answer(StatusCode::NOT_FOUND, "");
-            }
-            if s.tree.get(&parent(&dk)) != Some(&Node::Dir) {
-                return answer(StatusCode::CONFLICT, "");
-            }
-            let existed = s.tree.contains_key(&dk);
-            if existed && !overwrite {
-                return answer(StatusCode::PRECONDITION_FAILED, "");
-            }
-            let dprefix = [dk.as_slice(), b"/"].concat();
-            s.tree.retain(|p, _| *p != dk && !p.starts_with(&dprefix));
-            let prefix = [k.as_slice(), b"/"].concat();
-            let moved: Vec<(Vec<u8>, Node)> = s
-                .tree
-                .iter()
-                .filter(|(p, _)| **p == k || p.starts_with(&prefix))
-                .map(|(p, n)| ([dk.as_slice(), &p[k.len()..]].concat(), n.clone()))
-                .collect();
-            if method.as_str() == "MOVE" {
-                s.tree.retain(|p, _| *p != k && !p.starts_with(&prefix));
-            }
-            s.tree.extend(moved);
-            answer(if existed { StatusCode::NO_CONTENT } else { StatusCode::CREATED }, "")
-        }
+        "PROPFIND" => propfind(s, &k, headers),
+        "MKCOL" => mkcol(s, k),
+        "DELETE" => delete(s, &k),
+        "PUT" => put(s, k, headers, body),
+        "GET" => get(s, &k, headers),
+        "MOVE" | "COPY" => transfer(s, &k, method.as_str() == "MOVE", headers),
         _ => answer(StatusCode::NOT_IMPLEMENTED, ""),
     }
+}
+
+fn propfind(s: &State, k: &[u8], headers: &HeaderMap) -> Answer {
+    let Some(node) = s.tree.get(k).cloned() else { return answer(StatusCode::NOT_FOUND, "") };
+    let mut xml = props(k, &node, s.quota);
+    if node == Node::Dir && headers.get("depth").is_some_and(|d| d == "1") {
+        let prefix = [k, b"/"].concat();
+        for (p, n) in &s.tree {
+            if let Some(rest) = p.strip_prefix(prefix.as_slice())
+                && !rest.is_empty()
+                && !rest.contains(&b'/')
+            {
+                xml.push_str(&props(p, n, None));
+            }
+        }
+    }
+    let body = format!(
+        r#"<?xml version="1.0" encoding="utf-8"?><d:multistatus xmlns:d="DAV:">{xml}</d:multistatus>"#
+    );
+    answer(StatusCode::MULTI_STATUS, body)
+}
+
+fn mkcol(s: &mut State, k: Vec<u8>) -> Answer {
+    if s.tree.contains_key(&k) {
+        answer(StatusCode::METHOD_NOT_ALLOWED, "")
+    } else if s.tree.get(&parent(&k)) != Some(&Node::Dir) {
+        answer(StatusCode::CONFLICT, "")
+    } else {
+        s.tree.insert(k, Node::Dir);
+        answer(StatusCode::CREATED, "")
+    }
+}
+
+fn delete(s: &mut State, k: &[u8]) -> Answer {
+    if !s.tree.contains_key(k) {
+        return answer(StatusCode::NOT_FOUND, "");
+    }
+    let prefix = [k, b"/"].concat();
+    s.tree.retain(|p, _| p != k && !p.starts_with(&prefix));
+    answer(StatusCode::NO_CONTENT, "")
+}
+
+fn put(s: &mut State, k: Vec<u8>, headers: &HeaderMap, body: &Bytes) -> Answer {
+    match s.tree.get(&k) {
+        Some(Node::Dir) => answer(StatusCode::METHOD_NOT_ALLOWED, ""),
+        Some(_) if headers.get(header::IF_NONE_MATCH).is_some_and(|v| v == "*") => {
+            answer(StatusCode::PRECONDITION_FAILED, "")
+        }
+        existing => {
+            if s.tree.get(&parent(&k)) != Some(&Node::Dir) {
+                return answer(StatusCode::CONFLICT, "");
+            }
+            let code = if existing.is_some() { StatusCode::NO_CONTENT } else { StatusCode::CREATED };
+            s.tree.insert(k, Node::File(body.to_vec()));
+            answer(code, "")
+        }
+    }
+}
+
+fn get(s: &State, k: &[u8], headers: &HeaderMap) -> Answer {
+    match s.tree.get(k).cloned() {
+        None => answer(StatusCode::NOT_FOUND, ""),
+        Some(Node::Dir) => answer(StatusCode::OK, "<html>index</html>"),
+        Some(Node::File(data)) => match byte_range(headers, data.len()) {
+            Some(Ok((first, last))) if !s.no_ranges => {
+                let mut out = answer(StatusCode::PARTIAL_CONTENT, data[first..=last].to_vec());
+                let cr = format!("bytes {first}-{last}/{}", data.len());
+                out.headers_mut().insert(header::CONTENT_RANGE, HeaderValue::from_str(&cr).unwrap());
+                out
+            }
+            Some(Err(())) if !s.no_ranges => answer(StatusCode::RANGE_NOT_SATISFIABLE, ""),
+            _ => answer(StatusCode::OK, data),
+        },
+    }
+}
+
+/// MOVE (`remove` the source) or COPY.
+fn transfer(s: &mut State, k: &[u8], remove: bool, headers: &HeaderMap) -> Answer {
+    let Some(dest) = headers.get("destination").and_then(|d| href_path(d.as_bytes())) else {
+        return answer(StatusCode::BAD_REQUEST, "");
+    };
+    let dk = key(&dest);
+    let overwrite = headers.get("overwrite").is_none_or(|o| o == "T");
+    if !s.tree.contains_key(k) {
+        return answer(StatusCode::NOT_FOUND, "");
+    }
+    if s.tree.get(&parent(&dk)) != Some(&Node::Dir) {
+        return answer(StatusCode::CONFLICT, "");
+    }
+    let existed = s.tree.contains_key(&dk);
+    if existed && !overwrite {
+        return answer(StatusCode::PRECONDITION_FAILED, "");
+    }
+    let dprefix = [dk.as_slice(), b"/"].concat();
+    s.tree.retain(|p, _| *p != dk && !p.starts_with(&dprefix));
+    let prefix = [k, b"/"].concat();
+    let moved: Vec<(Vec<u8>, Node)> = s
+        .tree
+        .iter()
+        .filter(|(p, _)| p.as_slice() == k || p.starts_with(&prefix))
+        .map(|(p, n)| ([dk.as_slice(), &p[k.len()..]].concat(), n.clone()))
+        .collect();
+    if remove {
+        s.tree.retain(|p, _| p != k && !p.starts_with(&prefix));
+    }
+    s.tree.extend(moved);
+    answer(if existed { StatusCode::NO_CONTENT } else { StatusCode::CREATED }, "")
 }

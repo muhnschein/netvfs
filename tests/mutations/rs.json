@@ -72,8 +72,8 @@
   {
     "name": "Identity: an SSH host key becomes none",
     "file": "src/backends/rs/rsmarshal.cpp",
-    "search": "identity.kind == NVB_IDENTITY_SSH ? ServerIdentity::Kind::SshHostKey : ServerIdentity::Kind::None;",
-    "replace": "ServerIdentity::Kind::None;",
+    "search": "        out.kind = ServerIdentity::Kind::SshHostKey;",
+    "replace": "        out.kind = ServerIdentity::Kind::None;",
     "test": "build/tests/backends/rs/tst_rsshim"
   },
   {

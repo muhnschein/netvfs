@@ -268,7 +268,7 @@ pub fn identity(spki: Vec<u8>) -> ServerIdentity {
 }
 
 fn handshake_error(e: &std::io::Error) -> Status {
-    let tls = e.get_ref().and_then(|inner| inner.downcast_ref::<rustls::Error>());
+    let tls = e.get_ref().and_then(<dyn std::error::Error + Send + Sync>::downcast_ref::<rustls::Error>);
     match tls {
         Some(rustls::Error::InvalidCertificate(CertificateError::ApplicationVerificationFailure)) => {
             Status::new(

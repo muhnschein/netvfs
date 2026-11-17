@@ -113,6 +113,14 @@ mod tests {
         assert_eq!(name(404, Op::Put), NotFound);
         let s = error(StatusCode::NOT_FOUND, Op::Other, &HeaderMap::new(), SystemTime::UNIX_EPOCH);
         assert_eq!(s.detail, "HTTP 404 Not Found");
+        // Protocol errors say what went wrong.
+        let message = |code| {
+            error(StatusCode::from_u16(code).unwrap(), Op::Other, &HeaderMap::new(), SystemTime::UNIX_EPOCH)
+                .message
+        };
+        assert_eq!(message(400), "The server rejected the request as malformed");
+        assert_eq!(message(302), "The server redirects elsewhere; check the address");
+        assert_eq!(message(502), "The server answered with an error");
     }
 
     #[test]

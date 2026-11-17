@@ -276,6 +276,7 @@ fn settings_from_params() {
         (DEFAULT_CONNECT_TIMEOUT, DEFAULT_REQUEST_TIMEOUT)
     );
     assert_eq!(s.pin, None);
+    assert_eq!(s.target.stale_after, Duration::from_secs(1));
     let p = Params {
         host: "nas".into(),
         port: 8443,
@@ -417,6 +418,16 @@ async fn list_gives_children_in_batches() {
 }
 
 #[tokio::test]
+async fn an_empty_folder_lists_nothing() {
+    let fake = server(Cert::Trusted).await;
+    fake.put("/d", Node::Dir);
+    let mut w = signed_in(&fake, "").await;
+    let mut sink = Collect::default();
+    w.list(b"/d", ListOptions::default(), &mut sink, &CancelToken::new()).await.unwrap();
+    assert!(sink.0.is_empty());
+}
+
+#[tokio::test]
 async fn hostile_listings_yield_only_children() {
     let fake = server(Cert::Trusted).await;
     let mut w = signed_in(&fake, "/").await;
@@ -533,6 +544,14 @@ async fn rename_modes() {
     fake.clear_seen();
     w.rename(b"/b", b"b", RenameMode::NoReplace, &c).await.unwrap();
     assert!(!fake.methods().contains(&"MOVE".to_owned()), "same path: nothing to do");
+    w.rename(b"/b", b"/c", RenameMode::Replace, &c).await.unwrap();
+    assert_eq!((fake.get("/b"), fake.get("/c")), (None, Some(file(b"a"))));
+    // A target that cannot be looked at is not replaced blindly.
+    fake.with(|s| s.forbidden = Some(b"/locked".to_vec()));
+    fake.clear_seen();
+    let e = w.rename(b"/c", b"/locked", RenameMode::Replace, &c).await.unwrap_err();
+    assert_eq!(e.name, ErrorName::PermissionDenied);
+    assert!(!fake.methods().contains(&"MOVE".to_owned()));
 }
 
 #[tokio::test]
@@ -621,6 +640,13 @@ async fn unresolved_paths_are_explained_by_their_parents() {
         let e = w.rename(b"/f", to, RenameMode::NoReplace, &c).await.unwrap_err();
         assert_eq!((e.name, e.detail.as_str()), (ErrorName::ProtocolError, "HTTP 500 Internal Server Error"));
     }
+    // A parent that cannot be looked at ends the search; the first error stands.
+    fake.with(|s| {
+        s.canned.push((propfind(), StatusCode::BAD_REQUEST, vec![], ""));
+        s.canned.push((propfind(), StatusCode::FORBIDDEN, vec![], ""));
+    });
+    let e = w.stat(b"/f/a/b", true, &c).await.unwrap_err();
+    assert_eq!((e.name, e.detail.as_str()), (ErrorName::ProtocolError, "HTTP 400 Bad Request"));
     // Other errors are not looked into.
     fake.clear_seen();
     fake.with(|s| s.canned.push((propfind(), StatusCode::FORBIDDEN, vec![], "")));
@@ -759,6 +785,68 @@ async fn uploads() {
     // An empty file.
     w.upload(b"/empty", &new, &mut Data(Vec::new(), 0, true), &mut Moves::quiet(), &c).await.unwrap();
     assert_eq!(fake.get("/empty"), Some(file(b"")));
+}
+
+/// A source of `left` zero bytes that notes the largest buffer it is offered.
+struct Zeros {
+    left: usize,
+    largest: usize,
+}
+
+impl Source for Zeros {
+    fn read(&mut self, buf: &mut [u8]) -> Result<usize, Status> {
+        self.largest = self.largest.max(buf.len());
+        let n = buf.len().min(self.left);
+        buf[..n].fill(0);
+        self.left -= n;
+        Ok(n)
+    }
+    fn size(&self) -> Option<u64> {
+        None
+    }
+}
+
+#[tokio::test]
+async fn uploads_read_256_kib_at_a_time() {
+    let fake = server(Cert::Trusted).await;
+    let mut w = signed_in(&fake, "").await;
+    let mut source = Zeros { left: 1_000_000, largest: 0 };
+    w.upload(b"/f", &WriteOptions::default(), &mut source, &mut Moves::quiet(), &CancelToken::new())
+        .await
+        .unwrap();
+    assert_eq!(source.largest, 262_144);
+}
+
+#[tokio::test]
+async fn a_failed_upload_does_not_reuse_its_connection() {
+    let fake = server(Cert::Trusted).await;
+    let mut w = signed_in(&fake, "").await;
+    let c = CancelToken::new();
+    let upload = async |w: &mut Webdav, path: &[u8]| {
+        let mut data = Data(b"x".to_vec(), 0, true);
+        w.upload(path, &WriteOptions::default(), &mut data, &mut Moves::quiet(), &c).await
+    };
+    let connections = || fake.state.lock().unwrap().connections;
+    upload(&mut w, b"/f").await.unwrap();
+    let after_success = connections();
+    w.stat(b"/f", false, &c).await.unwrap();
+    assert_eq!(connections(), after_success);
+    assert_eq!(upload(&mut w, b"/no/f").await.unwrap_err().name, ErrorName::NotFound);
+    let after_failure = connections();
+    w.stat(b"/f", false, &c).await.unwrap();
+    assert_eq!(connections(), after_failure + 1);
+}
+
+#[tokio::test]
+async fn a_server_without_ranges_is_read_up_to_the_length() {
+    let fake = server(Cert::Trusted).await;
+    let data: Vec<u8> = (0..1_000_000u32).map(|i| (i % 251) as u8).collect();
+    fake.put("/f", Node::File(data.clone()));
+    fake.with(|s| s.no_ranges = true);
+    let mut w = signed_in(&fake, "").await;
+    let mut out = Out::default();
+    w.download(b"/f", 1000, Some(600_000), &mut out, &mut Moves::quiet(), &CancelToken::new()).await.unwrap();
+    assert_eq!(out.0, data[1000..601_000]);
 }
 
 #[tokio::test]

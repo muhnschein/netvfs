@@ -1,0 +1,192 @@
+// SPDX-License-Identifier: LGPL-2.1-or-later
+#![allow(clippy::arithmetic_side_effects, reason = "tests")]
+use super::*;
+use crate::backend::{MAX_ERROR_BODY, MAX_MULTISTATUS};
+use crate::fake::{CA, Cert, Fake, acceptor};
+use http::StatusCode;
+use netvfs_tls::Anchors;
+use rustls::RootCertStore;
+use rustls::pki_types::CertificateDer;
+use std::net::{Ipv4Addr, SocketAddr};
+use std::sync::Arc;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpListener;
+
+const LONG: Duration = Duration::from_secs(20);
+
+fn http_to(addr: SocketAddr, request_timeout: Duration, stale_after: Duration) -> Http {
+    let mut store = RootCertStore::empty();
+    store.add(CertificateDer::from(CA.to_vec())).unwrap();
+    let tls = Tls::new("localhost", &[ALPN], &Anchors::Custom(Arc::new(store))).unwrap();
+    let target = Target {
+        host: "localhost".into(),
+        port: addr.port(),
+        connect_timeout: LONG,
+        request_timeout,
+        stale_after,
+    };
+    Http::new(tls, target).unwrap()
+}
+
+fn connections(fake: &Fake) -> usize {
+    fake.state.lock().unwrap().connections
+}
+
+/// Sends `req` and reads its answer to the end.
+async fn round_trip(http: &mut Http, req: Req) -> StatusCode {
+    let (head, body) = http.send(req).await.unwrap().into_parts();
+    http.discard(body, MAX_ERROR_BODY).await;
+    head.status
+}
+
+fn options() -> Req {
+    Req::new(Method::OPTIONS, b"/".to_vec())
+}
+
+fn stream_put(path: &[u8]) -> Req {
+    let (tx, rx) = mpsc::channel(1);
+    tx.try_send(Bytes::from_static(b"data")).unwrap();
+    Req::new(Method::PUT, path.to_vec()).body(Body::Stream(rx, Some(4)))
+}
+
+#[tokio::test]
+async fn only_a_stream_needs_a_recently_used_connection() {
+    let fake = Fake::start(Cert::Trusted).await;
+    let mut http = http_to(fake.addr, LONG, Duration::ZERO);
+    round_trip(&mut http, options()).await;
+    round_trip(&mut http, options()).await;
+    assert_eq!(connections(&fake), 1, "a replayable body goes on an idle connection");
+    assert_eq!(round_trip(&mut http, stream_put(b"/a")).await, StatusCode::CREATED);
+    assert_eq!(connections(&fake), 2, "a stream does not");
+    let mut http = http_to(fake.addr, LONG, Duration::from_hours(1));
+    round_trip(&mut http, options()).await;
+    assert_eq!(round_trip(&mut http, stream_put(b"/b")).await, StatusCode::CREATED);
+    assert_eq!(connections(&fake), 3, "nor one idle longer than stale_after");
+}
+
+#[tokio::test]
+async fn empty_bodies_have_a_length_except_on_get_and_options() {
+    let fake = Fake::start(Cert::Trusted).await;
+    let mut http = http_to(fake.addr, LONG, STALE_AFTER);
+    for method in [Method::GET, Method::OPTIONS, Method::DELETE] {
+        round_trip(&mut http, Req::new(method, b"/".to_vec())).await;
+    }
+    let lengths: Vec<_> = fake.seen().iter().map(|s| s.headers.get(CONTENT_LENGTH).cloned()).collect();
+    assert_eq!(lengths, [None, None, Some(HeaderValue::from_static("0"))]);
+}
+
+fn leak(text: String) -> &'static str {
+    Box::leak(text.into_boxed_str())
+}
+
+#[tokio::test]
+async fn error_pages_up_to_64_kib_are_read_to_keep_the_connection() {
+    let fake = Fake::start(Cert::Trusted).await;
+    let mut http = http_to(fake.addr, LONG, STALE_AFTER);
+    round_trip(&mut http, options()).await;
+    for (size, kept) in [(65_536, true), (65_537, false)] {
+        let before = connections(&fake);
+        fake.with(|s| s.canned.push((Method::GET, StatusCode::FORBIDDEN, vec![], leak("x".repeat(size)))));
+        assert_eq!(round_trip(&mut http, Req::new(Method::GET, b"/".to_vec())).await, StatusCode::FORBIDDEN);
+        round_trip(&mut http, options()).await;
+        assert_eq!(connections(&fake) == before, kept, "{size} bytes");
+    }
+}
+
+#[tokio::test]
+async fn answers_up_to_32_mib_are_read_whole() {
+    let fake = Fake::start(Cert::Trusted).await;
+    let mut http = http_to(fake.addr, LONG, STALE_AFTER);
+    let size = 32 * 1024 * 1024;
+    fake.with(|s| s.canned.push((Method::GET, StatusCode::OK, vec![], leak("x".repeat(size)))));
+    let (_, body) = http.send(Req::new(Method::GET, b"/".to_vec())).await.unwrap().into_parts();
+    assert_eq!(http.read_all(body, MAX_MULTISTATUS).await.unwrap().len(), size);
+    fake.with(|s| s.canned.push((Method::GET, StatusCode::OK, vec![], leak("x".repeat(size + 1)))));
+    let (_, body) = http.send(Req::new(Method::GET, b"/".to_vec())).await.unwrap().into_parts();
+    let e = http.read_all(body, MAX_MULTISTATUS).await.unwrap_err();
+    assert_eq!((e.name, e.detail.as_str()), (ErrorName::ProtocolError, "more than 33554432 bytes"));
+}
+
+/// What a scripted connection does after its answers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Then {
+    Close,
+    /// Reads whatever comes until the client closes, then reports the connection's index.
+    AwaitClose,
+}
+
+/// A server that answers the requests of its n-th connection with `script[n]`, one answer per request.
+async fn scripted(script: Vec<(Vec<&'static [u8]>, Then)>) -> (SocketAddr, mpsc::UnboundedReceiver<usize>) {
+    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let (closed, rx) = mpsc::unbounded_channel();
+    tokio::spawn(async move {
+        for (n, (answers, then)) in script.into_iter().enumerate() {
+            let (tcp, _) = listener.accept().await.unwrap();
+            let mut tls = acceptor(Cert::Trusted).accept(tcp).await.unwrap();
+            let mut buf = vec![0u8; 4096];
+            for answer in answers {
+                let mut head = Vec::new();
+                while !head.ends_with(b"\r\n\r\n") {
+                    let got = tls.read(&mut buf).await.unwrap();
+                    assert!(got > 0, "the client closed before its request");
+                    head.extend_from_slice(&buf[..got]);
+                }
+                tls.write_all(answer).await.unwrap();
+                tls.flush().await.unwrap();
+            }
+            if then == Then::AwaitClose {
+                while tls.read(&mut buf).await.is_ok_and(|got| got > 0) {}
+                closed.send(n).unwrap();
+            }
+        }
+    });
+    (addr, rx)
+}
+
+const OK: &[u8] = b"HTTP/1.1 200 OK\r\ncontent-length: 0\r\n\r\n";
+
+#[tokio::test]
+async fn an_answer_cut_short_on_a_reused_connection_is_sent_again() {
+    let (addr, _) =
+        scripted(vec![(vec![OK, b"HTTP/1.1 200 OK\r\n"], Then::Close), (vec![OK], Then::Close)]).await;
+    let mut http = http_to(addr, LONG, STALE_AFTER);
+    assert_eq!(round_trip(&mut http, options()).await, StatusCode::OK);
+    assert_eq!(round_trip(&mut http, options()).await, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn a_garbled_answer_is_not_sent_again() {
+    let (addr, _) =
+        scripted(vec![(vec![OK, b"garbage\r\n\r\n"], Then::Close), (vec![OK], Then::Close)]).await;
+    let mut http = http_to(addr, LONG, STALE_AFTER);
+    assert_eq!(round_trip(&mut http, options()).await, StatusCode::OK);
+    assert_eq!(http.send(options()).await.unwrap_err().name, ErrorName::ConnectionLost);
+}
+
+#[tokio::test]
+async fn a_request_that_times_out_closes_its_connection() {
+    // The second request's answer never comes.
+    let (addr, mut closed) = scripted(vec![(vec![OK], Then::AwaitClose)]).await;
+    let mut http = http_to(addr, Duration::from_millis(100), STALE_AFTER);
+    round_trip(&mut http, options()).await;
+    let started = http.send(options());
+    // Hang guard only: the answer never comes, so this is the timeout's own wait.
+    assert_eq!(started.await.unwrap_err().name, ErrorName::Timeout);
+    let seen = tokio::time::timeout(LONG, closed.recv()).await;
+    assert_eq!(seen.ok().flatten(), Some(0));
+}
+
+/// hyper's errors for a request on a connection whose other end is gone, from a connection never driven.
+#[tokio::test]
+async fn closed_and_canceled_count_as_dropped_unanswered() {
+    let (client, _server) = tokio::io::duplex(64);
+    let (mut sender, conn) = http1::handshake::<_, Body>(TokioIo::new(client)).await.unwrap();
+    drop(conn);
+    let e = std::future::poll_fn(|cx| sender.poll_ready(cx)).await.unwrap_err();
+    assert!(e.is_closed() && !e.is_canceled() && !e.is_incomplete_message(), "{e:?}");
+    assert!(dropped_unanswered(&e));
+    let e = sender.send_request(Request::new(Body::Empty)).await.unwrap_err();
+    assert!(e.is_canceled() && !e.is_closed() && !e.is_incomplete_message(), "{e:?}");
+    assert!(dropped_unanswered(&e));
+}
