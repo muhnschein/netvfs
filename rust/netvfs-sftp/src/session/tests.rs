@@ -52,7 +52,7 @@ async fn the_identity_is_the_host_key() {
     assert_eq!(session.end(), None);
     let printed = format!("{session:?}");
     assert!(
-        printed.starts_with(r#"Session { identity: ServerIdentity { algorithm: "ssh-ed25519""#),
+        printed.starts_with(r#"Session { identity: ServerIdentity { kind: Ssh, algorithm: "ssh-ed25519""#),
         "{printed}"
     );
     assert!(printed.contains(ED25519_FINGERPRINT), "{printed}");

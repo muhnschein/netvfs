@@ -27,6 +27,7 @@ constexpr const char *AuthPublicKey = "publickey";
 constexpr const char *AuthInteractive = "interactive";
 constexpr const char *ProviderSftp = "sftp";
 constexpr const char *ProviderSmb = "smb";
+constexpr const char *ProviderWebDav = "webdav";
 constexpr const char *StateCredentialsMissing = "credentials-missing";
 constexpr int MaxHostLength = 253;
 constexpr int MaxLabelLength = 63;
@@ -132,6 +133,8 @@ QVariantMap identityToVariant(const ServerIdentity &identity)
     QVariantMap map;
     if (identity.isEmpty())
         return map;
+    map.insert(QStringLiteral("kind"), identity.kind == ServerIdentity::Kind::TlsCertificate ? QStringLiteral("tls")
+                                                                                         : QStringLiteral("ssh"));
     map.insert(QStringLiteral("algorithm"), identity.algorithm);
     map.insert(QStringLiteral("fingerprint"),
                identity.fingerprint.isEmpty() ? sha256Fingerprint(identity.publicKey) : identity.fingerprint);
@@ -182,6 +185,8 @@ int InputRules::defaultPort(const QString &provider) const
         return 22;
     if (provider == QLatin1String(ProviderSmb))
         return 445;
+    if (provider == QLatin1String(ProviderWebDav))
+        return 443;
     return 0;
 }
 
@@ -495,6 +500,13 @@ QString Helpers::seenPin(const QString &provider, const QVariantMap &configurati
 
 QString Helpers::hostKeyHint(const QString &algorithm) const
 {
+    if (algorithm == QLatin1String(ServerIdentity::TlsAlgorithm)) {
+        const QString command = QStringLiteral(
+            "openssl x509 -in cert.pem -pubkey -noout | openssl pkey -pubin -outform der"
+            " | openssl dgst -sha256 -binary | base64");
+        //% "To compare, run this command with the server's certificate: %1"
+        return qtTrId("settings-accounts-netvfs-la-certificate_hint").arg(command);
+    }
     QString keyType = QStringLiteral("ed25519");
     if (algorithm.startsWith(QLatin1String("ecdsa-")))
         keyType = QStringLiteral("ecdsa");

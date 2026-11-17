@@ -10,7 +10,7 @@
 namespace NetVfsUi {
 
 namespace {
-constexpr std::array<const char *, 31> TextIds = { {
+constexpr std::array<const char *, 35> TextIds = { {
     //% "Server"
     QT_TRID_NOOP("settings-accounts-netvfs-la-server"),
     //% "Server name or IP address"
@@ -33,6 +33,14 @@ constexpr std::array<const char *, 31> TextIds = { {
     QT_TRID_NOOP("settings-accounts-netvfs-la-folder_in_share"),
     //% "Relative to the home folder, or starting with / for an absolute path."
     QT_TRID_NOOP("settings-accounts-netvfs-la-folder_in_home"),
+    //% "Relative to the server path."
+    QT_TRID_NOOP("settings-accounts-netvfs-la-folder_in_base"),
+    //% "Path on the server"
+    QT_TRID_NOOP("settings-accounts-netvfs-la-base_path"),
+    //% "The WebDAV folder, for example /remote.php/dav/files/<user>/ on Nextcloud. Leave empty for the server's root."
+    QT_TRID_NOOP("settings-accounts-netvfs-la-base_path_description"),
+    //% "Ask the server's administrator for an account. If the server uses two-step verification, create an app password for this device."
+    QT_TRID_NOOP("settings-accounts-netvfs-la-webdav_password_hint"),
     //% "Start folder"
     QT_TRID_NOOP("settings-accounts-netvfs-la-files_root"),
     //% "Password"

@@ -285,6 +285,7 @@ private slots:
     void connLifecycle();
     void establishIdentityHook_data();
     void establishIdentityHook();
+    void establishTlsIdentity();
     void establishNoAuthenticateBeforeIdentity();
     void establishPromptReplySet();
     void establishSecretsWiped();
@@ -486,6 +487,25 @@ void tst_BridgeFfi::establishIdentityHook()
     QCOMPARE(seen.authenticatedBefore, 0);
     QCOMPARE(logCount("authenticate"), error.isEmpty() ? 1 : 0);
     QCOMPARE(logCount("disconnect"), error.isEmpty() ? 0 : 1);
+}
+
+void tst_BridgeFfi::establishTlsIdentity()
+{
+    const QByteArray pin = "tls-spki-sha256 " + QByteArray("spki").toBase64();
+    f->set_identity_pin(bytes(pin));
+    IdentitySeen seen;
+    Establish e;
+    e.withHooks = true;
+    e.hooks.ctx = &seen;
+    e.hooks.identity = IdentitySeen::hook;
+    ConnPtr conn = newConn();
+    QCOMPARE(nameOf(e.run(conn.get())), QStringLiteral("ServerIdentityUnknown"));
+    QCOMPARE(seen.kind, uint32_t(NVB_IDENTITY_TLS));
+    QCOMPARE(seen.pin, pin);
+    QCOMPARE(seen.fingerprint, "SHA256:" + QCryptographicHash::hash("spki", QCryptographicHash::Sha256)
+                                               .toBase64(QByteArray::OmitTrailingEquals));
+    e.pin = pin;
+    QVERIFY(!e.run(newConn().get()));
 }
 
 void tst_BridgeFfi::establishNoAuthenticateBeforeIdentity()

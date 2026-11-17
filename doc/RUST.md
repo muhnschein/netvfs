@@ -4,7 +4,7 @@ Rust parts:
 
 - `netvfs-accounts` (package netvfs-bridge): setgid accounts helper. Requests `list`, `files <id>`, `attention <id> <state> [pin]`; `QDataStream` answer on stdout. Process with group `privileged` links libc, libgcc_s, libsqlite3 only: no Qt, GLib, libaccounts, GIO modules. All `unsafe` in `sandbox.rs` (descriptors, set-id, Landlock, seccomp).
 - `netvfs-bridge` (package netvfs-bridge): only netvfs process a sandboxed consumer reaches. Everything a consumer sends decoded and checked in Rust: zbus p2p server with own inbound limits, peer check, argument validation, consent, locations, questions, jobs. Reaches backends through `libnetvfs-bridge-ffi.so` (`src/bridge/ffi`, C ABI `netvfs_bridge_ffi.h`, one export), `dlopen`ed from `/usr/lib64/netvfs`. Binary links libc, libgcc_s, libm only. Protocol = `tests/bridge/contract`.
-- `libnetvfs-rs.so` (package netvfs): Rust backends `sftp`, `smb` (own SMB 3.1.1 client), `mem` (tests). C++ plugins (`src/backends/rs` shim) `dlopen` it from `/usr/lib64/netvfs`; C ABI `src/backends/rs/netvfs_rs.h`: `nvr_get()` returns one table.
+- `libnetvfs-rs.so` (package netvfs): Rust backends `sftp`, `smb` (own SMB 3.1.1 client), `webdav` (HTTP/1.1 over TLS 1.3 only), `mem` (tests). C++ plugins (`src/backends/rs` shim) `dlopen` it from `/usr/lib64/netvfs`; C ABI `src/backends/rs/netvfs_rs.h`: `nvr_get()` returns one table.
 
 Rest is C++.
 
@@ -25,6 +25,8 @@ Rest is C++.
 | `rust/netvfs-backend/` | `libnetvfs-rs.so`: `ffi/` table, `runtime.rs` tokio runtime and cancel cut, `erased.rs`, `providers.rs`, `mem/` (feature `testing`) |
 | `rust/netvfs-sftp/` | `policy.rs` algorithms, `session.rs`, `auth.rs`, `keys.rs`, `wire.rs`/`proto.rs`/`client.rs` SFTP v3, `remote.rs`, `io.rs`, `backend.rs` |
 | `rust/netvfs-smb/` | `transport`, `msg/` codecs, `negotiate`, `auth` (sspi), `crypto`, `conn`, `session`, `fs`, `files`, `rpc` (srvsvc), `names`, `status`, `profile`, `backend` |
+| `rust/netvfs-tls/` | TLS client for TLS-based backends: rustls with ring, TLS 1.3 only, system CAs, SPKI pins (`tls-spki-sha256`) |
+| `rust/netvfs-webdav/` | `http.rs` connection (hyper), `xml.rs` multistatus parser, `paths.rs`, `status.rs`, `io.rs` transfers, `backend.rs`; `fake.rs` test server |
 | `src/bridge/rust/rust.pro`, `src/backends/rs/rs.pro` | qmake targets running cargo |
 | `rust/fuzz/` | cargo-fuzz targets (nightly, outside workspace) |
 | `rust/vendor/ssh-key/`, `rust/vendor/picky-asn1-der/` | patched copies, outside workspace |
@@ -41,6 +43,8 @@ Why each is here; new one → line here.
 - `ssh-key` 0.7.0-rc.11 from `rust/vendor/ssh-key`: one line changed, ECDSA private scalar shorter than field size left-padded (OpenSSH stores ~1 in 256 P-256 keys with 31 bytes). `README.netvfs.md` there: checksum, diff.
 - `sspi` 0.23 (default features off): NTLMv2 in SPNEGO, incl. RC4 of NTLM key exchange. No Kerberos.
 - `picky-asn1-der` 0.5.7 from `rust/vendor/picky-asn1-der`: one line changed, `checked_add` on raw DER length so near-`usize::MAX` length is `TruncatedData`. `README.netvfs.md` there.
+- `rustls` 0.23 (default features off, `ring`, `std`; TLS 1.2 code not built), `tokio-rustls`, `rustls-webpki` (certificate checks, SPKI): TLS for WebDAV. `rustls-native-certs`: system CA store (`/etc/pki`, `SSL_CERT_FILE`). No OpenSSL.
+- `hyper` 1 (`client`, `http1`), `hyper-util` (`tokio`), `http`, `http-body`, `http-body-util`, `bytes`, `httpdate`: WebDAV's HTTP/1.1; no HTTP/2, no redirects followed. `quick-xml` 0.42: multistatus parser (no DTD, own caps).
 - `aes`, `aes-gcm`, `cmac`, `hmac`, `sha2`, `getrandom`: SMB 3.1.1 crypto, only in `netvfs-smb`'s `crypto.rs` (fence: `tools/ci/check-crypto-fence.sh`). `md-5`, `rc4`: one test.
 
 Vendored copies: patched via `[patch.crates-io]` in `rust/Cargo.toml` and `rust/fuzz/Cargo.toml`; outside fmt, clippy, tests, mutants, Sonar, coverage. `rust/deny.toml`: second versions of `syn`, `getrandom`, `sha3`, `base64`, `generic-array`, each with reason.
@@ -93,7 +97,7 @@ Workspace `rust/Cargo.toml`: clippy `all`, `pedantic` deny plus picked nursery a
 - `rust/netvfs-backend/tests/ffi.rs`: table against `mem`, process per test.
 - `tests/bridge/accounts`: helper answers byte for byte vs C++ reference helper (`referencehelper.cpp`), read back by `referencedecoder.cpp`; live libaccounts-qt sees attention write.
 - `tests/bridge/contract` (`tst_contract`), `tests/bridge/process`, `tests/bridge/ffi`, `tests/backends/rs` (`tst_rsshim`, also `SANITIZE=1`), `tests/unit/sftp`: C++ side, `make check-unit`.
-- Interop: `rust/netvfs-sftp/tests/openssh.rs` (OpenSSH 10.3p1, 9.6p1, 8.9p1; `NETVFS_SFTP_INTEROP_CONFIG` from `tests/interop/sftp/run.sh`), `rust/netvfs-smb/tests/samba.rs` (`NETVFS_INTEROP_SMB_*` from `tests/interop/smb/run.sh`), `windows.rs` (CI job "SMB against Windows"). Without settings: pass at once, say skipped.
+- Interop: `rust/netvfs-sftp/tests/openssh.rs` (OpenSSH 10.3p1, 9.6p1, 8.9p1; `NETVFS_SFTP_INTEROP_CONFIG` from `tests/interop/sftp/run.sh`), `rust/netvfs-smb/tests/samba.rs` (`NETVFS_INTEROP_SMB_*` from `tests/interop/smb/run.sh`), `windows.rs` (CI job "SMB against Windows"), `rust/netvfs-webdav/tests/apache.rs` (Apache httpd mod_dav; `NETVFS_INTEROP_WEBDAV_*` from `tests/interop/webdav/run.sh`). Without settings: pass at once, say skipped.
 - Mutants: `tools/ci/rust-mutants.sh diff <base> [<ffi-libs dir> [<k>/<n>]]` (PR CI, 12 shards; starts interop servers itself), `crate <package>` (new crate, `mutants.yml`), `interop <package> <base|all> <k>/<n> <command>` (mutant vs custom command). Exclusions with proof: `rust/.cargo/mutants.toml`. Curated lists: `tests/mutations/*.json`.
 - Fuzz: `rust/fuzz`, `./tools/ci/rust-fuzz.sh <seconds>` (nightly); finds stay as seeds in `rust/fuzz/seeds/<target>`.
 - Weekly ASan: `tools/ci/rust-sanitize.sh <nightly> [<ffi-libs dir>]`. rustc's LLVM ASan runtime in test binary; `ffi-libs.sh <dir> --asan` builds C++ libs with clang of rustc's LLVM major (`install-clang.sh`), `-fsanitize=address` only, binaries `--export-dynamic`. Qt uninstrumented; LSan `tools/sanitizer/lsan.supp`.

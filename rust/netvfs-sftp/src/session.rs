@@ -7,7 +7,7 @@
 
 use crate::errors::{connection_lost, timed_out};
 use crate::policy;
-use netvfs_vfs::{CancelToken, ErrorName, ServerIdentity, Status};
+use netvfs_vfs::{CancelToken, ErrorName, IdentityKind, ServerIdentity, Status};
 use russh::client::{self, ChannelOpenHandle, DisconnectReason, Handle, Msg};
 use russh::keys::{PublicKey, PublicKeyOrCertificate};
 use russh::{Channel, ChannelMsg, ChannelReadHalf, ChannelWriteHalf, Disconnect};
@@ -370,6 +370,7 @@ impl Drop for Session {
 #[must_use]
 pub fn identity_of(key: &PublicKey) -> ServerIdentity {
     ServerIdentity {
+        kind: IdentityKind::Ssh,
         algorithm: key.algorithm().as_str().to_owned(),
         public_key: key.to_bytes().unwrap_or_default(),
         fingerprint: crate::keys::fingerprint(key),

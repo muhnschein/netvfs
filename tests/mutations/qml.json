@@ -166,5 +166,26 @@
     "search": "service == Service::Backup ? withBackupDirMode(params) : params;",
     "replace": "params;",
     "test": "dbus-run-session -- build/tests/unit/qml/probe/tst_qmlprobe"
+  },
+  {
+    "name": "certificate shown as an SSH key",
+    "file": "src/qml/netvfshelpers.cpp",
+    "search": "identity.kind == ServerIdentity::Kind::TlsCertificate ? QStringLiteral(\"tls\")",
+    "replace": "false ? QStringLiteral(\"tls\")",
+    "test": "build/tests/unit/qml/helpers/tst_qmlhelpers"
+  },
+  {
+    "name": "certificate hint is the SSH one",
+    "file": "src/qml/netvfshelpers.cpp",
+    "search": "    if (algorithm == QLatin1String(ServerIdentity::TlsAlgorithm)) {",
+    "replace": "    if (false) {",
+    "test": "build/tests/unit/qml/helpers/tst_qmlhelpers"
+  },
+  {
+    "name": "WebDAV default port unknown",
+    "file": "src/qml/netvfshelpers.cpp",
+    "search": "    if (provider == QLatin1String(ProviderWebDav))\n        return 443;\n",
+    "replace": "",
+    "test": "build/tests/unit/qml/helpers/tst_qmlhelpers"
   }
 ]

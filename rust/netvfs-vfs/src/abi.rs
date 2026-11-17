@@ -24,6 +24,8 @@ pub const NVB_VALUE_STRING_LIST: u32 = 5;
 pub const NVB_IDENTITY_NONE: u32 = 0;
 /// `NVB_IDENTITY_SSH`.
 pub const NVB_IDENTITY_SSH: u32 = 1;
+/// `NVB_IDENTITY_TLS`.
+pub const NVB_IDENTITY_TLS: u32 = 2;
 
 /// `NVB_SECRET_NONE`: `Credentials(user, "")`.
 pub const NVB_SECRET_NONE: u32 = 0;

@@ -136,7 +136,7 @@ typedef struct nvb_attributes {
     int64_t atime_ms;
 } nvb_attributes;
 
-enum { NVB_IDENTITY_NONE = 0, NVB_IDENTITY_SSH = 1 };
+enum { NVB_IDENTITY_NONE = 0, NVB_IDENTITY_SSH = 1, NVB_IDENTITY_TLS = 2 };
 
 typedef struct nvb_identity {
     uint32_t kind;             /* an NVB_IDENTITY_* value */

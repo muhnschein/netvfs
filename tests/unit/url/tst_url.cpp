@@ -64,6 +64,14 @@ private slots:
                                   << "bob" << "share=Photos Backup" << "/2024/a b.jpg";
         QTest::newRow("smb default port") << "smb://nas:445/s/x" << "smb" << "nas" << 0 << "" << "share=s" << "/x";
 
+        QTest::newRow("davs bare") << "davs://nas" << "webdav" << "nas" << 0 << "" << "" << "";
+        QTest::newRow("davs root") << "davs://nas/" << "webdav" << "nas" << 0 << "" << "" << "";
+        QTest::newRow("https base") << "HTTPS://al@cloud:8443/remote.php//dav/files/al%20x/" << "webdav" << "cloud"
+                                    << 8443 << "al" << "base_path=/remote.php/dav/files/al x" << "";
+        QTest::newRow("davs default port") << "davs://nas:443/dav" << "webdav" << "nas" << 0 << "" << "base_path=/dav" << "";
+        QTest::newRow("https default port") << "https://nas:443" << "webdav" << "nas" << 0 << "" << "" << "";
+        QTest::newRow("https other default is a port") << "https://nas:80/" << "webdav" << "nas" << 80 << "" << "" << "";
+
         QTest::newRow("file") << "file:///tmp/x%20y" << "local" << "" << 0 << "" << "" << "/tmp/x y";
         QTest::newRow("file root") << "file:///" << "local" << "" << 0 << "" << "" << "/";
         QTest::newRow("file localhost") << "file://localhost/tmp" << "local" << "" << 0 << "" << "" << "/tmp";
@@ -140,11 +148,13 @@ private slots:
         params.connectTimeoutMs = 1234;
         params.options.insert(QStringLiteral("allow_insecure"), QStringLiteral("true"));
         params.options.insert(QStringLiteral("share"), QStringLiteral("stale"));
+        params.options.insert(QStringLiteral("base_path"), QStringLiteral("/stale"));
         QString path;
         QVERIFY(Url::parse(QStringLiteral("sftp://h"), &params, &path).ok());
         QCOMPARE(params.connectTimeoutMs, 1234);
         QCOMPARE(opt(params, "allow_insecure"), QStringLiteral("true"));
         QVERIFY(!params.options.contains(QStringLiteral("share")));
+        QVERIFY(!params.options.contains(QStringLiteral("base_path")));
         QVERIFY(Url::parse(QStringLiteral("sftp://h"), &params, nullptr).ok());   // path is optional
     }
 
@@ -162,11 +172,11 @@ private slots:
 
         QTest::newRow("unknown scheme") << "gopher://h/" << Error::Unsupported;
         QTest::newRow("scp") << "scp://h/x" << Error::Unsupported;
-        QTest::newRow("dav") << "dav://h/x" << Error::Unsupported;
-        QTest::newRow("davs") << "davs://u@h/x" << Error::Unsupported;
+        QTest::newRow("dav") << "dav://h/x" << Error::SecurityPolicy;
+        QTest::newRow("http") << "HTTP://h/remote.php/dav" << Error::SecurityPolicy;
         QTest::newRow("ftp") << "ftp://h/" << Error::Unsupported;
         QTest::newRow("ftps") << "FTPS://h:990/x" << Error::Unsupported;
-        QTest::newRow("https") << "https://h/remote.php/dav" << Error::Unsupported;
+        QTest::newRow("davs dotdot") << "davs://h/a/../b" << Error::InvalidName;
         QTest::newRow("file with host") << "file://remote/tmp" << Error::Unsupported;
         QTest::newRow("empty") << "" << Error::InvalidName;
         QTest::newRow("no scheme") << "example.com/x" << Error::InvalidName;
@@ -238,9 +248,9 @@ private slots:
     void unsupportedSchemes()
     {
         ConnectionParams params;
-        Result r = Url::parse(QStringLiteral("DAVS://h/x"), &params, nullptr);
-        QCOMPARE(r.error(), Error::Unsupported);
-        QCOMPARE(r.message(), QStringLiteral("Unsupported URL scheme \"davs\""));
+        Result r = Url::parse(QStringLiteral("http://u:p@h/x"), &params, nullptr);   // before the password check
+        QCOMPARE(r.error(), Error::SecurityPolicy);
+        QCOMPARE(r.message(), QStringLiteral("WebDAV needs TLS; use davs:// or https://"));
         r = Url::parse(QStringLiteral("ftp://u:p@h/"), &params, nullptr);   // before the password check
         QCOMPARE(r.error(), Error::Unsupported);
         QCOMPARE(r.message(), QStringLiteral("Unsupported URL scheme \"ftp\""));
@@ -278,6 +288,15 @@ private slots:
         QCOMPARE(Url::format(smb, QStringLiteral("/dir/f.txt")), QStringLiteral("smb://nas/My%20Share/dir/f.txt"));
         QCOMPARE(Url::format(smb, QStringLiteral("dir")), QStringLiteral("smb://nas/My%20Share/dir"));
 
+        ConnectionParams dav;
+        dav.provider = QStringLiteral("webdav");
+        dav.host = QStringLiteral("cloud");
+        QCOMPARE(Url::format(dav, QString()), QStringLiteral("davs://cloud"));
+        QCOMPARE(Url::format(dav, QStringLiteral("/a b")), QStringLiteral("davs://cloud/a%20b"));
+        dav.options.insert(QStringLiteral("base_path"), QStringLiteral("remote.php/dav/"));
+        QCOMPARE(Url::format(dav, QString()), QStringLiteral("davs://cloud/remote.php/dav"));
+        QCOMPARE(Url::format(dav, QStringLiteral("x/y")), QStringLiteral("davs://cloud/remote.php/dav/x/y"));
+
         ConnectionParams local;
         local.provider = QStringLiteral("local");
         QCOMPARE(Url::format(local, QStringLiteral("/tmp/a b")), QStringLiteral("file:///tmp/a%20b"));
@@ -306,7 +325,8 @@ private slots:
             "smb://bob@nas:4455/Photos%20Backup/2024/a%20b.jpg", "file:///tmp/x%20y", "file:///",
             "file://localhost/tmp", "sftp://[2001:db8::1]:2222/x", "smb://[::1]/share", "sftp://192.168.1.10",
             "sftp://b%C3%BCcher.example", "sftp://xn--bcher-kva.de/x", "sftp://xn--bcher-kva.example/x", "sftp://h/a%FFb%80",
-            "smb://nas/a%2Fb/c", "sftp://h/a%2Fb", "sftp://h/%F0%9F%98%80", "sftp://h/a%25b",
+            "smb://nas/a%2Fb/c", "sftp://h/a%2Fb", "davs://nas", "https://al@cloud:8443/remote.php/dav/files/al%20x/",
+            "davs://[::1]/d", "sftp://h/%F0%9F%98%80", "sftp://h/a%25b",
         };
         for (const QString &url : urls)
             QTest::newRow(qPrintable(url)) << url;

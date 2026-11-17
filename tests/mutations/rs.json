@@ -320,5 +320,12 @@
     "search": "    return resultOf(m_t, m_t->commit(std::exchange(m_h, nullptr)));",
     "replace": "    m_t->abort(std::exchange(m_h, nullptr));\n    return Result::success();",
     "test": "make -s -C build/tests/backends/rs check"
+  },
+  {
+    "name": "TLS identity of a Rust backend has no kind",
+    "file": "src/backends/rs/rsmarshal.cpp",
+    "search": "    case NVB_IDENTITY_TLS:\n        out.kind = ServerIdentity::Kind::TlsCertificate;",
+    "replace": "    case NVB_IDENTITY_TLS:\n        out.kind = ServerIdentity::Kind::None;",
+    "test": "build/tests/backends/rs/tst_rsshim"
   }
 ]

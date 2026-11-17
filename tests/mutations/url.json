@@ -138,5 +138,54 @@
     "search": "extensionBytes < maxBytes) {",
     "replace": "false) {",
     "test": "build/tests/unit/url/tst_url"
+  },
+  {
+    "name": "davs:// is not WebDAV",
+    "file": "src/core/url.cpp",
+    "search": "    { \"davs\", Kind::WebDav, 443 },",
+    "replace": "    { \"davs\", Kind::Sftp, 443 },",
+    "test": "build/tests/unit/url/tst_url"
+  },
+  {
+    "name": "https:// default port kept",
+    "file": "src/core/url.cpp",
+    "search": "    { \"https\", Kind::WebDav, 443 },",
+    "replace": "    { \"https\", Kind::WebDav, 0 },",
+    "test": "build/tests/unit/url/tst_url"
+  },
+  {
+    "name": "plain HTTP falls through to an unknown scheme",
+    "file": "src/core/url.cpp",
+    "search": "    return scheme == QLatin1String(\"dav\") || scheme == QLatin1String(\"http\");",
+    "replace": "    return scheme == QLatin1String(\"dav\");",
+    "test": "build/tests/unit/url/tst_url"
+  },
+  {
+    "name": "WebDAV URL path not the base path",
+    "file": "src/core/url.cpp",
+    "search": "            params->options.insert(QStringLiteral(\"base_path\"), urlPath);",
+    "replace": "            *path = urlPath;",
+    "test": "build/tests/unit/url/tst_url"
+  },
+  {
+    "name": "stale base_path kept",
+    "file": "src/core/url.cpp",
+    "search": "    result.options.remove(QStringLiteral(\"base_path\"));\n",
+    "replace": "",
+    "test": "build/tests/unit/url/tst_url"
+  },
+  {
+    "name": "WebDAV formatted without its base path",
+    "file": "src/core/url.cpp",
+    "search": "        return percentEncode(base + belowRoot(path), true);",
+    "replace": "        return percentEncode(belowRoot(path), true);",
+    "test": "build/tests/unit/url/tst_url"
+  },
+  {
+    "name": "WebDAV formatted as https",
+    "file": "src/core/url.cpp",
+    "search": "        return \"davs\";",
+    "replace": "        return \"https\";",
+    "test": "build/tests/unit/url/tst_url"
   }
 ]

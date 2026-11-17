@@ -2,9 +2,9 @@
 //! Plain Rust values on both sides of the C ABI: what Rust hands to C ([`Params`] through [`ParamsBuf`]) and what it reads out of C++'s blocks and callback arguments (entries, identities, URLs, capabilities, errors). Readers copy: nothing returned borrows C memory.
 
 use super::raw::{
-    NVB_IDENTITY_NONE, NVB_IDENTITY_SSH, NVB_VALUE_BOOL, NVB_VALUE_BYTES, NVB_VALUE_INT, NVB_VALUE_STRING,
-    NVB_VALUE_STRING_LIST, NvbBytes, NvbCapabilities, NvbEntry, NvbError, NvbIdentity, NvbKv, NvbNearby,
-    NvbParams, NvbPrompt, NvbValue,
+    NVB_IDENTITY_NONE, NVB_IDENTITY_SSH, NVB_IDENTITY_TLS, NVB_VALUE_BOOL, NVB_VALUE_BYTES, NVB_VALUE_INT,
+    NVB_VALUE_STRING, NVB_VALUE_STRING_LIST, NvbBytes, NvbCapabilities, NvbEntry, NvbError, NvbIdentity,
+    NvbKv, NvbNearby, NvbParams, NvbPrompt, NvbValue,
 };
 use crate::Status;
 use netvfs_bridge_proto::{ErrorName, WireCapabilities, WireEntry, WireNearby};
@@ -27,6 +27,8 @@ pub enum IdentityKind {
     None,
     /// An SSH host key.
     Ssh,
+    /// A TLS certificate's public key.
+    Tls,
 }
 
 impl IdentityKind {
@@ -35,6 +37,7 @@ impl IdentityKind {
     pub const fn from_raw(kind: u32) -> Self {
         match kind {
             NVB_IDENTITY_SSH => Self::Ssh,
+            NVB_IDENTITY_TLS => Self::Tls,
             _ => Self::None,
         }
     }
@@ -45,6 +48,7 @@ impl IdentityKind {
         match self {
             Self::None => NVB_IDENTITY_NONE,
             Self::Ssh => NVB_IDENTITY_SSH,
+            Self::Tls => NVB_IDENTITY_TLS,
         }
     }
 }
@@ -620,7 +624,7 @@ mod tests {
 
     #[test]
     fn identities_round_trip() {
-        for kind in [IdentityKind::None, IdentityKind::Ssh] {
+        for kind in [IdentityKind::None, IdentityKind::Ssh, IdentityKind::Tls] {
             let i = Identity {
                 kind,
                 algorithm: "ssh-ed25519".into(),
@@ -634,6 +638,7 @@ mod tests {
         }
         assert_eq!(IdentityKind::from_raw(9), IdentityKind::None);
         assert_eq!(IdentityKind::from_raw(NVB_IDENTITY_SSH), IdentityKind::Ssh);
+        assert_eq!(IdentityKind::from_raw(NVB_IDENTITY_TLS), IdentityKind::Tls);
     }
 
     #[test]

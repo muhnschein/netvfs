@@ -253,6 +253,10 @@ fn parse_adhoc(url: &str, opts: &args::AdHocOpts) -> Result<AdHocUrl, Fail> {
     let provider = match scheme {
         "sftp" | "ssh" => "sftp",
         "smb" => "smb",
+        "davs" | "https" => "webdav",
+        "dav" | "http" => {
+            return Err(Fail::net(ErrorName::SecurityPolicy, "WebDAV needs TLS; use davs:// or https://"));
+        }
         "fake" => "fake",
         "file" | "local" => {
             return Err(Fail::net(ErrorName::PermissionDenied, "The bridge never accesses local files"));
@@ -889,6 +893,9 @@ mod tests {
         assert!(info.contains(&("user".to_owned(), InfoValue::Str("other".into()))));
         assert!(!info.iter().any(|(k, _)| k == "port"));
         assert_eq!(parse_adhoc("smb://h/", &plain()).unwrap().provider, "smb");
+        for url in ["davs://h/", "https://h/"] {
+            assert_eq!(parse_adhoc(url, &plain()).unwrap().provider, "webdav", "{url}");
+        }
     }
 
     #[test]
@@ -897,10 +904,13 @@ mod tests {
         assert_eq!(bare("sftp://u:pw@h/", &plain()).as_deref(), Some("SecurityPolicy"));
         assert_eq!(bare("file:///x", &plain()).as_deref(), Some("PermissionDenied"));
         assert_eq!(bare("gopher://h/", &plain()).as_deref(), Some("Unsupported"));
-        for url in ["dav://h/", "davs://h/", "ftp://h/", "ftps://h/", "https://h/"] {
+        for url in ["ftp://h/", "ftps://h/"] {
             assert_eq!(bare(url, &plain()).as_deref(), Some("Unsupported"), "{url}");
         }
-        let unknown = parse_adhoc("davs://h/", &plain()).err();
+        for url in ["dav://h/", "http://h/"] {
+            assert_eq!(bare(url, &plain()).as_deref(), Some("SecurityPolicy"), "{url}");
+        }
+        let unknown = parse_adhoc("ftps://h/", &plain()).err();
         assert_eq!(unknown.as_ref().map(Fail::message), Some("No backend for this scheme is installed"));
         let guest = AdHocOpts { user: None, security_profile: Some("guest".into()) };
         assert!(bare("sftp://h/", &guest).is_some_and(|n| n.contains("InvalidArgs")));
