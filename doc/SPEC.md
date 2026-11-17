@@ -49,6 +49,8 @@ Non-goals: share sheet, Gallery, folder sync, photo upload, FUSE or kernel mount
 
 Packages: `netvfs` (library, backends, `libnetvfs-rs.so`, account UI, providers, `<p>-files` services, `netvfs-cli`), `netvfs-backup` (backup services, Buteo plugins and profiles; only package depending on Buteo), `netvfs-bridge` (bridge, FFI library, helper, systemd generator, `consumers/lautta.conf`; nothing requires it, so only devices with a sandboxed consumer carry the setgid helper), `netvfs-devel`. All require exact same `%{version}-%{release}` of `netvfs`. Bridge install or upgrade stops running bridges; next connection starts new one.
 
+Reproducible: same commit, same RPMs, byte for byte. Build time and file dates = commit time (`SOURCE_DATE_EPOCH`), fixed build host, build from copy of tracked files (version from spec, not git tags), no build path in Rust binaries, every input pinned (SDK image by digest, Rust toolchain, `rust/Cargo.lock`). `tools/verify-rpm.sh` rebuilds and compares; CI job "RPMs rebuild byte for byte" runs it every push (`doc/VERIFYING.md`).
+
 ## Lautta with and without netvfs
 
 - Without netvfs: Lautta is a plain Harbour file manager on local folders; no trace of bridge in UI.

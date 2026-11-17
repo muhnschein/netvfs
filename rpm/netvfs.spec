@@ -16,6 +16,12 @@
 # dependencies; tools/ci/check-rpm.sh checks the ones the split relies on, tools/ci/check-files.py that every
 # installed file belongs to exactly one package.
 
+# Reproducible (doc/VERIFYING.md): SOURCE_DATE_EPOCH (build-rpm.sh: commit time) = build time, clamps file dates.
+# Host name fixed: rpm records it.
+%define use_source_date_epoch_as_buildtime 1
+%define clamp_mtime_to_source_date_epoch 1
+%define _buildhost netvfs-build
+
 Name:       netvfs
 Version:    0.6.0
 Release:    1
