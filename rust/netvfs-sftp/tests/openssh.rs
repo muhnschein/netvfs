@@ -334,7 +334,7 @@ async fn pins_each_host_key_type() {
 async fn signs_in_with_passwords_and_keys() {
     let Some(s) = servers() else { return };
     let mut sftp = password_session(&s, "o103", "default").await;
-    assert!(sftp.stat(b"", true, &c()).await.unwrap().kind == EntryType::Directory);
+    assert_eq!(sftp.stat(b"", true, &c()).await.unwrap().kind, EntryType::Directory);
     sftp.disconnect().await;
 
     let wrong =
@@ -458,7 +458,7 @@ async fn capabilities_of_each_server() {
         for cap in never {
             assert!(!caps.has(cap), "{server} {instance}: {cap:?}");
         }
-        assert!(caps.checksum_algorithms.is_empty());
+        assert_eq!(caps.checksum_algorithms, Vec::<String>::new());
         let got = [
             Capability::AtomicReplace,
             Capability::SpaceInfo,

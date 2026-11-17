@@ -110,7 +110,7 @@ mod tests {
             SetupResponse { session_flags: session_flags::ENCRYPT_DATA, token: b"abc".to_vec() }
         );
         let empty = resp(&[9, 0, 0, 0, 0, 0, 0, 0, 0]);
-        assert!(SetupResponse::decode(&empty).unwrap().token.is_empty());
+        assert_eq!(SetupResponse::decode(&empty).unwrap().token, b"");
         SetupResponse::decode(&resp(&[9, 0, 0, 0, 72, 0, 9, 0, 1])).unwrap_err();
         SetupResponse::decode(&resp(&[9, 0, 0, 0, 72, 0, 0xff, 0xff])).unwrap_err();
         let mut at_cap = vec![9, 0, 0, 0, 72, 0];

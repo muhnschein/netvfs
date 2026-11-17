@@ -1135,7 +1135,7 @@ fn drives(h: &Harness) {
         let listed = c.proxy().list_drives().await.unwrap();
         let shown: Vec<_> = listed.iter().map(|d| (d.id.as_str(), d.label.as_str())).collect();
         assert_eq!(shown, [("mmcblk1p1", "CARD"), ("sda1", "")]);
-        assert!(listed[0].mount_point.is_empty());
+        assert_eq!(listed[0].mount_point, b"");
         assert_eq!(value_str(&listed[0].info["kind"]).as_deref(), Some("sd"));
         assert_eq!(c.proxy().mount("sda1").await.unwrap(), b"/run/media/user/sda1");
         assert_eq!(c.proxy().list_drives().await.unwrap()[1].mount_point, b"/run/media/user/sda1");
