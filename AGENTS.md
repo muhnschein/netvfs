@@ -106,7 +106,7 @@ User tests RPMs on phone; that test judges feel, lag, real servers. Say exactly 
 
 ## Releases
 
-- Only on user's go. None cut yet, no tags; version in `rpm/netvfs.spec` and `rust/Cargo.toml`. Latest `main` commit green first, Sonar included: check main, not just PR.
+- Only on user's go. Tag `vX.Y.Z` on main's merge commit; GitHub release carries that commit's CI RPMs (`netvfs-rpms-aarch64`). Version in `rpm/netvfs.spec`, `rust/Cargo.toml`, `sonar-project.properties`. Latest `main` commit green first, Sonar included: check main, not just PR.
 - Strict semver: nothing breaking → minor.
 - Before release: advisories against locked crates resolved (D-2); interop suite re-run after any dependency bump (D-3).
 

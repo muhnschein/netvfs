@@ -57,6 +57,17 @@ one go.
 - No folder sync, no mounting servers as file systems.
 - Not for the Jolla Store: it installs system files and a setgid helper.
 
+## Installing
+
+Needs Sailfish OS 5.2 on an aarch64 phone, with developer mode on. Download
+`netvfs`, `netvfs-backup` and `netvfs-bridge` from the
+[latest release](https://github.com/muhnschein/netvfs/releases/latest) and
+install them together:
+
+```
+$ devel-su pkcon install-local netvfs-*.aarch64.rpm
+```
+
 ## Building
 
 The device packages, built in the Sailfish OS SDK image (needs Docker):

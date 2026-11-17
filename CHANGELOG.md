@@ -2,10 +2,14 @@
 
 ## Unreleased
 
-- After a canceled upload to an SMB server, the unfinished `.part` file no longer stays visible in the folder for a moment.
-- Updating netvfs restarts its bridge, so apps such as Lautta use the new version without a reboot. A transfer running during the update stops.
-- Apps using netvfs, such as Lautta, now show each server's real connection state: connected, connecting, not connected, or why connecting failed.
-- Lautta can mount and unmount memory cards and USB drives through netvfs, including drives Sailfish OS does not mount by itself.
-- Lautta can open Settings › Storage through netvfs.
-- Encrypted memory cards and USB drives show up in Lautta: a locked one as locked, an unlocked one as a normal drive.
-- Reproducible builds: a commit always builds to the same RPMs, byte for byte. `tools/verify-rpm.sh` checks them for you (doc/VERIFYING.md).
+## 1.0.0 - 2026-11-17
+
+First release, for Sailfish OS 5.2 on aarch64.
+
+- SFTP and SMB 3.1.1 accounts in *Settings › Accounts*. SFTP signs in with a password or a key made on the phone or imported. Passwords and keys stay in the system's credential store.
+- Backups to SFTP and SMB servers in *Settings › Backup*: manual, scheduled and restore, as for Nextcloud.
+- Sandboxed apps such as Lautta browse SFTP and SMB servers through the netvfs bridge once you allow them. They never see a password or key.
+- Apps see each server's connection state: connected, connecting, not connected, or why connecting failed.
+- Apps such as Lautta can list, mount and unmount memory cards and USB drives through netvfs, including encrypted ones and drives Sailfish OS does not mount by itself, and can open *Settings › Storage*.
+- Updating netvfs restarts its bridge, so apps use the new version without a reboot. A transfer running during the update stops.
+- Reproducible builds: a commit always builds to the same RPMs, byte for byte. `tools/verify-rpm.sh` checks them for you (`doc/VERIFYING.md`).
