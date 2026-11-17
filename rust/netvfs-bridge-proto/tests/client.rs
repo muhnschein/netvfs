@@ -318,7 +318,7 @@ async fn features_and_the_storage_handoff_need_no_consent() {
     assert_eq!(fake.handoffs(), ["storage"]);
     // A bridge without the handoff entry.
     fake.set_features(&[]);
-    assert!(conn.proxy().get_features().await.unwrap().is_empty());
+    assert_eq!(conn.proxy().get_features().await.unwrap(), Vec::<String>::new());
     let e = BridgeError::from(conn.proxy().open_storage_settings().await.unwrap_err());
     assert_eq!(e.netvfs_name(), Some("Unsupported"));
     assert_eq!(fake.handoffs(), ["storage"]);
@@ -343,7 +343,7 @@ async fn drives_are_listed_mounted_and_unmounted_without_consent() {
     let ids: Vec<&str> = drives.iter().map(|d| d.id.as_str()).collect();
     assert_eq!(ids, ["mmcblk1p1", "sda1"]);
     assert_eq!(drives[0].label, "CARD");
-    assert!(drives[0].mount_point.is_empty());
+    assert_eq!(drives[0].mount_point, b"");
     assert_eq!(value_str(&drives[0].info[drive_info::KIND]).as_deref(), Some("sd"));
     assert_eq!(value_i64(&drives[0].info[drive_info::SIZE]), Some(64));
 
@@ -353,7 +353,7 @@ async fn drives_are_listed_mounted_and_unmounted_without_consent() {
     assert_eq!(conn.proxy().mount("sda1").await.unwrap(), b"/run/media/user/sda1");
     conn.proxy().unmount("mmcblk1p1").await.unwrap();
     conn.proxy().unmount("mmcblk1p1").await.unwrap();
-    assert!(fake.drives()[0].mount_point.is_empty());
+    assert_eq!(fake.drives()[0].mount_point, b"");
 
     let e = BridgeError::from(conn.proxy().mount("sdb1").await.unwrap_err());
     assert_eq!(e.netvfs_name(), Some("NotFound"));

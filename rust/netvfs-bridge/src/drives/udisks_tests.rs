@@ -185,7 +185,7 @@ fn only_listed_drives_are_acted_on() {
         assert_eq!(udisks.unmount("mmcblk0p20").await.unwrap_err().name, ErrorName::NotFound);
         fake.state.borrow_mut().gone.push("sda1".to_owned());
         assert_eq!(udisks.mount("sda1").await.unwrap_err().name, ErrorName::NotFound);
-        assert!(fake.calls().is_empty());
+        assert_eq!(fake.calls(), []);
     });
 }
 
@@ -205,7 +205,7 @@ fn errors_of_udisks_keep_their_name_as_the_detail() {
             let status = udisks.mount("mmcblk1p1").await.unwrap_err();
             assert_eq!((status.name, status.detail), (expected, format!("{name}: refused")));
         }
-        assert!(udisks.list().await[0].mount_point.is_empty());
+        assert_eq!(udisks.list().await[0].mount_point, b"");
     });
 }
 
@@ -297,7 +297,7 @@ fn a_locked_drive_is_never_mounted_and_its_unlocking_is_told() {
         let status = udisks.mount("mmcblk1p2").await.unwrap_err();
         assert_eq!(status.name, ErrorName::Unsupported);
         udisks.unmount("mmcblk1p2").await.unwrap();
-        assert!(fake.calls().is_empty());
+        assert_eq!(fake.calls(), []);
 
         fake.state.borrow_mut().luks = Some(true);
         fake.emit("mmcblk1p2").await;
@@ -339,10 +339,10 @@ fn without_udisks_nothing_is_listed() {
     let Some(bus) = TestBus::start() else { return };
     run(async {
         let udisks = client(&bus, CALL_TIMEOUT, &Rc::default());
-        assert!(udisks.list().await.is_empty());
+        assert_eq!(udisks.list().await, []);
         assert_eq!(udisks.mount("sda1").await.unwrap_err().name, ErrorName::Unsupported);
         let none = UDisks::new(Bus::Address("unix:path=/nonexistent/bus".to_owned()), CALL_TIMEOUT, || true);
-        assert!(none.list().await.is_empty());
+        assert_eq!(none.list().await, []);
         assert_eq!(none.unmount("sda1").await.unwrap_err().name, ErrorName::Unsupported);
     });
 }
@@ -354,7 +354,7 @@ fn a_udisks_that_does_not_answer() {
         let fake = FakeUDisks::start(&bus).await;
         let udisks = client(&bus, Duration::from_millis(300), &Rc::default());
         fake.state.borrow_mut().silent = true;
-        assert!(udisks.list().await.is_empty());
+        assert_eq!(udisks.list().await, []);
         assert_eq!(udisks.mount("sda1").await.unwrap_err().name, ErrorName::Timeout);
         fake.state.borrow_mut().silent = false;
         assert_eq!(udisks.list().await.len(), 2);

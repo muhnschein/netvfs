@@ -20,9 +20,25 @@ async fn started() -> (Conn, Peer) {
     (conn, peer)
 }
 
-/// The UTF-16 of `s`, for the life of the test process.
-fn units(s: &str) -> &'static [u16] {
-    Box::leak(s.encode_utf16().collect::<Vec<u16>>().into_boxed_slice())
+/// UTF-16 of an ASCII literal as a `&'static [u16]`, built at compile time: nothing leaks (LSan).
+macro_rules! units {
+    ($s:literal) => {{
+        const U: [u16; $s.len()] = ascii_units($s);
+        &U
+    }};
+}
+
+const fn ascii_units<const N: usize>(s: &str) -> [u16; N] {
+    let bytes = s.as_bytes();
+    assert!(bytes.len() == N);
+    let mut out = [0; N];
+    let mut i = 0;
+    while i < N {
+        assert!(bytes[i].is_ascii());
+        out[i] = bytes[i] as u16;
+        i = i.saturating_add(1);
+    }
+    out
 }
 
 fn set_info_body() -> Vec<u8> {
@@ -64,12 +80,12 @@ fn related_flags(reqs: &[Req]) -> Vec<bool> {
 async fn stat_is_one_compound_round_trip() {
     let (conn, mut peer) = started().await;
     let c = CancelToken::new();
-    let (r, mut peer) = tokio::join!(stat(&conn, TREE, units(r"a\b"), &c), async {
+    let (r, mut peer) = tokio::join!(stat(&conn, TREE, units!(r"a\b"), &c), async {
         let reqs = peer.recv().await;
         let cmds: Vec<Command> = reqs.iter().map(Req::command).collect();
         assert_eq!(cmds, [Command::Create, Command::Close]);
         assert_eq!(related_flags(&reqs), [false, true]);
-        assert_eq!(create_of(&reqs[0]), (0x0010_0080, 1, 0, units(r"a\b").to_vec()));
+        assert_eq!(create_of(&reqs[0]), (0x0010_0080, 1, 0, units!(r"a\b").to_vec()));
         assert_eq!(&reqs[1].body()[8..24], &RELATED_FILE_ID);
         assert!(reqs.iter().all(|r| r.header.tree_id == 3));
         answer(
@@ -88,7 +104,7 @@ async fn stat_is_one_compound_round_trip() {
         (EntryType::File, Some(42), Some(MS), Some(MS + 2), Some(MS + 1))
     );
     assert_eq!(e.flags, EntryFlags::READ_ONLY);
-    let (r, ()) = tokio::join!(stat(&conn, TREE, units("x"), &c), async {
+    let (r, ()) = tokio::join!(stat(&conn, TREE, units!("x"), &c), async {
         let reqs = peer.recv().await;
         answer(
             &mut peer,
@@ -121,9 +137,9 @@ fn entries_of_attributes() {
 async fn make_dir_and_an_existing_name() {
     let (conn, mut peer) = started().await;
     let c = CancelToken::new();
-    let (r, mut peer) = tokio::join!(make_dir(&conn, TREE, units("d"), true, &c), async {
+    let (r, mut peer) = tokio::join!(make_dir(&conn, TREE, units!("d"), true, &c), async {
         let reqs = peer.recv().await;
-        assert_eq!(create_of(&reqs[0]), (0x0010_0080, 2, 1, units("d").to_vec()));
+        assert_eq!(create_of(&reqs[0]), (0x0010_0080, 2, 1, units!("d").to_vec()));
         assert_eq!(u32::from_le_bytes(reqs[0].body()[28..32].try_into().unwrap()), attributes::DIRECTORY);
         answer(
             &mut peer,
@@ -136,14 +152,14 @@ async fn make_dir_and_an_existing_name() {
     r.unwrap();
     let collision =
         vec![(NtStatus::OBJECT_NAME_COLLISION, vec![]), (NtStatus::OBJECT_NAME_COLLISION, vec![])];
-    let (r, mut peer) = tokio::join!(make_dir(&conn, TREE, units("d"), true, &c), async {
+    let (r, mut peer) = tokio::join!(make_dir(&conn, TREE, units!("d"), true, &c), async {
         let reqs = peer.recv().await;
         answer(&mut peer, &reqs, collision.clone()).await;
         peer
     });
     assert_eq!(r, Err(Error::Status(NtStatus::OBJECT_NAME_COLLISION)));
     for (attrs, ok) in [(0x10, true), (0x20, false)] {
-        let (r, p) = tokio::join!(make_dir(&conn, TREE, units("d"), false, &c), async {
+        let (r, p) = tokio::join!(make_dir(&conn, TREE, units!("d"), false, &c), async {
             let reqs = peer.recv().await;
             answer(&mut peer, &reqs, collision.clone()).await;
             let reqs = peer.recv().await;
@@ -177,12 +193,12 @@ async fn remove_file_and_folder() {
             (NtStatus::SUCCESS, close_body()),
         ]
     };
-    let (r, mut peer) = tokio::join!(remove_file(&conn, TREE, units("f"), &c), async {
+    let (r, mut peer) = tokio::join!(remove_file(&conn, TREE, units!("f"), &c), async {
         let reqs = peer.recv().await;
         let cmds: Vec<Command> = reqs.iter().map(Req::command).collect();
         assert_eq!(cmds, [Command::Create, Command::SetInfo, Command::Close]);
         assert_eq!(related_flags(&reqs), [false, true, true]);
-        assert_eq!(create_of(&reqs[0]), (0x0011_0080, 1, 0x40, units("f").to_vec()));
+        assert_eq!(create_of(&reqs[0]), (0x0011_0080, 1, 0x40, units!("f").to_vec()));
         let b = reqs[1].body();
         assert_eq!((b[2], b[3]), (1, 13));
         assert_eq!(b[32], 1);
@@ -195,13 +211,13 @@ async fn remove_file_and_folder() {
         (NtStatus::FILE_IS_A_DIRECTORY, vec![]),
         (NtStatus::FILE_IS_A_DIRECTORY, vec![]),
     ];
-    let (r, mut peer) = tokio::join!(remove_file(&conn, TREE, units("d"), &c), async {
+    let (r, mut peer) = tokio::join!(remove_file(&conn, TREE, units!("d"), &c), async {
         let reqs = peer.recv().await;
         answer(&mut peer, &reqs, is_dir).await;
         peer
     });
     assert_eq!(r, Err(local(ErrorName::IsADirectory, "remove: a folder")));
-    let (r, mut peer) = tokio::join!(remove_dir(&conn, TREE, units("d"), &c), async {
+    let (r, mut peer) = tokio::join!(remove_dir(&conn, TREE, units!("d"), &c), async {
         let reqs = peer.recv().await;
         assert_eq!(create_of(&reqs[0]).2, options::DIRECTORY);
         answer(&mut peer, &reqs, ok3()).await;
@@ -215,7 +231,7 @@ async fn remove_file_and_folder() {
         peer
     });
     r.unwrap();
-    let (r, mut peer) = tokio::join!(remove_dir(&conn, TREE, units("d"), &c), async {
+    let (r, mut peer) = tokio::join!(remove_dir(&conn, TREE, units!("d"), &c), async {
         let reqs = peer.recv().await;
         answer(&mut peer, &reqs, ok3()).await;
         let reqs = peer.recv().await;
@@ -232,7 +248,7 @@ async fn remove_file_and_folder() {
         (NtStatus::DIRECTORY_NOT_EMPTY, Error::Status(NtStatus::DIRECTORY_NOT_EMPTY)),
         (NtStatus::NOT_A_DIRECTORY, local(ErrorName::NotADirectory, "remove folder: not a folder")),
     ] {
-        let (r, p) = tokio::join!(remove_dir(&conn, TREE, units("d"), &c), async {
+        let (r, p) = tokio::join!(remove_dir(&conn, TREE, units!("d"), &c), async {
             let reqs = peer.recv().await;
             answer(&mut peer, &reqs, vec![(status, vec![]), (status, vec![]), (status, vec![])]).await;
             peer
@@ -240,7 +256,7 @@ async fn remove_file_and_folder() {
         peer = p;
         assert_eq!(r, Err(want));
     }
-    let (r, ()) = tokio::join!(remove_dir(&conn, TREE, units("d"), &c), async {
+    let (r, ()) = tokio::join!(remove_dir(&conn, TREE, units!("d"), &c), async {
         let reqs = peer.recv().await;
         answer(&mut peer, &reqs, ok3()).await;
         let reqs = peer.recv().await;
@@ -261,9 +277,9 @@ async fn rename_with_and_without_replace() {
             (NtStatus::SUCCESS, close_body()),
         ]
     };
-    let (r, mut peer) = tokio::join!(rename(&conn, TREE, units("a"), units(r"d\b"), false, &c), async {
+    let (r, mut peer) = tokio::join!(rename(&conn, TREE, units!("a"), units!(r"d\b"), false, &c), async {
         let reqs = peer.recv().await;
-        assert_eq!(create_of(&reqs[0]), (0x0011_0080, 1, 0, units("a").to_vec()));
+        assert_eq!(create_of(&reqs[0]), (0x0011_0080, 1, 0, units!("a").to_vec()));
         let b = reqs[1].body();
         assert_eq!((b[2], b[3]), (1, 10));
         let info = &b[32..];
@@ -274,9 +290,9 @@ async fn rename_with_and_without_replace() {
         peer
     });
     r.unwrap();
-    let (r, mut peer) = tokio::join!(rename(&conn, TREE, units("a"), units("b"), true, &c), async {
+    let (r, mut peer) = tokio::join!(rename(&conn, TREE, units!("a"), units!("b"), true, &c), async {
         let reqs = peer.recv().await;
-        assert_eq!(create_of(&reqs[0]).3, units("b").to_vec());
+        assert_eq!(create_of(&reqs[0]).3, units!("b").to_vec());
         answer(
             &mut peer,
             &reqs,
@@ -288,7 +304,7 @@ async fn rename_with_and_without_replace() {
     assert_eq!(r, Err(local(ErrorName::AlreadyExists, "rename: the target is a folder")));
     for target_status in [NtStatus::SUCCESS, NtStatus::OBJECT_NAME_NOT_FOUND, NtStatus::OBJECT_PATH_NOT_FOUND]
     {
-        let (r, p) = tokio::join!(rename(&conn, TREE, units("a"), units("b"), true, &c), async {
+        let (r, p) = tokio::join!(rename(&conn, TREE, units!("a"), units!("b"), true, &c), async {
             let reqs = peer.recv().await;
             let body = if target_status == NtStatus::SUCCESS { created_body(0x20, 3, FID) } else { vec![] };
             answer(&mut peer, &reqs, vec![(target_status, body), (target_status, close_body())]).await;
@@ -300,7 +316,7 @@ async fn rename_with_and_without_replace() {
         peer = p;
         r.unwrap();
     }
-    let (r, ()) = tokio::join!(rename(&conn, TREE, units("a"), units("b"), true, &c), async {
+    let (r, ()) = tokio::join!(rename(&conn, TREE, units!("a"), units!("b"), true, &c), async {
         let reqs = peer.recv().await;
         answer(&mut peer, &reqs, vec![(NtStatus::ACCESS_DENIED, vec![]), (NtStatus::ACCESS_DENIED, vec![])])
             .await;
@@ -312,7 +328,7 @@ async fn rename_with_and_without_replace() {
 async fn set_times_and_space() {
     let (conn, mut peer) = started().await;
     let c = CancelToken::new();
-    let (r, mut peer) = tokio::join!(set_times(&conn, TREE, units("f"), Some(FT), None, &c), async {
+    let (r, mut peer) = tokio::join!(set_times(&conn, TREE, units!("f"), Some(FT), None, &c), async {
         let reqs = peer.recv().await;
         assert_eq!(create_of(&reqs[0]).0, 0x0010_0100);
         let b = reqs[1].body();
@@ -429,7 +445,7 @@ async fn list_leaves_out_names_that_are_no_entry_of_the_folder() {
         "...",
         ".hidden",
     ];
-    let (r, _peer) = tokio::join!(list(&conn, TREE, units("d"), 2, &mut sink, &c), async {
+    let (r, _peer) = tokio::join!(list(&conn, TREE, units!("d"), 2, &mut sink, &c), async {
         let reqs = peer.recv().await;
         answer(
             &mut peer,
@@ -456,11 +472,11 @@ async fn list_in_batches_and_close() {
     let (conn, mut peer) = started().await;
     let c = CancelToken::new();
     let mut sink = Batches { got: vec![], stop_after: usize::MAX };
-    let (r, mut peer) = tokio::join!(list(&conn, TREE, units("d"), 2, &mut sink, &c), async {
+    let (r, mut peer) = tokio::join!(list(&conn, TREE, units!("d"), 2, &mut sink, &c), async {
         let reqs = peer.recv().await;
         let cmds: Vec<Command> = reqs.iter().map(Req::command).collect();
         assert_eq!(cmds, [Command::Create, Command::QueryDirectory]);
-        assert_eq!(create_of(&reqs[0]), (0x0010_0081, 1, 1, units("d").to_vec()));
+        assert_eq!(create_of(&reqs[0]), (0x0010_0081, 1, 1, units!("d").to_vec()));
         assert_eq!(reqs[1].body()[3], 1, "RESTART_SCANS");
         answer(
             &mut peer,
@@ -484,7 +500,7 @@ async fn list_in_batches_and_close() {
     r.unwrap();
     assert_eq!(sink.got, [vec![b"a".to_vec(), b"b".to_vec()], vec![b"c".to_vec(), b"d".to_vec()]]);
     let mut sink = Batches { got: vec![], stop_after: 1 };
-    let (r, mut peer) = tokio::join!(list(&conn, TREE, units("d"), 1, &mut sink, &c), async {
+    let (r, mut peer) = tokio::join!(list(&conn, TREE, units!("d"), 1, &mut sink, &c), async {
         let reqs = peer.recv().await;
         answer(
             &mut peer,
@@ -498,7 +514,7 @@ async fn list_in_batches_and_close() {
     assert_eq!(r, Err(local(ErrorName::Canceled, "The listing was stopped")));
     assert_eq!(sink.got.len(), 1);
     let mut sink = Batches { got: vec![], stop_after: usize::MAX };
-    let (r, ()) = tokio::join!(list(&conn, TREE, units("f"), 1, &mut sink, &c), async {
+    let (r, ()) = tokio::join!(list(&conn, TREE, units!("f"), 1, &mut sink, &c), async {
         let reqs = peer.recv().await;
         answer(
             &mut peer,
@@ -508,7 +524,7 @@ async fn list_in_batches_and_close() {
         .await;
     });
     assert_eq!(r, Err(local(ErrorName::NotADirectory, "list: not a folder")));
-    assert!(sink.got.is_empty());
+    assert_eq!(sink.got, Vec::<Vec<Vec<u8>>>::new());
 }
 
 #[tokio::test]
@@ -527,5 +543,5 @@ async fn an_empty_folder_lists_nothing() {
         assert_eq!(peer.recv_one().await.command(), Command::Close);
     });
     r.unwrap();
-    assert!(sink.got.is_empty());
+    assert_eq!(sink.got, Vec::<Vec<Vec<u8>>>::new());
 }

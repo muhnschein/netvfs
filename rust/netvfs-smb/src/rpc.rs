@@ -369,8 +369,7 @@ impl Ndr<'_> {
             return Err(protocol("an NDR string with an offset"));
         }
         let bytes = self.0.bytes(actual.saturating_mul(2))?;
-        let mut units: Vec<u16> =
-            bytes.chunks_exact(2).map(|b| u16::from_le_bytes(b.try_into().unwrap_or_default())).collect();
+        let mut units: Vec<u16> = bytes.as_chunks::<2>().0.iter().copied().map(u16::from_le_bytes).collect();
         if units.last() == Some(&0) {
             units.pop();
         }

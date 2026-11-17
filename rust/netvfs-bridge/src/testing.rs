@@ -85,7 +85,7 @@ fn selected(tests: &[(&'static str, Test)], args: &[String]) -> Vec<(&'static st
 }
 
 /// The `main` of a test binary with `harness = false`: lists tests (`--list`, for nextest), skips all without the C ABI, otherwise `init`s the Qt application as `app` on this (main) thread and runs each selected test on a thread of its own while this one serves the Qt event loop; the fake backend is reset before each test.
-#[must_use]
+#[must_use = "the exit code of the test binary"]
 pub fn run_main(app: &str, tests: &[(&'static str, Test)]) -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.iter().any(|a| a == "--list") {
@@ -541,7 +541,7 @@ impl Default for Setup {
 }
 
 /// `fake://[user@]host[/path]`: an ad-hoc location of the fake backend (no URL scheme of its own); other URLs go to the C ABI.
-#[must_use]
+#[must_use = "the exit code of the test binary"]
 pub fn fake_url(url: &str) -> Option<ParsedUrl> {
     let rest = url.strip_prefix("fake://")?;
     let (authority, path) = rest.split_once('/').map_or((rest, ""), |(a, p)| (a, p));

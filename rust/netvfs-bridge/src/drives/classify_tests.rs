@@ -23,7 +23,7 @@ fn cards_and_usb_drives_but_never_the_emmc() {
     assert_eq!((card.kind, card.label.as_str(), card.fs_type.as_str()), (Kind::Sd, "CARD", "vfat"));
     assert_eq!((card.size, card.read_only, card.uuid.as_str()), (64_000_000_000, false, "1234-ABCD"));
     assert_eq!(card.model, "SanDisk Ultra");
-    assert!(card.mount_point.is_empty());
+    assert_eq!(card.mount_point, b"");
     assert_eq!(card.object_path(), "/org/freedesktop/UDisks2/block_devices/mmcblk1p1");
     assert_eq!(listed[1].kind, Kind::Usb);
     assert_eq!(listed[1].label, "");
@@ -111,7 +111,7 @@ fn a_card_encrypted_whole_as_a_phone_describes_it() {
     assert_eq!(seen, [("dm_2d3", false)]);
     let card = &listed[0];
     assert_eq!((card.kind, card.label.as_str(), card.fs_type.as_str()), (Kind::Sd, "PHOTOS", "ext4"));
-    assert!(card.mount_point.is_empty());
+    assert_eq!(card.mount_point, b"");
     let mut objects = encrypted_card(true);
     set(objects.get_mut(&device("dm_2d1")).unwrap(), BLOCK, "HintSystem", owned(false));
     assert_eq!(ids(&objects), ["dm_2d3"]);
@@ -131,7 +131,7 @@ fn a_locked_luks_device_is_listed_as_locked() {
         (Kind::Sd, "VAULT", "crypto_LUKS")
     );
     assert_eq!((vault.size, vault.uuid.as_str()), (64_000_000_000, "5c1e0a4f-6d2b-4b8e-9f3a-2e7d1c0b9a88"));
-    assert!(vault.mount_point.is_empty());
+    assert_eq!(vault.mount_point, b"");
     assert_eq!((listed[3].kind, listed[3].label.as_str()), (Kind::Usb, ""));
     let wire = vault.wire();
     assert_eq!(value_bool(&wire.info[drive_info::LOCKED]), Some(true));
@@ -209,7 +209,7 @@ fn the_first_mount_point_without_its_nul() {
     set(objects.get_mut(&device("sda1")).unwrap(), BLOCK, "Size", owned("big"));
     set(objects.get_mut(&device("sda1")).unwrap(), BLOCK, "IdLabel", owned(7_u32));
     let stick = &drives(&objects)[1];
-    assert!(stick.mount_point.is_empty());
+    assert_eq!(stick.mount_point, b"");
     assert_eq!((stick.size, stick.label.as_str()), (-1, ""));
 }
 
