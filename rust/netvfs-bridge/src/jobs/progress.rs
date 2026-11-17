@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! Progress of a job (`JobProgressSink` of sessionjobs.cpp): updates pass at
-//! most every 250 ms (XB-10, `JobProgress` at most 4 Hz), and the job's
-//! cancel flag answers [`Progress::canceled`].
+//! Progress of a job: updates pass at most every 250 ms (`JobProgress` at most 4 Hz), and the job's cancel flag answers [`Progress::canceled`].
 
 use crate::ffi::Progress;
 use std::fmt;
@@ -11,8 +9,7 @@ use std::time::{Duration, Instant};
 /// The shortest time between two reported updates.
 pub const PROGRESS_INTERVAL: Duration = Duration::from_millis(250);
 
-/// Hands a job's progress to `report` (which sends `JobProgress`), at most
-/// every [`PROGRESS_INTERVAL`]; the first update always passes.
+/// Hands a job's progress to `report` (which sends `JobProgress`), at most every [`PROGRESS_INTERVAL`].
 pub struct JobProgress<'a, F: FnMut(i64, i64)> {
     report: F,
     cancel: &'a AtomicBool,
@@ -31,7 +28,6 @@ impl<'a, F: FnMut(i64, i64)> JobProgress<'a, F> {
         Self { report, cancel, last: None }
     }
 
-    /// [`Progress::update`] at time `now`.
     fn update_at(&mut self, now: Instant, done: i64, total: i64) {
         if self.last.is_some_and(|last| now.saturating_duration_since(last) < PROGRESS_INTERVAL) {
             return;

@@ -1,28 +1,13 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! How the bridge opens a connection (XB-12, XB-14, C-7; port of
-//! `connector.cpp`, design §3.3). The order connect → identity verdict →
-//! credentials → authenticate is kept by one `conn_establish` call in C++;
-//! this module decides the verdicts and where the credentials come from.
+//! How the bridge opens a connection: `conn_establish` keeps the order connect → identity verdict → credentials → authenticate; this module decides the verdicts and where credentials come from.
 //!
-//! - Accounts: the connection data comes from the helper's `files` answer
-//!   (asked through the core, [`WorkerEvent::FetchAccount`]); the identity
-//!   is checked against the account's `host_key` pin and the secret is
-//!   fetched from signond in C++ only after that. An identity or
-//!   authentication failure is returned as an error and sets the account's
-//!   attention state as Buteo does ([`WorkerEvent::Attention`]);
-//!   resolution happens in Settings, never through a question.
-//! - Ad hoc: the identity is checked against this consumer's known_hosts
-//!   ([`PinStore`]). An unknown identity becomes `Question(identity-unknown)`
-//!   with the full server identity; an accepted one is pinned. A changed
-//!   identity is `ServerIdentityChanged` (re-pinning needs `ForgetAdHoc`).
-//!   Only then the secret the consumer gave is used.
-//! - Keyboard-interactive prompts are relayed as
-//!   `Question(keyboard-interactive)` to the session whose request opened
-//!   the connection; canceling the request ends the wait.
+//! - Accounts: connection data comes from the helper's `files` answer (asked through the core, [`WorkerEvent::FetchAccount`]); identity is checked against the account's `host_key` pin and only then the secret is fetched from signond.
+//!   An identity or authentication failure is returned as an error and sets the account's attention state ([`WorkerEvent::Attention`]); resolution happens in Settings, never through a question.
+//! - Ad hoc: identity is checked against this consumer's known_hosts ([`PinStore`]). Unknown identity becomes `Question(identity-unknown)` with the full server identity; an accepted one is pinned.
+//!   A changed identity is `ServerIdentityChanged` (re-pinning needs `ForgetAdHoc`). Only then is the consumer's secret used.
+//! - Keyboard-interactive prompts are relayed as `Question(keyboard-interactive)` to the session whose request opened the connection; canceling the request ends the wait.
 //!
-//! A question waits in 100 ms slices, looking at the request's cancel flag,
-//! for at most the question timeout (10 min); when it stops waiting it
-//! withdraws the question ([`WorkerEvent::CancelQuestion`]).
+//! A question waits in 100 ms slices, looking at the request's cancel flag, for at most the question timeout (10 min), then withdraws ([`WorkerEvent::CancelQuestion`]).
 
 use super::spec::{Attention, LocationKind, LocationSpec};
 use super::worker::Backend;
@@ -43,45 +28,37 @@ use zeroize::Zeroizing;
 
 /// `Question` kind of an unknown server identity of an ad-hoc location.
 pub const IDENTITY_UNKNOWN: &str = "identity-unknown";
-/// `Question` kind of a keyboard-interactive prompt (XC-15).
+/// `Question` kind of a keyboard-interactive prompt.
 pub const KEYBOARD_INTERACTIVE: &str = "keyboard-interactive";
-/// How long a question waits for its answer (`questionTimeoutMs`).
+/// How long a question waits for its answer.
 pub const QUESTION_TIMEOUT: Duration = Duration::from_mins(10);
-/// How long an account's connection data may take (`FetchTimeoutMs`).
+/// How long an account's connection data may take.
 pub const FETCH_TIMEOUT: Duration = Duration::from_mins(1);
 /// How often a waiting worker looks at its cancel flag.
 pub const WAIT_SLICE: Duration = Duration::from_millis(100);
 
-/// The pins of identities the user accepted for ad-hoc locations (XB-14),
-/// by host key. The consumer's known_hosts file
-/// (`locations::knownhosts::KnownHosts` of the platform part) implements
-/// it; thread-safe, as workers read and write pins.
+/// The pins of identities the user accepted for ad-hoc locations, by host key.
 pub trait PinStore: Send + Sync {
-    /// The pin of `key`; empty when none is stored.
+    /// The pin of `key`.
     fn pin(&self, key: &str) -> String;
-    /// Stores `pin` for `key`; false when it cannot be saved.
+    /// Stores `pin` for `key`.
     fn set_pin(&self, key: &str, pin: &str) -> bool;
-    /// Forgets the pin of `key`; false when it cannot be saved.
+    /// Forgets the pin of `key`.
     fn remove(&self, key: &str) -> bool;
 }
 
-/// What a connection to an account needs (the helper's `files` answer,
-/// XA-4): the parameters (with the `host_key` pin among the options) and
-/// where signond keeps the secret.
+/// What a connection to an account needs.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct AccountAccess {
     /// The account's parameters, for Files.
     pub params: Params,
     /// The signond identity holding the secret.
     pub credentials_id: u32,
-    /// A connection may go on without a secret (XA-7).
+    /// A connection may go on without a secret.
     pub secret_optional: bool,
 }
 
 impl From<crate::accounts::FilesAccess> for AccountAccess {
-    /// The helper's `files` answer for a connection (options the C ABI
-    /// cannot carry are left out, see
-    /// [`ConnectionParams::to_ffi`](crate::accounts::ConnectionParams::to_ffi)).
     fn from(access: crate::accounts::FilesAccess) -> Self {
         Self {
             params: access.params.to_ffi(),
@@ -91,18 +68,14 @@ impl From<crate::accounts::FilesAccess> for AccountAccess {
     }
 }
 
-/// How a wait for the core ended.
 #[derive(Debug, PartialEq, Eq)]
 enum Waited<T> {
     Got(T),
     Canceled,
     TimedOut,
-    /// The core dropped the sender without an answer.
     Gone,
 }
 
-/// Waits for one value from the core in [`WAIT_SLICE`]s (the C++
-/// `Rendezvous`): a value already there wins over a cancel.
 fn wait_for<T>(rx: &mpsc::Receiver<T>, cancel: &AtomicBool, timeout: Duration) -> Waited<T> {
     let deadline = Instant::now().checked_add(timeout);
     loop {
@@ -127,7 +100,7 @@ fn wait_for<T>(rx: &mpsc::Receiver<T>, cancel: &AtomicBool, timeout: Duration) -
     }
 }
 
-/// Asks questions through the core (`BridgeConnector::ask`).
+/// Asks questions through the core.
 #[derive(Debug, Clone)]
 pub struct Asker {
     events: WorkerEvents,
@@ -141,9 +114,7 @@ impl Asker {
         Self { events, timeout }
     }
 
-    /// Asks `task`'s session and waits for the answer; `None` when there is
-    /// none (canceled, timed out, no session). A question the worker stops
-    /// waiting for is withdrawn.
+    /// Asks `task`'s session and waits for the answer.
     #[must_use]
     pub fn ask(
         &self,
@@ -169,12 +140,11 @@ fn text(s: &str) -> OwnedValue {
     OwnedValue::from(Str::from(s.to_owned()))
 }
 
-/// An `a{sv}` value of `v`, if the wire can carry it.
 fn owned(v: zvariant::Value<'_>) -> Option<OwnedValue> {
     OwnedValue::try_from(v).ok()
 }
 
-/// The details of `Question(identity-unknown)` (`identityDetails`).
+/// The details of `Question(identity-unknown)`.
 #[must_use]
 pub fn identity_details(identity: &Identity, spec: &LocationSpec) -> HashMap<String, OwnedValue> {
     let mut d = HashMap::new();
@@ -190,8 +160,7 @@ pub fn identity_details(identity: &Identity, spec: &LocationSpec) -> HashMap<Str
     d
 }
 
-/// The details of `Question(keyboard-interactive)`: `name`, `instruction`,
-/// `prompts` (`as`) and `echo` (`av` of `b`).
+/// The details of `Question(keyboard-interactive)`.
 #[must_use]
 pub fn prompt_details(request: &PromptRequest) -> HashMap<String, OwnedValue> {
     let mut d = HashMap::new();
@@ -209,9 +178,7 @@ pub fn prompt_details(request: &PromptRequest) -> HashMap<String, OwnedValue> {
     d
 }
 
-/// The answers to give for `request` (`QuestionPrompter::answer`): `None`
-/// to decline (no answer, not accepted, or a count other than the
-/// prompts', whose answers are then wiped).
+/// The answers to give for `request`.
 #[must_use]
 pub fn prompt_answers(
     asker: &Asker,
@@ -222,10 +189,7 @@ pub fn prompt_answers(
     (answer.accept && answer.answers.len() == request.prompts.len()).then_some(answer.answers)
 }
 
-/// The attention state a failed account connection leaves, with the pin
-/// to record (the one seen, for an identity problem); `None` when it
-/// leaves none (failures before the identity check, credentials lookups,
-/// other errors).
+/// The attention state a failed account connection leaves, with the pin to record (the one seen, for an identity problem).
 #[must_use]
 pub fn attention_for(failure: &EstablishError, seen_pin: &str) -> Option<(Attention, String)> {
     if !matches!(failure.phase, Phase::Identity | Phase::Authenticate) {
@@ -238,8 +202,7 @@ pub fn attention_for(failure: &EstablishError, seen_pin: &str) -> Option<(Attent
     }
 }
 
-/// The `host_key` option of an account's parameters: the pin its identity
-/// is checked against.
+/// The `host_key` option of an account's parameters.
 #[must_use]
 pub fn account_pin(params: &Params) -> String {
     match params.options.get("host_key") {
@@ -249,14 +212,12 @@ pub fn account_pin(params: &Params) -> String {
     }
 }
 
-/// The identity verdict for an ad-hoc location (`checkAdHocIdentity`).
 struct AdHocIdentity<'a> {
     asker: &'a Asker,
     pins: &'a dyn PinStore,
     events: &'a WorkerEvents,
     task: &'a TaskContext,
     spec: &'a LocationSpec,
-    /// The user declined the unknown identity.
     declined: bool,
 }
 
@@ -280,8 +241,7 @@ impl AdHocIdentity<'_> {
     }
 }
 
-/// The production [`Backend`]: connections through the C ABI, with the
-/// policy above (`BridgeConnector`).
+/// The production [`Backend`].
 pub struct Connector {
     ffi: Ffi,
     pins: Arc<dyn PinStore>,
@@ -297,9 +257,7 @@ impl fmt::Debug for Connector {
 }
 
 impl Connector {
-    /// Connections through `ffi`, ad-hoc pins in `pins`, questions, account
-    /// data and attention through `events`; questions wait at most
-    /// `question_timeout`.
+    /// Connections through `ffi`, ad-hoc pins in `pins`, questions, account data and attention through `events`.
     #[must_use]
     pub fn new(ffi: Ffi, pins: Arc<dyn PinStore>, events: WorkerEvents, question_timeout: Duration) -> Self {
         let asker = Asker::new(events.clone(), question_timeout);
@@ -313,7 +271,6 @@ impl Connector {
         self
     }
 
-    /// The account's connection data, from the core.
     fn fetch(&self, account_id: i32, task: &TaskContext) -> Result<AccountAccess, Status> {
         let (tx, rx) = mpsc::channel();
         self.events.send(WorkerEvent::FetchAccount { account_id, reply: tx });
@@ -341,8 +298,7 @@ impl Connector {
         };
         let mut seen_pin = String::new();
         let result = {
-            // XB-14: the account's pin decides; the pin seen is kept for
-            // the attention record.
+            // The account's pin decides; the pin seen is kept for the attention record.
             let mut identity = |seen: &Identity, _check: Option<&Status>| {
                 seen_pin.clone_from(&seen.pin);
                 Verdict::UseCheck

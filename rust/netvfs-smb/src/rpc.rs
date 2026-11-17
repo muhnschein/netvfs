@@ -1,12 +1,7 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! The share list of server mode (XM-7): NetrShareEnum level 1 (MS-SRVS
-//! 3.1.4.8) on the `srvsvc` pipe of IPC$, over connection-oriented
-//! DCE/RPC (C706 chapter 12, MS-RPCE 2.2.2) with NDR (C706 chapter 14).
+//! The share list of server mode: NetrShareEnum level 1 (MS-SRVS 3.1.4.8) on the `srvsvc` pipe of IPC$, over connection-oriented DCE/RPC (C706 chapter 12, MS-RPCE 2.2.2) with NDR (C706 chapter 14).
 //!
-//! The PDU and NDR decoders are pure functions of bytes (fuzz target
-//! `ndr_share_enum`). Every count is checked against the bytes that are
-//! left before anything is allocated, the reply is capped at
-//! [`MAX_STUB`] bytes and [`MAX_SHARES`] entries.
+//! PDU and NDR decoders are pure functions of bytes (fuzz target `ndr_share_enum`). Every count is checked against the bytes left before allocating; reply capped at [`MAX_STUB`] bytes and [`MAX_SHARES`] entries.
 
 use netvfs_vfs::{CancelToken, ErrorName, Status};
 
@@ -91,8 +86,7 @@ pub struct ShareInfo {
 }
 
 impl ShareInfo {
-    /// `shareVisible` (XM-7): disk shares only, `$` shares only when asked
-    /// for.
+    /// `shareVisible`: disk shares only, `$` shares only when asked for.
     #[must_use]
     pub fn visible(&self, show_admin: bool) -> bool {
         self.share_type & SHARE_TYPE_MASK == SHARE_TYPE_DISK && (show_admin || !self.name.ends_with('$'))
@@ -513,7 +507,7 @@ fn bind_reply_wants_more(pdu: &[u8]) -> Result<bool> {
     Ok(pdu.len() < COMMON_LEN || common(pdu)?.frag_len > pdu.len())
 }
 
-/// The shares of the server (XM-7), over `ipc`, a tree of IPC$.
+/// The shares of the server, over `ipc`, a tree of IPC$.
 ///
 /// # Errors
 /// The server's refusals, malformed replies, the connection's failures.
@@ -542,7 +536,6 @@ pub async fn list_shares(
         decode_share_enum(&stub)
     }
     .await;
-    // The pipe is closed either way; its answer does not change the list.
     conn.close_detached(ipc.target(), &file_id);
     result
 }

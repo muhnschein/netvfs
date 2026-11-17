@@ -1,14 +1,7 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! The bodies of requests and jobs that run on a worker thread, with the
-//! worker's connection (sessionfiles.cpp `listOnWorker`, sessionjobs.cpp
-//! `transferOnWorker`, `walkOnWorker`, `removeTreeOnWorker`), and the
-//! checks and local I/O of transferred descriptors (fdcheck.cpp, XB-11).
+//! Bodies of requests and jobs that run on a worker thread with the worker's connection, and the checks and local I/O of transferred descriptors.
 //!
-//! The core (chunk E) submits a body as a [`Work`](crate::locations::worker::Work)
-//! item; the body streams `ListBatch` / `WalkBatch` straight to the
-//! session's outbox under its flow budget ([`batch`]), reports progress
-//! through a [`progress::JobProgress`] and returns a [`JobOutcome`] for
-//! `ListDone` / `JobFinished`, which the core sends.
+//! The core submits a body as a [`Work`](crate::locations::worker::Work) item; the body streams `ListBatch` / `WalkBatch` to the session's outbox under its flow budget ([`batch`]), reports progress through a [`progress::JobProgress`] and returns a [`JobOutcome`] for `ListDone` / `JobFinished`, which the core sends.
 
 pub mod batch;
 pub mod fd;
@@ -22,10 +15,10 @@ use crate::status::Status;
 use std::collections::HashMap;
 use zbus::zvariant::OwnedValue;
 
-/// The `extra` of `JobFinished`: `entries`, `files`, `dirs`, `bytes`.
+/// The `extra` of `JobFinished`.
 pub type Extra = HashMap<String, OwnedValue>;
 
-/// How a job ended: its result and its `extra`.
+/// How a job ended.
 #[derive(Debug, PartialEq)]
 pub struct JobOutcome {
     /// The result.
@@ -41,8 +34,7 @@ impl JobOutcome {
         Self { result: Err(status), extra: Extra::new() }
     }
 
-    /// The outcome as `runJob` reports it: a failure of a canceled job is
-    /// `Canceled` (a local write failing because of the cancel).
+    /// The outcome, `Canceled` if the job failed while `canceled`.
     #[must_use]
     pub fn settle(self, canceled: bool) -> Self {
         Self { result: settle(self.result, canceled), extra: self.extra }
@@ -60,7 +52,6 @@ pub fn settle(result: Result<(), Status>, canceled: bool) -> Result<(), Status> 
     }
 }
 
-/// An `extra` value of a count.
 fn count(n: i64) -> OwnedValue {
     OwnedValue::from(n)
 }

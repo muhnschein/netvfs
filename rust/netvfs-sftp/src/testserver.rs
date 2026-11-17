@@ -14,7 +14,7 @@
 
 use crate::fake::Fake;
 use russh::keys::{PrivateKey, PublicKey};
-use russh::server::{self, Auth, Msg, Response, Session};
+use russh::server::{self, Auth, Msg, PublicKeyOffer, Response, Session, VerifiedPublicKey};
 use russh::{Channel, ChannelId, ChannelOpenFailure, MethodKind, MethodSet, SshId};
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -281,8 +281,9 @@ impl server::Handler for Handler {
     fn auth_publickey_offered(
         &mut self,
         user: &str,
-        key: &PublicKey,
+        offer: PublicKeyOffer<'_>,
     ) -> impl Future<Output = Result<Auth, Self::Error>> + Send {
+        let key = offer.public_key;
         ready((|| {
             self.server.note(format!("offered {user} {}", key.algorithm()));
             match self.step() {
@@ -295,8 +296,9 @@ impl server::Handler for Handler {
     fn auth_publickey(
         &mut self,
         user: &str,
-        key: &PublicKey,
+        verified: VerifiedPublicKey<'_>,
     ) -> impl Future<Output = Result<Auth, Self::Error>> + Send {
+        let key = verified.public_key;
         ready((|| {
             self.server.note(format!("publickey {user} {}", key.algorithm()));
             match self.step() {

@@ -1,13 +1,8 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! One consumer connection after the peer check (design §3.2
-//! `server::session`): the p2p handshake, then a reader (zbus
-//! `MessageStream` → [`dispatch`] → [`Event::Call`]) and a writer
-//! ([`flow::run_writer`]).
+//! One consumer connection after the peer check: p2p handshake, then a reader (zbus `MessageStream` → [`dispatch`] → [`Event::Call`]) and a writer ([`flow::run_writer`]).
 //!
-//! The message stream is created by `Builder::build_message_stream`, before
-//! zbus's socket reader starts: a stream made from the finished connection
-//! would miss a call that the consumer pipelines right after the handshake
-//! (design §8). zbus queues at most [`MAX_QUEUED_INBOUND`] messages.
+//! The message stream is created by `Builder::build_message_stream` before zbus's socket reader starts: a stream made from the finished connection would miss a call pipelined right after the handshake.
+//! zbus queues at most [`MAX_QUEUED_INBOUND`] messages.
 
 use super::dispatch::{self, Action};
 use super::flow::{self, Link};
@@ -48,8 +43,7 @@ pub async fn handshake(stream: UnixStream) -> zbus::Result<MessageStream> {
         .map_err(|_elapsed| zbus::Error::Handshake("timed out".to_owned()))?
 }
 
-/// Runs a session on a peer-checked connection until it ends. `shutdown` is
-/// a duplicate of the socket, used to close it from any thread.
+/// Runs a session on a peer-checked connection until it ends.
 pub async fn run(stream: UnixStream, shutdown: StdUnixStream, sid: SessionId, sink: EventSink) {
     let Ok(mut messages) = handshake(stream).await else {
         return;

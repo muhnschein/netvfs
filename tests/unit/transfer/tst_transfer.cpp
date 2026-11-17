@@ -45,7 +45,7 @@ private:
     qint64 m_pos = 0;
 };
 
-// Stops the transfer through Progress::canceled() after the first update (XC-14).
+// Stops the transfer through Progress::canceled() after the first update.
 class CancelingProgress : public Progress
 {
 public:
@@ -88,7 +88,7 @@ private slots:
 
     void partName() { QCOMPARE(Transfer::partName(QStringLiteral("a/b.tar")), QStringLiteral("a/b.tar.part")); }
 
-    // C-12: data goes to .part, then rename; final file appears only at the end.
+    // data goes to.part, then rename; final file appears only at the end.
     void uploadViaPartAndRename()
     {
         QByteArray data = pattern(300 * 1024);
@@ -107,7 +107,7 @@ private slots:
         QCOMPARE(server->log, expected);
     }
 
-    // C-13: no transfer when the server reports too little space.
+    // no transfer when the server reports too little space.
     void noSpaceBeforeTransfer()
     {
         server->freeBytes = 10;
@@ -209,7 +209,7 @@ private slots:
         QByteArray data = pattern(100);
         QBuffer buffer(&data);
         buffer.open(QIODevice::ReadOnly);
-        // C-17: no remote path in a warning.
+        // no remote path in a warning.
         QTest::ignoreMessage(QtWarningMsg, QRegularExpression(QStringLiteral("^Could not remove partial file \"PermissionDenied\"$")));
         QCOMPARE(Transfer::upload(backend.data(), &buffer, data.size(), QStringLiteral("dir/b")).error(),
                  Error::PermissionDenied);
@@ -224,7 +224,7 @@ private slots:
         QVERIFY(server->log.isEmpty());
     }
 
-    // C-9: cancel() from another thread ends the transfer with Canceled.
+    // cancel() from another thread ends the transfer with Canceled.
     void cancelFromOtherThread()
     {
         server->chunkDelayMs = 20;
@@ -242,7 +242,7 @@ private slots:
         QCOMPARE(future.result().error(), Error::Canceled);
         QVERIFY(timer.elapsed() < 2000);
         QVERIFY(!server->exists(QStringLiteral("dir/b")));
-        QVERIFY(!server->exists(QStringLiteral("dir/b.part")));   // S-T16
+        QVERIFY(!server->exists(QStringLiteral("dir/b.part")));
     }
 
     void uploadFile()
@@ -296,7 +296,6 @@ private slots:
         QVERIFY(!QFile::exists(local + QStringLiteral(".part")));
     }
 
-    // SPEC 8.4 step 2.
     void removeStaleParts()
     {
         const QDateTime now = QDateTime::currentDateTimeUtc();
@@ -325,9 +324,7 @@ private slots:
         QCOMPARE(Transfer::removeStaleParts(backend.data(), QStringLiteral("dir"), now).error(), Error::Canceled);
     }
 
-    // ---- XH-1 policies --------------------------------------------------
 
-    // Backups (the default policy) create files 0600 (S-20 through XC-23).
     void defaultPolicyCreatesPrivateFiles()
     {
         QCOMPARE(Transfer::TransferPolicy().createMode, 0600);
@@ -363,7 +360,6 @@ private slots:
         QCOMPARE(server->node(QStringLiteral("dir/b")).mode, expected);
     }
 
-    // AtomicPut consumers write the final name directly.
     void noTempName()
     {
         server->addFile(QStringLiteral("dir/b"), "old");
@@ -395,7 +391,7 @@ private slots:
         QCOMPARE(server->fileData(QStringLiteral("dir/c")), data);
     }
 
-    // XC-10: the commit mode reaches rename(); NoReplace keeps an existing file.
+    // the commit mode reaches rename(); NoReplace keeps an existing file.
     void noReplaceCommit()
     {
         server->addFile(QStringLiteral("dir/b"), "old");
@@ -454,7 +450,7 @@ private slots:
         QVERIFY(!server->exists(QStringLiteral("dir/b.part")));
     }
 
-    // XH-1 resume: the offset must match the temporary file's size.
+    // resume: the offset must match the temporary file's size.
     void resumeAtCorrectOffset_data()
     {
         QTest::addColumn<bool>("sequential");
@@ -500,7 +496,7 @@ private slots:
         const Result r = Transfer::upload(backend.data(), &buffer, data.size(), QStringLiteral("dir/b"), nullptr, policy);
         QCOMPARE(r.error(), Error::ProtocolError);
         QVERIFY(r.message().contains(QStringLiteral("400")));
-        QCOMPARE(server->fileData(QStringLiteral("dir/b.part")), data.left(400));   // kept, untouched
+        QCOMPARE(server->fileData(QStringLiteral("dir/b.part")), data.left(400));
         QVERIFY(!server->exists(QStringLiteral("dir/b")));
         QVERIFY(!server->log.contains(QStringLiteral("openWrite:dir/b.part")));
 
@@ -528,7 +524,6 @@ private slots:
         QVERIFY(server->log.contains(QStringLiteral("abort:dir/b.part")));
         QVERIFY(!server->log.contains(QStringLiteral("removeFile:dir/b.part")));
 
-        // A canceled resume keeps the temporary file as well.
         buffer.seek(0);
         CancelingProgress progress;
         QCOMPARE(Transfer::upload(backend.data(), &buffer, data.size(), QStringLiteral("dir/b"), &progress, policy).error(),
@@ -587,7 +582,7 @@ private slots:
         QVERIFY(server->exists(QStringLiteral("dir/.d.uploading")));   // only regular files
 
         QVERIFY(Transfer::removeStaleParts(backend.data(), QStringLiteral("dir"), now, 10 * 24 * 3600).ok());
-        QVERIFY(server->exists(QStringLiteral("dir/b.part")));        // younger than the limit
+        QVERIFY(server->exists(QStringLiteral("dir/b.part")));
     }
 };
 

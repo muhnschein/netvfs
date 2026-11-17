@@ -11,7 +11,6 @@ void MessageUnref::operator()(DBusMessage *message) const
         dbus_message_unref(message);
 }
 
-// ----------------------------------------------------------------- decoding
 
 namespace {
 
@@ -196,7 +195,6 @@ Result decodeArguments(DBusMessage *message, QVariantList *out, const DecodeLimi
     return Result::success();
 }
 
-// ------------------------------------------------------------------ writing
 
 QByteArray variantSignature(const QVariant &v)
 {

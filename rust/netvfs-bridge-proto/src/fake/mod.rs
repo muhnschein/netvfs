@@ -1,9 +1,7 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! In-process fake bridge (tests only): serves `org.netvfs.Bridge1` over a
-//! unix socket pair (or a real socket path) with an in-memory file tree per
-//! location, configurable consent, locations, capabilities, scripted latency,
-//! failures and disconnects. The same fake replays the shared contract
-//! sequences ([`replay`]).
+//! In-process fake bridge (tests only): serves `org.netvfs.Bridge1` over a unix socket pair (or
+//! socket path) with an in-memory tree per location, configurable consent, locations, capabilities,
+//! latency, failures and disconnects. Also replays the shared contract sequences ([`replay`]).
 
 mod args;
 mod fail;
@@ -49,9 +47,8 @@ pub struct FakeBridge {
     _owner: Arc<Owner>,
 }
 
-/// Dropped with the last clone of a [`FakeBridge`]. A served connection's
-/// object server holds the interface, which holds the session, which holds
-/// the connection: that cycle is broken here, or every session leaks.
+/// Dropped with the last clone of a [`FakeBridge`]: breaks the cycle served connection -> object
+/// server -> interface -> session -> connection, or every session leaks.
 struct Owner(Arc<Shared>);
 
 impl Drop for Owner {
@@ -83,8 +80,6 @@ impl FakeBridge {
         Self { _owner: Arc::new(Owner(Arc::clone(&shared))), shared }
     }
 
-    // ---- serving -------------------------------------------------------
-
     /// A client connection to a fresh in-process session over a socket pair.
     ///
     /// # Errors
@@ -115,8 +110,7 @@ impl FakeBridge {
         Ok(())
     }
 
-    /// Listens on a socket path like the bridge's socket-activated unit (the
-    /// real app never creates this path; tests of the discovery do, here).
+    /// Listens on a socket path like the bridge's socket-activated unit.
     ///
     /// # Errors
     /// The socket cannot be created.
@@ -124,7 +118,6 @@ impl FakeBridge {
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir)?;
         }
-        // A socket left over from an earlier run; usually there is none.
         std::fs::remove_file(path).ok();
         let listener = UnixListener::bind(path)?;
         let me = self.clone();
@@ -140,7 +133,6 @@ impl FakeBridge {
                 }
                 let serving = me.clone();
                 tokio::spawn(async move {
-                    // A client that hangs up during the handshake is not an error here.
                     serving.serve_stream(stream).await.ok();
                 });
             }
@@ -165,7 +157,6 @@ impl FakeBridge {
         for session in self.shared.take_sessions() {
             session.shut();
             if let Some(conn) = session.take_conn() {
-                // The peer may already be gone.
                 conn.close().await.ok();
             }
         }
@@ -177,14 +168,10 @@ impl FakeBridge {
         self.shared.with(|s| s.sessions.len())
     }
 
-    // ---- bridge identity ------------------------------------------------
-
     /// What `Hello` answers (the bridge version).
     pub fn set_hello(&self, version: &str) {
         self.shared.with(|s| version.clone_into(&mut s.bridge_version));
     }
-
-    // ---- consent --------------------------------------------------------
 
     /// The consent now.
     #[must_use]
@@ -209,8 +196,6 @@ impl FakeBridge {
     pub fn auto_consent(&self, answer: Option<Consent>) {
         self.shared.with(|s| s.auto_consent = answer);
     }
-
-    // ---- locations ------------------------------------------------------
 
     /// An account location `account:<n>` (netvfs info keys `kind`, `host`,
     /// `accountId`, `path`, and `state` disconnected).
@@ -252,11 +237,9 @@ impl FakeBridge {
         self.shared.broadcast_locations().await;
     }
 
-    /// Sets the connection state of `id` (`state`: `disconnected`,
-    /// `connecting`, `connected` or `failed`, with `error` the XC-21 name of
-    /// a failure) and tells every client if it changed. On its own the fake
-    /// shows a location disconnected until a call needs a connection, and
-    /// again after `Disconnect`.
+    /// Sets the connection state of `id` (`state`: `disconnected`, `connecting`, `connected` or
+    /// `failed`, `error` the name of a failure); tells every client if it changed. Unprompted, a
+    /// location shows disconnected until a call needs a connection, and again after `Disconnect`.
     pub async fn set_state(&self, id: &str, state: &str, error: Option<&str>) {
         if self.shared.with(|s| s.set_state(id, state, error)) {
             self.shared.broadcast_locations().await;
@@ -297,15 +280,11 @@ impl FakeBridge {
         });
     }
 
-    // ---- discovery ------------------------------------------------------
-
     /// Replaces the discovery result and notifies clients that asked for it.
     pub async fn set_nearby(&self, nearby: Vec<WireNearby>) {
         self.shared.with(|s| s.nearby = nearby);
         self.shared.broadcast_nearby().await;
     }
-
-    // ---- files ----------------------------------------------------------
 
     /// A file on the fake server, with missing parent folders.
     pub fn put_file(&self, loc: &str, path: &[u8], data: &[u8]) {
@@ -333,8 +312,6 @@ impl FakeBridge {
     pub fn exists(&self, loc: &str, path: &[u8]) -> bool {
         self.shared.with(|s| s.trees.get(loc).is_some_and(|t| t.node(path).is_some()))
     }
-
-    // ---- scripting ------------------------------------------------------
 
     /// Every call takes at least `latency` (virtual time under a paused clock).
     pub fn set_latency(&self, latency: Duration) {
@@ -380,8 +357,6 @@ impl FakeBridge {
         self.shared.ask(kind, &details).await
     }
 
-    // ---- observation ----------------------------------------------------
-
     /// Secrets that reached `ConnectAdHoc`.
     #[must_use]
     pub fn received_secrets(&self) -> Vec<Vec<u8>> {
@@ -411,7 +386,7 @@ impl FakeBridge {
         self.shared.with(|s| s.calls.clear());
     }
 
-    /// What `GetFeatures` answers (XB-19); by default every feature.
+    /// What `GetFeatures` answers; by default every feature.
     pub fn set_features(&self, features: &[&str]) {
         self.shared.with(|s| s.features = features.iter().map(|f| (*f).to_owned()).collect());
     }
@@ -461,7 +436,6 @@ impl Listener {
 impl Drop for Listener {
     fn drop(&mut self) {
         self.task.abort();
-        // Already gone is fine.
         std::fs::remove_file(&self.path).ok();
     }
 }

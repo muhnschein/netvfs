@@ -1,12 +1,8 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 //! `accounts.db` of libaccounts-glib, read and written with SQLite directly.
-//!
-//! Tables (`create_db`, ag-manager.c): `Accounts(id, name, provider,
-//! enabled)`, `Services(id, name, display, provider, type)` and
-//! `Settings(account, service, key, type, value)`, where service 0 is the
-//! account's global settings and a service's `enabled` flag is its setting
-//! `enabled`. Keys are bytes: libaccounts-qt converts them to and from
-//! Latin-1.
+//! Tables: `Accounts(id, name, provider, enabled)`, `Services(id, name, display, provider, type)`,
+//! `Settings(account, service, key, type, value)`. Service 0 = account's global settings; a
+//! service's `enabled` flag is its setting `enabled`. Keys are bytes, Latin-1 in libaccounts-qt.
 
 use std::fs;
 use std::io;
@@ -18,18 +14,15 @@ use rusqlite::{Connection, OpenFlags, OptionalExtension, TransactionBehavior, pa
 use crate::gvariant;
 use crate::qvariant::{QString, Value, cut_to_int};
 
-/// Where libaccounts-glib keeps the database below the data folder on
-/// Sailfish OS (its spec: `-Ddatabase-dir=system/privileged/Accounts/libaccounts-glib`).
+/// libaccounts-glib's database folder below the data folder on Sailfish OS.
 pub const SAILFISH_DATABASE_DIR: &str = "system/privileged/Accounts/libaccounts-glib";
-/// The folder whose owner and mode libaccounts-glib checks on Sailfish OS
-/// (`-Dprivileged-dir=system/privileged`).
+/// Folder whose owner and mode libaccounts-glib checks on Sailfish OS.
 pub const SAILFISH_PRIVILEGED_DIR: &str = "system/privileged";
-/// The upstream location, below the configuration folder.
+/// Upstream location, below the configuration folder.
 pub const UPSTREAM_DATABASE_DIR: &str = "libaccounts-glib";
 /// The database file in its folder.
 pub const DATABASE_FILE: &str = "accounts.db";
 const REDIRECT_FILE: &str = "accounts.redirect";
-/// How long a read or write waits for another writer.
 const BUSY_TIMEOUT_MS: u64 = 5000;
 
 /// Where to look for the database.
@@ -49,7 +42,7 @@ pub enum Location {
     },
 }
 
-/// The environment the location comes from.
+/// Environment the location comes from.
 #[derive(Clone, Debug, Default)]
 pub struct Environment {
     /// The `ACCOUNTS` variable: the database folder, for tests.
@@ -75,7 +68,6 @@ impl Environment {
         }
     }
 
-    /// An XDG folder: the variable when it is absolute, else `$HOME/<fallback>`.
     fn xdg(&self, value: Option<&String>, fallback: &str) -> PathBuf {
         match value {
             Some(v) if v.starts_with('/') => PathBuf::from(v),
@@ -95,9 +87,8 @@ impl Environment {
         self.xdg(self.xdg_config_home.as_ref(), ".config")
     }
 
-    /// The database libaccounts-glib would open: `ACCOUNTS` when set, else
-    /// the Sailfish OS folder when its privileged folder exists, else the
-    /// upstream one.
+    /// The database libaccounts-glib would open: `ACCOUNTS` if set, else the Sailfish OS folder if
+    /// its privileged folder exists, else upstream.
     #[must_use]
     pub fn location(&self) -> Location {
         if let Some(dir) = &self.accounts {
@@ -111,8 +102,8 @@ impl Environment {
         }
     }
 
-    /// The folders the confinement lets the helper write to: `ACCOUNTS`
-    /// when set and absolute, else both places a database may be.
+    /// Folders the confinement lets the helper write: `ACCOUNTS` if set and absolute, else both
+    /// possible database places.
     #[must_use]
     pub fn database_folders(&self) -> Vec<PathBuf> {
         if let Some(dir) = self.accounts.as_ref().filter(|d| d.starts_with('/')) {
@@ -125,8 +116,7 @@ impl Environment {
     }
 }
 
-/// The database cannot be opened or read: what a helper without the group
-/// `privileged` sees on Sailfish OS.
+/// Database cannot be opened or read; what a helper without group `privileged` sees on Sailfish OS.
 #[derive(Debug)]
 pub struct Unusable(pub String);
 
@@ -136,20 +126,19 @@ impl From<rusqlite::Error> for Unusable {
     }
 }
 
-/// libaccounts-glib's check of the privileged folder on Sailfish OS: owned
-/// by user and group `privileged`, nothing for others.
+/// libaccounts-glib's privileged-folder check: owned by user and group `privileged`, nothing for
+/// others.
 pub trait PrivilegedOwner {
     /// The uid and gid of the user `privileged`, if there is one.
     fn privileged_ids(&self) -> Option<(u32, u32)>;
 }
 
 impl Location {
-    /// The database file, following an `accounts.redirect` as
-    /// libaccounts-glib does (Sailfish OS and upstream locations only).
+    /// Database file, following an `accounts.redirect` as libaccounts-glib does (Sailfish OS and
+    /// upstream only).
     ///
     /// # Errors
-    /// When the Sailfish OS privileged folder is not as libaccounts-glib
-    /// requires.
+    /// Privileged folder not as libaccounts-glib requires.
     pub fn database(&self, owner: &dyn PrivilegedOwner) -> Result<PathBuf, Unusable> {
         let folder = match self {
             Self::Explicit(dir) => return Ok(dir.join(DATABASE_FILE)),
@@ -186,8 +175,7 @@ fn check_privileged_folder(path: &Path, owner: &dyn PrivilegedOwner) -> Result<(
     Ok(())
 }
 
-/// An open database, or the empty one libaccounts-glib would create where
-/// there is none yet.
+/// An open database, or the empty one libaccounts-glib would create.
 #[derive(Debug)]
 pub struct Database {
     connection: Option<Connection>,
@@ -245,11 +233,11 @@ fn bytes(v: ValueRef<'_>) -> Option<Vec<u8>> {
 }
 
 impl Database {
-    /// Opens `path`; read-only unless `writable`. A missing file is the
-    /// empty database, which is not created.
+    /// Opens `path`, read-only unless `writable`. A missing file is the empty database, not
+    /// created.
     ///
     /// # Errors
-    /// When the file or its folder cannot be reached, or SQLite cannot open it.
+    /// File or folder unreachable, or SQLite cannot open it.
     pub fn open(path: &Path, writable: bool) -> Result<Self, Unusable> {
         match fs::metadata(path) {
             Ok(_) => {}
@@ -260,7 +248,7 @@ impl Database {
             if writable { OpenFlags::SQLITE_OPEN_READ_WRITE } else { OpenFlags::SQLITE_OPEN_READ_ONLY };
         let connection = Connection::open_with_flags(path, mode | OpenFlags::SQLITE_OPEN_NO_MUTEX)?;
         connection.busy_timeout(std::time::Duration::from_millis(BUSY_TIMEOUT_MS))?;
-        // Version 0: no tables yet, which libaccounts-glib would create.
+        // Version 0: no tables yet; libaccounts-glib would create them.
         let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
         Ok(Self { connection: (version >= 1).then_some(connection) })
     }
@@ -271,11 +259,10 @@ impl Database {
         Self { connection: None }
     }
 
-    /// `ag_manager_list_by_service_type`: accounts of a provider that has a
-    /// service of `service_type`.
+    /// `ag_manager_list_by_service_type`: accounts of a provider with a service of `service_type`.
     ///
     /// # Errors
-    /// When SQLite fails.
+    /// SQLite fails.
     pub fn accounts_with_service_type(&self, service_type: &str) -> Result<Vec<i64>, Unusable> {
         let Some(c) = &self.connection else { return Ok(Vec::new()) };
         let mut statement = c.prepare(
@@ -288,7 +275,7 @@ impl Database {
     /// The account `id`, if it exists.
     ///
     /// # Errors
-    /// When SQLite fails.
+    /// SQLite fails.
     pub fn account(&self, id: i64) -> Result<Option<AccountRow>, Unusable> {
         let Some(c) = &self.connection else { return Ok(None) };
         Ok(c.query_row(
@@ -299,7 +286,7 @@ impl Database {
                     id,
                     display_name: text(row.get_ref(0)?),
                     provider: text(row.get_ref(1)?),
-                    // sqlite3_column_int, as a gboolean
+                    // sqlite3_column_int as gboolean
                     enabled: row.get::<_, Option<i64>>(2)?.is_some_and(|v| cut_to_int(v) != 0),
                 })
             },
@@ -307,20 +294,19 @@ impl Database {
         .optional()?)
     }
 
-    /// The id of the service named `name` in `Services`. A service missing
-    /// there has no settings.
+    /// Id of service `name` in `Services`. A missing service has no settings.
     ///
     /// # Errors
-    /// When SQLite fails.
+    /// SQLite fails.
     pub fn service_id(&self, name: &str) -> Result<Option<i64>, Unusable> {
         let Some(c) = &self.connection else { return Ok(None) };
         Ok(c.query_row("SELECT id FROM Services WHERE name = ?1", [name], |row| row.get(0)).optional()?)
     }
 
-    /// The settings of `account` for `service` (0: global).
+    /// Settings of `account` for `service` (0: global).
     ///
     /// # Errors
-    /// When SQLite fails.
+    /// SQLite fails.
     pub fn settings(&self, account: i64, service: i64) -> Result<Vec<Setting>, Unusable> {
         let Some(c) = &self.connection else { return Ok(Vec::new()) };
         let mut statement =
@@ -334,11 +320,10 @@ impl Database {
         Ok(rows.collect::<Result<_, _>>()?)
     }
 
-    /// Writes global settings of `account` in one exclusive transaction, as
-    /// `ag_account_store` does.
+    /// Writes global settings of `account` in one exclusive transaction, as `ag_account_store`.
     ///
     /// # Errors
-    /// When there is no database or SQLite fails.
+    /// No database, or SQLite fails.
     pub fn store_global(&mut self, account: i64, settings: &[NewSetting]) -> Result<(), Unusable> {
         let Some(c) = &mut self.connection else { return Err(Unusable("no accounts database".into())) };
         let transaction = c.transaction_with_behavior(TransactionBehavior::Exclusive)?;
@@ -353,7 +338,6 @@ impl Database {
     }
 }
 
-/// The tables as libaccounts-glib's `create_db` makes them, for tests.
 #[cfg(test)]
 pub(crate) const TEST_SCHEMA: &str =
     "CREATE TABLE Accounts (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, provider TEXT, enabled INTEGER);
@@ -490,7 +474,6 @@ mod tests {
             db.settings(1, 0).ok(),
             Some(vec![Setting { key: b"netvfs/host".to_vec(), value: Value::String("nas".into()) }])
         );
-        // Read-only: a write fails.
         let mut db = db;
         let new =
             NewSetting { key: b"netvfs/attention".to_vec(), type_string: "s", text: "'auth-failed'".into() };
@@ -505,16 +488,13 @@ mod tests {
             value: Value::String("auth-failed".into())
         }));
 
-        // No tables yet: empty.
         let blank = dir.join("blank.db");
         drop(Connection::open(&blank));
         let db = Database::open(&blank, false).unwrap_or_else(|_| Database::empty());
         assert!(db.connection.is_none());
-        // Not a database: unusable.
         let junk = dir.join("junk.db");
         fs::write(&junk, vec![b'x'; 4096]).unwrap_or_default();
         Database::open(&junk, false).unwrap_err();
-        // A folder that is a file: unusable.
         Database::open(&junk.join(DATABASE_FILE), false).unwrap_err();
         fs::remove_dir_all(dir).ok();
     }

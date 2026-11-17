@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! The callbacks C++ passes to a call, as the netvfs-vfs traits the
-//! backends take. The backend's future calls them while `block_on` polls it
-//! on the caller's thread (S3), so they are plain calls into C++; C++
-//! catches its own exceptions (S5). What they receive is borrowed for the
-//! callback only (R2).
+//! C++ callbacks as netvfs-vfs traits. The backend's future calls them while `block_on` polls it on the caller's
+//! thread; arguments are borrowed for the callback only; C++ catches its own exceptions.
 
 use super::marshal::{fill_entry, items, slice};
 use super::raw::{
@@ -16,7 +13,6 @@ use netvfs_vfs::{
 use std::ffi::c_void;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
-/// `nvb_list_sink_fn` as a [`ListSink`].
 #[derive(Debug)]
 pub struct ListAdapter {
     sink: NvbListSinkFn,
@@ -24,7 +20,6 @@ pub struct ListAdapter {
 }
 
 impl ListAdapter {
-    /// The sink of a `list` call.
     pub const fn new(sink: NvbListSinkFn, ctx: *mut c_void) -> Self {
         Self { sink, ctx }
     }
@@ -32,32 +27,26 @@ impl ListAdapter {
 
 impl ListSink for ListAdapter {
     fn entries(&mut self, batch: &[Entry]) -> bool {
-        // Views into `batch`, which outlives the callback (R2).
+        // Views into `batch`; it outlives the callback.
         let views: Vec<NvbEntry> = batch.iter().map(|e| fill_entry(e, NvbBytes::of)).collect();
-        // SAFETY: `sink` and `ctx` are the caller's for this call; the views
-        // and the bytes they point to live until the call returns.
+        // SAFETY: caller's `sink` and `ctx`; views live until the call returns.
         unsafe { (self.sink)(self.ctx, views.as_ptr(), views.len()) != 0 }
     }
 }
 
-/// What `nvb_reply *` points to during a prompt: the answers `reply_set`
-/// gives.
 #[derive(Debug, Default)]
 pub struct Reply {
     answers: Option<Vec<Zeroizing<Vec<u8>>>>,
 }
 
-/// The table's `reply_set`: copies the answers into wiped-on-drop buffers
-/// (R5); a later call replaces earlier answers. NULL `r` is a no-op.
+/// Table `reply_set`: copies answers into wiped-on-drop buffers; a later call replaces earlier answers. NULL `r`
+/// is a no-op.
 ///
 /// # Safety
-/// `r` is NULL or the reply of a prompt that is running; `answers` points
-/// to `n` items whose bytes are readable.
+/// `r` is NULL or a running prompt's reply; `answers` has `n` readable items.
 pub unsafe extern "C" fn reply_set(r: *mut NvbReply, answers: *const NvbBytes, n: usize) {
     let set = || {
-        // SAFETY: `r` is NULL or a live `Reply` (the prompt adapter made it
-        // and waits for the callback); the answers are readable (the
-        // caller's contract).
+        // SAFETY: `r` is NULL or the live `Reply` its prompt waits on; answers readable by contract.
         unsafe {
             if let Some(reply) = r.cast::<Reply>().as_mut() {
                 let copied = items(answers, n).iter().map(|a| Zeroizing::new(slice(*a).to_vec())).collect();
@@ -68,7 +57,6 @@ pub unsafe extern "C" fn reply_set(r: *mut NvbReply, answers: *const NvbBytes, n
     catch_unwind(AssertUnwindSafe(set)).unwrap_or_default();
 }
 
-/// `nvr_prompter` as a [`Prompter`].
 #[derive(Debug)]
 pub struct PromptAdapter {
     prompt: NvrPromptFn,
@@ -76,7 +64,6 @@ pub struct PromptAdapter {
 }
 
 impl PromptAdapter {
-    /// The prompter of an `authenticate` call.
     pub const fn new(prompt: NvrPromptFn, ctx: *mut c_void) -> Self {
         Self { prompt, ctx }
     }
@@ -90,9 +77,7 @@ impl Prompter for PromptAdapter {
             .map(|p| NvbPrompt { text: NvbBytes::of(p.text.as_bytes()), echo: u8::from(p.echo) })
             .collect();
         let mut reply = Reply::default();
-        // SAFETY: `prompt` and `ctx` are the caller's for this call; the
-        // texts, the prompts and `reply` live until it returns, and
-        // `reply_set` is the only way the caller writes `reply`.
+        // SAFETY: caller's `prompt` and `ctx`; arguments live until return; `reply_set` is the only writer of `reply`.
         let given = unsafe {
             (self.prompt)(
                 self.ctx,
@@ -103,17 +88,14 @@ impl Prompter for PromptAdapter {
                 (&raw mut reply).cast::<NvbReply>(),
             )
         };
-        // One answer per prompt, or the user declined.
         reply.answers.filter(|a| given != 0 && a.len() == prompts.len())
     }
 }
 
-/// The bytes moved so far as `nvb_io`'s `pos`.
 fn position(done: u64) -> i64 {
     i64::try_from(done).unwrap_or(i64::MAX)
 }
 
-/// The local side of an upload: `nvb_io.read`, in order.
 #[derive(Debug)]
 pub struct IoSource {
     read: NvbIoReadFn,
@@ -122,7 +104,6 @@ pub struct IoSource {
 }
 
 impl IoSource {
-    /// `None` without a `read` function.
     pub fn new(io: NvbIo) -> Option<Self> {
         io.read.map(|read| Self { read, io, done: 0 })
     }
@@ -130,8 +111,7 @@ impl IoSource {
 
 impl Source for IoSource {
     fn read(&mut self, buf: &mut [u8]) -> Result<usize, Status> {
-        // SAFETY: `read` and `ctx` are the caller's for this call; `buf` is
-        // writable for `buf.len()` bytes.
+        // SAFETY: caller's `read` and `ctx`; `buf` writable for `buf.len()`.
         let n = unsafe { (self.read)(self.io.ctx, position(self.done), buf.as_mut_ptr(), buf.len()) };
         let n = usize::try_from(n)
             .ok()
@@ -146,8 +126,6 @@ impl Source for IoSource {
     }
 }
 
-/// The local side of a download: `nvb_io.write`, in order, until each
-/// chunk is written.
 #[derive(Debug)]
 pub struct IoSink {
     write: NvbIoWriteFn,
@@ -156,7 +134,6 @@ pub struct IoSink {
 }
 
 impl IoSink {
-    /// `None` without a `write` function.
     pub fn new(io: NvbIo) -> Option<Self> {
         io.write.map(|write| Self { write, io, done: 0 })
     }
@@ -166,8 +143,7 @@ impl Sink for IoSink {
     fn write(&mut self, data: &[u8]) -> Result<(), Status> {
         let mut rest = data;
         while !rest.is_empty() {
-            // SAFETY: `write` and `ctx` are the caller's for this call; `rest`
-            // is readable for `rest.len()` bytes.
+            // SAFETY: caller's `write` and `ctx`; `rest` readable for `rest.len()`.
             let n = unsafe { (self.write)(self.io.ctx, position(self.done), rest.as_ptr(), rest.len()) };
             rest = usize::try_from(n)
                 .ok()
@@ -180,14 +156,12 @@ impl Sink for IoSink {
     }
 }
 
-/// `nvb_progress` (may be absent) as [`Progress`].
 #[derive(Debug)]
 pub struct ProgressAdapter {
     progress: Option<NvbProgress>,
 }
 
 impl ProgressAdapter {
-    /// The progress of a transfer; `None`: no progress.
     pub const fn new(progress: Option<NvbProgress>) -> Self {
         Self { progress }
     }
@@ -199,14 +173,14 @@ impl Progress for ProgressAdapter {
             && let Some(update) = p.update
         {
             let total = total.map_or(-1, position);
-            // SAFETY: `update` and `ctx` are the caller's for this call.
+            // SAFETY: caller's `update` and `ctx`.
             unsafe { update(p.ctx, position(done), total) };
         }
     }
 
     fn canceled(&mut self) -> bool {
         match self.progress {
-            // SAFETY: `canceled` and `ctx` are the caller's for this call.
+            // SAFETY: caller's `canceled` and `ctx`.
             Some(NvbProgress { ctx, canceled: Some(canceled), .. }) => unsafe { canceled(ctx) != 0 },
             _ => false,
         }
@@ -218,8 +192,6 @@ mod tests {
     use super::*;
     use netvfs_vfs::{EntryType, Prompt};
     use std::ffi::c_int;
-
-    // ---- list
 
     unsafe extern "C" fn record(ctx: *mut c_void, entries: *const NvbEntry, n: usize) -> c_int {
         // SAFETY: test: ctx is a Vec<(Vec<u8>, u8)>, entries valid for the call.
@@ -244,8 +216,6 @@ mod tests {
         assert!(!sink.entries(&batch[..1]));
         assert_eq!(seen, [(b"a".to_vec(), 1), (b"b".to_vec(), 2), (b"a".to_vec(), 1)]);
     }
-
-    // ---- prompts
 
     struct Asked {
         name: Vec<u8>,
@@ -330,8 +300,6 @@ mod tests {
         // SAFETY: NULL is allowed.
         unsafe { reply_set(std::ptr::null_mut(), std::ptr::null(), 0) };
     }
-
-    // ---- io
 
     struct Local {
         data: Vec<u8>,
@@ -446,8 +414,6 @@ mod tests {
             assert_eq!((e.name, e.message.as_str()), (ErrorName::NoSpace, "Cannot write the local file"));
         }
     }
-
-    // ---- progress
 
     #[derive(Default)]
     struct Seen {

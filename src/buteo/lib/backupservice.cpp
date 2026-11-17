@@ -15,7 +15,7 @@ Result callError(const QString &method, const QDBusMessage &reply)
     return Result(Error::Internal, QStringLiteral("Call to %1() failed: %2 %3")
                                        .arg(method, reply.errorName(), reply.errorMessage()));
 }
-} // namespace
+}
 
 BackupService::BackupService(const QDBusConnection &connection, QObject *parent)
     : QObject(parent)
@@ -103,4 +103,4 @@ void BackupService::onCloudRestoreError(int accountId, const QString &error, con
     emit cloudRestoreError(accountId, error, errorString);
 }
 
-} // namespace NetVfs
+}

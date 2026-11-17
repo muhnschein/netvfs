@@ -38,7 +38,6 @@ QDateTime utc(const char *iso)
     return QDateTime::fromString(QString::fromLatin1(iso), Qt::ISODate).toUTC();
 }
 
-// Records the terminal echo switches of a prompt.
 class EchoRecorder : public Cli::EchoControl
 {
 public:
@@ -102,7 +101,6 @@ private slots:
 
     void init() { FakeServer::instance()->reset(); }
 
-    // ------------------------------------------------------------- arguments
 
     void usage()
     {
@@ -170,14 +168,12 @@ private slots:
         FakeServer::instance()->identity = ssh;
         QCOMPARE(run({ S("--host-key"), ssh.toPin(), S("ls"), QString() }), 0);
         QCOMPARE(FakeServer::instance()->lastParams.option(S("host_key")), ssh.toPin());
-        // The pin of another key is refused.
         ServerIdentity other = ssh;
         other.publicKey = "OTHERBLOB";
         FakeServer::instance()->identity = other;
         QCOMPARE(run({ S("--host-key"), ssh.toPin(), S("ls"), QString() }), code(Error::ServerIdentityChanged));
     }
 
-    // ------------------------------------------------------------------ URLs
 
     void urlRejectsPassword()
     {
@@ -198,7 +194,6 @@ private slots:
         QCOMPARE(runArgs({ S("--url"), S("ftp://h/"), S("ls"), QString() }), code(Error::Unsupported));
         QVERIFY(FakeServer::instance()->log.isEmpty());
         QCOMPARE(runArgs({ S("--url"), S("sftp:///nohost"), S("ls"), QString() }), code(Error::InvalidName));
-        // The URL replaces --provider/--host/--port/--user.
         QCOMPARE(runArgs({ S("--url"), S("sftp://h/"), S("--host"), S("h"), S("ls"), QString() }), 2);
         QCOMPARE(runArgs({ S("--url"), S("sftp://h/"), S("--user"), S("u"), S("ls"), QString() }), 2);
     }
@@ -226,7 +221,6 @@ private slots:
         QCOMPARE(runArgs({ S("--url"), url, S("ls"), S("../x") }), code(Error::InvalidName));
     }
 
-    // ------------------------------------------------------------- identity
 
     void identify()
     {
@@ -253,7 +247,6 @@ private slots:
         QVERIFY(err.contains(S("NetworkUnreachable: down")));
     }
 
-    // -------------------------------------------------------------- commands
 
     void fileCommands()
     {
@@ -269,7 +262,7 @@ private slots:
         QCOMPARE(run({ S("mkdir"), S("-p"), S("a/b") }), 0);
         QCOMPARE(run({ S("put"), local, S("a/b/f") }), 0);
         QCOMPARE(run({ S("ls"), S("a") }), 0);
-        QCOMPARE(out, S("d -1 b\n"));   // XC-2: unknown size
+        QCOMPARE(out, S("d -1 b\n"));
         QCOMPARE(run({ S("stat"), S("a/b/f") }), 0);
         QVERIFY2(out.startsWith(S("-rw------- - - 7 ")), qPrintable(out));
         QVERIFY(out.endsWith(S(" - a/b/f\n")));
@@ -301,7 +294,6 @@ private slots:
         QVERIFY(lines.at(1).endsWith(S(" folder")));
         QVERIFY(lines.at(2).startsWith(S("l")));
         QVERIFY(lines.at(2).endsWith(S(" link")));
-        // Plain ls: type, size, name; sorted by name.
         QCOMPARE(run({ S("ls"), S("d") }), 0);
         QCOMPARE(out.split(QLatin1Char('\n')).at(0), S("- 3 file"));
     }
@@ -344,7 +336,6 @@ private slots:
         QCOMPARE(Cli::shortLine(e), S("d -1 n"));
         e.targetType = EntryType::Unknown;
         QCOMPARE(Cli::shortLine(e), S("l -1 n"));
-        // Names are shown with U+FFFD for escaped bytes, control characters are neutralised.
         e.name = Names::decode("a\xff" "b");
         QCOMPARE(Cli::shortLine(e), S("l -1 a") + QString(QChar(0xfffd)) + S("b"));
         e.name = S("a\x1b[2Jb");
@@ -390,7 +381,6 @@ private slots:
         QVERIFY(folder.value(S("size")).isNull());   // unknown, not -1
         QCOMPARE(link.value(S("type")).toString(), S("symlink"));
         QVERIFY(link.contains(S("targetType")));
-        // XC-4: the name as displayed plus the exact bytes.
         QCOMPARE(bad.value(S("name")).toString(), S("bad") + QString(QChar(0xfffd)) + S("name"));
         QCOMPARE(QByteArray::fromBase64(bad.value(S("nameBytes")).toString().toLatin1()), QByteArray("bad\xff" "name"));
         QCOMPARE(bad.value(S("flags")).toArray().at(0).toString(), S("nameNotUtf8"));
@@ -402,10 +392,10 @@ private slots:
         server->addFile(S("t"), "abcd", utc("2024-05-17T12:30:00Z"));
         server->addSymlink(S("l"), S("t"));
         QCOMPARE(run({ S("stat"), S("l") }), 0);
-        QVERIFY2(out.startsWith(S("-")), qPrintable(out));      // followed: the file
+        QVERIFY2(out.startsWith(S("-")), qPrintable(out));
         QVERIFY(out.contains(S(" 4 ")));
         QCOMPARE(run({ S("lstat"), S("l") }), 0);
-        QVERIFY2(out.startsWith(S("l")), qPrintable(out));      // the link itself
+        QVERIFY2(out.startsWith(S("l")), qPrintable(out));
         QVERIFY(out.endsWith(S(" l\n")));
         QCOMPARE(run({ S("stat"), S("--json"), S("l") }), 0);
         QCOMPARE(json().object().value(S("type")).toString(), S("file"));
@@ -421,7 +411,7 @@ private slots:
         QCOMPARE(run({ S("mkdir"), S("a/b") }), code(Error::NotFound));   // no parents without -p
         QVERIFY(!server->exists(S("a")));
         QCOMPARE(run({ S("mkdir"), S("a") }), 0);
-        QCOMPARE(run({ S("mkdir"), S("a") }), 0);                          // an existing folder is fine ...
+        QCOMPARE(run({ S("mkdir"), S("a") }), 0);
         QCOMPARE(run({ S("mkdir"), S("--exclusive"), S("a") }), code(Error::AlreadyExists));   // ... unless exclusive
         QCOMPARE(run({ S("mkdir"), S("-p"), S("x/y/z") }), 0);
         QVERIFY(server->exists(S("x/y/z")));
@@ -441,7 +431,7 @@ private slots:
         QCOMPARE(run({ S("rmdir"), S("tree/g") }), code(Error::NotADirectory));
         QCOMPARE(run({ S("rm"), S("-r"), S("/") }), code(Error::InvalidName));
         QVERIFY(server->exists(S("tree/g")));
-        // XH-2: links are removed, never followed.
+        // links are removed, never followed.
         QCOMPARE(run({ S("rm"), S("-r"), S("tree") }), 0);
         QVERIFY(!server->exists(S("tree")));
         QVERIFY(server->exists(S("keep/precious")));
@@ -475,12 +465,10 @@ private slots:
         QCOMPARE(run({ S("cp"), S("src/f"), S("copy") }), 0);
         QVERIFY(server->log.contains(S("copy:src/f->copy")));
         QCOMPARE(server->fileData(S("copy")), QByteArray("data"));
-        // NoReplace by default.
         QCOMPARE(run({ S("cp"), S("src/f"), S("dst") }), code(Error::AlreadyExists));
         QCOMPARE(server->fileData(S("dst")), QByteArray("old"));
         QCOMPARE(run({ S("cp"), S("--replace"), S("src/f"), S("dst") }), 0);
         QCOMPARE(server->fileData(S("dst")), QByteArray("data"));
-        // A folder needs -r.
         QVERIFY(run({ S("cp"), S("src"), S("srccopy") }) != 0);
         server->log.clear();
         QCOMPARE(run({ S("cp"), S("-r"), S("src"), S("srccopy") }), 0);
@@ -529,7 +517,6 @@ private slots:
         QCOMPARE(run({ S("cp"), S("--to-url"), url, S("src/f"), S("f") }), code(Error::AlreadyExists));
         QCOMPARE(run({ S("cp"), S("-r"), S("--to-url"), url, S("src"), S("tree") }), 0);
         QVERIFY(QFileInfo::exists(dir.filePath(S("tree/sub/g"))));
-        // The destination's own options and checks.
         QCOMPARE(run({ S("cp"), S("--to-option"), S("novalue"), S("--to-url"), url, S("src/f"), S("h") }), 2);
         QCOMPARE(run({ S("cp"), S("--to-secret-env"), S("X"), S("src/f"), S("h") }), 2);
         QCOMPARE(run({ S("cp"), S("--to-url"), S("file://h.example/x"), S("src/f"), S("h") }), code(Error::Unsupported));
@@ -543,7 +530,7 @@ private slots:
             data.append(static_cast<char>(i));
         FakeServer::instance()->addFile(S("bin"), data);
         QCOMPARE(run({ S("cat"), S("bin") }), 0);
-        QCOMPARE(out.toLatin1(), data);       // a string-backed stream gets the bytes as Latin-1
+        QCOMPARE(out.toLatin1(), data);
         QCOMPARE(run({ S("cat"), S("--offset"), S("10"), S("bin") }), 0);
         QCOMPARE(out.toLatin1(), data.mid(10));
         QCOMPARE(run({ S("cat"), S("--length"), S("5"), S("bin") }), 0);
@@ -591,7 +578,6 @@ private slots:
         QCOMPARE(run({ S("touch"), S("--mtime"), S("2022-03-04T05:06:07"), S("f") }), 0);
         QCOMPARE(server->node(S("f")).modified.toUTC(), utc("2022-03-04T05:06:07Z"));
         QCOMPARE(run({ S("touch"), S("--mtime"), S("yesterday"), S("f") }), 2);
-        // Missing: created empty, with the time.
         QVERIFY(!server->exists(S("new")));
         QCOMPARE(run({ S("touch"), S("--mtime"), S("2019-01-02T03:04:05Z"), S("new") }), 0);
         QVERIFY(server->exists(S("new")));
@@ -615,7 +601,6 @@ private slots:
         QCOMPARE(server->node(S("l")).target, S("t"));
         QCOMPARE(run({ S("readlink"), S("l") }), 0);
         QCOMPARE(out, S("t\n"));
-        // Targets are verbatim: relative and dangling are fine.
         QCOMPARE(run({ S("ln"), S("-s"), S("../x/y"), S("l2") }), 0);
         QCOMPARE(run({ S("readlink"), S("l2") }), 0);
         QCOMPARE(out, S("../x/y\n"));
@@ -637,7 +622,7 @@ private slots:
         QCOMPARE(run({ S("sum"), S("f") }), 0);
         QVERIFY2(out.endsWith(S("  f\n")), qPrintable(out));
         const QString hex = out.left(out.indexOf(QLatin1Char(' ')));
-        QCOMPARE(hex.size(), 64);                                          // sha256 by default
+        QCOMPARE(hex.size(), 64);
         QCOMPARE(run({ S("sum"), S("--algo"), S("md5"), S("f") }), 0);
         QCOMPARE(out.left(out.indexOf(QLatin1Char(' '))).size(), 32);
         QCOMPARE(run({ S("sum"), S("--algo"), S("crc99"), S("f") }), code(Error::Unsupported));
@@ -674,12 +659,10 @@ private slots:
         QCOMPARE(runArgs({ S("shares"), S("extra") }), 2);
         if (!QFileInfo::exists(QStringLiteral(NETVFS_TEST_BACKEND_DIR "/libnetvfs-smb.so")))
             QSKIP("libnetvfs-smb.so is not built");
-        // The share named in the URL is dropped; nothing listens on port 1.
         const int result = runArgs({ S("--url"), S("smb://alice@localhost:1/share"), S("shares") });
         QVERIFY2(result != 0 && result != 2, qPrintable(err));
     }
 
-    // ------------------------------------------------------------- discovery
 
     void discoverCommand()
     {
@@ -700,7 +683,7 @@ private slots:
         ssh.provider = S("sftp");
         ssh.host = S("nas.local");
         ssh.port = 22;
-        const QHostAddress lan(0xC0A80105u);   // a private IPv4 address
+        const QHostAddress lan(0xC0A80105u);
         ssh.addresses << lan;
         DiscoveredService sftp = ssh;
         sftp.serviceType = S("_sftp-ssh._tcp");
@@ -712,7 +695,7 @@ private slots:
         smb.port = 445;
 
         const QVector<Cli::ServiceView> views = Cli::mergeServices({ ssh, smb, sftp });
-        QCOMPARE(views.size(), 2);   // _ssh and _sftp-ssh of one endpoint are one entry
+        QCOMPARE(views.size(), 2);
         QMap<QString, Cli::ServiceView> byProvider;
         for (const Cli::ServiceView &view : views)
             byProvider.insert(view.service.provider, view);
@@ -722,13 +705,11 @@ private slots:
         QCOMPARE(Cli::serviceLine(byProvider.value(S("sftp"))),
                  S("sftp://nas.local:22/\tMy NAS\t_sftp-ssh._tcp,_ssh._tcp\t") + lan.toString());
         QCOMPARE(Cli::serviceLine(byProvider.value(S("smb"))), S("smb://nas.local:445\tMy NAS\t_smb._tcp\t"));
-        // Different ports of one host are different endpoints.
         DiscoveredService other = ssh;
         other.port = 2222;
         QCOMPARE(Cli::mergeServices({ ssh, other }).size(), 2);
     }
 
-    // ---------------------------------------------------------------- prompt
 
     void promptAuthentication()
     {
@@ -790,7 +771,7 @@ private slots:
         QVector<QByteArray> answers;
         QVERIFY(!prompter.answer(QString(), QString(), { hidden }, &answers));
         QVERIFY(answers.isEmpty());
-        QCOMPARE(input.pos(), qint64(0));    // nothing was read
+        QCOMPARE(input.pos(), qint64(0));
     }
 
     void promptSanitisesServerText()
@@ -827,7 +808,6 @@ private slots:
         QVERIFY(answers.isEmpty());
     }
 
-    // --------------------------------------------------------- local backend
 
     void localEndToEnd()
     {

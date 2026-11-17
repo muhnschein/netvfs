@@ -9,10 +9,8 @@
 
 namespace NetVfs {
 
-// Root object of libnetvfs-sftp.so: provider "sftp" of the Rust backends
-// and, so that the SSH code lives only in the SFTP package, the SSH key
-// tools (SPEC-sftp 5.1). The shim stays out of this header: Qt 5.6 moc
-// cannot parse its C++17 nested namespace definitions.
+// Root object of libnetvfs-sftp.so: provider "sftp" of the Rust backends plus the SSH key tools.
+// Shim stays out of this header: Qt 5.6 moc cannot parse C++17 nested namespaces.
 class SftpPlugin : public QObject, public BackendFactory, public SshKeyTools
 {
     Q_OBJECT
@@ -28,6 +26,5 @@ public:
     Result describe(const QByteArray &privateKey, SshKeyMaterial *out) override;
 };
 
-} // namespace NetVfs
-
+}
 #endif

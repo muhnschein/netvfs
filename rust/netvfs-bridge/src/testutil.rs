@@ -1,9 +1,5 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! Test support shared by the unit and the integration tests (feature
-//! `testing`): temporary folders, child processes that do not outlive
-//! their test, and a private session bus.
-//!
-//! A failing set-up is a failing test, so these helpers panic.
+//! Test support (feature `testing`): temporary folders, child processes that do not outlive their test, private session bus. Set-up failure fails the test: helpers panic.
 #![allow(clippy::expect_used, clippy::panic, clippy::missing_panics_doc)]
 
 use std::io::{BufRead, BufReader};
@@ -13,13 +9,12 @@ use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, Instant};
 
-/// A fresh folder below the system's temporary folder, removed on drop.
+/// Fresh folder below the temporary folder, removed on drop.
 #[derive(Debug)]
 pub struct TempDir(PathBuf);
 
 impl TempDir {
-    /// Creates the folder: a new one, never a leftover of a test process
-    /// that was killed (and had the same process id).
+    /// Creates a new folder, never a leftover of a killed test with the same pid.
     #[must_use]
     pub fn new() -> Self {
         static NEXT: AtomicU32 = AtomicU32::new(0);
@@ -69,10 +64,7 @@ impl Drop for TempDir {
     }
 }
 
-/// A child process of a test. It is killed (SIGKILL) and reaped when
-/// dropped, and the kernel kills it when the thread that started it ends
-/// (`PR_SET_PDEATHSIG`): a test that panics, times out or is killed leaves
-/// no process behind. Start it from the test's own thread.
+/// Child process of a test. SIGKILLed and reaped on drop; the kernel kills it when the starting thread ends (`PR_SET_PDEATHSIG`). Start from the test's own thread.
 #[derive(Debug)]
 pub struct TestChild(Child);
 
@@ -90,7 +82,7 @@ impl TestChild {
         &mut self.0
     }
 
-    /// Waits at most `timeout` for the process to end: how it ended.
+    /// Waits at most `timeout` for the process: how it ended.
     pub fn wait_timeout(&mut self, timeout: Duration) -> Option<ExitStatus> {
         let end = deadline(timeout);
         loop {
@@ -104,7 +96,6 @@ impl TestChild {
     }
 }
 
-/// `timeout` from now.
 fn deadline(timeout: Duration) -> Instant {
     Instant::now().checked_add(timeout).expect("a deadline")
 }
@@ -116,16 +107,12 @@ impl Drop for TestChild {
     }
 }
 
-/// Whether a stream socket listens at `path`. Socket file exists after
-/// `bind`, before `listen`: connecting in between gets ECONNREFUSED.
-/// Read from `/proc/net/unix`, no connection made.
+/// Whether a stream socket listens at `path`, read from `/proc/net/unix` (a socket file exists after `bind`, before `listen`).
 #[must_use]
 pub fn listening(path: &Path) -> bool {
     std::fs::read_to_string("/proc/net/unix").is_ok_and(|table| listening_in(&table, path))
 }
 
-/// `/proc/net/unix` rows: `Num RefCount Protocol Flags Type St Inode Path`.
-/// Listening = flag `__SO_ACCEPTCON` (0x10000), type `SOCK_STREAM` (1).
 fn listening_in(table: &str, path: &Path) -> bool {
     table.lines().skip(1).any(|row| {
         let fields: Vec<&str> = row.split_whitespace().collect();
@@ -135,11 +122,7 @@ fn listening_in(table: &str, path: &Path) -> bool {
     })
 }
 
-/// A command that runs `program` as systemd's socket activation would
-/// (`sd_listen_fds`): `listener` at fd 3, `LISTEN_FDS=1`, and `LISTEN_PID`
-/// the process's own pid, which a shell sets before it execs `program` (the
-/// pid is unknown before the fork). Arguments and environment are the
-/// caller's, except that it must not remove the two variables.
+/// Command that runs `program` as socket activation would: `listener` at fd 3, `LISTEN_FDS=1`, `LISTEN_PID` set by a shell to its own pid before exec (unknown before the fork). Must not remove the two variables.
 #[must_use]
 pub fn socket_activated(program: &Path, listener: OwnedFd) -> Command {
     let mut command = Command::new("/bin/sh");
@@ -151,8 +134,7 @@ pub fn socket_activated(program: &Path, listener: OwnedFd) -> Command {
     command
 }
 
-/// The configuration of the private bus: anyone may own any name and send
-/// anything.
+/// Private bus config: anyone may own any name and send anything.
 const BUS_CONFIG: &str = r#"<!DOCTYPE busconfig PUBLIC "-//freedesktop//DTD D-Bus Bus Configuration 1.0//EN"
  "http://www.freedesktop.org/standards/dbus/1.0/busconfig.dtd">
 <busconfig>
@@ -167,8 +149,7 @@ const BUS_CONFIG: &str = r#"<!DOCTYPE busconfig PUBLIC "-//freedesktop//DTD D-Bu
 </busconfig>
 "#;
 
-/// A private `dbus-daemon`, stopped on drop (or with the thread that
-/// started it, see [`TestChild`]).
+/// Private `dbus-daemon`, stopped on drop (or with the starting thread, see [`TestChild`]).
 #[derive(Debug)]
 pub struct TestBus {
     _child: TestChild,
@@ -177,8 +158,7 @@ pub struct TestBus {
 }
 
 impl TestBus {
-    /// Starts the bus; `None` when `dbus-daemon` is not installed (the
-    /// caller skips its test).
+    /// Starts the bus; `None` without `dbus-daemon` (caller skips).
     #[must_use]
     pub fn start() -> Option<Self> {
         Self::start_program(Path::new("dbus-daemon"))
@@ -205,7 +185,7 @@ impl TestBus {
         Some(Self { _child: child, address, _dir: dir })
     }
 
-    /// The bus address, as `DBUS_SESSION_BUS_ADDRESS` would carry it.
+    /// Bus address as `DBUS_SESSION_BUS_ADDRESS` would carry it.
     #[must_use]
     pub fn address(&self) -> &str {
         &self.address
@@ -221,7 +201,6 @@ impl TestBus {
     }
 }
 
-/// The first line `dbus-daemon --print-address=1` prints.
 fn read_address(child: &mut Child) -> String {
     let mut address = String::new();
     BufReader::new(child.stdout.take().expect("piped stdout")).read_line(&mut address).expect("bus address");
@@ -242,7 +221,6 @@ mod tests {
         assert!(!listening(&stream));
         let listener = std::os::unix::net::UnixListener::bind(&stream).unwrap();
         assert!(listening(&stream));
-        // Bound, never listening: a file at the path all the same.
         let _bound = std::os::unix::net::UnixDatagram::bind(&datagram).unwrap();
         assert!(datagram.exists() && !listening(&datagram));
         drop(listener);
@@ -266,7 +244,6 @@ mod tests {
             at
         ));
         assert!(!listening_in(&row("00010000", "0001", "/t/bridge.sock"), Path::new("/t/bridge")));
-        // First row is the header.
         assert!(!listening_in(&line("00010000", "0001", "/t/bridge.sock"), at));
     }
 
@@ -282,7 +259,6 @@ mod tests {
 
     #[test]
     fn leftovers_are_skipped() {
-        // Folders a killed test process with this process id left behind.
         let mut planted = Vec::new();
         for n in 0..8 {
             let path = std::env::temp_dir().join(format!("nvb-test-{}-{n}", std::process::id()));
@@ -305,7 +281,6 @@ mod tests {
         assert_eq!(child.wait_timeout(Duration::from_millis(50)), None);
         let pid = i32::try_from(child.child().id()).unwrap();
         drop(child);
-        // Reaped as well: the pid names no process (nor a zombie) any more.
         assert!(!crate::sys::lock::process_exists(pid));
         let mut child = TestChild::spawn(Command::new("sh").args(["-c", "exit 3"])).unwrap();
         assert_eq!(child.wait_timeout(Duration::from_secs(10)).unwrap().code(), Some(3));
@@ -329,7 +304,6 @@ mod tests {
 
     #[test]
     fn bus_or_skip() {
-        // Installed (as where these tests run): a bus, not a skipped test.
         let installed = std::env::var_os("PATH")
             .is_some_and(|path| std::env::split_paths(&path).any(|d| d.join("dbus-daemon").is_file()));
         assert_eq!(TestBus::start().is_some(), installed);
@@ -339,7 +313,6 @@ mod tests {
     #[test]
     #[should_panic(expected = "dbus-daemon: ")]
     fn other_failures_fail() {
-        // Not a program: a broken set-up, not a missing daemon.
         let _ = TestBus::start_program(Path::new("/"));
     }
 }

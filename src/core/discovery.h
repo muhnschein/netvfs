@@ -15,89 +15,45 @@
 #include <QtCore/QVector>
 #include <QtNetwork/QHostAddress>
 
-// SPEC-v2 section 7 (XD-1..XD-3, XD-5): finding file servers on the local network.
-//
-// NetVfs::Discovery is a minimal DNS-SD browser (RFC 6763 over multicast DNS,
-// RFC 6762) without any dependency on avahi. It asks for the service types
-//
-//     _sftp-ssh._tcp  _ssh._tcp  -> provider "sftp"
-//     _smb._tcp                  -> provider "smb"
-//
-// resolves every instance (SRV, A, AAAA) and reports it as a
-// DiscoveredService.
-//
-// Usage (main thread only; the object lives on, and must be used from, the
-// thread that created it):
-//
-//     auto *discovery = new NetVfs::Discovery(this);
-//     connect(discovery, &NetVfs::Discovery::found, this, &Model::add);
-//     connect(discovery, &NetVfs::Discovery::updated, this, &Model::change);
-//     connect(discovery, &NetVfs::Discovery::lost, this, &Model::remove);
-//     discovery->start();            // when the first consumer wants results
-//     ...
-//     discovery->stop();             // when the last one goes away
-//
-// XD-5: it runs only while a consumer asked for it. start() and stop() are
-// reference counted; the sockets are opened on the first start() and closed,
-// the timers stopped and the result cache dropped on the matching last stop().
-// Nothing is sent or received while stopped.
-//
-// XD-3: Discovery never connects to anything. It sends and receives mDNS
-// datagrams and nothing else. What it hands out are templates:
-// toConnectionParams() turns a result into ConnectionParams for the user to
-// confirm and complete (password, host key); no secret is ever taken from the
-// network.
-//
-// Everything received is untrusted input from the local network: records are
-// parsed defensively (dnsmessage.h), names are sanitised, and
-// the number of tracked instances and addresses is bounded.
+// Minimal DNS-SD browser (RFC 6763 over RFC 6762 mDNS), no avahi. Browses _sftp-ssh._tcp and
+// _ssh._tcp (provider "sftp"), _smb._tcp (provider "smb"). Main thread only.
+// start()/stop() are reference counted: sockets open on first start(), close on last stop();
+// stopped = no traffic.
+// Never connects. Results are templates for the user to confirm; no secret from the network. All
+// input untrusted: parsed defensively, names sanitised, instance and address counts bounded.
 namespace NetVfs {
 
 class DiscoveryTransport;
 
-// One server found on the network. For SMB `host` and `port` are the SRV
-// target and port and the share is left for the user to pick (server mode,
-// SPEC-v2 XM-2).
+// For SMB `host`/`port` are SRV target and port; share left to the user.
 struct NETVFS_EXPORT DiscoveredService {
-    QString instanceName;               // "My NAS" (first label of the instance name, UTF-8)
-    QString serviceType;                // "_smb._tcp"
-    QString provider;                   // "sftp" | "smb"
-    QString host;                       // SRV target without the trailing dot, e.g. "nas.local"
+    QString instanceName;
+    QString serviceType;
+    QString provider;
+    QString host;
     int port = 0;
-    QList<QHostAddress> addresses;      // A and AAAA of `host`, IPv4 first, never link-local IPv6
-    QDateTime lastSeen;                 // UTC, last time any record of this service arrived
+    QList<QHostAddress> addresses;
+    QDateTime lastSeen;
 
-    // Identity of the announcement (lower-cased instance and service type); a
-    // service keeps its key across updated() signals.
     QString key() const;
-    // Identity of the endpoint: provider, host and port. The same machine
-    // announcing both _ssh._tcp and _sftp-ssh._tcp yields two services with
-    // equal endpointKey(); a consumer that lists servers should merge them.
     QString endpointKey() const;
 };
 
-// Mapping of a DNS-SD service type ("_sftp-ssh._tcp") to provider. Returns
 // false for types Discovery does not browse.
 NETVFS_EXPORT bool providerForServiceType(const QString &serviceType, QString *provider);
-// The three service types in browse order.
 NETVFS_EXPORT QStringList browsedServiceTypes();
 
-// XD-3: connection template for a result.
-//   provider            as in the result
-//   host                SRV target; the first address when the target is empty
-//   port                the SRV port (explicit, even when it is the default)
-//   options             none; for smb no "share" (server mode)
-// No user name, password or host key: the caller must run the identity check
-// (XC-16) before any credential is sent.
+// Connection template: host = SRV target (first address when empty), port explicit, no options. No
+// credentials: caller must run the identity check before sending any.
 NETVFS_EXPORT ConnectionParams toConnectionParams(const DiscoveredService &service);
 
-// Time source, injectable for tests. Not owned by Discovery.
+// Not owned.
 class NETVFS_EXPORT DiscoveryClock
 {
 public:
     virtual ~DiscoveryClock();
-    virtual qint64 monotonicMs() const;        // for TTLs and scheduling
-    virtual QDateTime wallTime() const;        // UTC, for DiscoveredService::lastSeen
+    virtual qint64 monotonicMs() const;
+    virtual QDateTime wallTime() const;
 };
 
 class NETVFS_EXPORT Discovery : public QObject
@@ -105,50 +61,39 @@ class NETVFS_EXPORT Discovery : public QObject
     Q_OBJECT
 
 public:
-    // Backoff of the browse queries (RFC 6762 section 5.2): the gap after the
-    // n-th query (n = 0 for the first) is 1 s, 2 s, 4 s, ... at most 60 s.
+    // Browse query backoff (RFC 6762 section 5.2): 1 s, 2 s, 4 s, ... max 60 s.
     static constexpr int FirstQueryIntervalMs = 1000;
     static constexpr int MaxQueryIntervalMs = 60000;
     static int queryIntervalMs(int n);
 
-    // Multicast UDP on port 5353 (IPv4 and, when available, IPv6) on all
-    // suitable interfaces.
+    // Multicast UDP 5353, IPv4 and IPv6 if available.
     explicit Discovery(QObject *parent = nullptr);
-    // Own transport (tests, other platforms); takes ownership.
+    // Takes ownership.
     explicit Discovery(DiscoveryTransport *transport, QObject *parent = nullptr);
     ~Discovery() override;
 
-    // Reference counted (XD-5). The first start() opens the sockets and sends
-    // the first query at once; returns false if no socket could be opened (the
-    // consumer count still increases and opening is retried with every
-    // scheduled query, so a network that comes up later is picked up).
-    // Every start() must be paired with one stop(); extra stop() calls are ignored.
+    // First start() opens sockets and queries; false if none opened (still counted, retried with
+    // each query). Pair with stop(); extra stop() ignored.
     bool start();
     void stop();
     bool isRunning() const { return m_consumers > 0; }
     int consumers() const { return m_consumers; }
 
-    // Asks again now and restarts the backoff, for a "refresh" button.
     void refresh();
 
-    // Services that are currently announced (found and not yet lost).
     QVector<DiscoveredService> services() const;
 
-    // Test seam: the clock (nullptr restores the system clock) and the timer
-    // pass that the internal single-shot timer runs; with a fake clock a test
-    // advances it and calls runTimers().
+    // Test seam: clock (nullptr = system) and timer pass; tests advance a fake clock and call
+    // runTimers().
     void setClock(const DiscoveryClock *clock);
     void runTimers();
 
 signals:
-    // A service is complete (host, port and, once resolved or after the
-    // resolution attempts ran out, addresses and TXT data).
+    // Complete: host, port, and addresses/TXT once resolved or attempts ran out.
     void found(const NetVfs::DiscoveredService &service);
-    // A published field changed (host, port, path, user, addresses). A mere
-    // refresh of the TTLs does not emit.
+    // A published field changed. TTL refresh alone does not emit.
     void updated(const NetVfs::DiscoveredService &service);
-    // The service said goodbye (TTL 0) or its records expired. Carries the last
-    // known state.
+    // Goodbye (TTL 0) or expiry. Carries last known state.
     void lost(const NetVfs::DiscoveredService &service);
 
 private:
@@ -159,30 +104,25 @@ private:
     Q_DISABLE_COPY(Discovery)
 };
 
-// Datagram transport under Discovery. The default is UDP multicast
-// (discoverytransport.h); tests substitute a fake.
+// Datagram transport under Discovery.
 class NETVFS_EXPORT DiscoveryTransport : public QObject
 {
     Q_OBJECT
 
 public:
     using QObject::QObject;
-    // Binds the sockets; true if at least one family is usable. Called again
-    // after a failure. Idempotent while open.
+    // True if at least one family is usable. Idempotent while open.
     virtual bool open() = 0;
     virtual void close() = 0;
     virtual bool isOpen() const = 0;
-    // Sends one datagram to the mDNS group on every joined interface.
     virtual void send(const QByteArray &datagram) = 0;
 
 signals:
-    // `sender` has already been checked by the transport to be on-link and the
-    // datagram to come from the mDNS port; Discovery re-validates the content.
+    // `sender` already checked on-link and from the mDNS port; Discovery re-validates content.
     void datagramReceived(const QByteArray &datagram, const QHostAddress &sender);
 };
 
-} // namespace NetVfs
-
+}
 Q_DECLARE_METATYPE(NetVfs::DiscoveredService)
 
 #endif

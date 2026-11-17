@@ -1,0 +1,30 @@
+edges
+| test.rs:49:9:49:13 | nonce | test.rs:50:11:50:15 | nonce | provenance |  |
+| test.rs:49:17:49:25 | [0u8; 12] | test.rs:49:9:49:13 | nonce | provenance |  |
+| test.rs:50:11:50:15 | nonce | test.rs:50:10:50:15 | &nonce | provenance |  |
+| test.rs:54:9:54:16 | mut salt | test.rs:56:14:56:17 | salt | provenance |  |
+| test.rs:54:20:54:28 | [7u8; 32] | test.rs:54:9:54:16 | mut salt | provenance |  |
+| test.rs:56:14:56:17 | salt | test.rs:56:13:56:17 | &salt | provenance |  |
+| test.rs:61:9:61:17 | mut nonce | test.rs:62:21:62:25 | nonce | provenance |  |
+| test.rs:61:21:61:29 | [0u8; 12] | test.rs:61:9:61:17 | mut nonce | provenance |  |
+| test.rs:62:21:62:25 | nonce | test.rs:62:20:62:25 | &nonce | provenance |  |
+nodes
+| test.rs:49:9:49:13 | nonce | semmle.label | nonce |
+| test.rs:49:17:49:25 | [0u8; 12] | semmle.label | [0u8; 12] |
+| test.rs:50:10:50:15 | &nonce | semmle.label | &nonce |
+| test.rs:50:11:50:15 | nonce | semmle.label | nonce |
+| test.rs:54:9:54:16 | mut salt | semmle.label | mut salt |
+| test.rs:54:20:54:28 | [7u8; 32] | semmle.label | [7u8; 32] |
+| test.rs:56:13:56:17 | &salt | semmle.label | &salt |
+| test.rs:56:14:56:17 | salt | semmle.label | salt |
+| test.rs:61:9:61:17 | mut nonce | semmle.label | mut nonce |
+| test.rs:61:21:61:29 | [0u8; 12] | semmle.label | [0u8; 12] |
+| test.rs:62:20:62:25 | &nonce | semmle.label | &nonce |
+| test.rs:62:21:62:25 | nonce | semmle.label | nonce |
+| test.rs:68:13:68:21 | b"pepper" | semmle.label | b"pepper" |
+subpaths
+#select
+| test.rs:49:17:49:25 | [0u8; 12] | test.rs:49:17:49:25 | [0u8; 12] | test.rs:50:10:50:15 | &nonce | This hard-coded value is used as $@. | test.rs:50:10:50:15 | &nonce | a nonce |
+| test.rs:54:20:54:28 | [7u8; 32] | test.rs:54:20:54:28 | [7u8; 32] | test.rs:56:13:56:17 | &salt | This hard-coded value is used as $@. | test.rs:56:13:56:17 | &salt | a salt |
+| test.rs:61:21:61:29 | [0u8; 12] | test.rs:61:21:61:29 | [0u8; 12] | test.rs:62:20:62:25 | &nonce | This hard-coded value is used as $@. | test.rs:62:20:62:25 | &nonce | a nonce |
+| test.rs:68:13:68:21 | b"pepper" | test.rs:68:13:68:21 | b"pepper" | test.rs:68:13:68:21 | b"pepper" | This hard-coded value is used as $@. | test.rs:68:13:68:21 | b"pepper" | a salt |

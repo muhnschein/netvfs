@@ -1,8 +1,5 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! The `Walk` body (`walkOnWorker`): entries stream in `WalkBatch` signals
-//! of at most [`MAX_LIST_BATCH`] items; unreadable sub-folders are skipped,
-//! as a file browser expects. `JobFinished` carries `entries`, the number
-//! of entries sent.
+//! The `Walk` body: entries stream in `WalkBatch` signals of at most [`MAX_LIST_BATCH`] items; unreadable sub-folders are skipped, as a file browser expects. `JobFinished` carries `entries`, the number sent.
 
 use super::batch::{Batcher, drain, walk_item_wire_size};
 use super::{Extra, JobOutcome, count};
@@ -15,7 +12,7 @@ use netvfs_bridge_proto::limits::MAX_LIST_BATCH;
 use netvfs_bridge_proto::{WireEntry, WireWalkItem};
 use std::sync::atomic::AtomicBool;
 
-/// The backend's walk options for `opts` (a negative depth: unlimited).
+/// The backend's walk options for `opts`; negative depth: unlimited.
 #[must_use]
 pub fn walk_options(opts: &WalkOpts) -> WalkOptions {
     WalkOptions {
@@ -34,8 +31,6 @@ pub fn walk_extra(entries: i64) -> Extra {
     extra
 }
 
-/// Streams what `run` visits through batches handed to `emit`, counting
-/// the entries sent.
 fn stream<E: FnMut(Vec<WireWalkItem>, usize) -> bool>(
     budget: &FlowBudget,
     cancel: &AtomicBool,
@@ -55,8 +50,7 @@ fn stream<E: FnMut(Vec<WireWalkItem>, usize) -> bool>(
     JobOutcome { result, extra: walk_extra(entries) }
 }
 
-/// Walks the tree at `root` and hands every batch to `emit` (see
-/// [`walk_batches`]).
+/// Walks the tree at `root` and hands every batch to `emit` (see [`walk_batches`]).
 pub fn walk<E: FnMut(Vec<WireWalkItem>, usize) -> bool>(
     conn: &mut Conn,
     root: &[u8],

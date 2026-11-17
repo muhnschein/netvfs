@@ -86,8 +86,8 @@
   {
     "name": "XB-6 first Hello does not ask",
     "file": "rust/netvfs-bridge/src/core/admin.rs",
-    "search": "        if self.consent == Consent::Unknown {\n            self.request_consent(); // XB-6: first Hello while unknown",
-    "replace": "        if false {\n            self.request_consent(); // XB-6: first Hello while unknown",
+    "search": "        if self.consent == Consent::Unknown {\n            self.request_consent();",
+    "replace": "        if false {\n            self.request_consent();",
     "test": "cd rust && NETVFS_BRIDGE_FFI=$PWD/../build/lib/netvfs/libnetvfs-bridge-ffi.so NETVFS_BRIDGE_FFI_FAKE=$PWD/../build/lib/libnetvfs-bridge-ffi-fake.so NETVFS_BACKEND_PATH=$PWD/../build/lib/netvfs/test-backends cargo test --locked -q -p netvfs-bridge --features testing --test server"
   },
   {

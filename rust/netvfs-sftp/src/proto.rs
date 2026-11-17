@@ -1,9 +1,7 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! SFTP version 3 (draft-ietf-secsh-filexfer-02) and the OpenSSH
-//! extensions this backend uses: message types, status codes, open flags,
-//! [`Attrs`], the server's replies ([`Reply`]) and `VERSION`
-//! ([`ServerVersion`]). Decoders check every count and length against the
-//! caps of design §3.2 before anything is allocated.
+//! SFTP version 3 (draft-ietf-secsh-filexfer-02) and the OpenSSH extensions in use: message types, status codes,
+//! open flags, [`Attrs`], [`Reply`], [`ServerVersion`]. Decoders check every count and length against a cap
+//! before allocating.
 
 use crate::wire::{Packet, Reader, WireError};
 
@@ -120,7 +118,7 @@ pub const MAX_EXTENSION_FIELD: usize = 4096;
 /// The part of a status message that is kept.
 pub const MAX_MESSAGE: usize = 1024;
 
-/// File attributes (draft-02 §5); `None` where the flag is not set.
+/// File attributes; `None` where the flag is not set.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Attrs {
     /// Size in bytes.
@@ -134,9 +132,7 @@ pub struct Attrs {
 }
 
 impl Attrs {
-    /// Reads an attribute block; extended pairs are skipped, at most
-    /// [`MAX_ATTR_EXTENSIONS`] of them. Unknown flag bits carry no fields
-    /// in v3 and are ignored.
+    /// Reads an attribute block; skips at most [`MAX_ATTR_EXTENSIONS`] extended pairs; unknown flag bits ignored.
     ///
     /// # Errors
     /// A short block or too many extended pairs.
@@ -199,8 +195,7 @@ impl Attrs {
     }
 }
 
-/// One entry of a `NAME` reply; the `longname` is skipped (it is text for
-/// people, not parsed).
+/// One `NAME` entry; the `longname` is skipped.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Name {
     /// The file name, or the path of `REALPATH` and `READLINK`.

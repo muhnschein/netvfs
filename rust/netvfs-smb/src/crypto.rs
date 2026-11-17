@@ -1,23 +1,12 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! The SMB 3.1.1 crypto glue (phase 3 design §5.2). This is the only module
-//! that imports a RustCrypto crate or the OS random generator
-//! (`tools/ci/check-crypto-fence.sh`), and it holds no primitive, no table
-//! and no constant-time code of its own: hashing, HMAC, CMAC, AES-GCM and
-//! every tag comparison are RustCrypto's.
+//! SMB 3.1.1 crypto glue. Only module that imports a RustCrypto crate or the OS random generator (`tools/ci/check-crypto-fence.sh`). Holds no primitive, table or constant-time code of its own: hashing, HMAC, CMAC, AES-GCM and every tag comparison are RustCrypto's.
 //!
-//! What MS-SMB2 mandates on top of the primitives, and nothing else:
-//! - [`PreauthHash`]: H = SHA-512(H ‖ message) over NEGOTIATE and
-//!   SESSION_SETUP (MS-SMB2 3.2.5.2, 3.2.5.3.1).
-//! - [`kdf`]: SP800-108 counter mode with HMAC-SHA256, one block
-//!   (MS-SMB2 3.1.4.2).
-//! - [`SigningKey`]: AES-128-CMAC over the message with the signature field
-//!   zeroed; the comparison is `cmac`'s `verify_slice` (`subtle`), never
-//!   `==` (MS-SMB2 3.1.4.1).
-//! - [`SealKey`] and [`OpenKey`]: AES-128/256-GCM in a TRANSFORM_HEADER,
-//!   nonce = 64-bit per-session counter ‖ 4 random bytes, AAD = header bytes
-//!   20..52, tag in the header's Signature field (MS-SMB2 2.2.41, 3.1.4.3).
-//! - [`random`]: the OS generator, for the nonce salt, ClientGuid and the
-//!   preauth salt.
+//! What MS-SMB2 mandates on top, nothing else:
+//! - [`PreauthHash`]: H = SHA-512(H ‖ message) over NEGOTIATE and SESSION_SETUP (MS-SMB2 3.2.5.2, 3.2.5.3.1).
+//! - [`kdf`]: SP800-108 counter mode, HMAC-SHA256, one block (MS-SMB2 3.1.4.2).
+//! - [`SigningKey`]: AES-128-CMAC over the message with the signature field zeroed; comparison is `cmac`'s `verify_slice` (`subtle`), never `==` (MS-SMB2 3.1.4.1).
+//! - [`SealKey`], [`OpenKey`]: AES-128/256-GCM in a TRANSFORM_HEADER; nonce = 64-bit per-session counter ‖ 4 random bytes; AAD = header bytes 20..52; tag in the header's Signature field (MS-SMB2 2.2.41, 3.1.4.3).
+//! - [`random`]: OS generator, for nonce salt, ClientGuid, preauth salt.
 
 use std::fmt;
 use std::ops::Range;
@@ -92,8 +81,7 @@ impl fmt::Display for CryptoError {
 
 impl std::error::Error for CryptoError {}
 
-/// Fills `buf` from the OS random generator (`getrandom`): the nonce salt,
-/// and NEGOTIATE's ClientGuid and preauth salt (MS-SMB2 2.2.3, 2.2.3.1.1).
+/// Fills `buf` from the OS random generator (`getrandom`).
 ///
 /// # Errors
 /// [`CryptoError::NoRandomness`] when the OS generator fails.
@@ -101,12 +89,7 @@ pub fn random(buf: &mut [u8]) -> Result<(), CryptoError> {
     getrandom::fill(buf).map_err(|_getrandom_error| CryptoError::NoRandomness)
 }
 
-// ---------------------------------------------------------------------------
-// Preauth integrity
-// ---------------------------------------------------------------------------
-
-/// The SMB 3.1.1 preauth integrity hash value (SHA-512 chain; starts as 64
-/// zero bytes).
+/// The preauth integrity hash value (SHA-512 chain; starts as 64 zero bytes).
 #[derive(Clone, PartialEq, Eq)]
 pub struct PreauthHash([u8; PREAUTH_HASH_LEN]);
 
@@ -117,8 +100,7 @@ impl Default for PreauthHash {
 }
 
 impl PreauthHash {
-    /// H = SHA-512(H ‖ message), over the whole SMB2 message as sent or
-    /// received (header included, transport length excluded).
+    /// H = SHA-512(H ‖ message) over the whole SMB2 message as sent or received (header included, transport length excluded).
     pub fn update(&mut self, message: &[u8]) {
         self.0 = Sha512::new().chain_update(self.0).chain_update(message).finalize().into();
     }
@@ -140,14 +122,7 @@ impl fmt::Debug for PreauthHash {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Key derivation
-// ---------------------------------------------------------------------------
-
-/// SP800-108 KDF in counter mode, PRF HMAC-SHA256, r = 32, as MS-SMB2
-/// 3.1.4.2 uses it: `K = HMAC-SHA256(key, [1]₃₂ ‖ label ‖ 0x00 ‖ context ‖
-/// [L]₃₂)`, truncated to L bits. One PRF block suffices because L ≤ 256.
-/// `N` is 16 (L = 128) or 32 (L = 256).
+/// SP800-108 KDF in counter mode, PRF HMAC-SHA256, r = 32 (MS-SMB2 3.1.4.2): `K = HMAC-SHA256(key, [1]₃₂ ‖ label ‖ 0x00 ‖ context ‖ [L]₃₂)`, truncated to L bits. One PRF block as L ≤ 256. `N` is 16 (L = 128) or 32 (L = 256).
 ///
 /// # Errors
 /// [`CryptoError::KeyLength`] for any other `N` or an empty key.
@@ -197,8 +172,7 @@ pub struct SessionKeys {
     pub open: Option<OpenKey>,
 }
 
-/// `Session.SessionKey`: the first 16 bytes of the GSS key, right-padded
-/// with zeros.
+/// `Session.SessionKey`: first 16 bytes of the GSS key, right-padded with zeros.
 fn session_key(gss_key: &[u8]) -> Zeroizing<[u8; 16]> {
     let mut key = Zeroizing::new([0u8; 16]);
     for (d, s) in key.iter_mut().zip(gss_key) {
@@ -207,9 +181,7 @@ fn session_key(gss_key: &[u8]) -> Zeroizing<[u8; 16]> {
     key
 }
 
-/// The GCM key for one direction: AES-128 keys come from `Session.SessionKey`
-/// with L = 128, AES-256 keys from `Session.FullSessionKey` (the whole GSS
-/// key) with L = 256.
+/// GCM key for one direction: AES-128 from `Session.SessionKey` (L = 128), AES-256 from `Session.FullSessionKey` (whole GSS key, L = 256).
 fn gcm_key(gss_key: &[u8], cipher: Cipher, label: &[u8], context: &[u8]) -> Result<GcmKey, CryptoError> {
     Ok(match cipher {
         Cipher::Aes128Gcm => GcmKey::Aes128(kdf::<16>(&session_key(gss_key)[..], label, context)?),
@@ -217,8 +189,7 @@ fn gcm_key(gss_key: &[u8], cipher: Cipher, label: &[u8], context: &[u8]) -> Resu
     })
 }
 
-/// Derives the session's keys from the GSS (NTLM) session key and the
-/// session's final preauth hash.
+/// Derives the session's keys from the GSS (NTLM) session key and the final preauth hash.
 ///
 /// # Errors
 /// [`CryptoError::KeyLength`] for an empty GSS key;
@@ -244,10 +215,6 @@ pub fn derive_session_keys(
     Ok(SessionKeys { signing, seal, open })
 }
 
-// ---------------------------------------------------------------------------
-// Signing
-// ---------------------------------------------------------------------------
-
 /// AES-128-CMAC signing key.
 pub struct SigningKey(Zeroizing<[u8; 16]>);
 
@@ -269,9 +236,7 @@ impl SigningKey {
             .map_err(|_invalid_length| CryptoError::KeyLength)
     }
 
-    /// Signs one SMB2 message in place: zeroes the Signature field, computes
-    /// AES-CMAC over the whole message (header with SMB2_FLAGS_SIGNED
-    /// already set, then body) and stores it.
+    /// Signs one SMB2 message in place: zeroes the Signature field, AES-CMAC over the whole message (header with SMB2_FLAGS_SIGNED set, then body), stores it.
     ///
     /// # Errors
     /// [`CryptoError::ShortMessage`] if `msg` has no complete header.
@@ -284,9 +249,7 @@ impl SigningKey {
         Ok(())
     }
 
-    /// Verifies the signature of one SMB2 message without changing it: the
-    /// MAC runs over the header with the Signature field taken as zeros, and
-    /// the comparison is constant time.
+    /// Verifies the signature without changing the message: MAC over the header with the Signature field as zeros; constant-time comparison.
     ///
     /// # Errors
     /// [`CryptoError::BadSignature`] on mismatch,
@@ -302,10 +265,6 @@ impl SigningKey {
         mac.verify_slice(signature).map_err(|_mac_error| CryptoError::BadSignature)
     }
 }
-
-// ---------------------------------------------------------------------------
-// Encryption
-// ---------------------------------------------------------------------------
 
 /// GCM key bytes for one direction.
 enum GcmKey {
@@ -369,8 +328,7 @@ pub struct SealKey {
     session_id: u64,
     /// Next nonce counter value; the session ends before it wraps.
     counter: u64,
-    /// Random per-session nonce bytes 8..12 (defence in depth on top of the
-    /// counter).
+    /// Random per-session nonce bytes 8..12 (on top of the counter).
     salt: [u8; 4],
 }
 
@@ -406,8 +364,7 @@ impl SealKey {
         self.key.cipher()
     }
 
-    /// Wraps `msg` (one SMB2 message or compound chain, unsigned) in a
-    /// TRANSFORM_HEADER with the next nonce.
+    /// Wraps `msg` (one SMB2 message or compound chain, unsigned) in a TRANSFORM_HEADER with the next nonce.
     ///
     /// # Errors
     /// [`CryptoError::NonceExhausted`] once the counter is used up: the
@@ -422,8 +379,7 @@ impl SealKey {
         self.seal_with_nonce(&nonce, msg)
     }
 
-    /// The TRANSFORM_HEADER construction for a given 12-byte nonce. Private:
-    /// nonces only come from [`Self::seal`]; known-answer tests call this.
+    /// TRANSFORM_HEADER for a given 12-byte nonce. Private: nonces only come from [`Self::seal`]; known-answer tests call this.
     fn seal_with_nonce(&self, nonce: &[u8; 12], msg: &[u8]) -> Result<Vec<u8>, CryptoError> {
         let size =
             u32::try_from(msg.len()).map_err(|_overflow| CryptoError::Malformed("message too long"))?;
@@ -468,12 +424,7 @@ impl OpenKey {
         Ok(Self { key: GcmKey::from_bytes(cipher, key)?, session_id })
     }
 
-    /// Checks and decrypts one TRANSFORM_HEADER frame, returning the SMB2
-    /// message(s) inside. Refuses a short frame, a wrong ProtocolId, Flags
-    /// other than "encrypted", a session id other than ours and an
-    /// OriginalMessageSize that does not match the frame, before any
-    /// decryption; then GCM verifies the tag over the AAD (header bytes
-    /// 20..52) and the ciphertext.
+    /// Checks and decrypts one TRANSFORM_HEADER frame. Before decryption refuses a short frame, wrong ProtocolId, Flags other than "encrypted", foreign session id, OriginalMessageSize not matching the frame; then GCM verifies the tag over the AAD (header bytes 20..52) and ciphertext.
     ///
     /// # Errors
     /// See [`CryptoError`]; no plaintext is returned unless the tag verifies.
@@ -502,8 +453,7 @@ impl OpenKey {
     }
 }
 
-/// The server's side of a session's keys (S2C sealing, C2S opening), for
-/// fake servers in the tests of other modules.
+/// The server's side of a session's keys, for fake servers in tests of other modules.
 #[cfg(test)]
 pub(crate) fn server_side_keys(
     gss_key: &[u8],

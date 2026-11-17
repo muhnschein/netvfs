@@ -1,8 +1,5 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! Direct TCP transport (MS-SMB2 2.1): every message goes in a frame of a
-//! zero byte, a 24-bit big-endian length and the message. A received
-//! length is checked against the current cap before anything is allocated
-//! (design §3.2).
+//! Direct TCP transport (MS-SMB2 2.1): frame = zero byte, 24-bit big-endian length, message. Received length is checked against the current cap before allocating.
 
 use std::net::SocketAddr;
 use std::time::Duration;
@@ -22,7 +19,7 @@ pub const INITIAL_MAX_FRAME: usize = 64 * 1024;
 /// The SMB port.
 pub const DEFAULT_PORT: u16 = 445;
 
-/// The addresses of `host` (C-17: the reason names no host).
+/// The addresses of `host` (the reason names no host).
 ///
 /// # Errors
 /// `NetworkUnreachable` when the name does not resolve.
@@ -53,7 +50,6 @@ pub async fn connect(addrs: &[SocketAddr], timeout: Duration) -> Result<(TcpStre
         for addr in addrs {
             match TcpStream::connect(addr).await {
                 Ok(stream) => {
-                    // Small requests go out at once; nothing waits for a full segment.
                     stream.set_nodelay(true).map_err(|e| Error::Unreachable(e.to_string()))?;
                     return Ok((stream, *addr));
                 }
@@ -91,7 +87,6 @@ pub async fn read_frame<R: AsyncRead + Unpin>(stream: &mut R, max: usize) -> Res
     if head[0] != 0 {
         return Err(protocol("transport header: the first byte is not zero"));
     }
-    // The other three bytes: the length, big-endian.
     let len = from_u32(u32::from_be_bytes(head))?;
     if len > max {
         return Err(protocol(format!("a frame of {len} bytes, above the cap of {max}")));

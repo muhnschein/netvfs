@@ -52,7 +52,7 @@ impl Fail {
         self
     }
 
-    /// The bare XC-21 name, for `ListDone` and `JobFinished`.
+    /// The bare error name, for `ListDone` and `JobFinished`.
     pub fn bare(&self) -> &str {
         self.full.strip_prefix(ERROR_PREFIX).unwrap_or(&self.full)
     }

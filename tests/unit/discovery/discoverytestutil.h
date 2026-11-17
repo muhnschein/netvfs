@@ -8,7 +8,6 @@
 #include <QtCore/QByteArray>
 #include <QtCore/QString>
 
-// Helpers shared by the DNS codec tests and the discovery tests.
 namespace NetVfs::Test {
 
 // Builds a packet byte by byte, the way a capture would look: no encoder
@@ -23,9 +22,7 @@ public:
     }
     Pkt &u16(int v) { return u8((v >> 8) & 0xFF).u8(v & 0xFF); }
     Pkt &u32(quint32 v) { return u16(static_cast<int>(v >> 16)).u16(static_cast<int>(v & 0xFFFF)); }
-    // One label: length byte and bytes.
     Pkt &label(const QByteArray &l) { return u8(l.size()).raw(l); }
-    // A whole name, uncompressed, with the root label.
     Pkt &name(const QByteArray &dotted)
     {
         const QList<QByteArray> parts = dotted.split('.');
@@ -46,7 +43,6 @@ public:
         return u16(id).u16(flags).u16(qd).u16(an).u16(ns).u16(ar);
     }
     int size() const { return m_b.size(); }
-    // Patches a 16 bit value written earlier (record lengths).
     Pkt &patch16(int at, int v)
     {
         m_b[at] = static_cast<char>((v >> 8) & 0xFF);
@@ -64,7 +60,6 @@ inline QByteArray hexBytes(const char *hex)
     return QByteArray::fromHex(QByteArray(hex));
 }
 
-// Record builders for crafted responses.
 inline Dns::Record ptrRecord(const QByteArray &type, const QByteArray &instance, quint32 ttl = 4500)
 {
     Dns::Record r;
@@ -120,7 +115,6 @@ inline Dns::Message response(const QVector<Dns::Record> &answers, const QVector<
     return m;
 }
 
-// A complete announcement in one datagram, as avahi sends it.
 inline Dns::Message announcement(const QByteArray &type, const QByteArray &instance, const QByteArray &host,
                                  quint16 port, const QString &ip, const QList<QByteArray> &txt = {})
 {

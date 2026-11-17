@@ -1,6 +1,5 @@
 # SPDX-License-Identifier: LGPL-2.1-or-later
-# Shared test helpers (shared library so that a single FakeServer instance is
-# seen by tests and by the fake backend plugin).
+# Shared test helpers (shared library: one FakeServer instance for tests and the fake backend plugin).
 include(../../common.pri)
 
 TEMPLATE = lib

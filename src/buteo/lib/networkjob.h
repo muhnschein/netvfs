@@ -12,12 +12,10 @@
 
 namespace NetVfs {
 
-// One connection's worth of network work on its own thread (SPEC B-3, C-8).
-// run() creates a fresh Backend, establishes the connection (identity check
-// before authentication, SEC-1), wipes its copy of the credentials (SEC-5),
-// runs the body and disconnects. The Backend never leaves that thread; only
-// cancel() reaches it from outside. finished() is delivered to the thread
-// that owns the job.
+// One connection's worth of network work on its own thread. run() creates a fresh Backend,
+// establishes the connection (identity check before authentication), wipes its copy of the
+// credentials, runs the body, disconnects. The Backend never leaves that thread; only cancel()
+// reaches it from outside. finished() is delivered to the thread that owns the job.
 class NetworkJob : public QThread
 {
     Q_OBJECT
@@ -26,14 +24,12 @@ public:
 
     NetworkJob(const QString &provider, const ConnectionParams &params, const Credentials &credentials,
                const Body &body, QObject *parent = nullptr);
-    // Cancels and waits for the thread.
     ~NetworkJob() override;
     Q_DISABLE_COPY(NetworkJob)
 
-    // Thread-safe; the in-flight call returns Canceled (C-9).
+    // Thread-safe; the in-flight call returns Canceled.
     void cancel();
 
-    // Valid once the thread has finished.
     Result result() const { return m_result; }
     ServerIdentity seenIdentity() const { return m_seen; }
 
@@ -48,7 +44,7 @@ private:
     Credentials m_credentials;
     const Body m_body;
 
-    QMutex m_mutex;                      // guards m_backend
+    QMutex m_mutex;
     Backend *m_backend = nullptr;
     std::atomic<bool> m_canceled { false };
 
@@ -56,6 +52,5 @@ private:
     ServerIdentity m_seen;
 };
 
-} // namespace NetVfs
-
+}
 #endif

@@ -1,14 +1,9 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! The C ABI of `src/backends/rs/netvfs_rs.h` (design §1, §2): [`nvr_get`]
-//! is the library's one export and hands out [`TABLE`].
+//! C ABI of `src/backends/rs/netvfs_rs.h`: [`nvr_get`], the one export, hands out [`TABLE`].
 //!
-//! Every table function catches panics and reports `Internal` (or does
-//! nothing, for those without a result), except `free` and `nvr_get`, which
-//! do nothing that can panic. A connection takes one call at a time; the
-//! callbacks of a call run on the caller's thread (S3).
-//!
-//! This module is the crate's only one with `unsafe`; every block says why
-//! it holds.
+//! Table functions catch panics and report `Internal`, except `free` and `nvr_get`.
+//! A connection takes one call at a time; callbacks run on the caller's thread.
+//! Only module of the crate with `unsafe`.
 #![allow(unsafe_code)]
 
 mod alloc;
@@ -22,7 +17,7 @@ pub use conn::live_objects;
 
 use raw::NvrTable;
 
-/// The table, in the header's order.
+/// The function table, in the header's order.
 pub static TABLE: NvrTable = NvrTable {
     free: alloc::free,
     reply_set: callback::reply_set,
@@ -64,8 +59,7 @@ pub static TABLE: NvrTable = NvrTable {
     key_describe: conn::key_describe,
 };
 
-/// `nvr_get`: the table. The shim and the library come from one commit,
-/// so there is no version to check.
+/// `nvr_get`: the table.
 #[unsafe(no_mangle)]
 pub extern "C" fn nvr_get() -> *const NvrTable {
     &raw const TABLE

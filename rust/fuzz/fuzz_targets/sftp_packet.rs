@@ -1,10 +1,5 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! netvfs-sftp against a hostile SFTP server (design §3.2): every reply
-//! decoder on arbitrary bytes, each result within its caps, and the
-//! client with the backend's file operations over a server that answers
-//! each request with the next of the input's packets (its request id put
-//! in, or as it is). Nothing panics, nothing hangs, and what comes back is
-//! a value or a status.
+//! netvfs-sftp against a hostile server: every reply decoder and the backend ops on arbitrary packets. No panic, no hang, caps hold.
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
@@ -23,12 +18,9 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 struct Input {
     /// Bytes for the decoders on their own.
     raw: Vec<u8>,
-    /// Ids asked for by `decode_owner_names`.
     users: u8,
     groups: u8,
-    /// The server's packets: the first answers INIT (VERSION), each next
-    /// one the next request. With `true` its request id is put in after
-    /// the type byte.
+    /// Server packets: first answers INIT, each next the next request; `true` puts the request id in after the type byte.
     replies: Vec<(bool, Vec<u8>)>,
 }
 
@@ -61,8 +53,7 @@ fn decoders(input: &Input) {
     }
 }
 
-/// Answers INIT and then each request with the next reply, until there
-/// are no more (then it hangs up).
+/// Answers INIT, then each request with the next reply; hangs up when none left.
 async fn serve(io: tokio::io::DuplexStream, replies: Vec<(bool, Vec<u8>)>) {
     let (mut read, mut write) = tokio::io::split(io);
     for (put_id, reply) in replies {

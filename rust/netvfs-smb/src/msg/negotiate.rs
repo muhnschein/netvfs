@@ -282,23 +282,19 @@ pub(crate) mod tests {
     #[test]
     fn request_layout() {
         let body = request().encode().unwrap();
-        // 36 fixed + 2 dialect bytes -> contexts at 64 + 40 = 104 (8-aligned)
         assert_eq!(u32::from_le_bytes(body[28..32].try_into().unwrap()), 104);
         assert_eq!(u16::from_le_bytes(body[32..34].try_into().unwrap()), 3);
         assert_eq!(&body[36..38], &[0x11, 0x03]);
-        // first context: preauth, 38 bytes of data
         assert_eq!(&body[40..44], &[1, 0, 38, 0]);
-        // second context 8-aligned after 40 + 8 + 38 = 86 -> 88
         assert_eq!(&body[88..92], &[2, 0, 6, 0]);
         assert_eq!(&body[96..102], &[2, 0, 2, 0, 4, 0]);
-        // third at 104
         assert_eq!(&body[104..112], &[8, 0, 4, 0, 0, 0, 0, 0]);
         NegotiateRequest { dialects: vec![], ..request() }.encode().unwrap_err();
         NegotiateRequest { dialects: vec![DIALECT_311; MAX_DIALECTS], ..request() }.encode().unwrap();
         NegotiateRequest { dialects: vec![DIALECT_311; MAX_DIALECTS + 1], ..request() }.encode().unwrap_err();
     }
 
-    /// A response message like Samba's, built by our own encoder for the request contexts.
+    /// A response message like Samba's, built from the request contexts.
     pub(crate) fn response(dialect: u16, contexts: &[NegContext]) -> Vec<u8> {
         let mut w = Writer::new();
         let ctx_offset = 64 + 64 + 8;
@@ -334,33 +330,25 @@ pub(crate) mod tests {
     fn response_rejects_bad_offsets_and_counts() {
         let ctxs = vec![preauth_context(&[2; 32])];
         let mut msg = response(DIALECT_311, &ctxs);
-        // context count 200
         msg[64 + 6] = 200;
         NegotiateResponse::decode(&msg).unwrap_err();
         let mut msg = response(DIALECT_311, &ctxs);
-        // context offset beyond the message
         msg[64 + 60..64 + 64].copy_from_slice(&4000u32.to_le_bytes());
         NegotiateResponse::decode(&msg).unwrap_err();
         let mut msg = response(DIALECT_311, &ctxs);
-        // unaligned offset
         msg[64 + 60..64 + 64].copy_from_slice(&129u32.to_le_bytes());
         NegotiateResponse::decode(&msg).unwrap_err();
         let mut msg = response(DIALECT_311, &ctxs);
-        // context data length beyond the message
         let at = 64 + 64 + 8 + 2;
         msg[at..at + 2].copy_from_slice(&5000u16.to_le_bytes());
         NegotiateResponse::decode(&msg).unwrap_err();
         let mut msg = response(DIALECT_311, &ctxs);
-        // security buffer outside
         msg[64 + 56..64 + 58].copy_from_slice(&2000u16.to_le_bytes());
         NegotiateResponse::decode(&msg).unwrap_err();
-        // no security buffer: its offset does not matter
         msg[64 + 58..64 + 60].copy_from_slice(&0u16.to_le_bytes());
         NegotiateResponse::decode(&msg).unwrap();
-        // truncated
         let msg = response(DIALECT_311, &ctxs);
         NegotiateResponse::decode(&msg[..100]).unwrap_err();
-        // up to MAX_CONTEXTS contexts
         let max = vec![signing_context(); MAX_CONTEXTS];
         assert_eq!(NegotiateResponse::decode(&response(DIALECT_311, &max)).unwrap().contexts, max);
         let more = vec![signing_context(); MAX_CONTEXTS + 1];
@@ -371,7 +359,6 @@ pub(crate) mod tests {
     fn list_counts_are_bounded_by_the_data() {
         u16_list(&[0xff, 0xff, 1, 0]).unwrap_err();
         assert_eq!(u16_list(&[2, 0, 1, 0]), Err(protocol("list count beyond the context")));
-        // Data after the list is no error.
         assert_eq!(u16_list(&[1, 0, 1, 0, 9, 9]).unwrap(), [1]);
         parse_preauth(&[1, 0, 32, 0, 1, 0]).unwrap_err();
         parse_preauth(&[0xff, 0x7f, 0, 0]).unwrap_err();

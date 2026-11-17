@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! Between C values and netvfs-vfs values. Readers copy what the caller
-//! passed (R1); writers make the blocks the caller frees (R3) or, for a
-//! callback, views into Rust values that live for the callback (R2).
-//! Out-of-range numbers from C++ are `ProtocolError`: the shim is built
-//! from the same commit, so they are bugs, not old callers.
+//! C values to and from netvfs-vfs values. Readers copy what the caller passed; writers make blocks the caller
+//! frees, or views valid for a callback. Out-of-range numbers from C++ are `ProtocolError`.
 
 use super::alloc::{Out, pack};
 use super::raw::{
@@ -18,34 +15,26 @@ use netvfs_vfs::{
     Value, ValueMap, WriteOptions, Zeroizing,
 };
 
-// ------------------------------------------------------------- C -> Rust
-
-/// The bytes `b` points to.
-///
 /// # Safety
 /// `b.ptr` is NULL or points to `b.len` bytes readable for `'a`.
 pub unsafe fn slice<'a>(b: NvbBytes) -> &'a [u8] {
     if b.ptr.is_null() || b.len == 0 {
         return &[];
     }
-    // SAFETY: non-NULL and `len` readable bytes for 'a (the contract).
+    // SAFETY: contract.
     unsafe { std::slice::from_raw_parts(b.ptr, b.len) }
 }
 
-/// The `n` items at `p`.
-///
 /// # Safety
 /// `p` is NULL or points to `n` initialised items readable for `'a`.
 pub unsafe fn items<'a, T>(p: *const T, n: usize) -> &'a [T] {
     if p.is_null() || n == 0 {
         return &[];
     }
-    // SAFETY: non-NULL and `n` items for 'a (the contract).
+    // SAFETY: contract.
     unsafe { std::slice::from_raw_parts(p, n) }
 }
 
-/// UTF-8 from C++ (`QString::toUtf8`), lossy.
-///
 /// # Safety
 /// As for [`slice`].
 pub unsafe fn text(b: NvbBytes) -> String {
@@ -53,20 +42,17 @@ pub unsafe fn text(b: NvbBytes) -> String {
     String::from_utf8_lossy(unsafe { slice(b) }).into_owned()
 }
 
-/// A `ProtocolError` naming the field C++ got wrong.
 fn bad(what: &str) -> Status {
     Status::invalid_args(format!("Invalid {what} from the plugin"))
 }
 
-/// A count or offset that must not be negative.
-///
 /// # Errors
-/// `ProtocolError` when it is.
+/// `ProtocolError` if negative.
 pub fn unsigned(value: i64, what: &str) -> Result<u64, Status> {
     u64::try_from(value).map_err(|_negative| bad(what))
 }
 
-/// -1: `None`; other negatives: `ProtocolError`.
+/// -1 is `None`.
 ///
 /// # Errors
 /// `ProtocolError` below -1.
@@ -74,7 +60,6 @@ pub fn optional(value: i64, what: &str) -> Result<Option<u64>, Status> {
     if value == -1 { Ok(None) } else { unsigned(value, what).map(Some) }
 }
 
-/// A mode (`create_mode`, `nvb_attributes.mode`); -1: `None`.
 fn mode(value: i32, what: &str) -> Result<Option<u32>, Status> {
     if value == -1 { Ok(None) } else { u32::try_from(value).map(Some).map_err(|_negative| bad(what)) }
 }
@@ -97,8 +82,6 @@ unsafe fn value(v: &NvbValue) -> Result<Value, Status> {
     }
 }
 
-/// `nvb_params` as [`Params`].
-///
 /// # Safety
 /// Everything `p` points to is valid (as for [`slice`] and [`items`]).
 ///
@@ -125,8 +108,6 @@ pub unsafe fn params(p: &NvbParams) -> Result<Params, Status> {
     })
 }
 
-/// `nvr_credentials` as [`Credentials`]; the secret goes straight into a
-/// wiped-on-drop buffer (R5).
 ///
 /// # Safety
 /// As for [`slice`], for each field.
@@ -141,8 +122,6 @@ pub unsafe fn credentials(c: &NvrCredentials) -> Credentials {
     }
 }
 
-/// `nvb_attributes` as [`Attributes`].
-///
 /// # Errors
 /// `ProtocolError` for a mode below -1.
 pub fn attributes(a: &NvbAttributes) -> Result<Attributes, Status> {
@@ -153,7 +132,6 @@ pub fn attributes(a: &NvbAttributes) -> Result<Attributes, Status> {
     })
 }
 
-/// The fields of `nvr_write_opts` and `nvb_upload_opts`.
 #[derive(Debug, Clone, Copy)]
 pub struct RawWriteOptions {
     /// `NVB_DISPOSITION_*`.
@@ -170,8 +148,6 @@ pub struct RawWriteOptions {
     pub mtime_ms: i64,
 }
 
-/// [`WriteOptions`] from their C fields.
-///
 /// # Errors
 /// `ProtocolError` for an unknown disposition or a negative number.
 pub fn write_options(o: RawWriteOptions) -> Result<WriteOptions, Status> {
@@ -190,15 +166,12 @@ pub fn write_options(o: RawWriteOptions) -> Result<WriteOptions, Status> {
     })
 }
 
-// ------------------------------------------------------------- Rust -> C
-
-/// -1 for unknown; a value past `i64::MAX` is clamped.
+/// -1 for unknown; clamped to `i64::MAX`.
 fn known(value: Option<u64>) -> i64 {
     value.map_or(-1, |v| i64::try_from(v).unwrap_or(i64::MAX))
 }
 
-/// `status` as an `nvb_error` block; aborts the process when not even
-/// that can be allocated (nothing else could report the failure).
+/// Aborts the process if even this block cannot be allocated.
 pub fn error(status: &Status) -> *mut NvbError {
     let block = pack(|out| NvbError {
         name: out.bytes(status.name.as_str().as_bytes()),
@@ -212,13 +185,10 @@ pub fn error(status: &Status) -> *mut NvbError {
     }
 }
 
-/// The `Internal` status of a block that could not be allocated.
 pub fn no_memory() -> Status {
     Status::internal("Out of memory in the Rust backends")
 }
 
-/// `e` with each field's bytes from `put`: copies into a block, or views
-/// of `e` itself for a callback.
 pub fn fill_entry(e: &Entry, mut put: impl FnMut(&[u8]) -> NvbBytes) -> NvbEntry {
     NvbEntry {
         name: put(&e.name),
@@ -239,19 +209,15 @@ pub fn fill_entry(e: &Entry, mut put: impl FnMut(&[u8]) -> NvbBytes) -> NvbEntry
     }
 }
 
-/// An entry block.
 pub fn entry(e: &Entry) -> Option<*mut NvbEntry> {
     pack(|out| fill_entry(e, |data| out.bytes(data)))
 }
 
-/// A blob block.
 pub fn blob(data: &[u8]) -> Option<*mut NvbBlob> {
     pack(|out| NvbBlob { data: out.bytes(data) })
 }
 
-/// An identity block: an SSH host key; `pin` is left empty (C++ computes
-/// `ServerIdentity::toPin()`), so is the fingerprint when the backend left
-/// it empty.
+/// `pin` is left empty (C++ computes it); so is the fingerprint if the backend left it empty.
 pub fn identity(id: &ServerIdentity) -> Option<*mut NvbIdentity> {
     pack(|out| NvbIdentity {
         kind: NVB_IDENTITY_SSH,
@@ -262,8 +228,6 @@ pub fn identity(id: &ServerIdentity) -> Option<*mut NvbIdentity> {
     })
 }
 
-/// A key block (`SshKeyMaterial`); the table's `free` wipes the private
-/// key with the rest of the block.
 pub fn key(k: &KeyMaterial) -> Option<*mut NvrKey> {
     pack(|out| NvrKey {
         private_key: out.bytes(&k.private_key),
@@ -273,7 +237,6 @@ pub fn key(k: &KeyMaterial) -> Option<*mut NvrKey> {
     })
 }
 
-/// A capabilities block; flags by name, sorted.
 pub fn capabilities(c: &Capabilities) -> Option<*mut NvbCapabilities> {
     let names: Vec<&[u8]> = c.names().into_iter().map(str::as_bytes).collect();
     let algorithms: Vec<&[u8]> = c.checksum_algorithms.iter().map(String::as_bytes).collect();
@@ -286,7 +249,6 @@ pub fn capabilities(c: &Capabilities) -> Option<*mut NvbCapabilities> {
     })
 }
 
-/// `nvb_space`; each -1 unknown.
 pub fn space(s: &SpaceInfo) -> NvbSpace {
     NvbSpace { free_bytes: known(s.free), total_bytes: known(s.total), used_bytes: known(s.used) }
 }

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: LGPL-2.1-or-later
-# A QtTest executable run by "make check".
+# QtTest executable run by "make check".
 include(../common.pri)
 
 TEMPLATE = app

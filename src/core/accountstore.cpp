@@ -26,7 +26,7 @@ QString providerKey(const QString &provider, const QString &key)
 {
     return QStringLiteral("netvfs/%1/%2").arg(provider, key);
 }
-} // namespace Keys
+}
 
 const char DefaultBackupsPath[] = "Sailfish OS/Backups";
 const char CredentialsApplication[] = "netvfs";
@@ -42,8 +42,7 @@ Result notFound(int accountId)
     return Result(Error::NotFound, QStringLiteral("Account %1 does not exist").arg(accountId));
 }
 
-// The value of `key` in the provider's `service`; empty when the service is
-// not installed. Leaves the global service selected.
+// Empty when the service is not installed. Leaves the global service selected.
 QString serviceValue(const Accounts::Manager *manager, Accounts::Account *account, Service service, const char *key,
                      bool *enabled)
 {
@@ -64,7 +63,7 @@ Result sync(Accounts::Account *account)
         return Result(Error::Internal, QStringLiteral("Cannot write the accounts database"));
     return Result::success();
 }
-} // namespace
+}
 
 QString attentionToString(Attention attention)
 {
@@ -118,7 +117,7 @@ AccountStore::AccountStore(Accounts::Manager *manager)
 
 Result AccountStore::load(int accountId, Service service, AccountConfig *out) const
 {
-    Accounts::Account *account = m_manager->account(accountId);  // owned by the manager
+    Accounts::Account *account = m_manager->account(accountId);
     if (!account)
         return notFound(accountId);
 
@@ -167,7 +166,7 @@ QList<int> AccountStore::filesAccounts() const
 {
     QList<int> ids;
     for (const Accounts::AccountId id : m_manager->accountList(QLatin1String(FilesServiceType))) {
-        Accounts::Account *account = m_manager->account(id);   // owned by the manager
+        Accounts::Account *account = m_manager->account(id);
         if (!account)
             continue;
         account->selectService(Accounts::Service());
@@ -188,7 +187,7 @@ Result AccountStore::setAttention(int accountId, Service service, Attention atte
     if (attention == Attention::None)
         return clearAttention(accountId);
 
-    Accounts::Account *account = m_manager->account(accountId);  // owned by the manager
+    Accounts::Account *account = m_manager->account(accountId);
     if (!account)
         return notFound(accountId);
 
@@ -205,7 +204,7 @@ Result AccountStore::setAttention(int accountId, Service service, Attention atte
 
 Result AccountStore::clearAttention(int accountId) const
 {
-    Accounts::Account *account = m_manager->account(accountId);  // owned by the manager
+    Accounts::Account *account = m_manager->account(accountId);
     if (!account)
         return notFound(accountId);
 
@@ -217,4 +216,4 @@ Result AccountStore::clearAttention(int accountId) const
     return sync(account);
 }
 
-} // namespace NetVfs
+}

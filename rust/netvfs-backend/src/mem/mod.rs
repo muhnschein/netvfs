@@ -1,12 +1,6 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! `mem`: an in-memory backend for tests (feature `testing`), provider
-//! `mem`. Connections with the same `store` option (default `default`)
-//! share one tree for the life of the process, so a test can reconnect
-//! and find its files.
-//!
-//! It reports every capability it implements and keeps the conformance
-//! suite's rules (tests/conformance). Options steer the C ABI's corner
-//! cases:
+//! In-memory backend for tests (feature `testing`), provider `mem`. Connections with the same `store` option
+//! (default `default`) share one tree for the process lifetime. Options steer the C ABI's corner cases:
 //!
 //! | option | effect |
 //! |---|---|
@@ -18,8 +12,7 @@
 //! | `stall` | `true`: every call after `authenticate` waits for cancel; `ignore`: waits for ever, ignoring cancel |
 //! | `panic` | the call of this name (`stat`, `read`, `position`, …) panics |
 //!
-//! The prompt's instruction is `Sign in as <user>`, or with a domain
-//! `Sign in as <domain>\<user>`.
+//! The prompt's instruction is `Sign in as <user>`, or `Sign in as <domain>\<user>` with a domain.
 
 mod tree;
 
@@ -35,15 +28,12 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock, Mutex, MutexGuard, PoisonError};
 use tree::Tree;
 
-/// Bytes per step of a transfer, between cancel and progress checks.
 const CHUNK: usize = 256 * 1024;
 const CHUNK_BYTES: u64 = 256 * 1024;
-/// What `spaceInfo` calls the total.
 const CAPACITY: u64 = 1 << 40;
 
 type Store = Arc<Mutex<Tree>>;
 
-/// The trees by `store` option.
 static STORES: LazyLock<Mutex<BTreeMap<String, Store>>> = LazyLock::new(Mutex::default);
 
 fn store(name: &str) -> Store {
@@ -51,7 +41,6 @@ fn store(name: &str) -> Store {
     Arc::clone(stores.entry(name.to_owned()).or_default())
 }
 
-/// What the `stall` option asks for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Stall {
     No,
@@ -59,7 +48,6 @@ enum Stall {
     Forever,
 }
 
-/// One connection's session, shared with its handles.
 #[derive(Debug)]
 struct Session {
     tree: Store,
@@ -82,13 +70,11 @@ impl Session {
         }
     }
 
-    /// The `panic` option's test hook: the C ABI must turn the panic into
-    /// `Internal`.
+    /// `panic` option hook: the C ABI must turn the panic into `Internal`.
     fn hook(&self, call: &str) {
         assert!(self.panic_on.as_deref() != Some(call), "mem: {call} panics on request");
     }
 
-    /// Starts a call: open, the hook, the stall.
     async fn enter(&self, call: &str, cancel: &CancelToken) -> Result<(), Status> {
         self.check()?;
         self.hook(call);
@@ -103,7 +89,6 @@ impl Session {
     }
 }
 
-/// The `mem` backend.
 #[derive(Debug, Default)]
 pub struct Mem {
     session: Option<Arc<Session>>,
@@ -111,7 +96,6 @@ pub struct Mem {
 }
 
 impl Mem {
-    /// Not connected yet.
     pub fn new() -> Self {
         Self::default()
     }
@@ -120,15 +104,12 @@ impl Mem {
         self.session.as_ref().ok_or_else(|| Status::new(ErrorName::ConnectionLost, "Not connected"))
     }
 
-    /// The session of a call after its checks.
     async fn enter(&self, call: &str, cancel: &CancelToken) -> Result<&Arc<Session>, Status> {
         let session = self.session()?;
         session.enter(call, cancel).await?;
         Ok(session)
     }
 
-    /// `connect`: a session on the `store` option's tree; the identity of
-    /// the `identity` option.
     fn open(&mut self, params: &Params) -> Option<ServerIdentity> {
         let stall = match params.option("stall").as_deref() {
             Some("true") => Stall::UntilCancel,
@@ -144,7 +125,6 @@ impl Mem {
         session.hook("connect");
         self.session = Some(Arc::new(session));
         self.params = params.clone();
-        // The fingerprint repeats the parameters, so that a test sees them.
         params.option("identity").map(|algorithm| ServerIdentity {
             algorithm,
             public_key: b"mem host key".to_vec(),
@@ -159,8 +139,6 @@ impl Mem {
         })
     }
 
-    /// `authenticate`: the `throttle`, `secret`, `interactive` and `answer`
-    /// options.
     fn sign_in(&self, credentials: &Credentials, prompter: Option<&mut dyn Prompter>) -> Result<(), Status> {
         let session = self.session()?;
         session.check()?;
@@ -444,7 +422,6 @@ impl Backend for Mem {
     }
 }
 
-/// Up to `len` bytes of file `id` from `at`.
 fn read_at(tree: &Tree, id: u64, at: u64, len: u64) -> Result<Vec<u8>, Status> {
     let data = tree.data(id)?;
     let start = usize::try_from(at).unwrap_or(usize::MAX).min(data.len());
@@ -452,7 +429,6 @@ fn read_at(tree: &Tree, id: u64, at: u64, len: u64) -> Result<Vec<u8>, Status> {
     Ok(data.get(start..end).unwrap_or_default().to_vec())
 }
 
-/// A `mem` read handle.
 #[derive(Debug)]
 pub struct MemRead {
     session: Arc<Session>,
@@ -483,7 +459,6 @@ impl ReadHandle for MemRead {
     }
 }
 
-/// A `mem` write handle.
 #[derive(Debug)]
 pub struct MemWrite {
     session: Arc<Session>,

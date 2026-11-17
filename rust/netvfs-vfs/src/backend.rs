@@ -1,15 +1,12 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! The async counterparts of `NetVfs::Backend`, `ReadHandle` and
-//! `WriteHandle` (`src/core/backend.h`), and the callbacks a call hands to a
-//! backend: [`ListSink`], [`Prompter`], [`Source`], [`Sink`], [`Progress`].
-//!
-//! The C ABI (netvfs-backend) runs every call on the caller's thread
-//! (`block_on`): the callbacks are plain synchronous calls made by the
-//! call's own future, never from a spawned task. Every call takes the
-//! connection's [`CancelToken`]; it should end with `Canceled` soon after
-//! the token is tripped (C-9), and must leave the connection usable or
-//! report `ConnectionLost` later. Methods with a default return
-//! `Unsupported` unless the matching capability is reported (XC-5).
+//! Async counterparts of `NetVfs::Backend`, `ReadHandle` and `WriteHandle` (`src/core/backend.h`),
+//! and the callbacks a call hands to a backend: [`ListSink`], [`Prompter`], [`Source`], [`Sink`],
+//! [`Progress`].
+//! The C ABI (netvfs-backend) runs every call on the caller's thread (`block_on`): callbacks are
+//! plain synchronous calls made by the call's own future, never from a spawned task. Every call
+//! takes the connection's [`CancelToken`]; it ends with `Canceled` soon after the token trips, and
+//! leaves the connection usable or reports `ConnectionLost` later. Methods with a default return
+//! `Unsupported` unless the matching capability is reported.
 
 use crate::cancel::CancelToken;
 use crate::status::Status;
@@ -20,21 +17,21 @@ use crate::types::{
 use std::future::{Future, Ready};
 use zeroize::Zeroizing;
 
-/// `NetVfs::ListSink` (XC-6).
+/// `NetVfs::ListSink`.
 pub trait ListSink {
     /// One batch; `false` stops the listing, which then ends with
     /// `Canceled`.
     fn entries(&mut self, batch: &[Entry]) -> bool;
 }
 
-/// `NetVfs::AuthPrompter` (XC-15).
+/// `NetVfs::AuthPrompter`.
 pub trait Prompter {
     /// One answer per prompt, or `None` when the user declines (the call
     /// then fails with `AuthFailed`). May block until the user answers.
     fn answer(&mut self, request: &PromptRequest) -> Option<Vec<Zeroizing<Vec<u8>>>>;
 }
 
-/// `NetVfs::Progress` of a transfer (XC-14).
+/// `NetVfs::Progress` of a transfer.
 pub trait Progress {
     /// Bytes moved so far, of `total` when known.
     fn update(&mut self, done: u64, total: Option<u64>);
@@ -63,7 +60,7 @@ pub trait Sink {
     fn write(&mut self, data: &[u8]) -> Result<(), Status>;
 }
 
-/// `NetVfs::ReadHandle` (XC-13): random access to one remote file. After
+/// `NetVfs::ReadHandle`: random access to one remote file. After
 /// the backend's disconnect every call is `ConnectionLost`.
 pub trait ReadHandle {
     /// The size at open time.
@@ -82,7 +79,7 @@ pub trait ReadHandle {
     fn close(self, cancel: &CancelToken) -> impl Future<Output = Result<(), Status>>;
 }
 
-/// `NetVfs::WriteHandle` (XC-13): sequential writes with an explicit commit.
+/// `NetVfs::WriteHandle`: sequential writes with an explicit commit.
 pub trait WriteHandle {
     /// Appends `data`.
     fn write(&mut self, data: &[u8], cancel: &CancelToken) -> impl Future<Output = Result<(), Status>>;
@@ -140,13 +137,13 @@ fn no_future<T>(handle: &NoHandle) -> Ready<T> {
     match *handle {}
 }
 
-/// `Unsupported` for an optional method (XC-5).
+/// `Unsupported` for an optional method.
 fn unsupported<T>(what: &str) -> Result<T, Status> {
     Err(Status::unsupported(format!("{what} is not supported")))
 }
 
-/// `NetVfs::Backend`: one connection. Paths are protocol bytes of
-/// normalised paths (`Names::encode`, C-15, XC-4).
+/// `NetVfs::Backend`: one connection. Paths are protocol bytes of normalised paths
+/// (`Names::encode`).
 pub trait Backend {
     /// What [`open_read`](Self::open_read) gives ([`NoHandle`] without
     /// read handles).
@@ -155,26 +152,25 @@ pub trait Backend {
     /// write handles).
     type Write: WriteHandle;
 
-    /// Opens the transport and reports the server identity, if the
-    /// protocol has one; sends no credentials (C-7).
+    /// Opens the transport and reports the server identity, if the protocol has one; sends no
+    /// credentials.
     fn connect(
         &mut self,
         params: &Params,
         cancel: &CancelToken,
     ) -> impl Future<Output = Result<Option<ServerIdentity>, Status>>;
-    /// Signs in; without a prompter, interactive methods are not tried
-    /// (XC-15).
+    /// Signs in; without a prompter, interactive methods are not tried.
     fn authenticate(
         &mut self,
         credentials: &Credentials,
         prompter: Option<&mut dyn Prompter>,
         cancel: &CancelToken,
     ) -> impl Future<Output = Result<(), Status>>;
-    /// Valid after `authenticate`; stable for the connection's life (XC-5).
+    /// Valid after `authenticate`; stable for the connection's life.
     fn capabilities(&self) -> Capabilities;
     /// Closes the connection; open handles fail with `ConnectionLost`.
     fn disconnect(&mut self) -> impl Future<Output = ()>;
-    /// XC-20: `ConnectionLost` when the connection is gone.
+    /// `ConnectionLost` when the connection is gone.
     fn keep_alive(&mut self, cancel: &CancelToken) -> impl Future<Output = Result<(), Status>>;
 
     /// The entry at `path`, following a final symlink when `follow` is set
@@ -185,8 +181,7 @@ pub trait Backend {
         follow: bool,
         cancel: &CancelToken,
     ) -> impl Future<Output = Result<Entry, Status>>;
-    /// XC-6: batches of at most `options.batch_size` entries; `.` and `..`
-    /// never appear.
+    /// Batches of at most `options.batch_size` entries; `.` and `..` never appear.
     fn list(
         &mut self,
         dir: &[u8],
@@ -194,20 +189,20 @@ pub trait Backend {
         sink: &mut dyn ListSink,
         cancel: &CancelToken,
     ) -> impl Future<Output = Result<(), Status>>;
-    /// XC-8: with `exclusive` an existing entry is `AlreadyExists`, without
-    /// it an existing folder is success.
+    /// With `exclusive` an existing entry is `AlreadyExists`, without it an existing folder is
+    /// success.
     fn make_dir(
         &mut self,
         path: &[u8],
         exclusive: bool,
         cancel: &CancelToken,
     ) -> impl Future<Output = Result<(), Status>>;
-    /// XC-9: a folder is `IsADirectory`.
+    /// A folder is `IsADirectory`.
     fn remove_file(&mut self, path: &[u8], cancel: &CancelToken) -> impl Future<Output = Result<(), Status>>;
-    /// XC-9: a non-empty folder is `DirectoryNotEmpty`.
+    /// A non-empty folder is `DirectoryNotEmpty`.
     fn remove_dir(&mut self, path: &[u8], cancel: &CancelToken) -> impl Future<Output = Result<(), Status>>;
-    /// XC-10: `NoReplace` fails with `AlreadyExists` if `to` exists;
-    /// replacing a folder is `AlreadyExists` in both modes.
+    /// `NoReplace` fails with `AlreadyExists` if `to` exists; replacing a folder is `AlreadyExists`
+    /// in both modes.
     fn rename(
         &mut self,
         from: &[u8],
@@ -216,8 +211,7 @@ pub trait Backend {
         cancel: &CancelToken,
     ) -> impl Future<Output = Result<(), Status>>;
 
-    /// XC-11: every field is checked first; an unsupported one changes
-    /// nothing.
+    /// Every field is checked first; an unsupported one changes nothing.
     fn set_attributes(
         &mut self,
         path: &[u8],
@@ -227,7 +221,7 @@ pub trait Backend {
         let _ = (path, changes, cancel);
         async { unsupported("setAttributes") }
     }
-    /// XC-12: the target verbatim.
+    /// The target verbatim.
     fn read_link(
         &mut self,
         path: &[u8],
@@ -236,7 +230,7 @@ pub trait Backend {
         let _ = (path, cancel);
         async { unsupported("readLink") }
     }
-    /// XC-12: `target` verbatim (may be relative).
+    /// `target` verbatim (may be relative).
     fn make_symlink(
         &mut self,
         target: &[u8],
@@ -246,7 +240,7 @@ pub trait Backend {
         let _ = (target, link, cancel);
         async { unsupported("makeSymlink") }
     }
-    /// XC-12.
+    /// Hard link `new_path` to `existing`.
     fn make_hardlink(
         &mut self,
         existing: &[u8],
@@ -256,7 +250,7 @@ pub trait Backend {
         let _ = (existing, link, cancel);
         async { unsupported("makeHardlink") }
     }
-    /// XC-17: a server-side copy (`ServerCopy`, `ServerCopyRecursive`).
+    /// A server-side copy (`ServerCopy`, `ServerCopyRecursive`).
     fn copy(
         &mut self,
         from: &[u8],
@@ -268,8 +262,7 @@ pub trait Backend {
         let _ = (from, to, recursive, mode, cancel);
         async { unsupported("copy") }
     }
-    /// XC-18: the digest of one of `checksum_algorithms`; another
-    /// algorithm is `Unsupported`.
+    /// The digest of one of `checksum_algorithms`; another algorithm is `Unsupported`.
     fn checksum(
         &mut self,
         path: &[u8],
@@ -279,7 +272,7 @@ pub trait Backend {
         let _ = (path, algorithm, cancel);
         async { unsupported("checksum") }
     }
-    /// XC-19.
+    /// Free, total and used bytes.
     fn space_info(
         &mut self,
         dir: &[u8],
@@ -289,7 +282,7 @@ pub trait Backend {
         async { unsupported("spaceInfo") }
     }
 
-    /// XC-13 (`ReadHandles`).
+    /// Needs `ReadHandles`.
     fn open_read(
         &mut self,
         path: &[u8],
@@ -298,7 +291,7 @@ pub trait Backend {
         let _ = (path, cancel);
         async { unsupported("openRead") }
     }
-    /// XC-13: `Resume` needs `WriteResume`.
+    /// `Resume` needs `WriteResume`.
     fn open_write(
         &mut self,
         path: &[u8],
@@ -308,7 +301,7 @@ pub trait Backend {
         let _ = (path, options, cancel);
         async { unsupported("openWrite") }
     }
-    /// XC-14: streams `source` to `path` in bounded memory (C-10).
+    /// Streams `source` to `path` in bounded memory.
     fn upload(
         &mut self,
         path: &[u8],
@@ -317,8 +310,7 @@ pub trait Backend {
         progress: &mut dyn Progress,
         cancel: &CancelToken,
     ) -> impl Future<Output = Result<(), Status>>;
-    /// XC-14: `length` bytes from `offset` (`None`: to the end) into
-    /// `sink`.
+    /// `length` bytes from `offset` (`None`: to the end) into `sink`.
     fn download(
         &mut self,
         path: &[u8],
@@ -336,8 +328,7 @@ mod tests {
     use crate::status::ErrorName;
     use std::future::ready;
 
-    /// Only what a backend must have; every optional method is the
-    /// trait's default.
+    /// Only what a backend must have; every optional method is the trait's default.
     struct Minimal;
 
     impl Backend for Minimal {

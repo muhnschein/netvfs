@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! The crate's error, and how it becomes a netvfs [`Status`] (SPEC-smb 5,
-//! XC-21): the same failure means something else during sign-in than on an
-//! established connection.
+//! The crate's error, and how it becomes a netvfs [`Status`]: the same failure means something else during sign-in than on an established connection.
 
 use std::fmt;
 
@@ -21,7 +19,7 @@ pub const SESSION_REFUSED: &str = "the server refused the session; it may requir
 /// use the share and for a share that needs encryption the session lacks.
 pub const SHARE_REFUSED: &str = "the server refused the share: this account may not use it, or the server \
      and this device have no encryption cipher in common";
-/// XC-21: an established connection dropped.
+/// An established connection dropped.
 pub const CONNECTION_LOST: &str = "the connection to the server was lost";
 
 /// What went wrong.
@@ -83,7 +81,7 @@ pub(crate) fn policy(msg: impl Into<String>) -> Error {
     Error::Policy(msg.into())
 }
 
-/// Where a failure happened (SPEC-smb 5).
+/// Where a failure happened.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Phase {
     /// NEGOTIATE, SESSION_SETUP, TREE_CONNECT.
@@ -100,9 +98,7 @@ impl Error {
         match self {
             Self::Status(nt) => {
                 let status = status_for(nt, context);
-                // During sign-in, a refusal that is about neither the
-                // credentials nor the share name means the server wants
-                // something this client does not offer (M-T9, M-T14).
+                // During sign-in a refusal that is about neither credentials nor share name: server wants something this client lacks.
                 let keeps = matches!(
                     status.name,
                     ErrorName::AuthFailed | ErrorName::NotFound | ErrorName::Timeout | ErrorName::Unsupported

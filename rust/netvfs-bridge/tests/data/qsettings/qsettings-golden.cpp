@@ -1,18 +1,15 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-// Writes and dumps QSettings INI files and QLockFile lock files, for the
-// golden files of netvfs-bridge's `ini` and `consent` modules (generate.sh).
-// Not built by the project; only generate.sh compiles it, against Qt 5.
+// Writes and dumps QSettings INI and QLockFile files for generate.sh. Not built by the project.
 //
-//   qsettings-golden dump FILE                 every key QSettings reads, one per line
-//   qsettings-golden write FILE {KEY TYPE VALUE}...
-//        TYPE s: QString, l: QStringList ('|'-separated), b: QByteArray (hex),
-//             i: int, z: QSize ("w,h"), r: remove the key (VALUE ignored)
-//        Strings take \uXXXX escapes (UTF-16 units).
-//   qsettings-golden lock FILE                 holds QLockFile FILE until stdin closes
-//   qsettings-golden trylock FILE              0 if QLockFile FILE could be taken at once
+// qsettings-golden dump FILE
+// qsettings-golden write FILE {KEY TYPE VALUE}...
+// TYPE s: QString, l: QStringList ('|'-separated), b: QByteArray (hex),
+// i: int, z: QSize ("w,h"), r: remove the key
+// Strings take \uXXXX escapes (UTF-16 units).
+// qsettings-golden lock FILE
+// qsettings-golden trylock FILE
 //
-// Dump lines: KEY|TYPE|toString()|n|item1|...|itemN (toStringList(), n items),
-// strings escaped: printable ASCII as is except '\' and '|', the rest \uXXXX.
+// Dump lines: KEY|TYPE|toString()|n|item1|...|itemN
 #include <QtCore/QCoreApplication>
 #include <QtCore/QLockFile>
 #include <QtCore/QSettings>

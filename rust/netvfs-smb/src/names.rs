@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! Names and paths: SMB's UTF-16LE and netvfs's protocol bytes (XC-4), the
-//! path rules of `Paths::normalize` (C-15, M-8) and `Paths::checkWindowsPath`
-//! (M-9), and share names (XM-2).
+//! Names and paths: SMB's UTF-16LE and netvfs's protocol bytes, the path rules of `Paths::normalize` and `Paths::checkWindowsPath`, and share names.
 //!
 //! Protocol bytes are WTF-8: UTF-8, with a lone surrogate of a UTF-16 name
 //! in its three-byte form, so that every name a server sends maps to bytes
@@ -86,8 +84,6 @@ pub fn utf16_from_wtf8(bytes: &[u8]) -> Option<Vec<u16>> {
             let mut buf = [0u16; 2];
             units.extend_from_slice(c.encode_utf16(&mut buf));
         } else {
-            // A surrogate: a low one right after a high one would be a
-            // pair that WTF-8 writes as one 4-byte sequence.
             let unit = u16::try_from(code).ok()?;
             if (0xDC00..=0xDFFF).contains(&unit)
                 && units.last().is_some_and(|u| (0xD800..=0xDBFF).contains(u))
@@ -115,9 +111,7 @@ pub fn units_of(bytes: &[u8]) -> Option<Vec<u16>> {
     Some(bytes.chunks_exact(2).filter_map(|c| <[u8; 2]>::try_from(c).ok()).map(u16::from_le_bytes).collect())
 }
 
-/// Whether a name a server lists (QUERY_DIRECTORY) names an entry of the
-/// folder: not `.` or `..`, not empty, without `/` and NUL. Joined to the
-/// folder's path, any other name would be a path elsewhere, or none.
+/// Whether a name a server lists names an entry of the folder: not `.` or `..`, not empty, no `/` or NUL. Any other name escapes the folder when joined.
 #[must_use]
 pub fn is_entry_name(units: &[u16]) -> bool {
     const DOT: u16 = 0x2E;
@@ -134,8 +128,7 @@ pub fn display(bytes: &[u8]) -> String {
     String::from_utf8_lossy(bytes).into_owned()
 }
 
-/// The components of a path: `Paths::normalize` (C-15), then relative to
-/// the share root (M-8: a leading `/` is dropped).
+/// The components of a path: `Paths::normalize`, then relative to the share root (a leading `/` is dropped).
 ///
 /// # Errors
 /// `InvalidName` for a NUL or a `.`/`..` component.
@@ -150,7 +143,7 @@ pub fn components(path: &[u8]) -> Result<Vec<&[u8]>, Status> {
     Ok(parts)
 }
 
-/// `Paths::windowsComponentProblem` (M-9), for a component given as UTF-16.
+/// `Paths::windowsComponentProblem`, for a component given as UTF-16.
 fn windows_problem(component: &[u8], units: &[u16]) -> Option<String> {
     let shown = display(component);
     for c in char::decode_utf16(units.iter().copied()) {
@@ -173,7 +166,7 @@ fn windows_problem(component: &[u8], units: &[u16]) -> Option<String> {
 ///
 /// # Errors
 /// `InvalidName` for bytes that are not WTF-8 and for a name Windows
-/// servers cannot store (M-9, as `Paths::checkWindowsPath`).
+/// servers cannot store (as `Paths::checkWindowsPath`).
 pub fn smb_path(components: &[&[u8]]) -> Result<Vec<u16>, Status> {
     let mut out = Vec::new();
     for (i, component) in components.iter().enumerate() {
@@ -190,9 +183,7 @@ pub fn smb_path(components: &[&[u8]]) -> Result<Vec<u16>, Status> {
     Ok(out)
 }
 
-/// `validShareName` (XM-2, XM-3): not empty, at most 80 UTF-16 units, not
-/// `.` or `..`, no character Windows refuses in share names, no control
-/// character, no surrogate.
+/// `validShareName`: not empty, at most 80 UTF-16 units, not `.` or `..`, no character Windows refuses in share names, no control character, no surrogate.
 #[must_use]
 pub fn valid_share_name(name: &str) -> bool {
     if name.is_empty() || name.encode_utf16().count() > MAX_SHARE_NAME || name == "." || name == ".." {
@@ -252,20 +243,18 @@ mod tests {
             &[0x80][..],
             &[0xC3],
             &[0xC3, 0x41],
-            &[0xC0, 0x80],             // overlong NUL
-            &[0xE0, 0x80, 0x80],       // overlong
-            &[0xF0, 0x80, 0x80, 0x80], // overlong
-            &[0xF4, 0x90, 0x80, 0x80], // above U+10FFFF
+            &[0xC0, 0x80],
+            &[0xE0, 0x80, 0x80],
+            &[0xF0, 0x80, 0x80, 0x80],
+            &[0xF4, 0x90, 0x80, 0x80],
             &[0xF8, 0x88, 0x80, 0x80, 0x80],
             &[0xFF],
-            &[0xED, 0xA0, 0x80, 0xED, 0xB0, 0x80], // a pair as two 3-byte sequences
+            &[0xED, 0xA0, 0x80, 0xED, 0xB0, 0x80],
             &[0xE2, 0x82],
         ] {
             assert_eq!(utf16_from_wtf8(bad), None, "{bad:x?}");
         }
-        // A low surrogate before a high one is not a pair.
         assert_eq!(utf16_from_wtf8(&[0xED, 0xB0, 0x80, 0xED, 0xA0, 0x80]).unwrap(), [0xDC00, 0xD800]);
-        // The boundaries of each length.
         assert_eq!(utf16_from_wtf8(&[0xC2, 0x80]).unwrap(), [0x80]);
         assert_eq!(utf16_from_wtf8(&[0xE0, 0xA0, 0x80]).unwrap(), [0x800]);
         assert_eq!(utf16_from_wtf8(&[0xF0, 0x90, 0x80, 0x80]).unwrap(), [0xD800, 0xDC00]);

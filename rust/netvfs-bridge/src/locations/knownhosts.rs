@@ -1,12 +1,7 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! The identities the user accepted for ad-hoc locations of one consumer
-//! (SPEC-v2 XB-14), in `~/.local/share/netvfs/bridge/<id>/known_hosts`
-//! (`Env::known_hosts_file`). One line per endpoint, sorted:
-//! `<provider>://<host>:<port> <pin>` (the pin as
-//! `ServerIdentity::toPin`). The file is mode 0600 and replaced atomically.
+//! Identities the user accepted for ad-hoc locations of one consumer, in `~/.local/share/netvfs/bridge/<id>/known_hosts`. One line per endpoint, sorted: `<provider>://<host>:<port> <pin>`. Mode 0600, replaced atomically.
 //!
-//! Thread-safe: workers read pins while they establish connections, and
-//! the identity hook writes an accepted one. Reads and writes block.
+//! Thread-safe: workers read pins while establishing connections, the identity hook writes an accepted one. Reads and writes block.
 
 use crate::savefile::{self, Mode};
 use std::collections::HashMap;
@@ -15,7 +10,6 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, PoisonError};
 
-/// At most this much of the file is read.
 const MAX_FILE_BYTES: u64 = 1 << 20;
 
 /// One consumer's known hosts.
@@ -26,7 +20,6 @@ pub struct KnownHosts {
     pins: Mutex<Option<HashMap<String, String>>>,
 }
 
-/// A key that fits the line format: not empty, no space, no line end.
 fn is_valid_key(key: &str) -> bool {
     !key.is_empty() && !key.contains([' ', '\n'])
 }
@@ -44,15 +37,13 @@ impl KnownHosts {
         &self.path
     }
 
-    /// The pin stored for `key` (`<provider>://<host>:<port>`), empty if
-    /// none.
+    /// The pin stored for `key` (`<provider>://<host>:<port>`), empty if none.
     #[must_use]
     pub fn pin(&self, key: &str) -> String {
         self.with_pins(|pins| pins.get(key).cloned().unwrap_or_default())
     }
 
-    /// Stores `pin` for `key` and saves the file; false for a key or pin
-    /// that does not fit a line, or when the file cannot be written.
+    /// Stores `pin` for `key` and saves the file.
     #[must_use]
     pub fn set_pin(&self, key: &str, pin: &str) -> bool {
         if !is_valid_key(key) || pin.is_empty() || pin.contains('\n') {
@@ -64,7 +55,7 @@ impl KnownHosts {
         })
     }
 
-    /// Forgets `key` (`ForgetAdHoc`); true unless saving failed.
+    /// Forgets `key` (`ForgetAdHoc`).
     #[must_use]
     pub fn remove(&self, key: &str) -> bool {
         self.with_pins(|pins| pins.remove(key).is_none() || self.save(pins))
@@ -77,12 +68,11 @@ impl KnownHosts {
 
     fn save(&self, pins: &HashMap<String, String>) -> bool {
         let mut keys: Vec<&String> = pins.keys().collect();
-        // QStringList::sort: by UTF-16 code units.
+        // Sorted by UTF-16 code units.
         keys.sort_by(|a, b| a.encode_utf16().cmp(b.encode_utf16()));
         let mut text = String::new();
         for key in keys {
             let pin = pins.get(key).map(String::as_str).unwrap_or_default();
-            // Writing to a String cannot fail.
             writeln!(text, "{key} {pin}").ok();
         }
         let saved = self
@@ -97,8 +87,6 @@ impl KnownHosts {
     }
 }
 
-/// The first MiB of the file: `<key> <pin>` per line, the pin trimmed;
-/// lines without a key are skipped, a later line wins.
 fn load(path: &Path) -> HashMap<String, String> {
     let mut data = Vec::new();
     if let Ok(file) = std::fs::File::open(path) {
@@ -114,7 +102,6 @@ fn load(path: &Path) -> HashMap<String, String> {
         .collect()
 }
 
-/// The connector reads and writes ad-hoc pins through this file.
 impl super::connector::PinStore for KnownHosts {
     fn pin(&self, key: &str) -> String {
         Self::pin(self, key)
@@ -135,7 +122,6 @@ mod tests {
     use crate::testutil::TempDir;
     use std::os::unix::fs::PermissionsExt;
 
-    /// The C++ case `knownHosts`.
     #[test]
     fn pins() {
         let dir = TempDir::new();
@@ -185,7 +171,6 @@ mod tests {
         assert_eq!(hosts.pin(""), "");
         assert!(hosts.set_pin("\u{1f600}://c:1", "z"));
         assert!(hosts.set_pin("\u{ffff}://c:1", "y"));
-        // Sorted by UTF-16 code units: a supplementary character before U+FFFF.
         assert_eq!(
             std::fs::read_to_string(&path).unwrap(),
             "sftp://a:22 ssh-rsa AAA\nsmb://b:445 later\n\u{1f600}://c:1 z\n\u{ffff}://c:1 y\n"
@@ -200,10 +185,8 @@ mod tests {
             assert!(!hosts.set_pin(key, pin), "{key:?} {pin:?}");
         }
         assert!(!dir.join("k").exists());
-        // Removing what is not there writes nothing.
         assert!(hosts.remove("absent"));
         assert!(!dir.join("k").exists());
-        // The folder is a file: nothing can be saved.
         std::fs::write(dir.join("f"), b"").unwrap();
         let broken = KnownHosts::new(dir.join("f/k"));
         assert!(!broken.set_pin("a", "b"));
@@ -218,7 +201,6 @@ mod tests {
         text.push_str("\na b\nc d\n");
         let path = dir.write("k", text);
         let hosts = KnownHosts::new(path);
-        // The cap falls right after "c": its pin "d" is never read.
         assert_eq!(hosts.pin("a"), "b");
         assert_eq!(hosts.pin("c"), "");
         let dir2 = TempDir::new();

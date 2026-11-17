@@ -60,7 +60,6 @@ Result databaseUsable(const Accounts::Manager *manager)
     return Result::success();
 }
 
-// The listed account `id` (enabled, Files service enabled), for Files.
 Result loadListed(const AccountStore &store, const QString &id, AccountConfig *config)
 {
     bool valid = false;
@@ -72,7 +71,6 @@ Result loadListed(const AccountStore &store, const QString &id, AccountConfig *c
 
 QByteArray serveList(const AccountStore &store)
 {
-    // XA-1: enabled accounts whose Files service is enabled.
     QVector<AccountLocation> result;
     for (const int id : store.filesAccounts()) {
         AccountConfig config;
@@ -103,7 +101,7 @@ QByteArray serveFiles(const AccountStore &store, const QString &id)
     AccountConfig config;
     if (const Result r = loadListed(store, id, &config); !r.ok())
         return failure(r);
-    // XA-4: refused before the secret is read.
+    // refused before the secret is read.
     if (const Result r = checkServicePolicy(config.params, Service::Files); !r.ok())
         return failure(r);
     Answer answer(Result::success());
@@ -114,7 +112,6 @@ QByteArray serveFiles(const AccountStore &store, const QString &id)
 
 QByteArray serveAttention(const AccountStore &store, const QString &id, const QString &state, const QString &pin)
 {
-    // XB-14 records attention; clearing it is the update flow's (Settings).
     const Attention attention = attentionFromString(state);
     if (attention == Attention::None)
         return failure(Result(Error::Unsupported, QStringLiteral("Unknown attention state")));

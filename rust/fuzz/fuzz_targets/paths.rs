@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! Byte paths from a consumer (XSEC-7): normalisation either fails or gives
-//! a path that is normalised already.
+//! Consumer byte paths: normalisation fails or gives an already normalised path.
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;

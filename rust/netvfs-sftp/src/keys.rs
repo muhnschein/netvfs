@@ -1,13 +1,10 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! SSH key tools (SPEC-sftp 5.1, S-15): generate an Ed25519 key, import
-//! Ed25519 and ECDSA keys from OpenSSH (bcrypt-encrypted or not), PKCS#8
-//! (PBES2-encrypted or not) and SEC1 files, and describe a stored key.
-//! RSA and DSA keys, security keys, certificates, PuTTY files and PEM
-//! files with the legacy (MD5) encryption are refused, by their armour
-//! where it names them, else right after decoding; no private-key
-//! operation runs on a refused key. So is a key whose passphrase
-//! protection would take minutes (or more memory than a phone has) to
-//! open, before the passphrase is asked for.
+//! SSH key tools: generate an Ed25519 key, import Ed25519 and ECDSA keys from OpenSSH (bcrypt-encrypted or not),
+//! PKCS#8 (PBES2-encrypted or not) and SEC1 files, describe a stored key.
+//! RSA, DSA, security keys, certificates, PuTTY files and PEM files with legacy (MD5) encryption are refused, by
+//! armour where it names them, else right after decoding; no private-key operation runs on a refused key. So is a
+//! key whose passphrase protection would take minutes (or more memory than a phone has) to open, before the
+//! passphrase is asked for.
 
 use data_encoding::BASE64;
 use netvfs_vfs::{ErrorName, Status};
@@ -16,12 +13,11 @@ use russh::keys::ssh_key::{Kdf, LineEnding};
 use russh::keys::{Algorithm, EcdsaCurve, HashAlg, PrivateKey, PublicKey};
 use zeroize::Zeroizing;
 
-/// The comment of the public line (SPEC-sftp 5.1).
+/// Comment of the public line.
 pub const PUBLIC_KEY_COMMENT: &str = "sailfish-backup";
-/// The prefix of a key stored as the account secret (SPEC-sftp 2).
+/// Prefix of a key stored as the account secret.
 pub const KEY_SECRET_PREFIX: &[u8] = b"netvfs-key-v1:";
-/// Key files larger than this are not keys (a 16384-bit RSA key in PEM is
-/// about 12 KiB).
+/// Larger key files are not keys (a 16384-bit RSA key in PEM is about 12 KiB).
 pub const MAX_KEY_FILE: usize = 64 * 1024;
 
 const OPENSSH_BEGIN: &str = "-----BEGIN OPENSSH PRIVATE KEY-----";
@@ -147,7 +143,7 @@ fn wrong_passphrase() -> Status {
     Status::new(ErrorName::AuthFailed, "The passphrase is not correct")
 }
 
-/// S-15: only Ed25519 and ECDSA on the NIST curves.
+/// Only Ed25519 and ECDSA on the NIST curves.
 ///
 /// # Errors
 /// `Unsupported`, naming what is refused.
@@ -207,12 +203,10 @@ fn public_line_refusal(text: &str) -> Option<Status> {
     Some(Status::unsupported("This is a public key; choose the private key file"))
 }
 
-/// The private key in `file`, decrypted with `passphrase` when it is
-/// encrypted.
+/// The private key in `file`, decrypted with `passphrase` if encrypted.
 ///
 /// # Errors
-/// `Unsupported` for files and keys S-15 refuses; `AuthFailed` for a
-/// missing or wrong passphrase.
+/// `Unsupported` for refused files and keys; `AuthFailed` for a missing or wrong passphrase.
 pub fn read_private_key(file: &[u8], passphrase: &[u8]) -> Result<PrivateKey, Status> {
     if file.len() > MAX_KEY_FILE {
         return Err(not_a_key());
@@ -221,11 +215,9 @@ pub fn read_private_key(file: &[u8], passphrase: &[u8]) -> Result<PrivateKey, St
     let text = std::str::from_utf8(file).map_err(|_not_text| not_a_key())?.trim();
     let key = match armour(text)? {
         Armour::OpenSsh => {
-            // An unknown key type of the `name@domain` form decodes and is
-            // refused by name below.
+            // Unknown `name@domain` key types decode, and are refused by name below.
             let key = PrivateKey::from_openssh(text).map_err(|_undecodable| unusable())?;
-            // The public half is not encrypted: refused before the
-            // passphrase is asked for.
+            // The public half is not encrypted: refused before the passphrase is asked for.
             check_algorithm(&key.algorithm())?;
             if key.is_encrypted() {
                 check_bcrypt_cost(key.kdf())?;
@@ -253,8 +245,7 @@ pub fn read_private_key(file: &[u8], passphrase: &[u8]) -> Result<PrivateKey, St
                 other => decoding_failure(&other),
             })?
         }
-        // russh takes a password as the sign of the encrypted format:
-        // never one here.
+        // russh takes a password as the sign of the encrypted format: never one here.
         Armour::Pkcs8 | Armour::Sec1 => {
             russh::keys::decode_secret_key(text, None).map_err(|e| decoding_failure(&e))?
         }
@@ -275,8 +266,7 @@ fn decoding_failure(e: &russh::keys::Error) -> Status {
 /// The material of an accepted, decrypted key.
 ///
 /// # Errors
-/// `Internal` when the key cannot be written out (not for keys this
-/// module read or made).
+/// `Internal` when the key cannot be written out (not for keys this module read or made).
 pub fn material(key: &PrivateKey) -> Result<KeyMaterial, Status> {
     let mut plain = key.clone();
     plain.set_comment("");
@@ -293,13 +283,13 @@ pub fn material(key: &PrivateKey) -> Result<KeyMaterial, Status> {
     })
 }
 
-/// `SHA256:` and unpadded base64 (S-6), as `ssh-keygen -lf` prints it.
+/// `SHA256:` and unpadded base64, as `ssh-keygen -lf` prints it.
 #[must_use]
 pub fn fingerprint(key: &PublicKey) -> String {
     key.fingerprint(HashAlg::Sha256).to_string()
 }
 
-/// `SshKeyTools::generate`: a new Ed25519 key.
+/// A new Ed25519 key.
 ///
 /// # Errors
 /// `Internal` when the system has no randomness to give.
@@ -309,7 +299,7 @@ pub fn generate() -> Result<KeyMaterial, Status> {
     material(&key)
 }
 
-/// `SshKeyTools::importKey`.
+/// Imports a private key file.
 ///
 /// # Errors
 /// As [`read_private_key`].
@@ -317,7 +307,7 @@ pub fn import(file: &[u8], passphrase: &[u8]) -> Result<KeyMaterial, Status> {
     material(&read_private_key(file, passphrase)?)
 }
 
-/// `SshKeyTools::describe`: the material of a stored (unencrypted) key.
+/// The material of a stored (unencrypted) key.
 ///
 /// # Errors
 /// As [`read_private_key`] without a passphrase.

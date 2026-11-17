@@ -3,22 +3,14 @@ import QtQuick 2.0
 import Sailfish.Accounts 1.0
 import org.netvfs.accounts 1.0
 
-// Creates or updates a netvfs account and its signond identity through
-// Sailfish.Accounts (SPEC 6.2, 6.3, 7.3 step 5, 7.5).
-//
-// create(): account -> settings, display name, the chosen services enabled
-// (<p>-backup and/or <p>-files, SPEC-v2 XA-1) ->
-// identity via createSignInCredentials("netvfs", "default", ...) without a
-// symmetric key (A-3) -> default_credentials_username = user@host (A-2) ->
-// done(accountId). Any failure after the account exists removes it again,
-// together with an identity already created (U-3).
-//
-// update(): identity updated (or re-created when it is missing, for example
-// after a device restore) -> accepted pin and sign-in method written,
-// attention keys cleared (6.4) -> done(accountId). Nothing is removed.
-//
-// Keep this object alive while busy (parent it to the agent and hold the
-// agent's delayDeletion, SPEC U-5).
+// Creates or updates a netvfs account and its signond identity through Sailfish.Accounts.
+// create(): account -> settings, display name, chosen services enabled (<p>-backup and/or
+// <p>-files) -> identity via createSignInCredentials("netvfs", "default", ...) without a symmetric
+// key -> default_credentials_username = user@host -> done(accountId). Failure after the account
+// exists removes it, with an identity already created.
+// update(): identity updated (re-created when missing, e.g. after device restore) -> accepted pin
+// and sign-in method written, attention keys cleared -> done(accountId). Nothing is removed.
+// Keep this object alive while busy: parent it to the agent and hold the agent's delayDeletion.
 QtObject {
     id: setup
 
@@ -63,10 +55,9 @@ QtObject {
         }
     }
 
-    // params: connection parameters with the accepted pin options;
-    // secret: password, "netvfs-key-v1:..." (SshKeyTool.secret()), or
-    // "" for accounts without a secret (XA-7: interactive, smb guest);
-    // services: { backup: bool, files: bool, backupsPath, filesRoot }.
+    // params: connection parameters with the accepted pin options; secret: password,
+    // "netvfs-key-v1:..." (SshKeyTool.secret()), or "" for accounts without a secret (interactive,
+    // smb guest); services: { backup: bool, files: bool, backupsPath, filesRoot }.
     function create(params, secret, services, name) {
         if (busy) {
             failed(_busyText())
@@ -96,7 +87,7 @@ QtObject {
         return qsTrId("settings-accounts-netvfs-la-setup_busy")
     }
 
-    // secret "" keeps the stored secret (only the settings are updated).
+    // secret "" keeps the stored secret (only settings are updated).
     function update(accountId, params, secret) {
         if (busy) {
             failed(_busyText())
@@ -106,15 +97,15 @@ QtObject {
         _provider = params.provider
         _params = params
         _secret = secret
-        // SPEC-v2 XP-1: the backup services come with netvfs-backup.
+        // Backup services come with netvfs-backup.
         var backupService = NetVfsHelpers.backupServiceName(_provider)
         _signInService = NetVfsProviders.offersService(_provider, "backup") && NetVfsHelpers.isServiceInstalled(backupService)
                 ? backupService : NetVfsHelpers.filesServiceName(_provider)
         _open(accountId, "update")
     }
 
-    // Changes the display name of the account handled last (creation flow,
-    // final dialog). Emits saved().
+    // Changes the display name of the account handled last (creation flow, final dialog). Emits
+    // saved().
     function rename(name) {
         if (busy || _account === null || name.length === 0 || name === _account.displayName) {
             saved()
@@ -232,8 +223,8 @@ QtObject {
 
     function _credentialsFailed(account, message) {
         if (_stage === "credentials-update") {
-            // The identity is gone (device restore): drop the stale reference,
-            // then create a new identity once the account has synced.
+            // Identity is gone (device restore): drop the stale reference, create a new one once
+            // the account has synced.
             _stage = "recreate"
             account.removeSignInCredentials(NetVfsHelpers.credentialsApplication, NetVfsHelpers.credentialsName)
         } else if (_stage === "credentials" || _stage === "recreate") {
@@ -242,8 +233,8 @@ QtObject {
     }
 
     function _writeSettings(account) {
-        // A-2 after the identity exists: createSignInCredentials() sets the
-        // label to the bare login name, which is not unique across servers.
+        // createSignInCredentials() sets the label to the bare login name, not unique across
+        // servers.
         _apply(account, _creating ? NetVfsHelpers.credentialsLabelSettings(_params)
                                   : NetVfsHelpers.updateSettings(_params))
         _stage = "finish"
@@ -259,9 +250,9 @@ QtObject {
     function _fail(text) {
         _secret = ""
         if (_creating && _stage !== "account" && _account !== null && _accountId > 0) {
-            // U-3: no half-created account; remove() also deletes the identity
-            // referenced by the segregated_credentials key (SPEC 3.5). The
-            // object stays busy (delayDeletion) until the removal is synced.
+            // No half-created account; remove() also deletes the identity referenced by
+            // segregated_credentials. Object stays busy (delayDeletion) until the removal is
+            // synced.
             _stage = "remove"
             failed(text)
             _account.remove()

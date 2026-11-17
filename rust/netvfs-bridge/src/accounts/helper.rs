@@ -1,18 +1,15 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! The bridge's account directory: everything through netvfs-accounts
-//! (SPEC-v2 XB-2a), started once per request:
+//! Account directory through netvfs-accounts, started once per request:
 //!
 //! ```text
-//! netvfs-accounts list                          the Files accounts (XA-1)
+//! netvfs-accounts list                          the Files accounts
 //! netvfs-accounts files <id>                    what a connection to a listed
-//!                                               account needs, policy checked (XA-4)
+//! account needs, policy checked
 //! netvfs-accounts attention <id> <state> [pin]  records auth-failed or
-//!                                               server-identity-changed (XB-14)
+//! server-identity-changed
 //! ```
 //!
-//! Each run happens on the blocking pool, gets 10 s and is killed after
-//! that; only the first MiB of its answer is read. Its warnings go to the
-//! bridge's stderr.
+//! Each run is on the blocking pool, gets 10 s, then is killed; only the first MiB of its answer is read. Its warnings go to the bridge's stderr.
 
 use super::qds::{decode_files, decode_list, decode_status};
 use super::{AccountDirectory, AccountLocation, Attention, FilesAccess};
@@ -28,7 +25,6 @@ use std::time::{Duration, Instant};
 pub const TIMEOUT: Duration = Duration::from_secs(10);
 /// How much of an answer is read.
 pub const MAX_ANSWER_BYTES: u64 = 1 << 20;
-/// How often a run that closed its output is checked for its exit.
 const EXIT_POLL: Duration = Duration::from_millis(5);
 
 /// Called after the helper recorded an attention state.
@@ -59,9 +55,7 @@ impl HelperDirectory {
         Self { program: program.into(), timeout: TIMEOUT, changed: None }
     }
 
-    /// Calls `changed` after each recorded attention state: the helper's own
-    /// `AccountChanged` may not reach the bus (it is set-id), so the owner
-    /// lists again without waiting for it.
+    /// Calls `changed` after each recorded attention state: the helper's `AccountChanged` may not reach the bus (set-id).
     #[must_use]
     pub fn on_change(mut self, changed: ChangeHook) -> Self {
         self.changed = Some(changed);
@@ -75,7 +69,6 @@ impl HelperDirectory {
         self
     }
 
-    /// The helper's answer to `arguments`.
     async fn run(&self, arguments: Vec<String>) -> Result<Vec<u8>, Status> {
         let (program, timeout) = (self.program.clone(), self.timeout);
         tokio::task::spawn_blocking(move || run(&program, &arguments, timeout))
@@ -123,8 +116,6 @@ impl AccountDirectory for HelperDirectory {
     }
 }
 
-/// Runs `program` with `arguments`: its answer once it ended with status
-/// 0, within `timeout`.
 fn run(program: &Path, arguments: &[String], timeout: Duration) -> Result<Vec<u8>, Status> {
     let started = Instant::now();
     let mut child = Command::new(program)
@@ -138,8 +129,7 @@ fn run(program: &Path, arguments: &[String], timeout: Duration) -> Result<Vec<u8
         })?;
     let (sender, answer) = mpsc::channel();
     if let Some(stdout) = child.stdout.take() {
-        // Detached: it ends with the last writer of the pipe, which may be
-        // a process the helper started.
+        // Detached: ends with the pipe's last writer, which may be a process the helper started.
         std::thread::spawn(move || sender.send(read_capped(stdout)).ok());
     }
     let finished = answer.recv_timeout(timeout).ok().and_then(|answer| {
@@ -157,7 +147,6 @@ fn run(program: &Path, arguments: &[String], timeout: Duration) -> Result<Vec<u8
     }
 }
 
-/// The exit status of `child`, if it ends within `timeout`.
 fn wait_for_exit(child: &mut Child, timeout: Duration) -> Option<ExitStatus> {
     let deadline = Instant::now().checked_add(timeout)?;
     loop {
@@ -171,11 +160,8 @@ fn wait_for_exit(child: &mut Child, timeout: Duration) -> Option<ExitStatus> {
     }
 }
 
-/// The first [`MAX_ANSWER_BYTES`] of `output`; the rest is read and
-/// dropped, so that the writer does not block.
 fn read_capped(mut output: impl Read) -> Vec<u8> {
     let mut answer = Vec::new();
-    // A failed read ends the answer: it is then too short to decode.
     output.by_ref().take(MAX_ANSWER_BYTES).read_to_end(&mut answer).ok();
     io::copy(&mut output, &mut io::sink()).ok();
     answer
@@ -190,7 +176,6 @@ mod tests {
     use std::os::unix::fs::PermissionsExt;
     use std::sync::atomic::{AtomicU32, Ordering};
 
-    /// A helper that records its arguments and answers with `answer`.
     fn script(dir: &TempDir, answer: &[u8]) -> PathBuf {
         dir.write("answer", answer);
         let body = format!(
@@ -216,14 +201,12 @@ mod tests {
 
     #[tokio::test]
     async fn lists() {
-        // tst_BridgeAccounts::directoryLists
         let dir = TempDir::new();
         let directory = HelperDirectory::new(script(&dir, &golden("list.bin")));
         let accounts = directory.list().await;
         assert_eq!(accounts.iter().map(|a| a.account_id).collect::<Vec<_>>(), [3, 4, i32::MAX]);
         assert_eq!(accounts[0].params.host, "files.example");
         assert_eq!(args(&dir), "list\n");
-        // A failure of the helper lists nothing.
         dir.write("answer", golden("not-found.bin"));
         assert_eq!(directory.try_list().await.unwrap_err().to_string(), "NotFound: No such account");
         assert_eq!(directory.list().await.len(), 0);
@@ -231,7 +214,6 @@ mod tests {
 
     #[tokio::test]
     async fn failures_list_nothing() {
-        // tst_BridgeAccounts::directoryFailures
         let missing = HelperDirectory::new("/nonexistent/netvfs-accounts");
         let status = missing.try_list().await.unwrap_err();
         assert_eq!(status.name, ErrorName::Unsupported);
@@ -248,7 +230,6 @@ mod tests {
             silent.try_list().await.unwrap_err().to_string(),
             "ProtocolError: netvfs-accounts gave a malformed answer"
         );
-        // A crash is a failure, whatever it wrote.
         let dir = TempDir::new();
         let crash = executable(
             &dir,
@@ -257,7 +238,6 @@ mod tests {
         );
         let status = HelperDirectory::new(&crash).try_list().await.unwrap_err();
         assert_eq!(status.message, format!("{} failed", crash.display()));
-        // A good answer with a failed exit is a failure too.
         let exit =
             executable(&dir, "exit", &format!("#!/bin/sh\ncat '{}'\nexit 3\n", dir.join("a").display()));
         assert_eq!(HelperDirectory::new(&exit).try_list().await.unwrap_err().name, ErrorName::ProtocolError);
@@ -277,17 +257,12 @@ mod tests {
         let pid = std::fs::read_to_string(&pid).unwrap();
         assert!(!Path::new(&format!("/proc/{}", pid.trim())).exists(), "the helper still runs");
 
-        // Output closed but still running: the exit is waited for, within
-        // the limit.
         let closes = executable(&dir, "closes", "#!/bin/sh\nexec >&-\nexec sleep 30\n");
         let directory = HelperDirectory::new(&closes).with_timeout(Duration::from_millis(300));
         assert_eq!(directory.try_list().await.unwrap_err().name, ErrorName::Timeout);
-        // The output open in a process the helper left behind: the helper
-        // has ended, but its answer never does.
         let leaves = executable(&dir, "leaves", "#!/bin/sh\nsleep 30 2>/dev/null &\n");
         let directory = HelperDirectory::new(&leaves).with_timeout(Duration::from_millis(300));
         assert_eq!(directory.try_list().await.unwrap_err().name, ErrorName::Timeout);
-        // Slow but in time.
         let late = executable(
             &dir,
             "late",
@@ -306,7 +281,6 @@ mod tests {
             let directory = HelperDirectory::new(script(&dir, &answer));
             assert_eq!(directory.try_list().await.unwrap_err().to_string(), malformed);
         }
-        // More than a MiB: cut, so malformed, and the helper is not blocked.
         let big = executable(
             &dir,
             "big",
@@ -328,7 +302,6 @@ mod tests {
 
     #[tokio::test]
     async fn files_are_fetched() {
-        // tst_BridgeAccounts::directoryFetch, up to the secret lookup.
         let dir = TempDir::new();
         let directory = HelperDirectory::new(script(&dir, &golden("files.bin")));
         let access = directory.files(3).await.unwrap();
@@ -346,7 +319,6 @@ mod tests {
 
     #[tokio::test]
     async fn attention_relists() {
-        // tst_BridgeAccounts::directoryAttention
         let dir = TempDir::new();
         let count = Arc::new(AtomicU32::new(0));
         let counter = Arc::clone(&count);
@@ -359,7 +331,6 @@ mod tests {
         directory.set_attention(3, Attention::ServerIdentityChanged, "SHA256:abc").await;
         assert_eq!(count.load(Ordering::SeqCst), 2);
         assert_eq!(args(&dir), "attention 3 auth-failed\nattention 3 server-identity-changed SHA256:abc\n");
-        // A refused write changes nothing.
         dir.write("answer", golden("not-found.bin"));
         capture::start();
         directory.set_attention(9, Attention::AuthFailed, "").await;
@@ -374,7 +345,6 @@ mod tests {
         );
         directory.set_attention(9, Attention::AuthFailed, "").await;
         assert_eq!(count.load(Ordering::SeqCst), 2);
-        // Without a hook, nothing to call.
         dir.write("answer", golden("ok.bin"));
         HelperDirectory::new(dir.join("helper")).set_attention(3, Attention::None, "").await;
         assert!(args(&dir).ends_with("attention 3 \n"));

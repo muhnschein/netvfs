@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: LGPL-2.1-or-later
-"""Tests of the packaging checks (SPEC-v2 XP-1): tools/ci/check-files.py
+"""Tests of the packaging checks: tools/ci/check-files.py
 against small specs and install trees, and tools/ci/check-ffi-lib.sh against
 stand-ins for netvfs-bridge's C ABI and
 tools/ci/check-rs-lib.sh against stand-ins for libnetvfs-rs.so, built here

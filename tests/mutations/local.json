@@ -23,8 +23,8 @@
   {
     "name": "local: rename(Replace) replaces a folder",
     "file": "src/backends/local/localbackend.cpp",
-    "search": "else if (targetExists && dst.isDir())   // XC-10",
-    "replace": "else if (targetExists && false)   // XC-10",
+    "search": "else if (targetExists && dst.isDir())",
+    "replace": "else if (targetExists && false)",
     "test": "timeout 300 build/tests/conformance/tst_conformance"
   },
   {
@@ -72,8 +72,8 @@
   {
     "name": "local: copy of a folder is not Unsupported",
     "file": "src/backends/local/localio.cpp",
-    "search": "if (r.error() == Error::IsADirectory)   // no ServerCopyRecursive",
-    "replace": "if (false)   // no ServerCopyRecursive",
+    "search": "if (r.error() == Error::IsADirectory)",
+    "replace": "if (false)",
     "test": "timeout 300 build/tests/conformance/tst_conformance"
   },
   {
@@ -93,8 +93,8 @@
   {
     "name": "local: list ignores cancel between entries",
     "file": "src/backends/local/localbackend.cpp",
-    "search": "if (m_backend.m_context->canceled)   // L-6: between entries",
-    "replace": "if (false)   // L-6: between entries",
+    "search": "if (m_backend.m_context->canceled)",
+    "replace": "if (false)",
     "test": "timeout 300 build/tests/conformance/tst_conformance"
   },
   {
@@ -128,8 +128,8 @@
   {
     "name": "local: handles survive disconnect",
     "file": "src/backends/local/localbackend.cpp",
-    "search": "++m_context->generation;   // XC-13",
-    "replace": ";   // XC-13",
+    "search": "++m_context->generation;",
+    "replace": ";",
     "test": "timeout 300 build/tests/conformance/tst_conformance"
   },
   {
@@ -142,15 +142,15 @@
   {
     "name": "local: listing follows symlinks",
     "file": "src/backends/local/localbackend.cpp",
-    "search": "const int rc = statAt(dirFd, name, false, &st);   // lstat semantics",
-    "replace": "const int rc = statAt(dirFd, name, true, &st);   // lstat semantics",
+    "search": "const int rc = statAt(dirFd, name, false, &st);",
+    "replace": "const int rc = statAt(dirFd, name, true, &st);",
     "test": "timeout 300 build/tests/conformance/tst_conformance"
   },
   {
     "name": "local: removeFile follows a symlink to a folder",
     "file": "src/backends/local/localbackend.cpp",
-    "search": "    if (const int e = statAt(AT_FDCWD, native, false, &st); e != 0)\n        return errnoResult(e, display(native));\n    if (st.isDir())   // XC-9",
-    "replace": "    if (const int e = statAt(AT_FDCWD, native, true, &st); e != 0)\n        return errnoResult(e, display(native));\n    if (st.isDir())   // XC-9",
+    "search": "    if (const int e = statAt(AT_FDCWD, native, false, &st); e != 0)\n        return errnoResult(e, display(native));\n    if (st.isDir())",
+    "replace": "    if (const int e = statAt(AT_FDCWD, native, true, &st); e != 0)\n        return errnoResult(e, display(native));\n    if (st.isDir())",
     "test": "timeout 300 build/tests/conformance/tst_conformance"
   },
   {

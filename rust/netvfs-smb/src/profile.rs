@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! The security profiles (SPEC-v2 XM-1 as amended by phase 3 design §5.1):
-//! what a connection requires of the server. Nothing is negotiated down
-//! from what the profile says (XSEC-2).
+//! Security profiles: what a connection requires of the server. Nothing is negotiated down.
 
 use netvfs_vfs::{ErrorName, Status};
 
@@ -11,8 +9,7 @@ pub enum Profile {
     /// Signing, and encryption of every request after SESSION_SETUP.
     #[default]
     Strict,
-    /// Signing; encryption where the server marks the session or the
-    /// share for it.
+    /// Signing; encryption where server marks session or share for it.
     Signed,
     /// NTLMSSP anonymous: no signing, no encryption, no credentials.
     Guest,
@@ -22,8 +19,7 @@ impl Profile {
     /// Every profile.
     pub const ALL: [Self; 3] = [Self::Strict, Self::Signed, Self::Guest];
 
-    /// The option value of `security_profile` (trimmed; empty is
-    /// `strict`).
+    /// The option value of `security_profile` (trimmed; empty is `strict`).
     ///
     /// # Errors
     /// `SecurityPolicy` for any other value: no profile below these exists.

@@ -1,20 +1,9 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! Argument validation of the bridge protocol (SPEC-v2 XSEC-7, XB-10): the
-//! port of the C++ bridge's `args.cpp` (netvfs 0.4). A method call becomes a
-//! typed [`Call`]: every path is normalised ([`super::paths`]), every number
-//! range-checked, every string length- and charset-checked, unknown option
-//! keys are refused. File descriptors are checked later (they need the
-//! descriptor).
+//! Argument validation: a method call becomes a typed [`Call`]. Paths are normalised ([`super::paths`]), numbers range-checked, strings length- and charset-checked, unknown option keys refused. File descriptors are checked later.
 //!
-//! Errors: `InvalidName` for paths and link targets, `ProtocolError` for
-//! everything else (the dispatch replies
-//! `org.freedesktop.DBus.Error.InvalidArgs` for it), `Unsupported` for an
-//! unknown method (`org.freedesktop.DBus.Error.UnknownMethod`).
+//! Errors: `InvalidName` for paths and link targets, `ProtocolError` for everything else (dispatch replies `org.freedesktop.DBus.Error.InvalidArgs`), `Unsupported` for an unknown method.
 //!
-//! Secrets (the `ConnectAdHoc` secret, the keyboard-interactive answers of
-//! `Answer`) are copied once, into [`Secret`]s, which wipe their bytes on
-//! drop (XB-16, XSEC-6). zbus's received message and its decoding buffers
-//! are not wiped (design §6.4).
+//! Secrets (`ConnectAdHoc` secret, keyboard-interactive `Answer`s) are copied once into [`Secret`]s, which wipe on drop. zbus's received message and decoding buffers are not wiped.
 
 use super::paths::{NPath, normalize};
 use crate::status::Status;
@@ -33,22 +22,14 @@ use zbus::message::Body;
 use zbus::zvariant::{self, Value};
 use zeroize::Zeroizing;
 
-/// Longest `Checksum` algorithm and `AddAccount` provider name.
 const MAX_TOKEN: usize = 32;
-/// Longest keyboard-interactive answer, in bytes.
 const MAX_ANSWER_BYTES: usize = MAX_SHORT * 4;
-/// Largest file mode an option may set.
 const MAX_MODE: i64 = 0o7777;
-/// Largest body of a call. The largest legitimate one is `ConnectAdHoc`
-/// (64 KiB secret, a URL of 4096 UTF-16 units, short options), under 96 KiB.
-/// A bound well below the 2 MiB message limit, because zvariant decodes a
-/// byte array inside a variant into 64 bytes per byte (an `a{sv}` argument
-/// of 2 MiB would take 128 MiB).
+/// Largest body of a call.
 pub const MAX_CALL_BODY: usize = 128 * 1024;
-/// The SMB security profiles `ConnectAdHoc` accepts.
 const SECURITY_PROFILES: [&str; 3] = ["strict", "signed", "guest"];
 
-/// A validated location id (`account:12`, `adhoc:<run>-3`): `[a-z0-9:-]{1,64}`.
+/// A validated location id (`account:12`, `adhoc:<run>-3`).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LocId(String);
 
@@ -60,7 +41,7 @@ impl LocId {
     }
 }
 
-/// Secret bytes, wiped on drop; `Debug` never shows them.
+/// Secret bytes, wiped on drop.
 #[derive(Clone, PartialEq, Eq)]
 pub struct Secret(Zeroizing<Vec<u8>>);
 
@@ -87,16 +68,16 @@ impl fmt::Debug for Secret {
 /// `ConnectAdHoc` options.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct AdHocOpts {
-    /// `user`: the user name instead of the URL's.
+    /// `user`.
     pub user: Option<String>,
-    /// `security_profile` (SMB only): `strict`, `signed` or `guest`.
+    /// `security_profile` (SMB only).
     pub security_profile: Option<String>,
 }
 
 /// `SetAttributes` changes.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct AttributeChanges {
-    /// `mode`: 0..=0o7777.
+    /// `mode`.
     pub mode: Option<u32>,
     /// `mtimeMs`, ms since the epoch.
     pub mtime_ms: Option<i64>,
@@ -113,15 +94,15 @@ pub struct CopyOpts {
     pub replace: bool,
 }
 
-/// How `Upload` writes the target (XC-13).
+/// How `Upload` writes the target.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum Disposition {
-    /// `create`: the target must not exist (default).
+    /// `create`.
     #[default]
     CreateNew,
-    /// `truncate`: replace the target's content.
+    /// `truncate`.
     Truncate,
-    /// `resume`: append at `offset`.
+    /// `resume`.
     Resume,
 }
 
@@ -130,13 +111,13 @@ pub enum Disposition {
 pub struct TransferOpts {
     /// First byte, in the local file and remotely.
     pub offset: i64,
-    /// Upload: bytes to send (-1: to the end); Download: the length (-1: all).
+    /// Upload.
     pub size: i64,
     /// Upload only.
     pub disposition: Disposition,
-    /// Upload only: the mode of a created file.
+    /// Upload only.
     pub create_mode: Option<u32>,
-    /// Upload only: the modification time to set, ms since the epoch.
+    /// Upload only.
     pub mtime_ms: Option<i64>,
 }
 
@@ -153,7 +134,7 @@ pub struct WalkOpts {
     pub max_depth: i32,
     /// Follow symbolic links to folders.
     pub follow_symlinks: bool,
-    /// Accepted and passed on; a no-op on the wire (design §7).
+    /// Accepted and passed on.
     pub post_order: bool,
 }
 
@@ -163,9 +144,9 @@ impl Default for WalkOpts {
     }
 }
 
-/// One validated call of `org.netvfs.Bridge1`, one variant per method (XB-10).
+/// One validated call of `org.netvfs.Bridge1`, one variant per method.
 #[derive(Debug)]
-#[allow(missing_docs)] // the fields are the XB-10 arguments of the same names
+#[allow(missing_docs)] // fields are the method arguments of the same names
 pub enum Call {
     Hello {
         client: String,
@@ -191,7 +172,7 @@ pub enum Call {
     Discover {
         on: bool,
     },
-    /// `batch`: 1..=512 (0 on the wire is the default 256).
+    /// `batch`.
     List {
         loc: LocId,
         dir: NPath,
@@ -241,7 +222,7 @@ pub enum Call {
         path: NPath,
         changes: AttributeChanges,
     },
-    /// `target` verbatim (XC-12: not normalised, may be relative).
+    /// `target` verbatim: not normalised, may be relative.
     MakeSymlink {
         loc: LocId,
         target: Vec<u8>,
@@ -263,13 +244,13 @@ pub enum Call {
         path: NPath,
         lane: Lane,
     },
-    /// `max`: at most 1 MiB.
+    /// `max`.
     Read {
         handle: u32,
         offset: i64,
         max: u32,
     },
-    /// `bytes`: capped at 16 MiB (a hint).
+    /// `bytes`.
     ReadAhead {
         handle: u32,
         offset: i64,
@@ -324,7 +305,7 @@ pub enum Call {
     },
     OpenStorageSettings,
     ListDrives,
-    /// `drive`: `[A-Za-z0-9_]{1,64}` (XB-20).
+    /// `drive`.
     Mount {
         drive: String,
     },
@@ -385,13 +366,11 @@ impl Call {
     #[must_use]
     pub fn method(&self) -> &'static MethodInfo {
         let name = self.name();
-        // Every variant names a method of the table (tested); Hello is the
-        // harmless stand-in that never happens.
+        // Every variant names a table method (tested); Hello is the stand-in that never happens.
         find_method(name).unwrap_or(&netvfs_bridge_proto::METHODS[0])
     }
 
-    /// The lane the call runs in: the hint of the call where it has one,
-    /// else the method's default (XB-12).
+    /// The lane the call runs in.
     #[must_use]
     pub fn lane(&self) -> Lane {
         match self {
@@ -404,19 +383,14 @@ impl Call {
         }
     }
 
-    /// XB-6: the call fails with `PermissionDenied` until the user granted
-    /// consent (the core enforces it).
+    /// Fails with `PermissionDenied` until the user granted consent.
     #[must_use]
     pub fn needs_consent(&self) -> bool {
         self.method().needs_consent
     }
 }
 
-// ------------------------------------------------------------ entry point
-
-/// Validates a method call of `org.netvfs.Bridge1`: method, signature, then
-/// the arguments (the C++ `validateCall`). The caller has checked path and
-/// interface.
+/// Validates a method call of `org.netvfs.Bridge1`: method, signature, then arguments. The caller checked path and interface.
 ///
 /// # Errors
 /// `Unsupported` for an unknown method, `ProtocolError` for a wrong
@@ -437,7 +411,6 @@ pub fn decode(msg: &Message) -> Result<Call, Status> {
 
 type Decoder = fn(&Body) -> Result<Call, Status>;
 
-/// The rules, in the order of the method table (`args.cpp` `rules()`).
 const DECODERS: [(&str, Decoder); 40] = [
     ("Hello", hello),
     ("GetConsent", |_| Ok(Call::GetConsent)),
@@ -493,10 +466,6 @@ fn deserialize<'b, T: zvariant::DynamicDeserialize<'b>>(body: &'b Body) -> Resul
     body.deserialize::<T>().map_err(|e| Status::invalid_args(format!("Malformed arguments: {e}")))
 }
 
-// ------------------------------------------------------------- building blocks
-
-/// The length of `s` in UTF-16 code units, as the C++ bridge counted
-/// (`QString::size`).
 fn utf16_len(s: &str) -> usize {
     s.encode_utf16().count()
 }
@@ -516,8 +485,7 @@ pub fn is_valid_token(value: &str, max: usize) -> bool {
         && value.bytes().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'-')
 }
 
-/// `[a-z0-9:-]{1,64}`: location ids (`account:12`, `adhoc:<run>-3`) and question
-/// ids (`q7`).
+/// `[a-z0-9:-]{1,64}`.
 #[must_use]
 pub fn is_valid_location_id(id: &str) -> bool {
     !id.is_empty()
@@ -569,8 +537,6 @@ fn loc_path(body: &Body) -> Result<(LocId, NPath), Status> {
     Ok((location_id(loc)?, normalize(&path)?))
 }
 
-// --------------------------------------------------------------- the methods
-
 fn hello(body: &Body) -> Result<Call, Status> {
     let (client,): (String,) = deserialize(body)?;
     Ok(Call::Hello { client: short_string(client, 1, MAX_SHORT)? })
@@ -579,7 +545,7 @@ fn hello(body: &Body) -> Result<Call, Status> {
 fn connect_ad_hoc(body: &Body) -> Result<Call, Status> {
     let (url, secret, opts): (String, &[u8], Options<'_>) = deserialize(body)?;
     let url = short_string(url, 1, MAX_URL)?;
-    // XB-16: the only copy of the secret in our hands, wiped on drop.
+    // The only copy of the secret in our hands, wiped on drop.
     let secret = Secret(Zeroizing::new(secret.to_vec()));
     if secret.expose().len() > MAX_SECRET {
         return Err(Status::invalid_args("Secret too long"));
@@ -630,8 +596,6 @@ fn set_attributes(body: &Body) -> Result<Call, Status> {
     Ok(Call::SetAttributes { loc, path, changes })
 }
 
-/// XC-12: the link target is stored verbatim (not normalised, may be
-/// relative); only its size and NUL bytes are checked.
 fn make_symlink(body: &Body) -> Result<Call, Status> {
     let (loc, target, link): (String, Vec<u8>, Vec<u8>) = deserialize(body)?;
     let loc = location_id(loc)?;
@@ -729,7 +693,6 @@ fn answer(body: &Body) -> Result<Call, Status> {
     Ok(Call::Answer { id, accept, answers })
 }
 
-/// A drive id of `ListDrives` (XB-20): an object path element, never a path.
 fn drive_only(body: &Body) -> Result<String, Status> {
     let (drive,): (String,) = deserialize(body)?;
     if !drive_info::is_valid_id(&drive) {
@@ -743,18 +706,12 @@ fn add_account(body: &Body) -> Result<Call, Status> {
     Ok(Call::AddAccount { provider: token(provider, 1)? })
 }
 
-// ----------------------------------------------------------------- options
-
-/// An `a{sv}` argument, in key order (as the C++ `QVariantMap`).
 type Options<'a> = BTreeMap<String, Value<'a>>;
 
 fn too_complex() -> Status {
     Status::invalid_args("Argument too complex")
 }
 
-/// `wire.h` `DecodeLimits` over a decoded value: containers nest at most
-/// [`DECODE_MAX_DEPTH`] deep, and hold at most [`DECODE_MAX_ELEMENTS`]
-/// elements (byte arrays excepted). `depth` counts as the C++ decoder did.
 fn check_value(value: &Value<'_>, depth: usize) -> Result<(), Status> {
     let deeper = depth.checked_add(1).ok_or_else(too_complex)?;
     let container = matches!(value, Value::Value(_) | Value::Array(_) | Value::Dict(_) | Value::Structure(_));
@@ -781,8 +738,6 @@ fn check_items<'v, 'a: 'v>(items: impl Iterator<Item = &'v Value<'a>>, depth: us
     Ok(())
 }
 
-/// Runs `handle` on each option, in key order, with nested variants
-/// unwrapped; first checks the decode limits.
 fn each_option<'a>(
     opts: &Options<'a>,
     mut handle: impl FnMut(&str, &Value<'a>) -> Result<(), Status>,
@@ -790,8 +745,7 @@ fn each_option<'a>(
     if opts.len() > DECODE_MAX_ELEMENTS {
         return Err(too_complex());
     }
-    // The values are the contents of the dict's variants: depth 2 for the
-    // C++ decoder (the array is 0, its entries and their variants 1).
+    // Contents of the dict's variants: depth 2 for the C++ decoder (array 0, entries and their variants 1).
     for value in opts.values() {
         check_value(value, 2)?;
     }
@@ -801,7 +755,6 @@ fn each_option<'a>(
     Ok(())
 }
 
-/// The value inside nested variants (the C++ decoder unwrapped them).
 fn unwrap_variant<'v, 'a>(mut value: &'v Value<'a>) -> &'v Value<'a> {
     while let Value::Value(inner) = value {
         value = inner;
@@ -814,7 +767,6 @@ fn unknown_option(key: &str) -> Status {
     Status::invalid_args(format!("Unknown option \"{shown}\""))
 }
 
-/// Any integer type, as the C++ bridge accepted (`toInt64`).
 fn as_int(value: &Value<'_>) -> Option<i64> {
     match value {
         Value::U8(n) => Some(i64::from(*n)),
@@ -905,7 +857,6 @@ fn disposition(key: &str, value: &Value<'_>) -> Result<Disposition, Status> {
     }
 }
 
-/// Upload and Download share the keys; Download refuses the write-only ones.
 fn transfer_option(
     key: &str,
     value: &Value<'_>,
@@ -969,8 +920,6 @@ fn answer_option(
     }
 }
 
-/// The keyboard-interactive answers: an array of byte arrays (`aay`, or
-/// `av` of `ay`), at most [`MAX_ANSWERS`], each at most 1 KiB.
 fn answer_list(value: &Value<'_>) -> Result<Vec<Secret>, Status> {
     let items = match value {
         Value::Array(a) if a.element_signature() != "y" && a.element_signature() != "s" => a.inner(),

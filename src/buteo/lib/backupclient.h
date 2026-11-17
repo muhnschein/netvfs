@@ -20,8 +20,8 @@ namespace NetVfs {
 
 class BackupService;
 
-// The Buteo client plugin shared by all providers and operations (SPEC 8.1):
-// the Buteo-facing shell. Each startSync() is carried out by a BackupRun.
+// Buteo client plugin shared by all providers and operations: the Buteo-facing shell. Each
+// startSync() is carried out by a BackupRun.
 class BackupClient : public Buteo::ClientPlugin
 {
     Q_OBJECT
@@ -31,8 +31,8 @@ public:
     using Operation = BackupOperation;
     using SessionFactory = NetVfs::SessionFactory;
 
-    // `sessionFactory`: how runs open their account session; empty means
-    // AccountSession::open(). Tests pass their own.
+    // `sessionFactory`: how runs open their account session; empty means AccountSession::open().
+    // Tests pass their own.
     BackupClient(const QString &provider, Operation operation, const QString &pluginName,
                  const Buteo::SyncProfile &profile, Buteo::PluginCbInterface *cbInterface,
                  const SessionFactory &sessionFactory = SessionFactory());
@@ -50,9 +50,8 @@ public:
     bool cleanUp() override;
     Buteo::SyncResults getSyncResults() const override;
 
-    // SPEC 8.7.
     static Buteo::SyncResults::MinorCode minorCodeFor(Error error);
-    // What abortSync() reports for the status Buteo passes in (B-4).
+    // What abortSync() reports for the status Buteo passes in.
     static Buteo::SyncResults::MinorCode minorCodeForAbort(Sync::SyncStatus status);
 
 public Q_SLOTS:
@@ -68,12 +67,11 @@ private:
     const SessionFactory m_sessionFactory;
     int m_accountId = 0;
     std::unique_ptr<BackupService> m_service;
-    std::unique_ptr<BackupRun> m_run;     // the current or last run; declared after the service it uses
+    std::unique_ptr<BackupRun> m_run;
     bool m_aborted = false;
     Buteo::SyncResults::MinorCode m_abortCode = Buteo::SyncResults::ABORTED;
     Buteo::SyncResults m_results;
 };
 
-} // namespace NetVfs
-
+}
 #endif

@@ -32,7 +32,6 @@ Result verifyAccess(Backend *backend, const QString &dir, qint64 *freeBytes)
     if (!r.ok())
         return r;
 
-    // SEC-6: the probe carries no device-identifying data.
     const QString name = QLatin1String(ProbeFilePrefix)
             + QUuid::createUuid().toString().mid(1, 36).remove(QLatin1Char('-'));
     const QString path = Paths::join(target, name);
@@ -48,9 +47,8 @@ Result verifyAccess(Backend *backend, const QString &dir, qint64 *freeBytes)
     if (!r.ok())
         return r;
 
-    // Best effort, as in verifyBrowseAccess(): the probe file already proved
-    // write access. Some servers drop the connection on this query (Samba
-    // with quotas on ZFS); free space is then unknown, not a failed verify.
+    // Best effort: some servers drop the connection on this query (Samba with quotas on ZFS); free
+    // space then unknown, not a failed verify.
     qint64 available = -1;
     r = backend->freeSpace(target, &available);
     if (r.error() == Error::Canceled)
@@ -83,4 +81,4 @@ Result verifyBrowseAccess(Backend *backend, const QString &root, qint64 *freeByt
     return Result::success();
 }
 
-} // namespace NetVfs
+}

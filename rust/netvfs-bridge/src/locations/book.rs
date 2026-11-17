@@ -1,13 +1,7 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! The locations a consumer may see (XB-7) and their connection pools
-//! (`LocationBook` of locationbook.cpp): netvfs accounts whose Files
-//! service is enabled, and the ad-hoc locations consumers created.
+//! The locations a consumer may see and their connection pools: netvfs accounts whose Files service is enabled, and the ad-hoc locations consumers created.
 //!
-//! The book lives in the core (one task, no locks). Reading the accounts
-//! database, the consent state and the known_hosts file are the core's
-//! (chunk E): it hands the book the account list
-//! ([`LocationBook::set_accounts`]), says whether consent is granted, and
-//! passes its [`PinStore`] where a pin is dropped.
+//! Lives in the core (one task, no locks). The core owns reading the accounts database, the consent state and known_hosts: it hands the book the account list ([`LocationBook::set_accounts`]), says whether consent is granted, and passes its [`PinStore`] where a pin is dropped.
 
 use super::TaskContext;
 use super::connector::PinStore;
@@ -28,10 +22,7 @@ use std::time::{Duration, Instant, SystemTime};
 pub struct LocationBook<B: Backend> {
     accounts: Vec<Arc<LocationSpec>>,
     ad_hoc: BTreeMap<String, Arc<LocationSpec>>,
-    /// Ad-hoc locations whose first connection is being established; their
-    /// pools exist (and count against the host limit) but nobody sees them.
     connecting: BTreeMap<String, Arc<LocationSpec>>,
-    /// This run's part of the ad-hoc ids ([`new_run`]).
     run: u64,
     next_ad_hoc: u64,
     pools: PoolSet<B>,
@@ -48,26 +39,23 @@ impl<B: Backend> fmt::Debug for LocationBook<B> {
     }
 }
 
-/// `PermissionDenied`: no consent (XB-6).
+/// `PermissionDenied`.
 #[must_use]
 pub fn no_consent() -> Status {
     Status::new(ErrorName::PermissionDenied, "The user has not allowed this app to use network locations")
 }
 
-/// `NotFound`: an id the consumer cannot see.
+/// `NotFound`.
 #[must_use]
 pub fn no_such_location() -> Status {
     Status::new(ErrorName::NotFound, "No such location")
 }
 
-/// A random number for this run of the bridge, the `<run>` of its ad-hoc
-/// ids ([`ad_hoc_location_id`]). `RandomState`'s keys come from the
-/// system's random source; the time and the process id are hashed with them.
 fn new_run() -> u64 {
     RandomState::new().hash_one((SystemTime::now(), std::process::id()))
 }
 
-/// `Unsupported`: the backend package is missing (XP-5).
+/// `Unsupported`.
 #[must_use]
 pub fn no_backend(provider: &str) -> Status {
     Status::new(ErrorName::Unsupported, format!("No backend for {provider} is installed"))
@@ -98,10 +86,7 @@ impl<B: Backend> LocationBook<B> {
         &mut self.pools
     }
 
-    /// Takes the account list (`load`, `refresh`): pools of accounts that
-    /// are gone or now connect differently are dropped, so that new
-    /// connections use the new settings. The caller broadcasts
-    /// `LocationsChanged` when consent is granted.
+    /// Takes the account list.
     pub fn set_accounts(&mut self, accounts: Vec<LocationSpec>) {
         let accounts: Vec<Arc<LocationSpec>> = accounts.into_iter().map(Arc::new).collect();
         self.pools.retain(|pool| {
@@ -111,8 +96,7 @@ impl<B: Backend> LocationBook<B> {
         self.accounts = accounts;
     }
 
-    /// Consent was revoked (XB-6): every pool goes, ad-hoc secrets are
-    /// wiped and ad-hoc locations forgotten.
+    /// Consent was revoked.
     pub fn revoke(&mut self) {
         self.pools.clear();
         self.wipe_ad_hoc_secrets();
@@ -128,19 +112,17 @@ impl<B: Backend> LocationBook<B> {
         }
     }
 
-    /// Wakes every running item to look at its cancel flag (`kickAll`).
+    /// Wakes every running item to look at its cancel flag.
     pub fn kick(&mut self) {
         self.pools.kick();
     }
 
-    /// Closes connections idle for `idle` (and frees finished ones):
-    /// whether anything changed.
+    /// Closes connections idle for `idle` (and frees finished ones).
     pub fn maintain(&mut self, now: Instant, idle: Duration) -> bool {
         self.pools.maintain(now, idle)
     }
 
-    /// What `ListLocations` shows: the accounts, then the ad-hoc
-    /// locations by id.
+    /// What `ListLocations` shows.
     pub fn visible(&self) -> impl Iterator<Item = &Arc<LocationSpec>> {
         self.accounts.iter().chain(self.ad_hoc.values())
     }
@@ -151,8 +133,7 @@ impl<B: Backend> LocationBook<B> {
         self.accounts.iter().find(|a| a.id == id).or_else(|| self.ad_hoc.get(id))
     }
 
-    /// The connection state of the visible location `id` (XB-12):
-    /// disconnected without a pool.
+    /// The connection state of the visible location `id`.
     #[must_use]
     pub fn state(&self, id: &str) -> ConnectionState {
         if self.connecting.contains_key(id) {
@@ -167,7 +148,7 @@ impl<B: Backend> LocationBook<B> {
         self.visible().map(|spec| (spec.id.clone(), self.state(&spec.id))).collect()
     }
 
-    /// Whether the visible location `id` has a pool (`existing`).
+    /// Whether the visible location `id` has a pool.
     #[must_use]
     pub fn has_pool(&self, id: &str) -> bool {
         !self.connecting.contains_key(id) && self.pools.get(id).is_some()
@@ -198,19 +179,14 @@ impl<B: Backend> LocationBook<B> {
         self.find(id).ok_or_else(no_such_location)
     }
 
-    /// The id of the next ad-hoc location (`reserveAdHocId`): never one
-    /// given out before, by this book or by an earlier run's.
+    /// The id of the next ad-hoc location.
     pub fn reserve_ad_hoc_id(&mut self) -> String {
         let id = ad_hoc_location_id(self.run, self.next_ad_hoc);
         self.next_ad_hoc = self.next_ad_hoc.saturating_add(1);
         id
     }
 
-    /// Starts an ad-hoc location (`connectAdHoc`): its pool exists from
-    /// now on, unseen; the core then submits an empty item on
-    /// [`Lane::Interactive`] (establishing is what the first item does) and
-    /// ends with [`LocationBook::add_ad_hoc`] or
-    /// [`LocationBook::abandon_ad_hoc`]. False if the id is taken.
+    /// Starts an ad-hoc location.
     pub fn start_ad_hoc(&mut self, spec: LocationSpec) -> bool {
         if spec.kind != LocationKind::AdHoc
             || self.find(&spec.id).is_some()
@@ -224,9 +200,7 @@ impl<B: Backend> LocationBook<B> {
         true
     }
 
-    /// The first connection of the ad-hoc location `id` was established:
-    /// it becomes visible (the caller broadcasts `LocationsChanged`).
-    /// False when it is no longer being connected (revoked meanwhile).
+    /// The first connection of the ad-hoc location `id` was established.
     pub fn add_ad_hoc(&mut self, id: &str) -> bool {
         let Some(spec) = self.connecting.remove(id) else { return false };
         if self.pools.get(id).is_none() {
@@ -236,8 +210,7 @@ impl<B: Backend> LocationBook<B> {
         true
     }
 
-    /// The first connection of the ad-hoc location `id` failed: its pool
-    /// goes and its secret is wiped.
+    /// The first connection of the ad-hoc location `id` failed.
     pub fn abandon_ad_hoc(&mut self, id: &str) {
         if let Some(spec) = self.connecting.remove(id) {
             if let Some(secret) = &spec.ad_hoc_secret {
@@ -247,10 +220,7 @@ impl<B: Backend> LocationBook<B> {
         }
     }
 
-    /// `ForgetAdHoc` (XB-14): drops the pin, so the next contact asks
-    /// again, wipes the secret and closes the connections. False for an
-    /// unknown id (the caller replies `NotFound`; the caller broadcasts
-    /// `LocationsChanged` otherwise).
+    /// `ForgetAdHoc`.
     pub fn forget_ad_hoc(&mut self, id: &str, pins: &dyn PinStore) -> bool {
         let Some(spec) = self.ad_hoc.remove(id) else { return false };
         // False only means there was no pin.
@@ -262,16 +232,14 @@ impl<B: Backend> LocationBook<B> {
         true
     }
 
-    /// `Disconnect`: stops every connection of `id`.
+    /// `Disconnect`.
     pub fn disconnect(&mut self, id: &str) {
         if self.has_pool(id) {
             self.pools.stop_all(id);
         }
     }
 
-    /// Closes read handle `handle` on the connection `worker` of `loc`
-    /// (`closeWorkerHandle`); nothing when the connection is gone, its
-    /// handles went with it.
+    /// Closes read handle `handle` on the connection `worker` of `loc`.
     pub fn close_worker_handle(&mut self, loc: &str, worker: WorkerId, handle: u32) {
         if !self.has_pool(loc) || !self.pools.owns(loc, worker) {
             return;

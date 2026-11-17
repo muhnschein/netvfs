@@ -1,6 +1,4 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-// Connections, metadata, namespace operations and read handles (T4); the
-// calls the C++ bridge made in sessionfiles.cpp and worker.cpp.
 #include "ffi_p.h"
 
 #include "backendloader.h"
@@ -40,8 +38,7 @@ ReadHandle *readHandleOf(const nvb_handle *h)
     return h->handle.get();
 }
 
-// ListSink over the C sink: one call per backend batch (XC-6, design §1.2).
-// `sink` gets the batch and says whether to go on.
+// `sink` gets one backend batch and says whether to go on.
 class SinkAdapter final : public ListSink
 {
 public:
@@ -62,8 +59,7 @@ private:
     Sink m_sink;
 };
 
-} // namespace
-
+}
 nvb_error *connNew(nvb_bytes provider, nvb_conn **out) noexcept
 {
     clearOut(out);
@@ -85,7 +81,7 @@ void connFree(nvb_conn *conn) noexcept
     guardedVoid([conn]() { std::unique_ptr<nvb_conn> owned(conn); });
 }
 
-// C-9: any thread, also while an owner-thread call runs (T4).
+// Any thread, also while an owner-thread call runs.
 void connCancel(nvb_conn *conn) noexcept
 {
     guardedVoid([conn]() {
@@ -218,7 +214,7 @@ nvb_error *connSetAttributes(nvb_conn *conn, nvb_bytes path, const nvb_attribute
     });
 }
 
-// XC-12: the target is verbatim (not a normalised path).
+// Target is verbatim (not a normalised path).
 nvb_error *connMakeSymlink(nvb_conn *conn, nvb_bytes target, nvb_bytes linkPath) noexcept
 {
     return guarded([conn, target, linkPath]() {
@@ -243,8 +239,6 @@ nvb_error *connCopy(nvb_conn *conn, nvb_bytes from, nvb_bytes to, int32_t recurs
     });
 }
 
-// ----------------------------------------------------------------- handles
-
 nvb_error *connOpenRead(nvb_conn *conn, nvb_bytes path, nvb_handle **out, int64_t *size) noexcept
 {
     clearOut(out);
@@ -268,7 +262,7 @@ nvb_error *connOpenRead(nvb_conn *conn, nvb_bytes path, nvb_handle **out, int64_
     });
 }
 
-// XC-13: a short read only at EOF.
+// Short read only at EOF.
 nvb_error *handleRead(nvb_handle *h, int64_t offset, uint8_t *buf, size_t cap, size_t *len) noexcept
 {
     if (len)
@@ -296,7 +290,7 @@ void handleReadAhead(nvb_handle *h, int64_t offset, int64_t bytes) noexcept
     guardedVoid([h, offset, bytes]() { readHandleOf(h)->readAhead(offset, bytes); });
 }
 
-// Always frees the handle (O4), also when close() fails.
+// Always frees the handle, also when close() fails.
 nvb_error *handleClose(nvb_handle *h) noexcept
 {
     return guarded([h]() {
@@ -304,9 +298,9 @@ nvb_error *handleClose(nvb_handle *h) noexcept
             return Result::success();
         const Result r = h->handle ? h->handle->close() : Result::success();
         if (h->conn)
-            h->conn->handles.erase(h);   // deletes it
+            h->conn->handles.erase(h);
         return r;
     });
 }
 
-} // namespace NetVfs::Ffi
+}

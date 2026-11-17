@@ -3,18 +3,17 @@ import QtQuick 2.0
 import Sailfish.Silica 1.0
 import com.jolla.settings.accounts 1.0
 
-// AccountBusyPage while a connection test or an account write runs. A
-// failure switches it to the info state with a specific message and a button
-// that takes the user back to edit their input (SPEC U-4).
+// AccountBusyPage while a connection test or an account write runs. A failure switches it to the
+// info state with a specific message and a button back to editing.
 AccountBusyPage {
     id: page
 
-    // Emitted once, when the page first becomes active (after the push
-    // transition, so the owner may replace the page when work completes).
+    // Emitted once, when the page first becomes active (after the push transition, so the owner may
+    // replace the page when work completes).
     signal pageActivated()
     signal editRequested()
-    // Emitted when the page stops being the current one while work still
-    // runs (the user went back): the owner cancels that work (U-3, U-4).
+    // Emitted when the page stops being current while work still runs (user went back): the owner
+    // cancels that work.
     signal left()
 
     property bool _wasActivated

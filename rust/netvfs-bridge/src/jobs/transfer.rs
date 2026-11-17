@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! The `Upload` and `Download` bodies (`transferOnWorker`, XB-11): regular
-//! files are read and written at explicit offsets, FIFOs sequentially.
-//! `JobFinished` carries `bytes`, the bytes read or written locally.
+//! The `Upload` and `Download` bodies: regular files are read and written at explicit offsets, FIFOs sequentially. `JobFinished` carries `bytes`, the bytes read or written locally.
 
 use super::fd::FdInfo;
 use super::fdio::FdDevice;
@@ -12,12 +10,10 @@ use crate::server::args::{Disposition, TransferOpts};
 use std::os::fd::{AsFd as _, OwnedFd};
 use std::sync::atomic::AtomicBool;
 
-/// What an `Upload` or `Download` needs on the worker thread. The job owns
-/// the descriptor; it is closed when the job ends.
+/// What an `Upload` or `Download` needs on the worker thread.
 #[derive(Debug)]
 pub struct Transfer {
-    /// The checked descriptor
-    /// ([`check_transfer_fd`](super::fd::check_transfer_fd)).
+    /// The checked descriptor ([`check_transfer_fd`](super::fd::check_transfer_fd)).
     pub fd: OwnedFd,
     /// What [`check_transfer_fd`](super::fd::check_transfer_fd) found.
     pub info: FdInfo,
@@ -29,8 +25,7 @@ pub struct Transfer {
     pub upload: bool,
 }
 
-/// The bytes to transfer: the call's size, or for an upload from a
-/// regular file what the file has after the offset.
+/// The bytes to transfer.
 #[must_use]
 pub fn transfer_length(t: &Transfer) -> i64 {
     let size = t.opts.size;
@@ -40,7 +35,7 @@ pub fn transfer_length(t: &Transfer) -> i64 {
     size
 }
 
-/// The backend's upload options for `t` and `length` bytes (-1: not known).
+/// The backend's upload options for `t`; `length` -1: unknown.
 #[must_use]
 pub fn upload_options_for(t: &TransferOpts, length: i64) -> UploadOptions {
     let expected = |base: i64| (length >= 0).then(|| base.saturating_add(length));
@@ -63,7 +58,7 @@ pub fn transfer_extra(bytes: i64) -> Extra {
     extra
 }
 
-/// Runs the transfer; `report` gets the progress.
+/// Runs the transfer.
 pub fn transfer<F: FnMut(i64, i64)>(
     conn: &mut Conn,
     t: &Transfer,

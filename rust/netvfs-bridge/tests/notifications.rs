@@ -1,8 +1,5 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! The consent notification against a fake `org.freedesktop.Notifications`
-//! on a private bus (skipped without `dbus-daemon`): the prompt itself, and
-//! the binary end to end, from `RequestConsent` to the answer in
-//! `bridge.conf` (also skipped without the C ABI).
+//! Consent notification against a fake `org.freedesktop.Notifications` on a private bus (skipped without `dbus-daemon`): the prompt, and the binary end to end (also skipped without the C ABI).
 
 #![allow(clippy::unwrap_used, clippy::arithmetic_side_effects, clippy::indexing_slicing, clippy::panic)]
 
@@ -36,7 +33,7 @@ enum Answer {
     NotAnId,
 }
 
-/// The fake service: ids from 7 on, or the replaced one.
+/// Fake service: ids from 7 on, or the replaced one.
 struct Fake {
     conn: Connection,
     calls: mpsc::UnboundedReceiver<Message>,
@@ -177,14 +174,12 @@ async fn closed_and_stale_signals() {
     let Some(mut s) = setup().await else { return };
     s.prompt.show("A");
     s.fake.notify().await;
-    // Other notifications, id 0, a malformed body and other members.
     s.fake.closed(6).await;
     s.fake.action(8, "allow").await;
     s.fake.action(0, "allow").await;
     emit(&s.fake.conn, None, "ActionInvoked", &7_u32).await;
     emit(&s.fake.conn, None, "NotificationClosed", &(7_u32, "x")).await;
     emit(&s.fake.conn, None, "ActionInvoked2", &(7_u32, "allow")).await;
-    // None of them was taken: the answer is the first event.
     s.fake.action(7, "allow").await;
     assert_eq!(next_event(&mut s.events).await, PromptEvent::Answered(true));
     s.prompt.show("A");
@@ -193,7 +188,6 @@ async fn closed_and_stale_signals() {
     s.fake.closed(8).await;
     assert_eq!(next_event(&mut s.events).await, PromptEvent::Dismissed);
     assert!(!s.prompt.is_shown());
-    // Closed already: a late action is ignored.
     s.fake.action(8, "allow").await;
     s.prompt.show("A");
     s.fake.notify().await;
@@ -205,7 +199,7 @@ async fn closed_and_stale_signals() {
 #[tokio::test]
 async fn withdraw_closes_the_notification() {
     let Some(mut s) = setup().await else { return };
-    s.prompt.withdraw(); // nothing shown: nothing sent
+    s.prompt.withdraw();
     s.prompt.show("A");
     s.fake.notify().await;
     s.prompt.withdraw();
@@ -218,7 +212,6 @@ async fn withdraw_closes_the_notification() {
     s.fake.action(8, "allow").await;
     assert_eq!(next_event(&mut s.events).await, PromptEvent::Answered(true));
 
-    // Withdrawn before the service answered: closed once it did.
     s.prompt.show("B");
     s.prompt.withdraw();
     assert!(!s.prompt.is_shown());
@@ -226,12 +219,10 @@ async fn withdraw_closes_the_notification() {
     assert_eq!(s.fake.close().await, 9);
     s.fake.action(9, "allow").await;
 
-    // Dropping the prompt withdraws its question.
     s.prompt.show("C");
     s.fake.notify().await;
     drop(s.prompt);
     assert_eq!(s.fake.close().await, 10);
-    // No event, and the task may have ended already.
     s.events.try_recv().unwrap_err();
 }
 
@@ -257,7 +248,6 @@ async fn other_senders_are_ignored() {
     emit(&other, Some(&to), "ActionInvoked", &(7_u32, "allow")).await;
     emit(&other, None, "ActionInvoked", &(7_u32, "allow")).await;
     emit(&other, Some(&to), "NotificationClosed", &(7_u32, 1_u32)).await;
-    // The bus has handled what `other` sent once it answers a ping.
     other
         .call_method(
             Some("org.freedesktop.DBus"),
@@ -298,7 +288,6 @@ async fn no_service() {
     prompt.show("A");
     assert_eq!(next_event(&mut events).await, PromptEvent::Dismissed);
     assert!(!prompt.is_shown());
-    // A failure that is no longer current is not reported.
     prompt.show("A");
     prompt.withdraw();
     prompt.show("A");
@@ -323,13 +312,9 @@ async fn no_bus() {
     assert_eq!(events.try_recv(), Err(mpsc::error::TryRecvError::Empty));
 }
 
-// ------------------------------------------------- end to end, the binary
-
 const BRIDGE: &str = env!("CARGO_BIN_EXE_netvfs-bridge");
 
-/// The bridge binary on the private bus with the fake service, consent
-/// unknown, and a client after Hello; `None` without the C ABI (the
-/// variables of `tests/ffi.rs`) or `dbus-daemon`.
+/// Bridge binary on the private bus with the fake service, consent unknown, client after Hello; `None` without the C ABI or `dbus-daemon`.
 async fn bridge_on_bus() -> Option<(TestBus, Fake, BridgeRun, TestChild, netvfs_bridge_proto::Connection)> {
     if ["NETVFS_BRIDGE_FFI", "NETVFS_BACKEND_PATH"].iter().any(|v| std::env::var_os(v).is_none()) {
         return None;
@@ -345,7 +330,7 @@ async fn bridge_on_bus() -> Option<(TestBus, Fake, BridgeRun, TestChild, netvfs_
     Some((bus, fake, run, child, client))
 }
 
-/// The consent the bridge stored for its consumer.
+/// Consent the bridge stored for its consumer.
 fn stored(run: &BridgeRun) -> Consent {
     ConsentStore::new(run.consent_file()).consent(&run.consumer)
 }
@@ -376,7 +361,6 @@ async fn an_allowed_notification_grants_consent() {
     let conf = std::fs::read_to_string(run.consent_file()).unwrap();
     assert!(conf.contains("[Consent]") && conf.contains("notified=granted"), "{conf}");
     assert_eq!(client.proxy().get_consent().await.unwrap(), "granted");
-    // Answered: no second question.
     client.proxy().request_consent().await.unwrap();
     tokio::time::timeout(Duration::from_millis(300), fake.calls.recv()).await.unwrap_err();
 }
@@ -400,7 +384,6 @@ async fn a_closed_notification_leaves_consent_unknown() {
     client.proxy().request_consent().await.unwrap();
     fake.notify().await;
     fake.closed(7).await;
-    // Dismissed: nothing stored, and the consumer may ask again.
     let mut asked_again = None;
     for _ in 0..50 {
         client.proxy().request_consent().await.unwrap();

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! Jobs and signals of the fake (`Walk`, `CopyAcross`, cancellation,
-//! discovery) follow the contract (SPEC-v2 XB-10, XB-11).
+//! Jobs and signals of the fake (`Walk`, `CopyAcross`, cancellation, discovery) follow the
+//! contract.
 // Test helpers outside #[test] functions: a failing test is the point.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 #![cfg(feature = "fake")]
@@ -23,7 +23,6 @@ async fn setup() -> (FakeBridge, Connection, SignalStream) {
     (fake, conn, signals)
 }
 
-/// The next signal; fails after five seconds instead of waiting forever.
 async fn next_signal(signals: &mut SignalStream) -> Signal {
     tokio::time::timeout(Duration::from_secs(5), signals.next())
         .await
@@ -32,7 +31,6 @@ async fn next_signal(signals: &mut SignalStream) -> Signal {
         .unwrap()
 }
 
-/// Reads signals until the job finishes; returns the walked paths and the extras.
 async fn finish(signals: &mut SignalStream, job: u32) -> (Vec<Vec<u8>>, String, HashMap<String, i64>) {
     let mut paths = Vec::new();
     loop {

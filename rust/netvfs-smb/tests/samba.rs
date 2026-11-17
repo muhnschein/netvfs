@@ -1,14 +1,7 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! netvfs-smb against the Samba containers of tests/interop/smb (phase 3
-//! design §6.3): `tests/interop/smb/run.sh` starts them and sets
-//! `NETVFS_INTEROP_SMB_*` (one address per server, the proxy, the password);
-//! without those every test passes at once, saying so. These are the tests
-//! that cargo-mutants runs in its interop mode, next to the unit tests.
+//! netvfs-smb against the Samba containers of tests/interop/smb: `tests/interop/smb/run.sh` starts them and sets `NETVFS_INTEROP_SMB_*` (one address per server, the proxy, the password); without those every test passes at once, saying so. cargo-mutants runs these in its interop mode next to the unit tests.
 //!
-//! The servers and what they show are those of tests/interop/smb/server/conf;
-//! the proxy ports those of run.sh (flipproxy.py).
-// A test crate: the helpers outside `#[test]` may panic, index and do plain
-// arithmetic (clippy.toml relaxes that only inside `#[test]`), and a skip says so.
+//! Servers and what they show: tests/interop/smb/server/conf; proxy ports: run.sh (flipproxy.py).
 #![allow(
     clippy::unwrap_used,
     clippy::panic,
@@ -85,8 +78,7 @@ impl Servers {
         session::sign_in(stream, profile, account, &host, T, &CancelToken::new()).await
     }
 
-    /// A backend signed in to `server` with `options` (`share` absent:
-    /// server mode).
+    /// A backend signed in to `server` with `options` (`share` absent: server mode).
     async fn backend(&self, server: &str, port: u16, options: &[(&str, &str)]) -> Result<Smb, Status> {
         let mut smb = Smb::new();
         smb.connect(&params(server, port, options), &CancelToken::new()).await?;
@@ -203,10 +195,7 @@ async fn stat(smb: &mut Smb, path: &str) -> Result<Entry, Status> {
     smb.stat(path.as_bytes(), true, &CancelToken::new()).await
 }
 
-// ---- NEGOTIATE and SESSION_SETUP ------------------------------------------
-
-/// M-T1: SMB 3.1.1, the first GCM cipher offered, every response after
-/// SESSION_SETUP encrypted; a share, ECHO and LOGOFF on it.
+/// SMB 3.1.1, the first GCM cipher offered, every response after SESSION_SETUP encrypted; a share, ECHO and LOGOFF on it.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn strict_server_gets_aes_128_gcm() {
     let Some(servers) = Servers::get() else { return };
@@ -223,7 +212,7 @@ async fn strict_server_gets_aes_128_gcm() {
     s.conn.close(true).await;
 }
 
-/// M-T14: a server whose only cipher is AES-256-GCM, the second offered.
+/// A server whose only cipher is AES-256-GCM, the second offered.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn aes_256_gcm_only_server_passes() {
     let Some(servers) = Servers::get() else { return };
@@ -234,8 +223,7 @@ async fn aes_256_gcm_only_server_passes() {
     s.conn.close(true).await;
 }
 
-/// M-T4: profile signed where the server has encryption off: signed only;
-/// M-T3: strict there is refused.
+/// Profile signed where the server has encryption off: signed only; strict there is refused.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn signed_profile_without_encryption() {
     let Some(servers) = Servers::get() else { return };
@@ -245,14 +233,12 @@ async fn signed_profile_without_encryption() {
     assert!(!tree.encrypt);
     session::echo(&s.conn, &CancelToken::new()).await.unwrap();
     s.conn.close(true).await;
-    // M-T3: strict needs encryption, which the server has off (no cipher
-    // in its NEGOTIATE response): refused before SESSION_SETUP.
+    // Strict needs encryption, which the server has off (no cipher in its NEGOTIATE response): refused before SESSION_SETUP.
     let e = servers.sign_in("encoff", 445, Profile::Strict, &servers.account()).await.unwrap_err();
     assert!(matches!(&e, Error::Policy(m) if m.contains("no cipher in common")), "{e}");
 }
 
-/// M-T7, M-T9, M-T20: servers limited to SMB 2.x or SMB 3.0 refuse the
-/// only dialect offered; every profile reports it as policy.
+/// Servers limited to SMB 2.x or SMB 3.0 refuse the only dialect offered; every profile reports it as policy.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn old_dialects_are_refused_by_every_profile() {
     let Some(servers) = Servers::get() else { return };
@@ -265,8 +251,7 @@ async fn old_dialects_are_refused_by_every_profile() {
     }
 }
 
-/// M-T7: a NEGOTIATE that offers SMB 2.1 only (test code: the client has
-/// no SMB 2 dialect) is not accepted by the strict server.
+/// A NEGOTIATE that offers SMB 2.1 only (test code: the client has no SMB 2 dialect) is not accepted by the strict server.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_client_pinned_to_smb_2_1_is_refused() {
     if Servers::get().is_none() {
@@ -291,7 +276,7 @@ async fn a_client_pinned_to_smb_2_1_is_refused() {
     conn.abort();
 }
 
-/// M-1: a NEGOTIATE reply rewritten to SMB 2.1 (proxy 4457) ends the sign-in.
+/// A NEGOTIATE reply rewritten to SMB 2.1 (proxy 4457) ends the sign-in.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_dialect_never_offered_is_refused() {
     let Some(servers) = Servers::get() else { return };
@@ -299,9 +284,7 @@ async fn a_dialect_never_offered_is_refused() {
     assert!(matches!(&e, Error::Policy(m) if m.contains("0x0210")), "{e}");
 }
 
-/// M-T14: AES-CCM only. Strict finds no cipher; signed is refused by Samba
-/// itself (required) or by the client, since Samba marks the session for
-/// encryption without a cipher (desired).
+/// AES-CCM only. Strict finds no cipher; signed is refused by Samba itself (required) or by the client, since Samba marks the session for encryption without a cipher (desired).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn ccm_only_servers_are_refused() {
     let Some(servers) = Servers::get() else { return };
@@ -315,8 +298,7 @@ async fn ccm_only_servers_are_refused() {
     assert!(matches!(&e, Error::Policy(m) if m.contains("no common cipher")), "{e}");
 }
 
-/// M-T14: signing only with AES-GMAC and HMAC-SHA256; the client signs
-/// with AES-CMAC only.
+/// Signing only with AES-GMAC and HMAC-SHA256; the client signs with AES-CMAC only.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn gmac_only_signing_server_is_refused() {
     let Some(servers) = Servers::get() else { return };
@@ -324,7 +306,7 @@ async fn gmac_only_signing_server_is_refused() {
     assert!(matches!(e, Error::Policy(_) | Error::Status(_)), "{e}");
 }
 
-/// M-T5: a wrong password and an unknown user; M-T6: an unknown share.
+/// A wrong password and an unknown user; an unknown share.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn credentials_and_share_names() {
     let Some(servers) = Servers::get() else { return };
@@ -351,8 +333,7 @@ async fn credentials_and_share_names() {
     assert!(e.message.contains("share not found") && e.message.contains("0xc00000cc"), "{}", e.message);
 }
 
-/// XM-1: an unknown user mapped to guest is refused by strict and signed;
-/// profile guest signs in anonymously and uses the public share.
+/// An unknown user mapped to guest is refused by strict and signed; profile guest signs in anonymously and uses the public share.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn guest_mapping_and_the_guest_profile() {
     let Some(servers) = Servers::get() else { return };
@@ -376,10 +357,7 @@ async fn guest_mapping_and_the_guest_profile() {
     assert!(matches!(e, Error::Policy(_) | Error::Status(_)), "{e}");
 }
 
-// ---- Integrity: the flip proxy (M-T12) -------------------------------------
-
-/// MS-SMB2 3.2.5.3.1: the final SESSION_SETUP reply with one byte altered
-/// (proxy 4459) does not verify with the new session's signing key.
+/// The final SESSION_SETUP reply with one byte altered (proxy 4459) does not verify with the new session's signing key (MS-SMB2 3.2.5.3.1).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_tampered_session_setup_reply_is_refused() {
     let Some(servers) = Servers::get() else { return };
@@ -390,8 +368,7 @@ async fn a_tampered_session_setup_reply_is_refused() {
     );
 }
 
-/// M-T12: the first reply after sign-in altered, signed (4451) and sealed
-/// (4452): the connection is lost, and stays lost.
+/// The first reply after sign-in altered, signed (4451) and sealed (4452): the connection is lost, and stays lost.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_tampered_reply_ends_the_connection() {
     let Some(servers) = Servers::get() else { return };
@@ -411,10 +388,7 @@ async fn a_tampered_reply_ends_the_connection() {
     }
 }
 
-// ---- Stalls, drops, timeouts ------------------------------------------------
-
-/// M-12: a request stalled on the network (proxy 4453) ends within 2 s of
-/// the cancel; C-14: with a 2 s request timeout it ends as Timeout.
+/// A request stalled on the network (proxy 4453) ends within 2 s of the cancel; with a 2 s request timeout it ends as Timeout.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn stalled_requests_cancel_and_time_out() {
     let Some(servers) = Servers::get() else { return };
@@ -444,7 +418,7 @@ async fn stalled_requests_cancel_and_time_out() {
     assert!(started.elapsed() < Duration::from_secs(5), "{:?}", started.elapsed());
 }
 
-/// M-12: a sign-in stalled after NEGOTIATE (proxy 4454) ends on cancel.
+/// A sign-in stalled after NEGOTIATE (proxy 4454) ends on cancel.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_stalled_sign_in_cancels() {
     let Some(servers) = Servers::get() else { return };
@@ -462,8 +436,7 @@ async fn a_stalled_sign_in_cancels() {
     assert!(started.elapsed() < Duration::from_millis(2500), "{:?}", started.elapsed());
 }
 
-/// XC-20, XC-21: dropped after sign-in (4455): ConnectionLost; during
-/// sign-in (4456): SecurityPolicy, the server closed.
+/// Dropped after sign-in (4455): ConnectionLost; during sign-in (4456): SecurityPolicy, the server closed.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn dropped_connections() {
     let Some(servers) = Servers::get() else { return };
@@ -474,10 +447,7 @@ async fn dropped_connections() {
     assert_eq!(e.name, ErrorName::SecurityPolicy);
 }
 
-// ---- The backend on a share --------------------------------------------------
-
-/// XC-5, XC-8..XC-14, XC-19: the namespace and transfers on the strict
-/// server, with multi-credit READ and WRITE (more than 1 MiB per file).
+/// The namespace and transfers on the strict server, with multi-credit READ and WRITE (more than 1 MiB per file).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_share_round_trip() {
     let Some(servers) = Servers::get() else { return };
@@ -543,14 +513,14 @@ async fn a_share_round_trip() {
         ErrorName::ProtocolError
     );
 
-    // XC-10: NoReplace is the server's; Replace replaces a file.
+    // NoReplace is the server's; Replace replaces a file.
     let e = smb.rename(small.as_bytes(), big.as_bytes(), RenameMode::NoReplace, &cancel).await.unwrap_err();
     assert_eq!(e.name, ErrorName::AlreadyExists);
     smb.rename(small.as_bytes(), big.as_bytes(), RenameMode::Replace, &cancel).await.unwrap();
     assert_eq!(stat(&mut smb, &small).await.unwrap_err().name, ErrorName::NotFound);
     assert_eq!(stat(&mut smb, &big).await.unwrap().size, Some(10 + 2 * 1024 * 1024));
 
-    // XC-11: times only.
+    // Times only.
     let times = Attributes { atime_ms: Some(when + 86_400_000), ..Attributes::default() };
     smb.set_attributes(big.as_bytes(), &times, &cancel).await.unwrap();
     let entry = stat(&mut smb, &big).await.unwrap();
@@ -561,7 +531,7 @@ async fn a_share_round_trip() {
         ErrorName::Unsupported
     );
 
-    // XC-6: batches, no dot entries.
+    // Batches, no dot entries.
     for i in 0..9 {
         put(&mut smb, &format!("{dir}/f{i}"), &vec![b'x'; i]).await.unwrap();
     }
@@ -578,7 +548,6 @@ async fn a_share_round_trip() {
     assert!(space.total.unwrap() > 0 && space.free.unwrap() <= space.total.unwrap());
     smb.keep_alive(&cancel).await.unwrap();
 
-    // XC-9
     assert_eq!(smb.remove_dir(dir.as_bytes(), &cancel).await.unwrap_err().name, ErrorName::DirectoryNotEmpty);
     assert_eq!(smb.remove_file(dir.as_bytes(), &cancel).await.unwrap_err().name, ErrorName::IsADirectory);
     for name in listed {
@@ -599,7 +568,7 @@ async fn a_read_only_share() {
     assert_eq!(get(&mut smb, "existing.txt").await.unwrap(), b"read-only share\n");
 }
 
-/// M-T16: the 16 MiB share: the server's DISK_FULL is NoSpace.
+/// The 16 MiB share: the server's DISK_FULL is NoSpace.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_full_share() {
     let Some(servers) = Servers::get() else { return };
@@ -613,7 +582,7 @@ async fn a_full_share() {
     smb.remove_file(b"rs-full.bin", &CancelToken::new()).await.unwrap();
 }
 
-/// XM-9: a DFS link.
+/// A DFS link.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_dfs_link_is_unsupported() {
     let Some(servers) = Servers::get() else { return };
@@ -622,10 +591,7 @@ async fn a_dfs_link_is_unsupported() {
     assert_eq!((e.name, e.detail.as_str()), (ErrorName::Unsupported, "DFS referral"));
 }
 
-// ---- Server mode -------------------------------------------------------------
-
-/// XM-2, XM-3, XM-7: the root lists the shares (srvsvc over IPC$): saved
-/// names first, disk shares only, admin shares on request.
+/// The root lists the shares (srvsvc over IPC$): saved names first, disk shares only, admin shares on request.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn server_mode_lists_shares() {
     let Some(servers) = Servers::get() else { return };

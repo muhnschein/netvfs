@@ -26,16 +26,16 @@ const char StatusUploading[] = "UploadingBackup";
 const char StatusCanceled[] = "Canceled";
 const char StatusError[] = "Error";
 
-// SPEC 8.4 step 6: the archive and its directory, when that is now empty.
+// The archive and its directory, when now empty.
 void removeArchive(const QString &path)
 {
     if (path.isEmpty())
         return;
     const QFileInfo archive(path);
     QFile::remove(archive.absoluteFilePath());
-    QDir().rmdir(archive.absolutePath());   // only when now empty
+    QDir().rmdir(archive.absolutePath());
 }
-} // namespace
+}
 
 BackupRun::BackupRun(const RunSpec &spec, BackupService *service, const SessionFactory &sessionFactory)
     : m_spec(spec)
@@ -50,7 +50,7 @@ BackupRun::BackupRun(const RunSpec &spec, BackupService *service, const SessionF
 
 BackupRun::~BackupRun()
 {
-    m_job.reset();   // cancels and waits
+    m_job.reset();
     if (m_running)
         removeLocalArchive();
 }
@@ -87,7 +87,7 @@ void BackupRun::onDeviceId(const Result &result, const QString &deviceId)
         return;
     Result r = result;
     if (r.ok())
-        r = BackupSteps::remoteDirectory(m_session->backupsPath(), deviceId, &m_remoteDir);   // B-2
+        r = BackupSteps::remoteDirectory(m_session->backupsPath(), deviceId, &m_remoteDir);
     if (!r.ok()) {
         fail(r);
         return;
@@ -104,7 +104,7 @@ void BackupRun::startOperation()
                  [this]() { requestArchive(); });
         break;
     case BackupOperation::BackupQuery: {
-        QStringList *listing = &m_listing;   // written by the job only, read after it finished
+        QStringList *listing = &m_listing;
         startJob([dir, listing](Backend *backend) { return BackupSteps::listBackups(backend, dir, listing); },
                  [this]() { reportBackups(); });
         break;
@@ -162,7 +162,7 @@ void BackupRun::requestArchive()
         if (self && self->m_running)
             self->onArchiveRequested(result, path);
         else
-            removeArchive(path);   // the run ended while the request was pending
+            removeArchive(path);
     });
 }
 
@@ -208,7 +208,7 @@ void BackupRun::startUpload()
     m_waitingForArchive = false;
     const QString local = m_archivePath;
     const QString dir = m_remoteDir;
-    // A fresh connection: building the archive can take minutes (SPEC 8.4 step 5).
+    // Fresh connection: building the archive can take minutes.
     startJob([local, dir](Backend *backend) { return BackupSteps::uploadArchive(backend, local, dir); },
              [this]() { finish(Result::success()); });
 }
@@ -235,7 +235,7 @@ void BackupRun::onCloudRestoreStatusChanged(int accountId, const QString &status
 
 void BackupRun::onCloudRestoreError(int accountId, const QString &error, const QString &errorString) const
 {
-    // Informational, as in the reference; the status signal ends the run.
+    // Informational; the status signal ends the run.
     if (accountId == m_spec.accountId)
         qCDebug(lcNetVfsButeo) << "Restore error from the backup service:" << error << errorString;
 }
@@ -245,7 +245,7 @@ void BackupRun::abort()
     if (!m_running || m_aborted)
         return;
     m_aborted = true;
-    // B-4: cancel the in-flight call; the run finishes when the worker returns.
+    // Cancel the in-flight call; the run finishes when the worker returns.
     if (m_job) {
         m_job->cancel();
         return;
@@ -267,12 +267,12 @@ void BackupRun::fail(const Result &result)
 void BackupRun::finish(const Result &result)
 {
     if (!m_running)
-        return;   // B-7: one result per run
+        return;
     m_running = false;
     m_waitingForArchive = false;
     removeLocalArchive();
     if (m_session)
-        m_session->releaseCredentials();   // SEC-5
+        m_session->releaseCredentials();
     if (!m_aborted && !result.ok())
         recordAttention(result);
     emit finished(m_aborted ? Result(Error::Canceled) : result);
@@ -292,9 +292,8 @@ void BackupRun::recordAttention(const Result &result)
 
 void BackupRun::removeLocalArchive()
 {
-    // SPEC 8.4 step 6, on success and on failure.
     removeArchive(m_archivePath);
     m_archivePath.clear();
 }
 
-} // namespace NetVfs
+}

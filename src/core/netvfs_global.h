@@ -10,7 +10,7 @@
 #  define NETVFS_EXPORT Q_DECL_IMPORT
 #endif
 
-// Qt 5.6 (the target) only has QString::SkipEmptyParts; Qt >= 5.14 deprecates it.
+// Qt 5.6 only has QString::SkipEmptyParts; Qt >= 5.14 deprecates it.
 #if QT_VERSION >= QT_VERSION_CHECK(5, 14, 0)
 #  define NETVFS_SKIP_EMPTY_PARTS Qt::SkipEmptyParts
 #else

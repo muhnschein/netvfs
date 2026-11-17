@@ -8,7 +8,8 @@ crates.io (`ssh-key-0.7.0-rc.11.crate`, SHA-256
 RustCrypto/SSH commit `7a1c757d2e2fcde32680e373d5226481de6d434e`, folder
 `ssh-key`), except one line, and without the crate's `tests` folder
 (netvfs does not run the crate's own tests, and their sample private keys
-would only be dead weight).
+would only be dead weight) and its `Cargo.lock` (cargo ignores a path
+dependency's lockfile; its old pins only drew advisory alerts).
 
 ## What was changed
 

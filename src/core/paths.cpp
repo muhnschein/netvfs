@@ -127,8 +127,7 @@ void stripTrailingSpacesAndDots(QString *name)
         name->chop(1);
 }
 
-// Longest prefix of `text` whose UTF-8 encoding (Names::encode) fits in
-// `maxBytes`, never splitting a code point.
+// Longest prefix whose UTF-8 encoding fits `maxBytes`, never splitting a code point.
 QString truncateBytes(const QString &text, qint64 maxBytes)
 {
     qint64 used = 0;
@@ -146,8 +145,7 @@ QString truncateBytes(const QString &text, qint64 maxBytes)
     return text.left(end);
 }
 
-// Truncates to `maxBytes`, keeping the extension when it leaves room for at
-// least one byte of the stem.
+// Truncates to `maxBytes`, keeping the extension if it leaves at least one stem byte.
 QString fitBytes(const QString &name, qint64 maxBytes)
 {
     if (maxBytes <= 0 || Names::encode(name).size() <= maxBytes)
@@ -169,15 +167,14 @@ QString stemOf(const QString &name)
     return dot < 0 ? name : name.left(dot);
 }
 
-// Windows treats "CON.txt" like "CON": the '_' goes after the stem.
+// Windows treats "CON.txt" like "CON": '_' goes after the stem.
 QString avoidReservedName(const QString &name)
 {
     const QString stem = stemOf(name);
     return stem + Placeholder + name.mid(stem.size());
 }
 
-} // namespace
-
+}
 QString sanitizeFor(const Capabilities &capabilities, const QString &name)
 {
     const bool windows = capabilities.has(Capability::WindowsNames);
@@ -188,7 +185,6 @@ QString sanitizeFor(const Capabilities &capabilities, const QString &name)
     if (windows) {
         stripTrailingSpacesAndDots(&result);
         if (isReservedDeviceStem(stemOf(result))) {
-            // The '_' needs a byte; trimming may also make the stem harmless.
             const qint64 room = capabilities.maxNameBytes > 1 ? capabilities.maxNameBytes - 1 : capabilities.maxNameBytes;
             result = fitBytes(result, room);
             stripTrailingSpacesAndDots(&result);
@@ -201,4 +197,4 @@ QString sanitizeFor(const Capabilities &capabilities, const QString &name)
     return result;
 }
 
-} // namespace NetVfs::Paths
+}

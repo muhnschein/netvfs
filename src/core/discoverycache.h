@@ -11,15 +11,13 @@
 
 #include <array>
 
-// Internal to the core library (not installed): the record cache and resolver
-// state machine behind Discovery. No sockets, no timers, no clock: every call
-// gets `now` (monotonic milliseconds), so it is testable through Discovery with
-// a fake clock and transport. SPEC-v2 XD-2.
+// Internal. Record cache and resolver state machine behind Discovery. No sockets, timers, clock:
+// every call gets `now` (monotonic ms).
 namespace NetVfs {
 
 struct BrowseType {
-    const char *type;        // "_sftp-ssh._tcp"
-    const char *provider;    // "sftp"
+    const char *type;
+    const char *provider;
 };
 
 const std::array<BrowseType, 3> &browseTypeTable();
@@ -38,27 +36,19 @@ public:
     // Bounds on what an untrusted network can make us hold.
     static constexpr int MaxInstances = 256;
     static constexpr int MaxAddressesPerHost = 8;
-    static constexpr int MaxTtlSeconds = 7200;          // longer TTLs are clamped
-    // A record that is not answered after this many queries makes the service
-    // appear with what is known (host and port without addresses).
+    static constexpr int MaxTtlSeconds = 7200;
+    // Unanswered after this many queries: service appears with what is known.
     static constexpr int MaxResolveAttempts = 3;
     static constexpr int FirstResolveDelayMs = 1000;
-    // RFC 6762 section 5.2: refresh queries at 80, 90 and 95 percent of the TTL.
+    // RFC 6762 section 5.2: refresh at 80, 90, 95 percent of TTL.
     static constexpr int RefreshStages = 3;
 
-    // Applies a received message. Messages that are not plain responses are
-    // ignored (RFC 6762 section 18.3, 18.11).
+    // Non-response messages ignored (RFC 6762 section 18.3, 18.11).
     void ingest(const Dns::Message &message, qint64 now, const QDateTime &wall, Events *events);
-    // Drops what expired, gives up resolving what stayed unanswered.
     void expire(qint64 now, Events *events);
-    // Earliest monotonic time at which expire() or dueQuestions() has work;
-    // -1 if none.
     qint64 nextDeadline() const;
-    // Follow-up questions that are due (missing SRV/address records, TTL
-    // refresh at 80/90/95 percent). Advances the retry state.
     QVector<Dns::Question> dueQuestions(qint64 now);
-    // PTR records for known-answer suppression (RFC 6762 section 7.1): those
-    // with more than half of their TTL left.
+    // Known-answer suppression PTRs: more than half TTL left.
     QVector<Dns::Record> knownAnswers(qint64 now) const;
     QVector<DiscoveredService> services() const;
     void clear();
@@ -67,19 +57,18 @@ private:
     struct Lifetime {
         qint64 received = 0;
         qint64 ttlMs = 0;
-        int stage = 0;               // refresh queries sent so far
+        int stage = 0;
         void set(qint64 now, quint32 ttlSeconds);
         qint64 expiresAt() const { return received + ttlMs; }
-        qint64 refreshAt() const;    // -1 when all stages are used
+        qint64 refreshAt() const;
     };
 
     struct AddressEntry {
         QHostAddress address;
         Lifetime life;
 
-        // Qt 5's QHostAddress has no move constructor, so a move copies its
-        // data. Qt reports allocation failure by aborting, never by throwing,
-        // which makes the moves noexcept in effect; containers rely on it.
+        // Qt 5 QHostAddress has no move ctor; Qt aborts on alloc failure, so moves are noexcept in
+        // effect.
         AddressEntry() = default;
         AddressEntry(const AddressEntry &other) = default;
         AddressEntry &operator=(const AddressEntry &other) = default;
@@ -89,14 +78,14 @@ private:
     };
 
     struct Instance {
-        QByteArray key;              // canonical full name
-        QByteArray rawName;          // full name as received, for known answers
-        QByteArray label;            // unescaped instance label
+        QByteArray key;
+        QByteArray rawName;
+        QByteArray label;
         const BrowseType *type = nullptr;
         Lifetime ptr;
         bool hasSrv = false;
         Lifetime srv;
-        QByteArray target;           // canonical SRV target
+        QByteArray target;
         QString host;
         int port = 0;
         int attempts = 0;
@@ -112,8 +101,8 @@ private:
         qint64 now = 0;
         QDateTime wall;
         Events *events = nullptr;
-        QSet<QByteArray> dirty;          // instance keys to re-evaluate
-        QSet<QByteArray> dirtyHosts;     // canonical host names whose addresses changed
+        QSet<QByteArray> dirty;
+        QSet<QByteArray> dirtyHosts;
         QSet<QPair<QByteArray, quint16>> flushed;
     };
 
@@ -145,9 +134,8 @@ private:
     qint64 instanceDeadline(const Instance &inst) const;
 
     QHash<QByteArray, Instance> m_instances;
-    QHash<QByteArray, QVector<AddressEntry>> m_hosts;   // targets of known instances only
+    QHash<QByteArray, QVector<AddressEntry>> m_hosts;
 };
 
-} // namespace NetVfs
-
+}
 #endif

@@ -1,14 +1,10 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! The `AccountChanged` signal libaccounts-glib's writers send on the
-//! session bus after a change (`signal_account_changes`, ag-manager.c), so
-//! that other processes (Settings, the bridge) see the helper's write. Like a
-//! libaccounts-glib manager on Sailfish OS, the connection owns a name
-//! `com.google.code.AccountsSSO.Accounts.uuid_<guid>` first: Sailjail lets
-//! sandboxed applications receive signals only from named senders.
-//!
-//! A minimal client: EXTERNAL authentication, `Hello`, `RequestName`, the
-//! signal, then a `GetId` whose reply shows the bus has taken the signal.
-//! Best-effort: the bridge lists again after its own writes anyway.
+//! `AccountChanged` signal libaccounts-glib's writers send on the session bus after a change, so
+//! Settings and the bridge see the helper's write. The connection first owns
+//! `com.google.code.AccountsSSO.Accounts.uuid_<guid>`: Sailjail lets sandboxed apps receive signals
+//! only from named senders.
+//! Minimal client: EXTERNAL auth, `Hello`, `RequestName`, the signal, `GetId` whose reply shows the
+//! bus took the signal. Best-effort: the bridge lists again after its own writes.
 
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::os::unix::net::UnixStream;
@@ -19,15 +15,14 @@ use crate::db::NewSetting;
 use crate::qvariant::Value;
 use crate::serve::Change;
 
-/// The interface of the signal.
+/// Interface of the signal.
 pub const INTERFACE: &str = "com.google.code.AccountsSSO.Accounts";
-/// The name of the signal.
+/// Name of the signal.
 pub const MEMBER: &str = "AccountChanged";
-/// Changes of the account's global settings, whose service type is "global".
+/// Path for changes of the account's global settings (service type "global").
 pub const GLOBAL_PATH: &str = "/ServiceType/global";
 const BUS_NAME_PREFIX: &str = "com.google.code.AccountsSSO.Accounts.uuid_";
 const TIMEOUT: Duration = Duration::from_secs(5);
-/// What the bus may send before the reply that ends the exchange.
 const MAX_READ: usize = 256 * 1024;
 const MAX_MESSAGE: usize = 64 * 1024;
 
@@ -40,10 +35,9 @@ pub enum Address {
     Abstract(Vec<u8>),
 }
 
-/// The session bus. A set-id process uses its uid's runtime folder only, as
-/// GLib does there (it ignores `DBUS_SESSION_BUS_ADDRESS`); otherwise the
-/// first unix address of `DBUS_SESSION_BUS_ADDRESS`, else
-/// `$XDG_RUNTIME_DIR/bus`.
+/// The session bus. A set-id process uses only its uid's runtime folder, as GLib does (ignores
+/// `DBUS_SESSION_BUS_ADDRESS`); otherwise the first unix address of `DBUS_SESSION_BUS_ADDRESS`,
+/// else `$XDG_RUNTIME_DIR/bus`.
 #[must_use]
 pub fn session_bus(set_id: bool, runtime_dir: &std::path::Path) -> Option<Address> {
     if set_id {
@@ -72,7 +66,7 @@ fn unescape(value: &str) -> Option<Vec<u8>> {
     Some(out)
 }
 
-/// The first `unix:path=` or `unix:abstract=` of a D-Bus address list.
+/// First `unix:path=` or `unix:abstract=` of a D-Bus address list.
 #[must_use]
 pub fn parse_address(list: &str) -> Option<Address> {
     use std::os::unix::ffi::OsStringExt;
@@ -89,8 +83,6 @@ pub fn parse_address(list: &str) -> Option<Address> {
     }
     None
 }
-
-// ---- marshalling (little-endian) ----
 
 mod kind {
     pub const METHOD_CALL: u8 = 1;
@@ -139,7 +131,6 @@ impl Writer {
         self.u32(u32::from(b));
     }
 
-    /// A string or object path: no NUL inside.
     fn string(&mut self, s: &str) {
         let s = s.replace('\0', "");
         self.len32(s.len());
@@ -153,8 +144,6 @@ impl Writer {
         self.bytes.push(0);
     }
 
-    /// An array whose elements `body` writes; `element_alignment` is that
-    /// of the element type.
     fn array(&mut self, element_alignment: usize, body: impl FnOnce(&mut Self)) {
         self.align(4);
         let at = self.bytes.len();
@@ -163,14 +152,12 @@ impl Writer {
         let start = self.bytes.len();
         body(self);
         let length = u32::try_from(self.bytes.len().saturating_sub(start)).unwrap_or(u32::MAX);
-        // The placeholder written above: the body only appends, so it is still there.
         if let Some(slot) = self.bytes.get_mut(at..).and_then(<[u8]>::first_chunk_mut::<4>) {
             *slot = length.to_le_bytes();
         }
     }
 }
 
-/// A variant value of a changed setting, as libaccounts-glib sends it.
 fn variant(w: &mut Writer, setting: &NewSetting) {
     match crate::gvariant::from_db(setting.type_string.as_bytes(), Some(setting.text.as_bytes())) {
         Value::Bool(b) => {
@@ -184,12 +171,9 @@ fn variant(w: &mut Writer, setting: &NewSetting) {
     }
 }
 
-/// The body of `AccountChanged`: `(uuubbsa(ssua{sv}as))`: time stamp,
-/// account, created, deleted, provider, and per service its name, type, id,
-/// changed and removed settings. The helper changes global settings only.
+/// Body of `AccountChanged`, `(uuubbsa(ssua{sv}as))`; helper changes global settings only.
 fn changed_body(change: &Change, (sec, nsec): (u64, u32)) -> Vec<u8> {
     let mut w = Writer::default();
-    // libaccounts-glib stores the seconds as 32 bits too.
     w.u32(u32::try_from(sec & u64::from(u32::MAX)).unwrap_or(0));
     w.u32(nsec);
     w.u32(change.account_id);
@@ -273,8 +257,6 @@ fn bus_call(serial: u32, member: &str, signature: &str, body: &[u8]) -> Vec<u8> 
     )
 }
 
-/// What the exchange sends after authentication: `Hello`, `RequestName`,
-/// the signal, `GetId` (serial 4, the reply that ends it).
 fn messages(change: &Change, guid: &str, time: (u64, u32)) -> Vec<u8> {
     let mut out = bus_call(1, "Hello", "", &[]);
     let mut name = Writer::default();
@@ -300,8 +282,6 @@ fn messages(change: &Change, guid: &str, time: (u64, u32)) -> Vec<u8> {
 
 const LAST_SERIAL: u32 = 4;
 
-// ---- reading replies ----
-
 /// A received message's type and reply serial.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Received {
@@ -311,7 +291,6 @@ pub struct Received {
     pub reply_serial: Option<u32>,
 }
 
-/// Reads the fixed part of a message header: its total length.
 fn total_length(fixed: &[u8; 16]) -> Option<usize> {
     let read = |at: usize| -> Option<u32> {
         let b: [u8; 4] = *fixed.get(at..)?.first_chunk::<4>()?;
@@ -323,7 +302,6 @@ fn total_length(fixed: &[u8; 16]) -> Option<usize> {
     };
     let body = usize::try_from(read(4)?).ok()?;
     let fields = usize::try_from(read(12)?).ok()?;
-    // The header, padded to 8 bytes.
     let header = 16usize.checked_add(fields)?.checked_next_multiple_of(8)?;
     let total = header.checked_add(body)?;
     (total <= MAX_MESSAGE).then_some(total)
@@ -346,7 +324,6 @@ pub fn parse_received(message: &[u8]) -> Option<Received> {
     let mut reply_serial = None;
     while at < end {
         at = at.checked_next_multiple_of(8)?;
-        // A header field: its code, then its signature (length, text, NUL).
         let field = message.get(at..)?;
         let code = *field.first()?;
         let sig_len = usize::from(*field.get(1)?);
@@ -391,11 +368,10 @@ fn read_message(reader: &mut impl Read, budget: &mut usize) -> io::Result<Receiv
     parse_received(&whole).ok_or_else(invalid)
 }
 
-/// Runs the exchange on `stream`: authenticates as `uid`, sends, and waits
-/// for the reply to `GetId`.
+/// Runs the exchange on `stream`: authenticates as `uid`, sends, waits for the `GetId` reply.
 ///
 /// # Errors
-/// When the bus refuses, fails or sends nonsense.
+/// Bus refuses, fails or sends nonsense.
 pub fn exchange(stream: &mut (impl Read + Write), uid: u32, payload: &[u8]) -> io::Result<()> {
     let hex = hex(uid.to_string().as_bytes());
     stream.write_all(format!("\0AUTH EXTERNAL {hex}\r\n").as_bytes())?;
@@ -406,8 +382,6 @@ pub fn exchange(stream: &mut (impl Read + Write), uid: u32, payload: &[u8]) -> i
         return Err(io::Error::new(io::ErrorKind::PermissionDenied, "the bus refused the authentication"));
     }
     let mut budget = MAX_READ;
-    // The reader holds the stream; what it buffered past the line is the
-    // bus's, read below.
     let rest = reader.buffer().to_vec();
     drop(reader);
     stream.write_all(b"BEGIN\r\n")?;
@@ -428,22 +402,18 @@ pub fn exchange(stream: &mut (impl Read + Write), uid: u32, payload: &[u8]) -> i
     }
 }
 
-/// Lower-case hex digits of `bytes`.
 fn hex(bytes: &[u8]) -> String {
     use std::fmt::Write as _;
     bytes.iter().fold(String::with_capacity(bytes.len().saturating_mul(2)), |mut out, b| {
-        // Writing to a String cannot fail.
         write!(out, "{b:02x}").ok();
         out
     })
 }
 
-/// A GUID as `g_dbus_generate_guid()` makes it: 32 hex digits.
 fn guid() -> String {
     let mut random = [0u8; 16];
     if std::fs::File::open("/dev/urandom").and_then(|mut f| f.read_exact(&mut random)).is_err() {
         let (sec, nsec) = crate::sandbox::monotonic_time();
-        // The seconds (8 bytes), the nanoseconds and the process id (4 each).
         let fallback =
             sec.to_le_bytes().into_iter().chain(nsec.to_le_bytes()).chain(std::process::id().to_le_bytes());
         for (byte, value) in random.iter_mut().zip(fallback) {
@@ -456,7 +426,7 @@ fn guid() -> String {
 /// Sends `AccountChanged` for `change` to the bus at `address`.
 ///
 /// # Errors
-/// When the bus cannot be reached or refuses.
+/// Bus unreachable or refuses.
 pub fn announce(change: &Change, address: &Address) -> io::Result<()> {
     let mut stream = match address {
         Address::Path(path) => UnixStream::connect(path)?,
@@ -512,11 +482,8 @@ mod tests {
     #[test]
     fn signal_body() {
         let body = changed_body(&change(), (0x1_0000_0002, 3));
-        // sec (low 32 bits), nsec, account, created, deleted
         assert_eq!(body[..20], [2, 0, 0, 0, 3, 0, 0, 0, 7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
-        // provider "fake"
         assert_eq!(body[20..29], [4, 0, 0, 0, b'f', b'a', b'k', b'e', 0]);
-        // the array length, then its first struct at an 8-byte boundary
         let length = u32::from_le_bytes(body[32..36].try_into().unwrap()) as usize;
         assert_eq!(body.len(), 40 + length);
         assert_eq!(body[40..47], [6, 0, 0, 0, b'g', b'l', b'o']);
@@ -525,14 +492,12 @@ mod tests {
         assert!(text.contains("\u{1}s\0"));
         assert!(text.contains("auth-failed"));
         assert!(text.contains("CredentialsNeedUpdate\0\u{1}b\0"));
-        // ends with an empty "as"
         assert_eq!(body[body.len() - 4..], [0, 0, 0, 0]);
     }
 
     #[test]
     fn only_messages_with_a_body_have_a_signature() {
         let contains = |message: &[u8], part: &[u8]| message.windows(part.len()).any(|w| w == part);
-        // The SIGNATURE field: code 8, signature "g", then the value.
         assert!(!contains(&bus_call(1, "Hello", "", &[]), b"\x01g\0"));
         assert!(contains(&bus_call(2, "RequestName", "su", &[]), b"\x08\x01g\0\x02su\0"));
         let all = messages(&change(), &guid(), (1, 2));
@@ -580,7 +545,6 @@ mod tests {
             for at in [4, 8, 12] {
                 bytes[at..at + 4].reverse();
             }
-            // the REPLY_SERIAL value
             bytes[20..24].reverse();
             bytes[28..32].reverse();
         }
@@ -613,7 +577,6 @@ mod tests {
         assert_eq!(parse_received(&huge), None);
     }
 
-    /// A bus that answers from a script.
     struct Script {
         input: io::Cursor<Vec<u8>>,
         written: Vec<u8>,
@@ -666,7 +629,6 @@ mod tests {
         assert!(run(garbage).0.is_err());
     }
 
-    /// `reply` with a body of `body` zero bytes.
     fn reply_with_body(kind: u8, serial: u32, reply_serial: u32, body: usize) -> Vec<u8> {
         let mut bytes = reply(kind, serial, reply_serial, b'l');
         bytes[4..8].copy_from_slice(&u32::try_from(body).unwrap().to_le_bytes());
@@ -676,7 +638,6 @@ mod tests {
 
     #[test]
     fn exchanges_end_at_the_reply_to_get_id() {
-        // Only the reply to GetId ends the exchange, whatever comes first.
         let mut late_error = b"OK 1\r\n".to_vec();
         late_error.extend(reply(kind::METHOD_RETURN, 1, 1, b'l'));
         late_error.extend(reply(kind::ERROR, 2, 4, b'l'));
@@ -693,15 +654,12 @@ mod tests {
             input.extend(reply(kind::METHOD_RETURN, 2, 4, b'l'));
             run(input).0
         };
-        // Sizes as such, not from the constants: a message of 64 KiB is
-        // taken, a byte more is not.
         let kib = 1024;
         let largest = reply_with_body(kind::METHOD_RETURN, 1, 1, 64 * kib - reply(0, 0, 0, b'l').len());
         assert_eq!(largest.len(), 64 * kib);
         assert!(matches!(ok(std::slice::from_ref(&largest)), Ok(())));
         let too_large = reply_with_body(kind::METHOD_RETURN, 1, 1, 64 * kib + 1);
         assert!(ok(&[too_large]).is_err());
-        // Up to 256 KiB in all before the reply: three of them, not four.
         assert!(matches!(ok(&vec![largest.clone(); 3]), Ok(())));
         assert!(ok(&vec![largest; 4]).is_err());
     }

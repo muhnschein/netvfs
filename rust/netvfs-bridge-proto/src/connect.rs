@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! Client side of the peer-to-peer connection (SPEC-v2 XB-3): a unix socket
-//! with fd passing and no bus daemon.
+//! Client side of the peer-to-peer connection: a unix socket with fd passing, no bus daemon.
 
 use crate::errors::BridgeError;
 use crate::proxy::Bridge1Proxy;
@@ -37,8 +36,7 @@ pub async fn connect(socket_path: &Path) -> Result<Connection, BridgeError> {
 }
 
 impl Connection {
-    /// Runs the (peer-to-peer) client handshake over an already connected
-    /// stream. Used by [`connect`] and by the fake bridge.
+    /// Runs the client handshake over a connected stream. Used by [`connect`] and the fake bridge.
     ///
     /// # Errors
     /// [`BridgeError::Disconnected`] when the handshake fails.
@@ -62,7 +60,6 @@ impl Connection {
 
     /// Closes the socket; calls and signals end with a disconnect.
     pub async fn close(&self) {
-        // Closing an already closed connection is not an error worth reporting.
         self.conn.clone().close().await.ok();
     }
 
@@ -73,10 +70,8 @@ impl Connection {
         SignalStream { inner: zbus::MessageStream::from(&self.conn), done: false }
     }
 
-    /// `ConnectAdHoc` that wipes `secret` before returning, also when the call
-    /// fails or the future is dropped (SPEC-v2 XB-16). The secret is passed
-    /// as `ay`; the copy that zbus serialises into the outgoing message lives
-    /// in the message buffer until it has been sent.
+    /// `ConnectAdHoc` that wipes `secret` before returning, also on failure or drop. Passed as
+    /// `ay`; zbus's serialised copy lives in the message buffer until sent.
     ///
     /// # Errors
     /// The bridge's refusal, or a broken connection.

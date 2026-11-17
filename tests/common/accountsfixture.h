@@ -15,7 +15,7 @@ namespace Test {
 // A private accounts database (ACCOUNTS, AG_PROVIDERS, AG_SERVICES point into a
 // temporary directory). Create it before the first Accounts::Manager in the
 // process. Providers get a "<provider>-backup" storage service and a
-// "<provider>-files" netvfs-files service (SPEC-v2 XA-1).
+// "<provider>-files" netvfs-files service.
 class Q_DECL_EXPORT AccountsFixture
 {
 public:

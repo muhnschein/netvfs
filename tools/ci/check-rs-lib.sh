@@ -1,16 +1,11 @@
 #!/bin/sh
 # SPDX-License-Identifier: LGPL-2.1-or-later
-# Checks libnetvfs-rs.so, the Rust backends that the backend plugins load
-# with dlopen (doc/RUST.md), from its ELF headers and against those plugins:
-#   - it exports one symbol, nvr_get (rustc's export list for a cdylib);
-#   - it links only the C runtime: libc, libgcc_s, libm, libpthread, libdl
-#     and the dynamic loader (no Qt, no libnetvfs: its Rust std, tokio and
-#     crypto stay inside);
-#   - no GLIBC symbol version above the given one (the target's glibc is the
-#     floor, as for the Rust binaries: check-linked-libs.sh);
+# Checks libnetvfs-rs.so (Rust backends, dlopen'd by the backend plugins) from ELF headers and the plugins:
+#   - exports one symbol, nvr_get;
+#   - links only the C runtime: libc, libgcc_s, libm, libpthread, libdl, dynamic loader (no Qt, no libnetvfs);
+#   - no GLIBC symbol version above the given one (target glibc is the floor);
 #   - full RELRO, immediate binding, no executable stack;
-#   - each given plugin looks for it where it is installed (the shim's
-#     compiled-in path, src/backends/rs/rs.pri).
+#   - each given plugin contains the installed path (shim's compiled-in path, src/backends/rs/rs.pri).
 # Usage: check-rs-lib.sh <library> <max glibc version> <installed path> [<plugin>...]
 set -eu
 library=$1

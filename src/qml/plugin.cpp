@@ -20,8 +20,8 @@
 
 namespace {
 
-// Installed into the application while the engine lives (as the platform's
-// account plugins do), so qsTrId() in our pages resolves.
+// Installed into the application while the engine lives (as the platform's account plugins do), so
+// qsTrId() in our pages resolves.
 class EngineTranslator : public QTranslator
 {
     Q_DISABLE_COPY(EngineTranslator)
@@ -54,8 +54,7 @@ private:
 };
 
 
-} // namespace
-
+}
 class NetVfsAccountsPlugin : public QQmlExtensionPlugin
 {
     Q_OBJECT
@@ -68,7 +67,7 @@ public:
         // Engineering English first, so the locale's translation wins.
         auto engineering = std::make_unique<EngineTranslator>(engine);
         engineering->loadAndInstall(QStringLiteral("netvfs_eng_en"));
-        engineering.release();   // owned by the engine
+        engineering.release();
         auto translation = std::make_unique<EngineTranslator>(engine);
         translation->loadAndInstall(QLocale(), QStringLiteral("netvfs"));
         translation.release();

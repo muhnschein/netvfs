@@ -10,12 +10,9 @@
 
 namespace NetVfs {
 
-// SPEC-v2 XH-4: a pair of QIODevices over a ring buffer of fixed capacity,
-// for streaming from one backend to another on two threads in constant
-// memory. Reads block until data, EOF (writer closed) or failure; writes
-// block until space. fail(result) on either side wakes both and makes every
-// later read/write return -1 with that result in result(). cancel() is
-// fail(Canceled). Both devices are opened by the constructor.
+// Two QIODevices over a fixed ring buffer: constant-memory streaming between backends on two
+// threads. Reads block until data, EOF or failure; writes block until space. fail(result) wakes
+// both; later read/write return -1 with result(). cancel() is fail(Canceled).
 class NETVFS_EXPORT BoundedPipe
 {
 public:
@@ -24,15 +21,14 @@ public:
     BoundedPipe(const BoundedPipe &) = delete;
     BoundedPipe &operator=(const BoundedPipe &) = delete;
 
-    QIODevice *writer();   // write side; close() signals EOF
-    QIODevice *reader();   // read side; returns 0 at EOF
-
+    QIODevice *writer();
+    QIODevice *reader();
     void fail(const Result &result) const;
     void cancel() const;
-    Result result() const;     // success until fail()/cancel()
+    Result result() const;
     qint64 capacity() const;
-    qint64 buffered() const;   // bytes currently held
-    qint64 peakBuffered() const;   // high-water mark of buffered(); never above capacity()
+    qint64 buffered() const;
+    qint64 peakBuffered() const;
 
     struct State;
 
@@ -42,6 +38,5 @@ private:
     std::unique_ptr<QIODevice> m_reader;
 };
 
-} // namespace NetVfs
-
+}
 #endif

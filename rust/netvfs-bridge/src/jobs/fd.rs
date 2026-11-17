@@ -1,9 +1,5 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! SPEC-v2 XB-11: the descriptors a consumer passes to `Upload` and
-//! `Download` (port of `fdcheck.cpp`). The bridge never opens a local path;
-//! it only uses descriptors the consumer opened, checks them before any
-//! network work, and never fsyncs, renames, truncates or deletes anything
-//! locally. Reading and writing them is [`super::fdio`].
+//! Descriptors a consumer passes to `Upload` and `Download`. The bridge never opens a local path; it only uses descriptors the consumer opened, checks them before any network work, and never fsyncs, renames, truncates or deletes anything locally. Reading and writing them is [`super::fdio`].
 
 use crate::Status;
 use crate::sys::fd::{self, FileKind};
@@ -12,18 +8,18 @@ use std::os::fd::RawFd;
 /// What the transfer does with the descriptor.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FdAccess {
-    /// Upload: the bridge reads it.
+    /// Upload.
     Read,
-    /// Download: the bridge writes it.
+    /// Download.
     Write,
 }
 
 /// A checked descriptor.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FdInfo {
-    /// A FIFO; else a regular file.
+    /// A FIFO.
     pub fifo: bool,
-    /// A regular file's `st_size` at check time; -1 for a FIFO.
+    /// A regular file's `st_size` at check time.
     pub size: i64,
 }
 
@@ -31,8 +27,6 @@ fn denied(why: &str) -> Status {
     Status::permission_denied(why)
 }
 
-/// Whether the access mode of `flags` allows `need` (`O_RDONLY`/`O_RDWR`
-/// to read, `O_WRONLY`/`O_RDWR` to write).
 fn access_mode_allows(flags: libc::c_int, need: FdAccess) -> bool {
     let mode = flags & libc::O_ACCMODE;
     match need {
@@ -41,7 +35,8 @@ fn access_mode_allows(flags: libc::c_int, need: FdAccess) -> bool {
     }
 }
 
-/// `checkTransferFd`: `PermissionDenied` unless `fd` is a regular file or
+/// `PermissionDenied` unless `fd` is a regular file or FIFO opened with the access `need` asks for.
+/// `O_PATH` descriptors are refused, and for writing a regular file `O_APPEND` too, because `pwrite` would ignore the offset. The descriptor is only inspected.
 /// FIFO opened with the access `need` asks for. `O_PATH` descriptors are
 /// refused, and for writing a regular file `O_APPEND` too, because
 /// `pwrite` would ignore the offset. The descriptor is only inspected.
@@ -92,15 +87,12 @@ mod tests {
         (ErrorName::PermissionDenied, why.to_owned())
     }
 
-    /// The port of `tst_BridgeUnits::fdChecks`.
     #[test]
     fn fd_checks() {
         let dir = TempDir::new();
         let path = dir.path().join("f");
         write_file(&path, b"0123456789");
 
-        // 0 is a descriptor like any other (stdin), not a missing one; what
-        // it is depends on how the tests run (a terminal, /dev/null, a pipe).
         if let Err(e) = check_transfer_fd(0, FdAccess::Read) {
             assert_ne!(e.message, "No file descriptor");
         }
@@ -109,7 +101,6 @@ mod tests {
             check_transfer_fd(rd.as_raw_fd(), FdAccess::Read).unwrap(),
             FdInfo { fifo: false, size: 10 }
         );
-        // A download into a read-only file.
         assert_eq!(
             name(check_transfer_fd(rd.as_raw_fd(), FdAccess::Write)),
             denied("The file is not open for writing")
@@ -134,7 +125,6 @@ mod tests {
             name(check_transfer_fd(append.as_raw_fd(), FdAccess::Write)),
             denied("The file is open for appending")
         );
-        // Reading is fine from a read-write descriptor in append mode.
         let rw_append = OpenOptions::new().read(true).append(true).open(&path).unwrap();
         assert!(check_transfer_fd(rw_append.as_raw_fd(), FdAccess::Read).is_ok());
 
@@ -164,7 +154,6 @@ mod tests {
             check_transfer_fd(w.as_raw_fd(), FdAccess::Write).unwrap(),
             FdInfo { fifo: true, size: -1 }
         );
-        // O_APPEND does not matter for a FIFO (its write end, reopened with it).
         let w_append =
             OpenOptions::new().append(true).open(format!("/proc/self/fd/{}", w.as_raw_fd())).unwrap();
         assert_ne!(fd::status_flags(w_append.as_raw_fd()).unwrap() & libc::O_APPEND, 0);
@@ -183,7 +172,6 @@ mod tests {
         assert!(!access_mode_allows(libc::O_WRONLY, Read));
         assert!(access_mode_allows(libc::O_RDWR | libc::O_APPEND, Read));
         assert!(access_mode_allows(libc::O_RDWR | libc::O_APPEND, Write));
-        // The access mode 3 (no access, a Linux special): neither.
         assert!(!access_mode_allows(libc::O_ACCMODE, Read));
         assert!(!access_mode_allows(libc::O_ACCMODE, Write));
     }

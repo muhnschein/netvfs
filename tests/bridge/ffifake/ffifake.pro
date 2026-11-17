@@ -1,7 +1,5 @@
 # SPDX-License-Identifier: LGPL-2.1-or-later
-# libnetvfs-bridge-ffi-fake.so: the fake backend's control table for the
-# tests of the C ABI and of the Rust bridge (nvb_fake.h; design §4.1).
-# Test-only, never installed.
+# libnetvfs-bridge-ffi-fake.so: fake backend's control table for the C ABI and Rust bridge tests (nvb_fake.h). Test-only, never installed.
 include(../../../common.pri)
 
 TEMPLATE = lib

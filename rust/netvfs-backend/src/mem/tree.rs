@@ -8,28 +8,22 @@ use netvfs_vfs::{Attributes, Disposition, Entry, EntryFlags, EntryType, ErrorNam
 use std::collections::BTreeMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-/// The root folder's node.
 const ROOT: u64 = 1;
 /// Symlinks followed in one lookup at most (Linux's 40).
 const MAX_HOPS: u32 = 40;
 /// The longest name, in bytes (`maxNameBytes`).
 pub const MAX_NAME: u64 = 255;
-/// Owner and group ids of every node.
 const OWNER_ID: u64 = 1000;
-/// Owner and group names of every node.
 const OWNER: &str = "mem";
-/// Mode of a new file without `create_mode`, of a new folder.
 const FILE_MODE: u32 = 0o644;
 const DIR_MODE: u32 = 0o755;
 
-/// Milliseconds since the epoch.
 pub fn now_ms() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX))
 }
 
-/// What a node holds.
 #[derive(Debug, Clone)]
 enum Data {
     File(Vec<u8>),
@@ -44,11 +38,8 @@ struct Node {
     mtime_ms: i64,
     atime_ms: i64,
     ctime_ms: i64,
-    /// Names of the node (hard links).
     links: u32,
-    /// The folder of a folder (the root's is the root).
     parent: u64,
-    /// Bumped on every change: the etag.
     version: u64,
 }
 
@@ -89,12 +80,10 @@ fn is_a_dir() -> Status {
     Status::new(ErrorName::IsADirectory, "Is a folder")
 }
 
-/// The components of `path`, without empty ones.
 fn components(path: &[u8]) -> Vec<&[u8]> {
     path.split(|b| *b == b'/').filter(|c| !c.is_empty()).collect()
 }
 
-/// A name a new entry may have.
 fn check_name(name: &[u8]) -> Result<(), Status> {
     if u64::try_from(name.len()).map_or(true, |n| n > MAX_NAME) {
         return Err(Status::new(ErrorName::InvalidName, "The name is too long"));
@@ -102,7 +91,6 @@ fn check_name(name: &[u8]) -> Result<(), Status> {
     Ok(())
 }
 
-/// A store's tree.
 #[derive(Debug)]
 pub struct Tree {
     nodes: BTreeMap<u64, Node>,
@@ -149,8 +137,7 @@ impl Tree {
         Ok(self.children(dir)?.get(name).copied())
     }
 
-    /// Walks `comps` from `start`; symlinks are followed in every
-    /// component but the last, and in the last with `follow_last`.
+    /// Symlinks are followed in every component but the last, and in the last with `follow_last`.
     fn walk(&self, start: u64, comps: &[&[u8]], follow_last: bool, hops: &mut u32) -> Result<u64, Status> {
         let last = comps.len().saturating_sub(1);
         let mut at = start;
@@ -178,12 +165,10 @@ impl Tree {
         Ok(at)
     }
 
-    /// The node at `path`, following a final symlink with `follow`.
     pub fn resolve(&self, path: &[u8], follow: bool) -> Result<u64, Status> {
         self.walk(ROOT, &components(path), follow, &mut 0)
     }
 
-    /// The folder `path` is in and its last name.
     fn parent_of<'p>(&self, path: &'p [u8]) -> Result<(u64, &'p [u8]), Status> {
         let comps = components(path);
         let Some((name, dirs)) = comps.split_last() else {
@@ -207,7 +192,6 @@ impl Tree {
         Ok(id)
     }
 
-    /// Removes the name; the node goes with its last name.
     fn unlink(&mut self, dir: u64, name: &[u8]) -> Result<(), Status> {
         let id = self.children_mut(dir)?.remove(name).ok_or_else(not_found)?;
         self.node_mut(dir)?.touch();
@@ -220,7 +204,6 @@ impl Tree {
         Ok(())
     }
 
-    /// Whether `dir` is `ancestor` or below it.
     fn within(&self, dir: u64, ancestor: u64) -> bool {
         let mut at = dir;
         loop {
@@ -234,8 +217,6 @@ impl Tree {
         }
     }
 
-    /// The entry of node `id` under `name`; a symlink's target type is
-    /// resolved from `dir` (the folder holding it) with `targets`.
     fn entry(&self, dir: u64, name: &[u8], id: u64, targets: bool) -> Result<Entry, Status> {
         let node = self.node(id)?;
         let mut flags =
@@ -254,8 +235,7 @@ impl Tree {
                 Err(_) => flags = flags.union(EntryFlags::TARGET_UNKNOWN),
             }
         }
-        // A symlink has no mode and only its modification time, as on
-        // servers that report no more (an entry's fields may be unknown).
+        // Symlinks have only a modification time, as on servers that report no more.
         let link = matches!(node.data, Data::Link(_));
         Ok(Entry {
             name: name.to_vec(),
@@ -276,7 +256,6 @@ impl Tree {
         })
     }
 
-    /// `stat` (`follow`) or `lstat` of `path`; the root's name is empty.
     pub fn stat(&self, path: &[u8], follow: bool) -> Result<Entry, Status> {
         let id = self.resolve(path, follow)?;
         let comps = components(path);
@@ -288,13 +267,11 @@ impl Tree {
         self.entry(dir, name, id, true)
     }
 
-    /// The entries of the folder at `path`, sorted by name.
     pub fn list(&self, path: &[u8], targets: bool) -> Result<Vec<Entry>, Status> {
         let dir = self.resolve(path, true)?;
         self.children(dir)?.iter().map(|(name, id)| self.entry(dir, name, *id, targets)).collect()
     }
 
-    /// XC-8.
     pub fn make_dir(&mut self, path: &[u8], exclusive: bool) -> Result<(), Status> {
         let (dir, name) = self.parent_of(path)?;
         if self.child(dir, name)?.is_some() {
@@ -304,7 +281,7 @@ impl Tree {
         self.add(dir, name, Data::Dir(BTreeMap::new()), DIR_MODE).map(drop)
     }
 
-    /// XC-9: `removeFile` (`folder` false) or `removeDir`.
+    /// `removeFile` (`folder` false) or `removeDir`.
     pub fn remove(&mut self, path: &[u8], folder: bool) -> Result<(), Status> {
         let (dir, name) = self.parent_of(path)?;
         let id = self.child(dir, name)?.ok_or_else(not_found)?;
@@ -319,7 +296,6 @@ impl Tree {
         self.unlink(dir, name)
     }
 
-    /// XC-10.
     pub fn rename(&mut self, from: &[u8], to: &[u8], replace: bool) -> Result<(), Status> {
         let (from_dir, from_name) = self.parent_of(from)?;
         let id = self.child(from_dir, from_name)?.ok_or_else(not_found)?;
@@ -354,7 +330,7 @@ impl Tree {
         Ok(())
     }
 
-    /// XC-11: everything is checked before anything changes.
+    /// Everything is checked before anything changes.
     pub fn set_attributes(&mut self, path: &[u8], changes: &Attributes) -> Result<(), Status> {
         let id = self.resolve(path, true)?;
         if changes.mode.is_some_and(|m| m > 0o7777) {
@@ -375,7 +351,7 @@ impl Tree {
         Ok(())
     }
 
-    /// XC-12: the target, verbatim.
+    /// The target, verbatim.
     pub fn read_link(&self, path: &[u8]) -> Result<Vec<u8>, Status> {
         let (dir, name) = self.parent_of(path)?;
         let id = self.child(dir, name)?.ok_or_else(not_found)?;
@@ -385,7 +361,7 @@ impl Tree {
         }
     }
 
-    /// XC-12: `link` pointing to `target`, verbatim.
+    /// `link` pointing to `target`, verbatim.
     pub fn make_symlink(&mut self, target: &[u8], link: &[u8]) -> Result<(), Status> {
         if target.is_empty() {
             return Err(Status::new(ErrorName::InvalidName, "The link target is empty"));
@@ -397,7 +373,7 @@ impl Tree {
         self.add(dir, name, Data::Link(target.to_vec()), 0o777).map(drop)
     }
 
-    /// XC-12: a second name of a file (not of a folder).
+    /// A second name of a file (not a folder).
     pub fn make_hardlink(&mut self, existing: &[u8], link: &[u8]) -> Result<(), Status> {
         let id = self.resolve(existing, false)?;
         if self.is_dir(id) {
@@ -415,7 +391,6 @@ impl Tree {
         Ok(())
     }
 
-    /// A copy of node `id` (and below it) as `name` in `dir`.
     fn duplicate(&mut self, id: u64, dir: u64, name: &[u8]) -> Result<(), Status> {
         let node = self.node(id)?.clone();
         let copy = self.add(
@@ -435,7 +410,6 @@ impl Tree {
         Ok(())
     }
 
-    /// XC-17.
     pub fn copy(&mut self, from: &[u8], to: &[u8], recursive: bool, replace: bool) -> Result<(), Status> {
         let id = self.resolve(from, true)?;
         let folder = self.is_dir(id);
@@ -458,7 +432,6 @@ impl Tree {
         self.duplicate(id, dir, name)
     }
 
-    /// The file at `path` (symlinks followed).
     pub fn file(&self, path: &[u8]) -> Result<u64, Status> {
         let id = self.resolve(path, true)?;
         match self.node(id)?.data {
@@ -468,7 +441,6 @@ impl Tree {
         }
     }
 
-    /// The bytes of file `id`.
     pub fn data(&self, id: u64) -> Result<&[u8], Status> {
         match &self.node(id)?.data {
             Data::File(data) => Ok(data),
@@ -476,8 +448,6 @@ impl Tree {
         }
     }
 
-    /// XC-13: opens `path` for writing; the node and the offset to write
-    /// at.
     pub fn open_write(&mut self, path: &[u8], options: &WriteOptions) -> Result<(u64, u64), Status> {
         let (dir, name) = self.parent_of(path)?;
         let existing = match self.child(dir, name)? {
@@ -510,7 +480,6 @@ impl Tree {
         }
     }
 
-    /// Writes `data` at `at` in file `id`, filling a gap with zeros.
     pub fn write_at(&mut self, id: u64, at: u64, data: &[u8]) -> Result<(), Status> {
         let node = self.node_mut(id)?;
         let Data::File(content) = &mut node.data else { return Err(is_a_dir()) };
@@ -527,24 +496,20 @@ impl Tree {
         Ok(())
     }
 
-    /// Sets the modification time of `id`.
     pub fn set_mtime(&mut self, id: u64, ms: i64) -> Result<(), Status> {
         self.node_mut(id)?.mtime_ms = ms;
         Ok(())
     }
 
-    /// Bytes in files, if `dir` exists (`spaceInfo`).
     pub fn used_seen_from(&self, dir: &[u8]) -> Result<u64, Status> {
         self.resolve(dir, true)?;
         Ok(self.used())
     }
 
-    /// The bytes of the file at `path` (`checksum`).
     pub fn file_data(&self, path: &[u8]) -> Result<&[u8], Status> {
         self.data(self.file(path)?)
     }
 
-    /// Bytes in files.
     pub fn used(&self) -> u64 {
         self.nodes
             .values()

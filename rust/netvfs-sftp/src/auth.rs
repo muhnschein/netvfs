@@ -1,23 +1,18 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! Signing in (S-10 to S-14, XS-11).
+//! Signing in.
 //!
-//! Without a prompter: exactly the configured method; keyboard-interactive
-//! only as S-11 says (the stored password answers one non-echo prompt); a
-//! partial success is `AuthFailed` (S-13).
+//! Without a prompter: exactly the configured method; keyboard-interactive only when the stored password answers one
+//! non-echo prompt; a partial success is `AuthFailed`.
 //!
-//! With a prompter (XS-11):
-//!  - keyboard-interactive is tried after the configured method failed,
-//!    and is the method of `auth_mode=interactive`; every round the stored
-//!    password does not answer goes to the prompter, for as many rounds as
-//!    the server sends (up to [`MAX_ROUNDS`]);
-//!  - a partial success continues with keyboard-interactive, or with a
-//!    password asked through the prompter, so publickey + OTP and
-//!    password + OTP chains work;
-//!  - answers are wiped after use as far as this code holds them (SEC-5).
+//! With a prompter:
+//!  - keyboard-interactive is tried after the configured method failed, and is the method of `auth_mode=interactive`;
+//!    every round the stored password does not answer goes to the prompter, up to [`MAX_ROUNDS`];
+//!  - a partial success continues with keyboard-interactive, or a password asked through the prompter, so
+//!    publickey + OTP and password + OTP chains work;
+//!  - answers are wiped after use as far as this code holds them.
 //!
-//! Every russh call is bounded by the connect timeout and the cancel
-//! token. A call that stops part way leaves russh's reply queue out of
-//! step, so the caller must drop the session after any failure here.
+//! Every russh call is bounded by the connect timeout and the cancel token. A call that stops part way leaves
+//! russh's reply queue out of step: the caller must drop the session after any failure here.
 
 use crate::keys;
 use crate::session::{Session, bounded};
@@ -42,7 +37,7 @@ pub enum Mode {
     Password,
     /// `publickey`: the secret is a key secret.
     PublicKey,
-    /// `interactive` (XS-11): the secret, if any, is a password.
+    /// `interactive`: the secret, if any, is a password.
     Interactive,
 }
 
@@ -60,8 +55,7 @@ impl Mode {
         }
     }
 
-    /// Secret and mode must agree (SPEC-sftp 2): a key is never sent as a
-    /// password, a password never read as a key.
+    /// Secret and mode must agree: a key is never sent as a password, a password never read as a key.
     ///
     /// # Errors
     /// `AuthFailed` when they do not.
@@ -82,7 +76,7 @@ impl Mode {
     }
 }
 
-/// S-14: the methods the server accepts, for the denial message.
+/// The methods the server accepts, for the denial message.
 #[must_use]
 pub fn accepted_methods_text(methods: &[MethodKind]) -> String {
     if methods == [MethodKind::PublicKey] {
@@ -105,13 +99,13 @@ pub fn accepted_methods_text(methods: &[MethodKind]) -> String {
     format!("The server accepts: {}.", names.join(", "))
 }
 
-/// S-14.
+/// Sign-in refused; names the accepted methods.
 #[must_use]
 pub fn auth_denied(methods: &[MethodKind]) -> Status {
     Status::new(ErrorName::AuthFailed, format!("Sign-in was refused. {}", accepted_methods_text(methods)))
 }
 
-/// S-13.
+/// The server needs a second sign-in step.
 #[must_use]
 pub fn auth_partial() -> Status {
     Status::new(
@@ -120,19 +114,19 @@ pub fn auth_partial() -> Status {
     )
 }
 
-/// S-11: a prompt shape the stored password cannot answer, no prompter.
+/// A prompt shape the stored password cannot answer, no prompter.
 #[must_use]
 pub fn interactive_not_supported() -> Status {
     Status::new(ErrorName::AuthFailed, "The server needs interactive sign-in, which is not supported")
 }
 
-/// XS-11: the prompter declined, or gave no answer for every prompt.
+/// The prompter declined, or gave no answer for every prompt.
 #[must_use]
 pub fn interactive_declined() -> Status {
     Status::new(ErrorName::AuthFailed, "Interactive sign-in was not completed")
 }
 
-/// The stored key cannot sign in (S-12).
+/// The stored key cannot sign in.
 #[must_use]
 pub fn unusable_key() -> Status {
     Status::new(ErrorName::AuthFailed, "The stored SSH key cannot be used")
@@ -143,19 +137,17 @@ pub fn unusable_key() -> Status {
 pub enum RoundAction {
     /// No prompts (OpenSSH sends one after PAM succeeded).
     Acknowledge,
-    /// S-11: the stored password answers a single non-echo prompt.
+    /// The stored password answers a single non-echo prompt.
     AnswerWithSecret,
-    /// XS-11.
+    /// Ask the prompter.
     AskPrompter,
-    /// S-11: any other shape without a prompter.
+    /// Any other shape without a prompter.
     Refuse,
 }
 
-/// What to do with a round of `prompts`. `secret_usable`: password mode
-/// and the stored password has not answered a round yet. Without a
-/// prompter this is S-11 exactly (the prompt's text does not matter);
-/// with one, the stored password answers only a prompt that asks for a
-/// password, never a one-time code.
+/// What to do with a round of `prompts`. `secret_usable`: password mode and the stored password has not answered
+/// a round yet. With a prompter the stored password answers only a prompt that asks for a password, never a
+/// one-time code.
 #[must_use]
 pub fn round_action(prompts: &[Prompt], secret_usable: bool, has_prompter: bool) -> RoundAction {
     let [first, rest @ ..] = prompts else {
@@ -173,8 +165,7 @@ pub fn is_password_prompt(text: &str) -> bool {
     text.to_lowercase().contains("password")
 }
 
-/// A russh call that did not return: canceled or timed out, or russh's
-/// error (mapped once the call no longer borrows the session).
+/// A russh call that did not return: canceled, timed out, or russh's error.
 #[derive(Debug)]
 enum Stopped {
     Bounded(Status),
@@ -194,7 +185,6 @@ async fn guarded<T>(
     }
 }
 
-/// How one method ended.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Outcome {
     Success,
@@ -206,13 +196,12 @@ fn offers(methods: &[MethodKind], method: MethodKind) -> bool {
     methods.contains(&method)
 }
 
-/// A password for russh, which takes a `String`.
 fn password_text(secret: &[u8]) -> Result<String, Status> {
     String::from_utf8(secret.to_vec())
         .map_err(|_e| Status::new(ErrorName::AuthFailed, "The password is not valid UTF-8 text"))
 }
 
-/// The stored key (S-12): Ed25519 or ECDSA in a key secret.
+/// The stored key: Ed25519 or ECDSA in a key secret.
 fn stored_key(secret: &[u8]) -> Result<PrivateKey, Status> {
     let text = keys::decode_key_secret(secret).ok_or_else(unusable_key)?;
     let text = std::str::from_utf8(&text).map_err(|_e| unusable_key())?;
@@ -232,7 +221,7 @@ pub struct Login<'a, 'p> {
     mode: Mode,
     timeout: Duration,
     cancel: &'a CancelToken,
-    /// S-11: the stored password answered a round.
+    /// The stored password answered a round.
     secret_used: bool,
     tried_interactive: bool,
 }
@@ -248,8 +237,7 @@ impl std::fmt::Debug for Login<'_, '_> {
 }
 
 impl<'a, 'p> Login<'a, 'p> {
-    /// A sign-in as `user` with `secret` in `mode`; russh calls are
-    /// bounded by `timeout`.
+    /// A sign-in as `user` with `secret` in `mode`; russh calls bounded by `timeout`.
     pub fn new(
         session: &'a mut Session,
         user: &'a str,
@@ -278,7 +266,7 @@ impl<'a, 'p> Login<'a, 'p> {
     /// `AuthFailed` with the reason; `Canceled`, `Timeout`,
     /// `ConnectionLost`, `ProtocolError`.
     pub async fn run(mut self) -> Result<(), Status> {
-        // S-10: learn the offered methods first.
+        // Learn the offered methods first.
         let methods = match self.none().await? {
             Outcome::Success => return Ok(()),
             Outcome::Partial(m) | Outcome::Denied(m) => m,
@@ -306,8 +294,7 @@ impl<'a, 'p> Login<'a, 'p> {
         match self.mode {
             Mode::PublicKey => self.public_key(methods).await,
             Mode::Password => self.password(methods).await,
-            // A stored password where the server takes one, else
-            // keyboard-interactive, which needs a prompter (XC-15).
+            // A stored password where the server takes one, else keyboard-interactive, which needs a prompter.
             Mode::Interactive => {
                 if !self.secret.is_empty() && offers(methods, MethodKind::Password) {
                     let password = password_text(self.secret)?;
@@ -334,7 +321,6 @@ impl<'a, 'p> Login<'a, 'p> {
         Err(auth_partial())
     }
 
-    /// S-11.
     async fn password(&mut self, methods: &[MethodKind]) -> Result<Outcome, Status> {
         if offers(methods, MethodKind::Password) {
             let password = password_text(self.secret)?;
@@ -346,8 +332,7 @@ impl<'a, 'p> Login<'a, 'p> {
         Ok(Outcome::Denied(methods.into()))
     }
 
-    /// S-12: the key comes from the secret only, never from files or an
-    /// agent (S-3).
+    /// The key comes from the secret only, never from files or an agent.
     async fn public_key(&mut self, methods: &[MethodKind]) -> Result<Outcome, Status> {
         if !offers(methods, MethodKind::PublicKey) {
             return Ok(Outcome::Denied(methods.into()));
@@ -377,9 +362,8 @@ impl<'a, 'p> Login<'a, 'p> {
         self.outcome(result)
     }
 
-    /// The outcome of an auth call. russh reports a session that ended
-    /// while it waited as a failure without methods: that is the end of
-    /// the session, not a refusal.
+    /// russh reports a session that ended while it waited as a failure without methods: that is the end of the
+    /// session, not a refusal.
     fn outcome(&self, result: Result<AuthResult, Stopped>) -> Result<Outcome, Status> {
         let reply = result.map_err(|e| self.call_failure(e))?;
         Ok(match reply {
@@ -408,8 +392,7 @@ impl<'a, 'p> Login<'a, 'p> {
         }
     }
 
-    /// S-11: rounds without prompts are acknowledged; XS-11: the others
-    /// go to the prompter.
+    /// Rounds without prompts are acknowledged, the others go to the prompter.
     async fn keyboard_interactive(&mut self) -> Result<Outcome, Status> {
         self.tried_interactive = true;
         let user = self.user.to_owned();
@@ -484,7 +467,7 @@ impl<'a, 'p> Login<'a, 'p> {
         answers.iter().map(|a| String::from_utf8(a.to_vec()).map_err(|_e| interactive_declined())).collect()
     }
 
-    /// XS-11: a password through the prompter, after a partial success.
+    /// A password through the prompter, after a partial success.
     async fn prompted_password(&mut self) -> Result<Outcome, Status> {
         let request = PromptRequest {
             name: String::new(),

@@ -1,10 +1,8 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 //! netvfs-accounts: see the library.
 
-/// The weekly ASan run only (`--cfg netvfs_asan`, tools/ci/rust-sanitize.sh):
-/// a set-id start cannot read `ASAN_OPTIONS` (its /proc/self/environ is not
-/// readable), and LeakSanitizer cannot stop the confined helper (no ptrace),
-/// so leak checking is off from the start.
+// ASan runs only (`--cfg netvfs_asan`): set-id start cannot read `ASAN_OPTIONS`, and
+// LeakSanitizer cannot stop the confined helper (no ptrace).
 #[cfg(netvfs_asan)]
 #[allow(unsafe_code)]
 #[unsafe(no_mangle)]

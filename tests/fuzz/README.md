@@ -1,43 +1,29 @@
-# Fuzzing (SPEC-v2 XT-3)
+# Fuzzing
 
-libFuzzer harnesses built with clang (`-fsanitize=fuzzer,address,undefined`), independent of
-qmake. Needs `clang`, `libclang-rt-dev` and `qtbase5-dev` (see `tools/ci/install-host-deps.sh`).
+libFuzzer harnesses, clang (`-fsanitize=fuzzer,address,undefined`), no qmake. Needs `clang`, `libclang-rt-dev`, `qtbase5-dev`.
 
     tests/fuzz/run.sh <build-dir> [seconds]     # default: 60 s per harness
     FUZZ_ONLY="names url" tests/fuzz/run.sh build 10
 
-`run.sh` builds every `tests/fuzz/fuzz_<name>.cpp` into `<build-dir>/fuzz/fuzz_<name>`, runs it for
-the time budget and exits non-zero if a harness fails to build or finds a crash. New corpus entries
-go to `<build-dir>/fuzz/work/<name>`, crash reproducers to `<build-dir>/fuzz/artifacts`
-(re-run one with `<build-dir>/fuzz/fuzz_<name> <artifact>`). CI runs it in the job "Fuzzing (fixed
-budget)".
-
-## Harnesses
+`run.sh` builds each `tests/fuzz/fuzz_<name>.cpp` into `<build-dir>/fuzz/fuzz_<name>`, runs it for the budget, fails on build error or crash. Corpus growth: `<build-dir>/fuzz/work/<name>`; reproducers: `<build-dir>/fuzz/artifacts` (rerun: `<build-dir>/fuzz/fuzz_<name> <artifact>`). CI job "Fuzzing (fixed budget)".
 
 | Harness | Property |
 | --- | --- |
 | `fuzz_names.cpp` | `Names::encode(Names::decode(x)) == x` for every byte string; UTF-16 input never crashes |
-| `fuzz_url.cpp` | `Url::parse` never crashes; what it accepts survives parse, format, parse unchanged |
+| `fuzz_url.cpp` | `Url::parse` never crashes; accepted input survives parse, format, parse unchanged |
 
-netvfs-bridge and the SMB backend are Rust: the bridge's argument validation, paths and FFI
-marshalling and the SMB codecs (responses, TRANSFORM_HEADER, NTLM challenge, SPNEGO, the srvsvc
-share list) are fuzzed by the cargo-fuzz targets in `rust/fuzz` (`tools/ci/rust-fuzz.sh`,
-doc/RUST.md).
+Rust code (bridge, SMB codecs, SFTP client, key import): cargo-fuzz targets in `rust/fuzz` (`tools/ci/rust-fuzz.sh`).
 
-## Adding a harness: one file
+## New harness: one file
 
-1. Create `tests/fuzz/fuzz_<name>.cpp` with `extern "C" int LLVMFuzzerTestOneInput(const uint8_t *, size_t)`.
-   Make a violated property crash (`__builtin_trap()`); never print or exit.
-2. Name what it needs in comment directives near the top (all optional):
+1. `tests/fuzz/fuzz_<name>.cpp` with `extern "C" int LLVMFuzzerTestOneInput(const uint8_t *, size_t)`. Violated property → crash (`__builtin_trap()`); never print or exit.
+2. Directives near top (all optional):
 
        // fuzz-sources: src/core/url.cpp src/core/names.cpp src/core/paths.cpp
        // fuzz-includes: src/backends/local
        // fuzz-qt: Core
 
-   `fuzz-sources` are repository-relative `.cpp` files compiled into the harness (compile only what
-   the parser needs, not whole plugins); `src/core` is always on the include path; `fuzz-qt` lists Qt
-   modules (default `Core`) used for `pkg-config` flags. `NETVFS_BUILD_CORE` is defined.
-3. Add seeds as small files in `tests/fuzz/corpus/<name>/` (valid inputs of every kind plus a few
-   known-bad ones) and, optionally, a dictionary in `tests/fuzz/dict/<name>.dict`.
+   `fuzz-sources`: repo-relative `.cpp` compiled in (only what parser needs); `src/core` always on include path; `fuzz-qt`: Qt modules for `pkg-config` (default `Core`). `NETVFS_BUILD_CORE` defined.
+3. Seeds in `tests/fuzz/corpus/<name>/` (valid inputs of every kind, a few bad); optional dictionary `tests/fuzz/dict/<name>.dict`.
 
-Nothing else needs changing: `run.sh` discovers the file and CI runs it.
+`run.sh` discovers file; CI runs it.

@@ -1,13 +1,6 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! XD-5: discovery of nearby servers runs only while a session asked for it
-//! (`Discover(true)`); the results go to the sessions that asked, as
-//! `NearbyChanged`, at most every 250 ms (`NearbyService` of
-//! serverparts.cpp).
-//!
-//! The discovery itself is a [`NearbySource`]: in the bridge
-//! [`FfiNearby`], the C++ `Discovery` on the Qt thread (T3), reached
-//! through `post`; tests use a fake. Its results come back to the core as
-//! events ([`CoreLink::nearby`]).
+//! Nearby-server discovery runs only while a session asked (`Discover(true)`); results go to askers as `NearbyChanged`, at most every 250 ms.
+//! In the bridge [`FfiNearby`] runs the C++ `Discovery` on the Qt thread; tests use a fake.
 
 use super::CoreLink;
 use crate::ffi::{Discovery, Ffi};
@@ -25,7 +18,7 @@ pub const NEARBY_DELAY: Duration = Duration::from_millis(250);
 
 /// Starts and stops the discovery of nearby servers.
 pub trait NearbySource {
-    /// Starts (`true`) or stops it; idempotent.
+    /// Starts (`true`) or stops it.
     fn set_running(&mut self, on: bool);
 }
 
@@ -50,15 +43,13 @@ impl std::fmt::Debug for Nearby {
 }
 
 impl Nearby {
-    /// Nothing discovering yet; discovery through `source`.
+    /// Nothing discovering yet.
     #[must_use]
     pub fn new(source: Box<dyn NearbySource>) -> Self {
         Self { source, running: false, discovering: BTreeSet::new(), services: Vec::new(), due: None }
     }
 
-    /// `Discover(on)` of `session` at `now`: the first one starts the
-    /// discovery (and a report of what is known), the last one to stop
-    /// stops it.
+    /// `Discover(on)` of `session` at `now`.
     pub fn set_discovering(&mut self, session: SessionId, on: bool, now: Instant) {
         if on {
             if !self.discovering.insert(session) {
@@ -87,8 +78,7 @@ impl Nearby {
         self.discovering.contains(&session)
     }
 
-    /// The discovery's current list (after a found, updated or lost
-    /// service), at `now`.
+    /// The discovery's current list (after a found, updated or lost service), at `now`.
     pub fn changed(&mut self, services: Vec<WireNearby>, now: Instant) {
         self.services = services;
         self.schedule(now);
@@ -106,20 +96,19 @@ impl Nearby {
         self.due
     }
 
-    /// The report is due: who gets `NearbyChanged`, and with what.
+    /// The report is due.
     pub fn report(&mut self) -> (Vec<SessionId>, Vec<WireNearby>) {
         self.due = None;
         (self.discovering.iter().copied().collect(), self.services.clone())
     }
 }
 
-// The discoveries of `FfiNearby`s, on the Qt thread (they are `!Send`).
+// On the Qt thread: `!Send`.
 thread_local! {
     static DISCOVERIES: RefCell<HashMap<u64, Discovery>> = RefCell::new(HashMap::new());
 }
 
-/// The C++ discovery (XD-5) on the Qt thread, made on first start and
-/// freed when this goes. Its results go to the core.
+/// The C++ discovery on the Qt thread, made on first start and freed when this goes.
 #[derive(Debug)]
 pub struct FfiNearby {
     ffi: Ffi,
@@ -155,7 +144,6 @@ impl Drop for FfiNearby {
     }
 }
 
-/// On the Qt thread: starts or stops discovery `id`, made on first start.
 fn set_running_on_qt_thread(ffi: Ffi, id: u64, link: CoreLink, on: bool) {
     DISCOVERIES.with_borrow_mut(|discoveries| {
         let discovery = match discoveries.entry(id) {

@@ -1,10 +1,6 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! The C ABI of libnetvfs-rs.so (`src/backends/rs/netvfs_rs.h`) against the
-//! `mem` backend, called through the table the way the shim calls it:
-//! ownership (blocks freed, no leaks), threads (callbacks on the caller's
-//! thread, two runtime workers, one call at a time), cancel within the
-//! C-9 bound, panics as `Internal`, and the argument checks. Each test uses
-//! its own `mem` store.
+//! C ABI of libnetvfs-rs.so against the `mem` backend, called through the table like the shim does. Each test
+//! uses its own `mem` store.
 #![allow(
     unsafe_code,
     missing_docs,
@@ -35,13 +31,9 @@ use std::sync::Once;
 use std::thread::{self, ThreadId};
 use std::time::{Duration, Instant};
 
-// ------------------------------------------------------------- helpers
-
-/// C-9.
 const CANCEL_LIMIT: Duration = Duration::from_secs(2);
 
 fn t() -> &'static NvrTable {
-    // nvr_get returns the address of a static table.
     unsafe { &*nvr_get() }
 }
 
@@ -71,7 +63,6 @@ struct Fail {
     detail: String,
 }
 
-/// A table call's result; the error block is freed.
 fn res(e: *mut NvbError) -> Result<(), Fail> {
     if e.is_null() {
         return Ok(());
@@ -83,7 +74,6 @@ fn res(e: *mut NvbError) -> Result<(), Fail> {
     Err(fail)
 }
 
-/// The error name of a failed call.
 fn name<T: std::fmt::Debug>(r: Result<T, Fail>) -> String {
     r.unwrap_err().name
 }
@@ -131,13 +121,10 @@ const LINK: u8 = 3;
 const NAME_NOT_UTF8: u16 = 0x0008;
 const TARGET_UNKNOWN: u16 = 0x0010;
 
-// ---- panics
-
 thread_local! {
     static PANICS: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
 }
 
-/// The panic messages of this thread while `f` runs.
 fn panics_in(f: impl FnOnce()) -> Vec<String> {
     static HOOK: Once = Once::new();
     HOOK.call_once(|| {
@@ -160,8 +147,6 @@ fn panics_in(f: impl FnOnce()) -> Vec<String> {
     f();
     PANICS.with(RefCell::take)
 }
-
-// ---- local side of transfers
 
 #[derive(Default)]
 struct Local {
@@ -258,8 +243,6 @@ fn write_opts(disposition: u32) -> NvrWriteOpts {
     }
 }
 
-// ---- listing
-
 #[derive(Default)]
 struct Lister {
     batches: Vec<Vec<E>>,
@@ -282,8 +265,6 @@ unsafe extern "C" fn sink(ctx: *mut c_void, entries: *const NvbEntry, n: usize) 
     }
     c_int::from(l.stop_after.is_none_or(|stop| l.batches.len() < stop))
 }
-
-// ---- prompts
 
 #[derive(Default)]
 struct Asker {
@@ -310,9 +291,6 @@ unsafe extern "C" fn ask(
     a.result
 }
 
-// ---- a connection
-
-/// A `mem` connection, freed on drop.
 struct Conn(*mut NvrConn);
 
 impl Drop for Conn {
@@ -321,7 +299,6 @@ impl Drop for Conn {
     }
 }
 
-/// A connection's pointer, for another thread (the test serialises).
 struct SendPtr(*mut NvrConn);
 unsafe impl Send for SendPtr {}
 
@@ -333,7 +310,6 @@ impl Conn {
         Self(c)
     }
 
-    /// Connected to store `store` and signed in.
     fn open(store: &str, options: &[(&str, &str)]) -> Self {
         let c = Self::new();
         let mut all = vec![("store", store)];
@@ -343,7 +319,6 @@ impl Conn {
         c
     }
 
-    /// `connect`; the identity seen as (kind, algorithm, key, fingerprint, pin).
     #[allow(clippy::type_complexity)]
     fn connect(
         &self,
@@ -500,7 +475,6 @@ impl Conn {
     }
 }
 
-/// The blob a call returns.
 fn blob(call: impl FnOnce(*mut *mut NvbBlob) -> *mut NvbError) -> Result<Vec<u8>, Fail> {
     let mut out: *mut NvbBlob = ptr::null_mut();
     res(call(&raw mut out))?;
@@ -525,8 +499,6 @@ fn pattern(n: usize, seed: u8) -> Vec<u8> {
     (0..n).map(|i| (i as u8).wrapping_mul(31).wrapping_add(seed)).collect()
 }
 
-/// Runs `call` while another thread cancels `c` after `delay`; the call's
-/// result and the time from cancel to return.
 fn canceled_after<R>(c: &Conn, delay: Duration, call: impl FnOnce() -> R) -> (R, Duration) {
     let target = SendPtr(c.0);
     let canceler = thread::spawn(move || {
@@ -541,8 +513,6 @@ fn canceled_after<R>(c: &Conn, delay: Duration, call: impl FnOnce() -> R) -> (R,
     let at = canceler.join().unwrap();
     (r, returned.duration_since(at))
 }
-
-// ------------------------------------------------------------- tests
 
 #[test]
 fn the_table_is_one_static() {
@@ -576,7 +546,6 @@ fn providers() {
     {
         let conn = Conn::new();
         assert_eq!(live_objects(), 1);
-        // Not connected yet.
         assert_eq!(name(conn.keep_alive()), "ConnectionLost");
         assert_eq!(name(conn.auth(b"", ptr::null())), "ConnectionLost");
         conn.disconnect();
@@ -601,14 +570,12 @@ fn connect_and_authenticate() {
     assert_eq!(c.connect(&[("store", "auth"), ("secret", "pw")]).unwrap(), None);
     assert_eq!(name(c.auth(b"wrong", ptr::null())), "AuthFailed");
     c.auth(b"pw", ptr::null()).unwrap();
-    // NULL arguments are the plugin's bug.
     let e = res(unsafe { (t().connect)(c.0, ptr::null(), ptr::null_mut()) }).unwrap_err();
     assert_eq!(
         (e.name.as_str(), e.message.as_str()),
         ("ProtocolError", "Missing parameters from the plugin")
     );
     assert_eq!(name(res(unsafe { (t().authenticate)(c.0, ptr::null(), ptr::null()) })), "ProtocolError");
-    // An option of a kind no build knows.
     let kv = NvbKv {
         key: b(b"x"),
         value: NvbValue { kind: 77, number: 0, bytes: b(b""), items: ptr::null(), n_items: 0 },
@@ -734,17 +701,14 @@ fn listing() {
     assert_eq!(l.batches.iter().map(Vec::len).collect::<Vec<_>>(), [10, 10, 5]);
     assert_eq!(l.batches[2][4].name, b"e24");
     assert_eq!(l.thread, Some(thread::current().id()));
-    // The sink stops: Canceled after that batch.
     let mut l = Lister { stop_after: Some(1), ..Lister::default() };
     assert_eq!(name(c.list_with(b"", 10, false, &mut l)), "Canceled");
     assert_eq!(l.batches.len(), 1);
-    // cancel() from the sink: no further batch.
     let mut l = Lister { cancel: Some(c.0), ..Lister::default() };
     assert_eq!(name(c.list_with(b"", 10, false, &mut l)), "Canceled");
     assert_eq!(l.batches.len(), 1);
     assert_eq!(name(c.keep_alive()), "Canceled");
     c.reset();
-    // Symlink types, resolved on request.
     c.mkdir(b"dir", true).unwrap();
     res(unsafe { (t().make_symlink)(c.0, b(b"dir"), b(b"dir/self")) }).unwrap();
     res(unsafe { (t().make_symlink)(c.0, b(b".."), b(b"dir/up")) }).unwrap();
@@ -765,7 +729,6 @@ fn listing() {
     c.list_with(b"dir", 100, false, &mut l).unwrap();
     assert!(l.batches.concat().iter().all(|e| e.target_kind == 0 && e.flags == 0));
     assert_eq!(name(c.list_with(b"e00", 10, false, &mut Lister::default())), "NotADirectory");
-    // Batch 0 and a NULL sink are the plugin's bugs.
     assert_eq!(name(c.list_with(b"", 0, false, &mut Lister::default())), "ProtocolError");
     let e = res(unsafe { (t().list)(c.0, b(b""), 10, 0, None, ptr::null_mut()) }).unwrap_err();
     assert_eq!(e.message, "Missing list sink from the plugin");
@@ -783,7 +746,6 @@ fn links_attributes_copies() {
     assert_eq!(name(blob(|out| unsafe { (t().read_link)(c.0, b(b"target"), out) })), "InvalidName");
     let link = c.stat(b"link", false).unwrap();
     assert_eq!((link.kind, link.target_kind), (LINK, FILE));
-    // An unknown mode or time crosses as -1.
     assert!(link.mtime > 0);
     assert_eq!((link.mode, link.ctime, link.atime), (-1, -1, -1));
     assert_eq!(c.stat(b"link", true).unwrap().size, 4);
@@ -885,7 +847,6 @@ fn read_handles() {
     assert!(h.is_null());
     c.mkdir(b"dir", true).unwrap();
     assert_eq!(name(c.open_read(b"dir")), "IsADirectory");
-    // The size pointer may be NULL.
     res(unsafe { (t().open_read)(c.0, b(b"data"), &raw mut h, ptr::null_mut()) }).unwrap();
     res(unsafe { (t().read_close)(h) }).unwrap();
     drop(c);
@@ -958,7 +919,7 @@ fn handles_after_disconnect_and_conn_free() {
     assert_eq!(unsafe { (t().position)(w) }, 0);
     assert_eq!(name(res(unsafe { (t().commit)(w) })), "ConnectionLost");
     assert_eq!(live_objects(), 2);
-    // conn_free frees the handles still open (R4).
+    // conn_free frees open handles.
     drop(c);
     assert_no_leaks();
     let c = Conn::open("lost", &[]);
@@ -1001,7 +962,7 @@ fn uploads_and_downloads() {
     assert_eq!(name(c.download(b"big", 0, -2, None).0), "ProtocolError");
     assert_eq!(name(c.download(b"missing", 0, -1, None).0), "NotFound");
 
-    // A FIFO source: no size; expected_size gives the total. Options apply.
+    // A FIFO source has no size; expected_size gives the total.
     let mut l = Local { data: b"options".to_vec(), sequential: true, ..Local::default() };
     let io_seq = io(&mut l);
     let mut p = Prog::default();
@@ -1024,7 +985,6 @@ fn uploads_and_downloads() {
     let pr = progress(&mut p);
     res(unsafe { (t().upload)(c.0, b(b"seq"), &truncate(), &raw const io_seq, &raw const pr) }).unwrap();
     assert_eq!(p.updates, [(1, -1)]);
-    // CreateNew on an existing file; Resume appends.
     assert_eq!(
         name(res(unsafe { (t().upload)(c.0, b(b"opts"), &raw const o, &raw const io_seq, ptr::null()) })),
         "AlreadyExists"
@@ -1036,7 +996,6 @@ fn uploads_and_downloads() {
         .unwrap();
     assert_eq!(c.get(b"opts").unwrap(), b"options+more");
 
-    // The local side fails.
     let mut l = Local { data: b"abc".to_vec(), fail: true, ..Local::default() };
     let failing = io(&mut l);
     let e =
@@ -1045,7 +1004,6 @@ fn uploads_and_downloads() {
     let e =
         res(unsafe { (t().download)(c.0, b(b"big"), 0, -1, &raw const failing, ptr::null()) }).unwrap_err();
     assert_eq!((e.name.as_str(), e.message.as_str()), ("NoSpace", "Cannot write the local file"));
-    // Missing pieces.
     let no_read = NvbIo { read: None, ..failing };
     let no_write = NvbIo { write: None, ..failing };
     let e =
@@ -1072,7 +1030,6 @@ fn uploads_and_downloads() {
         "ProtocolError"
     );
 
-    // Progress::canceled stops a transfer.
     let mut p = Prog { stop_after: Some(1), ..Prog::default() };
     let (r, got) = c.download(b"big", 0, -1, Some(&mut p));
     assert_eq!(name(r), "Canceled");
@@ -1101,22 +1058,18 @@ fn cancel_stays_until_reset() {
     c.cancel();
     assert_eq!(name(c.stat(b"f", true)), "Canceled");
     assert_eq!(name(c.keep_alive()), "Canceled");
-    // A refused call runs nothing of the backend, even where the backend
-    // does its work before it returns a future (mem's connect): the
-    // connection is still on its store below.
+    // A refused call runs nothing of the backend, even where it works before returning a future (mem's connect).
     assert_eq!(name(c.connect(&[("store", "elsewhere")])), "Canceled");
     assert_eq!(name(read(r, 0, 4)), "Canceled");
     assert_eq!(name(write(w, b"x")), "Canceled");
-    // A canceled commit aborts and frees the handle.
     assert_eq!(name(res(unsafe { (t().commit)(w) })), "Canceled");
     assert_eq!(live_objects(), 2);
-    // A canceled close still frees the handle.
     assert_eq!(name(res(unsafe { (t().read_close)(r) })), "Canceled");
     assert_eq!(live_objects(), 1);
     c.reset();
     c.stat(b"f", true).unwrap();
     assert_eq!(c.get(b"g").unwrap(), b"partial");
-    // cancel() from inside a transfer (C-9), then reset.
+    // cancel() from inside a transfer, then reset.
     c.put(b"big", &pattern(600_000, 3)).unwrap();
     let mut p = Prog { cancel: c.0, ..Prog::default() };
     let (r, got) = c.download(b"big", 0, -1, Some(&mut p));
@@ -1152,8 +1105,7 @@ fn a_call_that_ignores_cancel_is_cut() {
     assert_eq!(name(r), "Canceled");
     assert!(after >= GRACE.checked_sub(Duration::from_millis(50)).unwrap(), "{after:?}");
     assert!(after < CANCEL_LIMIT, "{after:?}");
-    // The connection takes calls again after reset_cancel; teardown is
-    // bounded as well (conn_free after a cancel).
+    // Calls work again after reset_cancel; conn_free after a cancel is bounded too.
     c.reset();
     c.cancel();
     let started = Instant::now();
@@ -1185,12 +1137,10 @@ fn one_call_at_a_time() {
     let busy = "The connection is busy: one call at a time, none from a callback";
     assert_eq!(results[0].as_ref().unwrap_err().message, busy);
     assert_eq!(results[1].as_ref().unwrap_err().message, busy);
-    // Another connection from inside a callback: tokio refuses to nest
-    // block_on, which comes back as Internal instead of a crash.
+    // Nested block_on: tokio refuses, comes back as Internal instead of a crash.
     let nested = results[2].as_ref().unwrap_err();
     assert_eq!((nested.name.as_str(), nested.message.as_str()), ("Internal", "The Rust backend failed"));
     assert!(nested.detail.starts_with("panic: "), "{}", nested.detail);
-    // Both connections work afterwards.
     other.stat(b"f", true).unwrap();
     assert_eq!(read(h, 0, 4).unwrap(), b"data");
     res(unsafe { (t().read_close)(h) }).unwrap();
@@ -1208,7 +1158,6 @@ fn panics_become_internal() {
     assert_eq!((e.name.as_str(), e.message.as_str()), ("Internal", "The Rust backend failed"));
     assert_eq!(e.detail, "panic: mem: stat panics on request");
     assert_eq!(panics, ["mem: stat panics on request"]);
-    // The connection survives.
     c.keep_alive().unwrap();
     drop(c);
 
@@ -1242,14 +1191,12 @@ fn panics_become_internal() {
             _ => assert_eq!(name(c.caps()), "Internal"),
         });
         assert_eq!(panics, [format!("mem: {call} panics on request")], "{call}");
-        // conn_free disconnects (panicking again for "disconnect") and
-        // frees all the same.
+        // conn_free disconnects (panicking again for "disconnect") and frees all the same.
         let panics = panics_in(|| drop(c));
         assert_eq!(panics.len(), usize::from(call == "disconnect"), "{call}");
         assert_no_leaks();
     }
 
-    // conn_free with handles whose teardown panics.
     for call in ["read_close", "abort"] {
         let c = Conn::open(&format!("panics-free-{call}"), &[("panic", call)]);
         c.put(b"f", b"data").unwrap();
@@ -1260,7 +1207,6 @@ fn panics_become_internal() {
         assert_no_leaks();
     }
 
-    // A panic in connect.
     let c = Conn::new();
     let panics = panics_in(|| assert_eq!(name(c.connect(&[("panic", "connect")])), "Internal"));
     assert_eq!(panics.len(), 1);
@@ -1268,9 +1214,7 @@ fn panics_become_internal() {
     assert_no_leaks();
 }
 
-/// The runtime's threads by name. A new thread names itself once it runs,
-/// which on a loaded machine can be after the call that made it returned:
-/// waits up to 10 s for all of them.
+/// Runtime threads by name; a new thread names itself once it runs, possibly after the call returned: waits up to 10 s.
 fn runtime_threads() -> Vec<String> {
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {
@@ -1301,8 +1245,7 @@ fn two_named_workers() {
 
 #[test]
 fn a_connection_may_move_between_threads() {
-    // Made here, used and freed on another thread (C-8: one thread at a
-    // time, not always the one that made it).
+    // Made here, used and freed on another thread.
     let c = Conn::new();
     let c = std::mem::ManuallyDrop::new(c);
     let moved = SendPtr(c.0);
@@ -1319,8 +1262,7 @@ fn a_connection_may_move_between_threads() {
     .unwrap();
 }
 
-/// `sftp` through the table: a connection to a port nobody listens on
-/// fails the way the backend says, and nothing leaks.
+/// `sftp` through the table: a port nobody listens on fails as the backend says, nothing leaks.
 #[test]
 fn sftp_is_a_provider() {
     let closed = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
@@ -1357,8 +1299,7 @@ fn fixture(file: &str) -> Vec<u8> {
     std::fs::read(path).unwrap()
 }
 
-/// A key block as (private key, algorithm, public line, fingerprint); the
-/// block is freed.
+/// A key block as (private key, algorithm, public line, fingerprint); freed.
 fn take_key(key: *mut NvrKey) -> (Vec<u8>, String, String, String) {
     assert!(!key.is_null());
     let k = unsafe { &*key };
@@ -1381,12 +1322,10 @@ fn key_generate_and_describe() {
     assert!(fingerprint.starts_with("SHA256:"), "{fingerprint}");
     assert_eq!(fingerprint.len(), 50);
 
-    // The stored key gives back the same material.
     key = ptr::dangling_mut();
     res(unsafe { (t().key_describe)(b(&private), &raw mut key) }).unwrap();
     assert_eq!(take_key(key), made);
 
-    // A second key is a new key.
     res(unsafe { (t().key_generate)(&raw mut key) }).unwrap();
     let other = take_key(key);
     assert_ne!((&other.0, &other.3), (&made.0, &made.3));
@@ -1407,7 +1346,6 @@ fn key_import() {
             "SHA256:ZGPW31uwJF+/lR0hhEstPwJCRwMYsx0C3T2YPcRL/3c"
         )
     );
-    // The stored copy has no passphrase.
     key = ptr::dangling_mut();
     res(unsafe { (t().key_describe)(b(&private), &raw mut key) }).unwrap();
     assert_eq!(take_key(key).3, fingerprint);
@@ -1446,7 +1384,6 @@ fn key_refusals() {
     key = ptr::dangling_mut();
     let e = unsafe { (t().key_describe)(b(&rsa), &raw mut key) };
     assert_eq!(refused(e, key), fails("Unsupported", rsa_refused));
-    // Describe never decrypts.
     key = ptr::dangling_mut();
     let e = unsafe { (t().key_describe)(b(&encrypted), &raw mut key) };
     assert_eq!(refused(e, key), fails("AuthFailed", "The key is protected by a passphrase"));

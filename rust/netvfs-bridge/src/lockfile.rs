@@ -1,15 +1,7 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! A lock file compatible with Qt's `QLockFile`, which `QSettings` takes as
-//! `<file>.lock` around every write (the account UI writes `bridge.conf`).
+//! Lock file compatible with Qt's `QLockFile`, which `QSettings` takes as `<file>.lock` around every write (the account UI writes `bridge.conf`).
 //!
-//! As `QLockFile` on Unix: the lock is the file itself, created with
-//! `O_EXCL` and holding `<pid>\n<process name>\n<host name>\n`; the holder
-//! keeps it `flock`ed so that nobody removes it while it lives. A lock is
-//! stale when its process is gone (or runs another program) on this host,
-//! or when it is older than 30 s; a stale lock is removed under
-//! `<file>.rmlock`, and only when its `flock` can be taken. Qt 5.6 reads the
-//! first three lines, Qt 5.10 and later also take a lock without the two
-//! machine and boot id lines they write themselves.
+//! As `QLockFile` on Unix: the lock is the file itself, created with `O_EXCL`, holding `<pid>\n<process name>\n<host name>\n`; the holder keeps it `flock`ed. Stale: process gone (or running another program) on this host, or older than 30 s; a stale lock is removed under `<file>.rmlock`, only when its `flock` can be taken. Qt 5.6 reads the first three lines; Qt 5.10+ also accept a lock without the two machine and boot id lines they write.
 
 use crate::sys::lock::{lock_exclusive_nonblocking, process_exists};
 use std::fs::{self, File, OpenOptions};
@@ -21,28 +13,24 @@ use std::time::{Duration, Instant, SystemTime};
 
 /// `QLockFile`'s default stale lock time.
 pub const STALE_AFTER: Duration = Duration::from_secs(30);
-/// `QLockFile::lock`'s first pause; it doubles up to 5 s.
+/// `QLockFile::lock`'s first pause; doubles up to 5 s.
 const FIRST_PAUSE: Duration = Duration::from_millis(100);
 const MAX_PAUSE: Duration = Duration::from_secs(5);
-/// How many stale `.rmlock` levels are cleared (Qt goes on as long as each
-/// level is stale).
+/// Stale `.rmlock` levels cleared (Qt goes on as long as each is stale).
 const RMLOCK_LEVELS: u32 = 4;
 
-/// A held lock; released (removed) on drop.
+/// A held lock; removed on drop.
 #[derive(Debug)]
 pub struct LockFile {
     path: PathBuf,
-    // Holds the flock until the file is gone.
     _file: File,
 }
 
 impl LockFile {
-    /// Takes the lock at `path`, waiting at most `timeout` (`QLockFile::
-    /// tryLock(timeout)`).
+    /// Takes the lock at `path`, waiting at most `timeout`.
     ///
     /// # Errors
-    /// `TimedOut` when someone else holds it all along; an I/O error when
-    /// the lock file cannot be created at all.
+    /// `TimedOut` if someone else holds it throughout; an I/O error if the file cannot be created.
     pub fn lock(path: &Path, timeout: Duration) -> io::Result<Self> {
         let deadline = Instant::now().checked_add(timeout);
         let mut pause = FIRST_PAUSE;
@@ -59,12 +47,10 @@ impl LockFile {
         }
     }
 
-    /// One attempt, removing a stale lock first (`QLockFile::tryLock(0)`);
-    /// `None` when someone holds it.
+    /// One attempt, removing a stale lock first; `None` when someone holds it.
     ///
     /// # Errors
-    /// When the lock file cannot be created for another reason than that
-    /// it exists.
+    /// The file cannot be created for a reason other than existing.
     pub fn try_lock(path: &Path) -> io::Result<Option<Self>> {
         try_lock_at(path, RMLOCK_LEVELS)
     }
@@ -72,13 +58,11 @@ impl LockFile {
 
 impl Drop for LockFile {
     fn drop(&mut self) {
-        // Removed while still flocked, so that nobody takes it for stale in
-        // between (Qt closes first).
+        // Removed while still flocked, so nobody takes it for stale in between (Qt closes first).
         fs::remove_file(&self.path).ok();
     }
 }
 
-/// `tryLock` with `depth` levels of `.rmlock` for stale locks.
 fn try_lock_at(path: &Path, depth: u32) -> io::Result<Option<LockFile>> {
     if let Some(lock) = create(path)? {
         return Ok(Some(lock));
@@ -89,8 +73,7 @@ fn try_lock_at(path: &Path, depth: u32) -> io::Result<Option<LockFile>> {
     let Some(depth) = depth.checked_sub(1) else { return Ok(None) };
     let mut rmlock = path.as_os_str().to_os_string();
     rmlock.push(".rmlock");
-    // Only one process removes it; the check is repeated under the rmlock,
-    // which is itself a lock file that a crashed remover may have left.
+    // Only one process removes it; repeated under the rmlock, which a crashed remover may have left.
     let removed = match try_lock_at(Path::new(&rmlock), depth)? {
         Some(_guard) => is_stale(path) && remove_stale(path),
         None => false,
@@ -98,9 +81,7 @@ fn try_lock_at(path: &Path, depth: u32) -> io::Result<Option<LockFile>> {
     if removed { create(path) } else { Ok(None) }
 }
 
-/// Creates the lock file exclusively; `None` when it exists. Unlike Qt's
-/// `0666` less the umask, only the owner may read or write it: the account
-/// UI and the bridge run as the same user, and others need not see the pid.
+/// Creates the lock file exclusively; `None` if it exists. Owner-only (Qt: `0666` less umask): others need not see the pid.
 fn create(path: &Path) -> io::Result<Option<LockFile>> {
     let mut file = match OpenOptions::new()
         .write(true)
@@ -113,7 +94,7 @@ fn create(path: &Path) -> io::Result<Option<LockFile>> {
         Err(e) if e.kind() == io::ErrorKind::AlreadyExists => return Ok(None),
         Err(e) => return Err(e),
     };
-    // As Qt: a lock without flock still works, it is only easier to steal.
+    // As Qt: a lock without flock still works, only easier to steal.
     if let Err(e) = lock_exclusive_nonblocking(file.as_fd()) {
         crate::log::debug(format_args!("No flock on {}: {e}", path.display()));
     }
@@ -125,20 +106,16 @@ fn create(path: &Path) -> io::Result<Option<LockFile>> {
     Ok(Some(LockFile { path: path.to_owned(), _file: file }))
 }
 
-/// `QLockFilePrivate::lockFileContents` of Qt 5.6.
 fn contents() -> String {
     format!("{}\n{}\n{}\n", std::process::id(), process_name(None).unwrap_or_default(), host_name())
 }
 
-/// `QSysInfo::machineHostName()`.
 fn host_name() -> String {
     fs::read_to_string("/proc/sys/kernel/hostname")
         .map(|h| h.trim_end_matches('\n').to_owned())
         .unwrap_or_default()
 }
 
-/// `processNameByPid`: the file name of `/proc/<pid>/exe` (ours for
-/// `None`), without " (deleted)".
 fn process_name(pid: Option<i32>) -> Option<String> {
     let link =
         pid.map_or_else(|| PathBuf::from("/proc/self/exe"), |p| PathBuf::from(format!("/proc/{p}/exe")));
@@ -147,7 +124,6 @@ fn process_name(pid: Option<i32>) -> Option<String> {
     Some(name.strip_suffix(" (deleted)").map(str::to_owned).unwrap_or(name))
 }
 
-/// What a lock file says about its holder.
 #[derive(Debug, PartialEq, Eq)]
 struct Holder {
     pid: i32,
@@ -155,7 +131,6 @@ struct Holder {
     host: String,
 }
 
-/// `getLockInfo`: pid, application and host lines.
 fn holder(content: &[u8]) -> Option<Holder> {
     let mut lines = content.split(|b| *b == b'\n');
     let pid_line = lines.next()?;
@@ -165,7 +140,6 @@ fn holder(content: &[u8]) -> Option<Holder> {
     (pid > 0).then_some(Holder { pid, name, host })
 }
 
-/// `QLockFilePrivate::isApparentlyStale`.
 fn is_stale(path: &Path) -> bool {
     if let Some(holder) = fs::read(path).ok().as_deref().and_then(holder)
         && (holder.host.is_empty() || holder.host == host_name())
@@ -176,13 +150,10 @@ fn is_stale(path: &Path) -> bool {
     fs::metadata(path).and_then(|m| m.modified()).is_ok_and(|modified| is_old(modified, SystemTime::now()))
 }
 
-/// Whether a lock modified at `modified` is older than [`STALE_AFTER`] at
-/// `now` (also when its time is that far in the future, as in Qt).
 fn is_old(modified: SystemTime, now: SystemTime) -> bool {
     now.duration_since(modified).unwrap_or_else(|e| e.duration()) > STALE_AFTER
 }
 
-/// Whether the holder's process still runs the program it named.
 fn holder_runs(holder: &Holder) -> bool {
     if !process_exists(holder.pid) {
         return false;
@@ -192,7 +163,6 @@ fn holder_runs(holder: &Holder) -> bool {
     process_name(Some(holder.pid)).is_none_or(|running| running == named)
 }
 
-/// `removeStaleLock`: unlinks the file only if nobody holds its flock.
 fn remove_stale(path: &Path) -> bool {
     let Ok(file) = OpenOptions::new().write(true).custom_flags(libc::O_CLOEXEC).open(path) else {
         return false;
@@ -206,7 +176,6 @@ mod tests {
     use crate::testutil::TempDir;
     use std::os::unix::fs::PermissionsExt;
 
-    /// The host and program names, not from the code under test.
     fn real_host() -> String {
         fs::read_to_string("/proc/sys/kernel/hostname").unwrap().trim_end().to_owned()
     }
@@ -229,7 +198,6 @@ mod tests {
         assert_eq!(content, format!("{}\n{}\n{}\n", std::process::id(), real_name(), real_host()));
         assert_ne!(real_host().len(), 0);
         assert_eq!(fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
-        // Held and alive: neither taken nor stale, also when old (flock).
         assert!(LockFile::try_lock(&path).unwrap().is_none());
         set_age(&path, Duration::from_mins(1));
         assert!(is_stale(&path));
@@ -265,26 +233,21 @@ mod tests {
     fn stale_locks_are_taken() {
         let dir = TempDir::new();
         let path = dir.join("l");
-        // A crashed holder on this host (no process with that pid).
         fs::write(&path, format!("{}\nqsg\n{}\n", i32::MAX, real_host())).unwrap();
         assert!(is_stale(&path));
         let lock = LockFile::try_lock(&path).unwrap().unwrap();
         assert!(fs::read_to_string(&path).unwrap().starts_with(&format!("{}\n", std::process::id())));
         assert!(!dir.join("l.rmlock").exists());
         drop(lock);
-        // A live process running another program: the pid was reused.
         fs::write(&path, format!("{}\nnot-this-program\n\n", std::process::id())).unwrap();
         assert!(is_stale(&path));
-        // Ours, named with a path as Qt 5.6's applicationName may be.
         let me = real_name();
         fs::write(&path, format!("{}\n/some/where/{me}\n{}\n", std::process::id(), real_host())).unwrap();
         assert!(!is_stale(&path));
-        // Another host: only its age counts.
         fs::write(&path, format!("{}\nqsg\nelsewhere\n", i32::MAX)).unwrap();
         assert!(!is_stale(&path));
         set_age(&path, Duration::from_secs(31));
         assert!(is_stale(&path));
-        // Unreadable content (a lock being written): only its age counts.
         fs::write(&path, b"").unwrap();
         assert!(!is_stale(&path));
         assert!(LockFile::try_lock(&path).unwrap().is_none());
@@ -304,7 +267,6 @@ mod tests {
         lock_exclusive_nonblocking(holder.as_fd()).unwrap();
         assert!(LockFile::try_lock(&path).unwrap().is_none());
         assert!(path.exists());
-        // Someone else removing it right now: no second remover.
         drop(holder);
         let rmlock = LockFile::try_lock(&dir.join("l.rmlock")).unwrap().unwrap();
         assert!(LockFile::try_lock(&path).unwrap().is_none());
@@ -317,19 +279,16 @@ mod tests {
         let dir = TempDir::new();
         let path = dir.join("l");
         let crashed = format!("{}\nqsg\n{}\n", i32::MAX, real_host());
-        // A remover crashed under the rmlock, and before it another one.
         for name in ["l", "l.rmlock", "l.rmlock.rmlock"] {
             fs::write(dir.join(name), &crashed).unwrap();
         }
         let lock = LockFile::try_lock(&path).unwrap().unwrap();
         assert!(!dir.join("l.rmlock").exists() && !dir.join("l.rmlock.rmlock").exists());
         drop(lock);
-        // A live rmlock: the stale lock stays until it is released.
         fs::write(&path, &crashed).unwrap();
         let remover = LockFile::try_lock(&dir.join("l.rmlock")).unwrap().unwrap();
         assert!(LockFile::try_lock(&path).unwrap().is_none());
         drop(remover);
-        // Levels beyond the limit are left alone.
         let mut name = String::from("m");
         for _ in 0..=RMLOCK_LEVELS {
             fs::write(dir.join(&name), &crashed).unwrap();
@@ -366,9 +325,7 @@ mod tests {
         }
     }
 
-    /// Against Qt's own QLockFile: the qsettings-golden tool that
-    /// tests/data/qsettings/generate.sh builds, named by
-    /// `NETVFS_QSETTINGS_GOLDEN` (skipped without it).
+    /// Against Qt's own QLockFile via the qsettings-golden tool built by tests/data/qsettings/generate.sh, named by `NETVFS_QSETTINGS_GOLDEN` (skipped without it).
     #[test]
     fn qlockfile_interop() {
         use std::io::{BufRead, BufReader};
@@ -376,7 +333,6 @@ mod tests {
         let Some(tool) = std::env::var_os("NETVFS_QSETTINGS_GOLDEN") else { return };
         let dir = TempDir::new();
         let path = dir.join("bridge.conf.lock");
-        // Qt holds it: we wait in vain.
         let mut qt = Command::new(&tool)
             .arg("lock")
             .arg(&path)
@@ -390,14 +346,12 @@ mod tests {
         assert!(LockFile::try_lock(&path).unwrap().is_none());
         drop(qt.stdin.take());
         assert!(qt.wait().unwrap().success());
-        // We hold it: Qt cannot take it, also when it is old.
         let lock = LockFile::try_lock(&path).unwrap().unwrap();
         let qt_try = || Command::new(&tool).arg("trylock").arg(&path).status().unwrap().success();
         assert!(!qt_try());
         set_age(&path, Duration::from_mins(1));
         assert!(!qt_try());
         drop(lock);
-        // Ours, left by a crash: Qt takes it as stale.
         fs::write(&path, format!("{}\n{}\n{}\n", i32::MAX, real_name(), real_host())).unwrap();
         assert!(qt_try());
     }

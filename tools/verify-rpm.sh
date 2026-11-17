@@ -1,7 +1,6 @@
 #!/bin/sh
 # SPDX-License-Identifier: LGPL-2.1-or-later
-# Rebuilds a commit from a fresh clone and checks RPMs against it (SPEC
-# P-8, doc/VERIFYING.md).
+# Rebuilds a commit from a fresh clone and checks RPMs against it (doc/VERIFYING.md).
 #
 #     tools/verify-rpm.sh --ref <ref> <rpm>...
 #

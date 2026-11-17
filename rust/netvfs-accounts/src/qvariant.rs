@@ -1,19 +1,16 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! Account settings as the C++ side sees them: the `QVariant` that
-//! libaccounts-qt makes of a stored `GVariant` (`gVariantToQVariant`), and the
-//! Qt 5 conversions the account store applies to it.
+//! Account settings as the C++ side sees them: the `QVariant` libaccounts-qt makes of a stored
+//! `GVariant`, and the Qt 5 conversions the account store applies.
 
 use std::cmp::Ordering;
 
-/// A `QString`: `None` is the null string, which the wire format tells apart
-/// from an empty one.
+/// A `QString`; `None` is the null string, distinct from empty on the wire.
 pub type QString = Option<String>;
 
 /// A setting's value as a `QVariant`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Value {
-    /// No value, or one libaccounts-qt does not convert (doubles, bytes,
-    /// object paths, ...): an invalid `QVariant`.
+    /// No value, or one libaccounts-qt does not convert: an invalid `QVariant`.
     Invalid,
     /// A boolean.
     Bool(bool),

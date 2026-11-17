@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-// The inbound frame limits (design §8): size from the primary header,
-// oversized and fd-heavy messages refused, bytes the handshake read first.
-// Restriction lints that only add noise to tests (doc/RUST.md "Lints").
+// Restriction lints that only add noise to tests.
 #![allow(clippy::assertions_on_result_states, clippy::arithmetic_side_effects)]
 
 use super::{
@@ -23,7 +21,6 @@ fn call_with_bytes(n: usize) -> Message {
         .unwrap()
 }
 
-/// A message of exactly `total` bytes on the wire.
 fn message_of(total: usize) -> Message {
     let overhead = call_with_bytes(0).data().len();
     let message = call_with_bytes(total - overhead);
@@ -50,7 +47,6 @@ fn frame_sizes() {
     assert_eq!(size.endian, Endian::Little);
     assert_eq!(size.total, u64::try_from(msg.data().len()).unwrap());
 
-    // Header fields of 1 byte are padded to 8 (16 + 1 → 24), then the body.
     let mut big = *b"B\x01\x00\x01\x00\x00\x00\x0a\x00\x00\x00\x01\x00\x00\x00\x01";
     assert_eq!(frame_size(&big).unwrap(), FrameSize { endian: Endian::Big, total: 24 + 10 });
     big[15] = 8;
@@ -61,7 +57,6 @@ fn frame_sizes() {
     assert_eq!(frame_size(&big).unwrap().total, 16 + 10);
     let little = *b"l\x01\x00\x01\x0a\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00";
     assert_eq!(frame_size(&little).unwrap(), FrameSize { endian: Endian::Little, total: 24 + 10 });
-    // Largest sizes do not overflow.
     let huge = *b"l\x01\x00\x01\xff\xff\xff\xff\x00\x00\x00\x00\xff\xff\xff\xff";
     assert_eq!(frame_size(&huge).unwrap().total, 0x1_0000_0010 + 0xffff_ffff);
 
@@ -73,7 +68,6 @@ fn frame_sizes() {
     assert_eq!(frame_size(&other).unwrap_err().kind(), io::ErrorKind::InvalidData);
 }
 
-/// A read half that cannot pass descriptors (zbus's defaults).
 #[derive(Debug)]
 struct NoFds;
 
@@ -113,7 +107,6 @@ async fn reads_messages_up_to_the_limit() {
         MAX_MESSAGE_BYTES - call_with_bytes(0).data().len()
     );
     drop(sender.await.unwrap());
-    // The peer is gone.
     assert!(receive(&mut reader, &mut Vec::new()).await.is_err());
 }
 
@@ -121,7 +114,6 @@ async fn reads_messages_up_to_the_limit() {
 async fn refuses_an_oversized_message_before_its_body() {
     let (mut reader, mut write, _spare) = reader();
     let too_big = message_of(MAX_MESSAGE_BYTES + 1);
-    // Only the header is sent: the refusal does not wait for the body.
     write.sendmsg(&too_big.data()[..64], &[]).await.unwrap();
     let error =
         tokio::time::timeout(std::time::Duration::from_secs(5), receive(&mut reader, &mut Vec::new()))
@@ -151,7 +143,6 @@ async fn continues_from_the_handshake_bytes() {
     let (mut reader, mut write, _spare) = reader();
     let first = call_with_bytes(40);
     let second = call_with_bytes(50);
-    // The handshake read all of the first message and 5 bytes of the second.
     let mut carried = first.data().to_vec();
     carried.extend_from_slice(&second.data()[..5]);
     write.sendmsg(&second.data()[5..], &[]).await.unwrap();
@@ -162,7 +153,6 @@ async fn continues_from_the_handshake_bytes() {
     assert_eq!(got.data()[..], second.data()[..]);
     assert_eq!(carried.len(), 0);
 
-    // Carried descriptors belong to the next message.
     let file = std::fs::File::open("/dev/null").unwrap();
     let mut fds = vec![file.as_fd().try_clone_to_owned().unwrap()];
     let third = call_with_bytes(1);
@@ -179,7 +169,6 @@ async fn refuses_garbage_and_end_of_stream() {
     assert!(receive(&mut reader, &mut Vec::new()).await.is_err());
 
     let (mut reader, mut write, _spare) = self::reader();
-    // A header whose fields are not valid.
     write
         .sendmsg(
             b"l\x01\x00\x01\x00\x00\x00\x00\x01\x00\x00\x00\x08\x00\x00\x00\xff\xff\xff\xff\xff\xff\xff\xff",
@@ -193,7 +182,6 @@ async fn refuses_garbage_and_end_of_stream() {
     let msg = call_with_bytes(10);
     write.sendmsg(&msg.data()[..30], &[]).await.unwrap();
     drop(write);
-    // zbus's tokio half reports the end of the stream as an error itself.
     let error = receive(&mut reader, &mut Vec::new()).await.unwrap_err();
     assert!(
         matches!(&error, zbus::Error::InputOutput(e) if e.kind() == io::ErrorKind::BrokenPipe),

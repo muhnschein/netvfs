@@ -1,19 +1,11 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! The outgoing side of a session: one FIFO ([`Outbox`]) for every reply and
-//! signal, written by a single writer task, and the byte budget of streamed
-//! signals (C-10, design §3.4).
+//! Outgoing side of a session: one FIFO ([`Outbox`]) for every reply and signal, written by a single writer task, and the byte budget of streamed signals.
 //!
-//! zbus 5's `Connection::send` resolves only once the message is in the
-//! kernel (design §8), so a consumer that stops reading leaves the writer
-//! pending. Producers of `ListBatch` and `WalkBatch` acquire their bytes from
-//! the session's [`FlowBudget`] before they enqueue; the writer releases
-//! them after the send. A session therefore holds at most
-//! [`FLOW_LIMIT`] bytes of pending batches (plus one batch and the
-//! message being written), however slowly its consumer reads.
+//! zbus 5's `Connection::send` resolves only once the message is in the kernel, so a consumer that stops reading leaves the writer pending.
+//! `ListBatch`/`WalkBatch` producers acquire bytes from the session's [`FlowBudget`] before enqueueing; the writer releases them after the send.
+//! A session holds at most [`FLOW_LIMIT`] bytes of pending batches (plus one batch and the message being written).
 //!
-//! Replies and other signals are not budgeted, but the session stops reading
-//! calls while [`MAX_QUEUED`] messages wait to be written: a consumer that
-//! sends calls without reading the replies is throttled by its own socket.
+//! Replies and other signals are unbudgeted, but the session stops reading calls while [`MAX_QUEUED`] messages wait to be written.
 
 use super::SessionId;
 use super::encode::OutSignal;
@@ -26,13 +18,11 @@ use std::time::Duration;
 use tokio::sync::{mpsc, watch};
 use zbus::Message;
 
-/// How often a waiting producer looks at its cancel flag.
 const POLL: Duration = Duration::from_millis(20);
 /// Messages waiting for the writer above which the session reads no calls.
 pub const MAX_QUEUED: usize = 64;
 
-/// Bytes of streamed signals that are enqueued but not yet written to the
-/// socket (one per session). Shared with worker threads: `acquire` blocks.
+/// Bytes of streamed signals that are enqueued but not yet written to the socket (one per session).
 #[derive(Debug)]
 pub struct FlowBudget {
     limit: usize,
@@ -47,8 +37,7 @@ struct FlowState {
 }
 
 impl FlowBudget {
-    /// A budget that lets producers in while at most `limit` bytes are in
-    /// flight.
+    /// A budget that lets producers in while at most `limit` bytes are in flight.
     #[must_use]
     pub fn new(limit: usize) -> Self {
         Self { limit, state: Mutex::new(FlowState::default()), changed: Condvar::new() }
@@ -58,10 +47,7 @@ impl FlowBudget {
         self.state.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// Waits until at most the limit is in flight, then adds `bytes`. Blocks
-    /// the calling thread (never call it on the runtime): wakes on every
-    /// release and looks at `cancel` every 20 ms. False when canceled or
-    /// when the session is gone; nothing is added then.
+    /// Waits until at most the limit is in flight, then adds `bytes`.
     pub fn acquire(&self, bytes: usize, cancel: &AtomicBool) -> bool {
         let mut state = self.lock();
         loop {
@@ -87,7 +73,7 @@ impl FlowBudget {
         self.changed.notify_all();
     }
 
-    /// The session is gone: every waiting and later `acquire` fails.
+    /// The session is gone.
     pub fn close(&self) {
         self.lock().closed = true;
         self.changed.notify_all();
@@ -106,16 +92,12 @@ impl FlowBudget {
     }
 }
 
-/// One message for the writer.
 #[derive(Debug)]
 pub(crate) struct Outgoing {
     pub(super) message: Message,
     pub(super) flow_bytes: usize,
 }
 
-/// The connection of a session as the outbox and its writer see it: the
-/// socket's shutdown handle (a duplicate of the descriptor zbus owns), the
-/// closed flag and the number of queued messages.
 #[derive(Debug)]
 pub(crate) struct Link {
     socket: UnixStream,
@@ -128,8 +110,6 @@ impl Link {
         Self { socket, closed: watch::Sender::new(false), queued: watch::Sender::new(0) }
     }
 
-    /// Shuts the socket down: zbus's reads and writes on it fail at once,
-    /// also a send that waits for a consumer that does not read.
     pub(crate) fn close(&self) {
         if !self.closed.send_replace(true) {
             // An error only means the peer is gone already.
@@ -148,7 +128,6 @@ impl Link {
         drop(rx.wait_for(|closed| *closed).await);
     }
 
-    /// Waits while [`MAX_QUEUED`] messages or more wait for the writer.
     pub(crate) async fn wait_for_room(&self) {
         let mut rx = self.queued.subscribe();
         drop(rx.wait_for(|n| *n < MAX_QUEUED).await);
@@ -163,9 +142,7 @@ impl Link {
     }
 }
 
-/// The FIFO of everything a session sends: replies (through
-/// [`super::ReplyTo`]) and signals. Cheap to clone; usable from any thread.
-/// Once the session is closed, sends are dropped (and report `false`).
+/// The FIFO of everything a session sends.
 #[derive(Clone)]
 pub struct Outbox {
     sid: SessionId,
@@ -190,10 +167,7 @@ impl Outbox {
         self.sid
     }
 
-    /// Enqueues a signal that is not flow-controlled (`ConsentChanged`,
-    /// `LocationsChanged`, `NearbyChanged`, `ListDone`, `JobProgress`,
-    /// `JobFinished`, `Question`). False when the session is closed or the
-    /// signal cannot be encoded.
+    /// Enqueues a signal that is not flow-controlled (`ConsentChanged`, `LocationsChanged`, `NearbyChanged`, `ListDone`, `JobProgress`, `JobFinished`, `Question`).
     #[must_use = "false: the session is closed"]
     pub fn signal(&self, signal: &OutSignal) -> bool {
         signal.build().is_ok_and(|message| self.send_message(message, 0))
@@ -205,9 +179,7 @@ impl Outbox {
         &self.budget
     }
 
-    /// Enqueues a streamed signal (`ListBatch`, `WalkBatch`) whose
-    /// `acquired` bytes the producer took from [`Outbox::flow`]; the writer
-    /// gives them back after the send. On failure they are given back here.
+    /// Enqueues a streamed signal (`ListBatch`, `WalkBatch`) whose `acquired` bytes the producer took from [`Outbox::flow`].
     #[must_use = "false: the session is closed"]
     pub fn send_streamed(&self, signal: &OutSignal, acquired: usize) -> bool {
         let sent = signal.build().is_ok_and(|message| self.send_message(message, acquired));
@@ -217,16 +189,13 @@ impl Outbox {
         sent
     }
 
-    /// [`FlowBudget::acquire`] then [`Outbox::send_streamed`]: blocks while
-    /// the budget is used up (worker threads only). False when canceled or
-    /// when the session is gone.
+    /// [`FlowBudget::acquire`] then [`Outbox::send_streamed`].
     #[must_use = "false: canceled, or the session is closed"]
     pub fn stream(&self, signal: &OutSignal, bytes: usize, cancel: &AtomicBool) -> bool {
         self.budget.acquire(bytes, cancel) && self.send_streamed(signal, bytes)
     }
 
-    /// Closes the connection without sending anything else (XB-6
-    /// revocation). The session then reports `Event::Closed`.
+    /// Closes the connection without sending anything else.
     pub fn close(&self) {
         self.link.close();
     }
@@ -250,7 +219,6 @@ impl Outbox {
     }
 }
 
-/// A new outbox and the receiving end for its writer.
 pub(crate) fn outbox(
     sid: SessionId,
     link: Arc<Link>,
@@ -260,12 +228,8 @@ pub(crate) fn outbox(
     (Outbox { sid, tx, budget: Arc::new(FlowBudget::new(limit)), link }, rx)
 }
 
-/// The default budget of a session.
 pub(crate) const SESSION_FLOW_LIMIT: usize = FLOW_LIMIT;
 
-/// The session's single writer: sends in FIFO order until the link closes or
-/// a send fails, then closes the link and the budget and drops what is left
-/// (giving its bytes back).
 pub(crate) async fn run_writer(
     conn: zbus::Connection,
     mut rx: mpsc::UnboundedReceiver<Outgoing>,

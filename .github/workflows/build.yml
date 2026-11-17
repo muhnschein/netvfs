@@ -15,8 +15,7 @@ env:
   NEXTEST_VERSION: 0.9.148
   NEXTEST_PROFILE: ci
 jobs:
-  # Docs-only PR: no scan, as ci.yml's build and test jobs. Rules:
-  # tools/ci/changes.sh.
+  # Docs-only PR: no scan (tools/ci/changes.sh).
   changes:
     name: What changed
     runs-on: ubuntu-24.04
@@ -37,15 +36,14 @@ jobs:
   build:
     name: Analyze
     needs: changes
-    # Fork PRs have no secrets: SONAR_TOKEN empty, auth error. Skipped;
-    # main's analysis runs on merge.
+    # Fork PRs have no secrets (SONAR_TOKEN empty): skipped; main's analysis runs on merge.
     if: >-
       needs.changes.outputs.code == 'true' && (
         github.event_name != 'pull_request' ||
         github.event.pull_request.head.repo.full_name == github.repository
       )
     runs-on: ubuntu-24.04
-    # Hung step stops here, not at GitHub's 6 h.
+    # Hung step stops here, not at 6 h.
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -63,9 +61,7 @@ jobs:
       - name: Install cargo-nextest
         run: ./tools/ci/cargo-tool.sh cargo-nextest "$NEXTEST_VERSION"
       - name: Build with coverage, run unit and interop tests
-        # bear records compile_commands.json for the C/C++ analysis;
-        # gcovr writes build-coverage/coverage.xml (generic coverage format),
-        # llvm-cov build-coverage/rust-lcov.info (the Rust workspace).
+        # bear records compile_commands.json; gcovr writes build-coverage/coverage.xml; llvm-cov build-coverage/rust-lcov.info.
         run: |
           mkdir -p build-coverage
           bear --output build-coverage/compile_commands.json -- make COVERAGE=1 -j"$(nproc)"

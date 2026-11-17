@@ -16,9 +16,9 @@ public:
     UnixFd() = default;
     explicit UnixFd(int fd);
 
-    int fd() const;                   // -1 if none (or taken)
+    int fd() const;
     bool isValid() const { return fd() >= 0; }
-    int take();                       // the caller owns the result
+    int take();
 
 private:
     struct Owner;

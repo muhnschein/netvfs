@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! What an SMB server sends, once it is out of its frame (and transform):
-//! a chain of SMB2 messages, each decoded by every response decoder of
-//! netvfs-smb. None may panic, and what they accept obeys their caps.
+//! SMB2 response chain through every netvfs-smb response decoder. No panic; caps hold.
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;

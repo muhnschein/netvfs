@@ -109,8 +109,6 @@ fn the_bind_and_the_request_are_c706_pdus() {
     }
     w.u32(1).u32(1).u32(REFERENT).u32(0).u32(0).u32(u32::MAX).u32(REFERENT).u32(0);
     assert_eq!(stub, w.into_vec().as_slice());
-    // A name the request cannot carry; the longest that fits fills the
-    // fragment.
     share_enum_request(&"x".repeat(3000)).unwrap_err();
     assert_eq!(share_enum_request(&"x".repeat(2101)).unwrap().len(), MAX_FRAG);
     share_enum_request(&"x".repeat(2102)).unwrap_err();
@@ -138,7 +136,6 @@ fn the_bind_reply_is_read_up_to_its_fragment() {
     assert!(bind_reply_wants_more(&with_len(71, 72)).unwrap());
     assert!(!bind_reply_wants_more(&with_len(72, 72)).unwrap());
     assert!(!bind_reply_wants_more(&with_len(80, 72)).unwrap());
-    // Up to a whole fragment; beyond it the check reports what is there.
     assert!(bind_reply_wants_more(&with_len(MAX_FRAG, 5000)).unwrap());
     assert!(!bind_reply_wants_more(&with_len(MAX_FRAG + 1, 5000)).unwrap());
     let mut v4 = with_len(16, 72);
@@ -156,8 +153,6 @@ fn a_bind_ack_must_accept_srvsvc_with_ndr() {
     let nak = pdu(PTYPE_BIND_NAK, 3, BIND_CALL, &[0, 0]);
     let e = check_bind_ack(&nak).unwrap_err();
     assert!(matches!(e, Error::Local(ref s) if s.name == ErrorName::Unsupported), "{e:?}");
-    // Another call, a short PDU, no results, the wrong byte order, a
-    // version 4 PDU, authentication data.
     let mut other = bind_ack(0, &NDR);
     other[12] = 7;
     let mut big_endian = bind_ack(0, &NDR);
@@ -169,7 +164,6 @@ fn a_bind_ack_must_accept_srvsvc_with_ndr() {
     let mut none = bind_ack(0, &NDR);
     none[40] = 0;
     let full = bind_ack(0, &NDR);
-    // The bind_ack must be its call's last fragment.
     let mut not_last = bind_ack(0, &NDR);
     not_last[3] = PFC_FIRST_FRAG;
     let mut last = bind_ack(0, &NDR);
@@ -180,7 +174,6 @@ fn a_bind_ack_must_accept_srvsvc_with_ndr() {
     {
         assert!(matches!(check_bind_ack(&bad), Err(Error::Protocol(_))), "{bad:?}");
     }
-    // A fault in reply to the bind.
     let fault = pdu(PTYPE_FAULT, 3, BIND_CALL, &[0, 0, 0, 0, 0, 0, 0, 0, 5, 0, 0, 0]);
     let e = check_bind_ack(&fault).unwrap_err();
     assert!(matches!(e, Error::Local(ref s) if s.message.contains("RPC fault 0x00000005")), "{e:?}");
@@ -209,11 +202,9 @@ fn share_lists_decode_and_filter() {
     assert_eq!(visible, ["data", "tabs"]);
     let admin: Vec<&str> = shares.iter().filter(|s| s.visible(true)).map(|s| s.name.as_str()).collect();
     assert_eq!(admin, ["data", "C$", "tabs"]);
-    // A long remark is cut.
     let long = "r".repeat(MAX_STRING_UNITS - 1);
     let shares = decode_share_enum(&enum_stub(&[(Some("a"), 0, Some(&long))], 0)).unwrap();
     assert_eq!(shares[0].remark.len(), MAX_REMARK);
-    // Empty: no container, or no entries.
     let mut w = Writer::new();
     w.u32(1).u32(1).u32(0).u32(0).u32(0).u32(0);
     assert_eq!(decode_share_enum(&w.into_vec()).unwrap(), []);
@@ -225,7 +216,6 @@ fn share_lists_decode_and_filter() {
 #[test]
 fn malformed_share_lists_are_refused() {
     let good = enum_stub(&[(Some("data"), 0, Some("x"))], 0);
-    // Every truncation.
     for n in 0..good.len() {
         assert!(decode_share_enum(&good[..n]).is_err(), "{n}");
     }
@@ -249,8 +239,6 @@ fn malformed_share_lists_are_refused() {
     for (i, bad) in cases.iter().enumerate() {
         assert!(matches!(decode_share_enum(bad), Err(Error::Protocol(_))), "case {i}");
     }
-    // A count far beyond the bytes there are is refused before allocating;
-    // one whose entries are all there passes that check.
     let short = protocol("the share list is shorter than its count");
     let mut w = Writer::new();
     w.u32(1).u32(1).u32(REFERENT).u32(4000).u32(REFERENT).u32(4000);
@@ -259,17 +247,13 @@ fn malformed_share_lists_are_refused() {
     w.u32(1).u32(1).u32(REFERENT).u32(1).u32(REFERENT).u32(1).u32(0).u32(0).u32(0);
     let e = decode_share_enum(&w.into_vec()).unwrap_err();
     assert!(e != short && matches!(e, Error::Protocol(_)), "{e:?}");
-    // A null buffer with entries.
     let mut w = Writer::new();
     w.u32(1).u32(1).u32(REFERENT).u32(1).u32(0).u32(0).u32(0).u32(0);
     decode_share_enum(&w.into_vec()).unwrap_err();
-    // Windows errors.
     let e = decode_share_enum(&enum_stub(&[], 5)).unwrap_err();
     assert!(matches!(e, Error::Local(ref s) if s.name == ErrorName::PermissionDenied), "{e:?}");
     let e = decode_share_enum(&enum_stub(&[], 1722)).unwrap_err();
     assert!(matches!(e, Error::Local(ref s) if s.message.ends_with("Windows error 1722")), "{e:?}");
-    // A string without its NUL is taken as it is; a lone surrogate in a
-    // name drops the entry.
     let mut w = Writer::new();
     w.u32(1).u32(1).u32(REFERENT).u32(2).u32(REFERENT).u32(2);
     w.u32(REFERENT).u32(0).u32(0).u32(REFERENT).u32(0).u32(0);
@@ -292,7 +276,6 @@ fn fragments_reassemble_from_pieces_of_any_size() {
         assert!(r.done(), "{piece}");
         assert_eq!(r.stub(), stub.as_slice());
     }
-    // Bytes after the last fragment.
     let mut r = Reassembly::new();
     let mut extra = wire.clone();
     extra.push(0);
@@ -308,8 +291,6 @@ fn bad_fragments_are_refused() {
     let stub = vec![0u8; 100];
     let wire = fragments(&stub, 40);
     let first_len = usize::from(u16::from_le_bytes([wire[8], wire[9]]));
-    // A first fragment without FIRST, a middle one with it, another call,
-    // a fault, a fragment shorter than the response header.
     let mut no_first = wire.clone();
     no_first[3] = 0;
     let mut twice = wire.clone();
@@ -324,11 +305,9 @@ fn bad_fragments_are_refused() {
     for (i, bad) in [no_first, twice, other_call, fault, short, tiny].iter().enumerate() {
         assert!(Reassembly::new().feed(bad).is_err(), "case {i}");
     }
-    // An incomplete header waits for more.
     let mut r = Reassembly::new();
     r.feed(&header_only).unwrap();
     assert!(!r.done());
-    // A stub above the cap, and one at it.
     let big = vec![0u8; MAX_STUB + 1];
     let wire = fragments(&big, 60_000);
     assert!(matches!(Reassembly::new().feed(&wire), Err(Error::Protocol(m)) if m.contains("too long")));
@@ -428,7 +407,6 @@ async fn list_shares_binds_calls_and_reads_the_rest() {
     let shares = r.unwrap();
     assert_eq!(shares.len(), 300);
     assert_eq!((shares[299].name.as_str(), shares[299].remark.as_str()), ("share299", "remark 299"));
-    // A small reply in the IOCTL alone.
     let reply = fragments(&enum_stub(&[(Some("one"), 0, None)], 0), 1000);
     let (r, ()) = tokio::join!(list_shares(&conn, &IPC, "srv", &c), serve(&mut peer, &reply, 1000));
     assert_eq!(names(&r.unwrap()), ["one"]);
@@ -438,13 +416,11 @@ async fn list_shares_binds_calls_and_reads_the_rest() {
 async fn list_shares_failures_close_the_pipe() {
     let (conn, mut peer) = started().await;
     let c = CancelToken::new();
-    // No pipe.
     let (r, ()) = tokio::join!(list_shares(&conn, &IPC, "srv", &c), async {
         let create = peer.recv_one().await;
         peer.send(&[fake::error(&create, NtStatus::OBJECT_NAME_NOT_FOUND, 1)], false).await;
     });
     assert_eq!(r.unwrap_err(), Error::Status(NtStatus::OBJECT_NAME_NOT_FOUND));
-    // The bind refused.
     let (r, ()) = tokio::join!(list_shares(&conn, &IPC, "srv", &c), async {
         let create = peer.recv_one().await;
         peer.send(&[fake::response(&create, NtStatus::SUCCESS, &created_body(0x80, 0, FID), 1)], false).await;
@@ -455,7 +431,6 @@ async fn list_shares_failures_close_the_pipe() {
         assert_eq!(close.command(), Command::Close);
     });
     assert!(matches!(r, Err(Error::Local(ref s)) if s.name == ErrorName::Unsupported), "{r:?}");
-    // A READ with nothing.
     let (r, ()) = tokio::join!(list_shares(&conn, &IPC, "srv", &c), async {
         let create = peer.recv_one().await;
         peer.send(&[fake::response(&create, NtStatus::SUCCESS, &created_body(0x80, 0, FID), 1)], false).await;

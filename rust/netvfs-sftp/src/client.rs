@@ -1,16 +1,11 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! The SFTP v3 client (design §4.4): one channel, requests matched to
-//! replies by id. A writer task sends what [`Client::send`] queues (so
-//! sending never waits, also outside the runtime), a reader task hands
-//! each reply to the [`Pending`] that waits for it.
+//! SFTP v3 client: one channel, requests matched to replies by id. A writer task sends what [`Client::send`]
+//! queues (sending never waits, also outside the runtime); a reader task hands each reply to its [`Pending`].
 //!
-//! A request whose caller stops waiting (cancel, timeout, a dropped
-//! [`Pending`]) is *abandoned*: its id stays reserved and its reply is
-//! dropped when it comes; a handle that an abandoned `OPEN` brings is
-//! closed. More than [`MAX_ABANDONED`] abandoned requests at once end the
-//! client (`ConnectionLost`), so a server that stops answering cannot make
-//! the table grow (C-10). So does a reply nobody asked for, or one that
-//! cannot be read.
+//! A request whose caller stops waiting (cancel, timeout, dropped [`Pending`]) is abandoned: its id stays reserved,
+//! its reply is dropped when it comes, and a handle from an abandoned `OPEN` is closed. More than [`MAX_ABANDONED`]
+//! at once end the client (`ConnectionLost`), so a silent server cannot grow the table. So does an unsolicited or
+//! unreadable reply.
 
 use crate::errors::{Failure, connection_lost, malformed, timed_out, unexpected};
 use crate::proto::{
@@ -27,7 +22,7 @@ use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::sync::{mpsc, oneshot};
 
-/// Most requests abandoned at once before the client gives up.
+/// Abandoned requests tolerated at once.
 pub const MAX_ABANDONED: usize = 64;
 
 /// The client's end of the channel. Clones share it.
@@ -68,8 +63,7 @@ impl Shared {
         self.table.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// Ends the client: every waiting request fails with `reason` (the
-    /// first reason wins), both tasks stop.
+    /// Fails every waiting request with `reason` (first wins) and stops both tasks.
     fn end(&self, reason: Status) {
         let mut table = self.table();
         if table.ended.is_none() {
@@ -118,7 +112,6 @@ impl Shared {
 
     /// Sends `CLOSE` for `handle` without waiting for its reply.
     fn close_detached(&self, handle: &[u8]) {
-        // A client that ended has no handles left to close.
         drop(self.queue(Packet::request(FXP_CLOSE).string(handle), Slot::Abandoned { close_handle: false }));
     }
 
@@ -135,8 +128,7 @@ impl Shared {
             }
             return;
         }
-        // The reply was handed over under the lock: it is in `rx` now, or
-        // the client ended and it never comes.
+        // Handed over under the lock: in `rx` now, or the client ended and it never comes.
         let delivered = rx.try_recv().ok();
         drop(table);
         if let (true, Some(Reply::Handle(handle))) = (close_handle, delivered) {
@@ -150,9 +142,7 @@ impl Shared {
         let mut table = self.table();
         match table.slots.remove(&id) {
             Some(Slot::Waiting(tx)) => {
-                // Under the lock, so that a waiter that stops now finds the
-                // reply in its receiver (`abandon`). A waiter that is gone
-                // has abandoned its id first: `tx` always has a receiver.
+                // Under the lock, so a waiter that stops now finds the reply in its receiver (`abandon`).
                 drop(tx.send(reply));
                 Ok(())
             }
@@ -203,7 +193,6 @@ impl Pending {
             () = cancel.canceled() => None,
             () = tokio::time::sleep(timeout) => return Err(Failure::Local(timed_out(timeout.as_millis()))),
         };
-        // Answered or ended: nothing to abandon. Else the drop abandons it.
         match outcome {
             Some(reply) => {
                 self.rx = None;
@@ -222,12 +211,10 @@ impl Drop for Pending {
     }
 }
 
-/// `ConnectionLost` for an I/O error of the channel.
 fn lost(e: &std::io::Error) -> Status {
     connection_lost().with_detail(e.to_string())
 }
 
-/// Reads one packet body, its length checked before the buffer is made.
 async fn read_packet<R: AsyncRead + Unpin>(read: &mut R) -> Result<Vec<u8>, Status> {
     let mut len = [0; 4];
     read.read_exact(&mut len).await.map_err(|e| lost(&e))?;
@@ -290,7 +277,6 @@ async fn write_loop<W, F>(
     on_end.await;
 }
 
-/// Runs `work` under `cancel` and `timeout`.
 async fn bounded<T>(
     work: impl Future<Output = Result<T, Status>>,
     timeout: Duration,
@@ -494,8 +480,7 @@ impl Client {
             Simple::Mkdir(path, attrs) => attrs.encode(Packet::request(FXP_MKDIR).string(path)),
             Simple::Rename(from, to) => Packet::request(FXP_RENAME).string(from).string(to),
             Simple::Setstat(path, attrs) => attrs.encode(Packet::request(FXP_SETSTAT).string(path)),
-            // OpenSSH's order (target, then the link), which every server
-            // this backend meets uses (phase 3 design §10).
+            // OpenSSH's order (target, then link).
             Simple::Symlink { target, link } => Packet::request(FXP_SYMLINK).string(target).string(link),
         };
         ok(self.call(packet, cancel).await?)
@@ -561,7 +546,7 @@ pub enum Simple<'a> {
     Rmdir(&'a [u8]),
     /// `MKDIR` with the attributes of the new folder.
     Mkdir(&'a [u8], Attrs),
-    /// `RENAME` (fails on an existing target, XS-6).
+    /// `RENAME` (fails on an existing target).
     Rename(&'a [u8], &'a [u8]),
     /// `SETSTAT`.
     Setstat(&'a [u8], Attrs),
@@ -583,8 +568,7 @@ pub enum PathOf<'a> {
     Readlink(&'a [u8]),
 }
 
-/// The failure for a reply that is not the one wanted: the server's status,
-/// or a protocol error.
+/// The failure for an unwanted reply: the server's status, or a protocol error.
 #[must_use]
 pub fn not_ok(reply: Reply) -> Failure {
     match reply {

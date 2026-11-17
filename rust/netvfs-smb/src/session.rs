@@ -1,12 +1,7 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! Sign-in (NEGOTIATE, SESSION_SETUP) and the session-level requests:
-//! TREE_CONNECT, TREE_DISCONNECT, ECHO.
+//! Sign-in (NEGOTIATE, SESSION_SETUP) and session-level requests: TREE_CONNECT, TREE_DISCONNECT, ECHO.
 //!
-//! The session is the one connection's only one; every share is a tree
-//! of it (design §5.1). Its keys come from the NTLM session key and the
-//! preauth hash of every NEGOTIATE and SESSION_SETUP message; the final
-//! SESSION_SETUP response must be signed with them (MS-SMB2 3.2.5.3.1),
-//! which also proves that the server knows the password.
+//! Session keys come from the NTLM session key and the preauth hash of every NEGOTIATE and SESSION_SETUP message. The final SESSION_SETUP response must be signed with them (MS-SMB2 3.2.5.3.1): proves the server knows the password.
 
 use std::time::Duration;
 
@@ -29,14 +24,13 @@ use crate::status::NtStatus;
 
 /// SESSION_SETUP rounds before giving up (NTLM in SPNEGO needs two).
 const MAX_SETUP_ROUNDS: usize = 4;
-/// What a frame may hold beyond the largest READ or IOCTL output: headers,
-/// a compound's other responses, the transform header.
+/// Frame room beyond the largest READ or IOCTL output: headers, a compound's other responses, the transform header.
 const FRAME_SLACK: usize = 65_536 + TRANSFORM_HEADER_LEN;
 
-/// XM-1: a session the server mapped to guest or anonymous.
+/// A session the server mapped to guest or anonymous.
 pub const GUEST_MAPPED: &str = "the server signed this account in as a guest instead of checking the password; \
      the security profile does not allow that";
-/// NEGOTIATE refused: no SMB 3.1.1 (M-T7, M-T9, M-T20).
+/// NEGOTIATE refused: no SMB 3.1.1.
 pub const NO_SMB311: &str = "the server does not support SMB 3.1.1 (NEGOTIATE: NT status 0xc00000bb, \
      STATUS_NOT_SUPPORTED: no common dialect); servers limited to SMB 2.x or 3.0.x are refused";
 
@@ -107,8 +101,7 @@ pub async fn sign_in(
 async fn negotiate(conn: &Conn, profile: Profile, cancel: &CancelToken) -> Result<(Negotiated, PreauthHash)> {
     let offer = Offer::new(profile.signs(), CIPHERS.to_vec())?;
     let (resp, sent) = conn.call_raw(Element::new(Command::Negotiate, offer.request()?), cancel).await?;
-    // MS-SMB2 3.3.5.4: no common dialect. Only 3.1.1 is offered, so this is
-    // a 2.x or 3.0.x server, or one with 3.1.1 switched off.
+    // MS-SMB2 3.3.5.4: no common dialect; server is 2.x, 3.0.x or has 3.1.1 off.
     if resp.status() == NtStatus::NOT_SUPPORTED {
         return Err(policy(NO_SMB311));
     }
@@ -174,8 +167,7 @@ async fn session_setup(
     Err(policy("too many SESSION_SETUP rounds"))
 }
 
-/// The final SESSION_SETUP response: the profile's checks, the keys, the
-/// signature.
+/// The final SESSION_SETUP response: the profile's checks, the keys, the signature.
 fn finish(
     conn: &Conn,
     profile: Profile,
@@ -195,8 +187,7 @@ fn finish(
         conn.establish(None, false);
         return Ok(flags);
     }
-    // XM-1: never a guest or anonymous session in place of the account's
-    // own; checked first, as such a session cannot sign its responses.
+    // Never a guest or anonymous session in place of the account's own; checked first, such a session cannot sign.
     if flags & (session_flags::IS_GUEST | session_flags::IS_NULL) != 0 {
         return Err(policy(GUEST_MAPPED));
     }
@@ -254,7 +245,7 @@ pub async fn tree_disconnect(conn: &Conn, tree: &Tree, cancel: &CancelToken) -> 
     check_four_byte_response(&resp.msg, "TREE_DISCONNECT")
 }
 
-/// ECHO (XM-8, XC-20).
+/// ECHO.
 ///
 /// # Errors
 /// The server's refusal, the connection's failures.

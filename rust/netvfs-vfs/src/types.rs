@@ -1,9 +1,7 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! The values of `src/core/types.h` as a Rust backend sees them: entries
-//! (XC-2), capabilities (XC-5), connection parameters, credentials, prompts
-//! (XC-15), attributes (XC-11), write options (XC-13, XC-23) and space
-//! (XC-19). Paths and names are protocol bytes (`Names::encode`, XC-4);
-//! "unknown" is `None` where C++ has -1 or an invalid date.
+//! The values of `src/core/types.h` as a Rust backend sees them: entries, capabilities, connection
+//! parameters, credentials, prompts, attributes, write options, space. Paths and names are protocol
+//! bytes (`Names::encode`); "unknown" is `None` where C++ has -1 or an invalid date.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -47,7 +45,7 @@ impl EntryFlags {
     pub const READ_ONLY: Self = Self(0x0002);
     /// SMB system attribute.
     pub const SYSTEM: Self = Self(0x0004);
-    /// XC-4: the name is not well-formed UTF-8.
+    /// The name is not well-formed UTF-8.
     pub const NAME_NOT_UTF8: Self = Self(0x0008);
     /// A symlink whose target type could not be determined.
     pub const TARGET_UNKNOWN: Self = Self(0x0010);
@@ -71,14 +69,14 @@ impl EntryFlags {
     }
 }
 
-/// `NetVfs::Entry` (XC-2).
+/// `NetVfs::Entry`.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Entry {
-    /// The name, protocol bytes (XC-4).
+    /// The name, protocol bytes.
     pub name: Vec<u8>,
     /// Its type.
     pub kind: EntryType,
-    /// For a symlink, its target's type when resolved (XC-6).
+    /// For a symlink, its target's type when resolved.
     pub target_kind: EntryType,
     /// Flags.
     pub flags: EntryFlags,
@@ -108,7 +106,7 @@ pub struct Entry {
 
 macro_rules! capabilities {
     ($($(#[$doc:meta])* $name:ident),* $(,)?) => {
-        /// `NetVfs::Capability` (XC-5).
+        /// `NetVfs::Capability`.
         #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
         pub enum Capability {
             $($(#[$doc])* $name,)*
@@ -118,7 +116,7 @@ macro_rules! capabilities {
             /// Every capability, in the order of `src/core/types.h`.
             pub const ALL: [Self; capabilities!(@count $($name)*)] = [$(Self::$name,)*];
 
-            /// The stable name (`capabilityName()`, XB-9).
+            /// The stable name (`capabilityName()`).
             #[must_use]
             pub const fn as_str(self) -> &'static str {
                 match self {
@@ -160,7 +158,7 @@ capabilities! {
     ServerCopy,
     /// `copy` of a folder tree.
     ServerCopyRecursive,
-    /// A native tree delete exists (XC-9).
+    /// A native tree delete exists.
     RecursiveDelete,
     /// `spaceInfo`.
     SpaceInfo,
@@ -184,7 +182,7 @@ impl Capability {
     }
 }
 
-/// `NetVfs::Capabilities` (XC-5): valid after `authenticate`, stable for
+/// `NetVfs::Capabilities`: valid after `authenticate`, stable for
 /// the connection's life.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Capabilities {
@@ -272,12 +270,12 @@ impl Params {
 }
 
 /// `NetVfs::Credentials` and the SMB domain. The secret is wiped when this
-/// goes (SEC-5) and never printed.
+/// goes and never printed.
 #[derive(Clone, PartialEq, Eq, Default)]
 pub struct Credentials {
     /// User name.
     pub user: String,
-    /// Password, or `netvfs-key-v1:` and a base64 key (SPEC-sftp 2).
+    /// Password, or `netvfs-key-v1:` and a base64 key.
     pub secret: Zeroizing<Vec<u8>>,
     /// SMB only, may be empty.
     pub domain: String,
@@ -293,7 +291,7 @@ impl fmt::Debug for Credentials {
     }
 }
 
-/// The server identity seen during `connect` (XC-16): an SSH host key.
+/// The server identity seen during `connect`: an SSH host key.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ServerIdentity {
     /// Key algorithm (`ssh-ed25519`).
@@ -304,7 +302,7 @@ pub struct ServerIdentity {
     pub fingerprint: String,
 }
 
-/// One keyboard-interactive prompt (XC-15).
+/// One keyboard-interactive prompt.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Prompt {
     /// The question.
@@ -313,7 +311,7 @@ pub struct Prompt {
     pub echo: bool,
 }
 
-/// What the server asks for, keyboard-interactive (XC-15).
+/// What the server asks for, keyboard-interactive.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct PromptRequest {
     /// The method's name.
@@ -324,7 +322,7 @@ pub struct PromptRequest {
     pub prompts: Vec<Prompt>,
 }
 
-/// `NetVfs::ListOptions` (XC-6).
+/// `NetVfs::ListOptions`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ListOptions {
     /// Entries per batch at most; at least 1.
@@ -339,7 +337,7 @@ impl Default for ListOptions {
     }
 }
 
-/// `NetVfs::RenameMode` (XC-10), also the mode of `copy`.
+/// `NetVfs::RenameMode`, also the mode of `copy`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum RenameMode {
     /// An existing target is `AlreadyExists`.
@@ -349,7 +347,7 @@ pub enum RenameMode {
     Replace,
 }
 
-/// `NetVfs::AttributeChanges` (XC-11); `None` leaves a field unchanged.
+/// `NetVfs::AttributeChanges`; `None` leaves a field unchanged.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Attributes {
     /// Permission bits; more than `0o7777` is invalid.
@@ -360,7 +358,7 @@ pub struct Attributes {
     pub atime_ms: Option<i64>,
 }
 
-/// `WriteOptions::Disposition` (XC-13).
+/// `WriteOptions::Disposition`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Disposition {
     /// An existing file is `AlreadyExists`.
@@ -372,7 +370,7 @@ pub enum Disposition {
     Resume,
 }
 
-/// `NetVfs::WriteOptions` (XC-13, XC-23).
+/// `NetVfs::WriteOptions`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct WriteOptions {
     /// What happens to an existing file.
@@ -387,7 +385,7 @@ pub struct WriteOptions {
     pub mtime_ms: Option<i64>,
 }
 
-/// `NetVfs::SpaceInfo` (XC-19).
+/// `NetVfs::SpaceInfo`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct SpaceInfo {
     /// Free bytes.

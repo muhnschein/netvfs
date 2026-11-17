@@ -1,15 +1,9 @@
 #!/bin/sh
 # SPDX-License-Identifier: LGPL-2.1-or-later
 # Builds the aarch64 RPMs with the Sailfish OS Platform SDK container.
-# Env: SDK_IMAGE (container image), TARGET (sb2 target name),
-#      SOURCE_DATE_EPOCH (default: the commit's time).
-# The Rust binaries and libnetvfs-rs.so come prebuilt from rust/prebuilt (the
-# RPM job's step "Cross-build the Rust binaries" puts them there, doc/RUST.md
-# "Cross build"); without them this script cross-builds them first, which
-# needs the host packages of lift-sdk.sh.
-# Reproducible (SPEC P-8): same commit, same RPMs, byte for byte
-# (doc/VERIFYING.md). SOURCE_DATE_EPOCH is the packages' build time and
-# clamps their file dates; the spec fixes the host name.
+# Env: SDK_IMAGE (container image), TARGET (sb2 target name), SOURCE_DATE_EPOCH (default: commit time).
+# Rust binaries and libnetvfs-rs.so come from rust/prebuilt (RPM job's cross-build step); without them this script cross-builds first, needing lift-sdk.sh's host packages.
+# Reproducible (doc/VERIFYING.md): SOURCE_DATE_EPOCH is build time and clamps file dates; spec fixes host name.
 set -eu
 : "${SDK_IMAGE:?}" "${TARGET:?}"
 root=$(cd "$(dirname "$0")/../.." && pwd)

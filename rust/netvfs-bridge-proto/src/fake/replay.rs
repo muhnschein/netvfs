@@ -1,14 +1,10 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! Replays the golden sequences of the contract (`tests/bridge/contract/*.json`,
-//! SPEC-v2 XT-7) against a bridge. The format and the matching rules are in
-//! the README next to the files.
-//!
-//! [`replay_sequence`] drives any bridge: it seeds the bridge through a
-//! callback (consent and files of the sequence), connects through another,
-//! and checks every reply and signal against the sequence and the signatures
-//! of the method table. [`replay`] and [`replay_dir`] run it against the
-//! in-process [`FakeBridge`]; the bridge's own tests run it against the
-//! in-process bridge and the binary (design §3.1, §4.2).
+//! Replays the golden sequences of the contract (`tests/bridge/contract/*.json`) against a bridge.
+//! Format and matching rules: the README next to the files.
+//! [`replay_sequence`] drives any bridge: seeds it through a callback (consent and files), connects
+//! through another, checks every reply and signal against the sequence and the method table's
+//! signatures. [`replay`] and [`replay_dir`] run it against the in-process [`FakeBridge`]; the
+//! bridge's own tests run it against the in-process bridge and the binary.
 
 use super::{Consent, FakeBridge};
 use crate::connect::Connection;
@@ -153,9 +149,6 @@ pub fn load_dir(dir: &Path) -> Result<Vec<(String, Sequence)>, String> {
         .collect()
 }
 
-// ---- signatures ----------------------------------------------------------
-
-/// Splits a signature into its complete types (`"saya{sv}"` -> `s`, `ay`, `a{sv}`).
 fn split_types(sig: &str) -> Result<Vec<&str>, String> {
     let mut out = Vec::new();
     let mut rest = sig;
@@ -168,7 +161,6 @@ fn split_types(sig: &str) -> Result<Vec<&str>, String> {
     Ok(out)
 }
 
-/// Length of the first complete type of `sig`.
 fn type_end(sig: &str) -> Result<usize, String> {
     let mut depth = 0usize;
     for (i, c) in sig.char_indices() {
@@ -185,10 +177,8 @@ fn type_end(sig: &str) -> Result<usize, String> {
     Err(if depth == 0 { "truncated signature" } else { "unbalanced signature" }.to_owned())
 }
 
-/// The body signature as the message header carries it. zvariant 5 parses
-/// `(asasx)` (one struct) and `asasx` (three arguments) to the same
-/// `Signature`, but the contract tells them apart, so the header field is
-/// read from the raw message.
+/// The body signature as the message header carries it. zvariant 5 parses `(asasx)` (one struct)
+/// and `asasx` (three arguments) to the same `Signature`, but the contract tells them apart.
 fn wire_signature(msg: &zbus::Message) -> Result<String, String> {
     let bytes = msg.data().bytes();
     let le = match bytes.first() {
@@ -220,7 +210,6 @@ fn wire_signature(msg: &zbus::Message) -> Result<String, String> {
             (_, other) => return Err(format!("unexpected header field type {other}")),
         }
     }
-    // No signature field: an empty body.
     Ok(String::new())
 }
 
@@ -263,8 +252,6 @@ impl<'a> Reader<'a> {
         std::str::from_utf8(raw).map_err(|e| e.to_string())
     }
 }
-
-// ---- value encoding ------------------------------------------------------
 
 fn bytes_of(v: &Json) -> Result<Vec<u8>, String> {
     if let Some(s) = v.get("bytes").and_then(Json::as_str) {
@@ -335,7 +322,6 @@ fn encode_array(elem: &str, v: &Json) -> Result<Value<'static>, String> {
     Ok(Value::Array(arr))
 }
 
-/// `a{sv}`: integers travel as `x`.
 fn encode_dict(v: &Json) -> Result<Value<'static>, String> {
     let obj = v.as_object().ok_or_else(|| format!("expected an object, got {v}"))?;
     let mut dict = Dict::new(&Signature::Str, &Signature::Variant);
@@ -350,8 +336,6 @@ fn encode_dict(v: &Json) -> Result<Value<'static>, String> {
     }
     Ok(Value::Dict(dict))
 }
-
-// ---- value decoding ------------------------------------------------------
 
 fn hex(bytes: &[u8]) -> String {
     let mut out = String::with_capacity(bytes.len().saturating_mul(2));
@@ -401,7 +385,6 @@ fn decode(v: &Value<'_>) -> Json {
     }
 }
 
-/// The body's arguments and its signature as sent.
 fn body_fields(msg: &zbus::Message) -> Result<(String, Vec<Json>), String> {
     let sig = wire_signature(msg)?;
     if sig.is_empty() {
@@ -410,16 +393,13 @@ fn body_fields(msg: &zbus::Message) -> Result<(String, Vec<Json>), String> {
     let body = msg.body();
     let s: Structure<'_> = body.deserialize().map_err(|e| e.to_string())?;
     let fields: Vec<Json> = s.fields().iter().map(decode).collect();
-    // zvariant reads a body that is one struct as that struct's fields; on
-    // the wire it is a single argument (a reply such as `Stat`'s entry).
+    // zvariant reads a one-struct body as that struct's fields; on the wire it is a single argument
+    // (e.g. `Stat`'s entry).
     let one_struct = sig.starts_with('(') && split_types(&sig).is_ok_and(|t| t.len() == 1);
     let fields = if one_struct { vec![Json::Array(fields)] } else { fields };
     Ok((sig, fields))
 }
 
-// ---- matching ------------------------------------------------------------
-
-/// Byte arrays may be written as `{"bytes": ...}`; both sides compare as hex.
 fn normalise(v: &Json) -> Json {
     if v.as_object().is_some_and(|o| o.len() == 1 && (o.contains_key("bytes") || o.contains_key("hex")))
         && let Ok(b) = bytes_of(v)
@@ -476,7 +456,6 @@ fn match_arrays(e: &[Json], a: &[Json], binds: &mut Bindings) -> Result<(), Stri
     Ok(())
 }
 
-/// Replaces `"$name"` strings by their bindings.
 fn substitute(v: &Json, binds: &Bindings) -> Result<Json, String> {
     match v {
         Json::String(s) => match s.strip_prefix('$') {
@@ -495,10 +474,6 @@ fn substitute(v: &Json, binds: &Bindings) -> Result<Json, String> {
     }
 }
 
-// ---- running -------------------------------------------------------------
-
-/// A signal as it arrived: its signature and arguments, or why they could
-/// not be read.
 type Received = Result<(String, Vec<Json>), String>;
 
 #[derive(Default)]
@@ -520,7 +495,6 @@ impl Inbox {
     }
 }
 
-/// Collects the bridge's signals until the connection closes.
 fn collect_signals(conn: &Connection, inbox: Arc<Inbox>) -> tokio::task::JoinHandle<()> {
     let mut stream = zbus::MessageStream::from(conn.zbus());
     tokio::spawn(async move {
@@ -545,8 +519,6 @@ fn error_name(e: &BridgeError) -> String {
     }
 }
 
-/// Checks a reply's signature against the method table (as `tst_contract`
-/// did). Methods outside the table are not the contract's business.
 fn check_reply_signature(call: &str, sig: &str) -> Result<(), String> {
     match find_method(call) {
         Some(m) if m.output != sig => {
@@ -556,7 +528,6 @@ fn check_reply_signature(call: &str, sig: &str) -> Result<(), String> {
     }
 }
 
-/// Error replies carry the message and an `a{sv}` of details.
 fn check_error_signature(call: &str, name: &str, msg: &zbus::Message) -> Result<(), String> {
     let sig = wire_signature(msg)?;
     let fine = if name.starts_with(crate::errors::ERROR_PREFIX) {
@@ -621,7 +592,6 @@ async fn signal_step(
         loop {
             let notified = inbox.arrived.notified();
             tokio::pin!(notified);
-            // Arm before looking, so that a signal pushed in between is not missed.
             notified.as_mut().enable();
             if let Some(args) = inbox.take(signal) {
                 return args;
@@ -644,10 +614,8 @@ async fn signal_step(
         .map_err(|m| format!("signal {signal}: {m}"))
 }
 
-/// Replays `seq` against a bridge: `seed` prepares the bridge for the
-/// sequence (its consent, and its files on [`ACCOUNT`]); `connect` then
-/// opens the one connection the steps run on. The same replayer drives the
-/// fake ([`replay`]), the in-process bridge and the binary.
+/// Replays `seq` against a bridge: `seed` prepares it (consent, files on [`ACCOUNT`]); `connect`
+/// opens the one connection the steps run on.
 ///
 /// # Errors
 /// A message naming the step that failed and why.

@@ -1,25 +1,12 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! SPEC-v2 XB-12: connection pools per location, with lanes as the consumer
-//! hints them (interactive 1, bulk 2, stream 1 connection) and at most 4
-//! connections per host across all locations of the consumer (port of
-//! `pool.cpp`). Core actor only: no locks.
+//! Connection pools per location: lanes as the consumer hints them (interactive 1, bulk 2, stream 1 connection) and at most 4 connections per host across all locations of the consumer. Core actor only: no locks.
 //!
-//! [`PoolSet`] holds the pools of all locations with the host counts, as the
-//! C++ `HostRegistry` and `LocationBook` did together, because picking a
-//! connection may close an idle one of another pool on the same host
-//! (`evictIdle`), and a freed slot lets the waiting work of every pool on
-//! that host retry (`notifyReleased`).
+//! [`PoolSet`] holds all pools with the host counts together: picking a connection may close an idle one of another pool on the same host, and a freed slot lets waiting work of every pool on that host retry.
 //!
-//! A stopped connection keeps its host slot until its thread has finished
-//! (the worker's `finished` flag), except one closed to make room
-//! (`closeOneIdle`), whose slot counts as free at once. Nothing here waits
-//! for a thread: stopped workers are kept until they have finished and are
-//! dropped then (reaped on [`PoolSet::submit`] and [`PoolSet::maintain`]).
+//! A stopped connection keeps its host slot until its thread has finished (the worker's `finished` flag), except one closed to make room, whose slot counts as free at once.
+//! Nothing waits for a thread: stopped workers are dropped once finished (reaped on [`PoolSet::submit`] and [`PoolSet::maintain`]).
 //!
-//! [`Pool::state`] is the location's connection state
-//! ([`ConnectionState`]) from its live connections and its
-//! [`StateTracker`]; every change of it raises the set's [`StateSignal`]:
-//! a worker's phase or attempt, and a connection stopped here.
+//! [`Pool::state`] is the location's [`ConnectionState`] from its live connections and its [`StateTracker`]; every change raises the set's [`StateSignal`]: a worker's phase or attempt, and a connection stopped here.
 
 use super::spec::LocationSpec;
 use super::state::{ConnectionState, Phase, StateSignal, StateTracker};
@@ -33,10 +20,10 @@ use std::fmt;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-/// Connections closed after this long without work (`connectionIdleMs`).
+/// Connections closed after this long without work.
 pub const CONNECTION_IDLE: Duration = Duration::from_mins(1);
 
-/// Connection counts per host (`HostRegistry`).
+/// Connection counts per host.
 #[derive(Debug, Clone)]
 pub struct HostRegistry {
     per_host: usize,
@@ -56,8 +43,7 @@ impl HostRegistry {
         Self { per_host, used: HashMap::new() }
     }
 
-    /// Takes `count` slots of `host`; false (nothing taken) when that would
-    /// exceed the limit.
+    /// Takes `count` slots of `host`.
     pub fn try_acquire(&mut self, host: &str, count: usize) -> bool {
         let used = self.used.entry(host.to_owned()).or_insert(0);
         match used.checked_add(count) {
@@ -102,23 +88,19 @@ impl HostRegistry {
     }
 }
 
-/// A stopped worker that keeps (or gave back) its host slot until its
-/// thread has finished.
 struct Retired<B: Backend> {
     worker: Worker<B>,
     host: String,
-    /// Whether its slot is still taken.
     counted: bool,
 }
 
-/// Work waiting for a connection (the host is full).
 struct Pending<B: Backend> {
     lane: Lane,
     task: TaskContext,
     work: Work<B>,
 }
 
-/// The connections of one location (`Pool`).
+/// The connections of one location.
 pub struct Pool<B: Backend> {
     spec: Arc<LocationSpec>,
     host: String,
@@ -152,8 +134,7 @@ impl<B: Backend> Pool<B> {
         &self.spec
     }
 
-    /// Whether `worker` is one of its live connections (read handles are
-    /// checked through this before each use).
+    /// Whether `worker` is one of its live connections (read handles are checked through this before each use).
     #[must_use]
     pub fn owns(&self, worker: WorkerId) -> bool {
         self.workers.iter().any(|w| w.id() == worker)
@@ -177,10 +158,7 @@ impl<B: Backend> Pool<B> {
         self.pending.is_empty() && self.workers.iter().all(|w| w.idle_since().is_some())
     }
 
-    /// The location's connection state: connected while one of its live
-    /// connections is established, else connecting while one is being
-    /// established, else failed if the last attempt failed, else
-    /// disconnected. Work waiting for a host slot connects nothing yet.
+    /// The location's connection state.
     #[must_use]
     pub fn state(&self) -> ConnectionState {
         let mut connecting = false;
@@ -197,7 +175,6 @@ impl<B: Backend> Pool<B> {
         self.tracker.failure().map_or(ConnectionState::Disconnected, ConnectionState::Failed)
     }
 
-    /// The least loaded connection of `lane` (or of any lane).
     fn least_loaded(&self, lane: Lane, any_lane: bool) -> Option<usize> {
         let mut best: Option<(usize, usize)> = None;
         for (i, w) in self.workers.iter().enumerate() {
@@ -212,8 +189,6 @@ impl<B: Backend> Pool<B> {
         best.map(|(i, _)| i)
     }
 
-    /// Cancels the running items whose flags are set; pending work whose
-    /// flag is set ends now.
     fn kick(&mut self) {
         for w in &self.workers {
             w.kick();
@@ -225,8 +200,6 @@ impl<B: Backend> Pool<B> {
         }
     }
 
-    /// Stops the connection at `index`; `counted`: its slot stays taken
-    /// until the thread has finished. It no longer counts for the state.
     fn retire(&mut self, index: usize, counted: bool) {
         if index < self.workers.len() {
             let worker = self.workers.remove(index);
@@ -236,8 +209,6 @@ impl<B: Backend> Pool<B> {
         }
     }
 
-    /// Stops every connection (`Disconnect`); a failed attempt before is
-    /// forgotten: the location is disconnected now.
     fn stop_all(&mut self) {
         while !self.workers.is_empty() {
             self.retire(0, true);
@@ -245,8 +216,6 @@ impl<B: Backend> Pool<B> {
         self.tracker.clear();
     }
 
-    /// Stops one idle connection without handles, its slot free at once
-    /// (`closeOneIdle`).
     fn close_one_idle(&mut self) -> bool {
         let Some(index) = self.workers.iter().position(|w| w.idle_since().is_some() && w.open_handles() == 0)
         else {
@@ -256,7 +225,6 @@ impl<B: Backend> Pool<B> {
         true
     }
 
-    /// Drops the retired workers that have finished; the slots that frees.
     fn reap(&mut self) -> usize {
         reap(&mut self.retired)
     }
@@ -274,12 +242,10 @@ impl<B: Backend> Drop for Pool<B> {
     }
 }
 
-/// Pending work that will not get a connection ends with `Canceled`.
 fn end_pending<B: Backend>(p: Pending<B>) {
     drop((p.work)(Turn::failed(canceled())));
 }
 
-/// Drops the finished workers of `retired`; how many of them held a slot.
 fn reap<B: Backend>(retired: &mut Vec<Retired<B>>) -> usize {
     let mut released = 0_usize;
     retired.retain(|r| {
@@ -297,9 +263,7 @@ pub struct PoolSet<B: Backend> {
     backend: Arc<B>,
     hosts: HostRegistry,
     pools: Vec<Pool<B>>,
-    /// Stopped workers of pools that went away.
     orphans: Vec<Retired<B>>,
-    /// Raised when a pool's state may have changed.
     signal: StateSignal,
 }
 
@@ -314,8 +278,7 @@ impl<B: Backend> fmt::Debug for PoolSet<B> {
 }
 
 impl<B: Backend> PoolSet<B> {
-    /// No pools; connections through `backend`, at most `per_host` per
-    /// host. Changes of the pools' states are signalled to nobody.
+    /// No pools.
     #[must_use]
     pub fn new(backend: Arc<B>, per_host: usize) -> Self {
         Self {
@@ -327,8 +290,7 @@ impl<B: Backend> PoolSet<B> {
         }
     }
 
-    /// The same, with changes of the pools' states raising `signal`; set
-    /// before the first pool is added.
+    /// The same, with changes of the pools' states raising `signal`.
     #[must_use]
     pub fn with_signal(mut self, signal: StateSignal) -> Self {
         self.signal = signal;
@@ -362,8 +324,7 @@ impl<B: Backend> PoolSet<B> {
         self.pools.iter()
     }
 
-    /// Adds a pool for `spec` unless its location has one; whether it was
-    /// added.
+    /// Adds a pool for `spec` unless its location has one.
     pub fn add(&mut self, spec: Arc<LocationSpec>) -> bool {
         if self.index(&spec.id).is_some() {
             return false;
@@ -372,12 +333,7 @@ impl<B: Backend> PoolSet<B> {
         true
     }
 
-    /// Queues `work` on a connection of `lane` of location `id` (`submit`):
-    /// an idle connection of the lane, a new one while the lane and the
-    /// host have room (closing an idle connection of another location on
-    /// the host if needed), the lane's least loaded one, another lane's
-    /// least loaded one, or else it waits until a slot comes free. Without
-    /// such a pool the work ends with `NotFound`.
+    /// Queues `work` on a connection of `lane` of location `id`.
     pub fn submit(&mut self, id: &str, lane: Lane, task: TaskContext, work: Work<B>) {
         match self.index(id) {
             Some(index) => self.submit_at(index, lane, task, work),
@@ -385,9 +341,7 @@ impl<B: Backend> PoolSet<B> {
         }
     }
 
-    /// Queues `work` on the connection `worker` of location `id` (where its
-    /// read handles live). When that connection is gone the work ends at
-    /// once with `ConnectionLost`.
+    /// Queues `work` on the connection `worker` of location `id` (where its read handles live).
     pub fn submit_to(&mut self, id: &str, worker: WorkerId, task: TaskContext, work: Work<B>) {
         match self.get(id).and_then(|p| p.workers.iter().find(|w| w.id() == worker)) {
             Some(w) => w.post(task, work),
@@ -423,8 +377,6 @@ impl<B: Backend> PoolSet<B> {
         }
     }
 
-    /// The connection for new work of `lane` in pool `index` (`pick`);
-    /// `None`: wait.
     fn pick(&mut self, index: usize, lane: Lane) -> Result<Option<usize>, Status> {
         let Some(pool) = self.pools.get(index) else { return Ok(None) };
         let existing = pool.least_loaded(lane, false);
@@ -460,8 +412,6 @@ impl<B: Backend> PoolSet<B> {
         Ok(self.pools.get(index).and_then(|p| p.least_loaded(lane, true)))
     }
 
-    /// Frees a slot on `host` by closing an idle connection of another
-    /// pool (`evictIdle`).
     fn evict_idle(&mut self, host: &str, except: usize) -> bool {
         for (i, pool) in self.pools.iter_mut().enumerate() {
             if i != except && pool.host == host && pool.close_one_idle() {
@@ -473,8 +423,6 @@ impl<B: Backend> PoolSet<B> {
         false
     }
 
-    /// A slot of `host` came free: the waiting work of its pools retries
-    /// (`notifyReleased`).
     fn notify_released(&mut self, host: &str) {
         for index in 0..self.pools.len() {
             let Some(pool) = self.pools.get_mut(index) else { continue };
@@ -487,7 +435,6 @@ impl<B: Backend> PoolSet<B> {
         }
     }
 
-    /// Releases the slots of pool `index`'s finished connections.
     fn reap_pool(&mut self, index: usize) -> bool {
         let Some(pool) = self.pools.get_mut(index) else { return false };
         let before = pool.retired.len();
@@ -501,7 +448,6 @@ impl<B: Backend> PoolSet<B> {
         changed
     }
 
-    /// Releases the slots of finished connections of pools that went away.
     fn reap_orphans(&mut self) -> bool {
         let mut hosts: Vec<String> = Vec::new();
         let before = self.orphans.len();
@@ -521,16 +467,14 @@ impl<B: Backend> PoolSet<B> {
         before != self.orphans.len()
     }
 
-    /// Cancels the work whose flags were set (`kick`, XB-13).
+    /// Cancels the work whose flags were set.
     pub fn kick(&mut self) {
         for pool in &mut self.pools {
             pool.kick();
         }
     }
 
-    /// Stops the connections idle for `idle` or longer without open
-    /// handles, and drops finished ones (`maintain`). Whether anything
-    /// changed.
+    /// Stops the connections idle for `idle` or longer without open handles, and drops finished ones.
     pub fn maintain(&mut self, now: Instant, idle: Duration) -> bool {
         let mut changed = false;
         for index in 0..self.pools.len() {
@@ -562,9 +506,7 @@ impl<B: Backend> PoolSet<B> {
         }
     }
 
-    /// Removes the pool of location `id`: its connections stop (their
-    /// slots count until they have finished), its waiting work ends with
-    /// `Canceled`. Whether there was one.
+    /// Removes the pool of location `id`.
     pub fn remove(&mut self, id: &str) -> bool {
         let Some(index) = self.index(id) else { return false };
         let mut pool = self.pools.remove(index);
@@ -599,8 +541,7 @@ impl<B: Backend> PoolSet<B> {
         self.hosts.try_acquire(host, 1)
     }
 
-    /// Gives back a slot taken with [`PoolSet::try_acquire_host`]; waiting
-    /// work on the host retries.
+    /// Gives back a slot taken with [`PoolSet::try_acquire_host`].
     pub fn release_host(&mut self, host: &str) {
         self.hosts.release(host, 1);
         self.notify_released(host);

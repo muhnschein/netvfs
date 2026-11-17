@@ -1,7 +1,4 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-// The command line, locations and connections of netvfs-cli; the commands are
-// in clicommands.cpp and the output formats in cliformat.cpp. See cli.h for
-// the full description and the exit codes.
 #include "cli.h"
 
 #include "backendloader.h"
@@ -77,7 +74,6 @@ bool validProfile(const QString &profile)
         || profile == QLatin1String("guest");
 }
 
-// Options that give the location by parts.
 bool applyLocationOption(const QString &arg, const QString &value, Options *options, QString *error)
 {
     ConnectionParams &params = options->main.params;
@@ -193,7 +189,6 @@ bool locationGiven(const ConnectionParams &params)
     return !params.host.isEmpty() || params.provider == QLatin1String("local");
 }
 
-// Everything between the parsed command line and the handler.
 struct Prepared {
     const CommandSpec *spec = nullptr;
     CommandLine cmd;
@@ -257,8 +252,7 @@ int runWithBackend(const Prepared &prepared, const Options *options, const Conne
     return r.ok() ? 0 : fail(err, r);
 }
 
-} // namespace
-
+}
 Result Connector::establishOn(Backend *backend, const Location &location) const
 {
     QByteArray secret = qgetenv(location.secretEnv.toLocal8Bit().constData());
@@ -282,7 +276,7 @@ Result Connector::open(const Location &location, QScopedPointer<Backend> *backen
 Result resolveLocation(Location *location, const QString &url, const QVariantMap &overrides)
 {
     if (!url.isEmpty()) {
-        // XH-6: a password in the URL is rejected and never stored.
+        // A password in the URL is rejected and never stored.
         QString path;
         if (const Result parsed = Url::parse(url, &location->params, &path); !parsed.ok())
             return parsed;
@@ -338,4 +332,4 @@ int run(const QStringList &arguments, QTextStream &out, QTextStream &err, QIODev
     return runWithBackend(prepared, &options, connector, out, err);
 }
 
-} // namespace NetVfs::Cli
+}

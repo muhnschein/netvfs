@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! The `org.netvfs.Bridge1` interface of the fake. Checks happen in the order
-//! of the C++ bridge (`session.cpp`): argument validation
-//! (`InvalidArgs`, `InvalidName`), then `Hello` first, then consent, then the
-//! scripted latency and failures, then the operation.
+//! `org.netvfs.Bridge1` interface of the fake. Check order as in the C++ bridge (`session.cpp`):
+//! argument validation (`InvalidArgs`, `InvalidName`), `Hello` first, consent, scripted latency and
+//! failures, then the operation.
 
 use super::DEFAULT_CAPS;
 use super::args::{self, Dict};
@@ -37,9 +36,8 @@ impl Checked {
     }
 }
 
-// `Interface` is an async-trait trait; zbus re-exports the macro it uses.
-// `DispatchResult2` is marked unstable in zbus 5: a zbus bump that changes
-// it breaks this wrapper, and the tests show it (the fake is test-only).
+// `DispatchResult2` is unstable in zbus 5: a zbus bump that changes it breaks this wrapper
+// (test-only).
 #[zbus::export::async_trait::async_trait]
 impl Interface for Checked {
     fn name() -> InterfaceName<'static> {
@@ -126,8 +124,7 @@ impl Iface {
         Self { shared, session }
     }
 
-    /// The checks before the operation. Consent and the default lane come
-    /// from the method table ([`crate::methods::METHODS`]).
+    /// Checks before the operation; consent and default lane from [`crate::methods::METHODS`].
     async fn begin(&self, method: &str, lane: Option<Lane>, target: &str) -> Result<(), Fail> {
         let info =
             find_method(method).ok_or_else(|| Fail::net(ErrorName::Internal, "Not in the method table"))?;
@@ -159,15 +156,14 @@ impl Iface {
         }
     }
 
-    /// A call that needs a connection of `loc`'s pool: the location is
-    /// connected from now on (XB-12), until `Disconnect`; a change is told.
+    /// A call needing a connection of `loc`'s pool: the location is connected until `Disconnect`; a
+    /// change is told.
     fn reach(&self, loc: &str) -> Result<(), Fail> {
         self.require_location(loc)?;
         self.set_state(loc, location_state::CONNECTED);
         Ok(())
     }
 
-    /// Sets `loc`'s state, and tells every client if it changed.
     fn set_state(&self, loc: &str, state: &str) {
         if self.shared.with(|s| s.set_state(loc, state, None)) {
             let shared = Arc::clone(&self.shared);
@@ -199,7 +195,6 @@ impl Iface {
         }
     }
 
-    /// Starts a job: validates the location, takes the id and runs `work`.
     fn start_job<F, Fut>(&self, ctxt: &SignalEmitter<'_>, work: F) -> u32
     where
         F: FnOnce(Env, u32, Arc<std::sync::atomic::AtomicBool>) -> Fut,
@@ -289,7 +284,7 @@ fn parse_adhoc(url: &str, opts: &args::AdHocOpts) -> Result<AdHocUrl, Fail> {
 }
 
 fn adhoc_info(p: &AdHocUrl) -> Vec<(String, InfoValue)> {
-    // The bridge shows an ad-hoc location once it has connected.
+    // The bridge shows an ad-hoc location once connected.
     let mut info = vec![
         ("kind".to_owned(), InfoValue::Str("adhoc".into())),
         ("host".to_owned(), InfoValue::Str(p.host.clone())),
@@ -307,8 +302,6 @@ fn adhoc_info(p: &AdHocUrl) -> Vec<(String, InfoValue)> {
 
 #[zbus::interface(name = "org.netvfs.Bridge1")]
 impl Iface {
-    // ---- Session ---------------------------------------------------------
-
     async fn hello(&self, client: String) -> Result<String, Fail> {
         if client.len() > 256 {
             return Err(Fail::args("Argument 1 is too long"));
@@ -339,8 +332,6 @@ impl Iface {
         Ok(self.shared.with(|s| s.features.clone()))
     }
 
-    // ---- Locations -------------------------------------------------------
-
     async fn list_locations(&self) -> Result<Vec<WireLocation>, Fail> {
         self.begin("ListLocations", None, "").await?;
         Ok(self.shared.with(|s| if s.consent == Consent::Granted { s.wire_locations() } else { Vec::new() }))
@@ -367,8 +358,6 @@ impl Iface {
         self.set_state(&loc, location_state::DISCONNECTED);
         Ok(())
     }
-
-    // ---- Ad-hoc locations --------------------------------------------------
 
     async fn connect_ad_hoc(
         &self,
@@ -405,26 +394,20 @@ impl Iface {
         Ok(())
     }
 
-    // ---- Discovery -------------------------------------------------------
-
     async fn discover(&self, on: bool, #[zbus(signal_emitter)] ctxt: SignalEmitter<'_>) -> Result<(), Fail> {
         self.begin("Discover", None, "").await?;
         self.env(&ctxt);
         self.session.with(|s| s.discovering = on);
         if on {
-            // As netvfs' NearbyService: a start signals what is known right
-            // away, after the reply, also when that is nothing yet.
+            // A start signals what is known right away, after the reply, even if nothing yet.
             let shared = Arc::clone(&self.shared);
             tokio::spawn(async move { shared.broadcast_nearby().await });
         } else if !self.shared.any_discovering() {
-            // netvfs halts the discovery when its last client stops and
-            // forgets what it found (Discovery::Private::halt).
+            // Discovery halts when the last client stops and forgets what it found.
             self.shared.with(|s| s.nearby.clear());
         }
         Ok(())
     }
-
-    // ---- Listing -----------------------------------------------------------
 
     async fn list(
         &self,
@@ -444,8 +427,6 @@ impl Iface {
         Ok(self
             .start_job(&ctxt, move |env, req, cancel| transfer::run_list(env, req, listing, batch, cancel)))
     }
-
-    // ---- Metadata ----------------------------------------------------------
 
     async fn stat(
         &self,
@@ -487,8 +468,6 @@ impl Iface {
         }
         self.tree(&loc, |t| t.file_data(&path).map(|d| sha2::Sha256::digest(d).to_vec()))
     }
-
-    // ---- Namespace ---------------------------------------------------------
 
     async fn make_dir(&self, loc: String, path: Vec<u8>, exclusive: bool) -> Result<(), Fail> {
         let loc = args::location(&loc)?;
@@ -557,8 +536,6 @@ impl Iface {
         self.tree(&loc, |t| t.server_copy(&from, &to, opts.recursive, opts.replace))
     }
 
-    // ---- Handles -----------------------------------------------------------
-
     async fn open_read(&self, loc: String, path: Vec<u8>, lane: String) -> Result<(u32, i64), Fail> {
         let loc = args::location(&loc)?;
         let path = args::path(&path)?;
@@ -599,8 +576,6 @@ impl Iface {
             None => Err(Fail::net(ErrorName::NotFound, "No such handle")),
         }
     }
-
-    // ---- Jobs --------------------------------------------------------------
 
     async fn upload(
         &self,
@@ -701,8 +676,6 @@ impl Iface {
         }
     }
 
-    // ---- Questions ---------------------------------------------------------
-
     async fn answer(&self, id: String, answer: Dict) -> Result<(), Fail> {
         let id = args::location(&id)?;
         let answer = args::answer_opts(&answer)?;
@@ -716,8 +689,6 @@ impl Iface {
         tx.send(recorded).ok();
         Ok(())
     }
-
-    // ---- Handoff -----------------------------------------------------------
 
     async fn open_account_settings(&self, loc: String) -> Result<(), Fail> {
         let loc = args::location(&loc)?;
@@ -745,8 +716,6 @@ impl Iface {
         Ok(())
     }
 
-    // ---- Drives ------------------------------------------------------------
-
     async fn list_drives(&self) -> Result<Vec<WireDrive>, Fail> {
         self.begin("ListDrives", None, "").await?;
         Ok(self.shared.with(|s| s.drives.iter().map(FakeDrive::wire).collect()))
@@ -771,8 +740,6 @@ impl Iface {
         }
         Ok(())
     }
-
-    // ---- Signals -----------------------------------------------------------
 
     #[zbus(signal)]
     pub async fn consent_changed(ctxt: &SignalEmitter<'_>, consent: String) -> zbus::Result<()>;
@@ -828,7 +795,6 @@ fn no_drive() -> Fail {
     Fail::net(ErrorName::NotFound, "No such drive")
 }
 
-/// Signal context of a session, if its connection is up.
 pub(super) fn context(session: &Session) -> Option<SignalEmitter<'static>> {
     let conn = session.conn()?;
     SignalEmitter::new(&conn, OBJECT_PATH).ok()
@@ -838,7 +804,6 @@ impl Shared {
     pub async fn broadcast_consent(&self, consent: Consent) {
         for session in self.sessions_snapshot() {
             if let Some(ctx) = context(&session) {
-                // A closed client simply misses the signal.
                 Iface::consent_changed(&ctx, consent.as_str().to_owned()).await.ok();
             }
         }
@@ -847,7 +812,6 @@ impl Shared {
     pub async fn broadcast_locations(&self) {
         for session in self.sessions_snapshot() {
             if let Some(ctx) = context(&session) {
-                // As above.
                 Iface::locations_changed(&ctx).await.ok();
             }
         }
@@ -856,7 +820,6 @@ impl Shared {
     pub async fn broadcast_drives(&self) {
         for session in self.sessions_snapshot() {
             if let Some(ctx) = context(&session) {
-                // A closed client simply misses the signal.
                 Iface::drives_changed(&ctx).await.ok();
             }
         }
@@ -869,7 +832,6 @@ impl Shared {
                 continue;
             }
             if let Some(ctx) = context(&session) {
-                // As above.
                 Iface::nearby_changed(&ctx, nearby.clone()).await.ok();
             }
         }

@@ -11,7 +11,7 @@ use tokio::sync::oneshot;
 use tokio::time::Instant;
 use zbus::zvariant::{OwnedValue, Value};
 
-/// The user's answer to this app using network locations (XB-6).
+/// The user's answer to this app using network locations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Consent {
     /// Not asked yet.
@@ -166,12 +166,11 @@ impl InfoValue {
             Self::Bytes(b) => Value::from(b.clone()),
             Self::Strings(s) => Value::from(s.clone()),
         };
-        // Plain values never contain file descriptors, the only failing case.
         OwnedValue::try_from(v).unwrap_or_else(|_e| OwnedValue::from(0u8))
     }
 }
 
-/// A memory card or USB drive of the fake (XB-20).
+/// A memory card or USB drive of the fake.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FakeDrive {
     /// The drive id.
@@ -275,9 +274,9 @@ pub struct State {
     pub answers: Vec<RecordedAnswer>,
     pub calls: Vec<CallRecord>,
     pub handoffs: Vec<String>,
-    /// What `GetFeatures` answers (XB-19).
+    /// What `GetFeatures` answers.
     pub features: Vec<String>,
-    /// What `ListDrives` lists (XB-20).
+    /// What `ListDrives` lists.
     pub drives: Vec<FakeDrive>,
     pub nearby: Vec<WireNearby>,
     pub next_adhoc: u32,
@@ -444,7 +443,6 @@ pub struct Session {
 }
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
-    // A panic while holding the lock cannot leave the data inconsistent here.
     m.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
@@ -523,8 +521,8 @@ impl Session {
         })
     }
 
-    /// The client is gone: its jobs are canceled, its questions unanswerable
-    /// and its handles closed, as the real bridge does (netvfs XB-13).
+    /// The client is gone: its jobs are canceled, questions unanswerable, handles closed, as in the
+    /// real bridge.
     pub fn shut(&self) {
         self.with(|s| {
             for flag in s.jobs.values() {
@@ -648,7 +646,6 @@ mod tests {
         let w = st.wire_locations();
         assert_eq!(w.len(), 1);
         assert_eq!(crate::wire::value_str(&w[0].info["host"]).as_deref(), Some("h"));
-        // Disconnected until it is used.
         let state = |st: &State, key: &str| {
             st.wire_locations()[0].info.get(key).and_then(|v| crate::wire::value_str(v))
         };

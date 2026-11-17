@@ -1,18 +1,10 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! The answers of netvfs-accounts: a `QDataStream` of version `Qt_5_6`
-//! (big-endian; strings UTF-16 with a byte length, a null string as length
-//! `0xffffffff`). Every answer starts with the `qint32` error and the
-//! `QString` message; then
+//! Answers of netvfs-accounts: a `QDataStream` of version `Qt_5_6` (big-endian; strings UTF-16 with a byte length, null string as length `0xffffffff`). Every answer starts with the `qint32` error and the `QString` message; then
 //!
-//! - `list`: `qint32` count, per account `qint32` id, `QString` provider and
-//!   display name, the parameters, `QString` files root, `qint32` attention;
-//! - `files`: the parameters, `quint32` credentials id, `bool` secret
-//!   optional;
+//! - `list`: `qint32` count, per account `qint32` id, `QString` provider and display name, the parameters, `QString` files root, `qint32` attention;
+//! - `files`: the parameters, `quint32` credentials id, `bool` secret optional;
 //!
-//! where the parameters are `QString` provider, host, `qint32` port,
-//! `QString` username, `QVariantMap` options, `qint32` connect and request
-//! timeout. Anything else, a short answer or bytes left over is a
-//! `ProtocolError`.
+//! where the parameters are `QString` provider, host, `qint32` port, `QString` username, `QVariantMap` options, `qint32` connect and request timeout. Anything else, a short answer or leftover bytes is a `ProtocolError`.
 
 use super::{AccountLocation, Attention, ConnectionParams, FilesAccess, Value};
 use crate::status::Status;
@@ -21,11 +13,9 @@ use std::collections::BTreeMap;
 
 /// More accounts than this is a malformed list.
 pub const MAX_ACCOUNTS: i32 = 10_000;
-/// Nested maps deeper than this are a malformed answer (Qt has no limit;
-/// the helper writes one level).
+/// Deeper nested maps are malformed (Qt has no limit; the helper writes one level).
 const MAX_DEPTH: u32 = 32;
 
-/// `QMetaType` ids of Qt 5.
 mod type_id {
     pub const INVALID: u32 = 0;
     pub const BOOL: u32 = 1;
@@ -39,9 +29,7 @@ mod type_id {
     pub const BYTE_ARRAY: u32 = 12;
 }
 
-/// A null `QString` or `QByteArray`.
 const NULL_LENGTH: u32 = u32::MAX;
-/// The longest length that is not null.
 #[cfg(any(test, feature = "test-bins"))]
 const LONGEST_LENGTH: u32 = 0xffff_fffe;
 
@@ -49,9 +37,7 @@ fn malformed() -> Status {
     Status::new(ErrorName::ProtocolError, "netvfs-accounts gave a malformed answer")
 }
 
-/// `Names::encode`: UTF-16 to protocol bytes. The escapes U+DC80 to
-/// U+DCFF stand for the bytes 0x80 to 0xFF that are not UTF-8; other lone
-/// surrogates become U+FFFD.
+/// `Names::encode`: UTF-16 to protocol bytes. U+DC80 to U+DCFF stand for the non-UTF-8 bytes 0x80 to 0xFF; other lone surrogates become U+FFFD.
 #[must_use]
 pub fn names_encode(units: &[u16]) -> Vec<u8> {
     let mut out = Vec::with_capacity(units.len());
@@ -67,7 +53,7 @@ pub fn names_encode(units: &[u16]) -> Vec<u8> {
     out
 }
 
-/// Reads a `QDataStream`; `None` is a failed read (short or corrupt).
+/// Reads a `QDataStream`; `None` is a failed read.
 #[derive(Debug)]
 struct Reader<'a> {
     rest: &'a [u8],
@@ -108,7 +94,6 @@ impl<'a> Reader<'a> {
         self.array().map(u64::from_be_bytes)
     }
 
-    /// A length-prefixed block; null reads as empty.
     fn block(&mut self) -> Option<&'a [u8]> {
         match self.u32()? {
             NULL_LENGTH => Some(&[]),
@@ -120,7 +105,6 @@ impl<'a> Reader<'a> {
         self.block().map(<[u8]>::to_vec)
     }
 
-    /// A `QString` as UTF-16 code units; an odd byte length is corrupt.
     fn utf16(&mut self) -> Option<Vec<u16>> {
         let (pairs, odd) = self.block()?.as_chunks::<2>();
         odd.is_empty().then(|| pairs.iter().map(|p| u16::from_be_bytes(*p)).collect())
@@ -135,10 +119,9 @@ impl<'a> Reader<'a> {
         (0..count).map(|_| self.string()).collect()
     }
 
-    /// A `QVariant`: type id, null flag, value.
     fn variant(&mut self, depth: u32) -> Option<Value> {
         let id = self.u32()?;
-        self.take(1)?; // the null flag: no value is null here
+        self.take(1)?;
         Some(match id {
             type_id::INVALID => Value::Invalid,
             type_id::BOOL => Value::Bool(self.bool()?),
@@ -156,8 +139,7 @@ impl<'a> Reader<'a> {
         })
     }
 
-    /// A `QVariantMap`, read with `insertMulti` and used with `value()`:
-    /// the last value of a key wins; keys in `QMap` order.
+    /// Read with `insertMulti`, used with `value()`: the last value of a key wins; keys in `QMap` order.
     fn variant_map(&mut self, depth: u32) -> Option<Vec<(String, Value)>> {
         let count = self.u32()?;
         let mut map = BTreeMap::new();
@@ -209,7 +191,6 @@ impl<'a> Reader<'a> {
         })
     }
 
-    /// The header: `Err` is the helper's failure or a malformed header.
     fn header(&mut self) -> Result<(), Status> {
         let error = self.i32().ok_or_else(malformed)?;
         let message = self.string().ok_or_else(malformed)?;
@@ -224,7 +205,6 @@ impl<'a> Reader<'a> {
         Err(Status::new(*name, message))
     }
 
-    /// The end of a payload read with `read`.
     fn finish<T>(&self, read: Option<T>) -> Result<T, Status> {
         read.filter(|_| self.rest.is_empty()).ok_or_else(malformed)
     }
@@ -272,7 +252,7 @@ pub struct Writer {
 
 #[cfg(any(test, feature = "test-bins"))]
 impl Writer {
-    /// The header: error (`0` for success) and message (null for success).
+    /// Header: error (`0` success) and message (null on success).
     #[must_use]
     pub fn answer(failure: Option<&Status>) -> Self {
         let mut w = Self::default();
@@ -306,7 +286,7 @@ impl Writer {
     }
 
     fn length(&mut self, n: usize) {
-        // As the helper: a length past 4 GiB is cut to the longest one.
+        // As the helper: a length past 4 GiB is cut to the longest.
         self.u32(u32::try_from(n).unwrap_or(LONGEST_LENGTH));
     }
 
@@ -454,7 +434,6 @@ mod tests {
         decode_status(&golden("ok.bin")).unwrap();
         let failure = decode_status(&golden("not-found.bin")).unwrap_err();
         assert_eq!(failure.to_string(), "NotFound: No such account");
-        // Failures carry over whatever the command.
         assert_eq!(decode_list(&golden("not-found.bin")).unwrap_err(), failure);
         assert_eq!(decode_files(&golden("not-found.bin")).unwrap_err(), failure);
         assert_eq!(decode_files(&golden("internal-empty.bin")).unwrap_err().to_string(), "Internal");
@@ -491,7 +470,6 @@ mod tests {
         let not_found = Status::new(ErrorName::NotFound, "No such account");
         assert_eq!(Writer::answer(Some(&not_found)).into_bytes(), golden("not-found.bin"));
         assert_eq!(Writer::answer(None).into_bytes(), golden("ok.bin"));
-        // Values the helper does not write, and a key given twice.
         let mut w = Writer::answer(None);
         let options = vec![("b".into(), Value::ByteArray(vec![0, 0xff])), ("b".into(), Value::Int(1))];
         w.variant_map(&options);
@@ -502,7 +480,6 @@ mod tests {
 
     #[test]
     fn malformed_answers() {
-        // tst_BridgeAccounts::malformedAnswers
         let good = golden("list.bin");
         let protocol = |r: Result<(), Status>| r.unwrap_err().to_string();
         let expected = "ProtocolError: netvfs-accounts gave a malformed answer";
@@ -514,7 +491,6 @@ mod tests {
         assert_eq!(protocol(decode_status(&good)), expected);
         assert_eq!(protocol(decode_list(&golden("files.bin")).map(drop)), expected);
         assert_eq!(protocol(decode_files(&golden("ok.bin")).map(drop)), expected);
-        // Every cut of a good answer is malformed.
         for cut in 0..good.len() {
             assert_eq!(protocol(decode_list(&good[..cut]).map(drop)), expected, "{cut}");
         }
@@ -536,12 +512,10 @@ mod tests {
         let malformed = Err("ProtocolError: netvfs-accounts gave a malformed answer".into());
         assert_eq!(status(header(24, None)), malformed);
         assert_eq!(status(header(-1, None)), malformed);
-        // An odd string length is corrupt.
         let mut odd = header(9, None).into_bytes();
         let at = odd.len() - 4;
         odd.splice(at.., [0, 0, 0, 1, b'x']);
         assert_eq!(decode_status(&odd).unwrap_err().name, ErrorName::ProtocolError);
-        // A failure ignores what follows it; a success may not have more.
         let mut failed = header(9, Some("gone"));
         failed.i32(5);
         assert_eq!(status(failed), Err("NotFound: gone".into()));
@@ -580,7 +554,6 @@ mod tests {
         assert_eq!(list_with(0, |_| ()), Ok(vec![]));
         assert_eq!(list_with(-1, |_| ()), Err(ErrorName::ProtocolError));
         assert_eq!(list_with(MAX_ACCOUNTS + 1, |_| ()), Err(ErrorName::ProtocolError));
-        // The limit itself is fine (the answer is short here).
         assert_eq!(list_with(MAX_ACCOUNTS, |_| ()), Err(ErrorName::ProtocolError));
         assert_eq!(
             list_with(1, |w| account(w, 2, &invalid)).unwrap()[0].attention,
@@ -591,7 +564,6 @@ mod tests {
         let options =
             |value: &[u8]| list_with(1, |w| account(w, 0, value)).map(|l| l[0].params.options.clone());
         assert_eq!(options(&invalid), Ok(vec![("k".into(), Value::Invalid)]));
-        // The null flag is read and ignored; a boolean is any non-zero byte.
         assert_eq!(options(&[0, 0, 0, 1, 1, 2]), Ok(vec![("k".into(), Value::Bool(true))]));
         assert_eq!(
             options(&[0, 0, 0, 12, 0, 0xff, 0xff, 0xff, 0xff]),
@@ -601,7 +573,6 @@ mod tests {
             options(&[0, 0, 0, 11, 0, 0, 0, 0, 1, 0xff, 0xff, 0xff, 0xff]),
             Ok(vec![("k".into(), Value::StringList(vec![String::new()]))])
         );
-        // Types the helper never writes: double, char, list, user types.
         for id in [6_u8, 7, 9, 13, 127] {
             assert_eq!(
                 options(&[0, 0, 0, id, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
@@ -610,7 +581,6 @@ mod tests {
             );
         }
         assert_eq!(options(&[0, 0, 4, 0, 0, 0, 0, 0, 1, b'x']), Err(ErrorName::ProtocolError));
-        // A key read twice: the last value wins (insertMulti, then value()).
         let mut twice = Writer::answer(None);
         twice.u32(2);
         for value in [Value::Int(1), Value::Int(2)] {
@@ -644,13 +614,11 @@ mod tests {
     fn names_are_encoded() {
         let encode = |s: &[u16]| names_encode(s);
         assert_eq!(encode(&"a/ä😀".encode_utf16().collect::<Vec<_>>()), "a/ä😀".as_bytes());
-        // Escapes stand for their byte; other lone surrogates are replaced.
         assert_eq!(encode(&[0x61, 0xdc80, 0xdcff, 0x62]), [0x61, 0x80, 0xff, 0x62]);
         assert_eq!(encode(&[0xdc7f]), "\u{fffd}".as_bytes());
         assert_eq!(encode(&[0xdd00]), "\u{fffd}".as_bytes());
         assert_eq!(encode(&[0xd800]), "\u{fffd}".as_bytes());
         assert_eq!(encode(&[0xd800, 0x61]), "\u{fffd}a".as_bytes());
-        // A pair wins over an escape.
         assert_eq!(encode(&[0xd800, 0xdc80]), "\u{10080}".as_bytes());
         assert_eq!(encode(&[]), b"");
     }

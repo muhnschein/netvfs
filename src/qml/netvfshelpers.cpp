@@ -79,8 +79,8 @@ QString providerOptionKey(const QString &provider, const QString &key)
     return Keys::providerKey(provider, key);
 }
 
-// Options that are written to the account; host_key_seen is owned by the
-// attention mechanism (SPEC 6.4) and an empty pin is never stored.
+// Options written to the account; host_key_seen is owned by the attention mechanism and an empty
+// pin is never stored.
 bool isStorableOption(const QString &key, const QVariant &value)
 {
     if (key == QLatin1String(Keys::HostKeySeen))
@@ -95,7 +95,7 @@ void insertOptions(QVariantMap *global, const ConnectionParams &params)
             global->insert(providerOptionKey(params.provider, it.key()), it.value());
     }
 }
-} // namespace
+}
 
 ConnectionParams paramsFromVariant(const QVariantMap &map)
 {
@@ -136,7 +136,7 @@ QVariantMap identityToVariant(const ServerIdentity &identity)
     map.insert(QStringLiteral("fingerprint"),
                identity.fingerprint.isEmpty() ? sha256Fingerprint(identity.publicKey) : identity.fingerprint);
     map.insert(QStringLiteral("pin"), identity.toPin());
-    // XC-16: what to store on acceptance (host_key).
+    // What to store on acceptance (host_key).
     map.insert(QStringLiteral("pinOptions"), pinOptions(identity));
     return map;
 }
@@ -316,7 +316,7 @@ QString InputRules::backupsPathProblem(const QString &provider, const QString &p
     }
     if (provider != QLatin1String(ProviderSmb))
         return QString();
-    // SPEC-smb M-9: rejected before any connection is made.
+    // Rejected before any connection is made.
     for (const QString &component : Paths::components(normalized)) {
         if (!Paths::windowsComponentProblem(component).isEmpty()) {
             //% "\"%1\" cannot be used as a folder name on an SMB server: names must not contain \\ : * ? \" < > | or end in a space or a dot."
@@ -407,7 +407,7 @@ QVariantMap Helpers::creationSettings(const QVariantMap &paramsMap, const QVaria
         enable << name;
     }
     if (services.value(QStringLiteral("files")).toBool()) {
-        // SPEC-v2-review 2.17: files_root is a setting of the files service.
+        // files_root is a setting of the files service.
         const QString name = NetVfs::filesServiceName(params.provider);
         QVariantMap files;
         files.insert(str(Keys::FilesRoot),
@@ -519,4 +519,4 @@ QString Helpers::authModeText(const QString &authMode) const
     return qtTrId("settings-accounts-netvfs-la-auth_password");
 }
 
-} // namespace NetVfsUi
+}

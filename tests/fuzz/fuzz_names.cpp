@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-// SPEC-v2 XT-3: the Names codec (XC-4). For every byte string the codec is
+// the Names codec. For every byte string the codec is
 // lossless: encode(decode(x)) == x. Arbitrary UTF-16 input must never crash.
 //
 // fuzz-sources: src/core/names.cpp
@@ -21,7 +21,7 @@ void require(bool condition)
 void checkBytes(const QByteArray &bytes)
 {
     const QString name = Names::decode(bytes);
-    require(Names::encode(name) == bytes);                 // lossless round trip
+    require(Names::encode(name) == bytes);
     require(Names::isEncodable(name));                     // decode() only produces encodable names
     require(Names::hasEscapes(name) == (Names::display(name) != name));
     require(Names::display(name).size() == name.size());

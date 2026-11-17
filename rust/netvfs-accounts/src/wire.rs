@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! The answer on stdout in the format of a `QDataStream` of version
-//! `Qt_5_6`, which netvfs-bridge's `accounts::qds` reads: big-endian,
-//! strings as UTF-16 with a byte length, a null string as length
+//! The answer on stdout as a `QDataStream` of version `Qt_5_6`, which netvfs-bridge's
+//! `accounts::qds` reads: big-endian, strings UTF-16 with byte length, null string length
 //! `0xffffffff`.
 
 use crate::qvariant::{QString, Value};
@@ -52,7 +51,6 @@ impl Outcome {
     }
 }
 
-/// `QMetaType` ids of Qt 5.
 mod type_id {
     pub const INVALID: u32 = 0;
     pub const BOOL: u32 = 1;
@@ -123,8 +121,7 @@ impl Stream {
         self.bytes.extend_from_slice(&value.to_be_bytes());
     }
 
-    /// A length as Qt writes it: a 32-bit count. Nothing the helper writes
-    /// comes near 4 GiB; a longer one would be cut to what fits.
+    /// Qt's 32-bit count. A longer length is cut.
     fn length(&mut self, n: usize) {
         self.u32(u32::try_from(n).unwrap_or(u32::MAX - 1));
     }
@@ -212,8 +209,8 @@ mod tests {
     #[test]
     fn lengths_beyond_32_bits_are_cut() {
         assert_eq!(bytes(|s| s.length(5)), [0, 0, 0, 5]);
-        // u32::MAX would be a null array or string; the cut stops below it.
-        // Only where a usize can hold 4 GiB.
+        // u32::MAX would be a null array or string; the cut stops below it. Only where usize holds
+        // 4 GiB.
         if let Ok(n) = usize::try_from(1_u64 << 32) {
             assert_eq!(bytes(|s| s.length(n)), [0xff, 0xff, 0xff, 0xfe]);
         }
@@ -252,7 +249,6 @@ mod tests {
         expected.extend([0, 0, 0, 2, 0, b'b', 0, 0, 0, 1, 0, 1]);
         expected.extend([0, 0, 0, 2, 0, b'a', 0, 0, 0, 1, 0, 0]);
         assert_eq!(bytes(|s| s.variant_map(&map)), expected);
-        // A QMap holds a key once.
         let twice = vec![("a".to_owned(), Value::Bool(true)), ("a".to_owned(), Value::Bool(true))];
         assert_eq!(bytes(|s| s.variant_map(&twice))[..4], [0, 0, 0, 1]);
     }

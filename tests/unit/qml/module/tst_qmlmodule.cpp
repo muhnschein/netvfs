@@ -109,7 +109,6 @@ private slots:
 
     void pluginRegistersTypes()
     {
-        // SPEC 7.2: the C++ types of org.netvfs.accounts 1.0, usable from QML.
         QQmlEngine engine;
         engine.addImportPath(BuildDir + QStringLiteral("/qml"));
         QQmlComponent component(&engine);
@@ -227,14 +226,13 @@ private slots:
 
     void platformTypes()
     {
-        // U-1, U-2, R1: only the closed types and members listed in SPEC 7.1.
+        // only the closed types and members listed in
         const QSet<QString> closedTypes {
             QStringLiteral("AccountCreationAgent"), QStringLiteral("AccountSettingsAgent"),
             QStringLiteral("AccountCredentialsAgent"), QStringLiteral("AccountBusyPage"),
             QStringLiteral("StandardAccountSettingsPullDownMenu"), QStringLiteral("AccountCredentialsUpdater")
         };
         const QSet<QString> openTypes {
-            // QtQuick, Silica, Sailfish.Pickers, Sailfish.Accounts
             QStringLiteral("Item"), QStringLiteral("Column"), QStringLiteral("Row"), QStringLiteral("Component"),
             QStringLiteral("Repeater"), QStringLiteral("SilicaListView"), QStringLiteral("ViewPlaceholder"),
             QStringLiteral("QtObject"), QStringLiteral("Dialog"), QStringLiteral("Page"),
@@ -244,7 +242,6 @@ private slots:
             QStringLiteral("TextSwitch"), QStringLiteral("Button"), QStringLiteral("SectionHeader"),
             QStringLiteral("DetailItem"), QStringLiteral("VerticalScrollDecorator"), QStringLiteral("BusyIndicator"),
             QStringLiteral("FilePickerPage"), QStringLiteral("Account"), QStringLiteral("AccountManager"),
-            // org.netvfs.accounts
             QStringLiteral("NetVfsProbe"), QStringLiteral("SshKeyTool"), QStringLiteral("NetVfsAccountSetup"),
             QStringLiteral("NetVfsCreationAgent"), QStringLiteral("NetVfsSettingsAgent"),
             QStringLiteral("NetVfsUpdateAgent"), QStringLiteral("NetVfsSettingsPage"),
@@ -279,7 +276,7 @@ private slots:
             const QSet<QString> own = matches(code, declared);
             for (const QString &member : matches(code, agentUse))
                 QVERIFY2(own.contains(member) || agentMembers.contains(member),
-                         qPrintable(file + QStringLiteral(": agent member outside SPEC 7.1: ") + member));
+                         qPrintable(file + QStringLiteral(": agent member outside the closed set: ") + member));
         }
     }
 
@@ -299,7 +296,6 @@ private slots:
 
     void uiFiles()
     {
-        // SPEC 3.1: /usr/share/accounts/ui/<p>.qml, <p>-settings.qml, <p>-update.qml
         QFETCH(QString, file);
         QFETCH(QString, type);
         QFETCH(QString, provider);
@@ -322,7 +318,6 @@ private slots:
 
     void providerFiles()
     {
-        // SPEC 6.1 and 3.2/3.3: discovery by the Backup page depends on these values.
         QFETCH(QString, provider);
         QFETCH(QString, name);
         const QString providerPath = BuildDir + QStringLiteral("/accounts/providers/") + provider + QStringLiteral(".provider");
@@ -333,9 +328,8 @@ private slots:
         QCOMPARE(p.value(QStringLiteral("provider/name")), name);
         QVERIFY(!p.value(QStringLiteral("provider/description")).isEmpty());
         QCOMPARE(p.value(QStringLiteral("provider/icon")), QStringLiteral("image://theme/graphic-service-") + provider);
-        QVERIFY2(!readFile(providerPath).contains(QStringLiteral("<tag")), "no user-group tag (SPEC 6.1, V2)");
+        QVERIFY2(!readFile(providerPath).contains(QStringLiteral("<tag")), "no user-group tag");
 
-        // SPEC-v2 XA-1: "<p>-files" of type netvfs-files for every provider.
         const QString filesPath = BuildDir + QStringLiteral("/accounts/files-services/services/") + provider
                 + QStringLiteral("-files.service");
         const QMap<QString, QString> f = readXml(filesPath);
@@ -392,7 +386,6 @@ private slots:
 
     void translationsComplete()
     {
-        // Every id used in the UI has an engineering English text in the catalogue.
         QTranslator translator;
         QVERIFY(translator.load(QStringLiteral("netvfs_eng_en"), BuildDir + QStringLiteral("/translations")));
         static const QRegularExpression call(QStringLiteral("q[st]TrId\\(\"([^\"]+)\"\\)"));
@@ -409,7 +402,6 @@ private slots:
         }
         QVERIFY(ids > 50);
 
-        // Descriptor labels (SPEC-v2 XA-5) are looked up at run time.
         QStringList descriptorIds;
         for (const QString &file : filesIn(QStringLiteral("accounts/descriptors"), { QStringLiteral("*.json") }))
             descriptorIds += matches(readFile(file), QRegularExpression(QStringLiteral("\"(settings-accounts-netvfs-[^\"]+)\""))).values();

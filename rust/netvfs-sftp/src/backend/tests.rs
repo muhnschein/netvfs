@@ -94,7 +94,7 @@ fn settings_from_params() {
     );
     assert_eq!((s.username.as_str(), s.auth_mode.as_deref(), s.pin.as_deref()), ("alice", None, None));
     assert_eq!((s.dir_mode, s.target.pinned_type.as_deref()), (DEFAULT_DIR_MODE, None));
-    // Defaults (C-14, S-1).
+    // Defaults.
     let p = Params { port: 0, connect_timeout_ms: 0, request_timeout_ms: -5, ..params(addr) };
     let s = Settings::of(&p).unwrap();
     assert_eq!(s.target.port, 22);
@@ -209,7 +209,7 @@ async fn connect_sign_in_and_work() {
         assert!(caps.has(cap), "{cap:?}");
     }
     assert!(!caps.has(Capability::Checksums) && !caps.has(Capability::ServerCopyRecursive));
-    // Relative paths are relative to the start folder (S-19).
+    // Relative paths are relative to the start folder.
     assert_eq!(sftp.stat(b"", true, &c()).await.unwrap().kind, EntryType::Directory);
     sftp.make_dir(b"Backups", true, &c()).await.unwrap();
     let options = WriteOptions { disposition: Disposition::CreateNew, ..WriteOptions::default() };
@@ -303,7 +303,7 @@ async fn nothing_works_before_sign_in() {
 
 #[tokio::test]
 async fn a_changed_key_gets_no_credentials() {
-    // SEC-1, S-7: even a caller that skips the identity check.
+    // Even a caller that skips the identity check.
     let server = Server::start(Script::password()).await;
     let mut sftp = Sftp::new();
     let p = with_option(

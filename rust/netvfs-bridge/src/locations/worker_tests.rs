@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-// The worker (port of worker.cpp, design §3.3) over the fake backend.
 #![allow(clippy::assertions_on_result_states, clippy::arithmetic_side_effects)]
 
 use super::{
@@ -15,7 +14,6 @@ fn worker(mock: &Arc<Mock>) -> Worker<Mock> {
     Worker::start(Arc::clone(mock), spec("account:1", "h"), Lane::Bulk, Arc::default()).unwrap()
 }
 
-/// A worker whose pool's tracker and signal the test sees.
 fn tracked(mock: &Arc<Mock>) -> (Worker<Mock>, Arc<StateTracker>, StateSignal) {
     let signal = StateSignal::default();
     let tracker = StateTracker::new(signal.clone());
@@ -54,7 +52,7 @@ fn lazy_connection_in_order_and_reset_after_each_item() {
     let w = worker(&mock);
     assert_eq!(w.lane(), Lane::Bulk);
     assert!(w.idle_since().is_some());
-    assert_eq!(mock.count("create"), 0); // nothing until the first item
+    assert_eq!(mock.count("create"), 0);
     let (tx, rx) = mpsc::channel();
     for _ in 0..3 {
         w.post(task(), reporting(&tx, Ok(())));
@@ -72,7 +70,6 @@ fn which_results_drop_the_connection() {
     let mock = Mock::new();
     let w = worker(&mock);
     let (tx, rx) = mpsc::channel();
-    // A failure of the operation itself keeps the connection.
     w.post(task(), reporting(&tx, Err(status(ErrorName::NotFound))));
     assert_eq!(recv(&rx), Seen::Conn(1));
     let drops =
@@ -86,7 +83,7 @@ fn which_results_drop_the_connection() {
     assert_eq!(recv(&rx), Seen::Conn(5));
     wait_idle(&w);
     assert_eq!(mock.count("create"), 5);
-    assert_eq!(mock.count("reset 1"), 1); // only after NotFound
+    assert_eq!(mock.count("reset 1"), 1);
     assert_eq!(mock.count("reset 5"), 1);
     assert_eq!(mock.live(), 1);
     assert!(drops_connection(&Err(status(ErrorName::Timeout))));
@@ -124,7 +121,6 @@ fn canceled_while_queued_never_connects() {
     assert_eq!(recv(&rx), Seen::Failed(ErrorName::Canceled));
     wait_idle(&w);
     assert_eq!(mock.count("create"), 0);
-    // The handles are there for such an item too.
     let (htx, hrx) = mpsc::channel();
     let t = task();
     t.cancel.store(true, Ordering::Release);
@@ -148,7 +144,6 @@ fn establish_and_create_failures_reach_the_item() {
     mock.fail_create(status(ErrorName::Unsupported));
     w.post(task(), reporting(&tx, Ok(())));
     assert_eq!(recv(&rx), Seen::Failed(ErrorName::Unsupported));
-    // The next item connects anew.
     w.post(task(), reporting(&tx, Ok(())));
     assert_eq!(recv(&rx), Seen::Conn(2));
     wait_idle(&w);
@@ -172,14 +167,13 @@ fn stop_cancels_the_running_item_and_drains_the_queue() {
     assert!(w.idle_since().is_none());
     assert!(!w.finished());
     w.stop();
-    assert!(flag.load(Ordering::Acquire)); // the request is canceled
+    assert!(flag.load(Ordering::Acquire));
     assert_eq!(recv(&rx), Seen::Failed(ErrorName::Canceled));
     assert_eq!(recv(&rx), Seen::Failed(ErrorName::Canceled));
     wait_finished(&w);
     assert_eq!(mock.count("cancel 1"), 1);
     assert_eq!(mock.count("free 1"), 1);
     assert_eq!(mock.count("create"), 1);
-    // Posted after the stop: never lost; it ends with the worker.
     w.post(task(), reporting(&tx, Ok(())));
     assert_eq!(w.load(), 1);
     drop(w);
@@ -219,7 +213,6 @@ fn a_connection_created_for_a_canceled_request_is_canceled_at_once() {
     let establish = log.iter().position(|l| l == "establish 1 s0").expect("established");
     assert!(cancel < establish, "{log:?}");
     wait_idle(&w);
-    // The same for a worker that is stopping.
     let mock = Mock::new();
     let w2 = worker(&mock);
     mock.hold_create(true);
@@ -227,7 +220,6 @@ fn a_connection_created_for_a_canceled_request_is_canceled_at_once() {
     mock.wait_for("creating", 1);
     w2.stop();
     mock.hold_create(false);
-    // The item taken before the stop connects, canceled at once.
     assert_eq!(recv(&rx), Seen::Conn(1));
     wait_finished(&w2);
     let log = mock.log();
@@ -240,7 +232,7 @@ fn a_connection_created_for_a_canceled_request_is_canceled_at_once() {
 fn kick_cancels_only_a_canceled_running_item() {
     let mock = Mock::new();
     let w = worker(&mock);
-    w.kick(); // nothing running, no connection
+    w.kick();
     let (tx, rx) = mpsc::channel();
     let (go, wait) = mpsc::channel();
     let running = task();
@@ -255,7 +247,6 @@ fn kick_cancels_only_a_canceled_running_item() {
     wait_idle(&w);
     assert_eq!(mock.count("free 1"), 1);
     drop(go);
-    // With a connection but no canceled item, kick does nothing.
     let (go, wait) = mpsc::channel();
     w.post(task(), blocking(&tx, wait, Ok(())));
     assert_eq!(recv(&rx), Seen::Conn(2));
@@ -284,7 +275,6 @@ fn handles_live_with_their_connection() {
     wait_idle(&w);
     assert_eq!(w.open_handles(), 2);
     let since = w.idle_since().unwrap();
-    // A failure that drops the connection closes the handles first.
     w.post(task(), reporting(&tx, Err(status(ErrorName::ConnectionLost))));
     assert_eq!(recv(&rx), Seen::Conn(1));
     mock.wait_for("free 1", 1);
@@ -312,7 +302,7 @@ fn handles_table() {
     assert_eq!(handles.remove(1), None);
     assert_eq!(count.load(Ordering::Acquire), 1);
     assert!(!handles.is_empty());
-    assert_eq!(handles.add("c"), 3); // numbers are not reused
+    assert_eq!(handles.add("c"), 3);
     handles.clear();
     assert_eq!((handles.len(), count.load(Ordering::Acquire)), (0, 0));
     assert!(format!("{handles:?}").contains("next: 4"));
@@ -343,34 +333,28 @@ fn the_phase_follows_the_connection_and_is_signalled() {
     let (w, tracker, signal) = tracked(&mock);
     assert_eq!(w.phase(), Phase::Closed);
     assert!(!signal.take());
-    // Connecting while it is established.
     let (tx, rx) = mpsc::channel();
     mock.hold_establish(true);
     w.post(task(), reporting(&tx, Ok(())));
     mock.wait_for("establish 1", 1);
     assert_eq!(w.phase(), Phase::Connecting);
     assert!(signal.take());
-    // Established before the item runs.
     mock.hold_establish(false);
     assert_eq!(recv(&rx), Seen::Conn(1));
     assert_eq!(w.phase(), Phase::Established);
     assert!(signal.take());
-    // Work on the connection, also work that fails, changes nothing.
     w.post(task(), reporting(&tx, Err(status(ErrorName::NotFound))));
     w.post(task(), reporting(&tx, Ok(())));
     assert_eq!([recv(&rx), recv(&rx)], [Seen::Conn(1), Seen::Conn(1)]);
     wait_idle(&w);
     assert_eq!(w.phase(), Phase::Established);
     assert!(!signal.take(), "no change, no signal");
-    // A result that drops the connection closes it.
     w.post(task(), reporting(&tx, Err(status(ErrorName::ConnectionLost))));
     assert_eq!(recv(&rx), Seen::Conn(1));
     wait_phase(&w, Phase::Closed);
     assert_eq!(mock.count("free 1"), 1);
     assert!(signal.take());
-    // A lost connection is no failed attempt.
     assert_eq!(tracker.failure(), None);
-    // So does the end of the thread.
     w.post(task(), reporting(&tx, Ok(())));
     assert_eq!(recv(&rx), Seen::Conn(2));
     assert!(signal.take());
@@ -386,22 +370,18 @@ fn a_failed_attempt_is_recorded_until_one_succeeds() {
     let mock = Mock::new();
     let (w, tracker, signal) = tracked(&mock);
     let (tx, rx) = mpsc::channel();
-    // Recorded before the item sees the failure, the phase closed.
     mock.fail_establish(status(ErrorName::AuthFailed));
     w.post(task(), reporting(&tx, Ok(())));
     assert_eq!(recv(&rx), Seen::Failed(ErrorName::AuthFailed));
     assert_eq!((tracker.failure(), w.phase()), (Some(ErrorName::AuthFailed), Phase::Closed));
     assert!(signal.take());
-    // A connection that cannot even be made is a failed attempt too.
     mock.fail_create(status(ErrorName::Unsupported));
     w.post(task(), reporting(&tx, Ok(())));
     assert_eq!(recv(&rx), Seen::Failed(ErrorName::Unsupported));
     assert_eq!((tracker.failure(), w.phase()), (Some(ErrorName::Unsupported), Phase::Closed));
-    // The next attempt that succeeds clears it.
     w.post(task(), reporting(&tx, Ok(())));
     assert_eq!(recv(&rx), Seen::Conn(2));
     assert_eq!((tracker.failure(), w.phase()), (None, Phase::Established));
-    // Items on the established connection make no attempt.
     tracker.failed(ErrorName::Timeout);
     w.post(task(), reporting(&tx, Err(status(ErrorName::AuthFailed))));
     assert_eq!(recv(&rx), Seen::Conn(2));
@@ -413,15 +393,12 @@ fn a_failed_attempt_is_recorded_until_one_succeeds() {
 fn a_canceled_attempt_is_no_failure() {
     let mock = Mock::new();
     let (w, tracker, _signal) = tracked(&mock);
-    // An earlier failure stays what the location shows.
     tracker.failed(ErrorName::NetworkUnreachable);
     let (tx, rx) = mpsc::channel();
-    // The backend says Canceled.
     mock.fail_establish(status(ErrorName::Canceled));
     w.post(task(), reporting(&tx, Ok(())));
     assert_eq!(recv(&rx), Seen::Failed(ErrorName::Canceled));
     assert_eq!(tracker.failure(), Some(ErrorName::NetworkUnreachable));
-    // The request was canceled while the backend failed otherwise.
     mock.hold_establish(true);
     let t = task();
     let flag = Arc::clone(&t.cancel);
@@ -432,7 +409,6 @@ fn a_canceled_attempt_is_no_failure() {
     mock.hold_establish(false);
     assert_eq!(recv(&rx), Seen::Failed(ErrorName::Timeout));
     assert_eq!(tracker.failure(), Some(ErrorName::NetworkUnreachable));
-    // Stopped while establishing (Disconnect, an idle close).
     mock.hold_establish(true);
     w.post(task(), reporting(&tx, Ok(())));
     mock.wait_for("establish 3", 1);

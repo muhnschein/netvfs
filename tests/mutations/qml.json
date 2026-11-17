@@ -58,8 +58,8 @@
   {
     "name": "SMB folder names not checked (M-9)",
     "file": "src/qml/netvfshelpers.cpp",
-    "search": "    if (provider != QLatin1String(ProviderSmb))\n        return QString();\n    // SPEC-smb M-9",
-    "replace": "    if (!provider.isNull())\n        return QString();\n    // SPEC-smb M-9",
+    "search": "    if (provider != QLatin1String(ProviderSmb))\n        return QString();",
+    "replace": "    if (!provider.isNull())\n        return QString();",
     "test": "build/tests/unit/qml/helpers/tst_qmlhelpers"
   },
   {

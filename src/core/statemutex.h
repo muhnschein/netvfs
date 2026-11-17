@@ -4,10 +4,8 @@
 
 #include <mutex>
 
-// Internal to the core library (not installed): the mutex of a shared state
-// object. It only hands out locks, so no other access to it is possible and
-// the state's fields can stay plain data. std::mutex rather than QMutex for
-// the reason given in boundedpipe.cpp (ThreadSanitizer).
+// Internal. Mutex of a shared state object; only hands out locks, so fields stay plain data.
+// std::mutex for the TSan reason in boundedpipe.cpp.
 namespace NetVfs {
 
 class StateMutex
@@ -19,6 +17,5 @@ private:
     mutable std::mutex m_mutex;
 };
 
-} // namespace NetVfs
-
+}
 #endif

@@ -42,7 +42,6 @@ void sleepChunk(int delayMs)
 
 } // namespace
 
-// --- FakeServer --------------------------------------------------------------
 
 FakeServer *FakeServer::instance()
 {
@@ -192,7 +191,6 @@ Result FakeServer::resolve(const QString &path, bool followLast, QString *resolv
             pending = target + pending;
         }
         current.clear();
-        // ".." in targets: collapse against what was walked so far.
         QStringList collapsed;
         for (const QString &part : pending) {
             if (part != QLatin1String("..") && part != QLatin1String("."))
@@ -211,7 +209,6 @@ Result FakeServer::resolve(const QString &path, bool followLast, QString *resolv
     return Result::success();
 }
 
-// --- handles -----------------------------------------------------------------
 
 class FakeBackend::Reader : public ReadHandle
 {
@@ -339,7 +336,6 @@ private:
     bool m_done = false;
 };
 
-// --- FakeBackend -------------------------------------------------------------
 
 FakeBackend::FakeBackend(FakeServer *server)
     : m_server(server)
@@ -461,7 +457,7 @@ Result FakeBackend::authenticate(const Credentials &credentials, AuthPrompter *p
         otp = m_server->otp;
     }
     if (!otp.isEmpty()) {
-        // XC-15: a second factor, only with a prompter.
+        // a second factor, only with a prompter.
         QVector<QByteArray> answers;
         AuthPrompt prompt;
         prompt.text = QStringLiteral("Verification code: ");
@@ -701,7 +697,6 @@ Result FakeBackend::rename(const QString &from, const QString &to, RenameMode mo
     if (!parent.isEmpty() && !m_server->nodes.value(parent).isDir())
         return m_server->nodes.contains(parent) ? Result(Error::NotADirectory, parent) : notFound(parent);
     if (target.isEmpty() || m_server->nodes.contains(target)) {
-        // XC-10: replacing a folder is AlreadyExists in both modes.
         if (target.isEmpty() || m_server->nodes.value(target).isDir() || mode == RenameMode::NoReplace)
             return Result(Error::AlreadyExists, QStringLiteral("%1 exists").arg(t));
         if (m_server->nodes.value(source).isDir())
@@ -723,7 +718,7 @@ Result FakeBackend::setAttributes(const QString &path, const AttributeChanges &c
     Result r = key(path, &k);
     if (r.ok())
         r = begin(QStringLiteral("setAttributes:") + k);
-    // XC-11: every field is checked before anything changes.
+    // every field is checked before anything changes.
     if (r.ok() && changes.mode >= 0 && !has(Capability::PosixModes))
         r = unsupported("Changing modes");
     if (r.ok() && (changes.modified.isValid() || changes.accessed.isValid()) && !has(Capability::SetModified))
@@ -856,11 +851,11 @@ Result FakeBackend::prepareWrite(const QString &key, const WriteOptions &options
 {
     Result r = m_server->resolve(key, true, resolved);
     if (r.error() == Error::NotFound)
-        r = m_server->resolve(key, false, resolved);   // a new file
+        r = m_server->resolve(key, false, resolved);
     if (!r.ok())
         return r;
     if (m_server->nodes.value(*resolved).type == EntryType::Symlink)
-        return notFound(key);                           // a dangling link
+        return notFound(key);
     const QString parent = Paths::parent(*resolved);
     if (!parent.isEmpty() && !m_server->nodes.value(parent).isDir())
         return m_server->nodes.contains(parent) ? Result(Error::NotADirectory, parent) : notFound(parent);

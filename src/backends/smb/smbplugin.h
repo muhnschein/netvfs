@@ -8,9 +8,7 @@
 
 namespace NetVfs {
 
-// Root object of libnetvfs-smb.so: provider "smb" of libnetvfs-rs.so through
-// the shim. (A single-level namespace: Qt 5.6 moc cannot parse C++17 nested
-// namespace definitions.)
+// Single-level namespace: Qt 5.6 moc cannot parse C++17 nested namespace definitions.
 class SmbBackendFactory : public QObject, public BackendFactory
 {
     Q_OBJECT
@@ -22,6 +20,5 @@ public:
     Result create(Backend **out) override;
 };
 
-} // namespace NetVfs
-
+}
 #endif

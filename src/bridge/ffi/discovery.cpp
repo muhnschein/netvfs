@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-// Discovery of nearby servers (XD-5), on the Qt thread only (T3). The caller
-// decides when it runs and how often it reports (the C++ bridge's
-// NearbyService in serverparts.cpp); this part reports every change.
+// Discovery of nearby servers, Qt thread only. The caller decides when it runs and how often it
+// reports; this part reports every change.
 #include "ffi_p.h"
 
 #include "discovery.h"
@@ -10,7 +9,7 @@ struct nvb_discovery {
     nvb_discovery_hooks hooks {};
     std::unique_ptr<NetVfs::Discovery> discovery;
     bool running = false;
-    bool open = false;               // start() opened a socket
+    bool open = false;
 };
 
 namespace NetVfs::Ffi {
@@ -35,8 +34,7 @@ void report(const nvb_discovery *d)
     d->hooks.changed(d->hooks.ctx, items.data(), items.size());
 }
 
-} // namespace
-
+}
 nvb_discovery *discoveryNew(const nvb_discovery_hooks *hooks) noexcept
 {
     return guardedValue<nvb_discovery *>(nullptr, [hooks]() {
@@ -54,8 +52,7 @@ nvb_discovery *discoveryNew(const nvb_discovery_hooks *hooks) noexcept
     });
 }
 
-// Idempotent: Discovery::start()/stop() are reference counted, this holds at
-// most one reference.
+// Idempotent: Discovery::start()/stop() are reference counted, this holds at most one reference.
 int32_t discoverySetRunning(nvb_discovery *d, int32_t on) noexcept
 {
     return guardedValue<int32_t>(0, [d, on]() {
@@ -82,4 +79,4 @@ void discoveryFree(nvb_discovery *d) noexcept
     });
 }
 
-} // namespace NetVfs::Ffi
+}

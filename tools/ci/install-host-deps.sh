@@ -1,11 +1,8 @@
 #!/bin/sh
-# Host packages for building and testing on Ubuntu 24.04 (CI runners, dev boxes),
-# the Rust toolchain that rust/rust-toolchain.toml pins (with clippy,
-# rustfmt and the llvm-tools for coverage). libc6-i386 and
-# qemu-user-static are for the cross build (tools/ci/lift-sdk.sh: the SDK's
-# compilers are i486 binaries; the smoke run uses qemu).
-# CI runner: through apt-install.sh (third-party lists dropped, fastest
-# mirror, stall cut off). Dev box: plain apt-get, its lists untouched.
+# Host packages for building and testing on Ubuntu 24.04 (CI runners, dev boxes), the Rust toolchain pinned by
+# rust/rust-toolchain.toml (clippy, rustfmt, llvm-tools for coverage). libc6-i386 and qemu-user-static are for the
+# cross build (lift-sdk.sh: SDK compilers are i486 binaries; smoke run uses qemu).
+# CI runner: via apt-install.sh. Dev box: plain apt-get, lists untouched.
 set -eu
 here=$(cd "$(dirname "$0")" && pwd)
 if [ "${GITHUB_ACTIONS:-}" = true ]; then

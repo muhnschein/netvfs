@@ -2,7 +2,7 @@
 # Engineering English for the account UI: lupdate collects the qsTrId()/
 # qtTrId() ids and //% texts from the QML module, its C++ plugin and the
 # account UI files; lrelease -idbased writes netvfs_eng_en.qm, which the
-# org.netvfs.accounts plugin loads (installed with the core package, SPEC 4.1).
+# org.netvfs.accounts plugin loads (installed with the core package).
 # Translations for other languages go to netvfs-<locale>.qm next to it.
 TEMPLATE = aux
 

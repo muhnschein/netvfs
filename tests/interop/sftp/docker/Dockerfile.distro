@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: LGPL-2.1-or-later
 # The OpenSSH server of a distribution release (ubuntu:24.04 → 9.6p1,
 # ubuntu:22.04 → 8.9p1), with PAM and the one-time password stub module
-# (pam_netvfs_otp.c) for the keyboard-interactive cases (SPEC-v2 XT-2).
+# (pam_netvfs_otp.c) for the keyboard-interactive cases.
 ARG BASE=mirror.gcr.io/library/ubuntu:24.04
 FROM ${BASE} AS pam
 RUN apt-get update \

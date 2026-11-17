@@ -1,0 +1,7 @@
+# Default Rust suite, stock rust/hard-coded-cryptographic-value swapped for ours
+# (same id: alerts keep their history).
+- import: codeql-suites/rust-code-scanning.qls
+  from: codeql/rust-queries
+- exclude:
+    id: rust/hard-coded-cryptographic-value
+- query: HardcodedCryptographicValue.ql

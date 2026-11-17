@@ -1,8 +1,5 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! Namespace operations on a tree, each one round trip where a compound
-//! chain allows it (design §5.1): CREATE with the related requests and the
-//! CLOSE in one chain. Paths are UTF-16 from the share root
-//! ([`crate::names::smb_path`]).
+//! Namespace operations on a tree, one round trip where a compound chain allows: CREATE with the related requests and the CLOSE in one chain. Paths are UTF-16 from the share root ([`crate::names::smb_path`]).
 
 use netvfs_vfs::{CancelToken, Entry, EntryFlags, EntryType, ErrorName, ListSink, SpaceInfo, Status};
 
@@ -51,7 +48,7 @@ impl Info {
     #[must_use]
     pub fn entry(&self, name: Vec<u8>) -> Entry {
         let a = self.attributes;
-        // XM-4: a reparse point is reported as a link.
+        // A reparse point is reported as a link.
         let kind = if a & attributes::REPARSE_POINT != 0 {
             EntryType::Symlink
         } else if a & attributes::DIRECTORY != 0 {
@@ -137,8 +134,7 @@ pub async fn stat(conn: &Conn, target: Target, path: &[u16], cancel: &CancelToke
     Ok(Info::of(&created(&responses)?))
 }
 
-/// XC-8: a folder; an existing one is `AlreadyExists` with `exclusive`,
-/// success without it (a file of that name is `AlreadyExists`).
+/// A folder; an existing one is `AlreadyExists` with `exclusive`, success without it (a file of that name is `AlreadyExists`).
 ///
 /// # Errors
 /// As described, the server's refusal, the connection's failures.
@@ -162,7 +158,7 @@ pub async fn make_dir(
     let responses = conn.compound(target, chain, cancel).await?;
     match created(&responses) {
         Err(Error::Status(NtStatus::OBJECT_NAME_COLLISION)) if !exclusive => {
-            // XC-8: an existing folder is success (also one made concurrently).
+            // An existing folder is success (also one made concurrently).
             if stat(conn, target, path, cancel).await?.is_dir() {
                 Ok(())
             } else {
@@ -196,7 +192,7 @@ async fn delete(conn: &Conn, target: Target, path: &[u16], options: u32, cancel:
     chain_ok(&conn.compound(target, chain, cancel).await?)
 }
 
-/// XC-9: a file; a folder is `IsADirectory`.
+/// A file; a folder is `IsADirectory`.
 ///
 /// # Errors
 /// As described, the server's refusal, the connection's failures.
@@ -209,8 +205,7 @@ pub async fn remove_file(conn: &Conn, target: Target, path: &[u16], cancel: &Can
     }
 }
 
-/// XC-9: an empty folder; a non-empty one is `DirectoryNotEmpty`, a file
-/// `NotADirectory`.
+/// An empty folder; a non-empty one is `DirectoryNotEmpty`, a file `NotADirectory`.
 ///
 /// # Errors
 /// As described, the server's refusal, the connection's failures.
@@ -221,8 +216,7 @@ pub async fn remove_dir(conn: &Conn, target: Target, path: &[u16], cancel: &Canc
         }
         other => other?,
     }
-    // A server may accept the delete disposition of a folder that is not
-    // empty and keep it: it must be gone afterwards.
+    // A server may accept the delete disposition of a non-empty folder and keep it: it must be gone afterwards.
     match stat(conn, target, path, cancel).await {
         Ok(_) => Err(local(ErrorName::DirectoryNotEmpty, "remove folder: the folder is not empty")),
         Err(Error::Status(NtStatus::OBJECT_NAME_NOT_FOUND | NtStatus::OBJECT_PATH_NOT_FOUND)) => Ok(()),
@@ -230,9 +224,7 @@ pub async fn remove_dir(conn: &Conn, target: Target, path: &[u16], cancel: &Canc
     }
 }
 
-/// XC-10: `from` to `to` on one tree. Without `replace` the server refuses
-/// an existing target (NativeNoReplace); with it, a file is replaced
-/// atomically (ReplaceIfExists, AtomicReplace) and a folder is never.
+/// `from` to `to` on one tree. Without `replace` the server refuses an existing target (NativeNoReplace); with it a file is replaced atomically (ReplaceIfExists, AtomicReplace), a folder never.
 ///
 /// # Errors
 /// As described, the server's refusal, the connection's failures.
@@ -296,7 +288,7 @@ pub async fn set_times(
     chain_ok(&conn.compound(target, chain, cancel).await?)
 }
 
-/// XC-19, XM-8: FileFsFullSizeInformation of the volume `path` is on.
+/// FileFsFullSizeInformation of the volume `path` is on.
 ///
 /// # Errors
 /// The server's refusal, the connection's failures.
@@ -326,9 +318,7 @@ pub async fn space_info(
     })
 }
 
-/// XC-6: the entries of the folder `path` in batches of `batch` (names that
-/// are no entry of it left out: [`is_entry_name`]); `false` from the sink
-/// stops with `Canceled`.
+/// The entries of the folder `path` in batches of `batch` (names that are no entry of it left out: [`is_entry_name`]); `false` from the sink stops with `Canceled`.
 ///
 /// # Errors
 /// A file is `NotADirectory`; the server's refusal, the connection's
@@ -362,8 +352,7 @@ pub async fn list(
         }
         Err(e) => return Err(e),
     };
-    // Closed however the listing ends, also when the call is dropped. The
-    // answer changes nothing; the next request on the tree comes after it.
+    // Closed however the listing ends, also when the call is dropped.
     let _open = Opened { conn, target, file_id: dir.file_id };
     let first = responses.into_iter().nth(1).ok_or_else(|| crate::error::protocol("short chain"))?;
     deliver(conn, target, &dir.file_id, first, batch.max(1), sink, cancel).await
@@ -397,8 +386,6 @@ async fn deliver(
         if response.expect(&[NtStatus::NO_MORE_FILES])? == NtStatus::NO_MORE_FILES {
             break;
         }
-        // A name that is no entry of this folder is left out; the rest of
-        // the listing stays.
         let entries = file::query_directory_response(&response.msg, DIR_BUFFER)?;
         for d in entries.iter().filter(|d| is_entry_name(&d.name)) {
             pending.push(dir_entry(d));

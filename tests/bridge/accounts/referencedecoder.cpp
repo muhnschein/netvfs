@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-// The C++ bridge's side of the netvfs-accounts protocol (XB-2a): the
+// The C++ bridge's side of the netvfs-accounts protocol: the
 // reference decoder of the golden tests.
 #include "referencedecoder.h"
 
@@ -28,7 +28,6 @@ Result malformed()
     return Result(Error::ProtocolError, QStringLiteral("netvfs-accounts gave a malformed answer"));
 }
 
-// Reads the header; the helper's result, with `stream` at the payload.
 Result readHeader(QDataStream &stream)
 {
     stream.setVersion(StreamVersion);

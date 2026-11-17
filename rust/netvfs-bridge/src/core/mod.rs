@@ -1,27 +1,5 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! The core of the bridge (design §3.3): one task on the runtime thread that
-//! owns all bridge state, without locks, fed by one channel of [`Event`]s:
-//! what the socket front reports ([`server::Event`]), what workers and copy
-//! jobs report ([`WorkerEvent`]), the results of work items, consent file
-//! changes, prompt answers, account changes, discovery results, changes of
-//! connection states and of the drives, and its own timers (idle exit,
-//! maintenance, the nearby report, the look at the connection states). The
-//! port of `BridgeServer` and the bookkeeping half of `Session`
-//! (session.cpp, sessionfiles.cpp, sessionjobs.cpp).
-//!
-//! - [`admin`]: Hello, consent (XB-6), features (XB-19), locations, ad-hoc
-//!   locations, discovery, Cancel, questions, the settings handoff.
-//! - `drives`: ListDrives, Mount, Unmount, DrivesChanged (XB-20).
-//! - `files`: listing, metadata, namespace operations, read handles.
-//! - `jobs`: Upload, Download (XB-11), Walk, RemoveTree, CopyAcross.
-//! - [`quota`] (XB-17), [`questions`] (the broker), [`nearby`] (XD-5),
-//!   [`states`] (`LocationsChanged` for connection states, XB-12).
-//!
-//! Work runs on the workers of [`locations`](crate::locations); the bodies
-//! of streamed work are [`jobs`](crate::jobs). A work item reports its
-//! result to the core as an event; the core then gives the request or job
-//! slot back and replies, or signals the outcome, to its session if it is
-//! still there.
+//! Bridge core: one task on the runtime thread owning all bridge state, lock-free, fed by one channel of [`Event`]s.
 
 mod admin;
 mod drives;
@@ -80,18 +58,18 @@ use tokio::time::Instant;
 /// How often idle connections are closed and finished ones reaped.
 pub const MAINTENANCE_INTERVAL: Duration = Duration::from_secs(5);
 
-/// What the bridge of one consumer runs with (`BridgeConfig`).
+/// What the bridge of one consumer runs with.
 #[derive(Debug, Clone)]
 pub struct Config {
-    /// The consumer (XB-3).
+    /// The consumer.
     pub consumer: ConsumerInfo,
-    /// `bridge.conf` (XB-6).
+    /// `bridge.conf`.
     pub consent_file: PathBuf,
-    /// The consumer's known_hosts (XB-14).
+    /// The consumer's known_hosts.
     pub known_hosts_file: PathBuf,
-    /// `handoff.conf` (XB-15).
+    /// `handoff.conf`.
     pub handoff_config: PathBuf,
-    /// The idle exit (XB-2).
+    /// The idle exit.
     pub idle_exit: Duration,
     /// Pooled connections without work are closed after this.
     pub connection_idle: Duration,
@@ -144,16 +122,15 @@ impl<A: AccountDirectory> Directory for A {
 
 /// What the core talks to besides the backends, made on the runtime thread.
 pub struct Services {
-    /// The accounts (XB-2a).
+    /// The accounts.
     pub accounts: Rc<dyn Directory>,
-    /// The consent question (XB-6); its answers go to [`CoreLink::prompt`].
+    /// The consent question.
     pub prompt: Box<dyn ConsentPrompt>,
-    /// The discovery of nearby servers (XD-5).
+    /// The discovery of nearby servers.
     pub nearby: Box<dyn NearbySource>,
-    /// Sends the settings handoff calls (XB-15).
+    /// Sends the settings handoff calls.
     pub launcher: Box<dyn Launcher>,
-    /// The memory cards and USB drives (XB-20); their changes go to
-    /// [`CoreLink::drives_changed`].
+    /// The memory cards and USB drives.
     pub drives: Rc<dyn DriveSource>,
 }
 
@@ -163,13 +140,10 @@ impl fmt::Debug for Services {
     }
 }
 
-/// Makes the [`Services`] on the runtime thread, once the core's channel
-/// exists ([`CoreLink`]).
+/// Makes the [`Services`] on the runtime thread, once the core's channel exists ([`CoreLink`]).
 pub type MakeServices = Box<dyn FnOnce(CoreLink) -> LocalFuture<'static, Services> + Send>;
 
-/// Parses the `ConnectAdHoc` URLs it knows (`None`: the C ABI's
-/// `Url::parse` does): ad-hoc locations of the fake backend in tests, which
-/// has no URL scheme of its own.
+/// Parses `ConnectAdHoc` URLs; `None` falls through to the C ABI.
 pub type UrlOverride = Arc<dyn Fn(&str) -> Option<ParsedUrl> + Send + Sync>;
 
 /// The injectable dependencies of [`serve`](crate::serve).
@@ -180,7 +154,7 @@ pub struct Deps {
     pub listen: ListenAddress,
     /// The accounts, the prompt, the discovery and the handoff launcher.
     pub services: MakeServices,
-    /// URLs parsed before the C ABI sees them; `None` in the bridge.
+    /// URLs parsed before the C ABI sees them.
     pub url_override: Option<UrlOverride>,
 }
 
@@ -195,9 +169,7 @@ impl fmt::Debug for Deps {
 }
 
 impl Deps {
-    /// The bridge's own: the accounts helper of `env`, the notification
-    /// prompt, account changes and the handoff on the session bus, the
-    /// C++ discovery, and UDisks2 on the system bus.
+    /// The bridge's own.
     #[must_use]
     pub fn system(ffi: Ffi, listen: ListenAddress, env: &Env) -> Self {
         let helper = env.accounts_helper();
@@ -206,7 +178,6 @@ impl Deps {
     }
 }
 
-/// The session bus, if there is one.
 async fn session_bus() -> Option<zbus::Connection> {
     zbus::Connection::session()
         .await
@@ -245,10 +216,9 @@ async fn system_services(ffi: Ffi, helper: PathBuf, link: CoreLink) -> Services 
 pub struct Counters {
     /// Connected sessions.
     pub sessions: usize,
-    /// Requests in flight (XB-17).
+    /// Requests in flight.
     pub requests: usize,
-    /// Calls, `List` requests and jobs the sessions still track (their
-    /// cancel flags and reply slots).
+    /// Calls, `List` requests and jobs the sessions still track (their cancel flags and reply slots).
     pub ops: usize,
     /// Open read handles.
     pub handles: usize,
@@ -264,50 +234,29 @@ pub struct Counters {
     pub discovering: bool,
 }
 
-/// What the core receives.
 #[derive(Debug)]
 pub(crate) enum Event {
-    /// From the socket front.
     Server(server::Event),
-    /// From a worker or copy job.
     Worker(WorkerEvent),
-    /// A request's work ended.
     Done { sid: SessionId, op: u64, result: Result<Reply, Status> },
-    /// The first connection of an ad-hoc location ended its attempt.
     AdHocDone { sid: SessionId, op: u64, loc: String, result: Result<(), Status> },
-    /// A `List` ended.
     ListDone { sid: SessionId, request: u32, result: Result<(), Status> },
-    /// An `OpenRead` ended: the worker, its handle number and the size.
     Opened { sid: SessionId, op: u64, loc: String, opened: Result<(WorkerId, u32, i64), Status> },
-    /// Progress of a job.
     Progress { sid: SessionId, job: u32, done: i64, total: i64 },
-    /// A job ended.
     JobFinished { sid: SessionId, job: u32, outcome: JobOutcome },
-    /// `bridge.conf` may have changed.
     ConsentFile,
-    /// The answer to the prompt was stored.
     ConsentStored(Consent),
-    /// The prompt was answered or dismissed.
     Prompt(PromptEvent),
-    /// The accounts may have changed.
     AccountsChanged,
-    /// The accounts, as listed for request `generation`.
     AccountsListed { generation: u64, accounts: Vec<AccountLocation> },
-    /// The nearby servers changed.
     Nearby(Vec<WireNearby>),
-    /// A connection state of a location may have changed.
     ConnectionStates,
-    /// What `ListDrives` lists changed.
     DrivesChanged,
-    /// Counters for tests.
     Probe(oneshot::Sender<Counters>),
-    /// Stop serving (tests).
     Shutdown,
 }
 
-/// A way into the core from anywhere: what the [`Services`] report, and
-/// test controls. Cheap to clone; calls after the core has stopped do
-/// nothing (and say so).
+/// A way into the core from anywhere.
 #[derive(Clone)]
 pub struct CoreLink(mpsc::UnboundedSender<Event>);
 
@@ -328,7 +277,7 @@ impl CoreLink {
         self.send(Event::Prompt(event))
     }
 
-    /// The accounts may have changed: list them again.
+    /// The accounts may have changed.
     #[must_use = "false: the core has stopped"]
     pub fn accounts_changed(&self) -> bool {
         self.send(Event::AccountsChanged)
@@ -340,19 +289,19 @@ impl CoreLink {
         self.send(Event::Nearby(services))
     }
 
-    /// What `ListDrives` lists changed: `DrivesChanged` to every session.
+    /// What `ListDrives` lists changed.
     #[must_use = "false: the core has stopped"]
     pub fn drives_changed(&self) -> bool {
         self.send(Event::DrivesChanged)
     }
 
-    /// Stops serving: [`serve`](crate::serve) returns success.
+    /// Stops serving.
     #[must_use = "false: the core has stopped"]
     pub fn shutdown(&self) -> bool {
         self.send(Event::Shutdown)
     }
 
-    /// The core's counters; `None` when it has stopped.
+    /// The core's counters.
     pub async fn probe(&self) -> Option<Counters> {
         let (tx, rx) = oneshot::channel();
         if !self.send(Event::Probe(tx)) {
@@ -362,14 +311,11 @@ impl CoreLink {
     }
 }
 
-/// What a session's call is waiting for.
 struct Op {
-    /// The answer slot; `None` for `List` and jobs (answered at once).
     reply: Option<ReplyTo>,
     cancel: CancelToken,
 }
 
-/// A read handle of the session: its connection and number there.
 #[derive(Debug, Clone)]
 struct HandleRef {
     loc: String,
@@ -377,7 +323,6 @@ struct HandleRef {
     handle: u32,
 }
 
-/// One consumer connection (the bookkeeping half of the C++ `Session`).
 struct Session {
     outbox: Outbox,
     hello: bool,
@@ -386,7 +331,6 @@ struct Session {
     next_public: u32,
     next_handle: u32,
     ops: HashMap<u64, Op>,
-    /// `List` request and job ids → op.
     public: HashMap<u32, u64>,
     handles: HashMap<u32, HandleRef>,
 }
@@ -406,7 +350,6 @@ impl Session {
         }
     }
 
-    /// A new op; with `public`, also a new `List` request or job id.
     fn new_op(&mut self, reply: Option<ReplyTo>, public: bool) -> (u64, u32, CancelToken) {
         let op = self.next_op;
         self.next_op = self.next_op.saturating_add(1);
@@ -423,7 +366,6 @@ impl Session {
         (op, id, cancel)
     }
 
-    /// The op of a `List` request or job that ended.
     fn end_public(&mut self, id: u32) {
         if let Some(op) = self.public.remove(&id) {
             self.ops.remove(&op);
@@ -438,7 +380,6 @@ impl Session {
     }
 }
 
-/// Wraps a launcher of the services for [`Handoff`].
 struct DynLauncher(Box<dyn Launcher>);
 
 impl Launcher for DynLauncher {
@@ -447,7 +388,6 @@ impl Launcher for DynLauncher {
     }
 }
 
-/// The bridge state (`BridgeServer` with its parts).
 pub(crate) struct Core {
     config: Config,
     ffi: Ffi,
@@ -462,33 +402,25 @@ pub(crate) struct Core {
     known_hosts: Arc<KnownHosts>,
     book: LocationBook<Connector>,
     copy_jobs: CopyJobs<Connector>,
-    /// Running copy jobs → their session and job id.
     copy_owners: HashMap<CopyId, (SessionId, u32)>,
     quota: Quota,
     questions: QuestionBroker<Waiter>,
-    /// Questions of workers → their ids.
     asks: HashMap<AskId, String>,
     nearby: Nearby,
-    /// What the sessions were told of the connection states (XB-12).
     states: StateReport,
-    /// Raised by the pools on a change of a connection state.
     state_signal: StateSignal,
     sessions: BTreeMap<SessionId, Session>,
     idle_deadline: Option<Instant>,
-    /// Answers to the prompt being stored.
     consent_writes: usize,
-    /// See [`Deps::url_override`].
     url_override: Option<UrlOverride>,
 }
 
-/// Whether the loop goes on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Flow {
     Continue,
     Stop,
 }
 
-/// Waits until `deadline`; never without one.
 async fn sleep_until(deadline: Option<Instant>) {
     match deadline {
         Some(deadline) => tokio::time::sleep_until(deadline).await,
@@ -496,9 +428,6 @@ async fn sleep_until(deadline: Option<Instant>) {
     }
 }
 
-/// The bridge on the runtime thread, inside a `LocalSet`: listens, runs the
-/// core until the idle exit (or a shutdown), and stops every connection
-/// before it returns.
 pub(crate) async fn run(config: Config, deps: Deps) -> ExitCode {
     let socket = match server::listener::bind(&deps.listen) {
         Ok(socket) => socket,
@@ -531,7 +460,6 @@ pub(crate) async fn run(config: Config, deps: Deps) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-/// Reports changes of `bridge.conf` as [`Event::ConsentFile`].
 fn watch_consent_file(config: &Config, tx: &mpsc::UnboundedSender<Event>) {
     match ConsentWatcher::new(&config.consent_file) {
         Ok(mut watcher) => {
@@ -631,8 +559,6 @@ impl Core {
         }
     }
 
-    // ---------------------------------------------------------- the loop
-
     fn handle(&mut self, event: Event) -> Flow {
         match event {
             Event::Server(event) => self.on_server(event),
@@ -681,9 +607,6 @@ impl Core {
         }
     }
 
-    // ---------------------------------------------------------- idle exit
-
-    /// XB-2: no session, no work in flight, no question to the user.
     fn is_idle(&self) -> bool {
         self.sessions.is_empty()
             && self.quota.running_jobs() == 0
@@ -693,7 +616,6 @@ impl Core {
             && self.consent_writes == 0
     }
 
-    /// Starts the idle time when idle, stops it when not.
     fn update_idle(&mut self) {
         if !self.is_idle() {
             self.idle_deadline = None;
@@ -710,8 +632,6 @@ impl Core {
         }
         Flow::Continue
     }
-
-    // ----------------------------------------------------------- sessions
 
     fn on_server(&mut self, event: server::Event) {
         match event {
@@ -765,7 +685,6 @@ impl Core {
         }
     }
 
-    /// Listing, metadata, namespace operations, read handles and jobs.
     fn on_file_call(&mut self, sid: SessionId, reply: ReplyTo, call: Call, lane: Lane) {
         match call {
             Call::List { loc, dir, lane, batch } => self.on_list(sid, reply, &loc, dir, lane, batch),
@@ -820,7 +739,6 @@ impl Core {
             }
             Call::RemoveTree { loc, path } => self.on_remove_tree(sid, reply, (&loc, lane), path),
             Call::Walk { loc, path, opts } => self.on_walk(sid, reply, (&loc, lane), path, opts),
-            // The administrative calls went to `on_call`.
             other => reply.fail(&Status::new(
                 netvfs_bridge_proto::ErrorName::Internal,
                 format!("{} has no handler", other.name()),
@@ -828,8 +746,6 @@ impl Core {
         }
     }
 
-    /// XB-13: cancels everything of the session in flight, closes its
-    /// handles, ends its questions and its discovery.
     fn cancel_session(&mut self, sid: SessionId) {
         let Some(session) = self.sessions.get_mut(&sid) else { return };
         if session.canceled {
@@ -855,38 +771,29 @@ impl Core {
         self.kick_all();
     }
 
-    /// Cancels the running work whose flags were set (XB-13).
     fn kick_all(&mut self) {
         self.book.kick();
         self.copy_jobs.kick();
     }
 
-    /// Sends `signal` to every session that said Hello (`broadcast`).
     fn broadcast(&self, signal: &OutSignal) {
         for session in self.sessions.values().filter(|s| s.hello) {
             session.signal(signal);
         }
     }
 
-    /// What `ListLocations` shows changed: `LocationsChanged` to every
-    /// session, which now knows the connection states too.
     fn locations_changed(&mut self) {
         self.broadcast(&OutSignal::LocationsChanged);
         let states = self.connection_states();
         self.states.announced(states);
     }
 
-    /// The connection states `ListLocations` shows now (none without
-    /// consent).
     fn connection_states(&self) -> States {
         if self.consent == Consent::Granted { self.book.states() } else { States::new() }
     }
 
-    /// The look at the connection states is due: `LocationsChanged` if one
-    /// differs from what the sessions were told (XB-12).
     fn report_states(&mut self) {
-        // Changes from now on wake the core again. Whether one woke it this
-        // time does not matter: a `ListLocations` may have asked for the look.
+        // Whether a change woke the core already does not matter: `ListLocations` may have asked for the look.
         let _woken = self.state_signal.take();
         let states = self.connection_states();
         if self.states.check(states) && self.consent == Consent::Granted {
@@ -898,8 +805,6 @@ impl Core {
         self.sessions.get_mut(&sid)
     }
 
-    // ------------------------------------------------------------ results
-
     fn on_done(&mut self, sid: SessionId, op: u64, result: Result<Reply, Status>) {
         self.quota.release_request();
         let Some(reply) = self.take_reply(sid, op) else { return };
@@ -909,7 +814,6 @@ impl Core {
         }
     }
 
-    /// The answer slot of `op` of `sid`, which ends.
     fn take_reply(&mut self, sid: SessionId, op: u64) -> Option<ReplyTo> {
         self.session(sid).and_then(|s| s.ops.remove(&op)).and_then(|op| op.reply)
     }
@@ -927,8 +831,6 @@ impl Core {
         session.end_public(job);
         session.signal(&OutSignal::JobFinished { job, result: outcome.result, extra: outcome.extra });
     }
-
-    // ---------------------------------------------------- worker events
 
     fn on_worker(&mut self, event: WorkerEvent) {
         match event {
@@ -957,7 +859,6 @@ impl Core {
                 let tx = self.tx.clone();
                 tokio::task::spawn_local(async move {
                     accounts.set_attention(account_id, attention, &pin).await;
-                    // List again without waiting for AccountChanged.
                     drop(tx.send(Event::AccountsChanged));
                 });
             }
@@ -965,7 +866,7 @@ impl Core {
                 self.copy_jobs.finish(id, self.book.pools_mut());
                 self.quota.release_job();
                 if let Some((sid, job)) = self.copy_owners.remove(&id) {
-                    // As in C++, not settled: copy_across reports its own Canceled.
+                    // copy_across reports its own Canceled.
                     self.finish_job(sid, job, JobOutcome { result, extra: HashMap::new() });
                 }
             }
@@ -973,7 +874,6 @@ impl Core {
         }
     }
 
-    /// Sends question `id` to `sid`; withdraws it when the session is gone.
     fn emit_question(
         &mut self,
         sid: SessionId,
@@ -990,7 +890,6 @@ impl Core {
         }
     }
 
-    /// Resolves a question's waiter with `answer` (`None`: no answer).
     fn resolve(&mut self, waiter: Waiter, answer: Option<Answer>) {
         match waiter {
             Waiter::Worker { ask, answer: tx } => {
@@ -1004,9 +903,6 @@ impl Core {
         }
     }
 
-    // ----------------------------------------------------------- accounts
-
-    /// Lists the accounts again (`refresh`).
     fn refresh_accounts(&mut self) {
         self.accounts_generation = self.accounts_generation.wrapping_add(1);
         let generation = self.accounts_generation;
@@ -1017,25 +913,18 @@ impl Core {
         });
     }
 
-    /// Takes the account list; the connection states it shows count as
-    /// known (a list that changed is told by the caller).
     fn set_accounts(&mut self, accounts: &[AccountLocation]) {
         self.book.set_accounts(accounts.iter().map(account_spec).collect());
         let states = self.connection_states();
         self.states.announced(states);
     }
 
-    // ------------------------------------------------------------ helpers
-
-    /// The pool of `loc` for a call that needs a connection.
     fn pool_for(&mut self, loc: &str) -> Result<Arc<LocationSpec>, Status> {
         let granted = self.consent == Consent::Granted;
         let ffi = self.ffi;
         self.book.ensure_pool(loc, granted, |p| ffi.provider_available(p)).map(Arc::clone)
     }
 
-    /// A request on a pooled connection of `loc`: `body` runs on the worker
-    /// and its reply goes to `reply` (`Session::run`).
     fn run_request(
         &mut self,
         sid: SessionId,
@@ -1059,8 +948,6 @@ impl Core {
         self.book.submit(loc, lane, TaskContext::new(sid, cancel), work);
     }
 
-    /// Takes a request slot and makes an op answered through `reply`;
-    /// `None` (after an error reply) at the limit.
     fn start_request(&mut self, sid: SessionId, reply: ReplyTo) -> Option<(u64, CancelToken)> {
         if !self.quota.acquire_request() {
             reply.fail(&quota::too_many("Too many requests"));
@@ -1074,7 +961,6 @@ impl Core {
         Some((op, cancel))
     }
 
-    /// Reports the nearby servers to the sessions that asked, with consent.
     fn report_nearby(&mut self) {
         let (to, services) = self.nearby.report();
         if self.consent != Consent::Granted {
@@ -1088,7 +974,6 @@ impl Core {
     }
 }
 
-/// The location of a listed account (`specFor`).
 fn account_spec(a: &AccountLocation) -> LocationSpec {
     LocationSpec::account(
         a.account_id,

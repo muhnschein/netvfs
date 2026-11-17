@@ -21,9 +21,7 @@ struct NetVfsLoopOwner {
 
     // After every watch activation (the connection schedules a dispatch).
     virtual void afterWatch() = 0;
-    // A message arrived.
     virtual DBusHandlerResult message(DBusMessage *message) = 0;
-    // The dispatch queue changed.
     virtual void dispatchStatus(DBusDispatchStatus status) = 0;
 };
 
@@ -122,7 +120,6 @@ bool isLocalDisconnected(DBusMessage *message)
 
 } // namespace
 
-// -------------------------------------------------------------- connection
 
 struct WireConnection::Integration final : NetVfsLoopOwner {
     explicit Integration(WireConnection *connection) : owner(connection) {}
@@ -156,7 +153,7 @@ WireConnection *WireConnection::connectTo(const QString &address, Result *result
         return nullptr;
     }
     auto *wire = new WireConnection(connection, parent);
-    dbus_connection_unref(connection);   // the WireConnection holds its own reference
+    dbus_connection_unref(connection);
     if (result)
         *result = Result::success();
     return wire;
@@ -270,7 +267,6 @@ void WireConnection::noteDisconnected()
 
 } // namespace NetVfs::BridgeTest
 
-// The typed side of the libdbus callbacks (dbusloop.c).
 
 dbus_bool_t netvfs_loop_watch_added(DBusWatch *watch, NetVfsLoopOwner *owner)
 {

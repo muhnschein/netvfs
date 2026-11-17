@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-// Listen addresses (the C++ `--listen` values), socket activation checks,
-// binding, and which accept failures are transient.
-// Restriction lints that only add noise to tests (doc/RUST.md "Lints").
+// Restriction lints that only add noise to tests.
 #![allow(clippy::assertions_on_result_states, clippy::arithmetic_side_effects)]
 
 use super::{
@@ -78,11 +76,9 @@ async fn binding() {
     let client = UnixStream::connect(&path).await.unwrap();
     let (accepted, _) = listener.accept().await.unwrap();
     assert_eq!(accepted.peer_cred().unwrap().pid(), client.peer_cred().unwrap().pid());
-    // The path is taken.
     let error = bind(&ListenAddress::Path(path.clone())).unwrap_err();
     assert_eq!(error.name, ErrorName::NetworkUnreachable);
     assert!(error.message.starts_with("Cannot listen on Path("), "{}", error.message);
-    // Without socket activation (the test runner sets no LISTEN_PID).
     if std::env::var_os("LISTEN_PID").is_none() {
         let error = bind(&ListenAddress::Systemd).unwrap_err();
         assert!(error.message.contains("not socket-activated: no LISTEN_PID"), "{}", error.message);
@@ -129,7 +125,6 @@ async fn next(seen: &mut tokio::sync::mpsc::UnboundedReceiver<Seen>) -> Seen {
     tokio::time::timeout(Duration::from_secs(5), seen.recv()).await.unwrap().unwrap()
 }
 
-/// Peers that pass the check get numbered sessions.
 #[tokio::test]
 async fn accepted_peers_are_numbered() {
     let (_dir, path, mut seen) = serving(PeerChecker::new(std::env::current_exe().unwrap()));
@@ -143,8 +138,6 @@ async fn accepted_peers_are_numbered() {
     assert!(matches!(next(&mut seen).await, Seen::Closed(SessionId(2))));
 }
 
-/// XB-5: a peer that fails the check is closed before anything is read or
-/// written, and reported.
 #[tokio::test]
 async fn refused_peers_are_closed_unanswered() {
     let (_dir, path, mut seen) = serving(PeerChecker::new("/nonexistent/netvfs-consumer"));
@@ -160,7 +153,6 @@ async fn refused_peers_are_closed_unanswered() {
             .unwrap()
             .unwrap();
     assert_eq!(n, 0);
-    // The listener keeps serving.
     let _again = UnixStream::connect(&path).await.unwrap();
     assert!(matches!(next(&mut seen).await, Seen::Refused(_)));
 }

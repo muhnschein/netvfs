@@ -1,12 +1,8 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-// netvfs-accounts (SPEC-v2 XB-2a): the setgid helper that is the bridge's
-// only access to the accounts database. The helper is rust/netvfs-accounts,
-// whose own tests cover its confinement and set-id environment; the bridge's
-// side that runs it is rust/netvfs-bridge/src/accounts, tested there. These
-// run the built helper: its answers must be the bytes the C++ helper it
-// replaced gave (referencehelper.h) and read back as the C++ bridge read them
-// (referencedecoder.h), its writes what libaccounts would store, and its
-// change signal one libaccounts reads.
+// netvfs-accounts: the setgid helper that is the bridge's only access to the accounts database. Its
+// confinement and set-id tests are Rust (rust/netvfs-accounts). These run the built helper: answers must be
+// the bytes the replaced C++ helper gave (referencehelper.h), read back as the C++ bridge read them
+// (referencedecoder.h), writes what libaccounts would store, change signal one libaccounts reads.
 #include "accountsfixture.h"
 #include "referencedecoder.h"
 #include "referencehelper.h"
@@ -54,8 +50,6 @@ QVariantMap globals(const QString &host, const QVariantMap &extra = QVariantMap(
     return map;
 }
 
-// The built helper's answer to `arguments`, run with this process's
-// environment and `extra`.
 QByteArray runHelper(const QStringList &arguments, const Environment &extra = Environment(),
                      int *exitCode = nullptr, QByteArray *errors = nullptr)
 {
@@ -81,7 +75,6 @@ QByteArray serve(AccountsFixture *, const QStringList &arguments)
     return runHelper(arguments);
 }
 
-// The C++ helper's answer, from the database ACCOUNTS names now.
 QByteArray reference(const QStringList &arguments)
 {
     Accounts::Manager manager;
@@ -105,7 +98,6 @@ bool sql(const QString &database, const QString &statement)
     return ok;
 }
 
-// A consistent copy of the database at `from` (in WAL mode) at `to`.
 bool copyDatabase(const QString &from, const QString &to)
 {
     sqlite3 *source = nullptr;
@@ -129,8 +121,6 @@ QByteArray describe(const QStringList &arguments, const QByteArray &rust, const 
             + "\n    c++: " + cpp.toHex();
 }
 
-// The global settings of `accountId` in the database at `accounts`, as
-// libaccounts reads them.
 QVariantMap globalSettings(const QString &accounts, int accountId)
 {
     const QByteArray saved = qgetenv("ACCOUNTS");
@@ -183,13 +173,13 @@ private:
                       quint32 credentialsId = 0);
     void compareAnswers(const QList<QStringList> &requests);
 
-    // A session bus of this test's own: other tests that write accounts at
-    // the same time would announce their changes here too.
+    // A session bus of this test's own: other tests writing accounts concurrently would announce their
+    // changes here too.
     QProcess busDaemon;
     QStringList ownedNames;
     std::unique_ptr<AccountsFixture> fixture;
-    int listed = 0;      // sftp, Files enabled
-    int unlisted = 0;    // sftp, Files service disabled
+    int listed = 0;
+    int unlisted = 0;
 };
 
 void tst_BridgeAccounts::onNameOwnerChanged(const QString &name, const QString &, const QString &newOwner)
@@ -206,8 +196,7 @@ void tst_BridgeAccounts::initTestCase()
     QVERIFY(busDaemon.waitForReadyRead(10000));
     const QByteArray address = busDaemon.readLine().trimmed();
     QVERIFY(!address.isEmpty());
-    // Before the first use of the session bus in this process; the helpers
-    // and libaccounts inherit it.
+    // Before the first use of the session bus in this process; helpers and libaccounts inherit it.
     qputenv("DBUS_SESSION_BUS_ADDRESS", address);
     QVERIFY(QDBusConnection::sessionBus().connect(
         QStringLiteral("org.freedesktop.DBus"), QStringLiteral("/org/freedesktop/DBus"),
@@ -249,7 +238,7 @@ int tst_BridgeAccounts::listedAccount(const QString &provider, const QVariantMap
 
 void tst_BridgeAccounts::list()
 {
-    // XA-1: only enabled accounts with the Files service enabled.
+    // only enabled accounts with the Files service enabled.
     QVector<AccountLocation> accounts;
     QVERIFY(decodeList(serve(fixture.get(), { QStringLiteral("list") }), &accounts).ok());
     QCOMPARE(accounts.size(), 1);
@@ -277,8 +266,6 @@ void tst_BridgeAccounts::files()
     QCOMPARE(access.params.provider, QStringLiteral("sftp"));
     QCOMPARE(access.credentialsId, 7u);
     QVERIFY(!access.secretOptional);
-    // Only listed accounts: not one whose Files service is off, nor ids that
-    // are not ids.
     for (const QString &id : { QString::number(unlisted), QStringLiteral("999"), QStringLiteral("0"),
                                QStringLiteral("-1"), QStringLiteral("x"), QString() }) {
         QCOMPARE(decodeFiles(serve(fixture.get(), { QStringLiteral("files"), id }), &access).error(),
@@ -288,7 +275,7 @@ void tst_BridgeAccounts::files()
 
 void tst_BridgeAccounts::filesPolicy()
 {
-    // XA-4 is applied by the helper, before the bridge looks up a secret.
+    // is applied by the helper, before the bridge looks up a secret.
     const int bogus = fixture->createAccount(
         QStringLiteral("smb"), globals(QStringLiteral("nas.example"),
                                        { { QStringLiteral("netvfs/smb/security_profile"), QStringLiteral("bogus") } }));
@@ -297,7 +284,7 @@ void tst_BridgeAccounts::filesPolicy()
     QCOMPARE(decodeFiles(serve(fixture.get(), { QStringLiteral("files"), QString::number(bogus) }),
                                          &access).error(),
              Error::SecurityPolicy);
-    // XA-7: a guest profile with consent needs no secret.
+    // a guest profile with consent needs no secret.
     const int guest = fixture->createAccount(
         QStringLiteral("smb"), globals(QStringLiteral("guest.example"),
                                        { { QStringLiteral("netvfs/smb/security_profile"), QStringLiteral("guest") },
@@ -310,7 +297,6 @@ void tst_BridgeAccounts::filesPolicy()
 
 void tst_BridgeAccounts::attention()
 {
-    // XB-14: recorded for a listed account, as a Files run.
     QVERIFY(decodeStatus(serve(fixture.get(), { QStringLiteral("attention"), QString::number(listed),
                                                                 QStringLiteral("server-identity-changed"),
                                                                 QStringLiteral("SHA256:pin") }))
@@ -374,7 +360,6 @@ void tst_BridgeAccounts::databaseUnusable()
         QVERIFY2(r.message().contains(QLatin1String("setgid privileged")), qPrintable(r.message()));
     }
 
-    // Not a database.
     QVERIFY(QDir(dir.path()).mkdir(QStringLiteral("junk")));
     QFile junk(dir.path() + QStringLiteral("/junk/accounts.db"));
     QVERIFY(junk.open(QIODevice::WriteOnly));
@@ -384,7 +369,6 @@ void tst_BridgeAccounts::databaseUnusable()
         runHelper({ QStringLiteral("list") }, { { QStringLiteral("ACCOUNTS"), dir.path() + QStringLiteral("/junk") } }));
     QCOMPARE(r.error(), Error::PermissionDenied);
 
-    // No database yet is no account, and the helper creates none.
     const QString missing = dir.path() + QStringLiteral("/missing");
     QVector<AccountLocation> accounts { AccountLocation() };
     QVERIFY(decodeList(runHelper({ QStringLiteral("list") }, { { QStringLiteral("ACCOUNTS"), missing } }),
@@ -407,11 +391,10 @@ void tst_BridgeAccounts::malformedAnswers()
     QCOMPARE(decodeList("garbage", &accounts).error(), Error::ProtocolError);
     QCOMPARE(decodeList(good.left(good.size() - 1), &accounts).error(), Error::ProtocolError);
     QCOMPARE(decodeList(good + 'x', &accounts).error(), Error::ProtocolError);
-    QCOMPARE(accounts.size(), 1);   // untouched by the failures
+    QCOMPARE(accounts.size(), 1);
     FilesAccess access;
     QCOMPARE(decodeFiles(good, &access).error(), Error::ProtocolError);
     QCOMPARE(decodeStatus(good).error(), Error::ProtocolError);
-    // Another kind of answer is no list either.
     const QByteArray files = serve(fixture.get(), { QStringLiteral("files"), QString::number(listed) });
     QCOMPARE(decodeList(files, &accounts).error(), Error::ProtocolError);
 }
@@ -500,7 +483,6 @@ void tst_BridgeAccounts::goldenAnswers()
     QVERIFY(off > 0);
     QVERIFY(fixture->setService(off, QString(), false));
 
-    // What only other writers store.
     const QString t = QString::number(types);
     QVERIFY(sql(database(), QStringLiteral(
         "INSERT OR REPLACE INTO Settings (account, service, key, type, value) VALUES "
@@ -625,7 +607,6 @@ void tst_BridgeAccounts::goldenAttention()
             QCOMPARE(globalSettings(copy.path(), account), globalSettings(fixture->path(), account));
     }
 
-    // A write the database refuses.
     const QString refuse = QStringLiteral(
         "CREATE TRIGGER refuse BEFORE INSERT ON Settings BEGIN SELECT RAISE(ABORT, 'refused'); END;");
     QVERIFY(sql(database(), refuse));
@@ -661,7 +642,6 @@ void tst_BridgeAccounts::attentionSignal()
     QCOMPARE(needsUpdate.userType(), int(QMetaType::Bool));
     QVERIFY(needsUpdate.toBool());
     QCOMPARE(account->value(QStringLiteral("CredentialsNeedUpdateFrom")).toString(), QStringLiteral("sftp-files"));
-    // Sailfish OS's libaccounts-glib owns such a name to send from.
     const QRegularExpression name(QStringLiteral("^com\\.google\\.code\\.AccountsSSO\\.Accounts\\.uuid_[0-9a-f]{32}$"));
     QTRY_VERIFY_WITH_TIMEOUT(std::any_of(ownedNames.cbegin(), ownedNames.cend(),
                                          [&](const QString &n) { return name.match(n).hasMatch(); }),
@@ -670,7 +650,6 @@ void tst_BridgeAccounts::attentionSignal()
 
 void tst_BridgeAccounts::attentionWithoutBus()
 {
-    // The write stands when nobody can be told.
     int exitCode = -1;
     QByteArray errors;
     const QByteArray answer = runHelper({ QStringLiteral("attention"), QString::number(listed),
@@ -686,7 +665,7 @@ void tst_BridgeAccounts::attentionWithoutBus()
 
 void tst_BridgeAccounts::helperLinks()
 {
-    // XB-2a: no Qt, GLib or libaccounts in the setgid helper.
+    // no Qt, GLib or libaccounts in the setgid helper.
     QProcess readelf;
     readelf.start(QStringLiteral("readelf"), { QStringLiteral("-d"), Helper });
     QVERIFY2(readelf.waitForFinished(10000), "readelf is needed");
@@ -702,7 +681,6 @@ void tst_BridgeAccounts::helperLinks()
 
 void tst_BridgeAccounts::helperWithClosedDescriptors()
 {
-    // The built helper, confined, started with stdin and stderr closed.
     QProcess helper;
     helper.start(QStringLiteral("/bin/sh"), { QStringLiteral("-c"), QStringLiteral("exec \"$0\" list 0<&- 2>&-"),
                                              Helper });

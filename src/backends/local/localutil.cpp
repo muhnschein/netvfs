@@ -22,7 +22,7 @@ namespace NetVfs::Local {
 
 namespace {
 
-constexpr int PollSliceMs = 100;              // C-9: cancel is seen within one slice
+constexpr int PollSliceMs = 100;
 constexpr size_t InitialNameBuffer = 1024;
 constexpr size_t MaxNameBuffer = 1 << 20;
 constexpr qint64 MsecsPerSec = 1000;
@@ -38,7 +38,7 @@ EntryType typeFromMode(mode_t mode)
     case S_IFLNK:
         return EntryType::Symlink;
     default:
-        return EntryType::Special;   // FIFO, socket, device
+        return EntryType::Special;
     }
 }
 
@@ -71,8 +71,8 @@ int fstatatFallback(int dirFd, const char *path, int flags, NativeStat *out)
 }
 
 #ifdef STATX_BTIME
-// statx() is missing on old kernels (ENOSYS) and blocked by some seccomp
-// profiles (EPERM on a path that exists); fstatat() is used from then on.
+// statx() is missing on old kernels (ENOSYS) and blocked by some seccomp profiles (EPERM);
+// fstatat() is used from then on.
 std::atomic<bool> &statxUsable()
 {
     static std::atomic<bool> usable { true };
@@ -115,8 +115,7 @@ int statxAt(int dirFd, const char *path, int flags, NativeStat *out)
 }
 #endif
 
-// getpwuid_r/getgrgid_r with a growing buffer. `lookup` returns the name or
-// an empty string; ERANGE asks for a larger buffer.
+// getpwuid_r/getgrgid_r with a growing buffer; ERANGE asks for more.
 template<typename Lookup>
 QString lookupName(Lookup lookup)
 {
@@ -131,8 +130,7 @@ QString lookupName(Lookup lookup)
     return QString();
 }
 
-} // namespace
-
+}
 void Fd::reset(int fd)
 {
     if (m_fd >= 0)
@@ -312,7 +310,7 @@ Result Waiter::wait(int fd, short events) const
         pfd.events = events;
         const int rc = ::poll(&pfd, 1, PollSliceMs);
         if (rc > 0)
-            return Result::success();   // ready, or an error the next call reports
+            return Result::success();
         if (rc < 0 && errno != EINTR)
             return errnoResult(errno, QStringLiteral("poll"));
     }
@@ -340,7 +338,7 @@ Result readFully(int fd, qint64 offset, char *buffer, qint64 length, const Waite
 {
     qint64 done = 0;
     while (done < length) {
-        if (const Result r = waiter.check(); !r.ok())   // L-6
+        if (const Result r = waiter.check(); !r.ok())
             return r;
         qint64 n = 0;
         const qint64 position = offset >= 0 ? offset + done : -1;
@@ -359,7 +357,7 @@ Result writeFully(int fd, const char *data, qint64 length, const Waiter &waiter)
 {
     qint64 done = 0;
     while (done < length) {
-        if (const Result r = waiter.check(); !r.ok())   // L-6
+        if (const Result r = waiter.check(); !r.ok())
             return r;
         if (const ssize_t n = ::write(fd, data + done, static_cast<size_t>(qMin(ChunkSize, length - done))); n >= 0) {
             done += n;
@@ -373,4 +371,4 @@ Result writeFully(int fd, const char *data, qint64 length, const Waiter &waiter)
     return Result::success();
 }
 
-} // namespace NetVfs::Local
+}

@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! A setting row as the accounts database may hold it: type string and
-//! value text (the first byte gives the type's length), read as the helper
-//! reads it and written into an answer.
+//! Accounts database setting row (type string, value text) as the helper reads it.
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;

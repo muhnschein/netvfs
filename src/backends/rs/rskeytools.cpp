@@ -7,8 +7,7 @@ namespace NetVfs::Rs {
 
 namespace {
 
-// One key call: the table's key in `*out` on success (its private part is
-// wiped twice: by free in Rust, and by SshKeyMaterial here).
+// Private part is wiped twice: by free in Rust and by SshKeyMaterial here.
 template <typename Call>
 Result keyCall(SshKeyMaterial *out, const Call &call)
 {
@@ -24,8 +23,7 @@ Result keyCall(SshKeyMaterial *out, const Call &call)
     return r;
 }
 
-} // namespace
-
+}
 Result RsKeyTools::generate(SshKeyMaterial *out)
 {
     return keyCall(out, [](const nvr_table *t, nvr_key **key) { return t->key_generate(key); });
@@ -45,4 +43,4 @@ Result RsKeyTools::describe(const QByteArray &privateKey, SshKeyMaterial *out)
     });
 }
 
-} // namespace NetVfs::Rs
+}

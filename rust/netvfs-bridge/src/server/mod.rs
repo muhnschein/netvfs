@@ -1,52 +1,22 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! The socket front of the bridge (design §3.2, §3.4, §3.5): listening,
-//! the peer check, one session per consumer connection, the dispatch of raw
-//! D-Bus messages, and the outgoing FIFO with flow control.
+//! Socket front: listening, peer check, one session per consumer connection, raw D-Bus dispatch, outgoing FIFO with flow control.
 //!
-//! # The contract with the core
+//! Knows nothing of consent, locations or jobs. Hands each valid call up as an [`Event`] through an [`EventSink`]; replies and signals come back through [`ReplyTo`] and [`Outbox`].
+//! Per session: `Accepted`, `Call`s in send order, `Closed`.
 //!
-//! The server knows nothing of consent, locations or jobs. It hands every
-//! valid call up as an [`Event`] through an [`EventSink`] and takes replies
-//! and signals back through [`ReplyTo`] and [`Outbox`]. Per session the
-//! events come in this order: `Accepted`, then `Call`s in the order the
-//! consumer sent them, then `Closed`.
+//! Done before any event:
+//! - peer check on the raw socket before any byte is read; refused peer closed without reply, reported as [`Event::Refused`].
+//! - p2p handshake (EXTERNAL, fd passing), at most 30 s.
+//! - inbound limits: header declaring more than [`inbound::MAX_MESSAGE_BYTES`] bytes or [`inbound::MAX_MESSAGE_FDS`] descriptors closes the connection; at most 16 messages in zbus's queue.
+//! - `org.freedesktop.DBus.Peer` (`Ping`, `GetMachineId`, any path), verbatim introspection XML, `UnknownMethod` for other paths, interfaces and members, `InvalidArgs` for wrong signature or argument, `org.netvfs.Error.InvalidName` for a bad path ([`args`]).
+//! - `org.netvfs.Error.ProtocolError` for any method before a valid `Hello`.
 //!
-//! What the server does itself, before any event:
-//! - XB-5: the peer check on the raw socket, before any byte is read; a
-//!   refused peer is closed without a reply and reported as
-//!   [`Event::Refused`] (the core logs it at warning level).
-//! - The p2p handshake (EXTERNAL, fd passing), at most 30 s.
-//! - Inbound limits: a message whose header declares more than
-//!   [`inbound::MAX_MESSAGE_BYTES`] or that carries more than
-//!   [`inbound::MAX_MESSAGE_FDS`] descriptors closes the connection; at most
-//!   16 messages wait in zbus's queue.
-//! - `org.freedesktop.DBus.Peer` (`Ping`, `GetMachineId`, on any path), the
-//!   verbatim introspection XML, `UnknownMethod` for other paths, interfaces
-//!   and members, `InvalidArgs` for a wrong signature or argument,
-//!   `org.netvfs.Error.InvalidName` for a bad path (XSEC-7, [`args`]).
-//! - "Hello must be the first call": `org.netvfs.Error.ProtocolError` for
-//!   any other method before a valid `Hello`.
+//! Core duties for an [`Event::Call`]:
+//! - `PermissionDenied` for a call with [`args::Call::needs_consent`] until consent is granted (`ListLocations` answers an empty list instead).
+//! - Answer through the [`ReplyTo`] exactly once: [`ReplyTo::ok`] with a [`Reply`] of the output signature, [`ReplyTo::fail`] for a netvfs error, [`ReplyTo::refuse`] for a validation error. A dropped `ReplyTo` replies `org.netvfs.Error.Internal`; replies of a closed session are dropped. Answer `Hello` with [`Reply::Hello`].
 //!
-//! What the core must do with an [`Event::Call`]:
-//! - XB-6 consent: `PermissionDenied` for a call whose
-//!   [`args::Call::needs_consent`] is set until the user granted consent
-//!   (`ListLocations` answers an empty list instead).
-//! - Answer through the [`ReplyTo`] exactly once, with a [`Reply`] of the
-//!   method's output signature ([`ReplyTo::ok`]), a netvfs error
-//!   ([`ReplyTo::fail`]) or a validation error ([`ReplyTo::refuse`]). A
-//!   `ReplyTo` dropped without an answer replies
-//!   `org.netvfs.Error.Internal`. Replies of a closed session are dropped.
-//! - Answer `Hello` with [`Reply::Hello`].
-//!
-//! The core keeps the [`Outbox`] of an `Accepted` session to send signals
-//! (only to sessions that said `Hello`, as the C++ `broadcast` did), and
-//! drops it after `Closed`. [`Outbox::close`] closes a session (XB-6
-//! revocation); `Closed` follows. Streamed signals (`ListBatch`,
-//! `WalkBatch`) go through [`Outbox::stream`] from worker threads, which
-//! blocks on the session's [`FlowBudget`] (C-10).
-//!
-//! Core-only events (job results, questions, timers, consent file changes)
-//! are not part of this enum; the core wraps [`Event`] in its own.
+//! The core keeps an `Accepted` session's [`Outbox`] to send signals (only to sessions that said `Hello`) and drops it after `Closed`.
+//! [`Outbox::close`] closes a session; `Closed` follows. Streamed signals (`ListBatch`, `WalkBatch`) go through [`Outbox::stream`] from worker threads and block on the session's [`FlowBudget`].
 
 pub mod args;
 pub mod dispatch;
@@ -83,7 +53,7 @@ impl fmt::Display for SessionId {
 /// What the server reports to the core.
 #[derive(Debug)]
 pub enum Event {
-    /// A peer passed the check and the handshake; its outbox.
+    /// A peer passed the check and the handshake.
     Accepted {
         /// The session.
         sid: SessionId,
@@ -104,17 +74,14 @@ pub enum Event {
         /// The session.
         sid: SessionId,
     },
-    /// XB-5: a connection was refused by the peer check (closed without a
-    /// reply); the reason is for the warning log.
+    /// Connection refused by the peer check; reason is for the warning log.
     Refused {
         /// Why.
         reason: Status,
     },
 }
 
-/// Where the server delivers [`Event`]s: any function, typically one that
-/// forwards into the core's channel. Called from the runtime's tasks; must
-/// not block.
+/// Where the server delivers [`Event`]s.
 #[derive(Clone)]
 pub struct EventSink(Arc<dyn Fn(Event) + Send + Sync>);
 
@@ -124,8 +91,7 @@ impl EventSink {
         Self(Arc::new(deliver))
     }
 
-    /// A sink feeding an unbounded channel (events are dropped once its
-    /// receiver is gone).
+    /// A sink feeding an unbounded channel (events are dropped once its receiver is gone).
     #[must_use]
     pub fn channel(tx: tokio::sync::mpsc::UnboundedSender<Event>) -> Self {
         Self::new(move |event| {
@@ -145,12 +111,8 @@ impl fmt::Debug for EventSink {
     }
 }
 
-/// The answer slot of one call. Answer exactly once; dropping it unanswered
-/// replies `org.netvfs.Error.Internal`. `Send`: it may travel to the thread
-/// that finishes the work.
+/// The answer slot of one call.
 pub struct ReplyTo {
-    /// A body-less stand-in of the call carrying its serial (and sender), so
-    /// that the call's arguments (secrets) are not kept until the reply.
     call: Message,
     method: &'static MethodInfo,
     outbox: Outbox,
@@ -169,7 +131,6 @@ impl fmt::Debug for ReplyTo {
 }
 
 impl ReplyTo {
-    /// The slot for `call` (its header: serial, sender, no-reply flag).
     pub(crate) fn new(call: &Message, method: &'static MethodInfo, outbox: Outbox) -> zbus::Result<Self> {
         let header = call.header();
         let mut stub =
@@ -198,9 +159,7 @@ impl ReplyTo {
         self.outbox.session()
     }
 
-    /// Replies with return values. A reply that does not match the method's
-    /// output signature, or that cannot be encoded, becomes
-    /// `org.netvfs.Error.Internal`.
+    /// Replies with return values.
     pub fn ok(mut self, reply: &Reply) {
         let message = if reply.signature() == self.method.output {
             reply.build(&self.call.header()).ok()
@@ -218,10 +177,7 @@ impl ReplyTo {
         self.fail_with(status, false);
     }
 
-    /// Replies with a validation error: `ProtocolError` becomes
-    /// `org.freedesktop.DBus.Error.InvalidArgs` and `Unsupported`
-    /// `org.freedesktop.DBus.Error.UnknownMethod` (as for the server's own
-    /// checks); other names as [`ReplyTo::fail`].
+    /// Replies with a validation error.
     pub fn refuse(mut self, status: &Status) {
         self.fail_with(status, true);
     }
@@ -250,7 +206,6 @@ impl Drop for ReplyTo {
     }
 }
 
-/// Whether the caller asked for no reply.
 fn no_reply_expected(msg: &Message) -> bool {
     msg.primary_header().flags().contains(zbus::message::Flags::NoReplyExpected)
 }

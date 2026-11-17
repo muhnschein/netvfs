@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-// SPEC-v2 XH-4: BoundedPipe.
+// BoundedPipe.
 #include "boundedpipe.h"
 
 #include <QtCore/QThread>
@@ -22,7 +22,6 @@ QByteArray patternBytes(qint64 size, quint32 seed)
     return data;
 }
 
-// Waits up to `ms` for a flag set by a worker thread.
 bool waitFor(const std::atomic<bool> &flag, int ms)
 {
     for (int waited = 0; waited < ms && !flag; waited += 2)
@@ -32,7 +31,7 @@ bool waitFor(const std::atomic<bool> &flag, int ms)
 
 struct Writer {
     std::atomic<bool> done { false };
-    qint64 result = 0;               // last write() result
+    qint64 result = 0;
     std::thread thread;
     ~Writer()
     {
@@ -109,7 +108,7 @@ private slots:
         QVERIFY(writer.result > 0);
         QVERIFY(pipe.result().ok());
         QVERIFY(pipe.peakBuffered() <= capacity);
-        QCOMPARE(pipe.peakBuffered(), qint64(capacity));    // the ring did fill: writes blocked
+        QCOMPARE(pipe.peakBuffered(), qint64(capacity));
         QCOMPARE(pipe.buffered(), qint64(0));
     }
 
@@ -120,14 +119,14 @@ private slots:
         pipe.writer()->close();
         QVERIFY(!pipe.writer()->isOpen());
         QTest::ignoreMessage(QtWarningMsg, "QIODevice::write (QIODevice): device not open");
-        QCOMPARE(pipe.writer()->write("x", 1), qint64(-1));     // closed
+        QCOMPARE(pipe.writer()->write("x", 1), qint64(-1));
         QCOMPARE(pipe.reader()->bytesAvailable(), qint64(10));
         QVERIFY(!pipe.reader()->atEnd());
         QCOMPARE(pipe.reader()->readAll(), QByteArray("0123456789"));
         QVERIFY(pipe.reader()->atEnd());
         char c = 0;
         QCOMPARE(pipe.reader()->read(&c, 1), qint64(0));
-        QCOMPARE(pipe.reader()->read(&c, 1), qint64(0));        // EOF is sticky
+        QCOMPARE(pipe.reader()->read(&c, 1), qint64(0));
         QVERIFY(pipe.result().ok());
     }
 
@@ -151,7 +150,7 @@ private slots:
         Writer writer;
         startWriter(&writer, &pipe, data, 3, 64);
         QThread::msleep(150);
-        QVERIFY(!writer.done);                       // blocked on the full ring
+        QVERIFY(!writer.done);
         QCOMPARE(pipe.buffered(), qint64(8));
 
         QByteArray received;
@@ -208,7 +207,7 @@ private slots:
         QCOMPARE(pipe.reader()->bytesAvailable(), qint64(0));
         QVERIFY(pipe.reader()->atEnd());
         QVERIFY(pipe.reader()->errorString().contains(QLatin1String("stalled")));
-        QTest::ignoreMessage(QtWarningMsg, "QIODevice::write (QIODevice): device not open");   // the writer thread closed it
+        QTest::ignoreMessage(QtWarningMsg, "QIODevice::write (QIODevice): device not open");
         QCOMPARE(pipe.writer()->write("x", 1), qint64(-1));
     }
 
@@ -295,7 +294,6 @@ private slots:
             writer = pipe.writer();
             QVERIFY(writer->isOpen());
         }
-        // The pipe is gone together with its devices; nothing left to touch.
         QVERIFY(writer != nullptr);
     }
 

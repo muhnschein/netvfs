@@ -1,9 +1,8 @@
 #!/bin/sh
 # SPDX-License-Identifier: LGPL-2.1-or-later
-# Restarts one sshd instance of start-sshd.sh, as a server restart would
-# look to a client of USER: the listener and every session of USER end,
-# then the listener starts again on the same port (the container and its
-# published ports stay). Used by the conformance suite's keepAlive case.
+# Restarts one sshd instance of start-sshd.sh as a server restart would look to a client of USER: listener and every
+# session of USER end, then the listener starts again on the same port (container and published ports stay). Used by the
+# conformance suite's keepAlive case.
 # Usage: restart-instance.sh INSTANCE USER
 set -eu
 

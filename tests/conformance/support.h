@@ -9,10 +9,8 @@
 
 #include <functional>
 
-// Helpers for tst_conformance; everything goes through the Backend API.
 namespace Conformance {
 
-// Deterministic test data.
 QByteArray pattern(qint64 size, int seed);
 
 // Writes `data` to `path` with upload() (Truncate unless given).
@@ -32,7 +30,6 @@ NetVfs::Result removeRecursive(NetVfs::Backend *backend, const QString &path);
 // [content digest]", for side-effect checks.
 QMap<QString, QString> snapshot(NetVfs::Backend *backend, const QString &dir);
 
-// Records every batch; optionally stops or cancels the backend.
 class RecordingSink : public NetVfs::ListSink
 {
 public:
@@ -41,7 +38,7 @@ public:
     QVector<int> batchSizes;
     QVector<NetVfs::Entry> all;
     int stopAfterBatches = -1;                 // return false after this many
-    NetVfs::Backend *cancelBackend = nullptr;  // cancel() on the first batch
+    NetVfs::Backend *cancelBackend = nullptr;
 };
 
 // Records updates; can ask for cancellation (Progress::canceled) or cancel
@@ -79,7 +76,7 @@ private:
 
 // A FIFO at `hostPath` that this process holds open for reading and
 // writing: a backend reading it finds no data and a backend writing it
-// fills the pipe, so either waits until cancel() (C-9 stall for targets
+// fills the pipe, so either waits until cancel() (stall for targets
 // whose folder is visible on this host).
 class FifoStall
 {
@@ -96,11 +93,10 @@ private:
 
 // Runs `call` on this thread while another thread calls backend->cancel()
 // after `delayMs`. `*cancelToReturnMs` is the time from cancel() to the
-// return of `call` (C-9: at most 2 s).
+// return of `call` (: at most 2 s).
 NetVfs::Result runCanceled(NetVfs::Backend *backend, int delayMs, const std::function<NetVfs::Result()> &call,
                            qint64 *cancelToReturnMs);
 
-// Runs a shell command (stall proxy hooks); true on exit code 0.
 bool runShell(const QString &command, QString *output);
 
 } // namespace Conformance

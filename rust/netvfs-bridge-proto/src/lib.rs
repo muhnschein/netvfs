@@ -1,11 +1,8 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! The netvfs bridge protocol `org.netvfs.Bridge1` (SPEC-v2 §8a): wire
-//! types, the method table, error names and limits that the bridge and its
-//! clients share, a client proxy, and (feature `fake`, tests only) an
-//! in-process fake bridge with the replayer of the golden contract sequences
-//! (`tests/bridge/contract`, SPEC-v2 XT-7).
-//!
-//! Started from lautta's copy (`lautta-bridge-proto`); see doc/RUST.md.
+//! The netvfs bridge protocol `org.netvfs.Bridge1`: wire types, method table, error names and
+//! limits that the bridge and its clients share, a client proxy, and (feature `fake`, tests only)
+//! an in-process fake bridge with the replayer of the golden contract sequences
+//! (`tests/bridge/contract`).
 #![forbid(unsafe_code)]
 
 pub mod connect;

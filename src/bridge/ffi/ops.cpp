@@ -1,7 +1,4 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-// Tree operations over src/core/ops.h (XH-2, XH-3, XH-5): the adapters the
-// C++ bridge had in sessionjobs.cpp, with the C callbacks in place of its
-// batches and progress signals.
 #include "ffi_p.h"
 
 #include <functional>
@@ -11,9 +8,8 @@ namespace NetVfs::Ffi {
 
 namespace {
 
-// Design §1.2: visit() per entry; listFailed() goes on unless
-// stop_on_list_error (the bridge skips unreadable sub-folders). `visit` gets
-// the encoded path and the entry and says whether to go on.
+// visit() per entry; listFailed() goes on unless stop_on_list_error (unreadable sub-folders are
+// skipped).
 class WalkAdapter final : public Ops::WalkVisitor
 {
 public:
@@ -41,15 +37,14 @@ Ops::WalkOptions walkOptionsOf(const nvb_walk_opts *opts)
     Ops::WalkOptions options;
     if (!opts)
         return options;
-    // §6.9: postOrder is a no-op on the wire (leave() is not reported).
+    // postOrder is a no-op on the wire (leave() is not reported).
     options.postOrder = opts->post_order != 0;
     options.maxDepth = opts->max_depth;
     options.symlinks = opts->follow_symlinks ? Ops::SymlinkPolicy::Follow : Ops::SymlinkPolicy::Never;
     return options;
 }
 
-} // namespace
-
+}
 nvb_error *removeTree(nvb_conn *conn, nvb_bytes path, const nvb_progress *progress, int64_t *files,
                       int64_t *dirs) noexcept
 {
@@ -81,7 +76,6 @@ nvb_error *walk(nvb_conn *conn, nvb_bytes root, const nvb_walk_opts *opts, nvb_w
     });
 }
 
-// T5: both connections belong to the calling thread.
 nvb_error *copyAcross(nvb_conn *source, nvb_bytes sourcePath, nvb_conn *destination, nvb_bytes destinationPath,
                       int32_t recursive, int32_t replace, const nvb_progress *progress) noexcept
 {
@@ -96,4 +90,4 @@ nvb_error *copyAcross(nvb_conn *source, nvb_bytes sourcePath, nvb_conn *destinat
     });
 }
 
-} // namespace NetVfs::Ffi
+}

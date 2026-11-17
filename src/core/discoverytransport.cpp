@@ -12,8 +12,7 @@ namespace NetVfs {
 
 namespace {
 
-constexpr int MulticastTtl = 255;                // RFC 6762 section 11
-
+constexpr int MulticastTtl = 255;  // RFC 6762 section 11
 const QHostAddress &group4()
 {
     static const QHostAddress g(QStringLiteral("224.0.0.251"));
@@ -33,8 +32,7 @@ bool hasAddressOfFamily(const QNetworkInterface &iface, QAbstractSocket::Network
                        [family](const QNetworkAddressEntry &e) { return e.ip().protocol() == family; });
 }
 
-} // namespace
-
+}
 MulticastTransport::MulticastTransport(QObject *parent)
     : MulticastTransport(Options(), parent)
 {
@@ -136,7 +134,7 @@ void MulticastTransport::send(const QByteArray &datagram)
 {
     if (!m_open)
         return;
-    joinInterfaces();       // interfaces that came up since the last query
+    joinInterfaces();
     if (!m_options.multicast) {
         m_v4.writeDatagram(datagram, m_options.unicastAddress, m_options.unicastPort);
         return;
@@ -187,4 +185,4 @@ void MulticastTransport::readFrom(QUdpSocket *socket)
     }
 }
 
-} // namespace NetVfs
+}

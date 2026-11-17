@@ -1,9 +1,8 @@
 #!/bin/sh
 # SPDX-License-Identifier: LGPL-2.1-or-later
-# Guards the Rust lockfile for the toolchain of rust-version (doc/RUST.md):
-#   - a lockfile version that cargo of rust-version reads (3 or 4);
-#   - no locked crate needs a newer Rust (rust-version) than the workspace's,
-#     which the SDK's cargo could not build once the spec runs cargo again.
+# Guards the Rust lockfile for rust-version's toolchain:
+#   - lockfile version that cargo of rust-version reads (3 or 4);
+#   - no locked crate needs a newer Rust than the workspace's (SDK cargo could not build it).
 # Usage: check-lockfile.sh <Cargo.lock>
 set -eu
 lock=$1

@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! NT status codes (MS-ERREF 2.3) and their mapping to netvfs errors
-//! (SPEC-smb §5, SPEC-v2 XC-21, XM-9).
+//! NT status codes (MS-ERREF 2.3) and their mapping to netvfs errors.
 
 use std::fmt;
 
@@ -134,11 +133,10 @@ impl fmt::Debug for NtStatus {
     }
 }
 
-/// The detail of XM-9.
+/// Detail for DFS statuses.
 pub const DFS_DETAIL: &str = "DFS referral";
 
-/// SPEC-smb 5: the statuses with a netvfs error of their own, and the text
-/// that names them. Any other status is `ProtocolError`.
+/// Statuses with a netvfs error of their own, and the text that names them. Any other status is `ProtocolError`.
 const TABLE: [(NtStatus, ErrorName, &str); 22] = [
     (NtStatus::LOGON_FAILURE, ErrorName::AuthFailed, "the server rejected the user name or password"),
     (NtStatus::WRONG_PASSWORD, ErrorName::AuthFailed, "the server rejected the password"),
@@ -158,7 +156,6 @@ const TABLE: [(NtStatus, ErrorName, &str); 22] = [
     (NtStatus::DISK_FULL, ErrorName::NoSpace, "the share is full"),
     (NtStatus::QUOTA_EXCEEDED, ErrorName::NoSpace, "the quota is exceeded"),
     (NtStatus::IO_TIMEOUT, ErrorName::Timeout, "the server did not answer in time"),
-    // SPEC-v2 XC-9, XC-21
     (NtStatus::FILE_IS_A_DIRECTORY, ErrorName::IsADirectory, "this is a folder"),
     (NtStatus::NOT_A_DIRECTORY, ErrorName::NotADirectory, "this is not a folder"),
     (NtStatus::DIRECTORY_NOT_EMPTY, ErrorName::DirectoryNotEmpty, "the folder is not empty"),
@@ -171,10 +168,7 @@ pub fn with_context(context: &str, message: &str) -> String {
     if context.is_empty() { message.to_owned() } else { format!("{context}: {message}") }
 }
 
-/// The netvfs status for an NT status the server answered `context` with
-/// (SPEC-smb 5): the table's error and text with the status in hex, DFS
-/// statuses as `Unsupported` (XM-9), anything else `ProtocolError`. The
-/// detail always names the status (XC-24).
+/// The netvfs status for an NT status the server answered `context` with: the table's error and text with the status in hex, DFS statuses as `Unsupported`, anything else `ProtocolError`. The detail always names the status.
 #[must_use]
 pub fn status_for(nt: NtStatus, context: &str) -> Status {
     if nt == NtStatus::PATH_NOT_COVERED || nt == NtStatus::DFS_UNAVAILABLE {

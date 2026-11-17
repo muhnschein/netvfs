@@ -6,9 +6,8 @@
 
 namespace NetVfs::Rs {
 
-// SshKeyTools over the key functions of libnetvfs-rs.so, for the root
-// object of a plugin whose provider has keys (design §2: SshKeyTools on the
-// SFTP plugin's root object). Without the library each call is Internal.
+// SshKeyTools over the key functions of libnetvfs-rs.so, for the SFTP plugin's root object. Without
+// the library each call is Internal.
 class RsKeyTools : public SshKeyTools
 {
 public:
@@ -17,6 +16,5 @@ public:
     Result describe(const QByteArray &privateKey, SshKeyMaterial *out) override;
 };
 
-} // namespace NetVfs::Rs
-
+}
 #endif

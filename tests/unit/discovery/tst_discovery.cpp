@@ -37,7 +37,6 @@ public:
     QDateTime wall = QDateTime(QDate(2026, 1, 1), QTime(12, 0), Qt::UTC);
 };
 
-// Records what Discovery sends and lets the test feed it datagrams.
 class FakeTransport : public DiscoveryTransport
 {
 public:
@@ -62,7 +61,6 @@ public:
     void deliver(const Dns::Message &m) { emit datagramReceived(Dns::encode(m), QHostAddress(QStringLiteral("192.0.2.1"))); }
     void deliverRaw(const QByteArray &raw) { emit datagramReceived(raw, QHostAddress(QStringLiteral("192.0.2.1"))); }
 
-    // Decodes and forgets everything sent so far.
     QVector<Dns::Message> drain()
     {
         QVector<Dns::Message> out;
@@ -102,7 +100,6 @@ QStringList questionTexts(const Dns::Message &m)
     return out;
 }
 
-// Everything asked in a batch of sent datagrams.
 QStringList allQuestions(const QVector<Dns::Message> &messages)
 {
     QStringList out;
@@ -159,7 +156,6 @@ class TestDiscovery : public QObject
     Q_OBJECT
 
 private slots:
-    // ------------------------------------------------------------ lifecycle
 
     void browseQueryAsksForTheThreeServiceTypes()
     {
@@ -234,7 +230,7 @@ private slots:
         QVERIFY(rig.transport->isOpen());
         QCOMPARE(rig.transport->closeCalls, 0);
         rig.advance(1000);
-        QCOMPARE(rig.transport->drain().size(), 1);     // the remaining consumer still gets queries
+        QCOMPARE(rig.transport->drain().size(), 1);
 
         rig.discovery.stop();
         QVERIFY(!rig.discovery.isRunning());
@@ -243,10 +239,10 @@ private slots:
         rig.advance(60000);
         QCOMPARE(rig.transport->sent.size(), 0);        // nothing is sent while stopped
 
-        rig.discovery.stop();                           // unmatched stop: ignored
+        rig.discovery.stop();
         QCOMPARE(rig.discovery.consumers(), 0);
         QCOMPARE(rig.transport->closeCalls, 1);
-        QVERIFY(rig.discovery.start());                 // and the object still works afterwards
+        QVERIFY(rig.discovery.start());
         QCOMPARE(rig.discovery.consumers(), 1);
         QCOMPARE(rig.transport->openCalls, 2);
         QCOMPARE(rig.transport->drain().size(), 1);
@@ -274,7 +270,7 @@ private slots:
         rig.discovery.start();
         QVERIFY(rig.discovery.services().isEmpty());
         rig.transport->deliver(announcement("_ssh._tcp", "box", "box.local", 22, QStringLiteral("192.0.2.5")));
-        QCOMPARE(rig.found.size(), 2);                   // a new consumer sees it again
+        QCOMPARE(rig.found.size(), 2);
     }
 
     void keepsRetryingToOpenTheSocket()
@@ -305,7 +301,6 @@ private slots:
         QVERIFY(!rig.discovery.isRunning());
     }
 
-    // ---------------------------------------------------------- announcements
 
     void anAnnouncementIsFoundOnce()
     {
@@ -397,7 +392,6 @@ private slots:
         QCOMPARE(rig.found[0].instanceName, QStringLiteral("Evil[31m.Nas"));
     }
 
-    // ------------------------------------------------------------- resolution
 
     void resolvesPtrSrvAndAddressesStepByStep()
     {
@@ -408,13 +402,11 @@ private slots:
         const QByteArray inst = "Drive";
         const QString instName = QStringLiteral("drive._smb._tcp.local");
 
-        // PTR alone: nothing to report yet, the SRV record is asked for.
         rig.transport->deliver(response({ptrRecord(type, inst)}));
         QVERIFY(rig.found.isEmpty());
         QStringList asked = allQuestions(rig.transport->drain());
         QCOMPARE(asked, QStringList{QStringLiteral("SRV ") + instName});
 
-        // SRV: the host's addresses are asked for.
         rig.transport->deliver(response({}, {srvRecord(type, inst, "drive-host.local", 4450)}));
         QVERIFY(rig.found.isEmpty());
         asked = allQuestions(rig.transport->drain());
@@ -422,13 +414,12 @@ private slots:
         QVERIFY(asked.contains(QStringLiteral("AAAA drive-host.local")));
         QVERIFY(!asked.contains(QStringLiteral("SRV ") + instName));
 
-        // The addresses: now it is complete.
         rig.transport->deliver(response({}, {addressRecord("drive-host.local", QStringLiteral("192.0.2.50")),
                                              addressRecord("drive-host.local", QStringLiteral("2001:db8::50"))}));
         QCOMPARE(rig.found.size(), 1);
         QCOMPARE(rig.found[0].port, 4450);
         QCOMPARE(rig.found[0].addresses, addresses({QStringLiteral("192.0.2.50"), QStringLiteral("2001:db8::50")}));
-        QCOMPARE(allQuestions(rig.transport->drain()).size(), 0);        // nothing left to ask
+        QCOMPARE(allQuestions(rig.transport->drain()).size(), 0);
     }
 
     void givesUpWaitingForAddressesAfterThreeQueries()
@@ -460,7 +451,6 @@ private slots:
         QVERIFY(rig.found[0].addresses.isEmpty());
         QCOMPARE(rig.found[0].host, QStringLiteral("box.local"));
 
-        // A late address completes it.
         rig.transport->deliver(response({}, {addressRecord("box.local", QStringLiteral("192.0.2.61"))}));
         QCOMPARE(rig.updated.size(), 1);
         QCOMPARE(rig.updated[0].addresses, addresses({QStringLiteral("192.0.2.61")}));
@@ -501,7 +491,6 @@ private slots:
         QCOMPARE(rig.updated.size(), 1);
         QCOMPARE(rig.updated[0].addresses, addresses({QStringLiteral("192.0.2.81")}));
 
-        // Two flush records of one answer both stay.
         rig.advance(2000);
         rig.transport->deliver(response({}, {addressRecord("box.local", QStringLiteral("192.0.2.82")),
                                              addressRecord("box.local", QStringLiteral("192.0.2.83"))}));
@@ -522,7 +511,6 @@ private slots:
         QVERIFY(rig.lost.isEmpty());
     }
 
-    // ----------------------------------------------------------- goodbye / TTL
 
     void aPtrGoodbyeLosesTheServiceImmediately()
     {
@@ -536,7 +524,7 @@ private slots:
         QCOMPARE(rig.lost[0].port, 445);
         QCOMPARE(rig.lost[0].instanceName, QStringLiteral("Nas"));
         QVERIFY(rig.discovery.services().isEmpty());
-        rig.transport->deliver(response({ptrRecord("_smb._tcp", "Nas", 0)}));       // again: nothing
+        rig.transport->deliver(response({ptrRecord("_smb._tcp", "Nas", 0)}));
         QCOMPARE(rig.lost.size(), 1);
         rig.advance(10000000);
         QCOMPARE(rig.lost.size(), 1);
@@ -570,7 +558,6 @@ private slots:
         QCOMPARE(rig.found.size(), 1);
         rig.transport->drain();
 
-        // Refresh queries at 80, 90 and 95 percent of the TTL (RFC 6762 section 5.2).
         rig.advance(7999);
         QCOMPARE(allQuestions(rig.transport->drain()).filter(QStringLiteral("SRV box")).size(), 0);
         rig.advance(1);
@@ -602,7 +589,7 @@ private slots:
         rig.transport->deliver(shortLived);
         for (int i = 0; i < 5; ++i) {
             rig.advance(8000);
-            rig.transport->deliver(shortLived);          // the answer to the refresh query
+            rig.transport->deliver(shortLived);
         }
         QVERIFY(rig.lost.isEmpty());
         QCOMPARE(rig.found.size(), 1);
@@ -634,7 +621,7 @@ private slots:
         QCOMPARE(rig.found.size(), 1);
         rig.advance(10000);
         QCOMPARE(rig.lost.size(), 1);
-        for (int i = 0; i < 10; ++i)                     // the resolution attempts run out meanwhile
+        for (int i = 0; i < 10; ++i)
             rig.advance(8000);
         QCOMPARE(rig.found.size(), 1);
         rig.transport->deliver(response({}, {addressRecord("box.local", QStringLiteral("192.0.2.98"))}));
@@ -685,7 +672,6 @@ private slots:
         }
     }
 
-    // --------------------------------------------------------- hostile input
 
     void ignoresMalformedAndUnrelatedMessages()
     {
@@ -707,7 +693,7 @@ private slots:
         rig.transport->deliver(rcode);
         Dns::Message foreign = good;
         for (Dns::Record &r : foreign.answers)
-            r.cls = 3;                                    // CHAOS
+            r.cls = 3;
         for (Dns::Record &r : foreign.additional)
             r.cls = 3;
         rig.transport->deliver(foreign);
@@ -737,7 +723,6 @@ private slots:
         rig.advance(20000);
         QVERIFY(rig.log.isEmpty());
         QVERIFY(rig.discovery.services().isEmpty());
-        // An instance label that contains a dot escaped is one label and fine.
         Dns::Record ok = ptrRecord("_ssh._tcp", "x");
         ok.target = "a\\.b._ssh._tcp.local";
         rig.transport->deliver(response({ok}, {srvRecord("_ssh._tcp", "a\\.b", "x.local", 22),
@@ -766,7 +751,6 @@ private slots:
                                          addressRecord("host.local", QStringLiteral("192.0.2.103"))}));
         rig.advance(20000);
         QVERIFY(rig.found.isEmpty());
-        // Letters, digits, '-', '_' and UTF-8 are fine.
         rig.transport->deliver(announcement("_ssh._tcp", "ok", "Büro_nas-1.local", 22, QStringLiteral("192.0.2.104")));
         QCOMPARE(rig.found.size(), 1);
         QCOMPARE(rig.found[0].host, QStringLiteral("Büro_nas-1.local"));
@@ -823,7 +807,6 @@ private slots:
         QCOMPARE(many.found[0].addresses.size(), 8);
     }
 
-    // ------------------------------------------------------------ templates
 
     void buildsConnectionTemplatesWithoutSecrets()
     {
@@ -847,7 +830,6 @@ private slots:
         QCOMPARE(p.port, 22);
     }
 
-    // ------------------------------------------------------------- transport
 
     void recognisesOnLinkSenders()
     {
@@ -889,7 +871,6 @@ private slots:
         QVERIFY(transport->isOpen());
         QVERIFY(transport->localPort() != 0);
 
-        // The browse query arrives at the peer.
         QTRY_VERIFY(peer.hasPendingDatagrams());
         QByteArray query(static_cast<int>(peer.pendingDatagramSize()), Qt::Uninitialized);
         peer.readDatagram(query.data(), query.size());
@@ -897,7 +878,6 @@ private slots:
         QVERIFY(Dns::decode(query, &m));
         QCOMPARE(m.questions.size(), 3);
 
-        // An announcement from the right port is found.
         const QByteArray wire = Dns::encode(announcement("_smb._tcp", "Loop Nas", "loop.local", 445, QStringLiteral("192.0.2.110")));
         QVERIFY(peer.writeDatagram(wire, QHostAddress::LocalHost, transport->localPort()) == wire.size());
         QTRY_COMPARE(found.size(), 1);
@@ -909,7 +889,6 @@ private slots:
         QVERIFY(other.bind(QHostAddress(QHostAddress::LocalHost), 0));
         const QByteArray second = Dns::encode(announcement("_smb._tcp", "Other", "other.local", 445, QStringLiteral("192.0.2.111")));
         QVERIFY(other.writeDatagram(second, QHostAddress::LocalHost, transport->localPort()) == second.size());
-        // Garbage from the right port is dropped by the parser.
         QVERIFY(peer.writeDatagram(QByteArray(40, '\xc0'), QHostAddress::LocalHost, transport->localPort()) == 40);
         QTest::qWait(200);
         QCOMPARE(found.size(), 1);
@@ -928,7 +907,7 @@ private slots:
         if (!transport.open())
             QSKIP("no multicast capable socket in this environment");
         QVERIFY(transport.isOpen());
-        QVERIFY(transport.open());          // idempotent
+        QVERIFY(transport.open());
         transport.send(Dns::encode(Dns::Message()));
         transport.close();
         QVERIFY(!transport.isOpen());

@@ -30,8 +30,7 @@ QObject *pluginFor(const QString &provider)
         const QString path = QDir(dir).absoluteFilePath(fileName);
         if (!QFileInfo(path).exists())
             continue;
-        // The loader instance is intentionally kept loaded: the root object is
-        // shared per process and plugins stay mapped until exit.
+        // Loader kept loaded on purpose: plugins stay mapped until exit.
         QPluginLoader loader(path);
         QObject *root = loader.instance();
         const BackendFactory *factory = qobject_cast<BackendFactory *>(root);
@@ -52,7 +51,7 @@ BackendFactory *factoryFor(const QString &provider)
 {
     return qobject_cast<BackendFactory *>(pluginFor(provider));
 }
-} // namespace
+}
 
 QStringList BackendLoader::searchPaths()
 {
@@ -85,4 +84,4 @@ SshKeyTools *BackendLoader::sshKeyTools()
     return qobject_cast<SshKeyTools *>(pluginFor(QStringLiteral("sftp")));
 }
 
-} // namespace NetVfs
+}

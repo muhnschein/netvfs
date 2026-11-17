@@ -1,9 +1,5 @@
 name: Mutants (full crate)
-# cargo-mutants on all of one crate, not only on the lines a pull request
-# changes (doc/RUST.md "Tests"): run by hand before the pull request of a
-# new crate merges, results in that pull request. Every mutant must be
-# caught or be unviable; equivalent ones are listed with their reason in
-# rust/.cargo/mutants.toml.
+# cargo-mutants on all of one crate, by hand before a new crate's PR merges; results in the PR. Every mutant caught or unviable; equivalent ones listed with reason in rust/.cargo/mutants.toml.
 on:
   workflow_dispatch:
     inputs:
@@ -59,13 +55,11 @@ jobs:
           key: cargo-mutants-${{ env.MUTANTS_VERSION }}-ubuntu-24.04
       - name: Install cargo-mutants
         run: ./tools/ci/cargo-tool.sh cargo-mutants "$MUTANTS_VERSION"
-      # netvfs-sftp's tests need the SFTP interop servers
-      # (rust/netvfs-sftp/tests/openssh.rs): started once for the shard.
+      # netvfs-sftp's tests need the SFTP interop servers (rust/netvfs-sftp/tests/openssh.rs): started once for the shard.
       - name: Start the SFTP interop servers
         if: inputs.package == 'netvfs-sftp'
         run: NETVFS_SFTP_SERVERS_ONLY=1 ./tests/interop/sftp/run.sh build-ffi | tail -n 1 >> "$GITHUB_ENV"
-      # netvfs-smb's tests need the Samba servers
-      # (rust/netvfs-smb/tests/samba.rs): started once for the shard.
+      # netvfs-smb's tests need the Samba servers (rust/netvfs-smb/tests/samba.rs): started once for the shard.
       - name: Start the SMB interop servers
         if: inputs.package == 'netvfs-smb'
         run: NETVFS_SMB_SERVERS_ONLY=1 ./tests/interop/smb/run.sh build-ffi | grep '^NETVFS_INTEROP_SMB_' >> "$GITHUB_ENV"

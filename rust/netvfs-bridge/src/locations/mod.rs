@@ -1,31 +1,15 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! What a consumer may reach (SPEC-v2 XB-7) and how (design §3.2, §3.3):
-//! location specs ([`spec`]), their connection pools with lanes and the
-//! per-host limit ([`pool`], XB-12), the connection state of a location
-//! ([`state`], XB-12), one std thread per backend connection
-//! ([`worker`], C-8), the copy jobs on threads of their own ([`copyjobs`]),
-//! the connection policy for accounts and ad-hoc locations ([`connector`],
-//! XB-14, C-7), the book that holds them for the core ([`book`]) and the
-//! pins of ad-hoc locations ([`knownhosts`], XB-14).
+//! What a consumer may reach and how: location specs ([`spec`]), connection pools with lanes and the per-host limit ([`pool`]), connection state ([`state`]), one std thread per backend connection ([`worker`]), copy jobs on threads of their own ([`copyjobs`]), connection policy for accounts and ad-hoc locations ([`connector`]), the book holding them for the core ([`book`]) and pins of ad-hoc identities ([`knownhosts`]).
 //!
 //! # Threads
 //!
-//! The book, the pools and the copy jobs belong to the core actor (no
-//! locks). Each worker is a std thread named `nvb-w` that owns its
-//! [`ffi::Conn`](crate::ffi::Conn); each copy job a thread `nvb-copy` with
-//! two. Shared across threads are only the per-operation [`CancelToken`]s,
-//! each worker's queue (a mutex with its connection's cancel handle and
-//! phase), and each pool's [`StateTracker`](state::StateTracker) with the
-//! [`StateSignal`](state::StateSignal) that wakes the core.
+//! Book, pools and copy jobs belong to the core actor (no locks). Each worker is a std thread `nvb-w` owning its [`ffi::Conn`](crate::ffi::Conn); each copy job a thread `nvb-copy` with two.
+//! Shared across threads: per-operation [`CancelToken`]s, each worker's queue (mutex with its connection's cancel handle and phase), each pool's [`StateTracker`](state::StateTracker) with the [`StateSignal`](state::StateSignal) that wakes the core.
 //!
 //! # Worker → core
 //!
-//! Workers and copy jobs report what needs the core through
-//! [`WorkerEvents`] ([`WorkerEvent`]): questions to a session and their
-//! withdrawal, an account's connection data, an account's attention state,
-//! a finished copy job and warnings for the log. The core folds
-//! `WorkerEvent` into its own event enum (`core::Event`); the results of
-//! ordinary work items are sent by the work closures the core builds.
+//! Workers and copy jobs report through [`WorkerEvents`] ([`WorkerEvent`]): questions and their withdrawal, account connection data, account attention state, finished copy jobs, log warnings.
+//! The core folds `WorkerEvent` into `core::Event`; results of ordinary work items come from the closures the core builds.
 
 pub mod book;
 pub mod connector;
@@ -51,12 +35,10 @@ use std::sync::mpsc;
 use zbus::zvariant::OwnedValue;
 use zeroize::Zeroizing;
 
-/// The cancel flag of one request or job (XB-13): set by the core, polled
-/// by workers, descriptor devices and question waits.
+/// The cancel flag of one request or job: set by the core, polled by workers, descriptor devices and question waits.
 pub type CancelToken = Arc<AtomicBool>;
 
-/// Who a piece of work is for: the session (for questions) and the
-/// request's cancel flag.
+/// Who a piece of work is for: the session (for questions) and the request's cancel flag.
 #[derive(Debug, Clone)]
 pub struct TaskContext {
     /// The session whose request this is (questions go there).
@@ -105,7 +87,7 @@ impl AskId {
     }
 }
 
-/// A consumer's answer to a question (`Answer` call, XB-10).
+/// A consumer's answer to a question (`Answer` call).
 #[derive(Clone, PartialEq, Eq, Default)]
 pub struct Answer {
     /// Whether the consumer accepted.
@@ -120,15 +102,11 @@ impl fmt::Debug for Answer {
     }
 }
 
-/// What a worker or copy job needs from the core (design §3.3). Fold into
-/// `core::Event`.
+/// What a worker or copy job needs from the core.
 #[derive(Debug)]
 pub enum WorkerEvent {
-    /// Ask `session` a question (`Question` signal) and send the answer, or
-    /// `None` when there is none (no such session, the session went away,
-    /// the question was dropped), through `answer`, once. The worker waits
-    /// at most the question timeout and withdraws it with
-    /// [`WorkerEvent::CancelQuestion`] when it stops waiting.
+    /// Ask `session` a question (`Question` signal); the answer (`None`: none) goes through `answer`, once.
+    /// The worker waits at most the question timeout, then sends [`WorkerEvent::CancelQuestion`].
     Ask {
         /// The question's id on the worker side.
         ask: AskId,
@@ -144,17 +122,14 @@ pub enum WorkerEvent {
     /// The worker stopped waiting (canceled, timed out): withdraw the
     /// question if it is still pending.
     CancelQuestion(AskId),
-    /// What a connection to the account needs (the helper's `files`
-    /// answer, XA-4): send it through `reply`, once.
+    /// What a connection to the account needs (the helper's `files` answer), sent through `reply`, once.
     FetchAccount {
         /// The account.
         account_id: i32,
         /// Where the answer goes.
         reply: mpsc::Sender<Result<AccountAccess, Status>>,
     },
-    /// XB-14: an account's connection failed at the identity check or at
-    /// authentication; record the state (the helper's `attention`) and
-    /// relist the accounts.
+    /// An account's connection failed at the identity check or authentication: record the state (the helper's `attention`) and relist the accounts.
     Attention {
         /// The account.
         account_id: i32,
@@ -163,9 +138,7 @@ pub enum WorkerEvent {
         /// The identity pin seen, for review in Settings; may be empty.
         pin: String,
     },
-    /// A copy job's thread has ended: call
-    /// [`CopyJobs::finish`](copyjobs::CopyJobs::finish) and report the
-    /// result.
+    /// A copy job's thread ended: call [`CopyJobs::finish`](copyjobs::CopyJobs::finish) and report the result.
     CopyDone {
         /// The job.
         id: CopyId,
@@ -176,9 +149,7 @@ pub enum WorkerEvent {
     Warning(String),
 }
 
-/// Where workers send [`WorkerEvent`]s: any function, typically one that
-/// forwards into the core's channel. Called from std threads; must not
-/// block.
+/// Where workers send [`WorkerEvent`]s. Called from std threads; must not block.
 #[derive(Clone)]
 pub struct WorkerEvents(Arc<dyn Fn(WorkerEvent) + Send + Sync>);
 

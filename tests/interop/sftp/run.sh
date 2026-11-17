@@ -1,11 +1,8 @@
 #!/bin/sh
 # SPDX-License-Identifier: LGPL-2.1-or-later
-# SFTP interop suite (SPEC-sftp 8, SPEC 12.2, SPEC-v2 XT-1, XT-2). Builds
-# the OpenSSH server images, starts one container per server version, runs
-# the QtTest driver tst_interop_sftp, netvfs-cli, the
-# backend conformance suite (tests/conformance) and the Rust tests of
-# netvfs-sftp (rust/netvfs-sftp/tests/openssh.rs) against them, and removes
-# the containers again, also when a step fails or the run is interrupted.
+# SFTP interop suite. Builds the OpenSSH server images, starts one container per server version, runs the QtTest driver
+# tst_interop_sftp, netvfs-cli, the backend conformance suite (tests/conformance) and the Rust tests of netvfs-sftp
+# (rust/netvfs-sftp/tests/openssh.rs) against them, and removes the containers again, also on failure or interrupt.
 #
 # Usage: run.sh <build dir> [tst_interop_sftp arguments]
 # With driver arguments (for example a list of test functions) only the
@@ -163,7 +160,6 @@ cli_check() {
     identity=$("$cli" "$@" identify)
     fingerprint=$(echo "$identity" | sed -n 1p)
     pin=$(echo "$identity" | sed -n 2p)
-    # S-6: the fingerprint is the one ssh-keygen -lf prints on the server.
     if ! docker exec "$container" sh -c 'for f in /etc/ssh/ssh_host_*_key.pub; do ssh-keygen -lf "$f"; done' \
             | cut -d ' ' -f 2 | grep -qx -- "$fingerprint"; then
         log "CLI fingerprint $fingerprint is not one of the server's host keys"
@@ -176,7 +172,7 @@ cli_check() {
     "$cli" "$@" verify "cli check"
     "$cli" "$@" put "$work/cli.bin" "cli check/cli.bin"
     "$cli" "$@" ls "cli check" | grep -q -- "- 3000000 cli.bin\$"
-    # XC-CLI: the full entry. ls -l: mode owner group size mtime(UTC) flags name.
+    # ls -l: mode owner group size mtime(UTC) flags name.
     "$cli" "$@" ls -l "cli check" | grep -Eq -- "^-rw[-rwx]+ [^ ]+ [^ ]+ 3000000 [0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z [-A-Z]+ cli.bin\$"
     "$cli" "$@" stat "cli check/cli.bin" | grep -Eq -- "^-rw[-rwx]+ .* 3000000 .* cli check/cli.bin\$"
     "$cli" "$@" stat --json "cli check/cli.bin" | grep -q -- '"size": 3000000'
@@ -271,10 +267,8 @@ cli_check() {
     log "netvfs-cli ok"
 }
 
-# SPEC-v2 XT-1: the conformance suite against OpenSSH 10.3p1. The target
-# works in a folder bind-mounted from here (hostPath), so that
-# the suite creates its large fixtures directly; the files it creates are
-# world-writable (umask 000) because the server's user changes them.
+# Conformance suite against OpenSSH 10.3p1. The target works in a folder bind-mounted from here (hostPath) so the suite
+# creates its large fixtures directly; files it creates are world-writable (umask 000) because the server's user changes them.
 conformance() {
     conformance_config="$work/conformance.json"
     o103_port=$(docker port "$prefix-o103" 2201/tcp | head -n 1 | sed 's/.*://')
@@ -353,7 +347,7 @@ if [ "${NETVFS_SFTP_SERVERS_ONLY:-0}" = 1 ]; then
     exit 0
 fi
 
-# The SFTP plugin loads the Rust library of the same build.
+# SFTP plugin loads the Rust library of the same build.
 export NETVFS_BACKEND_PATH="$build/lib/netvfs/backends"
 export NETVFS_RS_LIB="$build/lib/netvfs/libnetvfs-rs.so"
 export NETVFS_SFTP_INTEROP_CONFIG="$config"

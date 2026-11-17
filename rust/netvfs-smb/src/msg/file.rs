@@ -1,11 +1,5 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! The file commands: CREATE (MS-SMB2 2.2.13, 2.2.14), CLOSE (2.2.15,
-//! 2.2.16), FLUSH (2.2.17, 2.2.18), READ (2.2.19, 2.2.20), WRITE (2.2.21,
-//! 2.2.22), IOCTL (2.2.31, 2.2.32), QUERY_DIRECTORY (2.2.33, 2.2.34) with
-//! FileIdBothDirectoryInformation (MS-FSCC 2.4.17), QUERY_INFO (2.2.37,
-//! 2.2.38) with FileFsFullSizeInformation (MS-FSCC 2.5.4), and SET_INFO
-//! (2.2.39, 2.2.40) with FileBasicInformation, FileRenameInformation and
-//! FileDispositionInformation (MS-FSCC 2.4.7, 2.4.37.2, 2.4.11).
+//! File commands: CREATE, CLOSE, FLUSH, READ, WRITE, IOCTL, QUERY_DIRECTORY (FileIdBothDirectoryInformation, MS-FSCC 2.4.17), QUERY_INFO (FileFsFullSizeInformation, MS-FSCC 2.5.4), SET_INFO (FileBasicInformation, FileRenameInformation, FileDispositionInformation).
 
 use super::body_reader;
 use crate::error::{Result, protocol};
@@ -14,8 +8,7 @@ use crate::wire::{Reader, Writer, from_u32, slice_at, to_u16, to_u32};
 
 /// A 16-byte SMB2 file id (persistent ‖ volatile).
 pub type FileId = [u8; 16];
-/// The file id of a related compound request: "the file of the previous
-/// request" (MS-SMB2 3.2.4.1.4).
+/// The file id of a related compound request: "the file of the previous request" (MS-SMB2 3.2.4.1.4).
 pub const RELATED_FILE_ID: FileId = [0xFF; 16];
 
 /// Access mask bits (MS-SMB2 2.2.13.1).
@@ -74,11 +67,9 @@ pub mod attributes {
 pub const SHARE_ALL: u32 = 0x7;
 /// FSCTL_PIPE_TRANSCEIVE (MS-FSCC 2.3.49).
 pub const FSCTL_PIPE_TRANSCEIVE: u32 = 0x0011_C017;
-/// The longest path accepted in a CREATE or rename, in UTF-16 units
-/// (MAX_PATH-sized names are far shorter; the field is 16 bits of bytes).
+/// The longest path accepted in a CREATE or rename, in UTF-16 units (the field is 16 bits of bytes).
 pub const MAX_PATH_UNITS: usize = 32_767;
-/// Names in directory entries are at most this long (bytes of UTF-16):
-/// 255 units with headroom.
+/// Names in directory entries are at most this long (bytes of UTF-16): 255 units with headroom.
 pub const MAX_NAME_BYTES: usize = 1024;
 /// QUERY_DIRECTORY entries accepted per response.
 pub const MAX_ENTRIES: usize = 4096;
@@ -111,7 +102,6 @@ const PER_MS: u64 = 10_000;
 /// and for times before 1970.
 #[must_use]
 pub fn ms_of_filetime(ft: u64) -> Option<i64> {
-    // 0 (no time) is before the epoch as well.
     i64::try_from(ft.checked_sub(EPOCH_FILETIME)? / PER_MS).ok()
 }
 
@@ -281,8 +271,7 @@ pub fn read_response(msg: &[u8], requested: usize) -> Result<&[u8]> {
     slice_at(msg, offset, len)
 }
 
-/// WRITE request body with `data` (DataOffset right after the 48 fixed
-/// bytes).
+/// WRITE request body with `data` (DataOffset right after the 48 fixed bytes).
 ///
 /// # Errors
 /// More data than 32 bits can count.
@@ -641,7 +630,6 @@ mod tests {
         assert_eq!(r.times, Times { creation: 11, last_access: 12, last_write: 13, change: 14 });
         assert_eq!((r.end_of_file, r.attributes, r.file_id), (1234, 0x20, [0xAB; 16]));
         Created::decode(&resp(Command::Create, &body(152, 400))).unwrap_err();
-        // No contexts: the offset does not matter.
         Created::decode(&resp(Command::Create, &body(0xffff, 0))).unwrap();
         let mut with_ctx = resp(Command::Create, &body(152, 4));
         with_ctx.extend_from_slice(&[0; 4]);
@@ -762,20 +750,16 @@ mod tests {
         assert_eq!(got[0].times, Times { creation: 1, last_access: 2, last_write: 3, change: 4 });
         assert_eq!((got[1].name.clone(), got[1].size, got[1].attributes), (u("\u{dc}n\u{ef}"), 7, 0x10));
 
-        // NextEntryOffset pointing back into the entry, unaligned, or past the end.
         parse_id_both_directory(&entry("x", 1, 0, 8)).unwrap_err();
         parse_id_both_directory(&entry("x", 1, 0, 107)).unwrap_err();
         parse_id_both_directory(&entry("x", 1, 0, 4096)).unwrap_err();
-        // Unaligned, though past the entry and with an entry there.
         let mut unaligned = entry("x", 1, 0, 108);
         unaligned.resize(108, 0);
         unaligned.extend_from_slice(&entry("y", 1, 0, 0));
         parse_id_both_directory(&unaligned).unwrap_err();
-        // The smallest forward offset (fixed part and name, aligned) is fine.
         let mut tight = entry("xyzw", 1, 0, 112);
         tight.extend_from_slice(&entry("y", 1, 0, 0));
         assert_eq!(parse_id_both_directory(&tight).unwrap().len(), 2);
-        // A name beyond the buffer, odd, or above the cap.
         let mut long = entry("x", 1, 0, 0);
         long[60..64].copy_from_slice(&100u32.to_le_bytes());
         parse_id_both_directory(&long).unwrap_err();
@@ -833,7 +817,6 @@ mod tests {
         let mut short = msg.clone();
         short[68] = 31;
         fs_full_size_response(&short).unwrap_err();
-        // More than the structure: the rest is ignored.
         let mut long = msg.clone();
         long[68] = 40;
         long.extend_from_slice(&[0; 8]);

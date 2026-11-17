@@ -1,17 +1,9 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! Logging (SPEC-v2 XB-18, C-16, C-17): the category `netvfs.bridge`, at
-//! warning level unless `QT_LOGGING_RULES` says otherwise, every line
-//! prefixed with the consumer id: `netvfs.bridge: [lautta] message` on
-//! stderr (the journal, under systemd), as Qt's default message handler
-//! printed `qCWarning(lcNetVfsBridge) << consumerTag(id) << …`.
+//! Logging: category `netvfs.bridge`, warning level unless `QT_LOGGING_RULES` says otherwise, every line prefixed with the consumer id: `netvfs.bridge: [lautta] message` on stderr (the journal under systemd), as Qt's default handler printed it.
 //!
-//! The rules are read as `QLoggingSettingsParser` and `QLoggingRule` of
-//! Qt 5 read `QT_LOGGING_RULES` (design §7: `netvfs.bridge.debug=true`
-//! enables debug messages); the rule files Qt also reads
-//! (`QT_LOGGING_CONF`, `qtlogging.ini`) are not.
+//! Rules are parsed as Qt 5's `QLoggingSettingsParser` and `QLoggingRule` read `QT_LOGGING_RULES` (`netvfs.bridge.debug=true` enables debug); rule files (`QT_LOGGING_CONF`, `qtlogging.ini`) are not read.
 //!
-//! C-17 is the callers' part: no secrets at any level; paths, hosts and
-//! server text at debug only.
+//! Callers: no secrets at any level; paths, hosts and server text at debug only.
 
 use std::fmt;
 use std::io::Write;
@@ -46,7 +38,7 @@ impl Level {
     }
 }
 
-/// The bridge's logger: the consumer tag and the enabled levels.
+/// The consumer tag and the enabled levels.
 #[derive(Clone, Debug)]
 pub struct Logger {
     tag: String,
@@ -54,18 +46,15 @@ pub struct Logger {
 }
 
 impl Default for Logger {
-    /// No consumer tag, warning and critical enabled.
     fn default() -> Self {
         Self::new(None, None)
     }
 }
 
 impl Logger {
-    /// The logger of `consumer` (none: no tag), with the `QT_LOGGING_RULES`
-    /// value `rules` applied to the default levels.
+    /// Logger of `consumer` (none: no tag) with the `QT_LOGGING_RULES` value `rules` applied to the default levels.
     #[must_use]
     pub fn new(consumer: Option<&str>, rules: Option<&str>) -> Self {
-        // Q_LOGGING_CATEGORY(lcNetVfsBridge, "netvfs.bridge", QtWarningMsg)
         let mut enabled = [false, false, true, true];
         for rule in parse_rules(rules.unwrap_or_default()) {
             for level in Level::ALL {
@@ -86,7 +75,7 @@ impl Logger {
         self.enabled.get(level.index()).copied().unwrap_or(false)
     }
 
-    /// The line for `message` at `level`, or `None` when the level is off.
+    /// The line for `message` at `level`, `None` when off.
     #[must_use]
     pub fn line(&self, level: Level, message: fmt::Arguments<'_>) -> Option<String> {
         self.enabled(level).then(|| format!("{CATEGORY}: {}{message}\n", self.tag))
@@ -95,7 +84,6 @@ impl Logger {
     /// Writes `message` at `level` to `out` in one write.
     pub fn write_to(&self, out: &mut impl Write, level: Level, message: fmt::Arguments<'_>) {
         if let Some(line) = self.line(level, message) {
-            // Nowhere to report a failed log write.
             out.write_all(line.as_bytes()).unwrap_or_default();
         }
     }
@@ -103,19 +91,18 @@ impl Logger {
 
 static LOGGER: OnceLock<Logger> = OnceLock::new();
 
-/// Sets the process's logger, once (main, before anything logs); false if
-/// it was set already.
+/// Sets the process's logger, once, before anything logs; false if already set.
 pub fn init(logger: Logger) -> bool {
     LOGGER.set(logger).is_ok()
 }
 
-/// The process's logger (the default one before `init`).
+/// The process's logger (default before `init`).
 #[must_use]
 pub fn logger() -> &'static Logger {
     LOGGER.get_or_init(Logger::default)
 }
 
-/// Whether the process logs at `level` (to skip building costly text).
+/// Whether the process logs at `level`.
 #[must_use]
 pub fn enabled(level: Level) -> bool {
     logger().enabled(level)
@@ -130,8 +117,7 @@ pub fn log(level: Level, message: fmt::Arguments<'_>) {
     logger().write_to(&mut std::io::stderr().lock(), level, message);
 }
 
-/// Unit tests read what the code under test logs on their thread, at every
-/// level, as `QTest::ignoreMessage` checks the C++ warnings.
+/// Unit tests read what the code under test logs on their thread, as `QTest::ignoreMessage` does.
 #[cfg(test)]
 pub(crate) mod capture {
     use super::Level;
@@ -142,17 +128,14 @@ pub(crate) mod capture {
         static LINES: RefCell<Option<Vec<(Level, String)>>> = const { RefCell::new(None) };
     }
 
-    /// Records instead of writing while capturing.
     pub(super) fn record(level: Level, message: fmt::Arguments<'_>) -> bool {
         LINES.with_borrow_mut(|lines| lines.as_mut().map(|l| l.push((level, message.to_string()))).is_some())
     }
 
-    /// Starts capturing on this thread, dropping what was captured.
     pub(crate) fn start() {
         LINES.set(Some(Vec::new()));
     }
 
-    /// What was logged since `start`; capturing goes on.
     pub(crate) fn take() -> Vec<(Level, String)> {
         LINES.with_borrow_mut(|lines| lines.as_mut().map(std::mem::take).unwrap_or_default())
     }
@@ -178,21 +161,14 @@ pub fn critical(message: fmt::Arguments<'_>) {
     log(Level::Critical, message);
 }
 
-// ------------------------------------------------------------------ rules
-
-/// Where `*` sits in a rule's category (`QLoggingRule::PatternFlags`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Pattern {
     Full,
-    /// `prefix*`
     Left,
-    /// `*suffix`
     Right,
-    /// `*middle*`
     Mid,
 }
 
-/// One rule: `<category>[.<level>]=true|false`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Rule {
     category: String,
@@ -202,7 +178,6 @@ struct Rule {
 }
 
 impl Rule {
-    /// `QLoggingRule::parse`; `None` for a `*` inside the category.
     fn parse(pattern: &str, enabled: bool) -> Option<Self> {
         let mut level = None;
         let mut category = pattern;
@@ -232,7 +207,6 @@ impl Rule {
         Some(Self { category: category.to_owned(), pattern, level, enabled })
     }
 
-    /// `QLoggingRule::pass`: `Some(enabled)` when the rule applies.
     fn pass(&self, category: &str, level: Level) -> Option<bool> {
         if self.level.is_some_and(|l| l != level) {
             return None;
@@ -241,7 +215,6 @@ impl Rule {
         let applies = match self.pattern {
             Pattern::Full => category == self.category,
             Pattern::Left => found == Some(0),
-            // The first occurrence must end the category, as in Qt.
             Pattern::Right => found.is_some() && found == category.len().checked_sub(self.category.len()),
             Pattern::Mid => found.is_some(),
         };
@@ -249,8 +222,6 @@ impl Rule {
     }
 }
 
-/// `QLoggingSettingsParser` over `QT_LOGGING_RULES`: `;` separates lines
-/// (implicit `[Rules]` section); malformed rules are skipped.
 fn parse_rules(text: &str) -> Vec<Rule> {
     let mut rules = Vec::new();
     let mut in_rules = true;
@@ -309,9 +280,7 @@ mod tests {
         assert_eq!(levels("netvfs.*=true"), [true, true, true, true]);
         assert_eq!(levels("*.bridge.debug=true"), [true, false, true, true]);
         assert_eq!(levels("*vfs.br*.debug=true"), [true, false, true, true]);
-        // The later rule wins.
         assert_eq!(levels("netvfs.bridge.debug=true\nnetvfs.*.debug=false"), [false, false, true, true]);
-        // Key escapes as in QSettings.
         assert_eq!(levels("netvfs%2Ebridge.debug=true"), [true, false, true, true]);
     }
 
@@ -333,10 +302,8 @@ mod tests {
         }
         assert_eq!(levels("[Other]\n[ rules ]\nnetvfs.bridge.debug=true"), [true, false, true, true]);
         assert_eq!(levels("[]"), [false, false, true, true]);
-        // A section needs both brackets.
         assert_eq!(levels("a]\nnetvfs.bridge.debug=true"), [true, false, true, true]);
         assert_eq!(levels("[Other\nnetvfs.bridge.debug=true"), [true, false, true, true]);
-        // ';' separates rules like a line end.
         assert_eq!(levels("; netvfs.bridge.debug=true"), [true, false, true, true]);
     }
 
@@ -351,7 +318,6 @@ mod tests {
         assert_eq!(rule("*").category, "");
         assert_eq!(Rule::parse("a*b", true), None);
         assert_eq!(rule("x.critical").level, Some(Level::Critical));
-        // Qt matches a right filter at the first occurrence only.
         assert_eq!(rule("*a").pass("a.a", Level::Debug), None);
         assert_eq!(rule("*.a").pass("b.a", Level::Debug), Some(true));
         assert_eq!(rule("*b*").pass("abc", Level::Info), Some(true));
@@ -373,8 +339,6 @@ mod tests {
 
     #[test]
     fn process_logger() {
-        // init takes once (each test runs in a process of its own under
-        // nextest; cargo test may have set the logger already).
         let fresh = LOGGER.get().is_none();
         let first = init(Logger::new(Some("t"), None));
         assert_eq!(first, fresh);

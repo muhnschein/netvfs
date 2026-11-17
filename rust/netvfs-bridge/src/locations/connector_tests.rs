@@ -1,7 +1,4 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-// The connector's policy without C++: waits, questions, details, attention
-// and the ad-hoc identity verdict. Its establish paths run against the
-// C++ fake backend in tests/backend.rs.
 #![allow(clippy::assertions_on_result_states, clippy::arithmetic_side_effects)]
 
 use super::{
@@ -36,7 +33,6 @@ fn string(d: &HashMap<String, OwnedValue>, k: &str) -> String {
     String::try_from(d[k].try_clone().unwrap()).unwrap()
 }
 
-/// The core's side of one question: what was asked, answered with `reply`.
 fn answer_one(
     rx: &mut Events,
     reply: Option<Answer>,
@@ -59,7 +55,6 @@ fn waits_end_with_a_value_a_cancel_a_timeout_or_a_gone_core() {
     let flag = AtomicBool::new(false);
     let (tx, rx) = mpsc::channel();
     tx.send(1).unwrap();
-    // A value already there wins, even over a cancel.
     flag.store(true, Ordering::Release);
     assert_eq!(wait_for(&rx, &flag, Duration::ZERO), Waited::Got(1));
     assert_eq!(wait_for(&rx, &flag, Duration::from_secs(5)), Waited::Canceled);
@@ -69,7 +64,6 @@ fn waits_end_with_a_value_a_cancel_a_timeout_or_a_gone_core() {
     let waited = start.elapsed();
     assert!(waited >= Duration::from_millis(250) && waited < Duration::from_secs(2), "{waited:?}");
     assert_eq!(wait_for(&rx, &flag, Duration::ZERO), Waited::TimedOut);
-    // A value that comes while waiting; also with no time limit at all.
     let later = tx.clone();
     let sender = thread::spawn(move || {
         thread::sleep(Duration::from_millis(150));
@@ -77,7 +71,6 @@ fn waits_end_with_a_value_a_cancel_a_timeout_or_a_gone_core() {
     });
     assert_eq!(wait_for(&rx, &flag, Duration::MAX), Waited::Got(2));
     sender.join().unwrap();
-    // A cancel while waiting is seen within a slice.
     let flag = Arc::new(AtomicBool::new(false));
     let setter = Arc::clone(&flag);
     let canceler = thread::spawn(move || {
@@ -88,7 +81,6 @@ fn waits_end_with_a_value_a_cancel_a_timeout_or_a_gone_core() {
     assert_eq!(wait_for(&rx, &flag, Duration::from_secs(10)), Waited::Canceled);
     assert!(start.elapsed() < WAIT_SLICE * 4, "{:?}", start.elapsed());
     canceler.join().unwrap();
-    // The core dropped its sender.
     drop(tx);
     assert_eq!(wait_for(&rx, &AtomicBool::new(false), Duration::from_secs(10)), Waited::Gone);
     let (tx, rx) = mpsc::channel::<u8>();
@@ -121,7 +113,6 @@ fn asker_relays_through_the_core() {
     assert_eq!(string(&first.3, "k"), "v");
     assert_eq!(second.2, IDENTITY_UNKNOWN);
     assert!(second.0 > first.0);
-    // Answered "none": nothing to withdraw.
     assert!(rx.try_recv().is_err());
 }
 
@@ -136,7 +127,6 @@ fn a_question_nobody_answers_is_withdrawn() {
     let Some(WorkerEvent::Ask { ask, answer, .. }) = rx.blocking_recv() else { panic!("no question") };
     assert!(matches!(rx.blocking_recv(), Some(WorkerEvent::CancelQuestion(id)) if id == ask));
     drop(answer);
-    // Canceled while waiting: withdrawn as well.
     let asker = Asker::new(asker.events, QUESTION_TIMEOUT);
     let flag = Arc::clone(&t.cancel);
     let canceler = thread::spawn(move || {
@@ -147,7 +137,6 @@ fn a_question_nobody_answers_is_withdrawn() {
     canceler.join().unwrap();
     let Some(WorkerEvent::Ask { ask, .. }) = rx.blocking_recv() else { panic!("no question") };
     assert!(matches!(rx.blocking_recv(), Some(WorkerEvent::CancelQuestion(id)) if id == ask));
-    // The core dropped the question without an answer: nothing to withdraw.
     let (events, mut rx) = self::events();
     let asker = Asker::new(events, QUESTION_TIMEOUT);
     let core = thread::spawn(move || {
@@ -233,9 +222,9 @@ fn prompt_answers_need_acceptance_and_one_per_prompt() {
     let t = task();
     let answers = prompt_answers(&asker, &t, &request(2)).unwrap();
     assert_eq!(answers.iter().map(|a| a.to_vec()).collect::<Vec<_>>(), [b"1".to_vec(), b"2".to_vec()]);
-    assert!(prompt_answers(&asker, &t, &request(2)).is_none()); // one answer for two prompts
-    assert!(prompt_answers(&asker, &t, &request(1)).is_none()); // declined
-    assert!(prompt_answers(&asker, &t, &request(1)).is_none()); // no answer
+    assert!(prompt_answers(&asker, &t, &request(2)).is_none());
+    assert!(prompt_answers(&asker, &t, &request(1)).is_none());
+    assert!(prompt_answers(&asker, &t, &request(1)).is_none());
     let (kind, details) = core.join().unwrap();
     assert_eq!(kind, KEYBOARD_INTERACTIVE);
     assert_eq!(string(&details, "name"), "otp");
@@ -259,7 +248,6 @@ fn attention_after_a_failed_account_connection() {
         );
         assert_eq!(attention_for(&failed(phase, ErrorName::Timeout), "pin"), None);
     }
-    // Before the identity check, or while fetching the secret: none.
     for phase in [Phase::Connect, Phase::Credentials, Phase::Done] {
         assert_eq!(attention_for(&failed(phase, ErrorName::AuthFailed), "pin"), None);
         assert_eq!(attention_for(&failed(phase, ErrorName::ServerIdentityChanged), "pin"), None);
@@ -311,13 +299,10 @@ fn ad_hoc_identity_verdicts() {
     let changed = Status::new(ErrorName::ServerIdentityChanged, "changed");
     let mut judge =
         AdHocIdentity { asker: &asker, pins: &pins, events: &events, task: &t, spec: &spec, declined: false };
-    // The check passed, or the identity changed: the check stands, no
-    // question.
     assert_eq!(judge.verdict(&seen, None), Verdict::UseCheck);
     assert_eq!(judge.verdict(&seen, Some(&changed)), Verdict::UseCheck);
     assert!(rx.try_recv().is_err());
     assert!(!judge.declined);
-    // Unknown and declined.
     let core = thread::spawn(move || {
         let first = answer_one(&mut rx, Some(Answer { accept: false, answers: Vec::new() }));
         answer_one(&mut rx, Some(yes(&[])));
@@ -326,7 +311,6 @@ fn ad_hoc_identity_verdicts() {
     assert_eq!(judge.verdict(&seen, Some(&unknown)), Verdict::UseCheck);
     assert!(judge.declined);
     assert_eq!(pins.pin("sftp://srv:2222"), "");
-    // Unknown and accepted: pinned under the host key.
     judge.declined = false;
     assert_eq!(judge.verdict(&seen, Some(&unknown)), Verdict::AcceptUnknown);
     assert!(!judge.declined);
@@ -335,7 +319,6 @@ fn ad_hoc_identity_verdicts() {
     assert_eq!((session, kind), (SessionId(7), IDENTITY_UNKNOWN));
     assert_eq!(string(&details, "fingerprint"), "SHA256:abc");
     assert!(rx.try_recv().is_err());
-    // A pin that cannot be saved: accepted anyway, with a warning.
     let refusing = Pins { refuse: true, ..Pins::default() };
     let mut judge = AdHocIdentity {
         asker: &asker,
@@ -355,7 +338,6 @@ fn ad_hoc_identity_verdicts() {
     assert!(
         matches!(warning, Some(WorkerEvent::Warning(w)) if w == "Cannot store an accepted server identity")
     );
-    // Canceled while asking: Cancel, not a declined identity.
     let mut judge =
         AdHocIdentity { asker: &asker, pins: &pins, events: &events, task: &t, spec: &spec, declined: false };
     t.cancel.store(true, Ordering::Release);

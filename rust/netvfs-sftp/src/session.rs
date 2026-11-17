@@ -1,13 +1,9 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! The SSH transport (S-1 to S-7) over russh: TCP within the connect
-//! timeout, the hardened algorithm lists (narrowed to a pinned key type,
-//! S-5), the server's identity (S-6), keep-alive (XS-12) and the `sftp`
-//! subsystem channel. Signing in is [`crate::auth`]'s.
+//! SSH transport over russh: TCP within the connect timeout, the hardened algorithm lists (narrowed to a pinned
+//! key type), the server's identity, keep-alive and the `sftp` subsystem channel. Signing in is [`crate::auth`]'s.
 //!
-//! russh runs the session in a task of its own, which ends when its
-//! stream does. The stream here can be cut ([`Cut`]): a [`Session`] that
-//! is dropped, or a connect that is dropped half way, cuts it, so no
-//! session task outlives its connection, whatever a stalled server does.
+//! russh runs the session in its own task, which ends when its stream does. The stream can be cut ([`Cut`]): a
+//! dropped [`Session`] or half-done connect cuts it, so no session task outlives its connection.
 
 use crate::errors::{connection_lost, timed_out};
 use crate::policy;
@@ -25,12 +21,10 @@ use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tokio::net::TcpStream;
 
-/// Port 22 (S-1).
+/// SSH default port.
 pub const DEFAULT_PORT: u16 = 22;
-/// How long [`Session::close`] waits for the session task to send its
-/// `DISCONNECT` before the stream is cut.
+/// Wait for the session task to send `DISCONNECT` before the stream is cut.
 const CLOSE_WAIT: Duration = Duration::from_millis(500);
-/// The global request of XS-12.
 const KEEPALIVE: &str = "keepalive@openssh.com";
 
 /// Where to connect.
@@ -40,10 +34,9 @@ pub struct Target {
     pub host: String,
     /// TCP port.
     pub port: u16,
-    /// For TCP and the SSH handshake together (C-14).
+    /// Covers TCP and the SSH handshake together.
     pub connect_timeout: Duration,
-    /// The pinned host key type, if any: the host-key list is narrowed to
-    /// it (S-5).
+    /// Pinned host key type, if any: narrows the host-key list.
     pub pinned_type: Option<String>,
 }
 
@@ -94,10 +87,8 @@ impl Shared {
     }
 }
 
-/// The russh handler of a [`Session`]: records the host key (the caller
-/// compares it with the pin, S-7) and how the session ended; refuses every
-/// channel the server wants to open (dropping the reply refuses it,
-/// administratively prohibited).
+/// The russh handler of a [`Session`]: records the host key (the caller compares it with the pin) and how the
+/// session ended; refuses every channel the server wants to open.
 #[derive(Debug)]
 pub struct Recorder {
     seen: Shared,
@@ -236,8 +227,7 @@ impl client::Handler for Recorder {
     }
 }
 
-/// Ends a [`Cuttable`] stream: its reads and writes fail from then on,
-/// also one that is waiting.
+/// Ends a [`Cuttable`] stream: reads and writes fail from then on, waiting ones too.
 #[derive(Debug, Clone, Default)]
 pub struct Cut(Arc<CutState>);
 
@@ -276,8 +266,7 @@ impl Cut {
             *slot = Some(cx.waker().clone());
         }
         drop(wakers);
-        // A cut between the first check and the registration took no
-        // waker of ours.
+        // A cut between the first check and the registration took no waker of ours.
         if self.is_cut() {
             return Err(io::Error::from(io::ErrorKind::ConnectionAborted));
         }
@@ -285,8 +274,7 @@ impl Cut {
     }
 }
 
-/// Cuts on drop unless disarmed: a connect that is dropped half way ends
-/// the session task it started.
+/// Cuts on drop unless disarmed: a half-done connect ends its session task.
 #[derive(Debug)]
 struct CutOnDrop(Option<Cut>);
 
@@ -378,8 +366,7 @@ impl Drop for Session {
     }
 }
 
-/// The identity of a host key: its type, its blob, and the fingerprint
-/// as `ssh-keygen -lf` prints it (S-6).
+/// Identity of a host key: type, blob, and fingerprint as `ssh-keygen -lf` prints it.
 #[must_use]
 pub fn identity_of(key: &PublicKey) -> ServerIdentity {
     ServerIdentity {
@@ -404,10 +391,8 @@ pub async fn bounded<T>(
     }
 }
 
-/// Connects (S-1, S-5, S-6). With a pinned type the host-key list is
-/// narrowed to it; a server that no longer offers that type is connected
-/// to once more without the restriction, so that the caller sees the key
-/// it presents now (S-7).
+/// With a pinned type the host-key list is narrowed to it; a server that no longer offers that type is connected
+/// to once more without the restriction, so the caller sees the key it presents now.
 ///
 /// # Errors
 /// `NetworkUnreachable`, `Timeout`, `Canceled`, `SecurityPolicy` (no
@@ -443,8 +428,7 @@ impl Opening {
 #[must_use]
 pub fn handshake_failure(e: &russh::Error) -> Status {
     if let Some((list, offered)) = policy::no_common_algorithm(e) {
-        // What the server offers in the message itself: it tells the user
-        // what the server lacks (S-2).
+        // Server's offer goes in the message: tells the user what it lacks.
         return Status::new(
             ErrorName::SecurityPolicy,
             format!(
@@ -486,8 +470,7 @@ async fn open(
     pinned: Option<&russh::keys::Algorithm>,
     cancel: &CancelToken,
 ) -> Result<Session, Opening> {
-    // Dropped on cancel or timeout: the guard in it cuts the stream, which
-    // ends the session task the handshake started.
+    // Dropped on cancel or timeout: the guard cuts the stream, ending the handshake's session task.
     let work = async {
         let stream = tcp(target).await.map_err(Opening::Failed)?;
         let (stream, cut) = Cuttable::new(stream);
@@ -542,7 +525,7 @@ async fn tcp(target: &Target) -> Result<TcpStream, Status> {
 }
 
 impl Session {
-    /// The server's identity (S-6).
+    /// The server's identity.
     #[must_use]
     pub const fn identity(&self) -> &ServerIdentity {
         &self.identity
@@ -581,8 +564,7 @@ impl Session {
         }
     }
 
-    /// XS-12: `keepalive@openssh.com` with want-reply; any answer, a
-    /// refusal too (OpenSSH refuses it), proves the connection.
+    /// `keepalive@openssh.com` with want-reply; any answer, a refusal too (OpenSSH refuses it), proves the connection.
     ///
     /// # Errors
     /// `ConnectionLost`, `Timeout`, `Canceled`.
@@ -604,7 +586,7 @@ impl Session {
         }
     }
 
-    /// Opens a session channel and starts the `sftp` subsystem on it (S-3).
+    /// Opens a session channel and starts the `sftp` subsystem on it.
     ///
     /// # Errors
     /// `TooManyConnections` (the server allows no further session),
@@ -633,15 +615,13 @@ impl Session {
         bounded(open, timeout, cancel).await
     }
 
-    /// XC-21: a refused session channel.
     fn channel_failure(&self, e: &russh::Error) -> Status {
         let russh::Error::ChannelOpenFailure(reason) = e else {
             return self.failure(e);
         };
         match reason {
-            // OpenSSH refuses a session beyond MaxSessions with "connect
-            // failed" (2); others say "administratively prohibited" (1) or
-            // "resource shortage" (4).
+            // OpenSSH refuses a session beyond MaxSessions with "connect failed" (2); others say
+            // "administratively prohibited" (1) or "resource shortage" (4).
             russh::ChannelOpenFailure::AdministrativelyProhibited
             | russh::ChannelOpenFailure::ConnectFailed
             | russh::ChannelOpenFailure::ResourceShortage => Status::new(
@@ -665,7 +645,7 @@ impl Session {
     }
 }
 
-/// `Unsupported` for an account without SFTP (S-3).
+/// `Unsupported` for an account without SFTP.
 #[must_use]
 pub fn sftp_not_enabled() -> Status {
     Status::unsupported("SFTP is not enabled for this user")
@@ -693,8 +673,7 @@ async fn subsystem_reply(read: &mut ChannelReadHalf) -> Result<(), Status> {
 
 type Wait = Pin<Box<dyn Future<Output = (ChannelReadHalf, Option<ChannelMsg>)> + Send>>;
 
-/// The data of a channel as an owned `AsyncRead`: `EOF`, `CLOSE` or the
-/// end of the session end it; an empty data message does not, and
+/// A channel's data as an owned `AsyncRead`: `EOF`, `CLOSE` or session end end it; an empty data message does not;
 /// extended data (stderr) is not SFTP data.
 pub struct ChannelReader {
     state: Reading,

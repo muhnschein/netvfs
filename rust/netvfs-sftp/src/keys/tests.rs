@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! The key files in `testdata/keys` were made with ssh-keygen (OpenSSH
-//! 9.6p1) and openssl 3.0.13; `golden.txt` holds what the libssh-based
-//! C++ key tools made of each of them before they were removed: the
-//! Ed25519 and ECDSA keys must come out the same here, byte for byte.
+//! Key files in `testdata/keys` were made with ssh-keygen (OpenSSH 9.6p1) and openssl 3.0.13; `golden.txt` holds
+//! the expected outcome of each: Ed25519 and ECDSA keys must come out the same, byte for byte.
 
 use super::*;
 
@@ -71,8 +69,7 @@ fn ed25519_and_ecdsa_keys_come_out_as_the_libssh_tools_made_them() {
     for g in golden() {
         let got = import(&fixture(&g.file), &g.passphrase);
         let what = format!("{} with {:?}", g.file, String::from_utf8_lossy(&g.passphrase));
-        // What changed on purpose: RSA keys and legacy encrypted PEM were
-        // accepted by libssh and are refused now, whatever the passphrase.
+        // RSA keys and legacy encrypted PEM are refused whatever the passphrase.
         let now_refused = if g.file.starts_with("rsa-") {
             Some(RSA)
         } else if g.file.ends_with("-legacyenc") {
@@ -95,7 +92,7 @@ fn ed25519_and_ecdsa_keys_come_out_as_the_libssh_tools_made_them() {
                 accepted += 1;
             }
             (None, Err((name, message))) => {
-                // The DSA message no longer suggests RSA.
+                // The DSA message does not suggest RSA.
                 let message = if g.file.starts_with("dsa-") { DSA.to_owned() } else { message };
                 let (got_name, got_message) = refusal(got);
                 assert_eq!((format!("{got_name:?}"), got_message), (name, message), "{what}");

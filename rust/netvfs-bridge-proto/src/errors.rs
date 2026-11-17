@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! Bridge errors: `org.netvfs.Error.<Name>` D-Bus errors with the message as
-//! first argument and an optional `a{sv}` (`detail`, `retryAfterMs`) as second
-//! (SPEC-v2 XB-9, XC-24). The names are the XC-21 names of `src/core/error.h`.
+//! Bridge errors: `org.netvfs.Error.<Name>` D-Bus errors with the message as first argument and an
+//! optional `a{sv}` (`detail`, `retryAfterMs`) as second. Names are those of `src/core/error.h`.
 
 use crate::wire::{value_i64, value_str};
 use std::collections::HashMap;
@@ -25,7 +24,7 @@ pub enum BridgeError {
         name: String,
         /// The human message.
         message: String,
-        /// Protocol status for logs and a details view (XC-24).
+        /// Protocol status for logs and a details view.
         detail: Option<String>,
         /// When to try again (`RateLimited`, `TooManyConnections`).
         retry_after_ms: Option<u64>,
@@ -66,8 +65,7 @@ impl BridgeError {
         }
     }
 
-    /// The bare XC-21 name (`NotFound`, …) of a netvfs error, also of one
-    /// this client does not know yet.
+    /// The bare name (`NotFound`, ...) of a netvfs error, also one this client does not know yet.
     #[must_use]
     pub fn netvfs_name(&self) -> Option<&str> {
         match self {
@@ -76,7 +74,7 @@ impl BridgeError {
         }
     }
 
-    /// The XC-21 name of a netvfs error this client knows.
+    /// The name of a netvfs error this client knows.
     #[must_use]
     pub fn error_name(&self) -> Option<ErrorName> {
         self.netvfs_name().and_then(ErrorName::parse)
@@ -121,7 +119,7 @@ impl BridgeError {
             _ => {
                 let mut e = Self::from_bare(name, &message, extra)
                     .unwrap_or_else(|| Self::Protocol("error without a name".to_owned()));
-                // from_bare prefixed the name; keep the name as it came.
+                // from_bare prefixed the name; keep it as it came.
                 if let Self::Remote { name: n, .. } = &mut e {
                     name.clone_into(n);
                 }

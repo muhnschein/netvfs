@@ -1,7 +1,5 @@
 # SPDX-License-Identifier: LGPL-2.1-or-later
-# tst_rsshim: the shim (src/backends/rs, compiled in here as well, so that
-# the test reaches createBackend() and the key tools directly) and the test
-# plugin libnetvfs-mem.so against libnetvfs-rs.so with the mem backend.
+# tst_rsshim: the shim (compiled in too, to reach createBackend() and the key tools) and libnetvfs-mem.so against libnetvfs-rs.so with the mem backend.
 include(../../test.pri)
 include(rstest.pri)
 include($$NETVFS_ROOT/src/backends/rs/rs.pri)

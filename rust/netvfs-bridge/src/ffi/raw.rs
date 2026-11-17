@@ -1,10 +1,5 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! The C ABI of `libnetvfs-bridge-ffi.so`, written by hand from
-//! `src/bridge/ffi/netvfs_bridge_ffi.h`: its data types (shared with
-//! netvfs-backend, [`netvfs_vfs::abi`]), the handles and the table. Field
-//! order, types and the table's slot order are the header's; `layout` tests
-//! pin sizes and offsets on LP64 to what the C compiler gives. Ownership (O1
-//! to O5) and threads (T1 to T7) are in the header.
+//! The C ABI of `libnetvfs-bridge-ffi.so`, by hand from `src/bridge/ffi/netvfs_bridge_ffi.h`: data types (shared with netvfs-backend, [`netvfs_vfs::abi`]), handles and the table. Field and slot order are the header's; `layout` tests pin sizes and offsets on LP64 to what the C compiler gives. Ownership and threads rules are in the header.
 
 pub use netvfs_vfs::abi::*;
 
@@ -52,7 +47,7 @@ pub struct NvbFfi {
     pub post: unsafe extern "C" fn(Option<NvbPostFn>, *mut c_void) -> i32,
     /// After `run()`: deletes the app.
     pub shutdown: unsafe extern "C" fn(),
-    /// Releases a block (O3); NULL is a no-op.
+    /// Releases a block; NULL is a no-op.
     pub free: unsafe extern "C" fn(*mut c_void),
     /// `BackendLoader::isAvailable`.
     pub provider_available: unsafe extern "C" fn(NvbBytes) -> i32,
@@ -64,7 +59,7 @@ pub struct NvbFfi {
     pub conn_new: unsafe extern "C" fn(NvbBytes, *mut *mut NvbConn) -> *mut NvbError,
     /// Closes handles, disconnects, deletes.
     pub conn_free: unsafe extern "C" fn(*mut NvbConn),
-    /// `Backend::cancel` (C-9); any thread.
+    /// `Backend::cancel`; any thread.
     pub conn_cancel: unsafe extern "C" fn(*mut NvbConn),
     /// `Backend::resetCancel`.
     pub conn_reset_cancel: unsafe extern "C" fn(*mut NvbConn),
@@ -175,8 +170,7 @@ pub type NvbFfiGetFn = unsafe extern "C" fn() -> *const NvbFfi;
 
 #[cfg(all(test, target_pointer_width = "64"))]
 mod layout {
-    //! The table's size and slot offsets as gcc gives them on LP64; the
-    //! data types' are pinned in [`netvfs_vfs::abi`].
+    //! Table size and slot offsets as gcc gives them on LP64; data types' are pinned in [`netvfs_vfs::abi`].
     use super::*;
     use std::mem::{offset_of, size_of};
 

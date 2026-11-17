@@ -1,0 +1,7 @@
+# Written by `codeql test run`.
+Cargo.toml
+Cargo.lock
+lib.rs
+target/
+*.testproj/
+*.actual

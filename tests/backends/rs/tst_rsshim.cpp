@@ -1,11 +1,8 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-// The shim of the Rust backends (src/backends/rs; design §1, §2) against
-// libnetvfs-rs.so with its mem backend: loading, BackendFactory through the
-// test plugin libnetvfs-mem.so, the conversions both ways, the callbacks
-// (sink, prompter, progress, the local side of transfers) and what they
-// throw, cancel (C-9, XC-22), one call at a time (S1) and panics (S5). The
-// conformance suite on mem covers the operations themselves
-// (conformance/conformance.pro).
+// Shim of the Rust backends (src/backends/rs) against libnetvfs-rs.so with its mem backend: loading,
+// BackendFactory via libnetvfs-mem.so, conversions, callbacks (sink, prompter, progress, local side of
+// transfers) and what they throw, cancel, one call at a time, panics. Operations are covered by the
+// conformance suite on mem.
 #include "backendloader.h"
 #include "names.h"
 #include "rsbackend.h"
@@ -29,8 +26,7 @@
 using namespace NetVfs;
 
 namespace NetVfs {
-// QCOMPARE(result, Result(Error::X)) compares the error only and prints the
-// whole result on failure.
+// QCOMPARE(result, Result(Error::X)) compares the error only and prints the whole result on failure.
 bool operator==(const Result &a, const Result &b)
 {
     return a.error() == b.error();
@@ -47,7 +43,7 @@ char *toString(const NetVfs::Result &result)
 
 namespace {
 
-constexpr qint64 CancelLimitMs = 2000;   // C-9
+constexpr qint64 CancelLimitMs = 2000;
 constexpr int CancelDelayMs = 300;
 const QString Busy = QStringLiteral("The connection is busy: one call at a time, none from a callback");
 const QString CallbackFailed = QStringLiteral("A callback of the Rust backend failed");
@@ -65,7 +61,6 @@ QDateTime fixedTime()
     return QDateTime(QDate(2001, 2, 3), QTime(4, 5, 6, 789), Qt::UTC);
 }
 
-// The options of a mem connection, with a store of the test function's own.
 ConnectionParams memParams(QVariantMap options = {})
 {
     ConnectionParams params;
@@ -84,7 +79,6 @@ std::unique_ptr<Backend> newBackend(Result *result)
     return std::unique_ptr<Backend>(raw);
 }
 
-// Connected and authenticated, or nullptr.
 std::unique_ptr<Backend> connected(const QVariantMap &options = {})
 {
     Result r;
@@ -123,7 +117,6 @@ SshKeyTools *memKeyTools()
     return qobject_cast<SshKeyTools *>(loader.instance());
 }
 
-// Records the batches; can stop, throw, or make calls from inside.
 class Sink : public ListSink
 {
 public:
@@ -222,7 +215,6 @@ public:
     bool throwOnCanceled = false;
 };
 
-// The local side of a transfer: sequential, failing (-1) or throwing.
 class Device : public QIODevice
 {
 public:
@@ -264,8 +256,6 @@ private:
     qint64 m_at = 0;
 };
 
-// Runs `call` while another thread cancels `backend` after CancelDelayMs;
-// returns the call's result and how long it took after the cancel.
 Result canceledAfterDelay(Backend *backend, const std::function<Result()> &call, qint64 *afterCancelMs)
 {
     QElapsedTimer clock;
@@ -288,7 +278,6 @@ class tst_RsShim : public QObject
 
 private slots:
     void initTestCase();
-    // First: nothing is loaded yet.
     void missingLibrary();
     void plugin();
     void unknownProvider();
@@ -316,7 +305,7 @@ void tst_RsShim::initTestCase()
 
 void tst_RsShim::missingLibrary()
 {
-    // Design §1.3: the plugin is there, the library is not.
+    // the plugin is there, the library is not.
     qputenv("NETVFS_RS_LIB", "/nonexistent/libnetvfs-rs.so");
     QVERIFY(BackendLoader::isAvailable(QStringLiteral("mem")));
     Result r;
@@ -365,7 +354,6 @@ void tst_RsShim::plugin()
     QCOMPARE(backend->stat(QString(), &root), Result::success());
     QCOMPARE(root.type, EntryType::Directory);
 
-    // The key tools of the library, through the shim.
     SshKeyTools *keys = memKeyTools();
     QVERIFY(keys);
     SshKeyMaterial key;
@@ -417,10 +405,8 @@ void tst_RsShim::establish()
     QCOMPARE(seen.kind, ServerIdentity::Kind::SshHostKey);
     QCOMPARE(seen.algorithm, QStringLiteral("ssh-ed25519"));
     QCOMPARE(seen.publicKey, QByteArray("mem host key"));
-    // mem's fingerprint repeats the parameters it got.
     QCOMPARE(seen.fingerprint, QStringLiteral("tester@example.org:2222 3000/4000 ms"));
 
-    // Before authenticate each call asks Rust.
     QVERIFY(backend->capabilities().has(Capability::Symlinks));
     QCOMPARE(backend->authenticate(Credentials(QStringLiteral("tester"), "wrong")), Result(Error::AuthFailed));
     QCOMPARE(backend->authenticate(Credentials(QStringLiteral("tester"), "s3cret")), Result::success());
@@ -467,7 +453,6 @@ void tst_RsShim::prompts()
              Result::success());
     const Credentials credentials(QStringLiteral("tester"), QByteArray());
 
-    // XC-15: without a prompter there is no one to ask.
     QCOMPARE(backend->authenticate(credentials, nullptr), Result(Error::AuthFailed));
 
     Prompter declining;
@@ -503,7 +488,6 @@ void tst_RsShim::prompts()
     QCOMPARE(backend->authenticate(credentials, &inDomain), Result::success());
     QCOMPARE(inDomain.seenInstruction, QStringLiteral("Sign in as WORKGROUP\\tester"));
 
-    // S5: a throw stays on this side and the call is Internal.
     Prompter throwing;
     throwing.throwIt = true;
     const Result r = backend->authenticate(credentials, &throwing);
@@ -533,7 +517,7 @@ void tst_RsShim::cancelWakesPrompter()
     QVERIFY(waiting.canceled);
     QVERIFY(clock.elapsed() < CancelLimitMs);
 
-    // XC-22 only while it is asking: afterwards cancel() leaves it alone.
+    // only while it is asking: afterwards cancel() leaves it alone.
     waiting.canceled = false;
     backend->resetCancel();
     backend->cancel();
@@ -571,7 +555,6 @@ void tst_RsShim::entries()
     QVERIFY(entry.contentType.isEmpty());
     QCOMPARE(entry.flags, EntryFlags());
 
-    // An unchanged field stays; the time to the millisecond.
     AttributeChanges onlyMode;
     onlyMode.mode = 0640;
     QCOMPARE(backend->setAttributes(QStringLiteral("dir/file"), onlyMode), Result::success());
@@ -606,7 +589,6 @@ void tst_RsShim::entries()
             QCOMPARE(listed.targetType, EntryType::File);
     }
 
-    // A failed stat leaves an empty entry.
     entry.name = QStringLiteral("stale");
     QCOMPARE(backend->stat(QStringLiteral("missing"), &entry), Result(Error::NotFound));
     QVERIFY(entry.name.isEmpty());
@@ -617,7 +599,6 @@ void tst_RsShim::names()
 {
     std::unique_ptr<Backend> backend = connected();
     QVERIFY(backend);
-    // XC-4: escaped bytes go as the bytes they stand for, and come back.
     const QString latin1 = Names::decode(QByteArray("caf\xe9"));
     QVERIFY(Names::hasEscapes(latin1));
     QCOMPARE(put(backend.get(), latin1, "x"), Result::success());
@@ -658,20 +639,17 @@ void tst_RsShim::listing()
         names << entry.name;
     QCOMPARE(names, QStringList({ "a", "b", "c", "d", "e" }));
 
-    // A batch size below 1 is 1.
     options.batchSize = 0;
     Sink single;
     QCOMPARE(backend->list(QString(), &single, options), Result::success());
     QCOMPARE(single.sizes, QVector<int>({ 1, 1, 1, 1, 1 }));
 
-    // XC-6: false stops the listing with Canceled.
     options.batchSize = 2;
     Sink stopping;
     stopping.stopAfter = 1;
     QCOMPARE(backend->list(QString(), &stopping, options), Result(Error::Canceled));
     QCOMPARE(stopping.sizes, QVector<int>({ 2 }));
 
-    // S5: a throw stops it as well and the call is Internal.
     Sink throwing;
     throwing.throwOnBatch = true;
     const Result r = backend->list(QString(), &throwing, options);
@@ -682,7 +660,6 @@ void tst_RsShim::listing()
     QCOMPARE(backend->list(QString(), nullptr, options).message(), QStringLiteral("No listing sink"));
     QCOMPARE(backend->list(QStringLiteral("a"), &sink, options), Result(Error::NotADirectory));
 
-    // The non-virtual helper of Backend goes through the same call.
     QVector<Entry> all;
     QCOMPARE(backend->list(QString(), &all), Result::success());
     QCOMPARE(all.size(), 5);
@@ -743,7 +720,7 @@ void tst_RsShim::namespaceCalls()
     SpaceInfo space;
     QCOMPARE(backend->spaceInfo(QString(), &space), Result::success());
     QCOMPARE(space.total, qint64(1) << 40);
-    QCOMPARE(space.used, qint64(data.size()));   // "file" and "hard" are one file
+    QCOMPARE(space.used, qint64(data.size()));
     QCOMPARE(space.free, space.total - space.used);
     QCOMPARE(backend->spaceInfo(QStringLiteral("missing"), &space), Result(Error::NotFound));
     QCOMPARE(space.total, qint64(-1));
@@ -780,12 +757,10 @@ void tst_RsShim::readHandles()
     QCOMPARE(handle->read(-1, 10, &chunk), Result(Error::ProtocolError));
     QVERIFY(chunk.isEmpty());
     QCOMPARE(handle->close(), Result::success());
-    // Closed: the handle is gone (R4), on both sides.
     QCOMPARE(handle->read(0, 10, &chunk), Result(Error::ProtocolError));
     QCOMPARE(handle->close(), Result(Error::ProtocolError));
     handle.reset();
 
-    // Deleting an open handle closes it.
     QCOMPARE(backend->openRead(QStringLiteral("data"), &raw), Result::success());
     delete raw;
 
@@ -794,7 +769,6 @@ void tst_RsShim::readHandles()
     QVERIFY(!raw);
     QCOMPARE(backend->openRead(QStringLiteral("data"), nullptr), Result::success());
 
-    // XC-13: the handles of a disconnected backend report ConnectionLost.
     QCOMPARE(backend->openRead(QStringLiteral("data"), &raw), Result::success());
     handle.reset(raw);
     backend->disconnect();
@@ -819,7 +793,6 @@ void tst_RsShim::writeHandles()
     QCOMPARE(handle->position(), qint64(5));
     QCOMPARE(handle->write("x", -1).message(), QStringLiteral("Invalid length"));
     QCOMPARE(handle->commit(), Result::success());
-    // Committed: the handle is gone (R4).
     QCOMPARE(handle->position(), qint64(-1));
     QCOMPARE(handle->write("x", 1), Result(Error::ProtocolError));
     QCOMPARE(handle->commit(), Result(Error::ProtocolError));
@@ -831,7 +804,6 @@ void tst_RsShim::writeHandles()
     QCOMPARE(entry.mode, 0600);
     QCOMPARE(entry.modified, fixedTime());
 
-    // XC-23 and resume: the dispositions and offsets cross as they are.
     options = WriteOptions();
     QCOMPARE(backend->openWrite(QStringLiteral("new"), options, &raw), Result(Error::AlreadyExists));
     QVERIFY(!raw);
@@ -855,7 +827,6 @@ void tst_RsShim::writeHandles()
     QCOMPARE(handle->position(), qint64(-1));
     QCOMPARE(handle->write("x", 1), Result(Error::ProtocolError));
 
-    // Deleting an open handle aborts it.
     QCOMPARE(backend->openWrite(QStringLiteral("other"), WriteOptions(), &raw), Result::success());
     delete raw;
     QCOMPARE(backend->openWrite(QStringLiteral("third"), WriteOptions(), nullptr), Result::success());
@@ -871,9 +842,8 @@ void tst_RsShim::transfers()
 {
     std::unique_ptr<Backend> backend = connected();
     QVERIFY(backend);
-    const QByteArray data = pattern(600 * 1024);   // three of mem's chunks
+    const QByteArray data = pattern(600 * 1024);
 
-    // The size of a source is what it holds from its position.
     QBuffer source;
     source.setData(data);
     source.open(QIODevice::ReadOnly);
@@ -893,7 +863,6 @@ void tst_RsShim::transfers()
     QCOMPARE(sink.data(), data.mid(1100, 300 * 1024));
     QCOMPARE(down.updates.last(), qMakePair(qint64(300 * 1024), qint64(300 * 1024)));
 
-    // A sequential source has no size; expectedSize stands in for it.
     Device stream(Device::Mode::Works, data.left(5000));
     stream.open(QIODevice::ReadOnly);
     Watch unknown;
@@ -930,7 +899,6 @@ void tst_RsShim::transfers()
     QCOMPARE(get(backend.get(), QStringLiteral("small"), &read), Result::success());
     QCOMPARE(read, data.left(5000) + "+");
 
-    // XC-14: a progress that says stop ends either direction with Canceled.
     Watch stopping;
     stopping.stop = true;
     source.seek(0);
@@ -951,7 +919,6 @@ void tst_RsShim::transferFailures()
     QCOMPARE(backend->download(QStringLiteral("file"), nullptr, DownloadOptions(), nullptr).message(),
              QStringLiteral("No sink"));
 
-    // A local side that fails: Rust says which side it was.
     Device failingSource(Device::Mode::Fails);
     failingSource.open(QIODevice::ReadOnly);
     Result r = backend->upload(&failingSource, QStringLiteral("up"), truncate, nullptr);
@@ -963,7 +930,6 @@ void tst_RsShim::transferFailures()
     QCOMPARE(r, Result(Error::NoSpace));
     QCOMPARE(r.message(), QStringLiteral("Cannot write the local file"));
 
-    // S5: throws stay on this side; the call is Internal.
     Device throwingSource(Device::Mode::Throws);
     throwingSource.open(QIODevice::ReadOnly);
     r = backend->upload(&throwingSource, QStringLiteral("up"), truncate, nullptr);
@@ -986,7 +952,6 @@ void tst_RsShim::transferFailures()
     QCOMPARE(r.message(), CallbackFailed);
     QVERIFY2(r.detail().startsWith(QLatin1String("Canceled")), qPrintable(r.detail()));
 
-    // The connection is still usable.
     QByteArray read;
     QCOMPARE(get(backend.get(), QStringLiteral("file"), &read), Result::success());
     QCOMPARE(read, pattern(1000));
@@ -994,7 +959,7 @@ void tst_RsShim::transferFailures()
 
 void tst_RsShim::cancel()
 {
-    // C-9: until resetCancel() every call is Canceled.
+    // until resetCancel() every call is Canceled.
     std::unique_ptr<Backend> backend = connected();
     QVERIFY(backend);
     backend->cancel();
@@ -1013,7 +978,7 @@ void tst_RsShim::cancel()
     QCOMPARE(r, Result(Error::Canceled));
     QVERIFY2(afterMs < CancelLimitMs, qPrintable(QString::number(afterMs)));
 
-    // Even when the backend does not look at the cancel (the cut, design §1.4).
+    // Even when the backend does not look at the cancel (the cut).
     std::unique_ptr<Backend> deaf = connected({ { QStringLiteral("stall"), QStringLiteral("ignore") } });
     QVERIFY(deaf);
     r = canceledAfterDelay(deaf.get(), [&deaf]() { return deaf->keepAlive(); }, &afterMs);
@@ -1023,8 +988,8 @@ void tst_RsShim::cancel()
 
 void tst_RsShim::oneCallAtATime()
 {
-    // S1: a call from inside a callback finds the connection busy; the
-    // capabilities are kept since authenticate (XC-5), so they still answer.
+    // a call from inside a callback finds the connection busy; the
+    // capabilities are kept since authenticate, so they still answer.
     std::unique_ptr<Backend> backend = connected();
     QVERIFY(backend);
     QCOMPARE(put(backend.get(), QStringLiteral("a"), "a"), Result::success());
@@ -1053,7 +1018,6 @@ void tst_RsShim::oneCallAtATime()
 
 void tst_RsShim::panics()
 {
-    // S5: a panic in Rust is Internal, and the connection goes on.
     std::unique_ptr<Backend> backend = connected({ { QStringLiteral("panic"), QStringLiteral("stat") } });
     QVERIFY(backend);
     Entry entry;
@@ -1081,7 +1045,7 @@ void tst_RsShim::panics()
 
 void tst_RsShim::otherThreads()
 {
-    // C-8: one thread at a time, not always the one that made the backend.
+    // one thread at a time, not always the one that made the backend.
     Result r;
     std::unique_ptr<Backend> backend = newBackend(&r);
     QVERIFY(backend);

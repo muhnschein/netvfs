@@ -1,8 +1,5 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! The listening socket (XB-2): the one systemd passes as fd 3
-//! (`sd_listen_fds` protocol: `LISTEN_PID`, `LISTEN_FDS`; the environment is
-//! read by `crate::server::listener`), checked to be a listening unix stream
-//! socket.
+//! The listening socket systemd passes as fd 3 (`sd_listen_fds`: `LISTEN_PID`, `LISTEN_FDS`, read by `crate::server::listener`), checked to be a listening unix stream socket.
 
 use super::{check, socket_option_int};
 use std::io;
@@ -10,13 +7,12 @@ use std::os::fd::{AsFd as _, FromRawFd as _, OwnedFd, RawFd};
 use std::os::unix::net::UnixListener;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-/// `SD_LISTEN_FDS_START`: the first descriptor systemd passes.
+/// `SD_LISTEN_FDS_START`.
 pub const LISTEN_FDS_START: RawFd = 3;
 
 static TAKEN: AtomicBool = AtomicBool::new(false);
 
-/// Takes ownership of the first socket systemd passed. Only once per
-/// process: a second call fails, so two owners of fd 3 cannot exist.
+/// Takes ownership of the first socket systemd passed. Once per process: a second call fails, so fd 3 never has two owners.
 pub fn take_systemd_socket() -> io::Result<OwnedFd> {
     if TAKEN.swap(true, Ordering::SeqCst) {
         return Err(io::Error::new(io::ErrorKind::AlreadyExists, "the systemd socket was already taken"));
@@ -24,22 +20,17 @@ pub fn take_systemd_socket() -> io::Result<OwnedFd> {
     take_fd(LISTEN_FDS_START)
 }
 
-/// Takes ownership of `fd` after checking that it is open, and marks it
-/// close-on-exec (as libdbus did for activated sockets).
+/// Takes ownership of `fd` if open; sets close-on-exec (as libdbus did).
 fn take_fd(fd: RawFd) -> io::Result<OwnedFd> {
-    // SAFETY: fcntl on an integer descriptor; F_GETFD reads flags only and
-    // fails with EBADF for a closed descriptor.
+    // SAFETY: fcntl on an integer descriptor; F_GETFD reads flags, EBADF if closed.
     let flags = check(unsafe { libc::fcntl(fd, libc::F_GETFD) })?;
-    // SAFETY: as above; F_SETFD only changes the close-on-exec flag.
+    // SAFETY: as above; F_SETFD only sets close-on-exec.
     check(unsafe { libc::fcntl(fd, libc::F_SETFD, flags | libc::FD_CLOEXEC) })?;
-    // SAFETY: `fd` is open (checked above) and was passed to this process by
-    // its parent (sd_listen_fds); `take_systemd_socket` makes sure it gets
-    // only one owner.
+    // SAFETY: `fd` is open (checked) and passed by the parent; `take_systemd_socket` gives it one owner.
     Ok(unsafe { OwnedFd::from_raw_fd(fd) })
 }
 
-/// The listener on `fd`, which must be a listening unix stream socket; set
-/// non-blocking for tokio.
+/// Listener on `fd`, a listening unix stream socket; set non-blocking.
 pub fn adopt_listener(fd: OwnedFd) -> io::Result<UnixListener> {
     let wrong =
         |what: &str| io::Error::new(io::ErrorKind::InvalidInput, format!("the passed socket is {what}"));
@@ -90,31 +81,26 @@ mod tests {
     fn takes_an_open_descriptor_and_marks_it_cloexec() {
         let (a, _b) = UnixStream::pair().unwrap();
         let raw = a.into_raw_fd();
-        // SAFETY: test only; clears FD_CLOEXEC on a descriptor this test owns.
+        // SAFETY: test only; descriptor owned by the test.
         unsafe { libc::fcntl(raw, libc::F_SETFD, 0) };
         let owned = take_fd(raw).unwrap();
-        // SAFETY: test only; reads the flags of a descriptor this test owns.
+        // SAFETY: test only; descriptor owned by the test.
         let flags = unsafe { libc::fcntl(owned.as_raw_fd(), libc::F_GETFD) };
         assert_eq!(flags & libc::FD_CLOEXEC, libc::FD_CLOEXEC);
         drop(owned);
-        // Closed now: refused.
         assert!(take_fd(raw).is_err());
-        // Already close-on-exec (std opens so): stays so.
         let raw = std::fs::File::open("/dev/null").unwrap().into_raw_fd();
         let owned = take_fd(raw).unwrap();
-        // SAFETY: test only; reads the flags of a descriptor this test owns.
+        // SAFETY: test only; descriptor owned by the test.
         let flags = unsafe { libc::fcntl(owned.as_raw_fd(), libc::F_GETFD) };
         assert_eq!(flags & libc::FD_CLOEXEC, libc::FD_CLOEXEC);
     }
 
     #[test]
     fn the_systemd_socket_is_taken_once() {
-        // In the test process fd 3 may be anything; only the second call is
-        // certain to fail.
         let first = take_systemd_socket();
         let second = take_systemd_socket();
         assert_eq!(second.unwrap_err().kind(), io::ErrorKind::AlreadyExists);
-        // Give back whatever fd 3 was (the test harness may own it).
         if let Ok(fd) = first {
             let _given_back = fd.into_raw_fd();
         }

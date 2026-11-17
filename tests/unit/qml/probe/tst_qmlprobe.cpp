@@ -154,7 +154,6 @@ private slots:
 
     void identifySendsNoCredentials()
     {
-        // SPEC C-7, S-7: identify on creation reports the key as unknown.
         FakeServer::instance()->identity = identityOf(KeyBlob);
         NetVfsProbe probe;
         QSignalSpy identified(&probe, &NetVfsProbe::identified);
@@ -234,7 +233,6 @@ private slots:
 
     void verifyWritesProbeFile()
     {
-        // SPEC 7.2: authenticate, makePath, probe file written and removed, free space.
         FakeServer *server = FakeServer::instance();
         server->identity = identityOf(KeyBlob);
         server->freeBytes = 123456789;
@@ -252,7 +250,6 @@ private slots:
         QCOMPARE(log.value(1), QStringLiteral("authenticate"));
         QVERIFY(logHas(QStringLiteral("upload:Sailfish OS/Backups/.netvfs-probe-")));
         QVERIFY(logHas(QStringLiteral("removeFile:Sailfish OS/Backups/.netvfs-probe-")));
-        // S-20 via XC-23: the backups folder is created the way backups create it.
         QCOMPARE(server->lastParams.option(QStringLiteral("dir_mode")), QStringLiteral("0700"));
         QCOMPARE(server->node(QStringLiteral("Sailfish OS")).mode, 0700);
         QCOMPARE(server->node(QStringLiteral("Sailfish OS/Backups")).mode, 0700);
@@ -282,7 +279,7 @@ private slots:
 
     void verifyChecksPinBeforeCredentials()
     {
-        // SEC-1: no credential leaves the device unless the identity matches.
+        // no credential leaves the device unless the identity matches.
         QFETCH(QString, pin);
         QFETCH(int, error);
         QFETCH(int, status);
@@ -341,7 +338,7 @@ private slots:
 
     void cancelReachesBackend()
     {
-        // SPEC C-9 through the UI: cancel() stops the call in flight and
+        // through the UI: cancel() stops the call in flight and
         // discards its result.
         FakeServer::instance()->chunkDelayMs = 600;
         NetVfsProbe probe;
@@ -358,7 +355,6 @@ private slots:
         QCOMPARE(probe.state(), NetVfsProbe::State::Idle);
         QVERIFY(!logHas(QStringLiteral("spaceInfo:")));
 
-        // The probe is usable again afterwards.
         FakeServer::instance()->chunkDelayMs = 0;
         probe.identify(params());
         QSignalSpy identified(&probe, &NetVfsProbe::identified);
@@ -387,7 +383,6 @@ private slots:
             probe.verify(params(), credentials(QStringLiteral("secret")), QStringLiteral("b"));
             QTRY_VERIFY(logHas(QStringLiteral("upload:")));
         }
-        // The worker was joined and its backend released.
         QCOMPARE(FakeServer::instance()->liveBackends, 0);
     }
 
@@ -418,13 +413,12 @@ private slots:
         QVERIFY(probe.errorDetail().isEmpty());
         QVERIFY(probe.serverIdentity().isEmpty());
         QCOMPARE(probe.freeBytes(), Q_INT64_C(-1));
-        probe.cancel();   // nothing running: stays idle
+        probe.cancel();
         QCOMPARE(probe.state(), NetVfsProbe::State::Idle);
     }
 
     void verifyAccountWithStoredSecret()
     {
-        // Settings page "Test connection": stored settings and secret.
         FakeServer::instance()->identity = identityOf(KeyBlob);
         const int accountId = createAccount(pinOf(KeyBlob), QStringLiteral("Phone backups"));
         QVERIFY(accountId > 0);
@@ -440,7 +434,6 @@ private slots:
 
     void verifyAccountPinOverride()
     {
-        // SPEC 7.5: the accepted new key replaces the stored pin for the check.
         FakeServer::instance()->identity = identityOf(OtherBlob);
         const int accountId = createAccount(pinOf(KeyBlob));
         NetVfsProbe probe;
@@ -485,7 +478,6 @@ private slots:
         QVERIFY(serverLog().isEmpty());
     }
 
-    // SPEC-v2-review 2.19: a Files verify authenticates and stats the start folder, nothing more.
     void verifyFilesWritesNothing()
     {
         FakeServer *server = FakeServer::instance();
@@ -510,7 +502,6 @@ private slots:
         QVERIFY(!server->lastParams.options.contains(QStringLiteral("dir_mode")));
         QCOMPARE(log.last(), QStringLiteral("disconnect"));
 
-        // The backend's base folder by default.
         probe.verify(params(pinOf(KeyBlob)), credentials(QStringLiteral("secret")), QString(), QStringLiteral("files"));
         QTRY_COMPARE(verified.count(), 2);
     }
@@ -544,7 +535,7 @@ private slots:
         QVERIFY(!logHas(QStringLiteral("upload")));
     }
 
-    // SPEC-v2 XA-4: refused before anything is sent.
+    // refused before anything is sent.
     void verifyRefusedByPolicy()
     {
         QVariantMap guest = params();
@@ -599,7 +590,6 @@ private slots:
         QCOMPARE(probe.error(), NetVfsProbe::ErrorCode::SecurityPolicy);
     }
 
-    // XC-16: the probe's identity check is the pin check.
     void identityCheckForPins()
     {
         ConnectionParams params;
@@ -612,7 +602,6 @@ private slots:
 
     void verifyAccountFiles()
     {
-        // The stored start folder of the files service; nothing written.
         FakeServer *server = FakeServer::instance();
         server->identity = identityOf(KeyBlob);
         server->addDir(QStringLiteral("shared"));

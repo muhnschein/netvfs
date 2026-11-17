@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-// SPEC-v2 XT-1: backend conformance suite. Every test function runs once per
-// target (tests/conformance/README.md); a capability a backend reports must
-// pass its tests, an unreported one must answer Unsupported and change
+// Backend conformance suite. Every test function runs once per target (tests/conformance/README.md); a
+// capability a backend reports must pass its tests, an unreported one must answer Unsupported and change
 // nothing.
 #include "backendloader.h"
 #include "identity.h"
@@ -24,8 +23,7 @@ using namespace NetVfs;
 using namespace Conformance;
 
 namespace NetVfs {
-// QCOMPARE(result, Result(Error::X)) compares the error only and prints the
-// whole result on failure.
+// QCOMPARE(result, Result(Error::X)) compares the error only and prints the whole result on failure.
 bool operator==(const Result &a, const Result &b)
 {
     return a.error() == b.error();
@@ -44,13 +42,13 @@ namespace {
 
 constexpr int MiB = 1 << 20;
 constexpr qint64 FourGiB = qint64(4) << 30;
-constexpr qint64 CancelLimitMs = 2000;   // C-9
+constexpr qint64 CancelLimitMs = 2000;
 constexpr int CancelDelayMs = 300;
 constexpr int ClockToleranceSecs = 600;
 constexpr int ListTimeToleranceSecs = 60;
 constexpr int TimeoutMs = 500;
 constexpr int BatchSize = 100;
-constexpr int StallBytes = 4 * MiB;      // more than any pipe buffer
+constexpr int StallBytes = 4 * MiB;
 
 QDateTime fixedTime()
 {
@@ -129,10 +127,9 @@ private:
     std::unique_ptr<Backend> connectTo(const ConnectionParams &params, Result *result);
     QString p(const QString &name) const { return Paths::join(m_dir, name); }
     QString hostPath(const QString &name) const;
-    // Creates a folder the test also writes into from this host. With a
-    // hostPath it is made here, world-writable, because a folder the server
-    // creates belongs to the server's user and an unprivileged host user
-    // (CI) could not add files to it; without one the backend makes it.
+    // Creates a folder the test also writes into from this host. With a hostPath it is made here, world-
+    // writable: a folder the server creates belongs to the server's user and an unprivileged host user (CI)
+    // could not add files. Without one the backend makes it.
     bool makeFixtureDir(const QString &hostFolder, const QString &backendPath) const;
     bool has(Capability c) const { return m_caps.has(c); }
     void expectUnsupported(Capability c, const std::function<Result()> &call);
@@ -149,7 +146,6 @@ private:
     QString m_dir;
 };
 
-// --- fixture ----------------------------------------------------------------
 
 std::unique_ptr<Backend> TestConformance::connectTo(const ConnectionParams &params, Result *result)
 {
@@ -235,11 +231,10 @@ void TestConformance::cleanup()
     m_backend.reset();
 }
 
-// --- connection, capabilities, cancel ----------------------------------------
 
 void TestConformance::capabilities()
 {
-    const Capabilities again = m_backend->capabilities();   // XC-5: stable
+    const Capabilities again = m_backend->capabilities();
     QCOMPARE(again.names(), m_caps.names());
     QCOMPARE(again.checksumAlgorithms, m_caps.checksumAlgorithms);
     QCOMPARE(m_caps.checksumAlgorithms.isEmpty(), !has(Capability::Checksums));
@@ -255,7 +250,7 @@ void TestConformance::capabilities()
 
 void TestConformance::cancelBeforeCall()
 {
-    // C-9: a cancel() stays in effect until resetCancel().
+    // a cancel() stays in effect until resetCancel().
     m_backend->cancel();
     Entry entry;
     QCOMPARE(m_backend->stat(m_dir, &entry), Result(Error::Canceled));
@@ -265,7 +260,7 @@ void TestConformance::cancelBeforeCall()
 
 void TestConformance::keepAlive()
 {
-    QCOMPARE(m_backend->keepAlive(), Result::success());   // XC-20
+    QCOMPARE(m_backend->keepAlive(), Result::success());
     QCOMPARE(m_backend->keepAlive(), Result::success());
     m_backend->disconnect();
     QVERIFY(!m_backend->keepAlive().ok());
@@ -279,7 +274,6 @@ void TestConformance::keepAlive()
     QCOMPARE(backend->keepAlive(), Result(Error::ConnectionLost));
 }
 
-// --- metadata ---------------------------------------------------------------
 
 void TestConformance::entryFields()
 {
@@ -319,13 +313,12 @@ void TestConformance::entryFields()
 
     QVector<Entry> entries;
     QCOMPARE(m_backend->list(m_dir, &entries), Result::success());
-    QCOMPARE(entries.size(), 2);   // "." and ".." never appear (XC-6)
+    QCOMPARE(entries.size(), 2);   // "." and ".." never appear
     const Entry *listedFile = find(entries, QStringLiteral("fields.bin"));
     const Entry *listedDir = find(entries, QStringLiteral("sub"));
     QVERIFY(listedFile && listedDir);
     QCOMPARE(listedFile->type, EntryType::File);
     QCOMPARE(listedFile->size, file.size);
-    // Listings may carry coarser times than stat.
     QVERIFY(qAbs(listedFile->modified.secsTo(file.modified)) <= ListTimeToleranceSecs);
     QCOMPARE(listedFile->mode, file.mode);
     QCOMPARE(listedDir->type, EntryType::Directory);
@@ -373,7 +366,6 @@ void TestConformance::listBatches()
         }
     }
 
-    // XC-6: batches of at most batchSize, delivered as they come.
     ListOptions options;
     options.batchSize = BatchSize;
     RecordingSink sink;
@@ -388,30 +380,28 @@ void TestConformance::listBatches()
     seen.sort();
     QCOMPARE(seen, expected);
 
-    // A sink returning false stops the listing with Canceled.
     RecordingSink stopping;
     stopping.stopAfterBatches = 1;
     QCOMPARE(m_backend->list(dir, &stopping, options), Result(Error::Canceled));
     QCOMPARE(stopping.batchSizes.size(), 1);
 
-    // cancel() during the listing (C-9, L-6) ends it early.
+    // cancel() during the listing ends it early.
     RecordingSink canceling;
     canceling.cancelBackend = m_backend.get();
     QCOMPARE(m_backend->list(dir, &canceling, options), Result(Error::Canceled));
     QVERIFY(canceling.all.size() < count);
     m_backend->resetCancel();
     QVector<Entry> all;
-    QCOMPARE(m_backend->list(dir, &all), Result::success());   // the convenience helper
+    QCOMPARE(m_backend->list(dir, &all), Result::success());
     QCOMPARE(all.size(), count);
 }
 
-// --- namespace ----------------------------------------------------------------
 
 void TestConformance::makeDir()
 {
     const QString dir = p(QStringLiteral("folder"));
     QCOMPARE(m_backend->makeDir(dir, true), Result::success());
-    QCOMPARE(m_backend->makeDir(dir, true), Result(Error::AlreadyExists));   // XC-8
+    QCOMPARE(m_backend->makeDir(dir, true), Result(Error::AlreadyExists));
     QCOMPARE(m_backend->makeDir(dir, false), Result::success());
     QCOMPARE(putFile(m_backend.get(), p(QStringLiteral("file")), "x"), Result::success());
     QCOMPARE(m_backend->makeDir(p(QStringLiteral("file")), false), Result(Error::AlreadyExists));
@@ -432,7 +422,7 @@ void TestConformance::removeFile()
     QCOMPARE(m_backend->removeFile(p(QStringLiteral("file"))), Result::success());
     QVERIFY(!exists(m_backend.get(), p(QStringLiteral("file"))));
     QCOMPARE(m_backend->removeFile(p(QStringLiteral("file"))), Result(Error::NotFound));
-    QCOMPARE(m_backend->removeFile(p(QStringLiteral("dir"))), Result(Error::IsADirectory));   // XC-9
+    QCOMPARE(m_backend->removeFile(p(QStringLiteral("dir"))), Result(Error::IsADirectory));
     QVERIFY(exists(m_backend.get(), p(QStringLiteral("dir"))));
 }
 
@@ -445,11 +435,10 @@ void TestConformance::removeDir()
     QCOMPARE(m_backend->removeDir(p(QStringLiteral("empty"))), Result::success());
     QVERIFY(!exists(m_backend.get(), p(QStringLiteral("empty"))));
     QCOMPARE(m_backend->removeDir(p(QStringLiteral("empty"))), Result(Error::NotFound));
-    QCOMPARE(m_backend->removeDir(p(QStringLiteral("full"))), Result(Error::DirectoryNotEmpty));   // XC-9
+    QCOMPARE(m_backend->removeDir(p(QStringLiteral("full"))), Result(Error::DirectoryNotEmpty));
     QVERIFY(exists(m_backend.get(), p(QStringLiteral("full/inner"))));
     QCOMPARE(m_backend->removeDir(p(QStringLiteral("file"))), Result(Error::NotADirectory));
     QVERIFY(exists(m_backend.get(), p(QStringLiteral("file"))));
-    // The v1 helper: a file, else an empty folder.
     QCOMPARE(m_backend->remove(p(QStringLiteral("full/inner"))), Result::success());
     QCOMPARE(m_backend->remove(p(QStringLiteral("full"))), Result::success());
     QVERIFY(!exists(m_backend.get(), p(QStringLiteral("full"))));
@@ -473,20 +462,17 @@ void TestConformance::renameFiles()
     QCOMPARE(putFile(m_backend.get(), p(QStringLiteral("two")), two), Result::success());
     QByteArray data;
 
-    // XC-10: NoReplace refuses an existing target and changes nothing.
     QCOMPARE(m_backend->rename(p(QStringLiteral("one")), p(QStringLiteral("two")), RenameMode::NoReplace), Result(Error::AlreadyExists));
     QCOMPARE(getFile(m_backend.get(), p(QStringLiteral("one")), &data), Result::success());
     QCOMPARE(data, one);
     QCOMPARE(getFile(m_backend.get(), p(QStringLiteral("two")), &data), Result::success());
     QCOMPARE(data, two);
 
-    // Replace replaces it.
     QCOMPARE(m_backend->rename(p(QStringLiteral("one")), p(QStringLiteral("two")), RenameMode::Replace), Result::success());
     QVERIFY(!exists(m_backend.get(), p(QStringLiteral("one"))));
     QCOMPARE(getFile(m_backend.get(), p(QStringLiteral("two")), &data), Result::success());
     QCOMPARE(data, one);
 
-    // Plain moves in both modes, also into another folder.
     QCOMPARE(m_backend->makeDir(p(QStringLiteral("dir")), true), Result::success());
     QCOMPARE(m_backend->rename(p(QStringLiteral("two")), p(QStringLiteral("three")), RenameMode::NoReplace), Result::success());
     QCOMPARE(m_backend->rename(p(QStringLiteral("three")), p(QStringLiteral("dir/four")), RenameMode::Replace), Result::success());
@@ -508,7 +494,7 @@ void TestConformance::renameFolders()
     QCOMPARE(m_backend->makeDir(p(QStringLiteral("empty")), true), Result::success());
     QCOMPARE(putFile(m_backend.get(), p(QStringLiteral("file")), "file"), Result::success());
 
-    // XC-10: replacing a folder is AlreadyExists in both modes, even an
+    // replacing a folder is AlreadyExists in both modes, even an
     // empty one, and whatever the source is.
     for (const RenameMode mode : { RenameMode::NoReplace, RenameMode::Replace }) {
         QCOMPARE(m_backend->rename(p(QStringLiteral("src")), p(QStringLiteral("empty")), mode), Result(Error::AlreadyExists));
@@ -548,7 +534,6 @@ void TestConformance::renameCaseOnly()
     QCOMPARE(data, QByteArray("lower"));
 }
 
-// --- names (XC-4) -------------------------------------------------------------
 
 void TestConformance::namesUtf8()
 {
@@ -594,7 +579,7 @@ void TestConformance::namesUtf8()
 
 void TestConformance::namesNormalization()
 {
-    // XC-4b: no NFC/NFD conversion; both spellings are two names.
+    // no NFC/NFD conversion; both spellings are two names.
     const QString nfc = QStringLiteral("é.txt");
     const QString nfd = QStringLiteral("é.txt");
     QCOMPARE(putFile(m_backend.get(), p(nfc), "nfc"), Result::success());
@@ -622,7 +607,7 @@ void TestConformance::namesNonUtf8()
     QVector<Entry> entries;
     QCOMPARE(m_backend->list(m_dir, &entries), Result::success());
     QCOMPARE(entries.size(), 1);
-    QCOMPARE(entries.first().name, name);   // lossless round trip
+    QCOMPARE(entries.first().name, name);
     QVERIFY(entries.first().flags.testFlag(EntryFlag::NameNotUtf8));
     Entry entry;
     QCOMPARE(m_backend->stat(p(name), &entry), Result::success());
@@ -640,7 +625,7 @@ void TestConformance::namesLong()
 {
     const int limit = m_caps.maxNameBytes > 0 ? static_cast<int>(qMin<qint64>(m_caps.maxNameBytes, 255)) : 255;
     const QString ascii = QString(limit - 4, QLatin1Char('a')) + QStringLiteral(".txt");
-    const QString multibyte = QString(limit / 2, QChar(0x00e9));   // two bytes each
+    const QString multibyte = QString(limit / 2, QChar(0x00e9));
     for (const QString &name : { ascii, multibyte }) {
         QVERIFY(Names::encode(name).size() <= limit);
         QCOMPARE(putFile(m_backend.get(), p(name), "long"), Result::success());
@@ -666,7 +651,6 @@ void TestConformance::namesWindowsInvalid()
     }
 }
 
-// --- attributes (XC-11) -------------------------------------------------------
 
 void TestConformance::setAttributes()
 {
@@ -696,7 +680,7 @@ void TestConformance::setAttributes()
         times.accessed = fixedTime().addDays(1);
         if (m_backend->setAttributes(file, times).ok()) {
             QCOMPARE(m_backend->stat(file, &entry), Result::success());
-            QCOMPARE(seconds(entry.modified), seconds(fixedTime()));   // left alone
+            QCOMPARE(seconds(entry.modified), seconds(fixedTime()));
             if (entry.accessed.isValid())
                 QCOMPARE(seconds(entry.accessed), seconds(fixedTime().addDays(1)));
         }
@@ -716,12 +700,11 @@ void TestConformance::setAttributes()
     QVERIFY2(missing.error() == Error::NotFound || missing.error() == Error::Unsupported, qPrintable(describe(missing)));
 }
 
-// --- links (XC-12) ------------------------------------------------------------
 
 void TestConformance::checkLink(const QString &link, EntryType targetType)
 {
     Entry itself;
-    QCOMPARE(m_backend->lstat(link, &itself), Result::success());   // XC-7
+    QCOMPARE(m_backend->lstat(link, &itself), Result::success());
     QCOMPARE(itself.type, EntryType::Symlink);
     if (itself.targetType != EntryType::Unknown)
         QCOMPARE(itself.targetType, targetType);
@@ -734,7 +717,7 @@ void TestConformance::checkLink(const QString &link, EntryType targetType)
     QCOMPARE(m_backend->list(Paths::parent(link), &sink, options), Result::success());
     const Entry *listed = find(sink.all, Paths::fileName(link));
     QVERIFY(listed);
-    QCOMPARE(listed->type, EntryType::Symlink);   // lstat semantics (XS-3, L-2)
+    QCOMPARE(listed->type, EntryType::Symlink);
     QCOMPARE(listed->targetType, targetType);
     QCOMPARE(listed->isDir(), targetType == EntryType::Directory);
     QCOMPARE(listed->isFile(), targetType == EntryType::File);
@@ -749,7 +732,7 @@ void TestConformance::symlinks()
     QCOMPARE(m_backend->makeSymlink(QStringLiteral("target.txt"), p(QStringLiteral("link"))), Result::success());
     QString target;
     QCOMPARE(m_backend->readLink(p(QStringLiteral("link")), &target), Result::success());
-    QCOMPARE(target, QStringLiteral("target.txt"));   // verbatim
+    QCOMPARE(target, QStringLiteral("target.txt"));
     checkLink(p(QStringLiteral("link")), EntryType::File);
     Entry followed;
     QCOMPARE(m_backend->stat(p(QStringLiteral("link")), &followed), Result::success());
@@ -835,7 +818,6 @@ void TestConformance::hardlinks()
     QByteArray data;
     QCOMPARE(getFile(m_backend.get(), p(QStringLiteral("hard")), &data), Result::success());
     QCOMPARE(data, QByteArray("first"));
-    // One file under two names: a write through one shows through the other.
     WriteHandle *raw = nullptr;
     WriteOptions options;
     options.disposition = WriteOptions::Disposition::Truncate;
@@ -847,14 +829,12 @@ void TestConformance::hardlinks()
         QCOMPARE(getFile(m_backend.get(), p(QStringLiteral("file")), &data), Result::success());
         QCOMPARE(data, QByteArray("second"));
     }
-    // Renaming one link onto the other: NoReplace refuses, Replace leaves one name.
     QCOMPARE(m_backend->rename(p(QStringLiteral("hard")), p(QStringLiteral("file")), RenameMode::NoReplace), Result(Error::AlreadyExists));
     QCOMPARE(names(m_backend.get(), m_dir).size(), 2);
     QCOMPARE(m_backend->rename(p(QStringLiteral("hard")), p(QStringLiteral("file")), RenameMode::Replace), Result::success());
     QCOMPARE(names(m_backend.get(), m_dir), QStringList { QStringLiteral("file") });
 }
 
-// --- handles and transfers (XC-13, XC-14) -------------------------------------
 
 void TestConformance::readHandle()
 {
@@ -880,7 +860,7 @@ void TestConformance::readHandle()
     QCOMPARE(handle->read(5, 0, &chunk), Result::success());
     QVERIFY(chunk.isEmpty());
     handle->readAhead(MiB, MiB);
-    QCOMPARE(handle->read(MiB + 3, 2 * MiB, &chunk), Result::success());   // spans protocol chunks
+    QCOMPARE(handle->read(MiB + 3, 2 * MiB, &chunk), Result::success());
     QCOMPARE(chunk, data.mid(MiB + 3, 2 * MiB));
     QByteArray all;
     for (qint64 offset = 0; offset < n; offset += MiB) {
@@ -937,7 +917,7 @@ void TestConformance::downloadRanges()
     QVERIFY(out.isEmpty());
     QCOMPARE(download(m_backend.get(), p(QStringLiteral("data")), 7, 0, &out), Result::success());
     QVERIFY(out.isEmpty());
-    QCOMPARE(download(m_backend.get(), p(QStringLiteral("data")), MiB - 1, 2, &out), Result::success());   // across a chunk edge
+    QCOMPARE(download(m_backend.get(), p(QStringLiteral("data")), MiB - 1, 2, &out), Result::success());
     QCOMPARE(out, data.mid(MiB - 1, 2));
 }
 
@@ -961,7 +941,6 @@ void TestConformance::writeHandle()
     QCOMPARE(getFile(m_backend.get(), p(QStringLiteral("written")), &read), Result::success());
     QCOMPARE(read, data);
 
-    // CreateNew on an existing file: AlreadyExists, content unchanged.
     QCOMPARE(m_backend->openWrite(p(QStringLiteral("written")), options, &raw), Result(Error::AlreadyExists));
     QVERIFY(!raw);
     QCOMPARE(getFile(m_backend.get(), p(QStringLiteral("written")), &read), Result::success());
@@ -977,7 +956,6 @@ void TestConformance::writeHandle()
     QCOMPARE(getFile(m_backend.get(), p(QStringLiteral("written")), &read), Result::success());
     QCOMPARE(read, QByteArray("short"));
 
-    // XC-23: an explicit mode for new files (backups pass 0600).
     QCOMPARE(m_backend->openWrite(p(QStringLiteral("private")), options, &raw), Result::success());
     handle.reset(raw);
     QCOMPARE(handle->commit(), Result::success());
@@ -1032,7 +1010,6 @@ void TestConformance::writeResume()
     QCOMPARE(getFile(m_backend.get(), p(QStringLiteral("part")), &read), Result::success());
     QCOMPARE(read, head + tail);
 
-    // Through upload() as well.
     QBuffer more;
     more.setData(head);
     more.open(QIODevice::ReadOnly);
@@ -1060,7 +1037,7 @@ void TestConformance::handlesAfterDisconnect()
     std::unique_ptr<WriteHandle> writeHandle(writer);
     if (!readable.ok() && !writable.ok())
         QSKIP("no handles");
-    m_backend->disconnect();   // XC-13: open handles die with the connection
+    m_backend->disconnect();
     if (readHandle) {
         QByteArray out;
         QCOMPARE(readHandle->read(0, 4, &out), Result(Error::ConnectionLost));
@@ -1095,7 +1072,6 @@ void TestConformance::uploadDownload()
     QCOMPARE(down.updates.last().first, qint64(data.size()));
     QVERIFY(down.updates.last().second == -1 || down.updates.last().second == data.size());
 
-    // CreateNew refuses an existing file and leaves it alone.
     QCOMPARE(putFile(m_backend.get(), p(QStringLiteral("big")), "small", WriteOptions::Disposition::CreateNew), Result(Error::AlreadyExists));
     QByteArray read;
     QCOMPARE(getFile(m_backend.get(), p(QStringLiteral("big")), &read), Result::success());
@@ -1132,7 +1108,7 @@ void TestConformance::uploadOptions()
     if (has(Capability::SetModifiedOnUpload))
         QCOMPARE(seconds(entry.modified), seconds(fixedTime()));
 
-    // XC-23: the default mode is the server's (umask applied); the owner
+    // the default mode is the server's (umask applied); the owner
     // can always read and write a new file.
     QCOMPARE(putFile(m_backend.get(), p(QStringLiteral("default")), "x", WriteOptions::Disposition::CreateNew), Result::success());
     QCOMPARE(m_backend->stat(p(QStringLiteral("default")), &entry), Result::success());
@@ -1144,7 +1120,7 @@ void TestConformance::progressCancel()
 {
     const QByteArray data = pattern(4 * MiB, 11);
     QCOMPARE(putFile(m_backend.get(), p(QStringLiteral("data")), data), Result::success());
-    // XC-14: Progress::canceled() stops a transfer.
+    // Progress::canceled() stops a transfer.
     QBuffer sink;
     sink.open(QIODevice::WriteOnly);
     RecordingProgress stop;
@@ -1158,7 +1134,7 @@ void TestConformance::progressCancel()
     stopUp.cancelAfterFirst = true;
     QCOMPARE(m_backend->upload(&source, p(QStringLiteral("up")), UploadOptions(), &stopUp), Result(Error::Canceled));
 
-    // cancel() from within the transfer (C-9).
+    // cancel() from within the transfer.
     QBuffer sink2;
     sink2.open(QIODevice::WriteOnly);
     RecordingProgress cancelDown;
@@ -1235,7 +1211,6 @@ void TestConformance::largeSparse()
     QCOMPARE(m_backend->removeFile(path), Result::success());
 }
 
-// --- server-side work (XC-17..19) ---------------------------------------------
 
 void TestConformance::copy()
 {
@@ -1334,7 +1309,6 @@ void TestConformance::spaceInfo()
     QCOMPARE(m_backend->spaceInfo(p(QStringLiteral("missing")), &info), Result(Error::NotFound));
 }
 
-// --- unsupported means no side effects (XT-1) ---------------------------------
 
 void TestConformance::expectUnsupported(Capability c, const std::function<Result()> &call)
 {
@@ -1404,14 +1378,13 @@ void TestConformance::unsupportedWithoutSideEffects()
         QByteArray digest;
         return m_backend->checksum(p(QStringLiteral("file")), QStringLiteral("sha256"), &digest);
     });
-    // XC-18: an algorithm that is not listed is Unsupported as well.
+    // an algorithm that is not listed is Unsupported as well.
     const QMap<QString, QString> before = snapshot(m_backend.get(), m_dir);
     QByteArray digest;
     QCOMPARE(m_backend->checksum(p(QStringLiteral("file")), QStringLiteral("crc-unlisted"), &digest), Result(Error::Unsupported));
     QCOMPARE(snapshot(m_backend.get(), m_dir), before);
 }
 
-// --- cancel under a stall (C-9, C-14) -----------------------------------------
 
 void TestConformance::runFifoStall(const QString &what, const std::function<Result()> &call)
 {
@@ -1474,7 +1447,7 @@ void TestConformance::stallTimeoutFifo()
         QSKIP("no FIFO stall for this target");
     const FifoStall fifo(hostPath(QStringLiteral("stall")));
     QVERIFY(fifo.isOpen());
-    // C-14: the request timeout ends a wait nobody cancels.
+    // the request timeout ends a wait nobody cancels.
     ConnectionParams params = m_target.params;
     params.requestTimeoutMs = TimeoutMs;
     Result r;
@@ -1532,7 +1505,6 @@ void TestConformance::cancelStalledProxy()
     }
 }
 
-// --- main ---------------------------------------------------------------------
 
 int main(int argc, char **argv)
 {

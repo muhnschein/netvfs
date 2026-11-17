@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-// Handles, streaming transfers, copy and checksums (XC-13, XC-14, L-4, L-5, L-7).
 #include "localhandles.h"
 #include "names.h"
 
@@ -21,9 +20,9 @@ namespace NetVfs::Local {
 
 namespace {
 
-constexpr mode_t DefaultFileMode = 0666;      // XC-23: the process umask applies
+constexpr mode_t DefaultFileMode = 0666;
 constexpr int MaxTemporaryAttempts = 16;
-constexpr qint64 MaxReadBytes = std::numeric_limits<int>::max() / 2;   // QByteArray bound
+constexpr qint64 MaxReadBytes = std::numeric_limits<int>::max() / 2;
 
 Result handleLost()
 {
@@ -45,8 +44,8 @@ bool isStream(const NativeStat &st)
     return st.type != EntryType::File;
 }
 
-// copy_file_range(2) through syscall(): glibc 2.27..2.29 emulated it in
-// user space without cancel checks.
+// copy_file_range(2) through syscall(): glibc 2.27..2.29 emulated it in user space without cancel
+// checks.
 long copyRange(int source, int target, qint64 length)
 {
 #ifdef SYS_copy_file_range
@@ -63,7 +62,7 @@ long copyRange(int source, int target, qint64 length)
 bool cloned(int source, int target)
 {
 #ifdef FICLONE
-    return ::ioctl(target, FICLONE, source) == 0;   // reflink: shares extents
+    return ::ioctl(target, FICLONE, source) == 0;
 #else
     Q_UNUSED(source)
     Q_UNUSED(target)
@@ -71,12 +70,11 @@ bool cloned(int source, int target)
 #endif
 }
 
-// read()/write() in chunks, from the current positions.
 Result copyByReading(int source, int target, const Waiter &waiter)
 {
     QByteArray buffer(static_cast<int>(ChunkSize), Qt::Uninitialized);
     for (;;) {
-        if (const Result r = waiter.check(); !r.ok())   // L-6
+        if (const Result r = waiter.check(); !r.ok())
             return r;
         qint64 n = 0;
         if (const Result r = readOnce(source, -1, buffer.data(), ChunkSize, waiter, &n); !r.ok())
@@ -88,14 +86,13 @@ Result copyByReading(int source, int target, const Waiter &waiter)
     }
 }
 
-// L-4: FICLONE, then copy_file_range, then read/write.
 Result copyData(int source, int target, const Waiter &waiter)
 {
     if (cloned(source, target))
         return Result::success();
     bool started = false;
     for (;;) {
-        if (const Result r = waiter.check(); !r.ok())   // L-6
+        if (const Result r = waiter.check(); !r.ok())
             return r;
         const long n = copyRange(source, target, ChunkSize);
         if (n == 0)
@@ -135,8 +132,8 @@ QByteArray temporaryName(const QByteArray &target, int attempt)
 
 Result openForRead(const QByteArray &native, Fd *fd, NativeStat *st)
 {
-    // O_NONBLOCK: opening a FIFO without a writer must not block (C-9);
-    // reads wait in Waiter instead. No effect on regular files.
+    // O_NONBLOCK: opening a FIFO without a writer must not block; reads wait in Waiter. No effect
+    // on regular files.
     Fd file(::open(native.constData(), O_RDONLY | O_CLOEXEC | O_NOCTTY | O_NONBLOCK));
     if (!file.valid())
         return errnoResult(errno, display(native));
@@ -159,7 +156,6 @@ Result openForWrite(const QByteArray &native, const WriteOptions &options, Fd *f
         flags |= O_CREAT | O_EXCL;
     else if (options.disposition == WriteOptions::Disposition::Truncate)
         flags |= O_CREAT | O_TRUNC;
-    // L-7: Resume opens without truncation.
     const mode_t mode = options.createMode >= 0 ? static_cast<mode_t>(options.createMode) : DefaultFileMode;
     Fd file(::open(native.constData(), flags, mode));
     if (!file.valid())
@@ -179,17 +175,15 @@ Result openForWrite(const QByteArray &native, const WriteOptions &options, Fd *f
     return Result::success();
 }
 
-// Copies into `target` opened with `flags`; removes it again on failure.
 Result copyInto(int source, const QByteArray &target, const NativeStat &st, int flags,
                 const Waiter &waiter)
 {
     Fd output(::open(target.constData(), O_WRONLY | O_CLOEXEC | O_NOCTTY | flags,
-                     static_cast<mode_t>(st.mode & 0777)));   // as cp(1): source mode, umask applies
+                     static_cast<mode_t>(st.mode & 0777)));
     if (!output.valid())
         return errnoResult(errno, display(target));
     Result r = copyData(source, output.get(), waiter);
     if (r.ok()) {
-        // Server-side copies keep the modification time (as cp -p, L-4).
         if (const std::array<struct timespec, 2> times = { toTimespec(fromMsecs(st.accessedMs)),
                                                            toTimespec(fromMsecs(st.modifiedMs)) };
                 ::futimens(output.get(), times.data()) != 0)
@@ -204,8 +198,6 @@ Result copyInto(int source, const QByteArray &target, const NativeStat &st, int 
     return r;
 }
 
-// Replace: copies to a temporary name next to the target, then renames it
-// over the target, so a failed copy leaves the old file intact.
 Result copyReplacing(int source, const QByteArray &target, const NativeStat &st, const Waiter &waiter)
 {
     for (int attempt = 0; attempt < MaxTemporaryAttempts; ++attempt) {
@@ -226,7 +218,6 @@ Result copyReplacing(int source, const QByteArray &target, const NativeStat &st,
     return Result(Error::Internal, QStringLiteral("No free temporary name next to %1").arg(display(target)));
 }
 
-// Bytes a download will deliver: the range, bounded by what the file holds.
 qint64 downloadTotal(const DownloadOptions &options, const NativeStat &st)
 {
     if (isStream(st))
@@ -235,7 +226,6 @@ qint64 downloadTotal(const DownloadOptions &options, const NativeStat &st)
     return options.length < 0 ? available : qMin(options.length, available);
 }
 
-// Bytes an upload will take, -1 if unknown.
 qint64 uploadTotal(const WriteOptions &write, const QIODevice *source)
 {
     if (write.expectedSize >= 0)
@@ -243,7 +233,6 @@ qint64 uploadTotal(const WriteOptions &write, const QIODevice *source)
     return source->isSequential() ? -1 : source->size();
 }
 
-// The chunk loop of download(): cancel is checked between chunks (L-6).
 Result pumpDownload(int fd, const DownloadOptions &options, bool stream, QIODevice *sink, qint64 total,
                     Progress *progress, const Waiter &waiter)
 {
@@ -268,10 +257,7 @@ Result pumpDownload(int fd, const DownloadOptions &options, bool stream, QIODevi
     return Result::success();
 }
 
-} // namespace
-
-// --- read handle ------------------------------------------------------------
-
+}
 LocalReadHandle::LocalReadHandle(std::shared_ptr<Context> context, Fd fd, const NativeStat &st)
     : m_context(std::move(context))
     , m_generation(m_context->generation)
@@ -309,7 +295,6 @@ Result LocalReadHandle::read(qint64 offset, qint64 maxBytes, QByteArray *out)
         return Result(Error::Unsupported, QStringLiteral("This file can only be read sequentially"));
     qint64 want = maxBytes;
     if (m_seekable) {
-        // Bounds the buffer by what the file holds now (C-10).
         NativeStat st;
         if (const int e = statFd(m_fd.get(), &st); e != 0)
             return errnoResult(e, QStringLiteral("Cannot read"));
@@ -343,8 +328,6 @@ Result LocalReadHandle::close()
         return errnoResult(e, QStringLiteral("Cannot close"));
     return Result::success();
 }
-
-// --- write handle -----------------------------------------------------------
 
 LocalWriteHandle::LocalWriteHandle(std::shared_ptr<Context> context, Fd fd, qint64 position,
                                    const QDateTime &modified)
@@ -395,14 +378,14 @@ Result LocalWriteHandle::commit()
     const int fd = m_fd.get();
     if (fd < 0)
         return handleClosed();
-    // L-7: data on stable storage before the caller renames it into place.
-    // FIFOs and devices have nothing to flush (EINVAL).
+    // Data on stable storage before the caller renames it into place. FIFOs and devices have
+    // nothing to flush (EINVAL).
     if (::fsync(fd) != 0 && errno != EINVAL && errno != EROFS) {
         const int error = errno;
         m_fd.reset();
         return errnoResult(error, QStringLiteral("Cannot flush"));
     }
-    if (m_modified.isValid()) {   // SetModifiedOnUpload
+    if (m_modified.isValid()) {
         if (const std::array<struct timespec, 2> times = { toTimespec(QDateTime()), toTimespec(m_modified) };
                 ::futimens(m_fd.get(), times.data()) != 0) {
             const int error = errno;
@@ -417,10 +400,8 @@ Result LocalWriteHandle::commit()
 
 void LocalWriteHandle::abort()
 {
-    m_fd.reset();   // partial data stays (XC-13)
+    m_fd.reset();
 }
-
-// --- opening ----------------------------------------------------------------
 
 Result LocalBackend::openRead(const QString &path, ReadHandle **out)
 {
@@ -434,7 +415,7 @@ Result LocalBackend::openRead(const QString &path, ReadHandle **out)
     NativeStat st;
     if (const Result r = openForRead(native, &fd, &st); !r.ok())
         return r;
-    *out = std::make_unique<LocalReadHandle>(m_context, std::move(fd), st).release();   // the caller owns it
+    *out = std::make_unique<LocalReadHandle>(m_context, std::move(fd), st).release();
     return Result::success();
 }
 
@@ -453,8 +434,6 @@ Result LocalBackend::openWrite(const QString &path, const WriteOptions &options,
     *out = std::make_unique<LocalWriteHandle>(m_context, std::move(fd), position, options.modified).release();
     return Result::success();
 }
-
-// --- streaming (XC-14) ------------------------------------------------------
 
 Result LocalBackend::upload(QIODevice *source, const QString &path, const UploadOptions &options,
                             Progress *progress)
@@ -484,7 +463,7 @@ Result LocalBackend::upload(QIODevice *source, const QString &path, const Upload
         }
         if (n == 0)
             break;
-        if (const Result r = handle.write(buffer.constData(), n); !r.ok()) {   // checks cancel (L-6)
+        if (const Result r = handle.write(buffer.constData(), n); !r.ok()) {
             handle.abort();
             return r;
         }
@@ -514,8 +493,6 @@ Result LocalBackend::download(const QString &path, QIODevice *sink, const Downlo
     return pumpDownload(fd.get(), options, stream, sink, downloadTotal(options, st), progress, m_context->waiter());
 }
 
-// --- server-side work (L-4, L-5) --------------------------------------------
-
 Result LocalBackend::copy(const QString &from, const QString &to, const CopyOptions &options)
 {
     QByteArray source;
@@ -528,7 +505,7 @@ Result LocalBackend::copy(const QString &from, const QString &to, const CopyOpti
     Fd input;
     NativeStat st;
     r = openForRead(source, &input, &st);
-    if (r.error() == Error::IsADirectory)   // no ServerCopyRecursive: nothing happens
+    if (r.error() == Error::IsADirectory)
         return Result(Error::Unsupported, QStringLiteral("Copying folders is not supported by this backend"));
     if (!r.ok())
         return r;
@@ -536,7 +513,7 @@ Result LocalBackend::copy(const QString &from, const QString &to, const CopyOpti
         return Result(Error::Unsupported, QStringLiteral("%1 is not a regular file").arg(display(source)));
     if (options.mode == RenameMode::NoReplace)
         return copyInto(input.get(), target, st, O_CREAT | O_EXCL, m_context->waiter());
-    if (NativeStat existing; statAt(AT_FDCWD, target, false, &existing) == 0 && existing.isDir())   // XC-10, XC-17
+    if (NativeStat existing; statAt(AT_FDCWD, target, false, &existing) == 0 && existing.isDir())
         return Result(Error::AlreadyExists, QStringLiteral("%1 is a folder and is not replaced").arg(display(target)));
     return copyReplacing(input.get(), target, st, m_context->waiter());
 }
@@ -544,7 +521,7 @@ Result LocalBackend::copy(const QString &from, const QString &to, const CopyOpti
 Result LocalBackend::checksum(const QString &path, const QString &algorithm, QByteArray *digest)
 {
     QCryptographicHash::Algorithm kind {};
-    if (!algorithmFor(algorithm, &kind))   // XC-18: only the listed algorithms
+    if (!algorithmFor(algorithm, &kind))
         return Result(Error::Unsupported, QStringLiteral("Checksum algorithm \"%1\" is not supported").arg(algorithm));
     QByteArray native;
     if (const Result r = prepare(path, &native); !r.ok())
@@ -557,7 +534,7 @@ Result LocalBackend::checksum(const QString &path, const QString &algorithm, QBy
     QCryptographicHash hash(kind);
     QByteArray buffer(static_cast<int>(ChunkSize), Qt::Uninitialized);
     for (qint64 position = 0;;) {
-        if (const Result r = waiter.check(); !r.ok())   // L-5, L-6
+        if (const Result r = waiter.check(); !r.ok())
             return r;
         qint64 n = 0;
         if (const Result r = readOnce(fd.get(), isStream(st) ? -1 : position, buffer.data(), ChunkSize, waiter, &n);
@@ -573,4 +550,4 @@ Result LocalBackend::checksum(const QString &path, const QString &algorithm, QBy
     return Result::success();
 }
 
-} // namespace NetVfs::Local
+}

@@ -114,7 +114,7 @@
   {
     "name": "XH-5 destination failure does not release the source thread",
     "file": "src/core/ops.cpp",
-    "search": "        pipe.fail(uploaded);       // wakes a download blocked on a full pipe",
+    "search": "        pipe.fail(uploaded);",
     "replace": "        ;",
     "test": "timeout 120 build/tests/unit/ops/tst_ops"
   },

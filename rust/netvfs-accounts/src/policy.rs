@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! The Files slice of src/core/servicepolicy.cpp (SPEC-v2 XA-4, XA-7) and
-//! `ConnectionParams` (src/core/types.h).
+//! Files slice of src/core/servicepolicy.cpp and `ConnectionParams` (src/core/types.h).
 
 use crate::qvariant::{QString, Value, trimmed};
 use crate::wire::{Error, Outcome};
@@ -32,7 +31,6 @@ impl Default for ConnectionParams {
             port: 0,
             username: None,
             options: Vec::new(),
-            // SPEC C-14
             connect_timeout_ms: 15_000,
             request_timeout_ms: 60_000,
         }
@@ -136,7 +134,7 @@ pub fn check_files_policy(params: &ConnectionParams) -> Outcome {
     Outcome::success()
 }
 
-/// `secretOptional()` (XA-7).
+/// `secretOptional()`.
 #[must_use]
 pub fn secret_optional(params: &ConnectionParams) -> bool {
     params.option(option_keys::AUTH_MODE, "").as_deref() == Some(AUTH_INTERACTIVE)

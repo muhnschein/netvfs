@@ -205,29 +205,29 @@
   {
     "name": "XC-4 overlong 3-byte sequences decoded",
     "file": "src/core/names.cpp",
-    "search": "            lo = 0xA0;          // overlong",
-    "replace": "            lo = 0x80;          // overlong",
+    "search": "            lo = 0xA0;",
+    "replace": "            lo = 0x80;",
     "test": "build/tests/unit/core/tst_core"
   },
   {
     "name": "XC-4 surrogates in UTF-8 decoded",
     "file": "src/core/names.cpp",
-    "search": "            hi = 0x9F;          // UTF-16 surrogates",
-    "replace": "            hi = 0xBF;          // UTF-16 surrogates",
+    "search": "            hi = 0x9F;",
+    "replace": "            hi = 0xBF;",
     "test": "build/tests/unit/core/tst_core"
   },
   {
     "name": "XC-4 code points above U+10FFFF decoded",
     "file": "src/core/names.cpp",
-    "search": "            hi = 0x8F;          // > U+10FFFF",
-    "replace": "            hi = 0xBF;          // > U+10FFFF",
+    "search": "            hi = 0x8F;",
+    "replace": "            hi = 0xBF;",
     "test": "build/tests/unit/core/tst_core"
   },
   {
     "name": "XC-4 overlong 4-byte sequences decoded",
     "file": "src/core/names.cpp",
-    "search": "            lo = 0x90;          // overlong",
-    "replace": "            lo = 0x80;          // overlong",
+    "search": "            lo = 0x90;",
+    "replace": "            lo = 0x80;",
     "test": "build/tests/unit/core/tst_core"
   },
   {

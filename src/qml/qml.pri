@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: LGPL-2.1-or-later
-# C++ sources of the org.netvfs.accounts QML plugin, shared by the plugin and
-# its unit tests (which compile them directly so they can be tested without
-# a QML engine).
+# C++ sources of the org.netvfs.accounts QML plugin, shared with its unit tests (compiled directly,
+# no QML engine).
 INCLUDEPATH += $$PWD
 QT *= concurrent
 CONFIG *= link_pkgconfig

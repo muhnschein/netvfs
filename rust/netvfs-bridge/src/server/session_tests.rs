@@ -1,8 +1,5 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-// Sessions end to end against a stub core (netvfs 0.4's C++
-// tst_bridgeserver): the hello race, the server's own answers, errors,
-// descriptor passing, the inbound limits and flow control (C-10).
-// Restriction lints that only add noise to tests (doc/RUST.md "Lints").
+// Restriction lints that only add noise to tests.
 #![allow(clippy::assertions_on_result_states, clippy::arithmetic_side_effects)]
 
 use super::{Arc, Duration, EventSink, SessionId, StdUnixStream, UnixStream, run};
@@ -24,7 +21,6 @@ use zbus::zvariant::{DynamicType, Fd};
 const SID: SessionId = SessionId(1);
 const WAIT: Duration = Duration::from_secs(5);
 
-/// A session on one end of a socket pair; the other end.
 fn start(sink: EventSink) -> (UnixStream, tokio::task::JoinHandle<()>) {
     let (server, client) = UnixStream::pair().unwrap();
     let shutdown = StdUnixStream::from(server.as_fd().try_clone_to_owned().unwrap());
@@ -85,8 +81,6 @@ fn method_error(result: zbus::Result<Message>) -> (String, String) {
     }
 }
 
-/// XB-3: a call pipelined right behind `BEGIN` is not lost (design §8:
-/// the message stream exists before zbus's reader starts).
 #[tokio::test]
 async fn hello_right_after_the_handshake_is_answered() {
     for _ in 0..200 {
@@ -132,7 +126,6 @@ async fn own_answers_hello_first_and_consent_free_calls() {
         ("org.netvfs.Error.ProtocolError".to_owned(), "Hello must be the first call".to_owned())
     );
     assert_eq!(method_error(call(&client, OBJECT_PATH, INTERFACE, "Hello", &(1u32,)).await).0, INVALID_ARGS);
-    // The core's answers.
     assert_eq!(
         method_error(call(&client, OBJECT_PATH, INTERFACE, "Hello", &("old",)).await).0,
         "org.netvfs.Error.ProtocolError"
@@ -154,7 +147,6 @@ async fn own_answers_hello_first_and_consent_free_calls() {
         method_error(call(&client, OBJECT_PATH, INTERFACE, "Cancel", &(3u32,)).await),
         ("org.netvfs.Error.Internal".to_owned(), "The request was dropped".to_owned())
     );
-    // Only valid calls after Hello reach the core.
     for name in ["Hello", "Hello", "GetConsent", "ListLocations", "Disconnect", "Cancel"] {
         assert!(matches!(next(&mut seen).await, Seen::Call(SID, n) if n == name), "{name}");
     }
@@ -163,7 +155,6 @@ async fn own_answers_hello_first_and_consent_free_calls() {
     tokio::time::timeout(WAIT, session).await.unwrap().unwrap();
 }
 
-/// `Upload` brings its descriptor (`h`) to the core.
 #[tokio::test]
 async fn descriptors_reach_the_core() {
     let (sink, mut seen) = stub_core();
@@ -181,8 +172,6 @@ async fn descriptors_reach_the_core() {
     assert_eq!(reply.body().deserialize::<(u32,)>().unwrap().0, 12);
 }
 
-/// A message declaring more than 2 MiB closes the connection without
-/// waiting for its body.
 #[tokio::test]
 async fn an_oversized_message_closes_the_session() {
     let (sink, mut seen) = stub_core();
@@ -199,8 +188,6 @@ async fn an_oversized_message_closes_the_session() {
     tokio::time::timeout(WAIT, session).await.unwrap().unwrap();
 }
 
-/// A consumer that sends calls but never reads the replies is throttled by
-/// its own socket: the session stops reading.
 #[tokio::test]
 async fn unread_replies_throttle_the_reader() {
     let (sink, mut seen) = stub_core();
@@ -220,7 +207,6 @@ async fn unread_replies_throttle_the_reader() {
     tokio::time::sleep(Duration::from_millis(500)).await;
     assert!(!writer.is_finished(), "the session read everything without the replies being read");
     assert!(!outbox.is_closed());
-    // Reading the replies lets the rest through.
     for _ in 0..=count {
         let reply = tokio::time::timeout(WAIT, read_message(&mut read)).await.unwrap().unwrap();
         assert_eq!(reply.message_type(), Type::MethodReturn);
@@ -228,9 +214,6 @@ async fn unread_replies_throttle_the_reader() {
     let _write = tokio::time::timeout(WAIT, writer).await.unwrap().unwrap();
 }
 
-/// C-10: a consumer that never reads holds at most the flow budget of
-/// streamed batches; cancellation and disconnection free a blocked
-/// producer within a second.
 #[tokio::test]
 async fn flow_control_bounded() {
     let (sink, mut seen) = stub_core();
@@ -257,8 +240,7 @@ async fn flow_control_bounded() {
     let cancel = Arc::new(AtomicBool::new(false));
     let sent = Arc::new(AtomicUsize::new(0));
     let mut finished = producer(Arc::clone(&cancel), Arc::clone(&sent));
-    // Saturated once the budget is spent and nothing more gets through for
-    // a while (a slow machine, qemu, may take long for the first batch).
+    // Saturated once the budget is spent; a slow machine (qemu) may take long for the first batch.
     let deadline = Instant::now() + Duration::from_mins(1);
     while outbox.flow().in_flight() <= FLOW_LIMIT {
         assert!(Instant::now() < deadline, "{} batches sent", sent.load(Ordering::SeqCst));
@@ -272,13 +254,8 @@ async fn flow_control_bounded() {
     assert!(last * bytes > FLOW_LIMIT, "{last} batches of {bytes} bytes");
     let in_flight = outbox.flow().in_flight();
     assert!(in_flight > FLOW_LIMIT && in_flight <= FLOW_LIMIT + bytes, "{in_flight}");
-    // The resident set is the whole process's: this test needs a process of
-    // its own, as cargo nextest gives every test (tools/ci/cross-build.sh
-    // runs it alone); next to the other tests of a plain `cargo test` their
-    // memory counts as well.
-    // Under AddressSanitizer freed memory stays resident in its quarantine,
-    // so the resident set says nothing there (rust-sanitize.sh sets the
-    // variable); the budget above bounds what is queued all the same.
+    // Resident set is process-wide: needs its own process (nextest gives one; cross-build.sh runs it alone).
+    // Under AddressSanitizer freed memory stays resident in quarantine (rust-sanitize.sh sets the variable); the budget bounds the queue anyway.
     if std::env::var_os("NETVFS_TEST_SANITIZER").is_none() {
         let growth = resident_bytes().saturating_sub(before);
         assert!(growth < 16 << 20, "resident set grew by {growth} bytes");
@@ -290,7 +267,6 @@ async fn flow_control_bounded() {
     let at = tokio::time::timeout(Duration::from_secs(1), finished).await.unwrap().unwrap();
     assert!(at.duration_since(canceled) < Duration::from_secs(1));
 
-    // A second producer blocks, until the consumer goes away.
     let finished = producer(Arc::new(AtomicBool::new(false)), Arc::new(AtomicUsize::new(0)));
     tokio::time::sleep(Duration::from_millis(100)).await;
     let gone = Instant::now();
@@ -304,8 +280,6 @@ async fn flow_control_bounded() {
     assert_eq!(outbox.flow().in_flight(), 0);
 }
 
-/// XB-6 revocation: the core closes the session, also while its writer is
-/// stuck on a consumer that does not read.
 #[tokio::test]
 async fn the_core_closes_a_session() {
     let (sink, mut seen) = stub_core();
@@ -325,7 +299,6 @@ async fn the_core_closes_a_session() {
     assert!(client.closed_within(WAIT).await);
 }
 
-/// A failed handshake reports nothing.
 #[tokio::test]
 async fn a_failed_handshake_is_silent() {
     let (sink, mut seen) = stub_core();

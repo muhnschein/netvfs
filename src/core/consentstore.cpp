@@ -26,8 +26,7 @@ bool isIdChar(QChar c)
     return (u >= 'a' && u <= 'z') || (u >= '0' && u <= '9') || u == '-';
 }
 
-// Characters allowed in paths that end up in systemd unit files (no '%',
-// no whitespace, no quotes, no backslash).
+// Chars allowed in paths that end up in systemd unit files: no '%', whitespace, quotes, backslash.
 bool isPathChar(QChar c)
 {
     const ushort u = c.unicode();
@@ -40,7 +39,6 @@ bool hasOnlyPathChars(const QString &path)
     return std::all_of(path.cbegin(), path.cend(), isPathChar);
 }
 
-// No empty, "." or ".." components (a leading '/' is checked by the caller).
 bool hasCleanComponents(const QString &path)
 {
     const QStringList parts = path.split(QLatin1Char('/'));
@@ -54,8 +52,7 @@ Result invalid(const QString &path, const QString &why)
     return Result(Error::InvalidName, QStringLiteral("Invalid consumer file %1: %2").arg(path, why));
 }
 
-} // namespace
-
+}
 bool ConsumerInfo::isValidId(const QString &id)
 {
     return !id.isEmpty() && id.size() <= MaxIdLength && std::all_of(id.cbegin(), id.cend(), isIdChar);
@@ -164,8 +161,7 @@ Result ConsentStore::loadConsumer(const QString &id, ConsumerInfo *out)
     return parseConsumerFile(consumersDir() + QLatin1Char('/') + id + QStringLiteral(".conf"), out);
 }
 
-// Strict reader for the [Consumer] group: no QSettings (which would turn
-// "a, b" into a list and accept many syntaxes the generator does not).
+// Strict [Consumer] reader: QSettings would turn "a, b" into a list.
 Result ConsentStore::parseConsumerFile(const QString &path, ConsumerInfo *out)
 {
     QFile file(path);
@@ -211,4 +207,4 @@ Result ConsentStore::parseConsumerFile(const QString &path, ConsumerInfo *out)
     return Result::success();
 }
 
-} // namespace NetVfs
+}

@@ -46,8 +46,7 @@ bool TerminalPrompter::readAnswer(const AuthPrompt &prompt, QByteArray *answer) 
 {
     *m_prompts << sanitizeForTerminal(prompt.text);
     m_prompts->flush();
-    // A secret is never read with the echo on: if it cannot be switched off,
-    // the prompt is declined.
+    // A secret is never read with echo on; if it cannot be switched off, the prompt is declined.
     const bool hide = !prompt.echo && m_echo;
     if (hide && !m_echo->setEcho(false))
         return false;
@@ -86,4 +85,4 @@ bool TerminalPrompter::answer(const QString &name, const QString &instruction, c
     return true;
 }
 
-} // namespace NetVfs::Cli
+}

@@ -1,12 +1,7 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! The descriptor calls of transfers (XB-11): what a descriptor is
-//! (`fstat`, `F_GETFL`), positioned reads and writes of regular files
-//! (`pread`, `pwrite`), sequential ones of FIFOs (`read`, `write`) and
-//! waiting for a FIFO (`poll`). The checks themselves and the device over a
-//! checked descriptor are in `crate::jobs::fd` and `crate::jobs::fdio`.
+//! Descriptor calls of transfers: what a descriptor is (`fstat`, `F_GETFL`), positioned reads and writes of regular files (`pread`, `pwrite`), sequential ones of FIFOs (`read`, `write`), waiting for a FIFO (`poll`). The checks and the device over a checked descriptor are in `crate::jobs::fd` and `crate::jobs::fdio`.
 //!
-//! An interrupted call (`EINTR`) is repeated; `poll` reports it as "not
-//! ready yet", so that its caller looks at its cancel flag again.
+//! `EINTR` is repeated; `poll` reports it as "not ready yet" so the caller looks at its cancel flag again.
 
 use super::check;
 use std::io;
@@ -32,8 +27,7 @@ pub struct FileStat {
     pub size: i64,
 }
 
-/// `fstat(fd)`. Any number may be asked about: `fstat` only reads the
-/// descriptor table (`EBADF` for one that is not open).
+/// `fstat(fd)`; `fstat` only reads the descriptor table.
 ///
 /// # Errors
 /// The OS error (`EBADF`, …).
@@ -50,22 +44,19 @@ pub fn stat(fd: RawFd) -> io::Result<FileStat> {
     Ok(FileStat { kind, size: st.st_size })
 }
 
-/// `fcntl(fd, F_GETFL)`: the descriptor's status flags (`O_ACCMODE`,
-/// `O_APPEND`, `O_PATH`, …). Any number may be asked about.
+/// `fcntl(fd, F_GETFL)`: the descriptor's status flags.
 ///
 /// # Errors
 /// The OS error (`EBADF`, …).
 pub fn status_flags(fd: RawFd) -> io::Result<libc::c_int> {
-    // SAFETY: F_GETFL takes no argument and only reads the descriptor table.
+    // SAFETY: F_GETFL takes no argument, only reads the descriptor table.
     check(unsafe { libc::fcntl(fd, libc::F_GETFL) })
 }
 
-/// The count of a `read`-like call, or its OS error.
 fn count(n: libc::ssize_t) -> io::Result<usize> {
     usize::try_from(n).map_err(|_negative| io::Error::last_os_error())
 }
 
-/// Repeats `call` while it fails with `EINTR`.
 fn retry(mut call: impl FnMut() -> libc::ssize_t) -> io::Result<usize> {
     loop {
         match count(call()) {
@@ -75,29 +66,25 @@ fn retry(mut call: impl FnMut() -> libc::ssize_t) -> io::Result<usize> {
     }
 }
 
-/// `pread`: reads into `buf` at `offset` of the file; the descriptor's own
-/// offset is neither used nor moved.
+/// `pread` into `buf` at `offset`; the descriptor's own offset is not used or moved.
 ///
 /// # Errors
 /// The OS error; `InvalidInput` for an offset `off_t` cannot hold.
 pub fn pread(fd: BorrowedFd<'_>, buf: &mut [u8], offset: i64) -> io::Result<usize> {
     let offset =
         libc::off_t::try_from(offset).map_err(|_too_big| io::Error::from(io::ErrorKind::InvalidInput))?;
-    // SAFETY: `buf` is writable for `buf.len()` bytes during the call; `fd`
-    // is a live descriptor (borrowed).
+    // SAFETY: `buf` writable for `buf.len()` bytes during the call; `fd` a live borrowed descriptor.
     retry(|| unsafe { libc::pread(fd.as_raw_fd(), buf.as_mut_ptr().cast(), buf.len(), offset) })
 }
 
-/// `pwrite`: writes `data` at `offset` of the file; the descriptor's own
-/// offset is neither used nor moved. May write fewer bytes.
+/// `pwrite` `data` at `offset`; the descriptor's own offset is not used or moved. May write fewer bytes.
 ///
 /// # Errors
 /// The OS error; `InvalidInput` for an offset `off_t` cannot hold.
 pub fn pwrite(fd: BorrowedFd<'_>, data: &[u8], offset: i64) -> io::Result<usize> {
     let offset =
         libc::off_t::try_from(offset).map_err(|_too_big| io::Error::from(io::ErrorKind::InvalidInput))?;
-    // SAFETY: `data` is readable for `data.len()` bytes during the call;
-    // `fd` is a live descriptor (borrowed).
+    // SAFETY: `data` readable for `data.len()` bytes during the call; `fd` a live borrowed descriptor.
     retry(|| unsafe { libc::pwrite(fd.as_raw_fd(), data.as_ptr().cast(), data.len(), offset) })
 }
 
@@ -106,8 +93,7 @@ pub fn pwrite(fd: BorrowedFd<'_>, data: &[u8], offset: i64) -> io::Result<usize>
 /// # Errors
 /// The OS error.
 pub fn read(fd: BorrowedFd<'_>, buf: &mut [u8]) -> io::Result<usize> {
-    // SAFETY: `buf` is writable for `buf.len()` bytes during the call; `fd`
-    // is a live descriptor (borrowed).
+    // SAFETY: `buf` writable for `buf.len()` bytes during the call; `fd` a live borrowed descriptor.
     retry(|| unsafe { libc::read(fd.as_raw_fd(), buf.as_mut_ptr().cast(), buf.len()) })
 }
 
@@ -116,8 +102,7 @@ pub fn read(fd: BorrowedFd<'_>, buf: &mut [u8]) -> io::Result<usize> {
 /// # Errors
 /// The OS error (`EPIPE` once the reader is gone).
 pub fn write(fd: BorrowedFd<'_>, data: &[u8]) -> io::Result<usize> {
-    // SAFETY: `data` is readable for `data.len()` bytes during the call;
-    // `fd` is a live descriptor (borrowed).
+    // SAFETY: `data` readable for `data.len()` bytes during the call; `fd` a live borrowed descriptor.
     retry(|| unsafe { libc::write(fd.as_raw_fd(), data.as_ptr().cast(), data.len()) })
 }
 
@@ -130,9 +115,7 @@ pub enum Ready {
     Write,
 }
 
-/// `poll` on one descriptor for at most `timeout_ms`: true when it is ready
-/// (also for an error or hang-up, which the next read or write reports),
-/// false when the time passed or the call was interrupted.
+/// `poll` one descriptor for at most `timeout_ms`: true when ready (also for error or hang-up, which the next read or write reports), false on timeout or interruption.
 ///
 /// # Errors
 /// The OS error other than `EINTR`.
@@ -142,7 +125,7 @@ pub fn poll(fd: BorrowedFd<'_>, ready: Ready, timeout_ms: i32) -> io::Result<boo
         Ready::Write => libc::POLLOUT,
     };
     let mut p = libc::pollfd { fd: fd.as_raw_fd(), events, revents: 0 };
-    // SAFETY: one live `pollfd` for the call; `fd` is a live descriptor.
+    // SAFETY: one live `pollfd` for the call; `fd` a live descriptor.
     match check(unsafe { libc::poll(&raw mut p, 1, timeout_ms) }) {
         Ok(n) => Ok(n > 0),
         Err(e) if e.kind() == io::ErrorKind::Interrupted => Ok(false),
@@ -206,7 +189,6 @@ mod tests {
         assert_eq!(all, b"0123456789\0\0AB");
         assert_eq!(pread(file.as_fd(), &mut buf, -1).unwrap_err().raw_os_error(), Some(libc::EINVAL));
         assert_eq!(pwrite(file.as_fd(), b"x", -1).unwrap_err().raw_os_error(), Some(libc::EINVAL));
-        // A read-only descriptor cannot be written, nor a write-only read.
         let ro = File::open(&path).unwrap();
         assert_eq!(pwrite(ro.as_fd(), b"x", 0).unwrap_err().raw_os_error(), Some(libc::EBADF));
         let wo = OpenOptions::new().write(true).open(&path).unwrap();
@@ -216,7 +198,6 @@ mod tests {
     #[test]
     fn fifo_io_and_poll() {
         let (r, w) = pipe();
-        // Nothing to read: poll waits its time and says so.
         let start = Instant::now();
         assert!(!poll(r.as_fd(), Ready::Read, 50).unwrap());
         assert!(start.elapsed() >= Duration::from_millis(40));
@@ -227,7 +208,6 @@ mod tests {
         assert_eq!(read(r.as_fd(), &mut buf).unwrap(), 3);
         assert_eq!(&buf[..3], b"abc");
         drop(w);
-        // The writer is gone: ready, and the read says the end.
         assert!(poll(r.as_fd(), Ready::Read, 1000).unwrap());
         assert_eq!(read(r.as_fd(), &mut buf).unwrap(), 0);
         let (r2, w2) = pipe();

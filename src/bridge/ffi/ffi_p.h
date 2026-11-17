@@ -2,8 +2,7 @@
 #ifndef NETVFS_BRIDGE_FFI_P_H
 #define NETVFS_BRIDGE_FFI_P_H
 
-// Internals of libnetvfs-bridge-ffi.so (SPEC-v2 §8a; design: phase2-design.md
-// §1). Nothing here is exported: the library's only symbol is nvb_ffi_get.
+// Internals of libnetvfs-bridge-ffi.so. Nothing here is exported; the only symbol is nvb_ffi_get.
 #include "netvfs_bridge_ffi.h"
 
 #include "backend.h"
@@ -20,15 +19,13 @@
 
 Q_DECLARE_LOGGING_CATEGORY(lcNetVfsFfi)
 
-// One read handle (XC-13); owned by its conn (O4).
 struct nvb_handle {
     nvb_conn *conn = nullptr;
     std::unique_ptr<NetVfs::ReadHandle> handle;
 };
 
-// One backend connection (O4). Used from its owner thread only, except for
-// `canceled` and Backend::cancel(), which conn_cancel reaches from any
-// thread (T4, C-9).
+// One backend connection. Used from its owner thread only, except `canceled` and Backend::cancel(),
+// which conn_cancel reaches from any thread.
 struct nvb_conn {
     std::unique_ptr<NetVfs::Backend> backend;
     std::atomic<bool> canceled { false };
@@ -37,12 +34,11 @@ struct nvb_conn {
     nvb_conn() = default;
     nvb_conn(const nvb_conn &) = delete;
     nvb_conn &operator=(const nvb_conn &) = delete;
-    // Handles go before their backend (backend.h); then disconnect().
+    // Handles go before their backend; then disconnect().
     ~nvb_conn();
 };
 
-// The answers of one keyboard-interactive prompt (XC-15). Wiped when replaced
-// and on destruction (SEC-5, XSEC-6).
+// Answers of one keyboard-interactive prompt. Wiped when replaced and on destruction.
 struct nvb_reply {
     QVector<QByteArray> answers;
 
@@ -55,10 +51,9 @@ struct nvb_reply {
 
 namespace NetVfs::Ffi {
 
-// T7: nothing thrown crosses the ABI. A table function runs its body through
-// one of these; an exception is logged and becomes Internal (or `fallback`).
-// If even the Internal error cannot be allocated, std::terminate() ends the
-// process (the functions are noexcept).
+// Nothing thrown crosses the ABI. A table function runs its body through one of these; an exception
+// is logged and becomes Internal (or `fallback`). If even the Internal error cannot be allocated,
+// std::terminate() (the functions are noexcept).
 Result internalResult(const std::exception_ptr &thrown);
 
 template <typename Body>
@@ -92,8 +87,8 @@ void guardedVoid(const Body &body) noexcept
     }
 }
 
-// The C side of a transfer or tree operation's progress (nvb_progress may be
-// null, and so may each of its functions).
+// C side of a transfer or tree operation's progress (nvb_progress and each of its functions may be
+// null).
 class ProgressAdapter final : public Progress, public Ops::TreeProgress
 {
 public:
@@ -101,24 +96,19 @@ public:
 
     void update(qint64 done, qint64 total) override;
     bool canceled() const override;
-    // Design §1.2: update(files + dirs, -1), then go on unless canceled.
     bool removed(const QString &path, bool isDir, qint64 files, qint64 dirs) override;
 
 private:
     const nvb_progress *m_progress;
 };
 
-// The backend of a conn; throws std::invalid_argument for a null conn.
 Backend *backendOf(const nvb_conn *conn);
 
-// Runs `fn` on the Qt thread (the MainQueue of init()); false when there is
-// no application or it is quitting: `fn` never runs then.
+// Runs `fn` on the Qt thread (MainQueue of init()); false when there is no application or it is
+// quitting: `fn` never runs then.
 bool postToQt(std::function<void()> fn);
-// True on the thread that called init().
 bool onQtThread();
 
-// Table parts (ffi.cpp assembles the table).
-// conn.cpp
 nvb_error *connNew(nvb_bytes provider, nvb_conn **out) noexcept;
 void connFree(nvb_conn *conn) noexcept;
 void connCancel(nvb_conn *conn) noexcept;
@@ -142,27 +132,22 @@ nvb_error *connOpenRead(nvb_conn *conn, nvb_bytes path, nvb_handle **out, int64_
 nvb_error *handleRead(nvb_handle *h, int64_t offset, uint8_t *buf, size_t cap, size_t *len) noexcept;
 void handleReadAhead(nvb_handle *h, int64_t offset, int64_t bytes) noexcept;
 nvb_error *handleClose(nvb_handle *h) noexcept;
-// establish.cpp
 nvb_error *connEstablish(nvb_conn *conn, const nvb_params *params, nvb_bytes pin, const nvb_secret *secret,
                          const nvb_establish_hooks *hooks, uint32_t *phase) noexcept;
 void replySet(nvb_reply *reply, const nvb_bytes *answers, size_t count) noexcept;
-// io.cpp
 nvb_error *connUpload(nvb_conn *conn, nvb_bytes path, const nvb_upload_opts *opts, const nvb_io *io,
                       const nvb_progress *progress) noexcept;
 nvb_error *connDownload(nvb_conn *conn, nvb_bytes path, int64_t offset, int64_t length, const nvb_io *io,
                         const nvb_progress *progress) noexcept;
-// ops.cpp
 nvb_error *removeTree(nvb_conn *conn, nvb_bytes path, const nvb_progress *progress, int64_t *files,
                       int64_t *dirs) noexcept;
 nvb_error *walk(nvb_conn *conn, nvb_bytes root, const nvb_walk_opts *opts, nvb_walk_visit_fn visit,
                 void *ctx) noexcept;
 nvb_error *copyAcross(nvb_conn *source, nvb_bytes sourcePath, nvb_conn *destination, nvb_bytes destinationPath,
                       int32_t recursive, int32_t replace, const nvb_progress *progress) noexcept;
-// discovery.cpp
 nvb_discovery *discoveryNew(const nvb_discovery_hooks *hooks) noexcept;
 int32_t discoverySetRunning(nvb_discovery *d, int32_t on) noexcept;
 void discoveryFree(nvb_discovery *d) noexcept;
 
-} // namespace NetVfs::Ffi
-
+}
 #endif

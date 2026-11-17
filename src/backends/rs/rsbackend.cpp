@@ -22,7 +22,7 @@ Result createBackend(const QString &provider, Backend **out)
     nvr_conn *conn = nullptr;
     r = resultOf(t, t->conn_new(view(name), &conn));
     if (r.ok())
-        *out = std::make_unique<RsBackend>(t, conn).release();   // the caller owns it
+        *out = std::make_unique<RsBackend>(t, conn).release();
     return r;
 }
 
@@ -51,8 +51,6 @@ Result RsBackend::onPaths(const QString &first, const QString &second, const Cal
         return r;
     return resultOf(m_t, call(view(a), view(b)));
 }
-
-// ---- connection
 
 Result RsBackend::connect(const ConnectionParams &params, ServerIdentity *seen)
 {
@@ -83,7 +81,6 @@ Result RsBackend::authenticate(const Credentials &credentials, AuthPrompter *pro
         const std::scoped_lock lock(m_prompterMutex);
         m_prompter = nullptr;
     }
-    // XC-5: from now on the capabilities stay as they are.
     m_authenticated = r.ok() && fetchCapabilities(&m_capabilities).ok();
     return r;
 }
@@ -128,8 +125,6 @@ void RsBackend::disconnect()
 {
     m_t->disconnect(m_conn);
 }
-
-// ---- metadata and namespace
 
 Result RsBackend::statWith(const QString &path, bool follow, Entry *out)
 {
@@ -203,7 +198,7 @@ Result RsBackend::readLink(const QString &path, QString *target)
     return r;
 }
 
-// XC-12: the target goes verbatim, as the bytes of its name.
+// Target goes verbatim, as the bytes of its name.
 Result RsBackend::makeSymlink(const QString &target, const QString &linkPath)
 {
     return onPaths(target, linkPath,
@@ -245,8 +240,6 @@ Result RsBackend::spaceInfo(const QString &dir, SpaceInfo *out)
     return r;
 }
 
-// ---- handles and transfers
-
 Result RsBackend::openRead(const QString &path, ReadHandle **out)
 {
     nvr_read *raw = nullptr;
@@ -254,7 +247,7 @@ Result RsBackend::openRead(const QString &path, ReadHandle **out)
     const Result r = onPath(path, [this, &raw, &size](nvb_bytes p) { return m_t->open_read(m_conn, p, &raw, &size); });
     auto handle = raw ? std::make_unique<RsReadHandle>(m_t, raw, size) : nullptr;
     if (out)
-        *out = handle.release();   // the caller owns it
+        *out = handle.release();
     return r;
 }
 
@@ -265,7 +258,7 @@ Result RsBackend::openWrite(const QString &path, const WriteOptions &options, Wr
     const Result r = onPath(path, [this, &o, &raw](nvb_bytes p) { return m_t->open_write(m_conn, p, &o, &raw); });
     auto handle = raw ? std::make_unique<RsWriteHandle>(m_t, raw) : nullptr;
     if (out)
-        *out = handle.release();   // the caller owns it
+        *out = handle.release();
     return r;
 }
 
@@ -294,4 +287,4 @@ Result RsBackend::download(const QString &path, QIODevice *sink, const DownloadO
     }));
 }
 
-} // namespace NetVfs::Rs
+}

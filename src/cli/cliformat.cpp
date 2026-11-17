@@ -58,8 +58,8 @@ QString typeName(EntryType type)
     return QStringLiteral("unknown");
 }
 
-// rwx triplet for `shift` (6 owner, 3 group, 0 other); `special` is the
-// setuid/setgid/sticky bit that replaces the x column ('s' or 't').
+// rwx triplet for `shift` (6 owner, 3 group, 0 other); `special` is the setuid/setgid/sticky bit
+// that replaces the x column ('s' or 't').
 QString triplet(qint32 mode, int shift, bool special, QChar specialChar)
 {
     const qint32 bits = (mode >> shift) & 07;
@@ -123,8 +123,7 @@ QString sanitizeField(const QString &text)
     return sanitizeForTerminal(clean);
 }
 
-} // namespace
-
+}
 QString sanitizeForTerminal(const QString &text)
 {
     QString clean = text;
@@ -290,4 +289,4 @@ QString serviceLine(const ServiceView &view)
         + sanitizeField(addresses.join(QLatin1Char(',')));
 }
 
-} // namespace NetVfs::Cli
+}

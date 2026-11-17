@@ -11,8 +11,8 @@ publish.workspace = true
 workspace = true
 
 [features]
-# In-process fake bridge and the golden-sequence replayer (SPEC-v2 XT-7).
-# Test-only: never enabled by a shipped binary (design §6.11).
+# In-process fake bridge and the golden-sequence replayer.
+# Test-only: never enabled by a shipped binary.
 fake = ["dep:sha2", "dep:serde_json"]
 
 [dependencies]

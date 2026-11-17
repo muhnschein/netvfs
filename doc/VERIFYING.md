@@ -1,11 +1,11 @@
 # Verifying the RPMs
 
-Same commit, same RPMs, byte for byte (SPEC P-8). Check them:
+Same commit, same RPMs, byte for byte. Check them:
 
 ```
 $ git clone https://github.com/muhnschein/netvfs.git
 $ cd netvfs
-$ tools/verify-rpm.sh --ref <commit> netvfs-0.6.0-1.aarch64.rpm netvfs-bridge-0.6.0-1.aarch64.rpm
+$ tools/verify-rpm.sh --ref <commit> netvfs-<version>-1.aarch64.rpm netvfs-bridge-<version>-1.aarch64.rpm
 ```
 
 `<commit>`: full hash, branch or tag the RPMs were built from. CI artifact
@@ -24,7 +24,7 @@ clone under `~/.cache/netvfs-verify`, never in your tree: ~5 GB, checks for
 | Result | Exit | Meaning |
 |---|---|---|
 | `VERIFIED` | 0 | Same file as the rebuild. |
-| `SAME FILES` | 1 | Every file, mode, owner inside matches; packaging (build time, file dates, host) differs. Expected for RPMs built before P-8. |
+| `SAME FILES` | 1 | Every file, mode, owner inside matches; packaging (build time, file dates, host) differs. Expected for RPMs built before reproducible builds. |
 | `DIFFERENT` | 2 | Files differ. Please open an issue with the output. |
 | | 3 | Couldn't check (no Docker, no such commit, build failed). |
 

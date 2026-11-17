@@ -1,6 +1,6 @@
 [package]
 name = "netvfs-bridge"
-description = "netvfs-bridge: org.netvfs.Bridge1 for sandboxed consumers (SPEC-v2 8a), over the C++ backends"
+description = "netvfs-bridge: org.netvfs.Bridge1 for sandboxed consumers, over the C++ backends"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -11,10 +11,9 @@ publish.workspace = true
 workspace = true
 
 [features]
-# Test support: the fake control table of tests/bridge/ffifake, fixtures,
-# and a private dbus-daemon for the session-bus tests (`testbus`).
+# Fake control table, fixtures, private dbus-daemon for session-bus tests.
 testing = []
-# The test-only fake accounts helper `netvfs-accounts-fake` (design §4.1).
+# Fake accounts helper `netvfs-accounts-fake`.
 test-bins = []
 
 [dependencies]
@@ -22,24 +21,16 @@ netvfs-vfs = { path = "../netvfs-vfs" }
 netvfs-bridge-proto = { path = "../netvfs-bridge-proto" }
 libc = "0.2"
 zeroize = "1"
-# The socket front (design §3.2, §8): p2p server with fd passing; `bus-impl`
-# for `Builder::build_message_stream` (no message lost before the stream).
-# Also the session-bus client (notifications, settings handoff,
-# AccountChanged).
+# p2p server with fd passing; `bus-impl` for `Builder::build_message_stream`. Also the session-bus client.
 zbus = { version = "5", default-features = false, features = ["tokio", "p2p", "bus-impl"] }
 tokio = { version = "1", features = ["rt", "net", "sync", "time", "signal", "macros"] }
-# Already in the tree through zbus; named for StreamExt.
 futures-lite = { version = "2", default-features = false, features = ["std"] }
 
 [dev-dependencies]
-# The contract's replay machinery (test-only, design §6.11).
 netvfs-bridge-proto = { path = "../netvfs-bridge-proto", features = ["fake"] }
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "net", "sync", "time", "macros", "io-util", "test-util"] }
 
-# The C ABI against the real libnetvfs-bridge-ffi.so and the fake backend
-# (make check-rust-ffi). Its own main(): `init` must run on the main thread,
-# which then serves the Qt event loop. Without the libraries (the
-# NETVFS_BRIDGE_FFI* variables unset) every test says it is skipped.
+# C ABI against the real libnetvfs-bridge-ffi.so and fake backend. Own main(): `init` runs on the main thread. Skipped without the NETVFS_BRIDGE_FFI* variables.
 [[test]]
 name = "ffi"
 path = "tests/ffi.rs"
@@ -52,15 +43,14 @@ path = "tests/backend.rs"
 harness = false
 required-features = ["testing"]
 
-# The bridge end to end, in-process (the core with the socket front), with
-# the same layout as `ffi` and `backend`.
+# Bridge end to end, in-process.
 [[test]]
 name = "server"
 path = "tests/server.rs"
 harness = false
 required-features = ["testing"]
 
-# The bridge (SPEC-v2 XB-2): `netvfs-bridge [--listen ADDRESS] <consumer-id>`.
+# `netvfs-bridge [--listen ADDRESS] <consumer-id>`
 [[bin]]
 name = "netvfs-bridge"
 path = "src/main.rs"
@@ -71,14 +61,10 @@ path = "src/bin/accounts_fake.rs"
 required-features = ["test-bins"]
 test = false
 
-# The netvfs-bridge binary: command line, exit codes, runs with the C ABI
-# (with the fake accounts helper).
 [[test]]
 name = "process"
 required-features = ["testing", "test-bins"]
 
-# The shared contract (tests/bridge/contract) against the binary: the
-# introspection it serves and the golden sequences.
 [[test]]
 name = "contract"
 required-features = ["testing", "test-bins"]

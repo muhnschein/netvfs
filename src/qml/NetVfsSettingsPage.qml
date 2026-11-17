@@ -5,29 +5,21 @@ import Sailfish.Accounts 1.0
 import com.jolla.settings.accounts 1.0
 import org.netvfs.accounts 1.0
 
-// Account settings page (SPEC 7.4). A plain page with our own switches and
-// fields (U-2: not StandardAccountSettingsDisplay). Changes are saved when
-// the page is left (U-6), holding the agent's delayDeletion meanwhile (U-5).
-//
-// One switch per service the provider offers (SPEC-v2 XA-1, amends 7.4 "only
-// one service"): backups (<p>-backup, where the provider offers it and the
-// settings allow it, XA-4) and browsing files (<p>-files, when its service
-// file is installed). The account is enabled
-// while any of its services is.
-//
-// "Test connection" runs NetVfsProbe.identify() on the stored settings and
-// then NetVfsProbe.verifyAccount() for backups when they are on, else for
-// files (which writes nothing): the stored secret is read from signond by
-// the C++ core and never reaches QML. A changed server identity is
-// reported, never accepted here (S-9); the update flow resolves it.
-//
-// The pull-down menu also opens "Apps using network locations"
-// (NetVfsConsentPage, SPEC-v2 XB-6).
+// Account settings page: plain page with own switches and fields (not
+// StandardAccountSettingsDisplay). Changes saved when the page is left, holding the agent's
+// delayDeletion meanwhile.
+// One switch per service the provider offers: backups (<p>-backup, where offered and allowed) and
+// browsing files (<p>-files, when its service file is installed). Account is enabled while any
+// service is.
+// "Test connection" runs NetVfsProbe.identify() on the stored settings, then verifyAccount() for
+// backups when on, else for files (writes nothing). Stored secret is read from signond by the C++
+// core, never reaches QML. A changed server identity is reported, never accepted here; the update
+// flow resolves it.
 Page {
     id: page
 
     // The AccountSettingsAgent (accountId, accountsHeaderText, delayDeletion,
-    // accountDeletionRequested(); SPEC 7.1)
+    // accountDeletionRequested())
     property QtObject agent
     property string provider
 
@@ -49,7 +41,7 @@ Page {
 
     readonly property string _backupService: NetVfsHelpers.backupServiceName(provider)
     readonly property string _filesService: NetVfsHelpers.filesServiceName(provider)
-    // SPEC-v2 XP-1: the backup services come with netvfs-backup.
+    // Backup services come with netvfs-backup.
     readonly property bool _offersBackup: NetVfsProviders.offersService(provider, "backup")
                                           && NetVfsHelpers.isServiceInstalled(_backupService)
     readonly property bool _offersFiles: NetVfsProviders.offersService(provider, "files")
@@ -235,7 +227,6 @@ Page {
         _testOffersUpdate = offerUpdate
     }
 
-    // U-6
     onPageContainerChanged: {
         if (pageContainer === null) {
             probe.cancel()
@@ -305,7 +296,6 @@ Page {
             }
 
             Column {
-                // Attention banner (SPEC 6.4, 7.4)
                 visible: page._attention !== ""
                 width: parent.width
                 spacing: Theme.paddingMedium
@@ -400,7 +390,7 @@ Page {
             }
 
             Repeater {
-                // Fields of the provider descriptor (SPEC-v2 XA-5), read-only.
+                // Fields of the provider descriptor, read-only.
                 model: page._details
 
                 DetailItem {

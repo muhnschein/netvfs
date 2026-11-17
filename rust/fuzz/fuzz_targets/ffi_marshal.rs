@@ -1,11 +1,5 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! netvfs-bridge's FFI marshalling without C++ (design §4.4): arbitrary
-//! connection parameters, entries and identities built into their C form
-//! (`ParamsBuf`, `EntryBuf`, `IdentityBuf`) and read back through the
-//! readers C++'s blocks and callback arguments go through. The read-back
-//! equals the input (lengths, `nvb_kv` and `nvb_bytes` arrays), also after
-//! the input is gone (the C form holds copies, never borrows), and the
-//! strings of an entry come back as D-Bus strings (no NUL).
+//! FFI marshalling without C++: params, entries, identities built into C form and read back equal, also after the input is gone; entry strings come back without NUL.
 #![no_main]
 
 use libfuzzer_sys::arbitrary::{Result, Unstructured};
@@ -81,7 +75,6 @@ fn check(data: &[u8]) -> Result<()> {
     let mut p = params(&mut u)?;
     let expected = p.clone();
     let buf = ParamsBuf::new(&p);
-    // Copies, not borrows: the source may change or go.
     p.host.push('x');
     p.options.clear();
     drop(p);
@@ -108,6 +101,5 @@ fn check(data: &[u8]) -> Result<()> {
 }
 
 fuzz_target!(|data: &[u8]| {
-    // Running out of input is not a finding.
     let _ = check(data);
 });

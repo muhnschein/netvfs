@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! Transfers and handles (SPEC-sftp 7, S-21; SPEC-v2 XC-13, XC-14, XS-7):
-//! READ and WRITE pipelined in a window of [`WINDOW`] requests; a read
-//! handle that reads ahead while access is sequential or a hint asks for
-//! it, at most [`MAX_READ_AHEAD`] bytes in flight; a write handle whose
+//! Transfers and handles: READ and WRITE pipelined in a window of [`WINDOW`] requests; a read handle reads ahead
+//! while access is sequential or a hint asks for it, at most [`MAX_READ_AHEAD`] bytes in flight; a write handle's
 //! errors show at a later write or at commit.
 
 use crate::client::{Client, Field, Pending, ok};
@@ -16,7 +14,7 @@ use netvfs_vfs::{
 };
 use std::collections::VecDeque;
 
-/// Bytes a read handle has in flight at most (XS-7).
+/// Bytes a read handle has in flight at most.
 pub const MAX_READ_AHEAD: u64 = 4 * 1024 * 1024;
 
 /// `Canceled` when the token or the progress says so.
@@ -46,8 +44,7 @@ fn len_u64(n: usize) -> u64 {
     u64::try_from(n).unwrap_or(u64::MAX)
 }
 
-/// Opens `remote` for writing as `options` say (XC-13, XC-23); `Resume`
-/// checks that the file has `resume_offset` bytes.
+/// Opens `remote` for writing as `options` say; `Resume` checks that the file has `resume_offset` bytes.
 ///
 /// # Errors
 /// `IsADirectory`, `AlreadyExists` (`CreateNew`), `ProtocolError` for a
@@ -87,7 +84,7 @@ pub async fn open_for_write(
     if options.disposition != Disposition::Resume {
         return Ok(handle);
     }
-    // XC-13: the remote size must be the offset the caller continues at.
+    // The remote size must be the offset the caller continues at.
     let checked = match client.fstat(&handle, cancel).await {
         Ok(attrs) => {
             let size = attrs.size.unwrap_or(0);
@@ -151,8 +148,7 @@ fn read_fully(source: &mut dyn Source, buf: &mut [u8]) -> Result<usize, Status> 
     Ok(done)
 }
 
-/// An upload (XC-14): pipelined WRITEs, then fsync when offered (C-12),
-/// CLOSE and the modification time (SetModifiedOnUpload).
+/// An upload: pipelined WRITEs, then fsync when offered, CLOSE and the modification time.
 #[derive(Debug)]
 pub struct Upload<'a> {
     /// The client.
@@ -247,7 +243,7 @@ impl Upload<'_> {
     }
 }
 
-/// A download (XC-14): pipelined READs into the sink.
+/// A download: pipelined READs into the sink.
 #[derive(Debug)]
 pub struct Download<'a> {
     /// The client.
@@ -368,10 +364,8 @@ struct InFlight {
     pending: Pending,
 }
 
-/// XC-13, XS-7: one open file read at any offset. Reads are served from
-/// requests already on their way when access is sequential or
-/// `read_ahead` asked for them; what a request brought beyond the bytes
-/// asked for is kept for the next read.
+/// One open file read at any offset. Reads are served from requests already on their way when access is
+/// sequential or `read_ahead` asked for them; surplus bytes are kept for the next read.
 #[derive(Debug)]
 pub struct SftpRead {
     client: Client,
@@ -608,7 +602,7 @@ impl ReadHandle for SftpRead {
     }
 }
 
-/// XC-13, XS-7: sequential, pipelined writes with an explicit commit.
+/// Sequential, pipelined writes with an explicit commit.
 #[derive(Debug)]
 pub struct SftpWrite {
     client: Client,
@@ -673,7 +667,7 @@ impl SftpWrite {
         Ok(())
     }
 
-    /// Every WRITE acknowledged, then fsync when offered (C-12).
+    /// Every WRITE acknowledged, then fsync when offered.
     async fn finish(&mut self, cancel: &CancelToken) -> Result<(), Status> {
         self.usable()?;
         while !self.pending.is_empty() {
@@ -728,7 +722,7 @@ impl WriteHandle for SftpWrite {
         if let Err(f) = self.client.close(&self.handle, cancel).await {
             return Err(write_failure(&self.client, &self.ext, &self.remote, &f, 1, cancel).await);
         }
-        // XC-13: the modification time is applied on commit (SetModified).
+        // The modification time is applied on commit.
         if let Some(mtime) = self.mtime_ms {
             set_times(&self.client, &self.remote, Some(mtime), None, None, cancel).await?;
         }

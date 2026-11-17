@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-// The location book (locationbook.cpp): accounts, ad-hoc locations, pools.
-// Restriction lints that only add noise to tests (doc/RUST.md "Lints").
+// Restriction lints that only add noise to tests.
 #![allow(clippy::assertions_on_result_states, clippy::arithmetic_side_effects)]
 
 use super::{
@@ -98,7 +97,6 @@ fn pools_need_consent_a_visible_location_and_a_backend() {
     assert!(!book.has_pool("account:1"));
     assert_eq!(book.ensure_pool("account:1", true, available).unwrap().id, "account:1");
     assert!(book.has_pool("account:1"));
-    // An existing pool needs no backend check, but still consent.
     assert!(book.ensure_pool("account:1", true, |_| panic!("asked again")).is_ok());
     assert_eq!(
         book.ensure_pool("account:1", false, available).unwrap_err().name,
@@ -124,8 +122,6 @@ fn changed_and_removed_accounts_lose_their_pools() {
     let mut timeouts = account(4, "d");
     timeouts.params.connect_timeout_ms = 5;
     book.set_accounts(vec![renamed, optioned, timeouts, account(5, "e")]);
-    // 1: same connection, kept; 2: removed; 3: other options; 4: only the
-    // timeouts differ, kept; the ad-hoc pool stays.
     assert_eq!(pool_ids(&book), ["account:1", "account:4", &adhoc]);
     assert_eq!(book.find("account:1").unwrap().name, "Renamed");
     assert_eq!(ids(&book), ["account:1", "account:3", "account:4", "account:5", &adhoc]);
@@ -149,20 +145,17 @@ fn changed_and_removed_accounts_lose_their_pools() {
 fn ad_hoc_locations_appear_once_connected() {
     let (_mock, mut book) = book();
     let (first, secret) = ad_hoc(&mut book, "h", b"pw");
-    // `adhoc:<run>-<n>`: 16 hex digits of this run, then the count from 1.
     let run = first.strip_prefix("adhoc:").and_then(|id| id.strip_suffix("-1")).unwrap();
     assert!(
         run.len() == 16 && run.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)),
         "{first}"
     );
-    // Connecting: the pool exists, nobody sees it.
     assert_eq!(pool_ids(&book), [first.as_str()]);
     assert_eq!(ids(&book).len(), 0);
     assert!(book.find(&first).is_none());
     assert!(!book.has_pool(&first));
     assert_eq!(book.ensure_pool(&first, true, available).unwrap_err().name, ErrorName::NotFound);
     assert!(format!("{book:?}").contains("connecting: 1"));
-    // Taken ids and accounts cannot start.
     let again = LocationSpec::ad_hoc(&first, "h", params("h"), Vec::new(), None);
     assert!(!book.start_ad_hoc(again));
     assert!(!book.start_ad_hoc(account(9, "h")));
@@ -194,9 +187,7 @@ fn ad_hoc_locations_appear_once_connected() {
 
 #[test]
 fn a_restarted_bridge_never_gives_an_earlier_ad_hoc_id_again() {
-    // The bridge forgets its ad-hoc locations when it exits (XB-2), but a
-    // consumer may still hold their ids (URIs on its clipboard): a new run
-    // must not hand them out again, or they would name another server.
+    // A new run must not reuse ids of earlier runs: a consumer may still hold them (URIs on its clipboard) and they would name another server.
     let (_mock, mut earlier) = book();
     let old: Vec<String> = (0..3).map(|_| earlier.reserve_ad_hoc_id()).collect();
     drop(earlier);
@@ -214,7 +205,6 @@ fn a_location_revoked_while_connecting_is_not_added() {
     book.revoke();
     assert!(secret.secret().is_empty());
     assert!(!book.add_ad_hoc(&id));
-    // Gone from the pools but still connecting: not added either.
     let (id, _) = ad_hoc(&mut book, "h", b"pw");
     assert!(book.pools_mut().remove(&id));
     assert!(!book.add_ad_hoc(&id));
@@ -265,7 +255,6 @@ fn work_runs_on_the_locations_connections() {
     book.submit("account:9", Lane::Interactive, task(), reporting(&tx, Ok(())));
     assert_eq!(recv(&rx), Seen::Pending(ErrorName::NotFound));
 
-    // A read handle opened on a connection, then closed through the book.
     let (wtx, wrx) = mpsc::channel();
     let handle_mock = Arc::clone(&mock);
     book.submit(
@@ -290,7 +279,6 @@ fn work_runs_on_the_locations_connections() {
     book.submit_to("account:1", WorkerId(u64::MAX), task(), reporting(&tx, Ok(())));
     assert_eq!(recv(&rx), Seen::Pending(ErrorName::ConnectionLost));
 
-    // Disconnect stops the connections; an unknown id does nothing.
     book.disconnect("account:9");
     assert_eq!(mock.count("free"), 0);
     book.disconnect("account:1");
@@ -319,7 +307,6 @@ fn kick_cancels_running_work_whose_flag_is_set() {
     flagged.cancel.store(true, std::sync::atomic::Ordering::Release);
     book.kick();
     mock.wait_for("cancel 1", 1);
-    // The item ended canceled: its connection goes.
     mock.wait_for("free 1", 1);
 }
 
@@ -358,10 +345,8 @@ fn states_of_what_list_locations_shows() {
     let of = |list: &[(&str, ConnectionState)]| -> Vec<(String, ConnectionState)> {
         list.iter().map(|(id, state)| ((*id).to_owned(), *state)).collect()
     };
-    // Without a pool, or with one that never connected: disconnected.
     assert!(book.ensure_pool("account:2", true, available).is_ok());
     assert_eq!(states(&book), of(&[("account:1", Disconnected), ("account:2", Disconnected)]));
-    // An ad-hoc location being connected is not shown, nor is its state.
     let (adhoc, _) = ad_hoc(&mut book, "h", b"pw");
     let (tx, rx) = mpsc::channel();
     mock.hold_establish(true);
@@ -373,7 +358,6 @@ fn states_of_what_list_locations_shows() {
     mock.hold_establish(false);
     assert_eq!(recv(&rx), Seen::Conn(1));
     assert!(book.add_ad_hoc(&adhoc));
-    // Shown, with the states of their pools.
     book.submit("account:2", Lane::Interactive, task(), reporting(&tx, Ok(())));
     assert_eq!(recv(&rx), Seen::Conn(2));
     assert_eq!(

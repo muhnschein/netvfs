@@ -14,7 +14,7 @@ constexpr int PercentDivisor = 100;
 constexpr std::array<int, ServiceCache::RefreshStages> RefreshPercent = {{80, 90, 95}};
 constexpr int MaxTextLength = 256;
 constexpr int MaxHostLength = 253;
-constexpr int CacheFlushGraceMs = 1000;          // RFC 6762 section 10.2
+constexpr int CacheFlushGraceMs = 1000;  // RFC 6762 section 10.2
 constexpr int ControlLimit = 0x20;
 constexpr int C1First = 0x7F;
 constexpr int C1Last = 0x9F;
@@ -48,9 +48,8 @@ bool hostByteAllowed(char c)
         || u == '-' || u == '_' || u >= 0x80;
 }
 
-// Host names go into URLs and connection parameters: only letters, digits,
-// '-', '_' and UTF-8 are accepted; anything else (escapes, spaces, '/', '@',
-// ':' ...) rejects the SRV record.
+// Host names go into URLs: only letters, digits, '-', '_', UTF-8; anything else rejects the SRV
+// record.
 bool cleanHost(const QByteArray &target, QString *host)
 {
     bool ok = false;
@@ -71,8 +70,7 @@ bool cleanHost(const QByteArray &target, QString *host)
     return true;
 }
 
-// An address worth connecting to. Link-local IPv6 needs an interface scope
-// that a multicast DNS answer does not carry, so it is unusable here.
+// Link-local IPv6 needs an interface scope that mDNS answers lack: unusable.
 bool usableAddress(const QHostAddress &a)
 {
     if (a.isNull() || a == QHostAddress::AnyIPv4 || a == QHostAddress::AnyIPv6)
@@ -96,7 +94,6 @@ const BrowseType *browseTypeForName(const QByteArray &canonical)
     return nullptr;
 }
 
-// `target` must be "<one label>.<type>.local"; yields that label unescaped.
 bool instanceLabel(const QByteArray &target, const QByteArray &typeName, QByteArray *label)
 {
     const QByteArray canonical = Dns::canonicalName(target);
@@ -124,8 +121,7 @@ void consider(qint64 *best, qint64 t)
         *best = t;
 }
 
-} // namespace
-
+}
 const std::array<BrowseType, 3> &browseTypeTable()
 {
     return Table;
@@ -167,8 +163,6 @@ void ServiceCache::Collector::add(const QByteArray &name, quint16 type)
     out.append(q);
 }
 
-// ---------------------------------------------------------------- ingest
-
 void ServiceCache::ingest(const Dns::Message &message, qint64 now, const QDateTime &wall, Events *events)
 {
     if (!message.isResponse() || message.opcode() != 0 || message.rcode() != 0)
@@ -182,7 +176,6 @@ void ServiceCache::ingest(const Dns::Message &message, qint64 now, const QDateTi
         records.append(&r);
     for (const Dns::Record &r : message.additional)
         records.append(&r);
-    // PTR first (creates instances), then what hangs off them.
     const std::array<quint16, 4> order = {{Dns::TypePtr, Dns::TypeSrv, Dns::TypeA, Dns::TypeAaaa}};
     for (const quint16 type : order) {
         for (const Dns::Record *r : records) {
@@ -237,12 +230,12 @@ void ServiceCache::handleSrv(const Dns::Record &rec, Context *c)
         return;
     }
     QString host;
-    if (rec.port == 0 || !cleanHost(rec.target, &host))     // RFC 2782: "." means "not available"
+    if (rec.port == 0 || !cleanHost(rec.target, &host))
         return;
     Instance &inst = it.value();
     const QByteArray target = Dns::canonicalName(rec.target);
     if (!inst.hasSrv || inst.target != target) {
-        if (!m_hosts.contains(target))                     // accept addresses for this host from now on
+        if (!m_hosts.contains(target))
             m_hosts.insert(target, QVector<AddressEntry>());
         inst.attempts = 0;
         inst.gaveUp = false;
@@ -282,9 +275,8 @@ void ServiceCache::handleAddress(const Dns::Record &rec, Context *c)
     markHostDirty(host, c);
 }
 
-// RFC 6762 section 10.2: a cache-flush record replaces what was cached for that
-// name and type, except for records received within the last second (they are
-// part of the same answer).
+// RFC 6762 section 10.2: cache-flush replaces cached records of that name and type, except those
+// from the last second.
 void ServiceCache::flushFamily(const QByteArray &host, quint16 type, Context *c)
 {
     const QPair key(host, type);
@@ -321,8 +313,6 @@ void ServiceCache::removeInstance(const QByteArray &key, Context *c)
     m_instances.erase(it);
     c->dirty.remove(key);
 }
-
-// ------------------------------------------------------------ evaluation
 
 bool ServiceCache::hasAddresses(const QByteArray &host) const
 {
@@ -367,8 +357,7 @@ void ServiceCache::evaluate(Instance *inst, Context *c) const
     } else if (inst->nextResolve < 0 && inst->attempts == 0 && !inst->gaveUp) {
         inst->nextResolve = c->now;
     }
-    // A service that was announced before and lost a record is not announced
-    // again with less than it had.
+    // A lost record never un-announces; service is not re-announced with less.
     const bool ready = inst->hasSrv && (complete || (inst->gaveUp && !inst->everAnnounced));
     Event e;
     e.service = ready ? snapshot(*inst) : inst->last;
@@ -388,13 +377,12 @@ void ServiceCache::evaluate(Instance *inst, Context *c) const
     c->events->append(e);
 }
 
-// Instances whose SRV target is `host` are re-evaluated; their addresses changed.
 void ServiceCache::touchInstancesOf(const QByteArray &host, Context *c)
 {
     for (auto it = m_instances.begin(); it != m_instances.end(); ++it) {
         if (!it.value().hasSrv || it.value().target != host)
             continue;
-        if (c->wall.isValid())          // expiry is not "seen"
+        if (c->wall.isValid())
             it.value().lastSeen = c->wall;
         c->dirty.insert(it.key());
     }
@@ -425,8 +413,6 @@ void ServiceCache::pruneHosts()
             it = m_hosts.erase(it);
     }
 }
-
-// ---------------------------------------------------------------- expiry
 
 void ServiceCache::expireInstance(Instance *inst, Context *c)
 {
@@ -478,8 +464,6 @@ void ServiceCache::expire(qint64 now, Events *events)
     expireAddresses(&c);
     finishContext(&c);
 }
-
-// ------------------------------------------------------- questions, deadlines
 
 void ServiceCache::collectResolve(Instance *inst, qint64 now, Collector *col) const
 {
@@ -587,4 +571,4 @@ void ServiceCache::clear()
     m_hosts.clear();
 }
 
-} // namespace NetVfs
+}

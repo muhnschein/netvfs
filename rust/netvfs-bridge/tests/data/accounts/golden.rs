@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! Writes the answers of netvfs-accounts' own encoder (wire.rs, qvariant.rs,
-//! included by path) that `accounts::qds` must decode. Built by generate.sh
-//! outside the workspace.
+//! Writes the answers of netvfs-accounts' encoder that `accounts::qds` must decode. Built by generate.sh.
 #![allow(dead_code)]
 
 #[path = "../../../../netvfs-accounts/src/qvariant.rs"]

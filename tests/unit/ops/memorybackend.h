@@ -19,15 +19,14 @@ public:
         NetVfs::EntryType type = NetVfs::EntryType::File;
         QByteArray data;                 // file contents unless discarded
         qint64 size = 0;
-        quint64 hash = 0;                // FNV-1a of the contents
-        QString target;                  // symlink
+        quint64 hash = 0;
+        QString target;
         QDateTime modified;
-        qint64 generated = -1;           // >= 0: contents are pattern(offset), nothing stored
+        qint64 generated = -1;
     };
 
     MemoryBackend();
 
-    // ---- building and inspecting
     void addDir(const QString &path);
     void addFile(const QString &path, const QByteArray &data);
     void addGenerated(const QString &path, qint64 size);
@@ -35,26 +34,23 @@ public:
     bool exists(const QString &path) const;
     Node node(const QString &path) const;
     QByteArray fileData(const QString &path) const;
-    QStringList paths() const;           // every key, sorted
+    QStringList paths() const;
     static quint64 patternHash(qint64 size);
     static char patternByte(qint64 offset);
     static quint64 hashOf(const QByteArray &data);
 
-    // ---- knobs
     NetVfs::Capabilities caps;
-    QStringList log;                     // "<op> <path>" per call
-    // Called at the start of every operation; a failure is returned as is.
+    QStringList log;
     std::function<NetVfs::Result(const QString &op, const QString &path)> intercept;
-    bool listSymlinksAsTargets = false;  // hostile: list reports a link to a folder as a folder
+    bool listSymlinksAsTargets = false;
     bool discardData = false;            // uploads keep only size and hash
     qint64 chunkSize = 16 * 1024;
     int chunkDelayUs = 0;                // sleep per uploaded chunk
     qint64 failDownloadAfter = -1;       // ConnectionLost after this many bytes
     qint64 failUploadAfter = -1;         // NoSpace after this many bytes
-    std::atomic<qint64> bytesWritten { 0 };   // handed to the download sink
-    std::atomic<qint64> bytesRead { 0 };      // taken from the upload source
+    std::atomic<qint64> bytesWritten { 0 };
+    std::atomic<qint64> bytesRead { 0 };
 
-    // ---- Backend
     using Backend::authenticate;
     using Backend::list;
     NetVfs::Result connect(const NetVfs::ConnectionParams &params, NetVfs::ServerIdentity *seen) override;

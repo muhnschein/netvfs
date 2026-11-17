@@ -10,13 +10,11 @@
 
 namespace NetVfsUi {
 
-// Reads a private key file chosen by the user; `path` may be a file:// URL.
-// Fails for files that cannot be key files (missing, too large).
+// `path` may be a file:// URL. Fails for files that cannot be key files (missing, too large).
 NetVfs::Result readKeyFile(const QString &path, QByteArray *contents);
 
-// SPEC-sftp 5.1: key generation and import, and installing the public key
-// with a password (S-15..S-17). The private key stays in this object until
-// the account setup takes secret(); it is never written to disk (SEC-3).
+// Key generation and import, and installing the public key with a password. The private key stays
+// in this object until account setup takes secret(); never written to disk.
 class SshKeyTool : public QObject
 {
     Q_OBJECT
@@ -59,15 +57,12 @@ public:
     Q_INVOKABLE void generate();
     // Asks for a passphrase (state NeedsPassphrase) when the file is encrypted.
     Q_INVOKABLE void importFile(const QString &path, const QString &passphrase = QString());
-    // SPEC-sftp 2: "netvfs-key-v1:<base64>" for createSignInCredentials();
-    // empty while no key is held.
+    // "netvfs-key-v1:<base64>" for createSignInCredentials(); empty while no key is held.
     Q_INVOKABLE QString secret() const;
-    // S-16, S-17: signs in once with `password` (not stored, wiped after use)
-    // and appends the public key to ~/.ssh/authorized_keys. `params` must
-    // carry the accepted host key pin (SEC-1).
+    // Signs in once with `password` (not stored, wiped after use) and appends the public key to
+    // ~/.ssh/authorized_keys. `params` must carry the accepted host key pin.
     Q_INVOKABLE void installWithPassword(const QVariantMap &params, const QString &password);
     Q_INVOKABLE void cancel();
-    // Forgets the key (SEC-5).
     Q_INVOKABLE void clear();
 
 Q_SIGNALS:
@@ -90,10 +85,9 @@ private:
     InstallState m_installState = InstallState::InstallIdle;
     QString m_installErrorText;
     QString m_installErrorDetail;
-    BackendJobs m_keyJobs;       // last members: destroyed (and joined) first
+    BackendJobs m_keyJobs;
     BackendJobs m_installJobs;
 };
 
-} // namespace NetVfsUi
-
+}
 #endif

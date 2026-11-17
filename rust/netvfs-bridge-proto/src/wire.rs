@@ -1,12 +1,11 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! Wire types of `org.netvfs.Bridge1` (netvfs SPEC-v2 XB-9). Paths and names
-//! are `ay` (raw protocol bytes, XC-4), never `s`.
+//! Wire types of `org.netvfs.Bridge1`. Paths and names are `ay` (raw protocol bytes), never `s`.
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use zbus::zvariant::{OwnedValue, Type, Value};
 
-/// Entry kinds (`type` and `targetType` of an entry, XB-9).
+/// Entry kinds (`type` and `targetType` of an entry).
 pub mod entry_kind {
     /// Not known.
     pub const UNKNOWN: u8 = 0;
@@ -20,7 +19,7 @@ pub mod entry_kind {
     pub const SPECIAL: u8 = 4;
 }
 
-/// Entry flags (XB-9).
+/// Entry flags.
 pub mod entry_flags {
     /// A hidden file.
     pub const HIDDEN: u16 = 0x1;
@@ -37,7 +36,7 @@ pub mod entry_flags {
 /// `(ayyyxxxxixxssqays)`; -1 or empty means unknown.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, Type)]
 pub struct WireEntry {
-    /// Name (protocol bytes, XC-4).
+    /// Name (protocol bytes).
     pub name: Vec<u8>,
     /// Kind ([`entry_kind`]).
     pub kind: u8,
@@ -76,7 +75,6 @@ impl WireEntry {
         Self {
             name: name.to_vec(),
             kind,
-            // target_kind keeps its default, entry_kind::UNKNOWN.
             size: -1,
             mtime_ms: -1,
             ctime_ms: -1,
@@ -100,9 +98,8 @@ pub struct WireCapabilities {
     pub max_name_bytes: i64,
 }
 
-/// The connection state of a location: info key `state` of
-/// `ListLocations` (SPEC-v2 XB-10, XB-12), with `stateError` (the XC-21
-/// name) when it is [`FAILED`](location_state::FAILED).
+/// Connection state of a location: info key `state` of `ListLocations`, with `stateError` (the
+/// error name) when [`FAILED`](location_state::FAILED).
 pub mod location_state {
     /// The info key of the state.
     pub const KEY: &str = "state";
@@ -122,7 +119,7 @@ pub mod location_state {
 /// `(sssa{sv})`: id, provider, display name, info.
 #[derive(Debug, Serialize, Deserialize, Type)]
 pub struct WireLocation {
-    /// Location id (`account:<n>`, `adhoc:<run>-<n>`; opaque, SPEC-v2 XB-10).
+    /// Location id (`account:<n>`, `adhoc:<run>-<n>`; opaque).
     pub id: String,
     /// Backend provider (`sftp`, `smb`, …).
     pub provider: String,
@@ -145,7 +142,7 @@ pub struct WireNearby {
     pub port: u16,
 }
 
-/// `(ssaya{sv})`: a memory card or USB drive of `ListDrives` (SPEC-v2 XB-20).
+/// `(ssaya{sv})`: a memory card or USB drive of `ListDrives`.
 #[derive(Debug, Serialize, Deserialize, Type)]
 pub struct WireDrive {
     /// Drive id (opaque, `[A-Za-z0-9_]{1,64}`).
@@ -159,7 +156,7 @@ pub struct WireDrive {
     pub info: HashMap<String, OwnedValue>,
 }
 
-/// The info keys of a [`WireDrive`] (SPEC-v2 XB-20).
+/// Info keys of a [`WireDrive`].
 pub mod drive_info {
     /// `s`: [`KIND_SD`] or [`KIND_USB`].
     pub const KIND: &str = "kind";
@@ -173,8 +170,8 @@ pub mod drive_info {
     pub const UUID: &str = "uuid";
     /// `s`: the drive's vendor and model, when known.
     pub const MODEL: &str = "model";
-    /// `b`, `true`: an encrypted (LUKS) device not unlocked. Settings →
-    /// Storage unlocks it; `Mount` answers `Unsupported`.
+    /// `b`, `true`: an encrypted (LUKS) device not unlocked. Settings > Storage unlocks it; `Mount`
+    /// answers `Unsupported`.
     pub const LOCKED: &str = "locked";
     /// A memory card.
     pub const KIND_SD: &str = "sd";
@@ -261,7 +258,7 @@ impl OptsBuilder {
     pub fn build_owned(self) -> HashMap<String, OwnedValue> {
         self.0
             .into_iter()
-            // Plain values hold no file descriptors, the only case that fails.
+            // Plain values hold no file descriptors, the only failure.
             .filter_map(|(k, v)| OwnedValue::try_from(v).ok().map(|o| (k, o)))
             .collect()
     }

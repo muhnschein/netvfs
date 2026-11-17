@@ -1,13 +1,10 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! The data types of `src/bridge/ffi/netvfs_bridge_ffi.h`, written by hand:
-//! one definition for both C ABIs that use them, the bridge's
-//! (`libnetvfs-bridge-ffi.so`, netvfs-bridge's `ffi::raw` adds its table)
-//! and the Rust backends' (`libnetvfs-rs.so`, `src/backends/rs/netvfs_rs.h`,
-//! netvfs-backend's `ffi::raw` adds its table). Field order and types are
-//! the header's; the `layout` tests below pin sizes and offsets on LP64 to
-//! what the C compiler gives. Names are the header's in Rust case
-//! (`nvb_bytes` is [`NvbBytes`]). The comments say what each field carries;
-//! ownership and threads are in the headers.
+//! The data types of `src/bridge/ffi/netvfs_bridge_ffi.h`, written by hand: one definition for both
+//! C ABIs that use them, the bridge's (`libnetvfs-bridge-ffi.so`; netvfs-bridge's `ffi::raw` adds
+//! its table) and the Rust backends' (`libnetvfs-rs.so`, `src/backends/rs/netvfs_rs.h`;
+//! netvfs-backend's `ffi::raw` adds its table). Field order and types are the header's; the
+//! `layout` tests pin sizes and offsets on LP64 to what the C compiler gives. Names are the
+//! header's in Rust case (`nvb_bytes` is [`NvbBytes`]). Ownership and threads: see the headers.
 
 use std::ffi::{c_int, c_void};
 use std::marker::{PhantomData, PhantomPinned};
@@ -74,7 +71,7 @@ impl NvbBytes {
     /// The empty slice (NULL, 0).
     pub const EMPTY: Self = Self { ptr: std::ptr::null(), len: 0 };
 
-    /// Borrows `data` (O1: for the call only).
+    /// Borrows `data` for the call only.
     #[must_use]
     pub const fn of(data: &[u8]) -> Self {
         Self { ptr: data.as_ptr(), len: data.len() }
@@ -101,7 +98,7 @@ opaque! {
     NvbReply,
 }
 
-/// `nvb_error`: a failure (XC-21, XC-24).
+/// `nvb_error`: a failure.
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct NvbError {
@@ -181,7 +178,7 @@ pub struct NvbUrl {
     pub path: NvbBytes,
 }
 
-/// `nvb_entry`: `NetVfs::Entry` (XC-2) in wire form (XB-9).
+/// `nvb_entry`: `NetVfs::Entry` in wire form.
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct NvbEntry {
@@ -261,7 +258,7 @@ pub struct NvbAttributes {
     pub atime_ms: i64,
 }
 
-/// `nvb_identity`: the `ServerIdentity` seen during connect (XC-16).
+/// `nvb_identity`: the `ServerIdentity` seen during connect.
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct NvbIdentity {
@@ -289,7 +286,7 @@ pub struct NvbSecret {
     pub secret: NvbBytes,
     /// `NVB_SECRET_SIGNON` only.
     pub credentials_id: u32,
-    /// `NVB_SECRET_SIGNON` only (XA-7).
+    /// `NVB_SECRET_SIGNON` only.
     pub secret_optional: u8,
 }
 
@@ -334,7 +331,7 @@ pub struct NvbWalkOpts {
     pub max_depth: i32,
     /// `SymlinkPolicy::Follow`.
     pub follow_symlinks: u8,
-    /// A no-op on the wire (design §6.9).
+    /// A no-op on the wire.
     pub post_order: u8,
     /// 0: unreadable sub-folders are skipped.
     pub stop_on_list_error: u8,
@@ -379,7 +376,7 @@ pub struct NvbIo {
 pub struct NvbUploadOpts {
     /// `NVB_DISPOSITION_*`.
     pub disposition: u32,
-    /// -1: backend default (XC-23).
+    /// -1: backend default.
     pub create_mode: i32,
     /// Where `Resume` starts.
     pub resume_offset: i64,

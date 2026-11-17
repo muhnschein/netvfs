@@ -1,8 +1,5 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! netvfs-accounts-fake: a test stand-in for netvfs-accounts (feature
-//! `test-bins`). It answers `list`, `files <id>` and
-//! `attention <id> <state> [pin]` in the helper's format from the table
-//! that `NETVFS_FAKE_ACCOUNTS` names, one tab-separated record per line:
+//! netvfs-accounts-fake: test stand-in for netvfs-accounts (feature `test-bins`). Answers `list`, `files <id>`, `attention <id> <state> [pin]` from the tab-separated table named by `NETVFS_FAKE_ACCOUNTS`:
 //!
 //! ```text
 //! account    <id> <provider> <display name> <host> <port> <user> <files root> <attention>
@@ -10,8 +7,7 @@
 //! attention  <id> <state> <pin>
 //! ```
 //!
-//! `attention` appends its record, so a later `list` shows it. `files`
-//! reports credentials id 0 and an optional secret.
+//! `attention` appends its record. `files` reports credentials id 0 and an optional secret.
 
 use netvfs_bridge::accounts::qds::Writer;
 use netvfs_bridge::accounts::{Attention, ConnectionParams, Value};
@@ -69,7 +65,7 @@ fn parse_account(fields: &[&str]) -> Option<Account> {
     })
 }
 
-/// Applies one record; `None` for a malformed one.
+/// Applies one record; `None` if malformed.
 fn apply(accounts: &mut Vec<Account>, line: &str) -> Option<()> {
     let fields: Vec<&str> = line.split('\t').collect();
     let (&kind, rest) = fields.split_first()?;

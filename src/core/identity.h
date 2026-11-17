@@ -6,22 +6,15 @@
 
 namespace NetVfs {
 
-// SPEC-sftp S-7, amended by SPEC-v2 XC-16: compare the identity seen during
-// connect() with the pin.
-//  - protocol without identity and no pin: success
-//  - no pin: ServerIdentityUnknown (caller asks the user)
-//  - equal: success
-//  - otherwise: ServerIdentityChanged
+// Compare identity seen in connect() with the pin: none and no pin = success; no pin =
+// ServerIdentityUnknown (ask user); equal = success; else ServerIdentityChanged.
 NETVFS_EXPORT Result checkServerIdentity(const ServerIdentity &seen, const QString &pin);
 
-// SEC-1 / C-7: connect, verify the identity against params.options["host_key"],
-// and only then authenticate. On an identity failure the backend is
-// disconnected before anything else is sent.
-// `prompter` is passed to authenticate() (XC-15); null for backups.
+// Connect, verify identity against params.options["host_key"], only then authenticate. Identity
+// failure disconnects before anything else is sent. `prompter` null for backups.
 NETVFS_EXPORT Result establish(Backend *backend, const ConnectionParams &params,
                                const Credentials &credentials, ServerIdentity *seen = nullptr,
                                AuthPrompter *prompter = nullptr);
 
-} // namespace NetVfs
-
+}
 #endif

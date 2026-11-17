@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! Jobs and listings of the fake: the work behind `List`, `Upload`,
-//! `Download`, `CopyAcross`, `RemoveTree` and `Walk`. Local data moves through
-//! the file descriptors the client passed, at explicit offsets for regular
-//! files and sequentially for pipes (netvfs XB-11).
+//! Jobs and listings of the fake: the work behind `List`, `Upload`, `Download`, `CopyAcross`,
+//! `RemoveTree`, `Walk`. Local data moves through the descriptors the client passed, at explicit
+//! offsets for regular files, sequentially for pipes.
 
 use super::args::{CopyOpts, Disposition, TransferOpts, WalkOpts};
 use super::fail::Fail;
@@ -25,7 +24,6 @@ const WALK_BATCH: usize = 64;
 
 type Extra = HashMap<String, Value<'static>>;
 
-/// What a running request needs to talk to its client.
 pub(super) struct Env {
     pub shared: Arc<Shared>,
     pub session: Arc<Session>,
@@ -51,7 +49,6 @@ impl Env {
     async fn progress(&self, job: u32, done: u64, total: Option<u64>) {
         let done = i64::try_from(done).unwrap_or(i64::MAX);
         let total = total.map_or(-1, |t| i64::try_from(t).unwrap_or(i64::MAX));
-        // A closed client misses its progress.
         Iface::job_progress(&self.ctx, job, done, total).await.ok();
     }
 
@@ -63,7 +60,6 @@ impl Env {
         self.session.finish_job(job);
         let extra: HashMap<String, OwnedValue> =
             extra.into_iter().filter_map(|(k, v)| OwnedValue::try_from(v).ok().map(|o| (k, o))).collect();
-        // And its result.
         Iface::job_finished(&self.ctx, job, error, message, extra).await.ok();
     }
 
@@ -86,7 +82,6 @@ fn bytes_extra(done: u64) -> Extra {
     extra
 }
 
-/// A local file the client passed: a regular file or a pipe.
 pub(super) struct Source {
     file: Arc<File>,
     fifo: bool,
@@ -151,14 +146,12 @@ impl Source {
 
 fn io_fail(e: &std::io::Error) -> Fail {
     if e.raw_os_error() == Some(EBADF) {
-        // The descriptor was not opened for what the job needs (XB-11).
+        // Descriptor not opened for what the job needs.
         Fail::net(ErrorName::PermissionDenied, "The descriptor does not allow this access")
     } else {
         Fail::net(ErrorName::Internal, &e.to_string())
     }
 }
-
-// ---- listing -----------------------------------------------------------
 
 pub(super) async fn run_list(
     env: Env,
@@ -176,7 +169,6 @@ pub(super) async fn run_list(
         Err(f) => (f.bare().to_owned(), f.message().to_owned()),
     };
     env.session.finish_job(req);
-    // A closed client misses the end of its listing.
     Iface::list_done(&env.ctx, req, error, message).await.ok();
 }
 
@@ -192,13 +184,10 @@ async fn send_batches(
             return Err(canceled());
         }
         env.pause().await;
-        // As above.
         Iface::list_batch(&env.ctx, req, chunk.to_vec()).await.ok();
     }
     Ok(())
 }
-
-// ---- upload ------------------------------------------------------------
 
 pub(super) async fn run_upload(
     env: Env,
@@ -214,7 +203,6 @@ pub(super) async fn run_upload(
     env.finish(job, result).await;
 }
 
-/// Where the data goes in the destination, or the error of the disposition.
 fn upload_start(tree: &Tree, path: &[u8], opts: &TransferOpts) -> Result<usize, Fail> {
     let existing = tree.node(path).is_some();
     match opts.disposition {
@@ -265,7 +253,7 @@ async fn upload(
             }
         }
     }
-    // A failed upload leaves what arrived in place so that it can be resumed (XB-13).
+    // A failed upload leaves what arrived so it can be resumed.
     env.shared.with(|s| s.tree_mut(loc).write_file(path, at, &data, opts.mtime_ms))?;
     outcome.map(|()| bytes_extra(done))
 }
@@ -295,8 +283,6 @@ async fn upload_step(
     env.pause().await;
     Ok(moved)
 }
-
-// ---- download ----------------------------------------------------------
 
 pub(super) async fn run_download(
     env: Env,
@@ -347,8 +333,6 @@ async fn download(
     }
     Ok(bytes_extra(done))
 }
-
-// ---- tree jobs ---------------------------------------------------------
 
 pub(super) async fn run_remove_tree(env: Env, job: u32, cancel: Arc<AtomicBool>, loc: String, path: Vec<u8>) {
     let failure = env.job_failure("RemoveTree");
@@ -402,7 +386,6 @@ async fn walk_batches(
             .iter()
             .map(|(path, entry)| WireWalkItem { path: path.clone(), entry: entry.clone() })
             .collect();
-        // A closed client misses its entries.
         Iface::walk_batch(&env.ctx, job, batch).await.ok();
     }
     let mut extra = Extra::new();

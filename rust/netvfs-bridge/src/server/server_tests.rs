@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-// The answer slot of a call and the event sink.
-// Restriction lints that only add noise to tests (doc/RUST.md "Lints").
+// Restriction lints that only add noise to tests.
 #![allow(clippy::assertions_on_result_states, clippy::arithmetic_side_effects)]
 
 use super::flow::{Link, Outgoing};
@@ -80,7 +79,6 @@ fn ok_replies_to_the_call() {
     assert_eq!(message.body().deserialize::<(String,)>().unwrap().0, "granted");
     assert!(slot.rx.try_recv().is_err());
 
-    // Without a sender (the p2p case) there is no destination.
     let plain = Message::method_call(OBJECT_PATH, "Close").unwrap().build(&(1u32,)).unwrap();
     let reply = ReplyTo::new(&plain, find_method("Close").unwrap(), slot.outbox.clone()).unwrap();
     reply.ok(&Reply::Empty);

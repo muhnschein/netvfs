@@ -71,7 +71,6 @@ QString FakeBackupService::createBackupForSyncProfile(const QString &profileName
     if (returnEmptyPath)
         return QString();
 
-    // Like the platform: the archive in a directory of its own.
     ++m_archives;
     const QString dir = m_dir.path() + QStringLiteral("/run-%1").arg(m_archives);
     QDir().mkpath(dir);

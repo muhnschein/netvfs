@@ -1,11 +1,8 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-// The C ABI of libnetvfs-bridge-ffi.so (design: phase2-design.md §1, §4.3),
-// called through its table as the Rust bridge does: dlopen, nvb_ffi_get,
-// init on the main thread first (T1). Connections use the fake backend
-// (provider "fake"), steered through libnetvfs-bridge-ffi-fake.so (§4.1).
-// Run in the normal and the sanitizer build (ASan + UBSan, LSan at exit).
-// The marshalling templates (marshal.h) are also compiled in, for the cases
-// no backend produces.
+// C ABI of libnetvfs-bridge-ffi.so called through its table as the Rust bridge does (dlopen, nvb_ffi_get,
+// init on the main thread first), with the fake backend steered through libnetvfs-bridge-ffi-fake.so. Runs
+// in the normal and sanitizer builds. marshal.h templates are compiled in too, for cases no backend
+// produces.
 #include "netvfs_bridge_ffi.h"
 #include "nvb_fake.h"
 
@@ -31,15 +28,13 @@
 
 namespace {
 
-const nvb_ffi *t = nullptr;     // the table under test
-const nvb_fake *f = nullptr;    // the fake backend's controls
+const nvb_ffi *t = nullptr;
+const nvb_fake *f = nullptr;
 void *ffiLibrary = nullptr;
 
-// ------------------------------------------------------------ secret scan
 
-// SEC-5, XSEC-6: secrets given to the library carry this canary; every
-// block freed while the scan is armed is searched for it. A hit is a copy
-// that was released without being wiped.
+// Secrets given to the library carry this canary; every block freed while the scan is armed is searched for
+// it. A hit is a copy released without wiping.
 namespace SecretScan {
 const char Canary[] = "C4nary-0f-a-s3cret";
 std::atomic<bool> armed { false };
@@ -57,7 +52,6 @@ void check(const volatile void *block, size_t size)
 } // namespace
 
 #if defined(__SANITIZE_ADDRESS__)
-// ASan runs free hooks before it poisons the block.
 extern "C" int __sanitizer_install_malloc_and_free_hooks(void (*mallocHook)(const volatile void *, size_t),
                                                          void (*freeHook)(const volatile void *));
 extern "C" size_t __sanitizer_get_allocated_size(const volatile void *p);
@@ -70,7 +64,6 @@ void scanFreed(const volatile void *block)
 
 void ignoreAllocated(const volatile void *, size_t)
 {
-    // Only frees are scanned; ASan installs hooks in pairs.
 }
 
 void installSecretScan()
@@ -94,14 +87,12 @@ extern "C" void free(void *p) noexcept
 namespace {
 void installSecretScan()
 {
-    // Nothing to install: the definition of free() above is the hook.
 }
 } // namespace
 #endif
 
 namespace {
 
-// ------------------------------------------------------------- helpers
 
 nvb_bytes bytes(const QByteArray &data)
 {
@@ -140,7 +131,6 @@ QString nameOf(const ErrorPtr &error)
     return nameOf(error.get());
 }
 
-// What establish needs; the default signs in to the fake as user/secret.
 struct Establish {
     QByteArray provider = "fake";
     QByteArray host = "fake.example";
@@ -207,7 +197,6 @@ void offQtThread(const std::function<void()> &fn)
     worker.join();
 }
 
-// Collects listing batches; stops after `stopAfter` batches (-1: never).
 struct ListSink {
     QVector<QStringList> batches;
     int stopAfter = -1;
@@ -226,10 +215,9 @@ struct ListSink {
     }
 };
 
-// The local side of a transfer: a byte array, written in short pieces.
 struct Memory {
     QByteArray data;
-    qint64 maxWrite = -1;      // > 0: at most this many bytes per write
+    qint64 maxWrite = -1;
     bool failWrites = false;
     int writes = 0;
 
@@ -290,7 +278,6 @@ class tst_BridgeFfi : public QObject
 private slots:
     void init();
 
-    // The first test that creates a backend: the seed is read on first use.
     void fakeSeed();
     void entry();
     void onlyOneSymbol();
@@ -329,7 +316,7 @@ void tst_BridgeFfi::init()
 
 void tst_BridgeFfi::fakeSeed()
 {
-    // NETVFS_FAKE_SEED (design §4.1), read by the plugin on the first create().
+    // NETVFS_FAKE_SEED, read by the plugin on the first create().
     QTemporaryDir dir;
     QFile seed(dir.filePath(QStringLiteral("seed")));
     QVERIFY(seed.open(QIODevice::WriteOnly));
@@ -360,13 +347,11 @@ void tst_BridgeFfi::entry()
     const auto get = reinterpret_cast<nvb_ffi_get_fn>(dlsym(ffiLibrary, NVB_FFI_ENTRY));
     QVERIFY(get);
     QCOMPARE(get(), t);
-    // T1: a second init is refused.
     QCOMPARE(t->init(lit("again")), -1);
 }
 
 void tst_BridgeFfi::onlyOneSymbol()
 {
-    // Design §1: -fvisibility=hidden and the version script.
     QProcess nm;
     nm.start(QStringLiteral("nm"), { QStringLiteral("-D"), QStringLiteral("--defined-only"),
                                      QStringLiteral(NETVFS_TEST_FFI_LIB) });
@@ -408,7 +393,7 @@ void tst_BridgeFfi::connLifecycle()
     QVERIFY(!opened);
     QVERIFY(handle);
     QCOMPARE(size, int64_t(10));
-    // O4: conn_free closes the open handle (LSan sees a leak otherwise).
+    // conn_free closes the open handle (LSan sees a leak otherwise).
     conn.reset();
     QCOMPARE(logCount("close:a"), 1);
     QCOMPARE(f->live_backends(), 0);
@@ -420,7 +405,7 @@ void tst_BridgeFfi::establishIdentityHook_data()
     QTest::addColumn<QByteArray>("serverKey");
     QTest::addColumn<QByteArray>("pinKey");
     QTest::addColumn<uint>("verdict");
-    QTest::addColumn<QString>("checkName");     // what the hook is shown; "" passed
+    QTest::addColumn<QString>("checkName");
     QTest::addColumn<QString>("error");
     QTest::addColumn<uint>("phase");
 
@@ -495,10 +480,9 @@ void tst_BridgeFfi::establishIdentityHook()
     QCOMPARE(seen.checkName, checkName);
     QCOMPARE(seen.pin, pinFor(serverKey));
     QCOMPARE(seen.kind, uint32_t(NVB_IDENTITY_SSH));
-    // XC-16: filled when the backend gave none, as connector.cpp did.
     QCOMPARE(seen.fingerprint, "SHA256:" + QCryptographicHash::hash(serverKey, QCryptographicHash::Sha256)
                                                .toBase64(QByteArray::OmitTrailingEquals));
-    // C-7: the hook runs before anything is sent; a refusal sends nothing.
+    // the hook runs before anything is sent; a refusal sends nothing.
     QCOMPARE(seen.authenticatedBefore, 0);
     QCOMPARE(logCount("authenticate"), error.isEmpty() ? 1 : 0);
     QCOMPARE(logCount("disconnect"), error.isEmpty() ? 0 : 1);
@@ -552,7 +536,6 @@ struct Prompted {
 
 void tst_BridgeFfi::establishPromptReplySet()
 {
-    // XC-15 through the prompt hook; every given answer carries the canary.
     const QByteArray otp = QByteArray(SecretScan::Canary) + "-1";
     f->set_otp(bytes(otp));
     struct Case {
@@ -560,7 +543,7 @@ void tst_BridgeFfi::establishPromptReplySet()
         std::vector<std::vector<QByteArray>> replies;
         int answer;
         const char *error;
-        int delivered;              // "answers:<n>" lines: replies the backend saw
+        int delivered;
     };
     const QByteArray old = QByteArray(SecretScan::Canary) + "-old";
     const std::vector<Case> cases = {
@@ -592,7 +575,7 @@ void tst_BridgeFfi::establishPromptReplySet()
         QCOMPARE(prompted.text, QByteArray("Verification code: "));
         QCOMPARE(prompted.echo, uint8_t(0));
         QVERIFY2(logCount("answers:") == c.delivered, c.name);
-        // XSEC-6: no copy of an answer was released unwiped.
+        // no copy of an answer was released unwiped.
         QVERIFY2(SecretScan::hits == 0, c.name);
     }
 
@@ -608,7 +591,7 @@ void tst_BridgeFfi::establishPromptReplySet()
 
 void tst_BridgeFfi::establishSecretsWiped()
 {
-    // O5, SEC-5: the secret is copied once into Credentials and wiped.
+    //  the secret is copied once into Credentials and wiped.
     const QByteArray secret = QByteArray(SecretScan::Canary) + "-pw";
     f->set_credentials(lit("user"), bytes(secret));
     installSecretScan();
@@ -628,7 +611,7 @@ void tst_BridgeFfi::establishSecretsWiped()
 
 void tst_BridgeFfi::establishSignonId0Optional()
 {
-    // XA-7: credentials id 0 with an optional secret yields empty
+    // credentials id 0 with an optional secret yields empty
     // credentials without signond; the empty fetched user name becomes the
     // given one. Waits on a worker while the Qt thread serves the lookup.
     f->set_credentials(lit("user"), lit(""));
@@ -647,7 +630,6 @@ void tst_BridgeFfi::establishSignonId0Optional()
             QCOMPARE(e.phase, uint32_t(NVB_PHASE_DONE));
             QCOMPARE(logCount("authenticate"), 1);
         } else {
-            // A-6: no stored secret is AuthFailed, before authenticate.
             QCOMPARE(nameOf(error), QStringLiteral("AuthFailed"));
             QCOMPARE(e.phase, uint32_t(NVB_PHASE_CREDENTIALS));
             QCOMPARE(logCount("authenticate"), 0);
@@ -683,7 +665,7 @@ struct Blocker {
 
 void tst_BridgeFfi::establishSignonCancel()
 {
-    // T4: conn_cancel also ends the wait for signond (the lookup is queued
+    // conn_cancel also ends the wait for signond (the lookup is queued
     // behind a busy Qt thread here, so it never answers in time).
     Blocker blocker;
     ConnPtr conn = newConn();
@@ -712,7 +694,7 @@ void tst_BridgeFfi::establishSignonCancel()
         blocker.release = true;
         t->quit(0);
     });
-    t->run();   // the blocker, then the abandoned lookup, then quit
+    t->run();
     worker.join();
     QCOMPARE(blocked, 1);
     QCOMPARE(nameOf(error), QStringLiteral("Canceled"));
@@ -725,13 +707,12 @@ void tst_BridgeFfi::establishSignonCancel()
 void tst_BridgeFfi::establishPhases()
 {
     {
-        // Connect fails: nothing to disconnect.
         f->fail_op(lit("connect"), lit("NetworkUnreachable"));
         ConnPtr conn = newConn();
         Establish e;
         QCOMPARE(nameOf(e.run(conn.get())), QStringLiteral("NetworkUnreachable"));
         QCOMPARE(e.phase, uint32_t(NVB_PHASE_CONNECT));
-        QCOMPARE(logCount("disconnect"), 0);   // before conn_free disconnects
+        QCOMPARE(logCount("disconnect"), 0);
     }
     f->reset();
     {
@@ -769,11 +750,9 @@ void tst_BridgeFfi::listBatchesAndStop()
     QVERIFY(conn);
     ListSink sink;
     QVERIFY(!ErrorPtr(t->conn_list(conn.get(), lit("/dir"), 3, ListSink::call, &sink)));
-    // One sink call per backend batch.
     QCOMPARE(sink.batches.size(), 4);
     QCOMPARE(sink.batches.at(0).size(), 3);
     QCOMPARE(sink.batches.at(3).size(), 2);
-    // XC-4: names cross as protocol bytes (Names::encode).
     QCOMPARE(sink.batches.at(3).last().toUtf8(), QString::fromUtf8("n\xff").toUtf8());
 
     ListSink stopping;
@@ -834,7 +813,7 @@ namespace {
 
 struct Progressed {
     QVector<QPair<qint64, qint64>> updates;
-    int cancelAfter = -1;          // updates before canceled() says yes
+    int cancelAfter = -1;
 
     nvb_progress progress()
     {
@@ -870,7 +849,6 @@ void tst_BridgeFfi::removeTreeCounts()
     QCOMPARE(files, int64_t(3));
     QCOMPARE(dirs, int64_t(2));
     QCOMPARE(f->exists(lit("/r")), 0);
-    // Design §1.2: update(files + dirs, -1) per removed entry.
     QCOMPARE(progressed.updates.size(), 5);
     QCOMPARE(progressed.updates.last(), qMakePair(qint64(5), qint64(-1)));
 
@@ -958,7 +936,6 @@ void tst_BridgeFfi::handlesReadEof()
     QVERIFY(!ErrorPtr(t->handle_read(h, 2, buf, 4, &len)));
     QCOMPARE(len, size_t(4));
     QCOMPARE(QByteArray(reinterpret_cast<const char *>(buf), 4), QByteArray("2345"));
-    // XC-13: short only at EOF; at or past EOF nothing.
     QVERIFY(!ErrorPtr(t->handle_read(h, 7, buf, 8, &len)));
     QCOMPARE(len, size_t(3));
     QVERIFY(!ErrorPtr(t->handle_read(h, 40, buf, 8, &len)));
@@ -994,7 +971,6 @@ void tst_BridgeFfi::uploadDownloadViaIo()
     QVERIFY(!ErrorPtr(t->conn_stat(conn.get(), lit("/up"), 1, &raw)));
     QCOMPARE(Owned<nvb_entry>(raw)->mtime_ms, int64_t(5000));
 
-    // Short writes into a regular file are retried until all is written.
     Memory sink;
     sink.maxWrite = 1000;
     const nvb_io out = sink.io(false);
@@ -1002,13 +978,11 @@ void tst_BridgeFfi::uploadDownloadViaIo()
     QCOMPARE(sink.data, data.mid(100, 70000));
     QVERIFY(sink.writes >= 70);
 
-    // -1 is an error.
     Memory failing;
     failing.failWrites = true;
     const nvb_io broken = failing.io(false);
     QVERIFY(ErrorPtr(t->conn_download(conn.get(), lit("/up"), 0, -1, &broken, nullptr)));
 
-    // canceled() stops the transfer.
     Memory again;
     again.data = data;
     const nvb_io in2 = again.io(true);
@@ -1042,10 +1016,8 @@ void tst_BridgeFfi::cancelFromOtherThreadDuringList()
     const qint64 elapsed = sinceCancel.elapsed();
     canceler.join();
     QCOMPARE(nameOf(error), QStringLiteral("Canceled"));
-    // C-9: within 2 s of the cancel.
     QVERIFY2(elapsed < 2000, qPrintable(QString::number(elapsed)));
     QVERIFY(sink.batches.size() < 40);
-    // resetCancel: the connection is usable again.
     t->conn_reset_cancel(conn.get());
     f->set_chunk_delay_ms(0);
     ListSink after;
@@ -1101,14 +1073,13 @@ void tst_BridgeFfi::urlParseFormat()
     QCOMPARE(toBytes(url->params.host), QByteArray("host.example"));
     QCOMPARE(url->params.port, 2222);
     QCOMPARE(toBytes(url->params.username), QByteArray("alice"));
-    QCOMPARE(toBytes(url->path), QByteArray("/home/a\xff" "b"));   // XC-4 bytes
+    QCOMPARE(toBytes(url->path), QByteArray("/home/a\xff" "b"));
     QCOMPARE(url->params.connect_timeout_ms, 15000);
 
     nvb_blob *formatted = nullptr;
     QVERIFY(!ErrorPtr(t->url_format(&url->params, url->path, &formatted)));
     QCOMPARE(toBytes(Owned<nvb_blob>(formatted)->data), QByteArray("sftp://alice@host.example:2222/home/a%FFb"));
 
-    // XH-6: a password is refused; IDN; smb share and file://.
     nvb_url *none = reinterpret_cast<nvb_url *>(0x1);
     QCOMPARE(nameOf(ErrorPtr(t->url_parse(lit("sftp://alice:pw@host/"), &none))), QStringLiteral("SecurityPolicy"));
     QVERIFY(!none);
@@ -1151,7 +1122,6 @@ void tst_BridgeFfi::errorBlockContents()
     QCOMPARE(QString::fromUtf8(toBytes(error->message)), QStringLiteral("slow döwn"));
     QCOMPARE(toBytes(error->detail), QByteArray("HTTP 429"));
     QCOMPARE(error->retry_after_ms, int64_t(1500));
-    // O3: one block holds everything it points to.
     QVERIFY(insideBlock(error.get(), error->name));
     QVERIFY(insideBlock(error.get(), error->message));
     QVERIFY(insideBlock(error.get(), error->detail));
@@ -1179,10 +1149,8 @@ void tst_BridgeFfi::errorBlockContents()
 
 void tst_BridgeFfi::mapValuesNotCarried()
 {
-    // fillMap() leaves out the values the ABI cannot carry (no backend has
-    // such options yet) and keeps the key order of the
-    // others. With none left the array is empty: never indexed, not null,
-    // and in the block (O3).
+    // fillMap() leaves out values the ABI cannot carry and keeps key order. With none left the array is
+    // empty: never indexed, not null, in the block.
     using namespace NetVfs::Ffi;
     const auto packed = [](const QVariantMap &map) {
         return Owned<nvb_params>(pack<nvb_params>([&map](auto &arena, nvb_params *out) {
@@ -1223,7 +1191,7 @@ void tst_BridgeFfi::mapValuesNotCarried()
 
 void tst_BridgeFfi::exceptionsBecomeInternal()
 {
-    // T7: a C++ exception (here from a callback) never crosses the ABI.
+    // a C++ exception (here from a callback) never crosses the ABI.
     f->add_file(lit("/x/a"), lit("a"));
     ConnPtr conn = connected();
     QVERIFY(conn);
@@ -1236,12 +1204,10 @@ void tst_BridgeFfi::exceptionsBecomeInternal()
     const nvb_walk_visit_fn notStd = [](void *, nvb_bytes, const nvb_entry *) -> int { throw 42; };
     const nvb_walk_opts opts { -1, 0, 0, 0 };
     QCOMPARE(nameOf(ErrorPtr(t->walk(conn.get(), lit("/x"), &opts, notStd, nullptr))), QStringLiteral("Internal"));
-    // Invalid arguments are Internal too, not a crash.
     nvb_entry *entry = nullptr;
     QCOMPARE(nameOf(ErrorPtr(t->conn_stat(nullptr, lit("/x"), 1, &entry))), QStringLiteral("Internal"));
     QCOMPARE(nameOf(ErrorPtr(t->conn_list(conn.get(), lit("/x"), 8, nullptr, nullptr))),
              QStringLiteral("Internal"));
-    // The connection still works.
     ListSink sink;
     QVERIFY(!ErrorPtr(t->conn_list(conn.get(), lit("/x"), 8, ListSink::call, &sink)));
 }
@@ -1261,7 +1227,7 @@ struct Nearby {
 
 void tst_BridgeFfi::discoveryStartStopFree()
 {
-    // XD-5 on the Qt thread (T3); sockets may be unavailable in a sandbox,
+    // on the Qt thread; sockets may be unavailable in a sandbox
     // so only the bookkeeping is checked.
     Nearby nearby;
     const nvb_discovery_hooks hooks { &nearby, Nearby::changed };
@@ -1269,7 +1235,7 @@ void tst_BridgeFfi::discoveryStartStopFree()
     QVERIFY(d);
     const int32_t open = t->discovery_set_running(d, 1);
     QVERIFY(open == 0 || open == 1);
-    QCOMPARE(t->discovery_set_running(d, 1), open);   // idempotent
+    QCOMPARE(t->discovery_set_running(d, 1), open);
     QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
     QCOMPARE(t->discovery_set_running(d, 0), 0);
     QCOMPARE(t->discovery_set_running(d, 0), 0);
@@ -1277,7 +1243,7 @@ void tst_BridgeFfi::discoveryStartStopFree()
     t->discovery_free(d);
     const int calls = nearby.calls;
     QTest::qWait(100);
-    QCOMPARE(nearby.calls, calls);   // no hook call after free
+    QCOMPARE(nearby.calls, calls);
 }
 
 namespace {
@@ -1317,7 +1283,6 @@ void tst_BridgeFfi::postAndQuit()
     QCOMPARE(posted.runs.load(), 1);
     QCOMPARE(posted.thread, QThread::currentThread());
 
-    // Quitting: not queued, and it never runs.
     Posted late;
     QCOMPARE(t->post(Posted::fn, &late), 0);
 
@@ -1328,7 +1293,7 @@ void tst_BridgeFfi::postAndQuit()
     QCOMPARE(late.runs.load(), 0);
     Posted first;
     first.quitWith = 3;
-    QCOMPARE(t->post(Posted::fn, &first), 0);   // still quitting until run()
+    QCOMPARE(t->post(Posted::fn, &first), 0);
 }
 
 int main(int argc, char **argv)
@@ -1346,7 +1311,6 @@ int main(int argc, char **argv)
     t = getTable();
     f = getFake();
     qputenv("NETVFS_BACKEND_PATH", NETVFS_TEST_FAKE_BACKEND_DIR);
-    // T1: init first, on this (the main) thread.
     if (t->init(lit("tst_bridgeffi")) != 0)
         return 1;
     int rc = 0;
@@ -1355,7 +1319,6 @@ int main(int argc, char **argv)
         rc = QTest::qExec(&test, argc, argv);
     }
     t->shutdown();
-    // The libraries stay loaded: LeakSanitizer reports at exit.
     return rc;
 }
 

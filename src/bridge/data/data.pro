@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: LGPL-2.1-or-later
-# Files installed with netvfs-bridge (XB-3, XB-15). Nothing is built.
+# Files installed with netvfs-bridge. Nothing is built.
 TEMPLATE = aux
 
 consumers.files = lautta.conf

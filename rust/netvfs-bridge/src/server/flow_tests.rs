@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-// The flow budget, the outbox and the writer (C-10, design §3.4).
-// Restriction lints that only add noise to tests (doc/RUST.md "Lints").
+// Restriction lints that only add noise to tests.
 #![allow(clippy::assertions_on_result_states, clippy::arithmetic_side_effects)]
 
 use super::{
@@ -24,7 +23,6 @@ fn small(n: u32) -> OutSignal {
     OutSignal::JobProgress { job: n, done: 0, total: -1 }
 }
 
-/// Runs `acquire` on a thread; its result once it returns.
 fn acquire_on_thread(
     budget: &Arc<FlowBudget>,
     bytes: usize,
@@ -61,7 +59,6 @@ fn budget_admits_up_to_the_limit() {
     let cancel = AtomicBool::new(false);
     assert!(budget.acquire(60, &cancel));
     assert!(budget.acquire(40, &cancel));
-    // Exactly at the limit: one more producer may go (one batch over).
     assert_eq!(budget.in_flight(), 100);
     assert!(budget.acquire(30, &cancel));
     assert_eq!(budget.in_flight(), 130);
@@ -105,7 +102,6 @@ fn budget_cancel_and_close_unblock() {
     assert!(!got);
     assert!(at.duration_since(canceled) < Duration::from_millis(500));
     assert_eq!(budget.in_flight(), 1);
-    // A canceled producer does not even try.
     assert!(!budget.acquire(0, &cancel));
 
     let other = Arc::new(AtomicBool::new(false));
@@ -140,13 +136,11 @@ fn outbox_queues_until_closed() {
     outbox.close();
     assert!(outbox.is_closed());
     assert!(format!("{outbox:?}").contains("closed: true"));
-    // The first close shut the socket down: the peer sees the end.
     peer.set_read_timeout(Some(Duration::from_secs(1))).unwrap();
     let mut buf = [0u8; 1];
     assert_eq!(peer.read(&mut buf).unwrap(), 0);
     outbox.close();
     assert!(outbox.is_closed());
-    // Closed: nothing is queued and streamed bytes are given back.
     let queued = *link.queued.borrow();
     assert!(!outbox.signal(&small(4)));
     outbox.flow().release(7);
@@ -167,7 +161,6 @@ fn outbox_without_writer() {
     assert!(!outbox.stream(&small(2), 30, &cancel));
     assert_eq!(outbox.flow().in_flight(), 0);
     assert_eq!(*link.queued.borrow(), 0);
-    // Canceled: nothing is taken, nothing is sent.
     let (outbox, mut rx) = super::outbox(SID, link, 100);
     assert!(!outbox.stream(&small(3), 30, &AtomicBool::new(true)));
     assert_eq!(outbox.flow().in_flight(), 0);
@@ -202,7 +195,6 @@ async fn room_and_closed_waits() {
     tokio::time::timeout(Duration::from_secs(1), link.wait_closed()).await.unwrap();
 }
 
-/// The writer sends in order and gives the bytes back after each send.
 #[tokio::test]
 async fn writer_sends_in_order() {
     let pair = pair().await;
@@ -233,8 +225,6 @@ async fn writer_sends_in_order() {
     assert!(!outbox.signal(&small(99)));
 }
 
-/// A writer stuck on a consumer that does not read ends once the session
-/// is closed, and gives back the bytes of everything left.
 #[tokio::test]
 async fn writer_close_drains_the_queue() {
     let (server, shutdown, client) = raw_pair().await;
@@ -246,7 +236,6 @@ async fn writer_close_drains_the_queue() {
     let batch = OutSignal::ListBatch { request: 1, entries };
     let cancel = AtomicBool::new(false);
     let mut sent = 0usize;
-    // The client never reads: the socket buffers fill up.
     while sent < 20 {
         assert!(outbox.stream(&batch, 1000, &cancel));
         sent += 1;
@@ -262,7 +251,6 @@ async fn writer_close_drains_the_queue() {
     drop(client);
 }
 
-/// A failed send (the consumer went away) ends the writer and the budget.
 #[tokio::test]
 async fn writer_stops_on_a_failed_send() {
     let pair = pair().await;

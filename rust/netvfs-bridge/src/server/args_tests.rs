@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-// netvfs 0.4's C++ tst_bridgeunits: signaturesAndCounts, paths, numbers, options,
-// identifiers, secretsMovedAndWiped, and the decode limits (wireRoundTrip).
-// Restriction lints that only add noise to tests (doc/RUST.md "Lints").
+// Restriction lints that only add noise to tests.
 #![allow(clippy::assertions_on_result_states, clippy::arithmetic_side_effects)]
 
 use super::{
@@ -45,7 +43,6 @@ fn null_fd() -> std::fs::File {
     std::fs::File::open("/dev/null").unwrap()
 }
 
-/// A valid message for every method of the table.
 fn valid_message(name: &str) -> Message {
     let fd = null_fd();
     let fd = Fd::from(fd.as_fd());
@@ -106,17 +103,13 @@ fn signatures_and_counts() {
     assert_eq!((wrong.name, wrong.message.as_str()), (ErrorName::ProtocolError, "Hello takes (s)"));
     assert_eq!(error("Hello", &()), ErrorName::ProtocolError); // count
     assert_eq!(error("Hello", &("x", 2u32)), ErrorName::ProtocolError);
-    // Same values, other D-Bus types (object path, signature): only the
-    // signature check refuses them.
     assert_eq!(error("Hello", &(ObjectPath::try_from("/x").unwrap(),)), ErrorName::ProtocolError);
     assert_eq!(error("Hello", &(Signature::try_from("s").unwrap(),)), ErrorName::ProtocolError);
     assert_eq!(error("Frobnicate", &()), ErrorName::Unsupported);
     let nameless = Message::method_call(OBJECT_PATH, "Hello").unwrap().build(&("x",)).unwrap();
     assert_eq!(decode(&nameless).unwrap().name(), "Hello");
     validate("Stat", &(LOC, b"a".as_slice(), true, "")).unwrap();
-    // A Download whose "h" is not a file descriptor.
     assert_eq!(error("Download", &(LOC, b"a".as_slice(), 5i32, none())), ErrorName::ProtocolError);
-    // An "h" whose index names no descriptor of the message.
     let fd = null_fd();
     let with_fd = message("Download", &(LOC, b"a".as_slice(), Fd::from(fd.as_fd()), none()));
     let stripped = crate::sys::frame::message_from_frame(
@@ -135,7 +128,6 @@ fn paths_of_one_and_two_path_calls() {
     let bad: [&[u8]; 4] = [b"docs/../etc", b"./a", b"a\0b", &[b'a'; MAX_PATH + 1]];
     for raw in bad {
         assert_eq!(error("RemoveFile", &(LOC, raw)), ErrorName::InvalidName);
-        // Both paths of a two-path call are checked.
         assert_eq!(error("Rename", &(LOC, b"ok".as_slice(), raw, false)), ErrorName::InvalidName);
         assert_eq!(error("Rename", &(LOC, raw, b"ok".as_slice(), false)), ErrorName::InvalidName);
         assert_eq!(error("MakeHardlink", &(LOC, b"ok".as_slice(), raw)), ErrorName::InvalidName);
@@ -157,20 +149,17 @@ fn paths_of_one_and_two_path_calls() {
         panic!()
     };
     assert_eq!((from.as_bytes(), to.as_bytes(), replace), (b"a".as_slice(), b"/b".as_slice(), true));
-    // A path must be bytes, never a string (XB-9).
     assert_eq!(error("RemoveFile", &(LOC, "a")), ErrorName::ProtocolError);
 }
 
 #[test]
 fn numbers() {
     let p = b"".as_slice();
-    // List batch: 0 is the default, at most 512 (XB-17).
     assert!(matches!(validate("List", &(LOC, p, "", 0u32)).unwrap(), Call::List { batch: 256, .. }));
     assert!(matches!(validate("List", &(LOC, p, "", 512u32)).unwrap(), Call::List { batch: 512, .. }));
     assert!(matches!(validate("List", &(LOC, p, "", 1u32)).unwrap(), Call::List { batch: 1, .. }));
     let big = validate("List", &(LOC, p, "", 513u32)).unwrap_err();
     assert_eq!((big.name, big.message.as_str()), (ErrorName::ProtocolError, "Batch size above 512"));
-    // Read: at most 1 MiB, offsets >= 0.
     assert!(matches!(validate("Read", &(1u32, 0i64, MAX_READ)).unwrap(), Call::Read { max: MAX_READ, .. }));
     assert_eq!(validate("Read", &(1u32, 0i64, MAX_READ + 1)).unwrap_err().message, "Read size above 1 MiB");
     assert_eq!(validate("Read", &(1u32, -1i64, 1u32)).unwrap_err().message, "Argument 2 is out of range");
@@ -179,7 +168,6 @@ fn numbers() {
         validate("Read", &(7u32, MAX_OFFSET, 1u32)).unwrap(),
         Call::Read { handle: 7, offset: MAX_OFFSET, max: 1 }
     ));
-    // ReadAhead is a hint: capped, not refused.
     assert!(matches!(
         validate("ReadAhead", &(1u32, 3i64, 1i64 << 40)).unwrap(),
         Call::ReadAhead { handle: 1, offset: 3, bytes: MAX_READ_AHEAD }
@@ -217,7 +205,6 @@ fn attribute_options() {
     assert_eq!(refuse(&[("owner", Value::from(1i32))]), "Unknown option \"owner\""); // unknown keys are refused
     assert_eq!(refuse(&[("mtimeMs", Value::from(MAX_TIME_MS + 1))]), "Option \"mtimeMs\" is out of range");
     assert_eq!(refuse(&[("atimeMs", Value::from(MIN_TIME_MS - 1))]), "Option \"atimeMs\" is out of range");
-    // The edges are allowed; every integer type is accepted, nested variants unwrapped.
     let edges = map(&[
         ("mode", Value::Value(Box::new(Value::Value(Box::new(Value::from(0o7777u16)))))),
         ("mtimeMs", Value::from(MIN_TIME_MS)),
@@ -235,7 +222,6 @@ fn attribute_options() {
     assert_eq!(refuse(&[("mode", Value::from(-1i16))]), "Option \"mode\" is out of range");
     let small = validate("SetAttributes", &(LOC, p, map(&[("mode", Value::from(0o644i16))]))).unwrap();
     assert!(matches!(small, Call::SetAttributes { changes: AttributeChanges { mode: Some(0o644), .. }, .. }));
-    // The first offending key in key order is reported.
     assert_eq!(refuse(&[("zzz", Value::from(1i32)), ("aaa", Value::from(1i32))]), "Unknown option \"aaa\"");
     let long_key = "k".repeat(300);
     assert_eq!(
@@ -310,7 +296,6 @@ fn transfer_options() {
     let create = map(&[("disposition", Value::from("create"))]);
     let Call::Upload { opts, .. } = validate("Upload", &(LOC, p, fd(), create)).unwrap() else { panic!() };
     assert_eq!(opts, TransferOpts::default());
-    // Write-only options are refused by Download.
     for key in ["createMode", "disposition", "mtimeMs"] {
         assert_eq!(download_err(&[(key, Value::from(0o600i32))]), format!("Unknown option \"{key}\""));
     }
@@ -399,7 +384,6 @@ fn lanes_and_links() {
     assert_eq!(error("OpenRead", &(LOC, p, "x")), ErrorName::ProtocolError);
     assert!(matches!(validate("MakeDir", &(LOC, p, true)).unwrap(), Call::MakeDir { exclusive: true, .. }));
     assert!(matches!(validate("Discover", &(false,)).unwrap(), Call::Discover { on: false }));
-    // Symlink targets are verbatim but bounded.
     let Call::MakeSymlink { target, link, .. } =
         validate("MakeSymlink", &(LOC, b"../x".as_slice(), b"l/".as_slice())).unwrap()
     else {
@@ -443,7 +427,6 @@ fn identifiers() {
     assert!(
         matches!(validate("AddAccount", &("smb",)).unwrap(), Call::AddAccount { ref provider } if provider == "smb")
     );
-    // XB-20: a drive id is an object path element, nothing a path could hide in.
     assert!(matches!(validate("Mount", &("sda1",)).unwrap(), Call::Mount { ref drive } if drive == "sda1"));
     assert!(
         matches!(validate("Unmount", &("dm_2d3",)).unwrap(), Call::Unmount { ref drive } if drive == "dm_2d3")
@@ -457,7 +440,6 @@ fn identifiers() {
     assert_eq!(error("Disconnect", &("a b",)), ErrorName::ProtocolError);
     assert_eq!(location_id("account:1".to_owned()).unwrap().as_str(), "account:1");
     assert_eq!(lane_hint("", Lane::Bulk).unwrap(), Lane::Bulk);
-    // Hello's client name: at most 256 UTF-16 units.
     assert!(validate("Hello", &("é".repeat(256),)).is_ok());
     assert_eq!(validate("Hello", &("x".repeat(257),)).unwrap_err().message, "Argument 1 is too long");
     assert_eq!(validate("Hello", &("😀".repeat(129),)).unwrap_err().message, "Argument 1 is too long");
@@ -484,8 +466,6 @@ fn ad_hoc_options() {
     };
     assert_eq!(err(&[("user", Value::from(1i32))]), "Option \"user\" must be a short string");
     assert_eq!(err(&[("user", Value::from("u".repeat(257)))]), "Option \"user\" must be a short string");
-    // zvariant refuses NUL in a string already; the check stays for values
-    // built in memory.
     assert_eq!(
         error("ConnectAdHoc", &("u", secret, map(&[("user", Value::from("a\0b"))]))),
         ErrorName::ProtocolError
@@ -493,7 +473,6 @@ fn ad_hoc_options() {
     let nul = ad_hoc_option("user", &Value::from("a\0b"), &mut AdHocOpts::default()).unwrap_err();
     assert_eq!(nul.message, "Option \"user\" contains NUL");
     assert_eq!(err(&[("security_profile", Value::from("weak"))]), "Unknown security profile");
-    // The type check comes first, as in args.cpp.
     assert_eq!(err(&[("other", Value::from(1i32))]), "Option \"other\" must be a short string");
     assert_eq!(err(&[("other", Value::from("x"))]), "Unknown option \"other\"");
     for profile in SECURITY_PROFILES {
@@ -517,7 +496,6 @@ fn secrets_are_zeroizing() {
         panic!()
     };
     assert_eq!(secret.expose(), b"hunter2");
-    // The only holder is the wiping container; Debug never shows it.
     assert_eq!(format!("{secret:?}"), "Secret(7 bytes)");
     let call = validate("ConnectAdHoc", &("sftp://h/", b"hunter2".as_slice(), none())).unwrap();
     assert!(!format!("{call:?}").contains("hunter2"));
@@ -537,7 +515,6 @@ fn secrets_are_zeroizing() {
         "Secret too long"
     );
     assert!(validate("ConnectAdHoc", &("sftp://h/", &too_long[1..], none())).is_ok());
-    // The largest legitimate call fits the body limit.
     let url = "\u{ffff}".repeat(MAX_URL);
     let big = map(&[
         ("user", Value::from("\u{ffff}".repeat(MAX_SHORT))),
@@ -550,7 +527,6 @@ fn secrets_are_zeroizing() {
 fn body_size_limit() {
     let p = b"a".as_slice();
     let bytes = |n: usize| map(&[("mode", Value::from(vec![1u8; n]))]);
-    // Just at the limit: decoded (and refused for its type).
     let at_limit = message("SetAttributes", &(LOC, p, bytes(1)));
     let overhead = at_limit.body().len() - 1;
     let fits = validate("SetAttributes", &(LOC, p, bytes(MAX_CALL_BODY - overhead))).unwrap_err();
@@ -563,7 +539,6 @@ fn body_size_limit() {
 fn answers() {
     let answer = |opts: Map<'_>| validate("Answer", &("q7", opts));
     let message = |opts: Map<'_>| answer(opts).unwrap_err().message;
-    // av of ay works as aay does; nested variants are unwrapped.
     let av = Value::from(vec![Value::Value(Box::new(Value::from(b"a".to_vec()))), Value::from(b"".to_vec())]);
     let Call::Answer { accept, answers, .. } = answer(map(&[("answers", av)])).unwrap() else { panic!() };
     assert!(!accept);
@@ -586,7 +561,6 @@ fn answers() {
         "Invalid answer"
     );
     assert!(answer(map(&[("answers", Value::from(vec![vec![1u8; MAX_ANSWER_BYTES]]))])).is_ok());
-    // The C++ Limits::MaxShortString * 4.
     assert_eq!(MAX_ANSWER_BYTES, 1024);
     assert_eq!(message(map(&[("answers", Value::from(vec![Value::from(1i32)]))])), "Invalid answer");
     assert_eq!(message(map(&[("answers", Value::from(vec![vec![1u16]]))])), "Invalid answer");
@@ -596,7 +570,6 @@ fn answers() {
     assert_eq!(validate("Answer", &("q".repeat(65), none())).unwrap_err().message, "Argument 1 is too long");
 }
 
-/// Six and seven levels of arrays around an int.
 fn six_levels() -> Value<'static> {
     Value::from(vec![vec![vec![vec![vec![vec![1i32]]]]]])
 }
@@ -609,8 +582,6 @@ fn seven_levels() -> Value<'static> {
 fn variant_depth_and_element_limits() {
     let p = b"a".as_slice();
     let opts = |v: Value<'static>| map(&[("mode", v)]);
-    // The C++ decoder: a{sv} (depth 0) > dict (1) > variant (1) > value (2):
-    // six more levels fit.
     assert_eq!(
         validate("SetAttributes", &(LOC, p, opts(six_levels()))).unwrap_err().message,
         "Option \"mode\" must be an integer"
@@ -632,7 +603,6 @@ fn variant_depth_and_element_limits() {
         ok_variant = Value::Value(Box::new(ok_variant));
     }
     assert!(validate("SetAttributes", &(LOC, p, opts(ok_variant))).is_ok());
-    // Elements per container.
     let many = Value::from(vec![1i32; DECODE_MAX_ELEMENTS + 1]);
     assert_eq!(validate("SetAttributes", &(LOC, p, opts(many))).unwrap_err().message, "Argument too complex");
     let fits = Value::from(vec![1i32; DECODE_MAX_ELEMENTS]);
@@ -640,7 +610,6 @@ fn variant_depth_and_element_limits() {
         validate("SetAttributes", &(LOC, p, opts(fits))).unwrap_err().message,
         "Option \"mode\" must be an integer"
     );
-    // Byte arrays do not count.
     let bytes = Value::from(vec![1u8; DECODE_MAX_ELEMENTS + 1]);
     assert_eq!(
         validate("SetAttributes", &(LOC, p, opts(bytes))).unwrap_err().message,
@@ -659,7 +628,6 @@ fn variant_depth_and_element_limits() {
     let names: Vec<String> = (0..=DECODE_MAX_ELEMENTS).map(|i| i.to_string()).collect();
     let keys: Map<'_> = names.iter().map(|k| (k.as_str(), Value::from(1i32))).collect();
     assert_eq!(validate("SetAttributes", &(LOC, p, keys)).unwrap_err().message, "Argument too complex");
-    // Exactly the limit: counted in, then refused for the unknown key.
     let keys: Map<'_> = names[1..].iter().map(|k| (k.as_str(), Value::from(1i32))).collect();
     assert_eq!(keys.len(), DECODE_MAX_ELEMENTS);
     assert!(validate("SetAttributes", &(LOC, p, keys)).unwrap_err().message.starts_with("Unknown option"));

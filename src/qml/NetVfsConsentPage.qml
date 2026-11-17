@@ -3,18 +3,12 @@ import QtQuick 2.0
 import Sailfish.Silica 1.0
 import org.netvfs.accounts 1.0
 
-// SPEC-v2 XB-6: "Apps using network locations". Lists the apps registered
-// for netvfs-bridge (/usr/share/netvfs/consumers/<id>.conf) with the user's
-// consent from ~/.config/netvfs/bridge.conf, and grants or revokes it.
-// Writing the file is the whole contract: a running bridge watches it and
-// closes a revoked app's connections immediately.
-//
-// Reachable from the pull-down menu of every netvfs account's settings page
-// (NetVfsSettingsPage). The page needs no properties, so it can also be
-// opened on its own, for example from the bridge's consent notification:
-// it is installed as <qml import dir>/org/netvfs/accounts/NetVfsConsentPage.qml
-// and opened through the settings application's page-opening entry point
-// (SPEC-v2 open question 4 decides which one on 5.2).
+// "Apps using network locations". Lists apps registered for netvfs-bridge
+// (/usr/share/netvfs/consumers/<id>.conf) with the user's consent from
+// ~/.config/netvfs/bridge.conf; grants or revokes it. Writing the file is the whole contract: a
+// running bridge watches it and closes a revoked app's connections at once.
+// Opened from the pull-down menu of every account's settings page (NetVfsSettingsPage). Needs no
+// properties, so it can also be opened alone, e.g. from the bridge's consent notification.
 Page {
     id: page
 

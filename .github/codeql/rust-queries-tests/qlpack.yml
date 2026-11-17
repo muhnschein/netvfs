@@ -1,0 +1,6 @@
+name: netvfs/rust-queries-tests
+version: 0.0.0
+extractor: rust
+tests: .
+dependencies:
+  netvfs/rust-queries: "*"

@@ -246,11 +246,11 @@ QString choiceLabel(const QVariantMap &field, const QString &value)
     }
     return value;
 }
-} // namespace
+}
 
 ProviderDescriptors::ProviderDescriptors(QObject *parent)
     : QObject(parent)
-    , m_rules(std::make_unique<InputRules>(this).release())   // owned by this (Qt parent)
+    , m_rules(std::make_unique<InputRules>(this).release())
 {
 }
 
@@ -498,4 +498,4 @@ QVariantList ProviderDescriptors::details(const QString &provider, const QVarian
     return result;
 }
 
-} // namespace NetVfsUi
+}

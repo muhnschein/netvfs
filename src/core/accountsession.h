@@ -16,21 +16,14 @@ namespace NetVfs {
 
 class SecretSource;
 
-// Convenience: account parameters + credentials + backend + policy (SPEC 5.2,
-// SPEC-v2 XA-4). open() loads the account for one service synchronously and
-// fetches the secret asynchronously; exactly one of ready() or failed()
-// follows.
-//
-// A configuration that is not allowed for the service (checkServicePolicy(),
-// e.g. an SMB guest profile or allow_insecure for Backup) fails with
-// SecurityPolicy before any secret is read. Whether the service is enabled
-// is reported in config().serviceEnabled; consumers list accounts with
-// AccountStore::filesAccounts() (Files) or through the platform (Backup).
+// open() loads the account for one service, fetches the secret async; exactly one of ready() or
+// failed() follows.
+// Config not allowed for the service (checkServicePolicy()) fails with SecurityPolicy before any
+// secret is read.
 class NETVFS_EXPORT AccountSession : public QObject
 {
     Q_OBJECT
 public:
-    // Production entry point: default accounts manager and signond.
     static AccountSession *open(int accountId, Service service, QObject *parent);
 
     // Takes ownership of `secrets`; `manager` must outlive the session.
@@ -46,13 +39,10 @@ public:
     QString filesRoot() const { return m_config.filesRoot; }
     Service service() const { return m_config.service; }
 
-    // Owned by the session; created on first use. Thread-confined to the
-    // thread that first calls a Backend method.
+    // Owned by the session; created on first use. Thread-confined to the first calling thread.
     Backend *backend();
-    // A fresh, caller-owned backend for the account's provider.
     Backend *createBackend(Result *result = nullptr) const;
 
-    // Wipes the held secret (SEC-5).
     void releaseCredentials();
 
 Q_SIGNALS:
@@ -70,6 +60,5 @@ private:
     QScopedPointer<Backend> m_backend;
 };
 
-} // namespace NetVfs
-
+}
 #endif

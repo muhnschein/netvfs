@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! Consumer registration (SPEC-v2 XB-3), the environment the bridge reads
-//! and the paths it derives from it.
+//! Consumer registration, the environment the bridge reads, and derived paths.
 //!
 //! A consumer file `/usr/share/netvfs/consumers/<id>.conf`:
 //!
@@ -12,13 +11,7 @@
 //! DataDir=.local/share/org.netvfs/lautta
 //! ```
 //!
-//! is valid only when both of its readers accept it: the C++ reader
-//! (`ConsentStore::parseConsumerFile`, a strict line reader, not QSettings)
-//! and the systemd generator (`netvfs-bridge-generator.c`), which made the
-//! bridge's units from it. The bridge thus serves exactly the consumers the
-//! generator set up: the same consumers folder (the generator's checks of
-//! `NETVFS_CONSUMERS_DIR`), the file inside it after resolving links, values
-//! within the generator's buffers, no control characters in `DisplayName`.
+//! is valid only when both readers accept it: the C++ reader (`ConsentStore::parseConsumerFile`, a strict line reader, not QSettings) and the systemd generator (`netvfs-bridge-generator.c`) that made the bridge's units. The bridge thus serves exactly the consumers the generator set up: same consumers folder checks (`NETVFS_CONSUMERS_DIR`), file inside it after resolving links, values within the generator's buffers, no control characters in `DisplayName`.
 
 use crate::status::Status;
 use netvfs_bridge_proto::ErrorName;
@@ -29,13 +22,12 @@ use std::path::{Path, PathBuf};
 
 /// The consumers folder of the package.
 pub const CONSUMERS_DIR: &str = "/usr/share/netvfs/consumers";
-/// The installed accounts helper (XB-2a).
+/// The installed accounts helper.
 pub const ACCOUNTS_HELPER: &str = "/usr/libexec/netvfs/netvfs-accounts";
-/// The idle exit (XB-2): 30 s after the last client left and no job runs.
+/// Idle exit: 30 s after the last client left and no job runs.
 pub const IDLE_EXIT_MS: u64 = 30_000;
 
 const MAX_ID: usize = 64;
-/// `MaxPathLength` (C++) and `MAX_VALUE` (generator).
 const MAX_VALUE: usize = 1024;
 const MAX_FILE_BYTES: u64 = 16 * 1024;
 /// The generator's `fgets` buffer (`MAX_LINE`), less the NUL.
@@ -43,7 +35,6 @@ const GENERATOR_LINE: usize = 2047;
 /// `MAX_PATH_LENGTH / 2` of the generator.
 const MAX_CONSUMERS_DIR: usize = 2048;
 
-/// The environment variables the bridge reads.
 const VARIABLES: [&str; 7] = [
     "HOME",
     "XDG_CONFIG_HOME",
@@ -75,12 +66,10 @@ pub fn is_valid_id(id: &str) -> bool {
         && id.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
 }
 
-/// Characters allowed in paths that end up in systemd unit files.
 fn is_path_char(b: u8) -> bool {
     b.is_ascii_alphanumeric() || matches!(b, b'/' | b'.' | b'_' | b'-' | b'+')
 }
 
-/// No empty, `.` or `..` component.
 fn has_clean_components(path: &str) -> bool {
     path.split('/').all(|part| !matches!(part, "" | "." | ".."))
 }
@@ -129,7 +118,6 @@ impl Env {
         self.vars.get(name).map(OsString::as_os_str)
     }
 
-    /// A variable that is set and not empty.
     fn non_empty(&self, name: &str) -> Option<&OsStr> {
         self.get(name).filter(|v| !v.is_empty())
     }
@@ -140,43 +128,37 @@ impl Env {
         PathBuf::from(self.non_empty("HOME").unwrap_or_else(|| OsStr::new("/")))
     }
 
-    /// `QStandardPaths::GenericConfigLocation`: `$XDG_CONFIG_HOME` or
-    /// `~/.config`.
+    /// `QStandardPaths::GenericConfigLocation`: `$XDG_CONFIG_HOME` or `~/.config`.
     #[must_use]
     pub fn config_home(&self) -> PathBuf {
         self.non_empty("XDG_CONFIG_HOME").map_or_else(|| self.home().join(".config"), PathBuf::from)
     }
 
-    /// `QStandardPaths::GenericDataLocation`: `$XDG_DATA_HOME` or
-    /// `~/.local/share`.
+    /// `QStandardPaths::GenericDataLocation`: `$XDG_DATA_HOME` or `~/.local/share`.
     #[must_use]
     pub fn data_home(&self) -> PathBuf {
         self.non_empty("XDG_DATA_HOME").map_or_else(|| self.home().join(".local/share"), PathBuf::from)
     }
 
-    /// The consent file (XB-6): `~/.config/netvfs/bridge.conf`.
+    /// The consent file: `~/.config/netvfs/bridge.conf`.
     #[must_use]
     pub fn consent_file(&self) -> PathBuf {
         self.config_home().join("netvfs/bridge.conf")
     }
 
-    /// The accepted ad-hoc identities of `consumer` (XB-14):
-    /// `~/.local/share/netvfs/bridge/<id>/known_hosts`.
+    /// Accepted ad-hoc identities of `consumer`: `~/.local/share/netvfs/bridge/<id>/known_hosts`.
     #[must_use]
     pub fn known_hosts_file(&self, consumer: &str) -> PathBuf {
         self.data_home().join("netvfs/bridge").join(consumer).join("known_hosts")
     }
 
-    /// The accounts helper: `NETVFS_ACCOUNTS_HELPER` when set (tests; even
-    /// empty, as `qEnvironmentVariableIsSet`), else the installed one.
+    /// The accounts helper: `NETVFS_ACCOUNTS_HELPER` when set (tests; even empty, as `qEnvironmentVariableIsSet`), else the installed one.
     #[must_use]
     pub fn accounts_helper(&self) -> PathBuf {
         self.get("NETVFS_ACCOUNTS_HELPER").map_or_else(|| PathBuf::from(ACCOUNTS_HELPER), PathBuf::from)
     }
 
-    /// The consumers folder: `NETVFS_CONSUMERS_DIR` when the generator
-    /// would take it (absolute, at most 2048 bytes, no control character,
-    /// no `..` component), else the package's.
+    /// The consumers folder: `NETVFS_CONSUMERS_DIR` when the generator would take it (absolute, at most 2048 bytes, no control character, no `..` component), else the package's.
     #[must_use]
     pub fn consumers_dir(&self) -> PathBuf {
         match self.non_empty("NETVFS_CONSUMERS_DIR") {
@@ -185,8 +167,7 @@ impl Env {
         }
     }
 
-    /// The idle exit: `NETVFS_BRIDGE_IDLE_EXIT_MS` when it is a positive
-    /// `int` (`qEnvironmentVariableIntValue`, tests), else 30 s.
+    /// The idle exit: `NETVFS_BRIDGE_IDLE_EXIT_MS` when a positive `int` (`qEnvironmentVariableIntValue`, tests), else 30 s.
     #[must_use]
     pub fn idle_exit_ms(&self) -> u64 {
         self.get("NETVFS_BRIDGE_IDLE_EXIT_MS")
@@ -211,8 +192,7 @@ fn is_acceptable_consumers_dir(dir: &[u8]) -> bool {
         && !dir.split(|b| *b == b'/').any(|part| part == b"..")
 }
 
-/// `qEnvironmentVariableIntValue`: `strtoll` with base 0 (leading white
-/// space, a sign, `0x` hex or `0` octal), the whole value, in `int` range.
+/// `qEnvironmentVariableIntValue`: `strtoll` base 0 (leading white space, sign, `0x` hex or `0` octal), whole value, in `int` range.
 fn qt_env_int(value: &[u8]) -> Option<i32> {
     // Qt refuses what does not fit its buffer.
     if value.len() > 13 {
@@ -238,8 +218,6 @@ fn qt_env_int(value: &[u8]) -> Option<i32> {
     i32::try_from(if negative { magnitude.checked_neg()? } else { magnitude }).ok()
 }
 
-// ------------------------------------------------------------------ files
-
 fn invalid(path: &Path, why: &str) -> Status {
     Status::new(ErrorName::InvalidName, format!("Invalid consumer file {}: {why}", path.display()))
 }
@@ -251,7 +229,7 @@ fn unreadable(path: &Path) -> Status {
 /// `ConsentStore::loadConsumer`: loads and validates `<consumers>/<id>.conf`.
 ///
 /// # Errors
-/// `InvalidName` for a bad id or file, `NotFound` when it cannot be read.
+/// `InvalidName` for a bad id or file, `NotFound` when unreadable.
 pub fn load_consumer(env: &Env, id: &str) -> Result<ConsumerInfo, Status> {
     if !is_valid_id(id) {
         return Err(Status::new(ErrorName::InvalidName, "Invalid consumer id"));
@@ -274,8 +252,7 @@ pub fn load_consumer(env: &Env, id: &str) -> Result<ConsumerInfo, Status> {
     Ok(info)
 }
 
-/// Every valid consumer in the consumers folder, sorted by id; invalid
-/// files are skipped with a warning (`ConsentStore::consumers`).
+/// Every valid consumer in the consumers folder, sorted by id; invalid files are skipped with a warning.
 #[must_use]
 pub fn consumers(env: &Env) -> Vec<ConsumerInfo> {
     let Ok(entries) = std::fs::read_dir(env.consumers_dir()) else { return Vec::new() };
@@ -300,7 +277,6 @@ pub fn consumers(env: &Env) -> Vec<ConsumerInfo> {
         .collect()
 }
 
-/// The C++ reader: `[Consumer]` lines, each trimmed as `QString::trimmed`.
 fn parse_consumer(content: &[u8], stem: &str) -> Result<ConsumerInfo, &'static str> {
     let mut info = ConsumerInfo {
         id: String::new(),
@@ -312,8 +288,7 @@ fn parse_consumer(content: &[u8], stem: &str) -> Result<ConsumerInfo, &'static s
     for raw in content.split(|b| *b == b'\n') {
         let decoded = String::from_utf8_lossy(raw);
         let line = decoded.trim();
-        // Comments need no rule of their own: their keys would start with
-        // '#' or ';', which no field has.
+        // Comments need no rule: their keys would start with '#' or ';', which no field has.
         if line.starts_with('[') {
             in_group = line == "[Consumer]";
             continue;
@@ -345,16 +320,13 @@ fn parse_consumer(content: &[u8], stem: &str) -> Result<ConsumerInfo, &'static s
     Ok(info)
 }
 
-/// The generator's reading of the same file (`parse_consumer`, `validate`):
-/// `fgets` lines of at most 2047 bytes, cut at a NUL, trimmed of spaces and
-/// tabs; values within its buffers; no control characters in DisplayName.
+/// The generator's reading of the same file (`parse_consumer`, `validate`): `fgets` lines of at most 2047 bytes, cut at a NUL, trimmed of spaces and tabs; values within its buffers; no control characters in DisplayName.
 fn check_as_generator(content: &[u8], stem: &str) -> Result<(), &'static str> {
     let mut fields: [&[u8]; 4] = [b""; 4];
     let mut in_group = false;
     for chunk in fgets_lines(content) {
         let line = chunk.split(|b| *b == 0).next().unwrap_or_default();
         let s = trim_generator(line);
-        // Comments and empty keys match no field, as in parse_consumer.
         if s.first() == Some(&b'[') {
             in_group = s == b"[Consumer]";
             continue;
@@ -383,11 +355,9 @@ fn check_as_generator(content: &[u8], stem: &str) -> Result<(), &'static str> {
     if display_name.is_empty() || display_name.iter().any(|b| *b < 0x20 || *b == 0x7f) {
         return Err("DisplayName is empty or has control characters");
     }
-    // Executable and DataDir: the C++ rules on the same bytes.
     Ok(())
 }
 
-/// The lines `fgets` returns with a 2048-byte buffer.
 fn fgets_lines(content: &[u8]) -> impl Iterator<Item = &[u8]> {
     let mut rest = content;
     std::iter::from_fn(move || {
@@ -401,8 +371,6 @@ fn fgets_lines(content: &[u8]) -> impl Iterator<Item = &[u8]> {
     })
 }
 
-/// The generator's `trim`: spaces and tabs in front; spaces, tabs, `\r`
-/// and `\n` at the end.
 fn trim_generator(s: &[u8]) -> &[u8] {
     let start = s.iter().take_while(|b| matches!(b, b' ' | b'\t')).count();
     let s = s.get(start..).unwrap_or_default();
@@ -428,7 +396,6 @@ mod tests {
         Env::default().with("NETVFS_CONSUMERS_DIR", dir.path())
     }
 
-    /// The C++ case `consumers`.
     #[test]
     fn consumers_case() {
         let dir = TempDir::new();
@@ -465,17 +432,14 @@ mod tests {
         let info = parse_consumer(other.as_bytes(), "lautta").unwrap();
         assert_eq!((info.id.as_str(), info.display_name.as_str()), ("lautta", "Lautta, the browser"));
         check_as_generator(other.as_bytes(), "lautta").unwrap();
-        // Comments and keys that are not fields change nothing.
         let commented = format!("#Id=x\n;DisplayName=\n=y\n{LAUTTA}# Id=x\n");
         assert_eq!(parse_consumer(commented.as_bytes(), "lautta").unwrap(), info);
         check_as_generator(commented.as_bytes(), "lautta").unwrap();
-        // Each reader checks the id against the file name.
         assert_eq!(
             parse_consumer(LAUTTA.as_bytes(), "other").unwrap_err(),
             "Id must match [a-z0-9-]+ and the file name"
         );
         check_as_generator(LAUTTA.as_bytes(), "other").unwrap_err();
-        // The generator's buffers hold 1024 bytes of every path.
         for (key, long) in [("Executable", format!("/{}", "a".repeat(1024))), ("DataDir", "a".repeat(1025))] {
             let text = format!("{LAUTTA}{key}={long}\n");
             assert_eq!(
@@ -494,7 +458,6 @@ mod tests {
         std::fs::create_dir(dir.join("folder.conf")).unwrap();
         let ids: Vec<String> = consumers(&env_for(&dir)).into_iter().map(|c| c.id).collect();
         assert_eq!(ids, ["lautta"]);
-        // A file of exactly the size limit is read.
         let padded = format!("{LAUTTA}{}", "#".repeat(16 * 1024 - LAUTTA.len() - 1)) + "\n";
         assert_eq!(padded.len(), 16 * 1024);
         dir.write("lautta.conf", &padded);
@@ -503,8 +466,6 @@ mod tests {
         assert_eq!(load_consumer(&env_for(&dir), "lautta").unwrap_err().name, ErrorName::InvalidName);
     }
 
-    /// The generator's test consumers (tests/bridge/generator/consumers):
-    /// the bridge loads what it generated units for, and nothing else.
     #[test]
     fn generator_consumers() {
         let shipped = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -570,23 +531,17 @@ mod tests {
         };
         let ok = consumer("x", "X", "/x/y", "a");
         load(&ok).unwrap();
-        // Qt trims what the generator keeps.
         load(&consumer("x", "X\u{b}", "/x/y", "a")).unwrap_err();
         load(&ok.replace("Id=x", "\u{a0}Id=x")).unwrap_err();
         assert_eq!(load(&consumer("x", "X\u{a0}", "/x/y", "a")).unwrap().display_name, "X");
-        // CRLF, comments, other groups, unknown keys, keys without value.
         let crlf =
             format!("; c\r\n[Other]\r\nId=y\r\n{}\r\nKey=v\r\n=v\r\nnoequals\r\n", ok.replace('\n', "\r\n"));
         assert_eq!(load(&crlf).unwrap().id, "x");
-        // A line the generator splits at 2047 bytes: its tail is a line of
-        // its own to the generator only.
         let split = format!("{ok}# {}Id=evil\n", "x".repeat(GENERATOR_LINE - 2));
         assert!(load(&split).unwrap_err().message.ends_with("Id must match [a-z0-9-]+ and the file name"));
         load(&format!("{ok}# {}Id=evil\n", "x".repeat(GENERATOR_LINE - 1))).unwrap();
-        // Text after a NUL is gone for the generator.
         load(&ok.replace("Id=x", "Id=x\0z")).unwrap_err();
         load(&format!("{ok}DisplayName=\0\n")).unwrap_err();
-        // Values of exactly the generator's buffers.
         load(&consumer("x", "X", &format!("/{}", "a".repeat(1023)), "a")).unwrap();
         load(&consumer("x", "X", &format!("/{}", "a".repeat(1024)), "a")).unwrap_err();
     }
@@ -669,7 +624,6 @@ mod tests {
         }
         assert_eq!(qt_env_int(b"-0x10"), Some(-16));
         assert_eq!(qt_env_int(b"0"), Some(0));
-        // Qt's buffer takes 13 bytes.
         assert_eq!(qt_env_int(b"   0000000500"), Some(320));
         assert_eq!(qt_env_int(b"    0000000500"), None);
         assert_eq!(qt_env_int(b"2147483647"), Some(i32::MAX));

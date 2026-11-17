@@ -6,8 +6,7 @@ using namespace NetVfs;
 namespace NetVfsUi {
 
 namespace {
-// Files verify (SPEC-v2-review 2.19): nothing is written, so the backup
-// wording does not apply.
+// Files verify writes nothing, so the backup wording does not apply.
 QString browseText(Error error)
 {
     switch (error) {
@@ -134,7 +133,7 @@ QString genericText(Error error)
     //% "Something went wrong on this device."
     return qtTrId("settings-accounts-netvfs-la-error_internal");
 }
-} // namespace
+}
 
 QString userErrorText(Error error, Activity activity)
 {
@@ -150,4 +149,4 @@ QString backendMissingText()
     return qtTrId("settings-accounts-netvfs-la-error_backend_missing");
 }
 
-} // namespace NetVfsUi
+}
