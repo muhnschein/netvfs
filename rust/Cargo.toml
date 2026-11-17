@@ -12,7 +12,7 @@ ssh-key = { path = "vendor/ssh-key" }
 picky-asn1-der = { path = "vendor/picky-asn1-der" }
 
 [workspace.package]
-version = "0.6.0"
+version = "1.0.0"
 edition = "2024"
 # rustc that sailfishos/rust ships next (JB#64166). Until an SDK target has it, CI cross-builds with host cargo against the SDK compiler and sysroot (tools/ci/cross-build.sh).
 rust-version = "1.95"
