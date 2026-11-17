@@ -12,3 +12,4 @@ First release, for Sailfish OS 5.2 on aarch64.
 - Apps see each server's connection state: connected, connecting, not connected, or why connecting failed.
 - Apps such as Lautta can list, mount and unmount memory cards and USB drives through netvfs, including encrypted ones and drives Sailfish OS does not mount by itself, and can open *Settings › Storage*.
 - Updating netvfs restarts its bridge, so apps use the new version without a reboot. A transfer running during the update stops.
+- Reproducible builds: a commit always builds to the same RPMs, byte for byte. `tools/verify-rpm.sh` checks them for you (`doc/VERIFYING.md`).

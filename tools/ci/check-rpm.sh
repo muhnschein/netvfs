@@ -11,6 +11,7 @@
 #   - libnetvfs-rs.so exports one symbol, links only the C runtime, needs no newer glibc, is hardened and sits
 #     where the plugins that load it look for it, SMB plugin included (check-rs-lib.sh);
 #   - no file of the main package links libssh or libcrypto;
+#   - no packaged file or folder is writable by group or others (%license keeps LICENSE's build-tree mode);
 #   - all packages install into the SDK target (Requires from the release repositories), every ELF file resolves
 #     its libraries and none carries a build library search path.
 # Env: SDK_IMAGE (container image), TARGET (sb2 target name).
@@ -69,6 +70,10 @@ for r in $rpms; do
     # Setgid helper only where asked for.
     if echo "$requires" | grep -q '^netvfs-bridge'; then
         fail "$name requires netvfs-bridge"
+    fi
+    writable=$(rpm -qp --qf '[%{FILEMODES:perms} %{FILENAMES}\n]' "$r" | grep -E '^[^l].{4}w|^[^l].{7}w' || true)
+    if [ -n "$writable" ]; then
+        fail "$name has files writable by group or others: $writable"
     fi
 done
 

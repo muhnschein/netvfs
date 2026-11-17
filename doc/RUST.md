@@ -57,7 +57,7 @@ No SDK target ships rustc 1.95: RPM job builds Rust with host cargo against SDK'
 | Step | Script |
 |---|---|
 | Lift `/opt/cross`, host libs and target sysroot from pinned 5.2.0.15 SDK image; binutils names, linker wrapper, unversioned `libsqlite3.so` | `tools/ci/lift-sdk.sh <image> <target> <dir>` |
-| `cargo build --release` for `aarch64-unknown-linux-gnu`: PIE, full RELRO, `-z now`, NX stack; `libnetvfs-rs.so` with `--profile rs-release` (no PIE) | `tools/ci/cross-build.sh <dir> rust/prebuilt` |
+| `cargo build --release` for `aarch64-unknown-linux-gnu`: PIE, full RELRO, `-z now`, NX stack, cargo home mapped to `/cargo` (reproducible); `libnetvfs-rs.so` with `--profile rs-release` (no PIE) | `tools/ci/cross-build.sh <dir> rust/prebuilt` |
 | Workspace tests for target under `qemu-aarch64-static` (confinement tests native only) | `tools/ci/cross-build.sh <dir> <out> test` |
 | Cross-built helper answers `list`/`files` byte for byte as host build; bridge starts, loads its C ABI | `tools/ci/cross-smoke.sh` |
 | NEEDED libs, GLIBC floor, PIE, RELRO, BIND_NOW, NX of packaged binaries; `libnetvfs-bridge-ffi.so` exports only `nvb_ffi_get`; `libnetvfs-rs.so` exports only `nvr_get`, links only libc, libgcc_s, libm, libpthread, libdl, ld.so | `tools/ci/check-linked-libs.sh`, `check-ffi-lib.sh`, `check-rs-lib.sh` (from `check-rpm.sh`, `make check-packaging`) |

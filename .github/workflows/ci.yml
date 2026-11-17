@@ -412,10 +412,39 @@ jobs:
           path: RPMS/*.rpm
           if-no-files-found: error
 
+  reproducible:
+    # RPM job's packages rebuilt as doc/VERIFYING.md tells users (tools/verify-rpm.sh): fresh clone, other runner,
+    # path, cargo home, time zone, umask, time. Not byte for byte: red.
+    name: RPMs rebuild byte for byte
+    needs: rpm
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Cross-build tools (i386 C library for the SDK compiler)
+        run: ./tools/ci/apt-install.sh --no-install-recommends libc6-i386
+      - name: Fetch the RPM job's packages
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh run download "$GITHUB_RUN_ID" -R "$GITHUB_REPOSITORY" -n netvfs-rpms-aarch64 --dir "$RUNNER_TEMP/rpms"
+      # Clone from this checkout: a pull request's merge commit is on no branch GitHub serves.
+      - name: Rebuild and compare
+        env:
+          TZ: Pacific/Chatham
+        run: |
+          umask 0002
+          CARGO_HOME="$RUNNER_TEMP/cargo" NETVFS_REPO="$GITHUB_WORKSPACE" \
+            ./tools/verify-rpm.sh --ref "$GITHUB_SHA" "$RUNNER_TEMP"/rpms/*.rpm
+
   # Nobody watches a scheduled run: a failure opens an issue (or comments on the open one).
   report:
     name: Report a failed weekly run
-    needs: [check, sanitize, mutation, windows-smb, fuzz, rust-supply-chain, rpm]
+    needs: [check, sanitize, mutation, windows-smb, fuzz, rust-supply-chain, rpm, reproducible]
     if: failure() && github.event_name == 'schedule'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
