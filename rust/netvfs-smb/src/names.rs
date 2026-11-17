@@ -108,7 +108,7 @@ pub fn units_of(bytes: &[u8]) -> Option<Vec<u16>> {
     if !bytes.len().is_multiple_of(2) {
         return None;
     }
-    Some(bytes.chunks_exact(2).filter_map(|c| <[u8; 2]>::try_from(c).ok()).map(u16::from_le_bytes).collect())
+    Some(bytes.as_chunks::<2>().0.iter().copied().map(u16::from_le_bytes).collect())
 }
 
 /// Whether a name a server lists names an entry of the folder: not `.` or `..`, not empty, no `/` or NUL. Any other name escapes the folder when joined.

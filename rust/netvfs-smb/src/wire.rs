@@ -252,7 +252,7 @@ mod tests {
         assert_eq!(r.remaining(), 0);
         r.u8().unwrap_err();
         r.skip(1).unwrap_err();
-        assert!(r.bytes(0).unwrap().is_empty());
+        assert_eq!(r.bytes(0).unwrap(), b"");
     }
 
     #[test]

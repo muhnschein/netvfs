@@ -39,7 +39,7 @@ pub use status::Status;
 use std::process::ExitCode;
 
 /// Serves one consumer until the idle exit: binds the listening socket of `deps`, runs the [`core`](crate::core) on a current-thread runtime of the calling thread. The C ABI must be loaded and `init`ed, its Qt loop running on the main thread. Success after idle exit or [`CoreLink::shutdown`]; failure if the socket cannot be bound or the runtime cannot start.
-#[must_use]
+#[must_use = "the exit code of the bridge process"]
 pub fn serve(config: Config, deps: Deps) -> ExitCode {
     let runtime = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
         Ok(runtime) => runtime,
