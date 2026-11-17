@@ -287,3 +287,14 @@ fn pins_name_one_key() {
     }
     assert!(!pin_matches("tls-spki-sha256 ", &[]));
 }
+
+#[test]
+fn debug_names_the_host_and_whether_system_trust_applies() {
+    let trusting = Client::new("nas.example", &[], &anchors()).unwrap();
+    assert_eq!(
+        format!("{trusting:?}"),
+        "Client { name: DnsName(\"nas.example\"), verifier: Verifier { anchors: true, .. }, .. }"
+    );
+    let bare = Client::new("nas.example", &[], &Anchors::Custom(Arc::new(RootCertStore::empty()))).unwrap();
+    assert!(format!("{bare:?}").contains("anchors: false"), "{bare:?}");
+}
