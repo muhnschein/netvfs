@@ -8,7 +8,7 @@
 //! when the first one was system trusted.
 #![forbid(unsafe_code)]
 
-use netvfs_vfs::{ErrorName, IdentityKind, ServerIdentity, Status};
+use netvfs_vfs::{ErrorName, IdentityKind, Params, ServerIdentity, Status};
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
 use rustls::client::{
     ClientSessionStore, Resumption, Tls12ClientSessionValue, Tls13ClientSessionValue, WebPkiServerVerifier,
@@ -255,6 +255,50 @@ impl Client {
         drop(state);
         Some(identity(seen.spki))
     }
+}
+
+/// Host (brackets dropped) and port of `params`; `default_port` for none.
+///
+/// # Errors
+/// `Internal` for an empty host or one holding `@` or `/`, or a port out of range.
+pub fn host_port(params: &Params, default_port: u16) -> Result<(String, u16), Status> {
+    if params.host.is_empty() || params.host.contains(['@', '/']) {
+        return Err(Status::internal("Invalid server name"));
+    }
+    let port = if params.port <= 0 {
+        default_port
+    } else {
+        u16::try_from(params.port).map_err(|_e| Status::internal(format!("Invalid port {}", params.port)))?
+    };
+    Ok((params.host.trim_start_matches('[').trim_end_matches(']').to_owned(), port))
+}
+
+/// `ms` milliseconds when positive, else `default`.
+#[must_use]
+pub fn timeout_or(ms: i32, default: Duration) -> Duration {
+    match u64::try_from(ms) {
+        Ok(ms) if ms > 0 => Duration::from_millis(ms),
+        _ => default,
+    }
+}
+
+/// Whether credentials must not go out: `pin` set and the handshake's key (`seen`) not it, or none seen.
+#[must_use]
+pub fn refuses_credentials(pin: Option<&str>, seen: Option<&Seen>) -> bool {
+    match (pin, seen) {
+        (Some(pin), Some(seen)) => !pin_matches(pin, &seen.spki),
+        (Some(_), None) => true,
+        (None, _) => false,
+    }
+}
+
+/// Refusal to sign in where [`refuses_credentials`].
+#[must_use]
+pub fn identity_changed() -> Status {
+    Status::new(
+        ErrorName::ServerIdentityChanged,
+        "The server certificate does not match the saved one; not signing in",
+    )
 }
 
 /// Whether `pin` (`tls-spki-sha256 <base64>`, as C++ `ServerIdentity::toPin` writes it) names `spki`; a pin that

@@ -337,3 +337,31 @@ async fn tickets_are_counted_used_once_and_capped() {
     assert!(resumed.recv().await.unwrap());
     assert_eq!(client.tickets(), Tickets::MAX);
 }
+
+#[test]
+fn hosts_ports_and_timeouts_of_params() {
+    let at = |host: &str, port: i32| host_port(&Params { host: host.into(), port, ..Params::default() }, 21);
+    assert_eq!(at("[::1]", 0).unwrap(), ("::1".to_owned(), 21));
+    assert_eq!(at("h", -1).unwrap(), ("h".to_owned(), 21));
+    assert_eq!(at("h", 990).unwrap(), ("h".to_owned(), 990));
+    for (host, port) in [("", 0), ("u@h", 0), ("h/x", 0), ("h", 70_000)] {
+        assert_eq!(at(host, port).unwrap_err().name, ErrorName::Internal, "{host}:{port}");
+    }
+    let default = Duration::from_secs(9);
+    assert_eq!(timeout_or(1500, default), Duration::from_millis(1500));
+    assert_eq!(timeout_or(0, default), default);
+    assert_eq!(timeout_or(-5, default), default);
+}
+
+#[test]
+fn credentials_go_only_where_the_pin_matches() {
+    let seen = Seen { spki: spki(SELF), system_trusted: false };
+    let right = format!("tls-spki-sha256 {}", data_encoding::BASE64.encode(&seen.spki));
+    let wrong = format!("tls-spki-sha256 {}", data_encoding::BASE64.encode(&spki(LEAF)));
+    assert!(!refuses_credentials(None, None));
+    assert!(!refuses_credentials(None, Some(&seen)));
+    assert!(!refuses_credentials(Some(&right), Some(&seen)));
+    assert!(refuses_credentials(Some(&wrong), Some(&seen)));
+    assert!(refuses_credentials(Some(&right), None));
+    assert_eq!(identity_changed().name, ErrorName::ServerIdentityChanged);
+}
