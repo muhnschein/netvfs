@@ -298,3 +298,70 @@ fn debug_names_the_host_and_whether_system_trust_applies() {
     let bare = Client::new("nas.example", &[], &Anchors::Custom(Arc::new(RootCertStore::empty()))).unwrap();
     assert!(format!("{bare:?}").contains("anchors: false"), "{bare:?}");
 }
+
+/// A server answering connection `i` with the `i`-th of `tickets` (tickets it sends), sessions shared: echoes one
+/// byte, then closes; reports whether each resumed.
+async fn resuming_server(tickets: Vec<usize>) -> (SocketAddr, tokio::sync::mpsc::UnboundedReceiver<bool>) {
+    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let base = server_config(LEAF, LEAF_KEY, &[&rustls::version::TLS13]);
+    let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+    tokio::spawn(async move {
+        for n in tickets {
+            let (tcp, _) = listener.accept().await.unwrap();
+            let mut config = (*base).clone();
+            config.send_tls13_tickets = n;
+            let mut tls = TlsAcceptor::from(Arc::new(config)).accept(tcp).await.unwrap();
+            tx.send(tls.get_ref().1.handshake_kind() == Some(rustls::HandshakeKind::Resumed)).unwrap();
+            let mut b = [0u8; 1];
+            tls.read_exact(&mut b).await.unwrap();
+            tls.write_all(&b).await.unwrap();
+            tls.shutdown().await.ok();
+        }
+    });
+    (addr, rx)
+}
+
+#[tokio::test]
+async fn tickets_are_counted_used_once_and_capped() {
+    let (addr, mut resumed) = resuming_server(vec![3, 0, 10]).await;
+    let client = Client::new("localhost", &[], &anchors()).unwrap();
+    assert_eq!(client.tickets(), 0);
+    shake(&client, addr).await.unwrap();
+    assert!(!resumed.recv().await.unwrap());
+    assert_eq!(client.tickets(), 3);
+    shake(&client, addr).await.unwrap();
+    assert!(resumed.recv().await.unwrap());
+    assert_eq!(client.tickets(), 2);
+    shake(&client, addr).await.unwrap();
+    assert!(resumed.recv().await.unwrap());
+    assert_eq!(client.tickets(), Tickets::MAX);
+}
+
+#[test]
+fn hosts_ports_and_timeouts_of_params() {
+    let at = |host: &str, port: i32| host_port(&Params { host: host.into(), port, ..Params::default() }, 21);
+    assert_eq!(at("[::1]", 0).unwrap(), ("::1".to_owned(), 21));
+    assert_eq!(at("h", -1).unwrap(), ("h".to_owned(), 21));
+    assert_eq!(at("h", 990).unwrap(), ("h".to_owned(), 990));
+    for (host, port) in [("", 0), ("u@h", 0), ("h/x", 0), ("h", 70_000)] {
+        assert_eq!(at(host, port).unwrap_err().name, ErrorName::Internal, "{host}:{port}");
+    }
+    let default = Duration::from_secs(9);
+    assert_eq!(timeout_or(1500, default), Duration::from_millis(1500));
+    assert_eq!(timeout_or(0, default), default);
+    assert_eq!(timeout_or(-5, default), default);
+}
+
+#[test]
+fn credentials_go_only_where_the_pin_matches() {
+    let seen = Seen { spki: spki(SELF), system_trusted: false };
+    let right = format!("tls-spki-sha256 {}", data_encoding::BASE64.encode(&seen.spki));
+    let wrong = format!("tls-spki-sha256 {}", data_encoding::BASE64.encode(&spki(LEAF)));
+    assert!(!refuses_credentials(None, None));
+    assert!(!refuses_credentials(None, Some(&seen)));
+    assert!(!refuses_credentials(Some(&right), Some(&seen)));
+    assert!(refuses_credentials(Some(&wrong), Some(&seen)));
+    assert!(refuses_credentials(Some(&right), None));
+    assert_eq!(identity_changed().name, ErrorName::ServerIdentityChanged);
+}

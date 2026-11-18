@@ -1,0 +1,24 @@
+// SPDX-License-Identifier: LGPL-2.1-or-later
+#ifndef NETVFS_FTPSPLUGIN_H
+#define NETVFS_FTPSPLUGIN_H
+
+#include "backend.h"
+
+#include <QtCore/QObject>
+
+namespace NetVfs {
+
+// Single-level namespace: Qt 5.6 moc cannot parse C++17 nested namespace definitions.
+class FtpsBackendFactory : public QObject, public BackendFactory
+{
+    Q_OBJECT
+    Q_PLUGIN_METADATA(IID "org.netvfs.BackendFactory")
+    Q_INTERFACES(NetVfs::BackendFactory)
+
+public:
+    QString provider() const override;
+    Result create(Backend **out) override;
+};
+
+}
+#endif

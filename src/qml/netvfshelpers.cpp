@@ -28,6 +28,7 @@ constexpr const char *AuthInteractive = "interactive";
 constexpr const char *ProviderSftp = "sftp";
 constexpr const char *ProviderSmb = "smb";
 constexpr const char *ProviderWebDav = "webdav";
+constexpr const char *ProviderFtps = "ftps";
 constexpr const char *StateCredentialsMissing = "credentials-missing";
 constexpr int MaxHostLength = 253;
 constexpr int MaxLabelLength = 63;
@@ -187,6 +188,8 @@ int InputRules::defaultPort(const QString &provider) const
         return 445;
     if (provider == QLatin1String(ProviderWebDav))
         return 443;
+    if (provider == QLatin1String(ProviderFtps))
+        return 21;
     return 0;
 }
 

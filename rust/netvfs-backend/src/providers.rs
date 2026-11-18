@@ -13,6 +13,7 @@ pub fn create(provider: &[u8]) -> Result<Box<dyn DynBackend>, Status> {
         b"sftp" => Ok(Box::new(netvfs_sftp::backend::Sftp::new())),
         b"smb" => Ok(Box::new(netvfs_smb::backend::Smb::new())),
         b"webdav" => Ok(Box::new(netvfs_webdav::backend::Webdav::new())),
+        b"ftps" => Ok(Box::new(netvfs_ftps::backend::Ftps::new())),
         #[cfg(feature = "testing")]
         b"mem" => Ok(Box::new(crate::mem::Mem::new())),
         _ => Err(Status::unsupported(format!(
@@ -29,12 +30,12 @@ mod tests {
 
     #[test]
     fn unknown_providers_are_unsupported() {
-        for provider in [&b"ftp"[..], b"", b"m\xffm", b"SFTP", b"sftp\0", b"WebDAV"] {
+        for provider in [&b"ftp"[..], b"", b"m\xffm", b"SFTP", b"sftp\0", b"WebDAV", b"FTPS"] {
             let e = create(provider).err().unwrap();
             assert_eq!(e.name, ErrorName::Unsupported);
         }
-        let e = create(b"ftps").err().unwrap();
-        assert_eq!(e.message, "No Rust backend for provider \"ftps\"");
+        let e = create(b"ftp").err().unwrap();
+        assert_eq!(e.message, "No Rust backend for provider \"ftp\"");
     }
 
     #[test]
@@ -50,6 +51,11 @@ mod tests {
     #[test]
     fn webdav_is_a_provider() {
         create(b"webdav").unwrap();
+    }
+
+    #[test]
+    fn ftps_is_a_provider() {
+        create(b"ftps").unwrap();
     }
 
     #[cfg(feature = "testing")]

@@ -4,9 +4,9 @@
 
 ## Overview
 
-netvfs adds SFTP, SMB and WebDAV servers to Sailfish OS as a platform service:
+netvfs adds SFTP, SMB, WebDAV and FTPS servers to Sailfish OS as a platform service:
 
-- **Accounts.** SFTP, SMB and WebDAV appear in *Settings → Accounts*, next to the
+- **Accounts.** SFTP, SMB, WebDAV and FTPS appear in *Settings → Accounts*, next to the
   stock account types. Passwords and keys stay in the system's credential
   store.
 - **Backups.** The same accounts appear as targets in *Settings → Backup*.
@@ -19,7 +19,8 @@ netvfs adds SFTP, SMB and WebDAV servers to Sailfish OS as a platform service:
 
 The SFTP client is for OpenSSH servers; the SMB client speaks SMB 3.1.1 only
 (Samba, Windows); the WebDAV client (Nextcloud, Apache and others) uses HTTPS
-with TLS 1.3 only. All are written in Rust.
+with TLS 1.3 only; the FTPS client needs explicit TLS 1.3 and MLSD (proftpd,
+vsftpd, pure-ftpd and others). All are written in Rust.
 
 ## Where it sits
 
@@ -55,7 +56,7 @@ one go.
 - We never roll our own crypto: the cryptography comes from established Rust
   crates.
 - Only modern crypto wherever possible: SSH only with Curve25519/hybrid PQC
-  key exchange, AEAD ciphers; SMB 3.1.1 only; WebDAV over TLS 1.3 only.
+  key exchange, AEAD ciphers; SMB 3.1.1 only; WebDAV and FTPS over TLS 1.3 only.
 - No folder sync, no mounting servers as file systems.
 - Not for the Jolla Store: it installs system files and a setgid helper.
 

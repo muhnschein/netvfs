@@ -17,7 +17,7 @@ constexpr int MaxPortDigits = 5;
 constexpr ushort FirstPrintable = 0x20;
 constexpr ushort Delete = 0x7F;
 
-enum class Kind { Sftp, Smb, WebDav, Local };
+enum class Kind { Sftp, Smb, WebDav, Ftps, Local };
 
 struct SchemeInfo {
     const char *scheme;
@@ -25,12 +25,13 @@ struct SchemeInfo {
     int defaultPort;
 };
 
-constexpr std::array<SchemeInfo, 6> Schemes = {{
+constexpr std::array<SchemeInfo, 7> Schemes = {{
     { "sftp", Kind::Sftp, 22 },
     { "ssh", Kind::Sftp, 22 },
     { "smb", Kind::Smb, 445 },
     { "davs", Kind::WebDav, 443 },
     { "https", Kind::WebDav, 443 },
+    { "ftps", Kind::Ftps, 21 },
     { "file", Kind::Local, 0 },
 }};
 
@@ -294,6 +295,10 @@ void applyKind(const SchemeInfo &info, const QString &urlPath, ConnectionParams 
         if (urlPath.size() > 1)
             params->options.insert(QStringLiteral("base_path"), urlPath);
         break;
+    case Kind::Ftps:
+        params->provider = QStringLiteral("ftps");
+        *path = urlPath;
+        break;
     case Kind::Local:
         params->provider = QStringLiteral("local");
         params->host.clear();
@@ -324,6 +329,8 @@ const char *schemeFor(const ConnectionParams &params)
         return "smb";
     if (params.provider == QLatin1String("webdav"))
         return "davs";
+    if (params.provider == QLatin1String("ftps"))
+        return "ftps";
     if (params.provider == QLatin1String("local"))
         return "file";
     return nullptr;
@@ -383,6 +390,8 @@ Result parse(const QString &url, ConnectionParams *params, QString *path)
         return r;
     if (isPlainHttp(scheme))
         return Result(Error::SecurityPolicy, QStringLiteral("WebDAV needs TLS; use davs:// or https://"));
+    if (scheme == QLatin1String("ftp"))
+        return Result(Error::SecurityPolicy, QStringLiteral("FTP needs TLS; use ftps://"));
     const SchemeInfo *info = findScheme(scheme);
     if (!info)
         return Result(Error::Unsupported, QStringLiteral("Unsupported URL scheme \"%1\"").arg(scheme));

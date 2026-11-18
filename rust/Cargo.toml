@@ -2,7 +2,7 @@
 # Rust parts: netvfs-accounts (setgid accounts helper), netvfs-bridge-proto (org.netvfs.Bridge1), netvfs-bridge, netvfs-vfs (backend interface), netvfs-sftp, netvfs-smb, netvfs-backend (libnetvfs-rs.so: Rust backends behind the C++ plugins).
 [workspace]
 resolver = "3"
-members = ["netvfs-accounts", "netvfs-bridge-proto", "netvfs-bridge", "netvfs-vfs", "netvfs-sftp", "netvfs-smb", "netvfs-tls", "netvfs-webdav", "netvfs-backend"]
+members = ["netvfs-accounts", "netvfs-bridge-proto", "netvfs-bridge", "netvfs-vfs", "netvfs-sftp", "netvfs-smb", "netvfs-tls", "netvfs-webdav", "netvfs-ftps", "netvfs-backend"]
 # Fuzz targets build with their own nightly toolchain. vendor/: patched crates.io crates ([patch.crates-io] below).
 exclude = ["fuzz", "vendor"]
 

@@ -98,6 +98,7 @@ private slots:
         QTest::newRow("sftp") << "sftp" << QStringList({ QStringLiteral("backup"), QStringLiteral("files") });
         QTest::newRow("smb") << "smb" << QStringList({ QStringLiteral("backup"), QStringLiteral("files") });
         QTest::newRow("webdav") << "webdav" << QStringList({ QStringLiteral("files") });
+        QTest::newRow("ftps") << "ftps" << QStringList({ QStringLiteral("files") });
     }
 
     void shippedDescriptorsAreValid()
@@ -123,7 +124,8 @@ private slots:
     {
         ProviderDescriptors descriptors;
         QCOMPARE(descriptors.providers(),
-                 QStringList({ QStringLiteral("sftp"), QStringLiteral("smb"), QStringLiteral("webdav") }));
+                 QStringList({ QStringLiteral("ftps"), QStringLiteral("sftp"), QStringLiteral("smb"),
+                               QStringLiteral("webdav") }));
         QVERIFY(descriptors.descriptor(QStringLiteral("local")).isEmpty());   // not an account provider
         QVERIFY(descriptors.descriptor(QStringLiteral("../etc")).isEmpty());
         QCOMPARE(ProviderDescriptors::load(QStringLiteral("../sftp"), nullptr).error(), Error::InvalidName);
@@ -133,7 +135,8 @@ private slots:
     void textIdsAreUsed()
     {
         QSet<QString> used;
-        for (const QString &provider : { QStringLiteral("sftp"), QStringLiteral("smb"), QStringLiteral("webdav") }) {
+        for (const QString &provider :
+             { QStringLiteral("sftp"), QStringLiteral("smb"), QStringLiteral("webdav"), QStringLiteral("ftps") }) {
             QFile file(DescriptorDir + QLatin1Char('/') + provider + QStringLiteral(".json"));
             QVERIFY(file.open(QIODevice::ReadOnly));
             const QString text = QString::fromUtf8(file.readAll());

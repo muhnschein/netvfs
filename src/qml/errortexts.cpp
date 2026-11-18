@@ -34,7 +34,7 @@ QString activityText(Error error, Activity activity)
         return qtTrId("settings-accounts-netvfs-la-error_service_policy_backup");
     }
     if (activity == Activity::StoredSecret && error == Error::AuthFailed) {
-        //% "The stored password or key for this account could not be read. Update the sign-in details."
+        //% "The sign-in details stored for this account could not be read. Update them."
         return qtTrId("settings-accounts-netvfs-la-error_stored_secret");
     }
     if (activity == Activity::InstallKey && error == Error::AuthFailed) {
@@ -77,7 +77,7 @@ QString genericText(Error error)
         //% "The server presented a different identity than the one stored for this account. It may have been reinstalled, or someone may be intercepting the connection."
         return qtTrId("settings-accounts-netvfs-la-error_identity_changed");
     case Error::AuthFailed:
-        //% "The server refused the sign-in. Check the user name and the password or key."
+        //% "The server refused the sign-in. Check the user name and the sign-in details."
         return qtTrId("settings-accounts-netvfs-la-error_auth_failed");
     case Error::SecurityPolicy:
         //% "The server does not meet the security requirements of this account, for example because it offers no modern encryption."

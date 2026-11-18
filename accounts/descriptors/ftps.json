@@ -1,0 +1,18 @@
+{
+    "provider": "ftps",
+    "services": ["files"],
+    "defaultPort": 21,
+    "authModes": [
+        { "id": "password", "label": "settings-accounts-netvfs-me-password", "secret": "password" }
+    ],
+    "fields": [
+        { "key": "host", "type": "text", "label": "settings-accounts-netvfs-la-server",
+          "placeholder": "settings-accounts-netvfs-ph-server", "validation": "host", "input": "url" },
+        { "key": "port", "type": "text", "label": "settings-accounts-netvfs-la-port",
+          "validation": "port", "optional": true, "input": "digits" },
+        { "key": "username", "type": "text", "label": "settings-accounts-netvfs-la-user", "validation": "userName" },
+        { "key": "files_root", "type": "text", "label": "settings-accounts-netvfs-la-files_root",
+          "description": "settings-accounts-netvfs-la-folder_in_home", "validation": "folder", "optional": true,
+          "service": "files" }
+    ]
+}

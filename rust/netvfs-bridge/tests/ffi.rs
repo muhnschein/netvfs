@@ -809,8 +809,14 @@ fn url_parse_format(env: &Env) {
         (plain.name, plain.message.as_str()),
         (ErrorName::SecurityPolicy, "WebDAV needs TLS; use davs:// or https://")
     );
-    let ftp = ffi.url_parse("ftps://ftp.example/").unwrap_err();
-    assert_eq!((ftp.name, ftp.message.as_str()), (ErrorName::Unsupported, "Unsupported URL scheme \"ftps\""));
+    let ftps = ffi.url_parse("ftps://ftp.example:2121/pub").unwrap();
+    assert_eq!(
+        (ftps.params.provider.as_str(), ftps.params.port, ftps.path.as_slice()),
+        ("ftps", 2121, &b"/pub"[..])
+    );
+    assert_eq!(ffi.url_format(&ftps.params, b"/a b").unwrap(), "ftps://ftp.example:2121/a%20b");
+    let ftp = ffi.url_parse("ftp://ftp.example/").unwrap_err();
+    assert_eq!((ftp.name, ftp.message.as_str()), (ErrorName::SecurityPolicy, "FTP needs TLS; use ftps://"));
     let unknown = Params { provider: "fake".into(), ..Params::default() };
     assert_eq!(name_of(&ffi.url_format(&unknown, b"/")), Some(ErrorName::Unsupported));
     let mut typed = smb.params.clone();

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: LGPL-2.1-or-later -->
+<!-- FTPS account: a padlock in front of a folder. Original artwork. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="86" height="86" viewBox="0 0 86 86">
+  <path d="M6 20 a6 6 0 0 1 6 -6 h18 l7 8 h37 a6 6 0 0 1 6 6 v30 a6 6 0 0 1 -6 6 h-62 a6 6 0 0 1 -6 -6 z"
+        fill="#2e7d5b"/>
+  <path d="M6 30 a6 6 0 0 1 6 -6 h62 a6 6 0 0 1 6 6 v28 a6 6 0 0 1 -6 6 h-62 a6 6 0 0 1 -6 -6 z"
+        fill="#45a07a"/>
+  <circle cx="56" cy="56" r="21" fill="#ffffff"/>
+  <path d="M49 52 v-5 a7 7 0 0 1 14 0 v5" fill="none" stroke="#2e7d5b" stroke-width="3.5"/>
+  <rect x="45" y="52" width="22" height="16" rx="3" fill="#2e7d5b"/>
+  <circle cx="56" cy="59" r="2.5" fill="#ffffff"/>
+  <rect x="55" y="60" width="2" height="4" fill="#ffffff"/>
+</svg>

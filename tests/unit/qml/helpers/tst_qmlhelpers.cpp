@@ -71,6 +71,7 @@ private slots:
         QCOMPARE(input.defaultPort(QStringLiteral("sftp")), 22);
         QCOMPARE(input.defaultPort(QStringLiteral("smb")), 445);
         QCOMPARE(input.defaultPort(QStringLiteral("webdav")), 443);
+        QCOMPARE(input.defaultPort(QStringLiteral("ftps")), 21);
         QCOMPARE(input.defaultPort(QStringLiteral("fake")), 0);
         QCOMPARE(helpers.backupServiceName(QStringLiteral("smb")), QStringLiteral("smb-backup"));
     }
@@ -499,7 +500,7 @@ private slots:
         QCOMPARE(texts.size(), last);
         QCOMPARE(NetVfsUi::userErrorText(Error::None), QString());
         QCOMPARE(NetVfsUi::userErrorText(Error::AuthFailed),
-                 QStringLiteral("The server refused the sign-in. Check the user name and the password or key."));
+                 QStringLiteral("The server refused the sign-in. Check the user name and the sign-in details."));
         QCOMPARE(NetVfsUi::userErrorText(Error::NetworkUnreachable),
                  QStringLiteral("Cannot reach the server. Check the server name, the port and the network connection."));
         QCOMPARE(NetVfsUi::backendMissingText(), QStringLiteral("Support for this kind of server is not installed on this device."));
@@ -509,7 +510,7 @@ private slots:
     {
         using NetVfsUi::Activity;
         QCOMPARE(NetVfsUi::userErrorText(Error::AuthFailed, Activity::StoredSecret),
-                 QStringLiteral("The stored password or key for this account could not be read. Update the sign-in details."));
+                 QStringLiteral("The sign-in details stored for this account could not be read. Update them."));
         QCOMPARE(NetVfsUi::userErrorText(Error::AuthFailed, Activity::InstallKey),
                  QStringLiteral("The server did not accept the password, so the key could not be installed."));
         QCOMPARE(NetVfsUi::userErrorText(Error::Unsupported, Activity::KeyFile),

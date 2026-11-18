@@ -25,7 +25,7 @@ const char Usage[] =
     "       netvfs-cli discover [--seconds N]\n"
     "\n"
     "A location is a URL (sftp://, smb://host[/share[/path]], davs:// or https://,\n"
-    "file://; a user name is fine, a password is refused) or\n"
+    "ftps://, file://; a user name is fine, a password is refused) or\n"
     "--provider/--host/--port/--user. Relative paths resolve against the URL's path.\n"
     "The secret is read from the environment variable named by --secret-env (default\n"
     "NETVFS_SECRET), never from the command line; --prompt answers server questions\n"

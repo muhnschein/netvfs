@@ -3,6 +3,8 @@
 ## Unreleased
 
 - WebDAV accounts, such as Nextcloud, over HTTPS in *Settings › Accounts* and for apps through the bridge. Connections use TLS 1.3 only. A certificate the phone does not trust can be accepted once by its fingerprint; it is then checked on every connection. Backups to WebDAV come later.
+- FTPS accounts (FTP over TLS) in *Settings › Accounts* and for apps through the bridge. Only explicit TLS 1.3 with protected transfers: plain FTP is refused. Server certificates are trusted as for WebDAV. Backups to FTPS come later.
+- A refused sign-in no longer mentions a key for accounts that have none.
 
 ## 1.0.0 - 2026-11-17
 

@@ -1236,6 +1236,7 @@ name = "netvfs-backend"
 version = "1.0.0"
 dependencies = [
  "libc",
+ "netvfs-ftps",
  "netvfs-sftp",
  "netvfs-smb",
  "netvfs-vfs",
@@ -1270,6 +1271,18 @@ dependencies = [
  "tokio",
  "zbus",
  "zeroize",
+]
+
+[[package]]
+name = "netvfs-ftps"
+version = "1.0.0"
+dependencies = [
+ "data-encoding",
+ "netvfs-tls",
+ "netvfs-vfs",
+ "rustls",
+ "tokio",
+ "tokio-rustls",
 ]
 
 [[package]]

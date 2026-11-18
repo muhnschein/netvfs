@@ -110,7 +110,7 @@ fn string_of(settings: &[Setting], key: &str) -> QString {
 
 /// Providers whose accounts the helper hands out; other providers' accounts (removed backends) are
 /// not listed.
-pub const PROVIDERS: [&str; 3] = ["sftp", "smb", "webdav"];
+pub const PROVIDERS: [&str; 4] = ["sftp", "smb", "webdav", "ftps"];
 
 /// `serviceName(provider, Service::Files)`.
 #[must_use]
@@ -378,18 +378,20 @@ mod tests {
                                          (2, 'sftp-files', 'Files', 'sftp', 'netvfs-files'),
                                          (3, 'mail-email', 'Mail', 'mail', 'e-mail'),
                                          (4, 'webdav-files', 'Files', 'webdav', 'netvfs-files'),
-                                         (5, 'ftp-files', 'Files', 'ftp', 'netvfs-files');
-             -- 1, 5, 8: listed; 2: account disabled; 3: no Files service type;
+                                         (5, 'ftp-files', 'Files', 'ftp', 'netvfs-files'),
+                                         (6, 'ftps-files', 'Files', 'ftps', 'netvfs-files');
+             -- 1, 5, 8, 9: listed; 2: account disabled; 3: no Files service type;
              -- 4: service disabled; 6: no service setting; 2^32 + 2 reads as 2;
              -- 7: a provider the helper does not hand out.
              INSERT INTO Accounts VALUES (5, 'e', 'sftp', 1), (1, 'a', 'smb', 1), (2, 'b', 'smb', 0),
                                          (3, 'c', 'mail', 1), (4, 'd', 'smb', 1), (6, 'f', 'smb', 1),
-                                         (4294967298, 'g', 'smb', 1), (7, 'h', 'ftp', 1), (8, 'i', 'webdav', 1);
+                                         (4294967298, 'g', 'smb', 1), (7, 'h', 'ftp', 1), (8, 'i', 'webdav', 1),
+                                         (9, 'j', 'ftps', 1);
              INSERT INTO Settings VALUES (1, 0, 'netvfs/host', 's', '''nas'''),
                                          (1, 1, 'enabled', 'b', 'true'), (2, 1, 'enabled', 'b', 'true'),
                                          (3, 3, 'enabled', 'b', 'true'), (4, 1, 'enabled', 'b', 'false'),
                                          (5, 2, 'enabled', 'b', 'true'), (7, 5, 'enabled', 'b', 'true'),
-                                         (8, 4, 'enabled', 'b', 'true'),
+                                         (8, 4, 'enabled', 'b', 'true'), (9, 6, 'enabled', 'b', 'true'),
                                          (4294967298, 1, 'enabled', 'b', 'true');",
         )
         .unwrap();
@@ -456,7 +458,7 @@ mod tests {
         let path = dir.join("accounts.db");
         create(&path);
         let store = Store::new(Database::open(&path, false).unwrap());
-        assert_eq!(store.files_accounts().unwrap(), vec![1, 2, 5, 8]);
+        assert_eq!(store.files_accounts().unwrap(), vec![1, 2, 5, 8, 9]);
         assert_eq!(Store::new(Database::empty()).files_accounts().unwrap(), Vec::<i32>::new());
         std::fs::remove_dir_all(dir).ok();
     }

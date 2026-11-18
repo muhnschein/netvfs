@@ -301,7 +301,7 @@ private slots:
         QTest::addColumn<int>("error");
         QTest::addColumn<QString>("text");
         QTest::newRow("wrong secret") << "wrong" << QString() << int(NetVfsProbe::ErrorCode::AuthFailed)
-                                      << "The server refused the sign-in. Check the user name and the password or key.";
+                                      << "The server refused the sign-in. Check the user name and the sign-in details.";
         QTest::newRow("no permission") << "secret" << "makeDir" << int(NetVfsProbe::ErrorCode::PermissionDenied)
                                        << "The server does not allow writing to the backups folder.";
         QTest::newRow("upload fails") << "secret" << "upload" << int(NetVfsProbe::ErrorCode::PermissionDenied)
@@ -459,7 +459,7 @@ private slots:
         QTRY_COMPARE(failed.count(), 1);
         QCOMPARE(probe.error(), NetVfsProbe::ErrorCode::AuthFailed);
         QCOMPARE(probe.errorText(),
-                 QStringLiteral("The stored password or key for this account could not be read. Update the sign-in details."));
+                 QStringLiteral("The sign-in details stored for this account could not be read. Update them."));
         QCOMPARE(probe.errorDetail(), QStringLiteral("no identity"));
         QVERIFY(serverLog().isEmpty());
     }

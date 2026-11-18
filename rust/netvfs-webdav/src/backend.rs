@@ -51,13 +51,6 @@ pub struct Settings {
     pub pin: Option<String>,
 }
 
-fn timeout_or(ms: i32, default: Duration) -> Duration {
-    match u64::try_from(ms) {
-        Ok(ms) if ms > 0 => Duration::from_millis(ms),
-        _ => default,
-    }
-}
-
 impl Settings {
     /// The settings of `params`.
     ///
@@ -65,21 +58,13 @@ impl Settings {
     /// `Internal` for an empty host or one holding `@` or `/`, or a port out of range; `InvalidName` for a bad
     /// `base_path`.
     pub fn of(params: &Params) -> Result<Self, Status> {
-        if params.host.is_empty() || params.host.contains(['@', '/']) {
-            return Err(Status::internal("Invalid server name"));
-        }
-        let port = if params.port <= 0 {
-            DEFAULT_PORT
-        } else {
-            u16::try_from(params.port)
-                .map_err(|_e| Status::internal(format!("Invalid port {}", params.port)))?
-        };
+        let (host, port) = netvfs_tls::host_port(params, DEFAULT_PORT)?;
         Ok(Self {
             target: Target {
-                host: params.host.trim_start_matches('[').trim_end_matches(']').to_owned(),
+                host,
                 port,
-                connect_timeout: timeout_or(params.connect_timeout_ms, DEFAULT_CONNECT_TIMEOUT),
-                request_timeout: timeout_or(params.request_timeout_ms, DEFAULT_REQUEST_TIMEOUT),
+                connect_timeout: netvfs_tls::timeout_or(params.connect_timeout_ms, DEFAULT_CONNECT_TIMEOUT),
+                request_timeout: netvfs_tls::timeout_or(params.request_timeout_ms, DEFAULT_REQUEST_TIMEOUT),
                 stale_after: STALE_AFTER,
             },
             base: Base::new(&params.option("base_path").unwrap_or_default())?,
@@ -469,11 +454,7 @@ impl Backend for Webdav {
         let mut http = Http::new(tls, settings.target.clone())?;
         cancel.guard(http.open()).await?;
         let identity = http.tls().settle(settings.pin.is_some());
-        let mismatch = match (&settings.pin, http.tls().seen()) {
-            (Some(pin), Some(seen)) => !netvfs_tls::pin_matches(pin, &seen.spki),
-            (Some(_), None) => true,
-            (None, _) => false,
-        };
+        let mismatch = netvfs_tls::refuses_credentials(settings.pin.as_deref(), http.tls().seen().as_ref());
         self.state = State::Connected(Box::new(Connected { http, settings, mismatch }));
         Ok(identity)
     }
@@ -494,10 +475,7 @@ impl Backend for Webdav {
         if connected.mismatch {
             // No credentials go to a server whose key is not the pin.
             self.state = State::Connected(connected);
-            return Err(Status::new(
-                ErrorName::ServerIdentityChanged,
-                "The server certificate does not match the saved one; not signing in",
-            ));
+            return Err(netvfs_tls::identity_changed());
         }
         let user = if credentials.user.is_empty() { &connected.settings.username } else { &credentials.user };
         match basic(user, &credentials.secret) {

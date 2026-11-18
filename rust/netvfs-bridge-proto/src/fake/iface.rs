@@ -257,6 +257,8 @@ fn parse_adhoc(url: &str, opts: &args::AdHocOpts) -> Result<AdHocUrl, Fail> {
         "dav" | "http" => {
             return Err(Fail::net(ErrorName::SecurityPolicy, "WebDAV needs TLS; use davs:// or https://"));
         }
+        "ftps" => "ftps",
+        "ftp" => return Err(Fail::net(ErrorName::SecurityPolicy, "FTP needs TLS; use ftps://")),
         "fake" => "fake",
         "file" | "local" => {
             return Err(Fail::net(ErrorName::PermissionDenied, "The bridge never accesses local files"));
@@ -896,6 +898,7 @@ mod tests {
         for url in ["davs://h/", "https://h/"] {
             assert_eq!(parse_adhoc(url, &plain()).unwrap().provider, "webdav", "{url}");
         }
+        assert_eq!(parse_adhoc("ftps://h/", &plain()).unwrap().provider, "ftps");
     }
 
     #[test]
@@ -904,13 +907,10 @@ mod tests {
         assert_eq!(bare("sftp://u:pw@h/", &plain()).as_deref(), Some("SecurityPolicy"));
         assert_eq!(bare("file:///x", &plain()).as_deref(), Some("PermissionDenied"));
         assert_eq!(bare("gopher://h/", &plain()).as_deref(), Some("Unsupported"));
-        for url in ["ftp://h/", "ftps://h/"] {
-            assert_eq!(bare(url, &plain()).as_deref(), Some("Unsupported"), "{url}");
-        }
-        for url in ["dav://h/", "http://h/"] {
+        for url in ["dav://h/", "http://h/", "ftp://h/"] {
             assert_eq!(bare(url, &plain()).as_deref(), Some("SecurityPolicy"), "{url}");
         }
-        let unknown = parse_adhoc("ftps://h/", &plain()).err();
+        let unknown = parse_adhoc("gopher://h/", &plain()).err();
         assert_eq!(unknown.as_ref().map(Fail::message), Some("No backend for this scheme is installed"));
         let guest = AdHocOpts { user: None, security_profile: Some("guest".into()) };
         assert!(bare("sftp://h/", &guest).is_some_and(|n| n.contains("InvalidArgs")));
