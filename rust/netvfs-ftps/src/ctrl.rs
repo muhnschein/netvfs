@@ -4,7 +4,7 @@
 
 use crate::reply::{self, Reply, lost};
 use netvfs_tls::{Client as Tls, TlsStream};
-use netvfs_vfs::{ErrorName, Status};
+use netvfs_vfs::{CancelToken, ErrorName, Status};
 use std::net::{IpAddr, SocketAddr};
 use std::time::Duration;
 use tokio::io::{AsyncBufRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader};
@@ -192,7 +192,7 @@ impl Session {
         let mut out = Vec::new();
         let mut buf = vec![0u8; 64 * 1024];
         loop {
-            let n = self.read(&mut data, &mut buf).await?;
+            let n = self.read(&mut data, &mut buf, &CancelToken::new()).await?;
             if n == 0 {
                 break;
             }
@@ -206,22 +206,51 @@ impl Session {
         Ok(out)
     }
 
-    /// One read of a data connection.
+    /// One read of a data connection; ends early on `cancel`.
     ///
     /// # Errors
-    /// `Timeout`, `ConnectionLost`.
-    pub async fn read(&self, data: &mut Data, buf: &mut [u8]) -> Result<usize, Status> {
+    /// `Timeout`, `ConnectionLost`, `Canceled`.
+    pub async fn read(&self, data: &mut Data, buf: &mut [u8], cancel: &CancelToken) -> Result<usize, Status> {
         let read = async { data.read(buf).await.map_err(|e| lost(&e.to_string())) };
-        timed(self.target.request_timeout, "data", read).await
+        tokio::select! {
+            r = timed(self.target.request_timeout, "data", read) => r,
+            () = cancel.canceled() => Err(Status::canceled()),
+        }
     }
 
-    /// One write to a data connection.
+    /// One write to a data connection; ends early on `cancel`.
+    ///
+    /// # Errors
+    /// `Timeout`, `ConnectionLost`, `Canceled`.
+    pub async fn write(&self, data: &mut Data, buf: &[u8], cancel: &CancelToken) -> Result<(), Status> {
+        let write = async { data.write_all(buf).await.map_err(|e| lost(&e.to_string())) };
+        tokio::select! {
+            r = timed(self.target.request_timeout, "data", write) => r,
+            () = cancel.canceled() => Err(Status::canceled()),
+        }
+    }
+
+    /// Stops a transfer with `ABOR` (RFC 959) and a TLS close, reads `data` until the server closes it, then the
+    /// replies owed. Dropping a protected data connection instead makes some servers (proftpd) end the session.
     ///
     /// # Errors
     /// `Timeout`, `ConnectionLost`.
-    pub async fn write(&self, data: &mut Data, buf: &[u8]) -> Result<(), Status> {
-        let write = async { data.write_all(buf).await.map_err(|e| lost(&e.to_string())) };
-        timed(self.target.request_timeout, "data", write).await
+    pub async fn abort(&mut self, mut data: Data) -> Result<(), Status> {
+        self.torn = true;
+        send(self.ctrl.get_mut(), b"ABOR").await?;
+        self.torn = false;
+        self.pending = self.pending.saturating_add(1);
+        let drain = async {
+            drop(data.shutdown().await);
+            let mut sink = vec![0u8; 64 * 1024];
+            while matches!(data.read(&mut sink).await, Ok(n) if n > 0) {}
+        };
+        drop(tokio::time::timeout(self.target.request_timeout, drain).await);
+        drop(data);
+        while self.pending > 0 {
+            self.next().await?;
+        }
+        Ok(())
     }
 
     /// Ends an upload's data connection with a TLS close, so the server knows the file is whole, then waits for

@@ -463,6 +463,7 @@ async fn serve(tcp: TcpStream, acceptor: TlsAcceptor, state: Arc<Mutex<State>>) 
                     say(ctrl.get_mut(), if sent.is_ok() { done } else { "426 Transfer aborted" }).await;
                 }
             }
+            b"ABOR" => say(w, "226 Abort done").await,
             _ => say(w, "502 Not implemented").await,
         }
     }

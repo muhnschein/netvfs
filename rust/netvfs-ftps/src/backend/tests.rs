@@ -533,6 +533,7 @@ async fn canceled_transfers_leave_the_connection_usable() {
     }
     f.keep_alive(&c).await.unwrap();
     assert_eq!(fake.with(|s| s.connections), 1);
+    assert_eq!(fake.verbs().iter().filter(|v| *v == "ABOR").count(), 5);
 }
 
 #[tokio::test]
@@ -679,10 +680,10 @@ async fn downloads_ask_only_for_what_they_need() {
     assert_eq!((r, n, verbs), (Ok(()), 0, vec!["MLST".to_owned()]));
     let (r, n, verbs) = get(5, Some(0)).await;
     assert_eq!((r, n, verbs), (Ok(()), 0, vec!["MLST".to_owned()]));
-    // A short read of a large file: the server reports the closed transfer, which is fine.
+    // A short read of a large file stops the transfer.
     let (r, n, verbs) = get(0, Some(1000)).await;
     assert_eq!((r, n), (Ok(()), 1000));
-    assert_eq!(verbs, ["MLST", "EPSV", "RETR"]);
+    assert_eq!(verbs, ["MLST", "EPSV", "RETR", "ABOR"]);
     let (r, _, verbs) = get(0, Some(0)).await;
     assert_eq!((r, verbs), (Ok(()), vec!["MLST".to_owned()]), "in step");
     // A whole read the server reports failed is an error.

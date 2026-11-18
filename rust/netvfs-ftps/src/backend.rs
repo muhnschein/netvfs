@@ -251,33 +251,40 @@ impl Ftp {
         options: &WriteOptions,
         source: &mut dyn Source,
         progress: &mut dyn Progress,
+        cancel: &CancelToken,
     ) -> Result<(), Status> {
         match options.disposition {
             Disposition::Resume => return Err(Status::unsupported("Resuming uploads is not supported")),
-            Disposition::CreateNew if self.find(path).await?.is_some() => {
+            Disposition::CreateNew if cancel.guard(self.find(path)).await?.is_some() => {
                 return Err(Status::new(ErrorName::AlreadyExists, "The file exists"));
             }
             Disposition::CreateNew | Disposition::Truncate => {}
         }
         let size = source.size();
-        let mut data = match self.session.data(&command(b"STOR", path)?, "Uploading").await {
+        let mut data = match cancel.guard(self.session.data(&command(b"STOR", path)?, "Uploading")).await {
             Ok(d) => d,
             Err(e) => return Err(self.explain(path, e).await),
         };
         let mut sent = 0u64;
         let mut buf = vec![0u8; CHUNK];
-        loop {
-            let n = source.read(&mut buf)?;
-            if n == 0 {
-                break;
+        let stopped = loop {
+            let n = match source.read(&mut buf) {
+                Ok(0) => break None,
+                Ok(n) => n,
+                Err(e) => break Some(e),
+            };
+            if let Err(e) = self.session.write(&mut data, buf.get(..n).unwrap_or_default(), cancel).await {
+                break Some(e);
             }
-            self.session.write(&mut data, buf.get(..n).unwrap_or_default()).await?;
             sent = sent.saturating_add(n as u64);
             progress.update(sent, size);
             if progress.canceled() {
-                // The control connection still waits for the transfer's end: no reuse.
-                return Err(Status::canceled());
+                break Some(Status::canceled());
             }
+        };
+        if let Some(e) = stopped {
+            self.session.abort(data).await?;
+            return Err(e);
         }
         self.session.close_data(data).await?;
         self.session.finish("Uploading").await.map(drop)
@@ -290,8 +297,9 @@ impl Ftp {
         length: Option<u64>,
         sink: &mut dyn Sink,
         progress: &mut dyn Progress,
+        cancel: &CancelToken,
     ) -> Result<(), Status> {
-        let entry = self.stat(path).await?;
+        let entry = cancel.guard(self.stat(path)).await?;
         if entry.kind == EntryType::Directory {
             return Err(Status::new(ErrorName::IsADirectory, "Is a folder"));
         }
@@ -299,37 +307,43 @@ impl Ftp {
             return Ok(());
         }
         if offset > 0 {
-            self.session
-                .expect(format!("REST {offset}").as_bytes(), &[350], "Reading from an offset")
-                .await?;
+            let rest = format!("REST {offset}");
+            cancel.guard(self.session.expect(rest.as_bytes(), &[350], "Reading from an offset")).await?;
         }
-        let mut data: Data = self.session.data(&command(b"RETR", path)?, "Downloading").await?;
+        let mut data: Data = cancel.guard(self.session.data(&command(b"RETR", path)?, "Downloading")).await?;
         let total =
             entry.size.map(|s| s.saturating_sub(offset)).map(|left| length.map_or(left, |l| l.min(left)));
         let mut left = length;
         let mut got = 0u64;
         let mut buf = vec![0u8; CHUNK];
-        while left != Some(0) {
-            let want = left.map_or(buf.len(), |l| usize::try_from(l).unwrap_or(usize::MAX).min(buf.len()));
-            let n = self.session.read(&mut data, buf.get_mut(..want).unwrap_or_default()).await?;
-            if n == 0 {
-                break;
+        let stopped = loop {
+            if left == Some(0) {
+                break Some(None);
             }
-            sink.write(buf.get(..n).unwrap_or_default())?;
+            let want = left.map_or(buf.len(), |l| usize::try_from(l).unwrap_or(usize::MAX).min(buf.len()));
+            let n = match self.session.read(&mut data, buf.get_mut(..want).unwrap_or_default(), cancel).await
+            {
+                Ok(0) => break None,
+                Ok(n) => n,
+                Err(e) => break Some(Some(e)),
+            };
+            if let Err(e) = sink.write(buf.get(..n).unwrap_or_default()) {
+                break Some(Some(e));
+            }
             got = got.saturating_add(n as u64);
             left = left.map(|l| l.saturating_sub(n as u64));
             progress.update(got, total);
             if progress.canceled() {
-                return Err(Status::canceled());
+                break Some(Some(Status::canceled()));
             }
+        };
+        // `Some`: stopped before the end, with the error to return, if any.
+        if let Some(e) = stopped {
+            self.session.abort(data).await?;
+            return e.map_or(Ok(()), Err);
         }
-        let cut = left == Some(0);
         drop(data);
-        match self.session.finish("Downloading").await {
-            // Closing early makes the server report a broken transfer.
-            Err(e) if cut && matches!(e.name, ErrorName::ConnectionLost | ErrorName::ProtocolError) => Ok(()),
-            other => other.map(drop),
-        }
+        self.session.finish("Downloading").await.map(drop)
     }
 }
 
@@ -569,7 +583,7 @@ impl Backend for Ftps {
         cancel: &CancelToken,
     ) -> Result<(), Status> {
         let ftp = self.ftp(cancel)?;
-        cancel.guard(ftp.upload(path, options, source, progress)).await
+        ftp.upload(path, options, source, progress, cancel).await
     }
 
     async fn download(
@@ -582,7 +596,7 @@ impl Backend for Ftps {
         cancel: &CancelToken,
     ) -> Result<(), Status> {
         let ftp = self.ftp(cancel)?;
-        cancel.guard(ftp.download(path, offset, length, sink, progress)).await
+        ftp.download(path, offset, length, sink, progress, cancel).await
     }
 }
 
