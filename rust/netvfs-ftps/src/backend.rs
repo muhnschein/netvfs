@@ -342,7 +342,7 @@ impl Ftp {
             self.session.abort(data).await?;
             return e.map_or(Ok(()), Err);
         }
-        drop(data);
+        drop(self.session.close_data(data).await);
         self.session.finish("Downloading").await.map(drop)
     }
 }

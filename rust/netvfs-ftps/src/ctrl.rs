@@ -201,7 +201,7 @@ impl Session {
             }
             out.extend_from_slice(buf.get(..n).unwrap_or_default());
         }
-        drop(data);
+        drop(self.close_data(data).await);
         self.finish(what).await?;
         Ok(out)
     }
@@ -230,8 +230,8 @@ impl Session {
         }
     }
 
-    /// Stops a transfer with `ABOR` (RFC 959) and a TLS close, reads `data` until the server closes it, then the
-    /// replies owed. Dropping a protected data connection instead makes some servers (proftpd) end the session.
+    /// Stops a transfer with `ABOR` (RFC 959) and a TLS close, reads `data` until the server closes it; the next
+    /// command reads the replies owed. Dropping a protected data connection instead makes proftpd end the session.
     ///
     /// # Errors
     /// `Timeout`, `ConnectionLost`.
@@ -247,14 +247,12 @@ impl Session {
         };
         drop(tokio::time::timeout(self.target.request_timeout, drain).await);
         drop(data);
-        while self.pending > 0 {
-            self.next().await?;
-        }
         Ok(())
     }
 
-    /// Ends an upload's data connection with a TLS close, so the server knows the file is whole, then waits for
-    /// the server's close: closing with unread data (session tickets) resets the connection, losing the file's tail.
+    /// Ends a data connection with a TLS close, then waits for the server's close. Upload: the close tells the
+    /// file is whole; closing with unread data (session tickets) resets the connection, losing the file's tail.
+    /// Without a TLS close proftpd ends the session.
     ///
     /// # Errors
     /// `Timeout`, `ConnectionLost`.

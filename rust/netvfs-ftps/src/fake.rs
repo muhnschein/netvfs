@@ -457,10 +457,14 @@ async fn serve(tcp: TcpStream, acceptor: TlsAcceptor, state: Arc<Mutex<State>>) 
                     state.lock().unwrap().tree.insert(path.clone(), Node::File(got));
                     say(ctrl.get_mut(), if whole { "226 Stored" } else { "426 Transfer aborted" }).await;
                 } else {
+                    let mut rest = Vec::new();
                     let sent = data.write_all(&payload).await.and(data.shutdown().await);
+                    if sent.and(data.read_to_end(&mut rest).await).is_err() {
+                        // As proftpd: a data connection reset or closed without TLS close ends the session.
+                        return;
+                    }
                     let end = state.lock().unwrap().retr_end.filter(|_| verb == b"RETR");
-                    let done = end.unwrap_or("226 Done");
-                    say(ctrl.get_mut(), if sent.is_ok() { done } else { "426 Transfer aborted" }).await;
+                    say(ctrl.get_mut(), end.unwrap_or("226 Done")).await;
                 }
             }
             b"ABOR" => say(w, "226 Abort done").await,
