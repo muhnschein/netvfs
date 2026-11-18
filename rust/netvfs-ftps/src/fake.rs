@@ -65,6 +65,8 @@ pub struct State {
     pub listing: Option<Vec<u8>>,
     /// The reply ending a `RETR` instead of 226.
     pub retr_end: Option<&'static str>,
+    /// One more reply after `ABOR`'s, as proftpd sends at times.
+    pub abort_extra: Option<&'static str>,
     /// Extra raw `MLSD` lines.
     pub extra_lines: Vec<Vec<u8>>,
 }
@@ -87,6 +89,7 @@ impl Default for State {
             greeting_wait: false,
             listing: None,
             retr_end: None,
+            abort_extra: None,
             extra_lines: Vec::new(),
         }
     }
@@ -378,7 +381,13 @@ impl Conn {
                 self.rest = std::str::from_utf8(arg).ok().and_then(|a| a.parse().ok()).unwrap_or(0);
                 self.say("350 Restarting").await;
             }
-            b"ABOR" => self.say("226 Abort done").await,
+            b"ABOR" => {
+                self.say("226 Abort done").await;
+                let extra = self.state.lock().unwrap().abort_extra;
+                if let Some(extra) = extra {
+                    self.say(extra).await;
+                }
+            }
             _ => self.say("502 Not implemented").await,
         }
     }
