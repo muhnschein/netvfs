@@ -129,7 +129,7 @@ impl Fake {
         let addr = listener.local_addr().unwrap();
         let state = Arc::new(Mutex::new(State::default()));
         let config = config(cert);
-        // As OpenSSL servers (proftpd): no session ticket on a connection the server never writes to.
+        // As proftpd: no session ticket on a connection the server never writes to.
         let mut quiet = (*config).clone();
         quiet.send_tls13_tickets = 0;
         let acceptor = TlsAcceptor::from(config);

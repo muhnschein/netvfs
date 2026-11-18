@@ -112,7 +112,7 @@ struct Login {
 
 impl Ftp {
     /// A fresh session when no TLS ticket is left: data connections must resume one, TLS 1.3 uses each once,
-    /// and OpenSSL servers (proftpd, vsftpd) issue none on upload connections.
+    /// and proftpd issues none on upload connections.
     ///
     /// # Errors
     /// Those of connecting and signing in.
