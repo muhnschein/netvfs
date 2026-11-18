@@ -9,11 +9,16 @@
 #![forbid(unsafe_code)]
 
 use netvfs_vfs::{ErrorName, IdentityKind, ServerIdentity, Status};
-use rustls::client::WebPkiServerVerifier;
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
+use rustls::client::{
+    ClientSessionStore, Resumption, Tls12ClientSessionValue, Tls13ClientSessionValue, WebPkiServerVerifier,
+};
 use rustls::crypto::{CryptoProvider, WebPkiSupportedAlgorithms, ring};
 use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
-use rustls::{CertificateError, ClientConfig, DigitallySignedStruct, RootCertStore, SignatureScheme};
+use rustls::{
+    CertificateError, ClientConfig, DigitallySignedStruct, NamedGroup, RootCertStore, SignatureScheme,
+};
+use std::collections::VecDeque;
 use std::fmt;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
@@ -156,6 +161,7 @@ pub struct Client {
     connector: TlsConnector,
     verifier: Arc<Verifier>,
     name: ServerName<'static>,
+    tickets: Arc<Tickets>,
 }
 
 impl fmt::Debug for Client {
@@ -204,7 +210,9 @@ impl Client {
             .with_custom_certificate_verifier(dyn_verifier)
             .with_no_client_auth();
         config.alpn_protocols = alpn.iter().map(|p| p.to_vec()).collect();
-        Ok(Self { connector: TlsConnector::from(Arc::new(config)), verifier, name })
+        let tickets = Arc::new(Tickets::default());
+        config.resumption = Resumption::store(Arc::<Tickets>::clone(&tickets));
+        Ok(Self { connector: TlsConnector::from(Arc::new(config)), verifier, name, tickets })
     }
 
     /// The handshake over `tcp`, within `timeout`.
@@ -218,6 +226,12 @@ impl Client {
             .await
             .map_err(|_elapsed| Status::new(ErrorName::Timeout, "The TLS handshake timed out"))?;
         stream.map_err(|e| handshake_error(&e))
+    }
+
+    /// Session tickets held for resuming. TLS 1.3 uses each once.
+    #[must_use]
+    pub fn tickets(&self) -> usize {
+        self.tickets.held()
     }
 
     /// The certificate of the last handshake.
@@ -333,6 +347,49 @@ pub async fn connect_tcp(addrs: &[SocketAddr], timeout: Duration) -> Result<TcpS
 
 fn unreachable(why: &str) -> Status {
     Status::new(ErrorName::NetworkUnreachable, "Cannot reach the server").with_detail(why)
+}
+
+/// TLS 1.3 tickets for the one server of a [`Client`], newest used first, at most [`Tickets::MAX`].
+#[derive(Debug, Default)]
+struct Tickets {
+    tls13: Mutex<VecDeque<Tls13ClientSessionValue>>,
+}
+
+impl Tickets {
+    const MAX: usize = 8;
+
+    fn held(&self) -> usize {
+        self.tls13.lock().unwrap_or_else(PoisonError::into_inner).len()
+    }
+}
+
+impl ClientSessionStore for Tickets {
+    // No key exchange hint: one more round trip at most, when the server dislikes the first key share.
+    fn set_kx_hint(&self, _server: ServerName<'static>, _group: NamedGroup) {}
+
+    fn kx_hint(&self, _server: &ServerName<'_>) -> Option<NamedGroup> {
+        None
+    }
+
+    fn set_tls12_session(&self, _server: ServerName<'static>, _value: Tls12ClientSessionValue) {}
+
+    fn tls12_session(&self, _server: &ServerName<'_>) -> Option<Tls12ClientSessionValue> {
+        None
+    }
+
+    fn remove_tls12_session(&self, _server: &ServerName<'static>) {}
+
+    fn insert_tls13_ticket(&self, _server: ServerName<'static>, value: Tls13ClientSessionValue) {
+        let mut held = self.tls13.lock().unwrap_or_else(PoisonError::into_inner);
+        if held.len() >= Self::MAX {
+            held.pop_front();
+        }
+        held.push_back(value);
+    }
+
+    fn take_tls13_ticket(&self, _server: &ServerName<'static>) -> Option<Tls13ClientSessionValue> {
+        self.tls13.lock().unwrap_or_else(PoisonError::into_inner).pop_back()
+    }
 }
 
 #[cfg(test)]

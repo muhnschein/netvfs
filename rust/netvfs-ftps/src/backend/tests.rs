@@ -533,7 +533,8 @@ async fn canceled_transfers_leave_the_connection_usable() {
     }
     f.keep_alive(&c).await.unwrap();
     assert_eq!(fake.with(|s| s.connections), 1);
-    assert_eq!(fake.verbs().iter().filter(|v| *v == "ABOR").count(), 5);
+    // Downloads only: a stopped upload ends with a TLS close.
+    assert_eq!(fake.verbs().iter().filter(|v| *v == "ABOR").count(), 3);
 }
 
 #[tokio::test]
@@ -725,4 +726,45 @@ async fn a_closing_server_ends_the_connection() {
     assert_eq!((e.name, e.detail.as_str()), (ErrorName::ConnectionLost, "an earlier command did not finish"));
     f.disconnect().await;
     assert_eq!(fake.verbs(), ["NOOP"], "no QUIT on a torn connection");
+}
+
+#[tokio::test]
+async fn a_fresh_session_brings_tickets_when_uploads_used_them_up() {
+    let fake = Fake::start(Cert::Trusted).await;
+    fake.put("/d", Node::Dir);
+    let mut f = signed_in(&fake).await;
+    let c = CancelToken::new();
+    for i in 0..6 {
+        let path = format!("/d/{i}");
+        f.upload(
+            path.as_bytes(),
+            &opts(Disposition::Truncate),
+            &mut Data(vec![b'x'], 0, 0),
+            &mut Moves::quiet(),
+            &c,
+        )
+        .await
+        .unwrap();
+    }
+    assert!(fake.get("/d/5") == Some(file(b"x")));
+    // Two tickets per sign-in, none per upload: a fresh session before the 3rd and 5th upload.
+    assert_eq!(fake.with(|s| s.connections), 3);
+    f.stat(b"/d", false, &c).await.unwrap();
+    assert_eq!(fake.with(|s| s.connections), 3, "no data connection, no fresh session");
+    let mut sink = Collect(Vec::new(), 0);
+    f.list(b"/d", ListOptions::default(), &mut sink, &c).await.unwrap();
+    assert_eq!(sink.0.len(), 6);
+    assert_eq!(fake.with(|s| s.connections), 4);
+    let mut f = signed_in(&fake).await;
+    for i in 0..2 {
+        let path = format!("/d/{i}");
+        let mut source = Data(b"yz".to_vec(), 0, 0);
+        f.upload(path.as_bytes(), &opts(Disposition::Truncate), &mut source, &mut Moves::quiet(), &c)
+            .await
+            .unwrap();
+    }
+    let mut out = Out::default();
+    f.download(b"/d/1", 1, None, &mut out, &mut Moves::quiet(), &c).await.unwrap();
+    assert_eq!(out.0, b"z");
+    assert_eq!(fake.with(|s| s.connections), 6);
 }

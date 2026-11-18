@@ -99,9 +99,33 @@ fn not_found() -> Status {
 #[derive(Debug)]
 pub struct Ftp {
     session: Session,
+    login: Login,
+}
+
+/// What signs in a fresh session.
+#[derive(Debug)]
+struct Login {
+    target: Target,
+    user: String,
+    secret: Zeroizing<Vec<u8>>,
 }
 
 impl Ftp {
+    /// A fresh session when no TLS ticket is left: data connections must resume one, TLS 1.3 uses each once,
+    /// and OpenSSL servers (proftpd, vsftpd) issue none on upload connections.
+    ///
+    /// # Errors
+    /// Those of connecting and signing in.
+    async fn ensure_ticket(&mut self) -> Result<(), Status> {
+        if self.session.tls().tickets() > 0 {
+            return Ok(());
+        }
+        let mut fresh = Session::open(self.session.tls().clone(), self.login.target.clone()).await?;
+        sign_in(&mut fresh, &self.login.user, &self.login.secret).await?;
+        std::mem::replace(&mut self.session, fresh).quit().await;
+        Ok(())
+    }
+
     /// The entry at `path` (`MLST`); a refusal is `NotFound`.
     ///
     /// # Errors
@@ -155,6 +179,7 @@ impl Ftp {
     /// `NotFound`, `NotADirectory`, `ProtocolError` over the caps, connection errors.
     pub async fn entries(&mut self, dir: &[u8]) -> Result<Vec<Entry>, Status> {
         let line = command(b"MLSD", dir)?;
+        self.ensure_ticket().await?;
         let data = match self.session.data(&line, "Listing the folder").await {
             Ok(d) => d,
             // 550, or 501 (pyftpdlib) for a missing folder.
@@ -261,6 +286,7 @@ impl Ftp {
             Disposition::CreateNew | Disposition::Truncate => {}
         }
         let size = source.size();
+        cancel.guard(self.ensure_ticket()).await?;
         let mut data = match cancel.guard(self.session.data(&command(b"STOR", path)?, "Uploading")).await {
             Ok(d) => d,
             Err(e) => return Err(self.explain(path, e).await),
@@ -283,7 +309,9 @@ impl Ftp {
             }
         };
         if let Some(e) = stopped {
-            self.session.abort(data).await?;
+            // No ABOR: proftpd answers one during STOR with bytes that are no reply. The part sent stays.
+            drop(self.session.close_data(data).await);
+            drop(self.session.finish("Uploading").await);
             return Err(e);
         }
         self.session.close_data(data).await?;
@@ -306,6 +334,7 @@ impl Ftp {
         if length == Some(0) || entry.size.is_some_and(|s| offset >= s) {
             return Ok(());
         }
+        cancel.guard(self.ensure_ticket()).await?;
         if offset > 0 {
             let rest = format!("REST {offset}");
             cancel.guard(self.session.expect(rest.as_bytes(), &[350], "Reading from an offset")).await?;
@@ -508,7 +537,12 @@ impl Backend for Ftps {
             credentials.user.clone()
         };
         cancel.guard(sign_in(&mut connected.session, &user, &credentials.secret)).await?;
-        self.state = State::Ready(Box::new(Ftp { session: connected.session }));
+        let login = Login {
+            target: connected.settings.target.clone(),
+            user,
+            secret: Zeroizing::new(credentials.secret.to_vec()),
+        };
+        self.state = State::Ready(Box::new(Ftp { session: connected.session, login }));
         Ok(())
     }
 

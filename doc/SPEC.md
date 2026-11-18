@@ -145,7 +145,7 @@ Any process can start it, so it trusts nothing of caller:
 
 - Explicit TLS only: `AUTH TLS` on the plain greeting, then TLS 1.3 (netvfs-tls). `ftp://` refused before any packet; no implicit TLS (990), no TLS 1.2, no plain data. `PBSZ 0` + `PROT P` required, else `SecurityPolicy`. Trust as WebDAV; no `USER` before identity check.
 - Data: `EPSV` only, to control connection's peer address; each data connection a TLS client of its own, resuming control session (servers require it). `TYPE I`. Listings `MLSD`/`MLST` only (FEAT without `MLST` → `Unsupported`); no `LIST` parsing, no `PASV`. `OPTS UTF8 ON` when offered.
-- Reads `REST` + `RETR`; writes `STOR` whole, no resume, no handles. Transfer stopped early (range read, cancel) ends with `ABOR` and TLS close, never a dropped data connection: proftpd then ends session. Other canceled call: next command first reads replies still owed. Timeout, 421 or half-sent command ends connection (`ConnectionLost`).
+- Reads `REST` + `RETR`; writes `STOR` whole, no resume, no handles. Download stopped early (range read, cancel) ends with `ABOR` and TLS close, upload with TLS close only (part sent stays; proftpd answers `ABOR` during `STOR` with garbage); never a dropped data connection: proftpd then ends session. No TLS ticket left (TLS 1.3 uses each once; OpenSSL servers issue none on upload connections) → fresh session first. Other canceled call: next command first reads replies still owed. Timeout, 421 or half-sent command ends connection (`ConnectionLost`).
 - Caps: reply line ≤ 8 KiB, reply ≤ 64 KiB, listing ≤ 32 MiB, ≤ 200,000 entries.
 - Files only for now; no backup plugins.
 

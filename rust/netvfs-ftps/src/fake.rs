@@ -128,12 +128,17 @@ impl Fake {
         let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
         let addr = listener.local_addr().unwrap();
         let state = Arc::new(Mutex::new(State::default()));
-        let acceptor = TlsAcceptor::from(config(cert));
+        let config = config(cert);
+        // As OpenSSL servers (proftpd): no session ticket on a connection the server never writes to.
+        let mut quiet = (*config).clone();
+        quiet.send_tls13_tickets = 0;
+        let acceptor = TlsAcceptor::from(config);
+        let uploads = TlsAcceptor::from(Arc::new(quiet));
         let shared = Arc::clone(&state);
         tokio::spawn(async move {
             while let Ok((tcp, _)) = listener.accept().await {
                 shared.lock().unwrap().connections += 1;
-                tokio::spawn(serve(tcp, acceptor.clone(), Arc::clone(&shared)));
+                tokio::spawn(serve(tcp, acceptor.clone(), uploads.clone(), Arc::clone(&shared)));
             }
         });
         Self { state, addr }
@@ -203,7 +208,7 @@ fn children(tree: &BTreeMap<Vec<u8>, Node>, dir: &[u8]) -> Vec<(Vec<u8>, Node)> 
 
 type Ctrl = BufReader<TlsStream<TcpStream>>;
 
-async fn serve(tcp: TcpStream, acceptor: TlsAcceptor, state: Arc<Mutex<State>>) {
+async fn serve(tcp: TcpStream, acceptor: TlsAcceptor, uploads: TlsAcceptor, state: Arc<Mutex<State>>) {
     let mut plain = BufReader::new(tcp);
     let wait = state.lock().unwrap().greeting_wait;
     if wait {
@@ -434,7 +439,8 @@ async fn serve(tcp: TcpStream, acceptor: TlsAcceptor, state: Arc<Mutex<State>>) 
                 };
                 say(w, "150 Opening data connection").await;
                 let Ok((tcp, _)) = l.accept().await else { return };
-                let Ok(mut data) = acceptor.accept(tcp).await else {
+                let data_acceptor = if verb == b"STOR" { &uploads } else { &acceptor };
+                let Ok(mut data) = data_acceptor.accept(tcp).await else {
                     say(ctrl.get_mut(), "425 TLS failed").await;
                     continue;
                 };

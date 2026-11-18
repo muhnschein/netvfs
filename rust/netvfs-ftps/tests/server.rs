@@ -170,3 +170,63 @@ async fn files_and_folders_round_trip() {
     f.keep_alive(&c).await.unwrap();
     f.disconnect().await;
 }
+
+#[tokio::test]
+async fn many_small_uploads_on_one_connection() {
+    let Some(s) = server() else { return };
+    let mut f = s.signed_in().await;
+    let c = CancelToken::new();
+    f.make_dir(b"/small", false, &c).await.unwrap();
+    let o = WriteOptions { disposition: Disposition::Truncate, ..WriteOptions::default() };
+    for i in 0..6 {
+        let path = format!("/small/{i}");
+        f.upload(path.as_bytes(), &o, &mut Data(vec![b'x'], 0), &mut Quiet, &c).await.unwrap();
+    }
+    let mut names = Collect::default();
+    f.list(b"/small", ListOptions::default(), &mut names, &c).await.unwrap();
+    assert_eq!(names.0.len(), 6);
+}
+
+struct Stop;
+
+impl Progress for Stop {
+    fn update(&mut self, _: u64, _: Option<u64>) {}
+    fn canceled(&mut self) -> bool {
+        true
+    }
+}
+
+#[tokio::test]
+async fn stopped_transfers_leave_the_session_usable() {
+    let Some(s) = server() else { return };
+    let mut f = s.signed_in().await;
+    let c = CancelToken::new();
+    f.make_dir(b"/stops", false, &c).await.unwrap();
+    let o = WriteOptions { disposition: Disposition::Truncate, ..WriteOptions::default() };
+    let body = vec![7u8; 4 << 20];
+    f.upload(b"/stops/data", &o, &mut Data(body.clone(), 0), &mut Quiet, &c).await.unwrap();
+    for _ in 0..3 {
+        let e = f.download(b"/stops/data", 0, None, &mut Out(Vec::new()), &mut Stop, &c).await.unwrap_err();
+        assert_eq!(e.name, ErrorName::Canceled);
+        let e = f.upload(b"/stops/up", &o, &mut Data(body.clone(), 0), &mut Stop, &c).await.unwrap_err();
+        assert_eq!(e.name, ErrorName::Canceled);
+    }
+    let token = CancelToken::new();
+    let e = f.download(b"/stops/data", 0, None, &mut Out(Vec::new()), &mut Trip(token.clone()), &token).await;
+    assert_eq!(e.unwrap_err().name, ErrorName::Canceled);
+    let mut out = Out(Vec::new());
+    f.download(b"/stops/data", 0, None, &mut out, &mut Quiet, &c).await.unwrap();
+    assert_eq!(out.0, body);
+}
+
+/// Cancels the call's token at the first progress, as a user would.
+struct Trip(CancelToken);
+
+impl Progress for Trip {
+    fn update(&mut self, _: u64, _: Option<u64>) {
+        self.0.cancel();
+    }
+    fn canceled(&mut self) -> bool {
+        false
+    }
+}

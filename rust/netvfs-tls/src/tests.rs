@@ -298,3 +298,42 @@ fn debug_names_the_host_and_whether_system_trust_applies() {
     let bare = Client::new("nas.example", &[], &Anchors::Custom(Arc::new(RootCertStore::empty()))).unwrap();
     assert!(format!("{bare:?}").contains("anchors: false"), "{bare:?}");
 }
+
+/// A server answering connection `i` with the `i`-th of `tickets` (tickets it sends), sessions shared: echoes one
+/// byte, then closes; reports whether each resumed.
+async fn resuming_server(tickets: Vec<usize>) -> (SocketAddr, tokio::sync::mpsc::UnboundedReceiver<bool>) {
+    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let base = server_config(LEAF, LEAF_KEY, &[&rustls::version::TLS13]);
+    let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+    tokio::spawn(async move {
+        for n in tickets {
+            let (tcp, _) = listener.accept().await.unwrap();
+            let mut config = (*base).clone();
+            config.send_tls13_tickets = n;
+            let mut tls = TlsAcceptor::from(Arc::new(config)).accept(tcp).await.unwrap();
+            tx.send(tls.get_ref().1.handshake_kind() == Some(rustls::HandshakeKind::Resumed)).unwrap();
+            let mut b = [0u8; 1];
+            tls.read_exact(&mut b).await.unwrap();
+            tls.write_all(&b).await.unwrap();
+            tls.shutdown().await.ok();
+        }
+    });
+    (addr, rx)
+}
+
+#[tokio::test]
+async fn tickets_are_counted_used_once_and_capped() {
+    let (addr, mut resumed) = resuming_server(vec![3, 0, 10]).await;
+    let client = Client::new("localhost", &[], &anchors()).unwrap();
+    assert_eq!(client.tickets(), 0);
+    shake(&client, addr).await.unwrap();
+    assert!(!resumed.recv().await.unwrap());
+    assert_eq!(client.tickets(), 3);
+    shake(&client, addr).await.unwrap();
+    assert!(resumed.recv().await.unwrap());
+    assert_eq!(client.tickets(), 2);
+    shake(&client, addr).await.unwrap();
+    assert!(resumed.recv().await.unwrap());
+    assert_eq!(client.tickets(), Tickets::MAX);
+}
