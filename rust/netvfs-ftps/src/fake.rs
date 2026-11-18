@@ -209,6 +209,31 @@ fn children(tree: &BTreeMap<Vec<u8>, Node>, dir: &[u8]) -> Vec<(Vec<u8>, Node)> 
 type Ctrl = BufReader<TlsStream<TcpStream>>;
 
 async fn serve(tcp: TcpStream, acceptor: TlsAcceptor, uploads: TlsAcceptor, state: Arc<Mutex<State>>) {
+    let Some(tcp) = plain(tcp, &state).await else { return };
+    let Ok(tls) = acceptor.accept(tcp).await else { return };
+    let mut conn = Conn {
+        ctrl: BufReader::new(tls),
+        acceptor,
+        uploads,
+        state,
+        user: false,
+        account: false,
+        signed_in: false,
+        listener: None,
+        rest: 0,
+        rename_from: None,
+    };
+    let mut line = Vec::new();
+    loop {
+        line.clear();
+        if conn.ctrl.read_until(b'\n', &mut line).await.unwrap_or(0) == 0 || !conn.command(&line).await {
+            return;
+        }
+    }
+}
+
+/// The plain part: greeting, then `AUTH TLS`.
+async fn plain(tcp: TcpStream, state: &Mutex<State>) -> Option<TcpStream> {
     let mut plain = BufReader::new(tcp);
     let wait = state.lock().unwrap().greeting_wait;
     if wait {
@@ -219,90 +244,121 @@ async fn serve(tcp: TcpStream, acceptor: TlsAcceptor, uploads: TlsAcceptor, stat
     loop {
         line.clear();
         if plain.read_until(b'\n', &mut line).await.unwrap_or(0) == 0 {
-            return;
+            return None;
         }
         let cmd = line.trim_ascii_end().to_vec();
         state.lock().unwrap().seen.push(cmd.clone());
-        if cmd.eq_ignore_ascii_case(b"AUTH TLS") {
-            let code = state.lock().unwrap().auth_code;
-            if code == 234 {
-                say(plain.get_mut(), "234 AUTH TLS ok").await;
-                break;
-            }
-            say(plain.get_mut(), &format!("{code} no TLS here")).await;
-        } else {
+        if !cmd.eq_ignore_ascii_case(b"AUTH TLS") {
             say(plain.get_mut(), "530 Use AUTH TLS first").await;
+            continue;
         }
+        let code = state.lock().unwrap().auth_code;
+        if code == 234 {
+            say(plain.get_mut(), "234 AUTH TLS ok").await;
+            return Some(plain.into_inner());
+        }
+        say(plain.get_mut(), &format!("{code} no TLS here")).await;
     }
-    let Ok(tls) = acceptor.accept(plain.into_inner()).await else { return };
-    let mut ctrl: Ctrl = BufReader::new(tls);
-    let mut user = false;
-    let mut account = false;
-    let mut signed_in = false;
-    let mut listener: Option<TcpListener> = None;
-    let mut rest = 0usize;
-    let mut rename_from: Option<Vec<u8>> = None;
-    loop {
-        line.clear();
-        if ctrl.read_until(b'\n', &mut line).await.unwrap_or(0) == 0 {
-            return;
-        }
+}
+
+/// One protected control connection.
+struct Conn {
+    ctrl: Ctrl,
+    acceptor: TlsAcceptor,
+    uploads: TlsAcceptor,
+    state: Arc<Mutex<State>>,
+    user: bool,
+    account: bool,
+    signed_in: bool,
+    listener: Option<TcpListener>,
+    rest: usize,
+    rename_from: Option<Vec<u8>>,
+}
+
+impl Conn {
+    async fn say(&mut self, text: &str) {
+        say(self.ctrl.get_mut(), text).await;
+    }
+
+    /// Answers `line`; false ends the session.
+    async fn command(&mut self, line: &[u8]) -> bool {
         let raw = line.trim_ascii_end().to_vec();
         let (verb, arg) = match raw.iter().position(|b| *b == b' ') {
             Some(at) => (raw[..at].to_ascii_uppercase(), raw[at + 1..].to_vec()),
             None => (raw.to_ascii_uppercase(), Vec::new()),
         };
-        state.lock().unwrap().seen.push(if verb == b"PASS" { b"PASS ***".to_vec() } else { raw.clone() });
-        let w = ctrl.get_mut();
-        if !signed_in && !matches!(verb.as_slice(), b"USER" | b"PASS" | b"QUIT" | b"FEAT") {
-            say(w, "530 Please sign in").await;
-            continue;
-        }
+        self.state.lock().unwrap().seen.push(if verb == b"PASS" {
+            b"PASS ***".to_vec()
+        } else {
+            raw.clone()
+        });
         let path = norm(&arg);
-        if state.lock().unwrap().forbidden.as_deref() == Some(path.as_slice())
-            && !matches!(verb.as_slice(), b"USER" | b"PASS" | b"EPSV" | b"REST" | b"TYPE" | b"PBSZ" | b"PROT")
-        {
-            say(w, "550 Permission denied").await;
-            continue;
-        }
-        let refuse = state.lock().unwrap().refuse.clone();
-        if let Some((_, _, reply)) = refuse.filter(|(v, p, _)| v.as_bytes() == verb && *p == path) {
-            say(w, reply).await;
-            continue;
+        if let Some(reply) = self.refusal(&verb, &path) {
+            self.say(&reply).await;
+            return true;
         }
         match verb.as_slice() {
-            b"USER" if arg == b"guest" => {
-                signed_in = true;
-                say(w, "230 No password needed").await;
-            }
-            b"USER" if arg == b"acct" => say(w, "332 Need account").await,
-            b"USER" => {
-                user = arg == USER.as_bytes() || arg == b"pacct";
-                account = arg == b"pacct";
-                say(w, "331 Password please").await;
-            }
-            b"PASS" if account => say(w, "332 Need account").await,
-            b"PASS" => {
-                if user && arg == PASSWORD.as_bytes() {
-                    signed_in = true;
-                    say(w, "230 Welcome").await;
-                } else {
-                    say(w, "530 Login incorrect").await;
-                }
-            }
-            b"PBSZ" => say(w, "200 PBSZ=0").await,
-            b"PROT" => {
-                let code = state.lock().unwrap().prot_code;
-                say(w, &format!("{code} PROT")).await;
-            }
-            b"TYPE" | b"OPTS" => say(w, "200 OK").await,
-            b"NOOP" => say(w, "200 NOOP").await,
+            b"USER" | b"PASS" => self.sign_in(&verb, &arg).await,
+            b"MLSD" | b"RETR" | b"STOR" => return self.transfer(&verb, &path).await,
+            b"MLST" | b"MKD" | b"DELE" | b"RMD" | b"RNFR" | b"RNTO" => self.tree(&verb, &path).await,
             b"QUIT" => {
-                say(w, "221 Bye").await;
-                return;
+                self.say("221 Bye").await;
+                return false;
             }
+            _ => self.setting(&verb, &arg).await,
+        }
+        true
+    }
+
+    /// The reply refusing `verb` on `path` before it runs, if any.
+    fn refusal(&self, verb: &[u8], path: &[u8]) -> Option<String> {
+        if !self.signed_in && !matches!(verb, b"USER" | b"PASS" | b"QUIT" | b"FEAT") {
+            return Some("530 Please sign in".into());
+        }
+        let s = self.state.lock().unwrap();
+        if s.forbidden.as_deref() == Some(path)
+            && !matches!(verb, b"USER" | b"PASS" | b"EPSV" | b"REST" | b"TYPE" | b"PBSZ" | b"PROT")
+        {
+            return Some("550 Permission denied".into());
+        }
+        s.refuse
+            .as_ref()
+            .filter(|(v, p, _)| v.as_bytes() == verb && p == path)
+            .map(|(_, _, r)| (*r).to_owned())
+    }
+
+    async fn sign_in(&mut self, verb: &[u8], arg: &[u8]) {
+        match (verb, arg) {
+            (b"USER", b"guest") => {
+                self.signed_in = true;
+                self.say("230 No password needed").await;
+            }
+            (b"USER", b"acct") => self.say("332 Need account").await,
+            (b"USER", _) => {
+                self.user = arg == USER.as_bytes() || arg == b"pacct";
+                self.account = arg == b"pacct";
+                self.say("331 Password please").await;
+            }
+            _ if self.account => self.say("332 Need account").await,
+            _ if self.user && arg == PASSWORD.as_bytes() => {
+                self.signed_in = true;
+                self.say("230 Welcome").await;
+            }
+            _ => self.say("530 Login incorrect").await,
+        }
+    }
+
+    async fn setting(&mut self, verb: &[u8], arg: &[u8]) {
+        match verb {
+            b"PBSZ" => self.say("200 PBSZ=0").await,
+            b"PROT" => {
+                let code = self.state.lock().unwrap().prot_code;
+                self.say(&format!("{code} PROT")).await;
+            }
+            b"TYPE" | b"OPTS" => self.say("200 OK").await,
+            b"NOOP" => self.say("200 NOOP").await,
             b"FEAT" => {
-                let features = state.lock().unwrap().features.clone();
+                let features = self.state.lock().unwrap().features.clone();
                 let mut out = String::from("211-Features:\r\n");
                 for f in features {
                     out.push(' ');
@@ -310,171 +366,167 @@ async fn serve(tcp: TcpStream, acceptor: TlsAcceptor, uploads: TlsAcceptor, stat
                     out.push_str("\r\n");
                 }
                 out.push_str("211 End");
-                say(w, &out).await;
+                self.say(&out).await;
             }
             b"EPSV" => {
                 let l = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
                 let port = l.local_addr().unwrap().port();
-                listener = Some(l);
-                say(w, &format!("229 Entering Extended Passive Mode (|||{port}|)")).await;
+                self.listener = Some(l);
+                self.say(&format!("229 Entering Extended Passive Mode (|||{port}|)")).await;
             }
             b"REST" => {
-                rest = std::str::from_utf8(&arg).ok().and_then(|a| a.parse().ok()).unwrap_or(0);
-                say(w, "350 Restarting").await;
+                self.rest = std::str::from_utf8(arg).ok().and_then(|a| a.parse().ok()).unwrap_or(0);
+                self.say("350 Restarting").await;
             }
-            b"MLST" => {
-                let node = state.lock().unwrap().tree.get(&path).cloned();
-                match node {
-                    Some(n) => {
-                        let f = facts(&n, false);
-                        let name = String::from_utf8_lossy(&path).into_owned();
-                        say(w, &format!("250-Listing {name}\r\n {f} {name}\r\n250 End")).await;
-                    }
-                    None => say(w, "550 No such file").await,
-                }
-            }
-            b"MKD" => {
-                let ok = {
-                    let mut s = state.lock().unwrap();
-                    let ok = !s.tree.contains_key(&path) && s.tree.get(&parent(&path)) == Some(&Node::Dir);
-                    if ok {
-                        s.tree.insert(path.clone(), Node::Dir);
-                    }
-                    ok
-                };
-                say(w, if ok { "257 Created" } else { "550 Cannot create" }).await;
-            }
-            b"DELE" => {
-                let ok = {
-                    let mut s = state.lock().unwrap();
-                    let ok = matches!(s.tree.get(&path), Some(Node::File(_)));
-                    if ok {
-                        s.tree.remove(&path);
-                    }
-                    ok
-                };
-                say(w, if ok { "250 Deleted" } else { "550 Cannot delete" }).await;
-            }
-            b"RMD" => {
-                let ok = {
-                    let mut s = state.lock().unwrap();
-                    let ok = s.tree.get(&path) == Some(&Node::Dir) && children(&s.tree, &path).is_empty();
-                    if ok {
-                        s.tree.remove(&path);
-                    }
-                    ok
-                };
-                say(w, if ok { "250 Removed" } else { "550 Cannot remove" }).await;
-            }
-            b"RNFR" => {
-                let exists = state.lock().unwrap().tree.contains_key(&path);
-                rename_from = exists.then(|| path.clone());
-                say(w, if exists { "350 Ready" } else { "550 No such file" }).await;
-            }
-            b"RNTO" => {
-                let Some(from) = rename_from.take() else {
-                    say(w, "503 RNFR first").await;
-                    continue;
-                };
-                let ok = {
-                    let mut s = state.lock().unwrap();
-                    let ok = s.tree.get(&parent(&path)) == Some(&Node::Dir);
-                    if ok {
-                        let moved: Vec<(Vec<u8>, Node)> = s
-                            .tree
-                            .iter()
-                            .filter(|(p, _)| **p == from || p.starts_with(&[from.as_slice(), b"/"].concat()))
-                            .map(|(p, n)| (p.clone(), n.clone()))
-                            .collect();
-                        for (p, n) in moved {
-                            s.tree.remove(&p);
-                            s.tree.insert([path.as_slice(), &p[from.len()..]].concat(), n);
-                        }
-                    }
-                    ok
-                };
-                say(w, if ok { "250 Renamed" } else { "550 Cannot rename" }).await;
-            }
-            b"MLSD" | b"RETR" | b"STOR" => {
-                let Some(l) = listener.take() else {
-                    say(w, "425 Use EPSV first").await;
-                    continue;
-                };
-                let payload = {
-                    let s = state.lock().unwrap();
-                    match (verb.as_slice(), s.tree.get(&path)) {
-                        (b"MLSD", Some(Node::Dir)) if s.listing.is_some() => s.listing.clone(),
-                        (b"MLSD", Some(Node::Dir)) => {
-                            let mut out =
-                                format!("{} {}\r\n", facts(&Node::Dir, true), String::from_utf8_lossy(&path))
-                                    .into_bytes();
-                            out.extend_from_slice(b"type=pdir; ..\r\n");
-                            for (name, n) in children(&s.tree, &path) {
-                                out.extend_from_slice(facts(&n, false).as_bytes());
-                                out.push(b' ');
-                                out.extend_from_slice(&name);
-                                out.extend_from_slice(b"\r\n");
-                            }
-                            for extra in &s.extra_lines {
-                                out.extend_from_slice(extra);
-                                out.extend_from_slice(b"\r\n");
-                            }
-                            Some(out)
-                        }
-                        (b"RETR", Some(Node::File(d))) => {
-                            Some(d.get(rest.min(d.len())..).unwrap_or_default().to_vec())
-                        }
-                        (b"STOR", None | Some(Node::File(_)))
-                            if s.tree.get(&parent(&path)) == Some(&Node::Dir) =>
-                        {
-                            Some(Vec::new())
-                        }
-                        _ => None,
-                    }
-                };
-                rest = 0;
-                let Some(payload) = payload else {
-                    say(w, "550 No such file or folder").await;
-                    continue;
-                };
-                say(w, "150 Opening data connection").await;
-                let Ok((tcp, _)) = l.accept().await else { return };
-                let data_acceptor = if verb == b"STOR" { &uploads } else { &acceptor };
-                let Ok(mut data) = data_acceptor.accept(tcp).await else {
-                    say(ctrl.get_mut(), "425 TLS failed").await;
-                    continue;
-                };
-                let resumed = data.get_ref().1.handshake_kind() == Some(HandshakeKind::Resumed);
-                let require = {
-                    let mut s = state.lock().unwrap();
-                    if resumed {
-                        s.resumed += 1;
-                    }
-                    s.require_reuse
-                };
-                if require && !resumed {
-                    drop(data);
-                    say(ctrl.get_mut(), "425 TLS session of data connection not resumed").await;
-                    continue;
-                }
-                if verb == b"STOR" {
-                    let mut got = Vec::new();
-                    let whole = data.read_to_end(&mut got).await.is_ok() && data.shutdown().await.is_ok();
-                    state.lock().unwrap().tree.insert(path.clone(), Node::File(got));
-                    say(ctrl.get_mut(), if whole { "226 Stored" } else { "426 Transfer aborted" }).await;
-                } else {
-                    let mut rest = Vec::new();
-                    let sent = data.write_all(&payload).await.and(data.shutdown().await);
-                    if sent.and(data.read_to_end(&mut rest).await).is_err() {
-                        // As proftpd: a data connection reset or closed without TLS close ends the session.
-                        return;
-                    }
-                    let end = state.lock().unwrap().retr_end.filter(|_| verb == b"RETR");
-                    say(ctrl.get_mut(), end.unwrap_or("226 Done")).await;
-                }
-            }
-            b"ABOR" => say(w, "226 Abort done").await,
-            _ => say(w, "502 Not implemented").await,
+            b"ABOR" => self.say("226 Abort done").await,
+            _ => self.say("502 Not implemented").await,
         }
     }
+
+    async fn tree(&mut self, verb: &[u8], path: &[u8]) {
+        let reply = {
+            let mut s = self.state.lock().unwrap();
+            match verb {
+                b"MLST" => s.tree.get(path).map_or_else(
+                    || "550 No such file".to_owned(),
+                    |n| {
+                        let name = String::from_utf8_lossy(path);
+                        format!("250-Listing {name}\r\n {} {name}\r\n250 End", facts(n, false))
+                    },
+                ),
+                b"MKD" => change(
+                    !s.tree.contains_key(path) && s.tree.get(&parent(path)) == Some(&Node::Dir),
+                    || s.tree.insert(path.to_vec(), Node::Dir),
+                    "257 Created",
+                    "550 Cannot create",
+                ),
+                b"DELE" => change(
+                    matches!(s.tree.get(path), Some(Node::File(_))),
+                    || s.tree.remove(path),
+                    "250 Deleted",
+                    "550 Cannot delete",
+                ),
+                b"RMD" => change(
+                    s.tree.get(path) == Some(&Node::Dir) && children(&s.tree, path).is_empty(),
+                    || s.tree.remove(path),
+                    "250 Removed",
+                    "550 Cannot remove",
+                ),
+                b"RNFR" => {
+                    let exists = s.tree.contains_key(path);
+                    self.rename_from = exists.then(|| path.to_vec());
+                    (if exists { "350 Ready" } else { "550 No such file" }).to_owned()
+                }
+                _ => match self.rename_from.take() {
+                    None => "503 RNFR first".to_owned(),
+                    Some(from) => rename(&mut s.tree, &from, path),
+                },
+            }
+        };
+        self.say(&reply).await;
+    }
+
+    /// What `verb` sends or accepts on `path`, if it can run.
+    fn payload(&mut self, verb: &[u8], path: &[u8]) -> Option<Vec<u8>> {
+        let rest = std::mem::take(&mut self.rest);
+        let s = self.state.lock().unwrap();
+        match (verb, s.tree.get(path)) {
+            (b"MLSD", Some(Node::Dir)) if s.listing.is_some() => s.listing.clone(),
+            (b"MLSD", Some(Node::Dir)) => {
+                let mut out =
+                    format!("{} {}\r\n", facts(&Node::Dir, true), String::from_utf8_lossy(path)).into_bytes();
+                out.extend_from_slice(b"type=pdir; ..\r\n");
+                for (name, n) in children(&s.tree, path) {
+                    out.extend_from_slice(facts(&n, false).as_bytes());
+                    out.push(b' ');
+                    out.extend_from_slice(&name);
+                    out.extend_from_slice(b"\r\n");
+                }
+                for extra in &s.extra_lines {
+                    out.extend_from_slice(extra);
+                    out.extend_from_slice(b"\r\n");
+                }
+                Some(out)
+            }
+            (b"RETR", Some(Node::File(d))) => Some(d.get(rest.min(d.len())..).unwrap_or_default().to_vec()),
+            (b"STOR", None | Some(Node::File(_))) if s.tree.get(&parent(path)) == Some(&Node::Dir) => {
+                Some(Vec::new())
+            }
+            _ => None,
+        }
+    }
+
+    /// `MLSD`, `RETR`, `STOR`; false ends the session.
+    async fn transfer(&mut self, verb: &[u8], path: &[u8]) -> bool {
+        let Some(l) = self.listener.take() else {
+            self.say("425 Use EPSV first").await;
+            return true;
+        };
+        let Some(payload) = self.payload(verb, path) else {
+            self.say("550 No such file or folder").await;
+            return true;
+        };
+        self.say("150 Opening data connection").await;
+        let Ok((tcp, _)) = l.accept().await else { return false };
+        let acceptor = if verb == b"STOR" { &self.uploads } else { &self.acceptor };
+        let Ok(mut data) = acceptor.accept(tcp).await else {
+            self.say("425 TLS failed").await;
+            return true;
+        };
+        let resumed = data.get_ref().1.handshake_kind() == Some(HandshakeKind::Resumed);
+        let require = {
+            let mut s = self.state.lock().unwrap();
+            s.resumed += usize::from(resumed);
+            s.require_reuse
+        };
+        if require && !resumed {
+            drop(data);
+            self.say("425 TLS session of data connection not resumed").await;
+            return true;
+        }
+        if verb == b"STOR" {
+            let mut got = Vec::new();
+            let whole = data.read_to_end(&mut got).await.is_ok() && data.shutdown().await.is_ok();
+            self.state.lock().unwrap().tree.insert(path.to_vec(), Node::File(got));
+            self.say(if whole { "226 Stored" } else { "426 Transfer aborted" }).await;
+            return true;
+        }
+        let mut left = Vec::new();
+        let sent = data.write_all(&payload).await.and(data.shutdown().await);
+        if sent.and(data.read_to_end(&mut left).await).is_err() {
+            // As proftpd: a data connection reset or closed without TLS close ends the session.
+            return false;
+        }
+        let end = self.state.lock().unwrap().retr_end.filter(|_| verb == b"RETR");
+        self.say(end.unwrap_or("226 Done")).await;
+        true
+    }
+}
+
+/// `ok` → runs `apply`, `yes`; else `no`.
+fn change<T>(ok: bool, apply: impl FnOnce() -> T, yes: &str, no: &str) -> String {
+    if ok {
+        drop(apply());
+        yes.to_owned()
+    } else {
+        no.to_owned()
+    }
+}
+
+/// Moves `from` and all below it to `to`, if `to`'s folder exists.
+fn rename(tree: &mut BTreeMap<Vec<u8>, Node>, from: &[u8], to: &[u8]) -> String {
+    if tree.get(&parent(to)) != Some(&Node::Dir) {
+        return "550 Cannot rename".to_owned();
+    }
+    let below = [from, b"/"].concat();
+    let moved: Vec<(Vec<u8>, Node)> = tree
+        .iter()
+        .filter(|(p, _)| p.as_slice() == from || p.starts_with(&below))
+        .map(|(p, n)| (p.clone(), n.clone()))
+        .collect();
+    for (p, n) in moved {
+        tree.remove(&p);
+        tree.insert([to, &p[from.len()..]].concat(), n);
+    }
+    "250 Renamed".to_owned()
 }
