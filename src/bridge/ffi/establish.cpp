@@ -36,7 +36,15 @@ constexpr int SecretTimeoutMs = 60000;
 constexpr int WaitSliceMs = 50;  // A cancel ends the wait within this.
 uint32_t identityKind(ServerIdentity::Kind kind)
 {
-    return kind == ServerIdentity::Kind::SshHostKey ? NVB_IDENTITY_SSH : NVB_IDENTITY_NONE;
+    switch (kind) {
+    case ServerIdentity::Kind::SshHostKey:
+        return NVB_IDENTITY_SSH;
+    case ServerIdentity::Kind::TlsCertificate:
+        return NVB_IDENTITY_TLS;
+    case ServerIdentity::Kind::None:
+        break;
+    }
+    return NVB_IDENTITY_NONE;
 }
 
 // OpenSSH form "SHA256:" + unpadded base64 of the key blob's digest when the backend left the

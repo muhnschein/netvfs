@@ -76,7 +76,7 @@ typedef struct nvr_table {
     void (*free)(void *p);                                   /* also wipes nvr_key */
     void (*reply_set)(nvb_reply *r, const nvb_bytes *answers, size_t n);
 
-    nvb_error *(*conn_new)(nvb_bytes provider, nvr_conn **out);   /* "sftp", "smb", "mem" (testing) */
+    nvb_error *(*conn_new)(nvb_bytes provider, nvr_conn **out);   /* "sftp", "smb", "webdav", "mem" (testing) */
     void (*conn_free)(nvr_conn *c);                                /* disconnects, frees handles */
     void (*cancel)(nvr_conn *c);
     void (*reset_cancel)(nvr_conn *c);

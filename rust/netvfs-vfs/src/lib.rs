@@ -18,7 +18,7 @@ pub use cancel::CancelToken;
 pub use status::{ErrorName, Status};
 pub use types::{
     Attributes, Capabilities, Capability, Credentials, Disposition, Entry, EntryFlags, EntryType,
-    ListOptions, Params, Prompt, PromptRequest, RenameMode, ServerIdentity, SpaceInfo, Value, ValueMap,
-    WriteOptions,
+    IdentityKind, ListOptions, Params, Prompt, PromptRequest, RenameMode, ServerIdentity, SpaceInfo, Value,
+    ValueMap, WriteOptions,
 };
 pub use zeroize::Zeroizing;

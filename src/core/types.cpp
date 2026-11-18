@@ -108,7 +108,7 @@ ServerIdentity ServerIdentity::fromPin(const QString &pin)
     const QByteArray blob = QByteArray::fromBase64(parts.at(1).toLatin1());
     if (blob.isEmpty() || blob.toBase64() != parts.at(1).toLatin1())
         return identity;
-    identity.kind = Kind::SshHostKey;
+    identity.kind = parts.at(0) == QLatin1String(TlsAlgorithm) ? Kind::TlsCertificate : Kind::SshHostKey;
     identity.algorithm = parts.at(0);
     identity.publicKey = blob;
     return identity;

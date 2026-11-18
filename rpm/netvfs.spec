@@ -54,17 +54,20 @@ Requires:   jolla-settings-accounts
 Requires:   sailfish-components-accounts-qt5
 # SSH key import page uses the system file picker; part of the module, so every account UI loads it.
 Requires:   sailfish-components-pickers-qt5
+# WebDAV checks server certificates against the system's certificate authorities.
+Requires:   ca-certificates
 # Backups come along unless removed.
 Recommends: %{name}-backup = %{version}-%{release}
 
 %description
-Remote file access over SFTP and SMB for Sailfish OS: account
+Remote file access over SFTP, SMB and WebDAV for Sailfish OS: account
 providers in Settings > Accounts, network locations for apps, and the
 command line tool netvfs-cli.
 
 libnetvfs (accounts, credentials, sessions and errors over pluggable protocol
-backends) with its SFTP, SMB and local file system backends; the SFTP and
-SMB backends are Rust (libnetvfs-rs.so; SMB 3.1.1 only). libnetvfs also links
+backends) with its SFTP, SMB, WebDAV and local file system backends; the
+SFTP, SMB and WebDAV backends are Rust (libnetvfs-rs.so; SMB 3.1.1 only,
+WebDAV over TLS 1.3 only). libnetvfs also links
 QtNetwork, for the DNS-SD discovery of servers on the local network.
 
 %package devel
@@ -149,6 +152,7 @@ systemctl-user daemon-reload || :
 %dir %{_libdir}/netvfs/backends
 %{_libdir}/netvfs/backends/libnetvfs-sftp.so
 %{_libdir}/netvfs/backends/libnetvfs-smb.so
+%{_libdir}/netvfs/backends/libnetvfs-webdav.so
 %{_libdir}/netvfs/backends/libnetvfs-local.so
 # Rust backends, dlopen'd by their plugins next to the backend folder.
 %{_libdir}/netvfs/libnetvfs-rs.so
@@ -161,16 +165,22 @@ systemctl-user daemon-reload || :
 %{_datadir}/accounts/service_types/netvfs-files.service-type
 %{_datadir}/accounts/services/sftp-files.service
 %{_datadir}/accounts/services/smb-files.service
+%{_datadir}/accounts/services/webdav-files.service
 %{_datadir}/accounts/providers/sftp.provider
 %{_datadir}/accounts/providers/smb.provider
+%{_datadir}/accounts/providers/webdav.provider
 %{_datadir}/accounts/ui/sftp.qml
 %{_datadir}/accounts/ui/sftp-settings.qml
 %{_datadir}/accounts/ui/sftp-update.qml
 %{_datadir}/accounts/ui/smb.qml
 %{_datadir}/accounts/ui/smb-settings.qml
 %{_datadir}/accounts/ui/smb-update.qml
+%{_datadir}/accounts/ui/webdav.qml
+%{_datadir}/accounts/ui/webdav-settings.qml
+%{_datadir}/accounts/ui/webdav-update.qml
 %{_datadir}/themes/sailfish-default/silica/*/icons/graphic-service-sftp.png
 %{_datadir}/themes/sailfish-default/silica/*/icons/graphic-service-smb.png
+%{_datadir}/themes/sailfish-default/silica/*/icons/graphic-service-webdav.png
 %{_datadir}/translations/netvfs*.qm
 %{_bindir}/netvfs-cli
 

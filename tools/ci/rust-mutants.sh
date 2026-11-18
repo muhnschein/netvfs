@@ -18,8 +18,9 @@
 # With an ffi-libs.sh dir, netvfs-bridge's FFI test runs against the C++ libraries `tools/ci/ffi-libs.sh <dir>` built there
 # (else skipped, catches nothing). With <k>/<n>, only shard k (from 0) of n runs, every n-th mutant (CI: parallel jobs).
 #
-# netvfs-sftp's tests/openssh.rs and netvfs-smb's tests/samba.rs run against the interop containers and pass at once
-# (catching nothing) without NETVFS_SFTP_INTEROP_CONFIG, NETVFS_INTEROP_SMB_*. When the mutants include one of these
+# netvfs-sftp's tests/openssh.rs, netvfs-smb's tests/samba.rs and netvfs-webdav's tests/apache.rs run against the interop
+# containers and pass at once (catching nothing) without NETVFS_SFTP_INTEROP_CONFIG, NETVFS_INTEROP_SMB_*,
+# NETVFS_INTEROP_WEBDAV_*. When the mutants include one of these
 # crates and the settings are missing, its servers are started for the run (in the ffi-libs.sh dir when given) and
 # removed at the end. CI starts them once per job and hands them in (ci.yml, mutants.yml).
 set -eu
@@ -41,6 +42,8 @@ finish() {
         [ -z "$ids" ] || docker rm -f $ids >/dev/null 2>&1 || true
     done
     [ -z "${smb_work:-}" ] || rm -rf "$smb_work"
+    # Files the WebDAV server wrote belong to its user: what this user cannot remove stays.
+    [ -z "${webdav_work:-}" ] || rm -rf "$webdav_work" 2>/dev/null || true
     rm -rf "$tmp"
 }
 trap finish EXIT
@@ -94,6 +97,21 @@ print(json.load(open(sys.argv[1]))["servers"]["o103"]["container"].rsplit("-", 1
         fi
         started="$started $NETVFS_INTEROP_SMB_PREFIX"
         smb_work=$NETVFS_INTEROP_SMB_WORK
+        ;;
+    netvfs-webdav)
+        [ -z "${NETVFS_INTEROP_WEBDAV_PREFIX:-}" ] || return 0
+        echo "starting the WebDAV interop server for $1"
+        NETVFS_WEBDAV_SERVERS_ONLY=1 "$root/tests/interop/webdav/run.sh" "$2" > "$tmp/webdav-servers"
+        grep '^NETVFS_INTEROP_WEBDAV_' "$tmp/webdav-servers" > "$tmp/webdav-settings" || true
+        while IFS= read -r setting; do
+            export "${setting?}"
+        done < "$tmp/webdav-settings"
+        if [ -z "${NETVFS_INTEROP_WEBDAV_PREFIX:-}" ]; then
+            echo "the WebDAV interop server did not start"
+            exit 1
+        fi
+        started="$started $NETVFS_INTEROP_WEBDAV_PREFIX"
+        webdav_work=$NETVFS_INTEROP_WEBDAV_WORK
         ;;
     esac
 }

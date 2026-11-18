@@ -291,12 +291,24 @@ impl fmt::Debug for Credentials {
     }
 }
 
-/// The server identity seen during `connect`: an SSH host key.
+/// What kind of key a [`ServerIdentity`] is (`NVB_IDENTITY_*`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum IdentityKind {
+    /// An SSH host key.
+    #[default]
+    Ssh,
+    /// The public key of a TLS certificate.
+    Tls,
+}
+
+/// The server identity seen during `connect`: an SSH host key or a TLS certificate's key.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ServerIdentity {
-    /// Key algorithm (`ssh-ed25519`).
+    /// Its kind.
+    pub kind: IdentityKind,
+    /// Key algorithm (`ssh-ed25519`, `tls-spki-sha256`).
     pub algorithm: String,
-    /// The key blob.
+    /// SSH: the key blob; TLS: DER SubjectPublicKeyInfo.
     pub public_key: Vec<u8>,
     /// `SHA256:` and unpadded base64; empty lets C++ compute it.
     pub fingerprint: String,

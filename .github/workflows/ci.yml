@@ -243,6 +243,14 @@ jobs:
           if ! git diff --quiet "origin/$BASE_REF...HEAD" -- rust/netvfs-smb; then
               NETVFS_SMB_SERVERS_ONLY=1 ./tests/interop/smb/run.sh build-ffi | grep '^NETVFS_INTEROP_SMB_' >> "$GITHUB_ENV"
           fi
+      # netvfs-webdav's tests/apache.rs needs the Apache server: started once for the shard.
+      - name: Start the WebDAV interop server
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          if ! git diff --quiet "origin/$BASE_REF...HEAD" -- rust/netvfs-webdav; then
+              NETVFS_WEBDAV_SERVERS_ONLY=1 ./tests/interop/webdav/run.sh build-ffi | grep '^NETVFS_INTEROP_WEBDAV_' >> "$GITHUB_ENV"
+          fi
       - name: Mutants in the diff
         env:
           BASE_REF: ${{ github.base_ref }}

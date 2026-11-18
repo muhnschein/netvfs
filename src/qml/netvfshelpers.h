@@ -15,8 +15,8 @@ namespace NetVfsUi {
 NetVfs::ConnectionParams paramsFromVariant(const QVariantMap &map);
 QVariantMap paramsToVariant(const NetVfs::ConnectionParams &params);
 
-// Server identity as exposed to QML; empty map for protocols without one: { algorithm, fingerprint,
-// pin, pinOptions: {host_key} }.
+// Server identity as exposed to QML; empty map for protocols without one or a system-trusted TLS
+// certificate: { kind: "ssh"|"tls", algorithm, fingerprint, pin, pinOptions: {host_key} }.
 QVariantMap identityToVariant(const NetVfs::ServerIdentity &identity);
 
 // "SHA256:<unpadded base64>" of a raw key blob, as printed by ssh-keygen -lf.

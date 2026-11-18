@@ -15,6 +15,8 @@ on:
           - netvfs-accounts
           - netvfs-sftp
           - netvfs-smb
+          - netvfs-tls
+          - netvfs-webdav
 permissions:
   contents: read
 concurrency:
@@ -63,6 +65,10 @@ jobs:
       - name: Start the SMB interop servers
         if: inputs.package == 'netvfs-smb'
         run: NETVFS_SMB_SERVERS_ONLY=1 ./tests/interop/smb/run.sh build-ffi | grep '^NETVFS_INTEROP_SMB_' >> "$GITHUB_ENV"
+      # netvfs-webdav's tests/apache.rs needs the Apache server: started once for the shard.
+      - name: Start the WebDAV interop server
+        if: inputs.package == 'netvfs-webdav'
+        run: NETVFS_WEBDAV_SERVERS_ONLY=1 ./tests/interop/webdav/run.sh build-ffi | grep '^NETVFS_INTEROP_WEBDAV_' >> "$GITHUB_ENV"
       - name: Mutants in the whole crate
         env:
           PACKAGE: ${{ inputs.package }}

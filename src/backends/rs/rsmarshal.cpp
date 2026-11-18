@@ -79,7 +79,16 @@ Capabilities capabilitiesOf(const nvb_capabilities &capabilities)
 ServerIdentity identityOf(const nvb_identity &identity)
 {
     ServerIdentity out;
-    out.kind = identity.kind == NVB_IDENTITY_SSH ? ServerIdentity::Kind::SshHostKey : ServerIdentity::Kind::None;
+    switch (identity.kind) {
+    case NVB_IDENTITY_SSH:
+        out.kind = ServerIdentity::Kind::SshHostKey;
+        break;
+    case NVB_IDENTITY_TLS:
+        out.kind = ServerIdentity::Kind::TlsCertificate;
+        break;
+    default:
+        out.kind = ServerIdentity::Kind::None;
+    }
     out.algorithm = toUtf8String(identity.algorithm);
     out.publicKey = toByteArray(identity.public_key);
     out.fingerprint = toUtf8String(identity.fingerprint);

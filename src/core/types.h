@@ -83,11 +83,13 @@ struct NETVFS_EXPORT Capabilities {
 };
 
 struct NETVFS_EXPORT ServerIdentity {
-    enum class Kind { None, SshHostKey };
+    enum class Kind { None, SshHostKey, TlsCertificate };
     Kind kind = Kind::None;
-    QString algorithm;
-    QByteArray publicKey;
+    QString algorithm;        // TLS: TlsAlgorithm
+    QByteArray publicKey;     // SSH: key blob; TLS: DER SubjectPublicKeyInfo
     QString fingerprint;
+
+    static constexpr const char *TlsAlgorithm = "tls-spki-sha256";
 
     bool isEmpty() const { return publicKey.isEmpty(); }
 

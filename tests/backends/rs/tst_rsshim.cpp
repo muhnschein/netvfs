@@ -431,6 +431,12 @@ void tst_RsShim::establish()
     QCOMPARE(r.message(), QStringLiteral("Too many attempts"));
     QCOMPARE(r.retryAfterMs(), qint64(1500));
 
+    std::unique_ptr<Backend> tls = newBackend(&r);
+    QCOMPARE(tls->connect(memParams({ { QStringLiteral("identity"), QStringLiteral("tls-spki-sha256") } }), &seen),
+             Result::success());
+    QCOMPARE(seen.kind, ServerIdentity::Kind::TlsCertificate);
+    QCOMPARE(seen.algorithm, QStringLiteral("tls-spki-sha256"));
+
     // No identity: an empty one, also where there was one before.
     std::unique_ptr<Backend> plain = newBackend(&r);
     QCOMPARE(plain->connect(memParams(), &seen), Result::success());

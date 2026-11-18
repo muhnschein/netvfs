@@ -5,14 +5,14 @@
 use super::alloc::{Out, pack};
 use super::raw::{
     NVB_DISPOSITION_CREATE_NEW, NVB_DISPOSITION_RESUME, NVB_DISPOSITION_TRUNCATE, NVB_IDENTITY_SSH,
-    NVB_VALUE_BOOL, NVB_VALUE_BYTES, NVB_VALUE_INT, NVB_VALUE_STRING, NVB_VALUE_STRING_LIST, NvbAttributes,
-    NvbBlob, NvbBytes, NvbCapabilities, NvbEntry, NvbError, NvbIdentity, NvbKv, NvbParams, NvbSpace,
-    NvbValue, NvrCredentials, NvrKey,
+    NVB_IDENTITY_TLS, NVB_VALUE_BOOL, NVB_VALUE_BYTES, NVB_VALUE_INT, NVB_VALUE_STRING,
+    NVB_VALUE_STRING_LIST, NvbAttributes, NvbBlob, NvbBytes, NvbCapabilities, NvbEntry, NvbError,
+    NvbIdentity, NvbKv, NvbParams, NvbSpace, NvbValue, NvrCredentials, NvrKey,
 };
 use netvfs_sftp::keys::KeyMaterial;
 use netvfs_vfs::{
-    Attributes, Capabilities, Credentials, Disposition, Entry, Params, ServerIdentity, SpaceInfo, Status,
-    Value, ValueMap, WriteOptions, Zeroizing,
+    Attributes, Capabilities, Credentials, Disposition, Entry, IdentityKind, Params, ServerIdentity,
+    SpaceInfo, Status, Value, ValueMap, WriteOptions, Zeroizing,
 };
 
 /// # Safety
@@ -220,7 +220,10 @@ pub fn blob(data: &[u8]) -> Option<*mut NvbBlob> {
 /// `pin` is left empty (C++ computes it); so is the fingerprint if the backend left it empty.
 pub fn identity(id: &ServerIdentity) -> Option<*mut NvbIdentity> {
     pack(|out| NvbIdentity {
-        kind: NVB_IDENTITY_SSH,
+        kind: match id.kind {
+            IdentityKind::Ssh => NVB_IDENTITY_SSH,
+            IdentityKind::Tls => NVB_IDENTITY_TLS,
+        },
         algorithm: out.bytes(id.algorithm.as_bytes()),
         public_key: out.bytes(&id.public_key),
         fingerprint: out.bytes(id.fingerprint.as_bytes()),
@@ -480,6 +483,7 @@ mod tests {
         release(p);
 
         let id = ServerIdentity {
+            kind: IdentityKind::Ssh,
             algorithm: "ssh-ed25519".to_owned(),
             public_key: vec![1, 2],
             fingerprint: String::new(),
@@ -490,6 +494,13 @@ mod tests {
         assert_eq!(raw.kind, NVB_IDENTITY_SSH);
         assert_eq!((read(raw.algorithm), read(raw.public_key)), (b"ssh-ed25519".to_vec(), vec![1, 2]));
         assert!(read(raw.fingerprint).is_empty() && read(raw.pin).is_empty());
+        release(p);
+
+        let tls = ServerIdentity { kind: IdentityKind::Tls, algorithm: "tls-spki-sha256".to_owned(), ..id };
+        let p = identity(&tls).unwrap();
+        // SAFETY: test: a live block.
+        let raw = unsafe { p.read() };
+        assert_eq!((raw.kind, read(raw.algorithm)), (NVB_IDENTITY_TLS, b"tls-spki-sha256".to_vec()));
         release(p);
 
         let caps = Capabilities {

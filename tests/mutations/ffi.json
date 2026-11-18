@@ -152,5 +152,12 @@
     "search": "        std::call_once(seeded, seedFromEnvironment);",
     "replace": "        Q_UNUSED(seeded)",
     "test": "build/tests/bridge/ffi/tst_bridgeffi"
+  },
+  {
+    "name": "TLS identity crosses the bridge as none",
+    "file": "src/bridge/ffi/establish.cpp",
+    "search": "    case ServerIdentity::Kind::TlsCertificate:\n        return NVB_IDENTITY_TLS;",
+    "replace": "    case ServerIdentity::Kind::TlsCertificate:\n        return NVB_IDENTITY_NONE;",
+    "test": "build/tests/bridge/ffi/tst_bridgeffi"
   }
 ]

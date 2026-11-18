@@ -30,6 +30,8 @@ netvfs-vfs = { path = "../netvfs-vfs" }
 netvfs-sftp = { path = "../netvfs-sftp" }
 # Provider "smb".
 netvfs-smb = { path = "../netvfs-smb" }
+# Provider "webdav".
+netvfs-webdav = { path = "../netvfs-webdav" }
 libc = "0.2"
 tokio = { version = "1", default-features = false, features = ["rt-multi-thread", "time", "sync"] }
 zeroize = "1"

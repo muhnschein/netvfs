@@ -8,7 +8,7 @@
 //! | `secret` | `authenticate` wants this secret, else `AuthFailed` |
 //! | `throttle` | `authenticate` fails with `RateLimited`, retry after this many ms |
 //! | `interactive`, `answer` | `authenticate` asks the prompter this question and wants this answer |
-//! | `identity` | `connect` reports an SSH identity of this algorithm; its fingerprint is `<user>@<host>:<port> <connect>/<request timeout> ms` |
+//! | `identity` | `connect` reports an identity of this algorithm (TLS for `tls-…`, else SSH); its fingerprint is `<user>@<host>:<port> <connect>/<request timeout> ms` |
 //! | `stall` | `true`: every call after `authenticate` waits for cancel; `ignore`: waits for ever, ignoring cancel |
 //! | `panic` | the call of this name (`stat`, `read`, `position`, …) panics |
 //!
@@ -17,9 +17,9 @@
 mod tree;
 
 use netvfs_vfs::{
-    Attributes, Backend, CancelToken, Capabilities, Capability, Credentials, Entry, ErrorName, ListOptions,
-    ListSink, Params, Progress, Prompt, PromptRequest, Prompter, ReadHandle, RenameMode, ServerIdentity,
-    Sink, Source, SpaceInfo, Status, WriteHandle, WriteOptions,
+    Attributes, Backend, CancelToken, Capabilities, Capability, Credentials, Entry, ErrorName, IdentityKind,
+    ListOptions, ListSink, Params, Progress, Prompt, PromptRequest, Prompter, ReadHandle, RenameMode,
+    ServerIdentity, Sink, Source, SpaceInfo, Status, WriteHandle, WriteOptions,
 };
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
@@ -126,6 +126,7 @@ impl Mem {
         self.session = Some(Arc::new(session));
         self.params = params.clone();
         params.option("identity").map(|algorithm| ServerIdentity {
+            kind: if algorithm.starts_with("tls-") { IdentityKind::Tls } else { IdentityKind::Ssh },
             algorithm,
             public_key: b"mem host key".to_vec(),
             fingerprint: format!(

@@ -126,7 +126,8 @@ check-packaging: all
 	    $(BUILD_DIR)/libexec/netvfs/netvfs-bridge "$$(getconf GNU_LIBC_VERSION | cut -d ' ' -f 2)"
 	./tools/ci/check-rs-lib.sh $(BUILD_DIR)/lib/netvfs/libnetvfs-rs.so "$$(getconf GNU_LIBC_VERSION | cut -d ' ' -f 2)" \
 	    "$$($(QMAKE) -query QT_INSTALL_LIBS)/netvfs/libnetvfs-rs.so" $(BUILD_DIR)/lib/netvfs/test-backends/libnetvfs-mem.so \
-	    $(BUILD_DIR)/lib/netvfs/backends/libnetvfs-sftp.so $(BUILD_DIR)/lib/netvfs/backends/libnetvfs-smb.so
+	    $(BUILD_DIR)/lib/netvfs/backends/libnetvfs-sftp.so $(BUILD_DIR)/lib/netvfs/backends/libnetvfs-smb.so \
+	    $(BUILD_DIR)/lib/netvfs/backends/libnetvfs-webdav.so
 	./tests/packaging/test_packaging.py
 
 coverage:

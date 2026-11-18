@@ -115,6 +115,16 @@ class TestCore : public QObject
     Q_OBJECT
 
 private:
+    static ServerIdentity tls(char fill)
+    {
+        ServerIdentity id;
+        id.kind = ServerIdentity::Kind::TlsCertificate;
+        id.algorithm = QLatin1String(ServerIdentity::TlsAlgorithm);
+        id.publicKey = QByteArray(91, fill);
+        id.fingerprint = QStringLiteral("SHA256:tls");
+        return id;
+    }
+
     static ServerIdentity ed25519(char fill)
     {
         ServerIdentity id;
@@ -336,6 +346,11 @@ private slots:
         QCOMPARE(ssh.kind, ServerIdentity::Kind::SshHostKey);
         QCOMPARE(ssh.toPin(), QStringLiteral("ssh-ed25519 ") + QString::fromLatin1(QByteArray(51, 'k').toBase64()));
 
+        const ServerIdentity spki = ServerIdentity::fromPin(tls('t').toPin());
+        QCOMPARE(spki.kind, ServerIdentity::Kind::TlsCertificate);
+        QCOMPARE(spki.toPin(), QStringLiteral("tls-spki-sha256 ") + QString::fromLatin1(QByteArray(91, 't').toBase64()));
+        QCOMPARE(spki, tls('t'));
+
         // The same key bytes under another algorithm are another identity.
         ServerIdentity sameBytes = ssh;
         sameBytes.algorithm = QStringLiteral("ecdsa-sha2-nistp256");
@@ -351,6 +366,16 @@ private slots:
         const Result changed = checkServerIdentity(seen, ed25519('x').toPin());
         QCOMPARE(changed.error(), Error::ServerIdentityChanged);
         QVERIFY(changed.message().contains(seen.fingerprint));
+        QVERIFY(changed.message().contains(QLatin1String("server key changed")));
+
+        const ServerIdentity cert = tls('t');
+        const Result untrusted = checkServerIdentity(cert, QString());
+        QCOMPARE(untrusted.error(), Error::ServerIdentityUnknown);
+        QCOMPARE(untrusted.message(), QStringLiteral("Untrusted server certificate SHA256:tls"));
+        const Result replaced = checkServerIdentity(cert, tls('u').toPin());
+        QCOMPARE(replaced.error(), Error::ServerIdentityChanged);
+        QCOMPARE(replaced.message(), QStringLiteral("The server certificate key changed; it is now SHA256:tls"));
+        QVERIFY(checkServerIdentity(cert, cert.toPin()).ok());
     }
 
     void identityPolicy()

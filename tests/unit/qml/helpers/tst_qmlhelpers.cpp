@@ -70,6 +70,7 @@ private slots:
         QCOMPARE(helpers.backupsPathKey(), QStringLiteral("backups_path"));
         QCOMPARE(input.defaultPort(QStringLiteral("sftp")), 22);
         QCOMPARE(input.defaultPort(QStringLiteral("smb")), 445);
+        QCOMPARE(input.defaultPort(QStringLiteral("webdav")), 443);
         QCOMPARE(input.defaultPort(QStringLiteral("fake")), 0);
         QCOMPARE(helpers.backupServiceName(QStringLiteral("smb")), QStringLiteral("smb-backup"));
     }
@@ -401,12 +402,19 @@ private slots:
         const QByteArray blob("\x00\x00\x00\x0bssh-ed25519 key", 19);
         const QString pin = QStringLiteral("ssh-ed25519 ") + QString::fromLatin1(blob.toBase64());
         const QVariantMap identity = helpers.identityFromPin(pin);
+        QCOMPARE(identity.value(QStringLiteral("kind")).toString(), QStringLiteral("ssh"));
         QCOMPARE(identity.value(QStringLiteral("algorithm")).toString(), QStringLiteral("ssh-ed25519"));
         QCOMPARE(identity.value(QStringLiteral("fingerprint")).toString(), NetVfsUi::sha256Fingerprint(blob));
         QCOMPARE(identity.value(QStringLiteral("pin")).toString(), pin);
         // accepting stores the pin as host_key, nothing else.
         QCOMPARE(identity.value(QStringLiteral("pinOptions")).toMap(), QVariantMap({ { QStringLiteral("host_key"), pin } }));
-        QCOMPARE(identity.size(), 4);
+        QCOMPARE(identity.size(), 5);
+        const QString tlsPin = QStringLiteral("tls-spki-sha256 ") + QString::fromLatin1(blob.toBase64());
+        const QVariantMap certificate = helpers.identityFromPin(tlsPin);
+        QCOMPARE(certificate.value(QStringLiteral("kind")).toString(), QStringLiteral("tls"));
+        QCOMPARE(certificate.value(QStringLiteral("fingerprint")).toString(), NetVfsUi::sha256Fingerprint(blob));
+        QCOMPARE(certificate.value(QStringLiteral("pinOptions")).toMap(),
+                 QVariantMap({ { QStringLiteral("host_key"), tlsPin } }));
         QVERIFY(helpers.identityFromPin(QStringLiteral("garbage")).isEmpty());
         QVERIFY(helpers.identityFromPin(QString()).isEmpty());
 
@@ -441,6 +449,13 @@ private slots:
         QFETCH(QString, file);
         QCOMPARE(helpers.hostKeyHint(algorithm),
                  QStringLiteral("To compare, run this command on the server: ssh-keygen -lf /etc/ssh/") + file);
+    }
+
+    void certificateHint()
+    {
+        QCOMPARE(helpers.hostKeyHint(QStringLiteral("tls-spki-sha256")),
+                 QStringLiteral("To compare, run this command with the server's certificate: openssl x509 -in cert.pem "
+                                "-pubkey -noout | openssl pkey -pubin -outform der | openssl dgst -sha256 -binary | base64"));
     }
 
     void serviceRules()

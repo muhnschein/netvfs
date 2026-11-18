@@ -118,4 +118,7 @@ exclude_re = [
     'netvfs-smb/src/session\.rs:\d+:\d+: replace \| with \^ in finish$',
     # Equivalent: UTF-8 assembly ORs a lead or continuation marker with non-overlapping payload bits, `^` is `|`.
     'netvfs-smb/src/names\.rs:\d+:\d+: replace \| with \^ in (push_utf8|utf16_from_wtf8)$',
+    # Equivalent: usable() idle `elapsed < stale_after` vs `<=` differs only when elapsed equals it to the
+    # nanosecond; tests pin both sides (ZERO, one hour).
+    'netvfs-webdav/src/http\.rs:\d+:\d+: replace < with <= in Http::usable$',
 ]

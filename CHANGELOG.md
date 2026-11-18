@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- WebDAV accounts, such as Nextcloud, over HTTPS in *Settings › Accounts* and for apps through the bridge. Connections use TLS 1.3 only. A certificate the phone does not trust can be accepted once by its fingerprint; it is then checked on every connection. Backups to WebDAV come later.
+
 ## 1.0.0 - 2026-11-17
 
 First release, for Sailfish OS 5.2 on aarch64.

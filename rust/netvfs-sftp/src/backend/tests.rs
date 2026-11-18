@@ -167,6 +167,7 @@ fn pins() {
     }
     let addr: SocketAddr = "127.0.0.1:22".parse().unwrap();
     let identity = ServerIdentity {
+        kind: netvfs_vfs::IdentityKind::Ssh,
         algorithm: "ssh-ed25519".to_owned(),
         public_key: vec![0, 0, 0],
         fingerprint: "f".to_owned(),

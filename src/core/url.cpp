@@ -17,7 +17,7 @@ constexpr int MaxPortDigits = 5;
 constexpr ushort FirstPrintable = 0x20;
 constexpr ushort Delete = 0x7F;
 
-enum class Kind { Sftp, Smb, Local };
+enum class Kind { Sftp, Smb, WebDav, Local };
 
 struct SchemeInfo {
     const char *scheme;
@@ -25,12 +25,20 @@ struct SchemeInfo {
     int defaultPort;
 };
 
-constexpr std::array<SchemeInfo, 4> Schemes = {{
+constexpr std::array<SchemeInfo, 6> Schemes = {{
     { "sftp", Kind::Sftp, 22 },
     { "ssh", Kind::Sftp, 22 },
     { "smb", Kind::Smb, 445 },
+    { "davs", Kind::WebDav, 443 },
+    { "https", Kind::WebDav, 443 },
     { "file", Kind::Local, 0 },
 }};
+
+// WebDAV only over TLS: plain HTTP gets a clearer refusal than an unknown scheme.
+bool isPlainHttp(const QString &scheme)
+{
+    return scheme == QLatin1String("dav") || scheme == QLatin1String("http");
+}
 
 const SchemeInfo *findScheme(const QString &scheme)
 {
@@ -281,6 +289,11 @@ void applyKind(const SchemeInfo &info, const QString &urlPath, ConnectionParams 
             params->options.insert(QStringLiteral("share"), share);
         break;
     }
+    case Kind::WebDav:
+        params->provider = QStringLiteral("webdav");
+        if (urlPath.size() > 1)
+            params->options.insert(QStringLiteral("base_path"), urlPath);
+        break;
     case Kind::Local:
         params->provider = QStringLiteral("local");
         params->host.clear();
@@ -309,12 +322,14 @@ const char *schemeFor(const ConnectionParams &params)
         return "sftp";
     if (params.provider == QLatin1String("smb"))
         return "smb";
+    if (params.provider == QLatin1String("webdav"))
+        return "davs";
     if (params.provider == QLatin1String("local"))
         return "file";
     return nullptr;
 }
 
-QString belowShare(const QString &path)
+QString belowRoot(const QString &path)
 {
     QString trimmed = path;
     while (trimmed.startsWith(QLatin1Char('/')))
@@ -326,12 +341,18 @@ QString belowShare(const QString &path)
 
 QString encodedLocation(const ConnectionParams &params, const QString &path)
 {
+    if (params.provider == QLatin1String("webdav")) {
+        QString base = withLeadingSlash(params.option(QStringLiteral("base_path")));
+        while (base.endsWith(QLatin1Char('/')))
+            base.chop(1);
+        return percentEncode(base + belowRoot(path), true);
+    }
     if (params.provider == QLatin1String("smb")) {
         const QString share = params.option(QStringLiteral("share"));
         if (share.isEmpty())
             return QString();
         return QLatin1Char('/') + percentEncode(share, false)
-            + percentEncode(belowShare(path), true);
+            + percentEncode(belowRoot(path), true);
     }
     return percentEncode(withLeadingSlash(path), true);
 }
@@ -360,6 +381,8 @@ Result parse(const QString &url, ConnectionParams *params, QString *path)
     Result r = parseScheme(url, &scheme, &rest);
     if (!r.ok())
         return r;
+    if (isPlainHttp(scheme))
+        return Result(Error::SecurityPolicy, QStringLiteral("WebDAV needs TLS; use davs:// or https://"));
     const SchemeInfo *info = findScheme(scheme);
     if (!info)
         return Result(Error::Unsupported, QStringLiteral("Unsupported URL scheme \"%1\"").arg(scheme));
@@ -381,6 +404,7 @@ Result parse(const QString &url, ConnectionParams *params, QString *path)
 
     ConnectionParams result = *params;
     result.options.remove(QStringLiteral("share"));
+    result.options.remove(QStringLiteral("base_path"));
     result.host = authority.host;
     result.username = authority.user;
     result.port = authority.port == info->defaultPort ? 0 : authority.port;

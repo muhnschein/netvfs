@@ -257,7 +257,7 @@ mod tests {
         );
     }
 
-    /// Three listed accounts: 1 usable, 2 refused by policy, 2^32 (id reads as 0); 5 is WebDAV with
+    /// Three listed accounts: 1 usable, 2 refused by policy, 2^32 (id reads as 0); 5 is FTP (no backend) with
     /// Files enabled, not handed out. Returns its path.
     fn listed_accounts(name: &str) -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(format!("netvfs-accounts-serve-{name}-{}", std::process::id()));
@@ -268,9 +268,9 @@ mod tests {
         c.execute_batch(crate::db::TEST_SCHEMA).unwrap();
         c.execute_batch(
             "INSERT INTO Services VALUES (1, 'smb-files', 'Files', 'smb', 'netvfs-files'),
-                                         (2, 'webdav-files', 'Files', 'webdav', 'netvfs-files');
+                                         (2, 'ftp-files', 'Files', 'ftp', 'netvfs-files');
              INSERT INTO Accounts VALUES (1, 'alice@nas', 'smb', 1), (2, 'b', 'smb', 1),
-                                         (4294967296, 'z', 'smb', 1), (5, 'dav', 'webdav', 1);
+                                         (4294967296, 'z', 'smb', 1), (5, 'f', 'ftp', 1);
              INSERT INTO Settings VALUES (1, 0, 'netvfs/host', 's', '''nas'''),
                                          (1, 0, 'netvfs/port', 'i', '445'),
                                          (1, 0, 'netvfs/username', 's', '''alice'''),

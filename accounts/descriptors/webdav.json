@@ -1,0 +1,22 @@
+{
+    "provider": "webdav",
+    "services": ["files"],
+    "defaultPort": 443,
+    "authModes": [
+        { "id": "password", "label": "settings-accounts-netvfs-me-password", "secret": "password" }
+    ],
+    "fields": [
+        { "key": "host", "type": "text", "label": "settings-accounts-netvfs-la-server",
+          "placeholder": "settings-accounts-netvfs-ph-server", "validation": "host", "input": "url" },
+        { "key": "port", "type": "text", "label": "settings-accounts-netvfs-la-port",
+          "validation": "port", "optional": true, "input": "digits" },
+        { "key": "base_path", "type": "text", "label": "settings-accounts-netvfs-la-base_path",
+          "description": "settings-accounts-netvfs-la-base_path_description", "validation": "folder",
+          "optional": true, "input": "url" },
+        { "key": "username", "type": "text", "label": "settings-accounts-netvfs-la-user", "validation": "userName" },
+        { "key": "password_hint", "type": "note", "label": "settings-accounts-netvfs-la-webdav_password_hint" },
+        { "key": "files_root", "type": "text", "label": "settings-accounts-netvfs-la-files_root",
+          "description": "settings-accounts-netvfs-la-folder_in_base", "validation": "folder", "optional": true,
+          "service": "files" }
+    ]
+}

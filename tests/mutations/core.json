@@ -285,5 +285,19 @@
     "search": "        r = makeDir(current, false);",
     "replace": "        r = makeDir(current, true);",
     "test": "build/tests/unit/core/tst_core"
+  },
+  {
+    "name": "TLS pin read as an SSH key",
+    "file": "src/core/types.cpp",
+    "search": "parts.at(0) == QLatin1String(TlsAlgorithm) ? Kind::TlsCertificate : Kind::SshHostKey",
+    "replace": "Kind::SshHostKey",
+    "test": "build/tests/unit/core/tst_core"
+  },
+  {
+    "name": "untrusted certificate worded as a key",
+    "file": "src/core/identity.cpp",
+    "search": "    const bool tls = seen.kind == ServerIdentity::Kind::TlsCertificate;",
+    "replace": "    const bool tls = false;",
+    "test": "build/tests/unit/core/tst_core"
   }
 ]

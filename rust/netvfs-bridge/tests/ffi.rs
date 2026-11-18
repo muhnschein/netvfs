@@ -800,8 +800,17 @@ fn url_parse_format(env: &Env) {
     assert_eq!(ffi.url_format(&smb.params, &smb.path).unwrap(), "smb://nas/share/dir");
     assert_eq!(ffi.url_parse("file:///tmp/x").unwrap().params.provider, "local");
     assert_eq!(name_of(&ffi.url_parse("gopher://h/")), Some(ErrorName::Unsupported));
-    let dav = ffi.url_parse("davs://dav.example/remote.php/files").unwrap_err();
-    assert_eq!((dav.name, dav.message.as_str()), (ErrorName::Unsupported, "Unsupported URL scheme \"davs\""));
+    let dav = ffi.url_parse("https://dav.example/remote.php/files").unwrap();
+    assert_eq!(dav.params.provider, "webdav");
+    assert_eq!(dav.params.options.get("base_path"), Some(&Value::Str("/remote.php/files".into())));
+    assert_eq!(ffi.url_format(&dav.params, b"/a b").unwrap(), "davs://dav.example/remote.php/files/a%20b");
+    let plain = ffi.url_parse("http://dav.example/").unwrap_err();
+    assert_eq!(
+        (plain.name, plain.message.as_str()),
+        (ErrorName::SecurityPolicy, "WebDAV needs TLS; use davs:// or https://")
+    );
+    let ftp = ffi.url_parse("ftps://ftp.example/").unwrap_err();
+    assert_eq!((ftp.name, ftp.message.as_str()), (ErrorName::Unsupported, "Unsupported URL scheme \"ftps\""));
     let unknown = Params { provider: "fake".into(), ..Params::default() };
     assert_eq!(name_of(&ffi.url_format(&unknown, b"/")), Some(ErrorName::Unsupported));
     let mut typed = smb.params.clone();
