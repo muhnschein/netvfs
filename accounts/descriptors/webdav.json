@@ -1,6 +1,6 @@
 {
     "provider": "webdav",
-    "services": ["files"],
+    "services": ["backup", "files"],
     "defaultPort": 443,
     "authModes": [
         { "id": "password", "label": "settings-accounts-netvfs-me-password", "secret": "password" }
@@ -15,6 +15,9 @@
           "optional": true, "input": "url" },
         { "key": "username", "type": "text", "label": "settings-accounts-netvfs-la-user", "validation": "userName" },
         { "key": "password_hint", "type": "note", "label": "settings-accounts-netvfs-la-webdav_password_hint" },
+        { "key": "backups_path", "type": "text", "label": "settings-accounts-netvfs-la-backups_folder",
+          "description": "settings-accounts-netvfs-la-folder_in_base", "default": "Sailfish OS/Backups",
+          "validation": "folder", "service": "backup" },
         { "key": "files_root", "type": "text", "label": "settings-accounts-netvfs-la-files_root",
           "description": "settings-accounts-netvfs-la-folder_in_base", "validation": "folder", "optional": true,
           "service": "files" }

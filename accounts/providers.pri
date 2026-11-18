@@ -5,16 +5,16 @@
 # Every provider gets <p>.provider, the account UI and a "<p>-files" service; providers in
 # NETVFS_BACKUP_PROVIDERS also get "<p>-backup" (Buteo plugins exist for them).
 NETVFS_PROVIDERS = sftp smb webdav ftps
-NETVFS_BACKUP_PROVIDERS = sftp smb
+NETVFS_BACKUP_PROVIDERS = sftp smb webdav ftps
 
 NETVFS_NAME_sftp = SFTP
 NETVFS_DESCRIPTION_sftp = "Files and backups on an SSH/SFTP server"
 NETVFS_NAME_smb = SMB
 NETVFS_DESCRIPTION_smb = "Files and backups on an SMB (Windows or Samba) file share"
 NETVFS_NAME_webdav = WebDAV
-NETVFS_DESCRIPTION_webdav = "Files on a WebDAV server over HTTPS, such as Nextcloud"
+NETVFS_DESCRIPTION_webdav = "Files and backups on a WebDAV server over HTTPS, such as Nextcloud"
 NETVFS_NAME_ftps = FTPS
-NETVFS_DESCRIPTION_ftps = "Files on an FTP server over TLS (FTPS)"
+NETVFS_DESCRIPTION_ftps = "Files and backups on an FTP server over TLS (FTPS)"
 
 # Writes `output` from `template`, replacing @PROVIDER@, @NAME@ and @DESCRIPTION@.
 defineTest(netvfsGenerate) {
