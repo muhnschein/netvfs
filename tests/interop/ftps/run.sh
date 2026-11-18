@@ -12,8 +12,9 @@ prefix="netvfs-ftps-$$"
 work=$(mktemp -d)
 # A fresh password per run; it exists only in this process tree and the container.
 password=$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')
-# EPSV names a port, so passive ports map 1:1: ten from a range picked per run.
-first=$((30000 + $$ % 2000 * 10))
+# EPSV names a port, so passive ports map 1:1: ten from a range picked per run, below Linux's ephemeral ports
+# (32768 up), which other connections may hold.
+first=$((20000 + $$ % 1200 * 10))
 last=$((first + 9))
 
 cleanup() {
