@@ -16,7 +16,7 @@ Non-goals: share sheet, Gallery, folder sync, photo upload, FUSE or kernel mount
 - SFOS 5.2.0.18 aarch64: Qt 5.6.3, gcc 13.4 / glibc 2.41, OpenSSH 10.3p1 reference peer, libaccounts-qt5 1.17, signon-qt5 8.61, buteo-syncfw-qt5 0.11.11, jolla-settings-accounts 0.6.15 (closed), jolla-vault 1.1.46 (closed), sailfish-account-nextcloud 1.1.3 (reference backup account).
 - Not Harbour: uses privileged account and sync APIs. Lautta is Harbour; netvfs is what platform would have to ship for it.
 - Accounts&SSO documented as slated for replacement, no roadmap; Jolla still added Mastodon on it in 5.2: supported path for now.
-- SFTP, SMB and WebDAV clients: own Rust code in `libnetvfs-rs.so`; no protocol or crypto library of platform. WebDAV trusts system CAs (`ca-certificates`) or a pinned key.
+- SFTP, SMB, WebDAV and FTPS clients: own Rust code in `libnetvfs-rs.so`; no protocol or crypto library of platform. WebDAV and FTPS trust system CAs (`ca-certificates`) or a pinned key.
 
 ## Stack
 
@@ -31,10 +31,10 @@ Non-goals: share sheet, Gallery, folder sync, photo upload, FUSE or kernel mount
         │                          │                    ├ netvfs-accounts (setgid privileged)
         └──────────────┬───────────┘                    │ libnetvfs-bridge-ffi.so
                     libnetvfs (C++: accounts, credentials, session, ops, discovery)
-          ┌──────────────┼──────────────┬────────────┐
-     sftp plugin    smb plugin    webdav plugin  local plugin
-          └──────────────┼──────────────┘
-      libnetvfs-rs.so (Rust: netvfs-sftp, netvfs-smb, netvfs-webdav)
+     ┌───────────┬───────────┼───────────┬───────────┐
+sftp plugin  smb plugin  webdav plugin  ftps plugin  local plugin
+     └───────────┴─────┬─────┴───────────┘
+  libnetvfs-rs.so (Rust: netvfs-sftp, netvfs-smb, netvfs-webdav, netvfs-ftps)
  accounts db + signond (secrets)      UDisks2 (drives, via bridge)
 ```
 
@@ -116,7 +116,7 @@ Any process can start it, so it trusts nothing of caller:
 
 ## Security rules
 
-- Server identity checked before any credential is sent (SFTP host key, WebDAV certificate; SMB has none to pin).
+- Server identity checked before any credential is sent (SFTP host key, WebDAV and FTPS certificate; SMB has none to pin).
 - Algorithm lists fixed in code; no setting weakens SSH algorithms or SMB dialect. Never automatic downgrade or retry with weaker profile, dialect, auth method.
 - Private keys generated on device or imported once, signond only, never written to disk. Never reads `~/.ssh`, system SSH config, agent, Samba config, `NTLM_USER_FILE`, `krb5.conf`.
 - Secrets in memory only during an operation, wiped (best effort).
@@ -141,6 +141,14 @@ Any process can start it, so it trusts nothing of caller:
 - Caps: multistatus body ≤ 32 MiB, ≤ 200,000 responses, text ≤ 32 KiB, depth ≤ 32, href ≤ 8 KiB; error body ≤ 64 KiB.
 - Files only for now; no backup plugins.
 
+### FTPS
+
+- Explicit TLS only: `AUTH TLS` on the plain greeting, then TLS 1.3 (netvfs-tls). `ftp://` refused before any packet; no implicit TLS (990), no TLS 1.2, no plain data. `PBSZ 0` + `PROT P` required, else `SecurityPolicy`. Trust as WebDAV; no `USER` before identity check.
+- Data: `EPSV` only, to control connection's peer address; each data connection a TLS client of its own, resuming control session (servers require it). `TYPE I`. Listings `MLSD`/`MLST` only (FEAT without `MLST` → `Unsupported`); no `LIST` parsing, no `PASV`. `OPTS UTF8 ON` when offered.
+- Reads `REST` + `RETR`; writes `STOR` whole, no resume, no handles. Canceled call: next command first reads replies still owed. Timeout, 421 or half-sent command ends connection (`ConnectionLost`).
+- Caps: reply line ≤ 8 KiB, reply ≤ 64 KiB, listing ≤ 32 MiB, ≤ 200,000 entries.
+- Files only for now; no backup plugins.
+
 ### SMB
 
 SMB 3.1.1 only, NEGOTIATE offers 0x0311 alone, preauth SHA-512; ciphers AES-128-GCM, AES-256-GCM; signing AES-128-CMAC. Anything else picked → refused.
@@ -161,7 +169,7 @@ SMB 3.1.1 only, NEGOTIATE offers 0x0311 alone, preauth SHA-512; ciphers AES-128-
 
 - `cancel()` from any thread ends in-flight call with `Canceled` within 2 s on healthy connection (Rust: 1 s grace then call dropped).
 - Timeouts: connect 15 s, single request 60 s; no automatic retry in library. SMB request timeout ends connection.
-- Transfers stream in bounded memory. SFTP: 16 requests in flight, chunks ≤ 256 KiB (32 KiB without `limits@openssh.com`), read-ahead ≤ 4 MiB. SMB: ≤ 4 MiB in flight, chunks ≤ 1 MiB. WebDAV: one request per connection at a time, chunks 256 KiB.
+- Transfers stream in bounded memory. SFTP: 16 requests in flight, chunks ≤ 256 KiB (32 KiB without `limits@openssh.com`), read-ahead ≤ 4 MiB. SMB: ≤ 4 MiB in flight, chunks ≤ 1 MiB. WebDAV: one request per connection at a time, chunks 256 KiB. FTPS: one transfer per connection, chunks 256 KiB.
 - Backend calls block; one thread at a time per backend; owner keeps event loop running.
 - Bridge per consumer: 64 concurrent requests, 16 handles, 8 jobs, `ListBatch` ≤ 512 entries or 1 MiB, `Read` ≤ 1 MiB; over → `TooManyConnections` + `retryAfterMs`. Message header > 2 MiB or > 2 fds closes connection before body; ≤ 16 received messages waiting. Outgoing in order, only as fast as consumer reads: batches pause at 4 MiB unwritten, reading stops at 64 queued.
 - Pools per location: lanes interactive 1, bulk 2, stream ≤ 1; ≤ 4 per host; idle connection closed after 1 min. `LocationsChanged` ≤ every 250 ms, only on real change. `JobProgress` ≤ 4 Hz. Drives relist 200 ms after first UDisks2 signal of a burst; UDisks2 call ≤ 60 s.

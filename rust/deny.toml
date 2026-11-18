@@ -31,7 +31,7 @@ exceptions = [
     { crate = "ring", allow = ["ISC"] },
     # untrusted (ring input parser): ISC.
     { crate = "untrusted", allow = ["ISC"] },
-    # rustls-webpki (certificate checks of rustls, WebDAV): ISC, from webpki by ring's author.
+    # rustls-webpki (certificate checks of rustls, WebDAV and FTPS): ISC, from webpki by ring's author.
     { crate = "rustls-webpki", allow = ["ISC"] },
     # IDNA tables (sspi -> url -> idna -> idna_adapter 1.1, pinned to keep ICU4X out): "(Apache-2.0 OR MIT) AND Unicode-3.0".
     { crate = "idna_mapping", allow = ["Unicode-3.0"] },

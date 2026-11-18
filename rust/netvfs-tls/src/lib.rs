@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! TLS client side of the WebDAV backend: rustls with ring, TLS 1.3 only, no client certificates.
+//! TLS client side of the WebDAV and FTPS backends: rustls with ring, TLS 1.3 only, no client certificates.
 //!
 //! Trust: a certificate valid for the host under the system CAs needs no pin. Any other certificate
 //! is the server's identity (`tls-spki-sha256`, its SubjectPublicKeyInfo): `connect` reports it,

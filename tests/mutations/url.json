@@ -187,5 +187,33 @@
     "search": "        return \"davs\";",
     "replace": "        return \"https\";",
     "test": "build/tests/unit/url/tst_url"
+  },
+  {
+    "name": "ftps:// default port kept",
+    "file": "src/core/url.cpp",
+    "search": "    { \"ftps\", Kind::Ftps, 21 },",
+    "replace": "    { \"ftps\", Kind::Ftps, 0 },",
+    "test": "build/tests/unit/url/tst_url"
+  },
+  {
+    "name": "ftps:// path dropped",
+    "file": "src/core/url.cpp",
+    "search": "        params->provider = QStringLiteral(\"ftps\");\n        *path = urlPath;",
+    "replace": "        params->provider = QStringLiteral(\"ftps\");",
+    "test": "build/tests/unit/url/tst_url"
+  },
+  {
+    "name": "plain FTP falls through to an unknown scheme",
+    "file": "src/core/url.cpp",
+    "search": "    if (scheme == QLatin1String(\"ftp\"))",
+    "replace": "    if (scheme == QLatin1String(\"ftpx\"))",
+    "test": "build/tests/unit/url/tst_url"
+  },
+  {
+    "name": "FTPS formatted as ftp",
+    "file": "src/core/url.cpp",
+    "search": "        return \"ftps\";",
+    "replace": "        return \"ftp\";",
+    "test": "build/tests/unit/url/tst_url"
   }
 ]

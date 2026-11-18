@@ -1,6 +1,6 @@
 [package]
 name = "netvfs-tls"
-description = "TLS 1.3 client side of the WebDAV backend: rustls with ring, system trust, SPKI pins"
+description = "TLS 1.3 client side of the WebDAV and FTPS backends: rustls with ring, system trust, SPKI pins"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

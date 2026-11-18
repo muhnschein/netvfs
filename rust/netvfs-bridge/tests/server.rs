@@ -978,20 +978,16 @@ fn connect_ad_hoc_refusals(h: &Harness) {
         assert_eq!(error_name(&refused), name(ErrorName::SecurityPolicy));
         let local = p.connect_ad_hoc("file:///etc", b"", &no_opts()).await;
         assert_eq!(error_name(&local), name(ErrorName::PermissionDenied));
-        for url in ["ftp://host/", "ftps://host/"] {
-            let unknown = p.connect_ad_hoc(url, b"", &no_opts()).await;
-            assert_eq!(error_name(&unknown), name(ErrorName::Unsupported), "{url}");
-        }
-        for url in ["dav://host/", "http://host/"] {
+        for url in ["dav://host/", "http://host/", "ftp://host/"] {
             let plain = p.connect_ad_hoc(url, b"", &no_opts()).await;
             assert_eq!(error_name(&plain), name(ErrorName::SecurityPolicy), "{url}");
         }
-        let unknown = p.connect_ad_hoc("ftps://host/", b"", &no_opts()).await.unwrap_err();
+        let unknown = p.connect_ad_hoc("gopher://host/", b"", &no_opts()).await.unwrap_err();
         assert_eq!(
             netvfs_bridge_proto::BridgeError::from(unknown),
             netvfs_bridge_proto::BridgeError::remote(
                 ErrorName::Unsupported,
-                "Unsupported URL scheme \"ftps\""
+                "Unsupported URL scheme \"gopher\""
             )
         );
         let missing = p.connect_ad_hoc("sftp://host/", b"", &no_opts()).await;

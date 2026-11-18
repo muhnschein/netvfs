@@ -71,6 +71,7 @@ private slots:
         QCOMPARE(input.defaultPort(QStringLiteral("sftp")), 22);
         QCOMPARE(input.defaultPort(QStringLiteral("smb")), 445);
         QCOMPARE(input.defaultPort(QStringLiteral("webdav")), 443);
+        QCOMPARE(input.defaultPort(QStringLiteral("ftps")), 21);
         QCOMPARE(input.defaultPort(QStringLiteral("fake")), 0);
         QCOMPARE(helpers.backupServiceName(QStringLiteral("smb")), QStringLiteral("smb-backup"));
     }

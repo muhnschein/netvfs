@@ -1,0 +1,5 @@
+type=cdir;modify=20261028000000; /d
+type=pdir; ..
+type=file;size=28;modify=20261028000000.5;UNIX.mode=0644; a b.txt
+type=OS.unix=slink:/x; l
+ no facts

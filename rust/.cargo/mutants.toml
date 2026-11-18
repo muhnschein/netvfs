@@ -121,4 +121,6 @@ exclude_re = [
     # Equivalent: usable() idle `elapsed < stale_after` vs `<=` differs only when elapsed equals it to the
     # nanosecond; tests pin both sides (ZERO, one hour).
     'netvfs-webdav/src/http\.rs:\d+:\d+: replace < with <= in Http::usable$',
+    # Equivalent: FTPS offers no capability; capabilities() already returns Capabilities::default().
+    'netvfs-ftps/src/backend\.rs:\d+:\d+: replace <impl Backend for Ftps>::capabilities -> Capabilities with Default::default\(\)$',
 ]

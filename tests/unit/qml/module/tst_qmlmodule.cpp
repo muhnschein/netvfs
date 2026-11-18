@@ -285,7 +285,8 @@ private slots:
         QTest::addColumn<QString>("file");
         QTest::addColumn<QString>("type");
         QTest::addColumn<QString>("provider");
-        for (const QString &p : { QStringLiteral("sftp"), QStringLiteral("smb"), QStringLiteral("webdav") }) {
+        for (const QString &p :
+             { QStringLiteral("sftp"), QStringLiteral("smb"), QStringLiteral("webdav"), QStringLiteral("ftps") }) {
             QTest::newRow(qPrintable(p)) << p + QStringLiteral(".qml") << "NetVfsCreationAgent" << p;
             QTest::newRow(qPrintable(p + QStringLiteral("-settings"))) << p + QStringLiteral("-settings.qml")
                                                                        << "NetVfsSettingsAgent" << p;
@@ -304,7 +305,7 @@ private slots:
         QVERIFY(code.contains(type + QStringLiteral(" {")));
         QVERIFY(code.contains(QStringLiteral("provider: \"") + provider + QLatin1Char('"')));
         const QString pri = readFile(SourceDir + QStringLiteral("/accounts/providers.pri"));
-        QVERIFY(pri.contains(QStringLiteral("NETVFS_PROVIDERS = sftp smb webdav\n")));
+        QVERIFY(pri.contains(QStringLiteral("NETVFS_PROVIDERS = sftp smb webdav ftps\n")));
         QVERIFY(pri.contains(QStringLiteral("NETVFS_BACKUP_PROVIDERS = sftp smb\n")));
     }
 
@@ -316,6 +317,7 @@ private slots:
         QTest::newRow("sftp") << "sftp" << "SFTP" << true;
         QTest::newRow("smb") << "smb" << "SMB" << true;
         QTest::newRow("webdav") << "webdav" << "WebDAV" << false;
+        QTest::newRow("ftps") << "ftps" << "FTPS" << false;
     }
 
     void providerFiles()
@@ -378,6 +380,7 @@ private slots:
         QTest::newRow("sftp") << "sftp";
         QTest::newRow("smb") << "smb";
         QTest::newRow("webdav") << "webdav";
+        QTest::newRow("ftps") << "ftps";
     }
 
     void icons()

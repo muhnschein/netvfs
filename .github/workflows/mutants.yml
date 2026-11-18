@@ -17,6 +17,7 @@ on:
           - netvfs-smb
           - netvfs-tls
           - netvfs-webdav
+          - netvfs-ftps
 permissions:
   contents: read
 concurrency:

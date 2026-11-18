@@ -191,7 +191,7 @@ private slots:
         QCOMPARE(runArgs({ S("--url"), S("gopher://h/"), S("ls"), QString() }), code(Error::Unsupported));
         QCOMPARE(runArgs({ S("--url"), S("http://h/x"), S("ls"), QString() }), code(Error::SecurityPolicy));
         QVERIFY(err.contains(S("WebDAV needs TLS; use davs:// or https://")));
-        QCOMPARE(runArgs({ S("--url"), S("ftp://h/"), S("ls"), QString() }), code(Error::Unsupported));
+        QCOMPARE(runArgs({ S("--url"), S("ftp://h/"), S("ls"), QString() }), code(Error::SecurityPolicy));
         QVERIFY(FakeServer::instance()->log.isEmpty());
         QCOMPARE(runArgs({ S("--url"), S("sftp:///nohost"), S("ls"), QString() }), code(Error::InvalidName));
         QCOMPARE(runArgs({ S("--url"), S("sftp://h/"), S("--host"), S("h"), S("ls"), QString() }), 2);

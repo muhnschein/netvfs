@@ -1,0 +1,5 @@
+220 Welcome
+211-Features:
+ MLST type*;size*;
+ EPSV
+211 End

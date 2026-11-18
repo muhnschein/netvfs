@@ -71,6 +71,8 @@ private slots:
         QTest::newRow("davs default port") << "davs://nas:443/dav" << "webdav" << "nas" << 0 << "" << "base_path=/dav" << "";
         QTest::newRow("https default port") << "https://nas:443" << "webdav" << "nas" << 0 << "" << "" << "";
         QTest::newRow("https other default is a port") << "https://nas:80/" << "webdav" << "nas" << 80 << "" << "" << "";
+        QTest::newRow("ftps") << "FTPS://al@ftp:990/pub/x" << "ftps" << "ftp" << 990 << "al" << "" << "/pub/x";
+        QTest::newRow("ftps default port") << "ftps://ftp:21" << "ftps" << "ftp" << 0 << "" << "" << "";
 
         QTest::newRow("file") << "file:///tmp/x%20y" << "local" << "" << 0 << "" << "" << "/tmp/x y";
         QTest::newRow("file root") << "file:///" << "local" << "" << 0 << "" << "" << "/";
@@ -174,8 +176,8 @@ private slots:
         QTest::newRow("scp") << "scp://h/x" << Error::Unsupported;
         QTest::newRow("dav") << "dav://h/x" << Error::SecurityPolicy;
         QTest::newRow("http") << "HTTP://h/remote.php/dav" << Error::SecurityPolicy;
-        QTest::newRow("ftp") << "ftp://h/" << Error::Unsupported;
-        QTest::newRow("ftps") << "FTPS://h:990/x" << Error::Unsupported;
+        QTest::newRow("ftp") << "FTP://h/" << Error::SecurityPolicy;
+        QTest::newRow("ftpes") << "ftpes://h/" << Error::Unsupported;
         QTest::newRow("davs dotdot") << "davs://h/a/../b" << Error::InvalidName;
         QTest::newRow("file with host") << "file://remote/tmp" << Error::Unsupported;
         QTest::newRow("empty") << "" << Error::InvalidName;
@@ -252,8 +254,8 @@ private slots:
         QCOMPARE(r.error(), Error::SecurityPolicy);
         QCOMPARE(r.message(), QStringLiteral("WebDAV needs TLS; use davs:// or https://"));
         r = Url::parse(QStringLiteral("ftp://u:p@h/"), &params, nullptr);   // before the password check
-        QCOMPARE(r.error(), Error::Unsupported);
-        QCOMPARE(r.message(), QStringLiteral("Unsupported URL scheme \"ftp\""));
+        QCOMPARE(r.error(), Error::SecurityPolicy);
+        QCOMPARE(r.message(), QStringLiteral("FTP needs TLS; use ftps://"));
         r = Url::parse(QStringLiteral("gopher://h/"), &params, nullptr);
         QCOMPARE(r.message(), QStringLiteral("Unsupported URL scheme \"gopher\""));
         QVERIFY(params.provider.isEmpty());
@@ -296,6 +298,11 @@ private slots:
         dav.options.insert(QStringLiteral("base_path"), QStringLiteral("remote.php/dav/"));
         QCOMPARE(Url::format(dav, QString()), QStringLiteral("davs://cloud/remote.php/dav"));
         QCOMPARE(Url::format(dav, QStringLiteral("x/y")), QStringLiteral("davs://cloud/remote.php/dav/x/y"));
+
+        ConnectionParams ftps;
+        ftps.provider = QStringLiteral("ftps");
+        ftps.host = QStringLiteral("ftp");
+        QCOMPARE(Url::format(ftps, QStringLiteral("pub/a b")), QStringLiteral("ftps://ftp/pub/a%20b"));
 
         ConnectionParams local;
         local.provider = QStringLiteral("local");

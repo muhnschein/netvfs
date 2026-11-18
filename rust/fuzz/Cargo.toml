@@ -22,6 +22,7 @@ zbus = { version = "5", default-features = false, features = ["tokio", "p2p"] }
 netvfs-sftp = { path = "../netvfs-sftp" }
 netvfs-vfs = { path = "../netvfs-vfs" }
 netvfs-webdav = { path = "../netvfs-webdav" }
+netvfs-ftps = { path = "../netvfs-ftps" }
 arbitrary = { version = "1", features = ["derive"] }
 tokio = { version = "1", default-features = false, features = ["io-util", "rt", "time"] }
 
@@ -140,6 +141,13 @@ bench = false
 [[bin]]
 name = "webdav_multistatus"
 path = "fuzz_targets/webdav_multistatus.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "ftps_replies"
+path = "fuzz_targets/ftps_replies.rs"
 test = false
 doc = false
 bench = false

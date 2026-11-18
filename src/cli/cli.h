@@ -7,7 +7,7 @@
 class QIODevice;
 class QTextStream;
 
-// Location: --url (sftp://, ssh://, smb://host[/share[/path]], davs://, https://, file://; a password
+// Location: --url (sftp://, ssh://, smb://host[/share[/path]], davs://, https://, ftps://, file://; a password
 // is rejected with SecurityPolicy) or --provider/--host/--port/--user (local needs no host); not mixed. --option,
 // --host-key, --profile apply to both and win over the URL. A relative path argument resolves
 // against the URL's path.
