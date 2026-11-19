@@ -359,8 +359,8 @@
   {
     "name": "XB-6 first pending app wrong",
     "file": "src/qml/consentmodel.cpp",
-    "search": "    const int row = int(m_pending.indexOf(true));",
-    "replace": "    const int row = int(m_pending.indexOf(false));",
+    "search": "    const auto row = int(m_pending.indexOf(true));",
+    "replace": "    const auto row = int(m_pending.indexOf(false));",
     "test": "dbus-run-session -- build/tests/unit/qml/descriptors/tst_qmldescriptors"
   },
   {
@@ -380,8 +380,8 @@
   {
     "name": "XB-6 account choice ignored for new-accounts level",
     "file": "src/core/consentstore.cpp",
-    "search": "    if (!own.isEmpty())\n        return own;",
-    "replace": "",
+    "search": "accounts.value(accountId); !own.isEmpty())",
+    "replace": "accounts.value(accountId); false)",
     "test": "dbus-run-session -- build/tests/unit/qml/descriptors/tst_qmldescriptors"
   }
 ]
