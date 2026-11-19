@@ -4,7 +4,7 @@ What code can't show: platform contract, trust model, budgets, limits, open ques
 
 ## Goals
 
-1. SFTP or SMB account in *Settings → Accounts* shows up as target in stock *Settings → Backup*: manual and scheduled backup, list, restore, as for Nextcloud.
+1. SFTP, SMB, WebDAV or FTPS account in *Settings → Accounts* shows up as target in stock *Settings → Backup*: manual and scheduled backup, list, restore, as for Nextcloud.
 2. Same accounts reusable by a file browser, sandboxed Harbour app included (Lautta), without weakening any backup guarantee and without handing it secrets, pins or local paths.
 3. Backends give what a file manager needs: full metadata, lossless names, streamed listings, clear rename/remove semantics, symlinks, random-access handles, resume, server copy, space info. Plus a local backend.
 4. SMB browsable: server mode (shares as top folders), share enumeration, explicit security profiles.
@@ -139,7 +139,7 @@ Any process can start it, so it trusts nothing of caller:
 - Trust: certificate chain valid for host under system CAs → no pin, no prompt. Else identity `tls-spki-sha256` (SHA-256 of leaf's SubjectPublicKeyInfo): no pin → `ServerIdentityUnknown`, explicit accept; pinned key then required on every connection, chain and name not checked. Mismatch → `ServerIdentityChanged` before any request. Re-pin only by update flow.
 - Auth: Basic only, over TLS only; 401 → `AuthFailed`. No redirects followed (3xx → `ProtocolError`). Account folder (`base_path`) checked at sign-in: must be a collection; quota there → space info.
 - Caps: multistatus body ≤ 32 MiB, ≤ 200,000 responses, text ≤ 32 KiB, depth ≤ 32, href ≤ 8 KiB; error body ≤ 64 KiB.
-- Files only for now; no backup plugins.
+- Backups: `backups_path` below account folder (`base_path`).
 
 ### FTPS
 
@@ -147,7 +147,7 @@ Any process can start it, so it trusts nothing of caller:
 - Data: `EPSV` only, to control connection's peer address; each data connection a TLS client of its own, resuming control session (servers require it). `TYPE I`. Listings `MLSD`/`MLST` only (FEAT without `MLST` → `Unsupported`); no `LIST` parsing, no `PASV`. `OPTS UTF8 ON` when offered.
 - Reads `REST` + `RETR`; writes `STOR` whole, no resume, no handles. Download stopped early (range read, cancel) ends with `ABOR` and TLS close, upload with TLS close only (part sent stays; proftpd answers `ABOR` during `STOR` with garbage); never a dropped data connection: proftpd then ends session. No TLS ticket left (TLS 1.3 uses each once; proftpd issues none on upload connections) → fresh session first. Other canceled call: next command first reads replies still owed. Timeout, 421 or half-sent command ends connection (`ConnectionLost`).
 - Caps: reply line ≤ 8 KiB, reply ≤ 64 KiB, listing ≤ 32 MiB, ≤ 200,000 entries.
-- Files only for now; no backup plugins.
+- Backups: `backups_path` relative to login folder, or absolute.
 
 ### SMB
 

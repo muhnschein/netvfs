@@ -208,7 +208,7 @@ void captureMessage(QtMsgType type, const QMessageLogContext &context, const QSt
 }
 
 const std::array<const char *, 3> OperationNames = { { "Backup", "BackupQuery", "BackupRestore" } };
-const std::array<const char *, 2> Providers = { { "sftp", "smb" } };
+const std::array<const char *, 4> Providers = { { "sftp", "smb", "webdav", "ftps" } };
 
 } // namespace
 
@@ -367,7 +367,7 @@ private slots:
         QCOMPARE(clientProfile.type(), QStringLiteral("client"));
     }
 
-    // / 8.1: six plugins from one loader source, unique IIDs, each
+    // / 8.1: all plugins from one loader source, unique IIDs, each
     // creating the shared client for its provider and operation.
     void loaders()
     {
@@ -393,7 +393,7 @@ private slots:
                 QVERIFY(!plugin->init());   // no account id
             }
         }
-        QCOMPARE(iids.size(), 6);
+        QCOMPARE(iids.size(), int(Providers.size() * OperationNames.size()));
     }
 
     // The loaded plugins run on the production path (AccountSession::open,

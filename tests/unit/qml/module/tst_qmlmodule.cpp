@@ -306,25 +306,23 @@ private slots:
         QVERIFY(code.contains(QStringLiteral("provider: \"") + provider + QLatin1Char('"')));
         const QString pri = readFile(SourceDir + QStringLiteral("/accounts/providers.pri"));
         QVERIFY(pri.contains(QStringLiteral("NETVFS_PROVIDERS = sftp smb webdav ftps\n")));
-        QVERIFY(pri.contains(QStringLiteral("NETVFS_BACKUP_PROVIDERS = sftp smb\n")));
+        QVERIFY(pri.contains(QStringLiteral("NETVFS_BACKUP_PROVIDERS = sftp smb webdav ftps\n")));
     }
 
     void providerFiles_data()
     {
         QTest::addColumn<QString>("provider");
         QTest::addColumn<QString>("name");
-        QTest::addColumn<bool>("backup");
-        QTest::newRow("sftp") << "sftp" << "SFTP" << true;
-        QTest::newRow("smb") << "smb" << "SMB" << true;
-        QTest::newRow("webdav") << "webdav" << "WebDAV" << false;
-        QTest::newRow("ftps") << "ftps" << "FTPS" << false;
+        QTest::newRow("sftp") << "sftp" << "SFTP";
+        QTest::newRow("smb") << "smb" << "SMB";
+        QTest::newRow("webdav") << "webdav" << "WebDAV";
+        QTest::newRow("ftps") << "ftps" << "FTPS";
     }
 
     void providerFiles()
     {
         QFETCH(QString, provider);
         QFETCH(QString, name);
-        QFETCH(bool, backup);
         const QString providerPath = BuildDir + QStringLiteral("/accounts/providers/") + provider + QStringLiteral(".provider");
         const QMap<QString, QString> p = readXml(providerPath);
         QVERIFY2(!p.isEmpty() && !p.contains(QStringLiteral("error")), qPrintable(providerPath));
@@ -347,9 +345,6 @@ private slots:
         QVERIFY(!f.contains(QStringLiteral("setting:sync_profile_templates")));
 
         const QString servicePath = BuildDir + QStringLiteral("/accounts/services/") + provider + QStringLiteral("-backup.service");
-        QCOMPARE(QFile::exists(servicePath), backup);
-        if (!backup)
-            return;
         const QMap<QString, QString> s = readXml(servicePath);
         QVERIFY2(!s.isEmpty() && !s.contains(QStringLiteral("error")), qPrintable(servicePath));
         QCOMPARE(s.value(QStringLiteral("service@id")), provider + QStringLiteral("-backup"));

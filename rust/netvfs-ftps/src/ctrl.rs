@@ -230,16 +230,15 @@ impl Session {
         }
     }
 
-    /// Stops a transfer with `ABOR` (RFC 959) and a TLS close, reads `data` until the server closes it; the next
-    /// command reads the replies owed. Dropping a protected data connection instead makes proftpd end the session.
+    /// Stops a transfer with `ABOR` (RFC 959) and a TLS close, reads `data` until the server closes it, then reads
+    /// replies up to the 200 of a `NOOP`: transfer and `ABOR` get one to three replies, by server and timing.
+    /// Dropping a protected data connection instead makes proftpd end the session.
     ///
     /// # Errors
     /// `Timeout`, `ConnectionLost`.
     pub async fn abort(&mut self, mut data: Data) -> Result<(), Status> {
         self.torn = true;
         send(self.ctrl.get_mut(), b"ABOR").await?;
-        self.torn = false;
-        self.pending = self.pending.saturating_add(1);
         let drain = async {
             drop(data.shutdown().await);
             let mut sink = vec![0u8; 64 * 1024];
@@ -247,6 +246,22 @@ impl Session {
         };
         drop(tokio::time::timeout(self.target.request_timeout, drain).await);
         drop(data);
+        send(self.ctrl.get_mut(), b"NOOP").await?;
+        let ctrl = &mut self.ctrl;
+        let sync = async {
+            loop {
+                let r = reply::read(ctrl).await?;
+                if r.code == 421 {
+                    return Err(reply::error(&r, "Stopping the transfer"));
+                }
+                if r.code == 200 {
+                    return Ok(());
+                }
+            }
+        };
+        timed(self.target.request_timeout, "reply", sync).await?;
+        self.torn = false;
+        self.pending = 0;
         Ok(())
     }
 

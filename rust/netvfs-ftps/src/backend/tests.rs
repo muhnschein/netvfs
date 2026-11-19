@@ -538,6 +538,22 @@ async fn canceled_transfers_leave_the_connection_usable() {
 }
 
 #[tokio::test]
+async fn stray_replies_after_abort_are_skipped() {
+    let fake = Fake::start(Cert::Trusted).await;
+    fake.put("/f", Node::File(vec![7; 8 << 20]));
+    fake.with(|s| s.abort_extra = Some("426 Transfer aborted"));
+    let mut f = signed_in(&fake).await;
+    let c = CancelToken::new();
+    let mut out = Out::default();
+    f.download(b"/f", 0, Some(1000), &mut out, &mut Moves::quiet(), &c).await.unwrap();
+    assert_eq!(out.0.len(), 1000);
+    let mut out = Out::default();
+    f.download(b"/f", 0, Some(2000), &mut out, &mut Moves::quiet(), &c).await.unwrap();
+    assert_eq!(out.0.len(), 2000);
+    assert_eq!(fake.with(|s| s.connections), 1);
+}
+
+#[tokio::test]
 async fn uploads() {
     let fake = Fake::start(Cert::Trusted).await;
     fake.put("/old", file(b"old"));
@@ -684,7 +700,7 @@ async fn downloads_ask_only_for_what_they_need() {
     // A short read of a large file stops the transfer.
     let (r, n, verbs) = get(0, Some(1000)).await;
     assert_eq!((r, n), (Ok(()), 1000));
-    assert_eq!(verbs, ["MLST", "EPSV", "RETR", "ABOR"]);
+    assert_eq!(verbs, ["MLST", "EPSV", "RETR", "ABOR", "NOOP"]);
     let (r, _, verbs) = get(0, Some(0)).await;
     assert_eq!((r, verbs), (Ok(()), vec!["MLST".to_owned()]), "in step");
     // A whole read the server reports failed is an error.

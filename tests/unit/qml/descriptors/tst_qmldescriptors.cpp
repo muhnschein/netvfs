@@ -97,8 +97,8 @@ private slots:
         QTest::addColumn<QStringList>("offered");
         QTest::newRow("sftp") << "sftp" << QStringList({ QStringLiteral("backup"), QStringLiteral("files") });
         QTest::newRow("smb") << "smb" << QStringList({ QStringLiteral("backup"), QStringLiteral("files") });
-        QTest::newRow("webdav") << "webdav" << QStringList({ QStringLiteral("files") });
-        QTest::newRow("ftps") << "ftps" << QStringList({ QStringLiteral("files") });
+        QTest::newRow("webdav") << "webdav" << QStringList({ QStringLiteral("backup"), QStringLiteral("files") });
+        QTest::newRow("ftps") << "ftps" << QStringList({ QStringLiteral("backup"), QStringLiteral("files") });
     }
 
     void shippedDescriptorsAreValid()

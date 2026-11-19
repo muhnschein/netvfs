@@ -1,6 +1,6 @@
 {
     "provider": "ftps",
-    "services": ["files"],
+    "services": ["backup", "files"],
     "defaultPort": 21,
     "authModes": [
         { "id": "password", "label": "settings-accounts-netvfs-me-password", "secret": "password" }
@@ -11,6 +11,9 @@
         { "key": "port", "type": "text", "label": "settings-accounts-netvfs-la-port",
           "validation": "port", "optional": true, "input": "digits" },
         { "key": "username", "type": "text", "label": "settings-accounts-netvfs-la-user", "validation": "userName" },
+        { "key": "backups_path", "type": "text", "label": "settings-accounts-netvfs-la-backups_folder",
+          "description": "settings-accounts-netvfs-la-folder_in_home", "default": "Sailfish OS/Backups",
+          "validation": "folder", "service": "backup" },
         { "key": "files_root", "type": "text", "label": "settings-accounts-netvfs-la-files_root",
           "description": "settings-accounts-netvfs-la-folder_in_home", "validation": "folder", "optional": true,
           "service": "files" }

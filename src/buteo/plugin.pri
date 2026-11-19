@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: LGPL-2.1-or-later
 # One Buteo client plugin lib<provider>-<operation>-client.so with client profile and sync profile
 # template. Set before including:
-#   NETVFS_PROVIDER: sftp, smb
+#   NETVFS_PROVIDER: sftp, smb, webdav, ftps
 #   NETVFS_OPERATION: Backup, BackupQuery, BackupRestore
 include(buteo.pri)
 

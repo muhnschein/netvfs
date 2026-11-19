@@ -10,8 +10,7 @@ netvfs adds SFTP, SMB, WebDAV and FTPS servers to Sailfish OS as a platform serv
   stock account types. Passwords and keys stay in the system's credential
   store.
 - **Backups.** The same accounts appear as targets in *Settings → Backup*.
-  Backup, scheduled backup and restore work as they do for Nextcloud
-  (SFTP and SMB for now).
+  Backup, scheduled backup and restore work as they do for Nextcloud.
 - **Files for apps.** Sandboxed apps such as
   [Lautta](https://github.com/muhnschein/lautta) browse the servers through
   a bridge. They link nothing from netvfs, need no extra permission, and
@@ -44,7 +43,7 @@ vsftpd, pure-ftpd and others). All are written in Rust.
 | Package | For |
 |---|---|
 | `netvfs` | the accounts, the library, `netvfs-cli` |
-| `netvfs-backup` | backups to SFTP and SMB (comes with `netvfs`, can be removed) |
+| `netvfs-backup` | backups to SFTP, SMB, WebDAV and FTPS (comes with `netvfs`, can be removed) |
 | `netvfs-bridge` | apps such as Lautta |
 | `netvfs-devel` | building against the library |
 

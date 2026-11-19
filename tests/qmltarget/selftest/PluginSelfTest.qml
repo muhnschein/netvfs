@@ -40,8 +40,8 @@ Item {
         check(NetVfsHelpers.credentialsApplication === "netvfs", "NetVfsHelpers")
         // run-in-sdk.sh points NETVFS_PROVIDERS_DIR at accounts/descriptors.
         check(NetVfsProviders.providers().length === 4, "NetVfsProviders.providers")
-        check(NetVfsProviders.offersService("webdav", "files") && !NetVfsProviders.offersService("webdav", "backup"),
-              "NetVfsProviders.offersService webdav")
+        check(NetVfsProviders.offersService("webdav", "backup") && NetVfsProviders.offersService("ftps", "backup"),
+              "NetVfsProviders.offersService webdav ftps")
         check(NetVfsProviders.descriptor("smb").fields.length > 5, "NetVfsProviders.descriptor")
         check(NetVfsProviders.offersService("smb", "files") && !NetVfsProviders.offersService("local", "backup"),
               "NetVfsProviders.offersService")

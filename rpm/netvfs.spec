@@ -4,7 +4,7 @@
 #
 #   netvfs          libnetvfs, all backends, libnetvfs-rs.so (Rust backends the plugins load), account UI
 #   module, account providers, Files services, netvfs-cli, translations
-#   netvfs-backup   SFTP and SMB backups: services, Buteo plugins and profiles
+#   netvfs-backup   SFTP, SMB, WebDAV and FTPS backups: services, Buteo plugins and profiles
 #   netvfs-bridge   netvfs-bridge and its setgid accounts helper (Rust), for sandboxed consumers, and
 #   libnetvfs-bridge-ffi.so, the C ABI through which the bridge reaches the backends
 #   netvfs-devel    headers, pkg-config
@@ -78,7 +78,7 @@ Requires:   %{name} = %{version}-%{release}
 Headers and pkg-config file for building applications on libnetvfs.
 
 %package backup
-Summary:    SFTP and SMB backups
+Summary:    SFTP, SMB, WebDAV and FTPS backups
 License:    LGPL-2.1-or-later AND BSD-3-Clause
 Requires:   %{name} = %{version}-%{release}
 Requires:   buteo-syncfw-qt5-msyncd
@@ -86,8 +86,8 @@ Requires:   jolla-vault
 Requires:   systemd
 
 %description backup
-SFTP and SMB accounts as storage targets in Settings > Backup: the
-sftp-backup and smb-backup services and their Buteo backup plugins and
+SFTP, SMB, WebDAV and FTPS accounts as storage targets in Settings >
+Backup: the <provider>-backup services and their Buteo backup plugins and
 profiles. Without this package the accounts only provide files.
 
 %package bridge
@@ -218,6 +218,26 @@ systemctl-user daemon-reload || :
 %config %{_sysconfdir}/buteo/profiles/sync/smb.Backup.xml
 %config %{_sysconfdir}/buteo/profiles/sync/smb.BackupQuery.xml
 %config %{_sysconfdir}/buteo/profiles/sync/smb.BackupRestore.xml
+%{_datadir}/accounts/services/webdav-backup.service
+%{_libdir}/buteo-plugins-qt5/oopp/libwebdav-backup-client.so
+%{_libdir}/buteo-plugins-qt5/oopp/libwebdav-backupquery-client.so
+%{_libdir}/buteo-plugins-qt5/oopp/libwebdav-backuprestore-client.so
+%config %{_sysconfdir}/buteo/profiles/client/webdav-backup.xml
+%config %{_sysconfdir}/buteo/profiles/client/webdav-backupquery.xml
+%config %{_sysconfdir}/buteo/profiles/client/webdav-backuprestore.xml
+%config %{_sysconfdir}/buteo/profiles/sync/webdav.Backup.xml
+%config %{_sysconfdir}/buteo/profiles/sync/webdav.BackupQuery.xml
+%config %{_sysconfdir}/buteo/profiles/sync/webdav.BackupRestore.xml
+%{_datadir}/accounts/services/ftps-backup.service
+%{_libdir}/buteo-plugins-qt5/oopp/libftps-backup-client.so
+%{_libdir}/buteo-plugins-qt5/oopp/libftps-backupquery-client.so
+%{_libdir}/buteo-plugins-qt5/oopp/libftps-backuprestore-client.so
+%config %{_sysconfdir}/buteo/profiles/client/ftps-backup.xml
+%config %{_sysconfdir}/buteo/profiles/client/ftps-backupquery.xml
+%config %{_sysconfdir}/buteo/profiles/client/ftps-backuprestore.xml
+%config %{_sysconfdir}/buteo/profiles/sync/ftps.Backup.xml
+%config %{_sysconfdir}/buteo/profiles/sync/ftps.BackupQuery.xml
+%config %{_sysconfdir}/buteo/profiles/sync/ftps.BackupRestore.xml
 
 %files bridge
 %{_prefix}/libexec/netvfs/netvfs-bridge
