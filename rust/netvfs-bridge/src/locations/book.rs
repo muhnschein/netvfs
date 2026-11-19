@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 //! The locations a consumer may see and their connection pools: netvfs accounts whose Files service is enabled, and the ad-hoc locations consumers created.
 //!
-//! Lives in the core (one task, no locks). The core owns reading the accounts database, the consent state and known_hosts: it hands the book the account list ([`LocationBook::set_accounts`]), says whether consent is granted, and passes its [`PinStore`] where a pin is dropped.
+//! Lives in the core (one task, no locks). The core owns reading the accounts database, the consent state and known_hosts: it hands the book the accounts the consumer may use at their levels ([`LocationBook::set_accounts`]), says whether the user has decided, and passes its [`PinStore`] where a pin is dropped.
 
 use super::TaskContext;
 use super::connector::PinStore;
@@ -39,10 +39,17 @@ impl<B: Backend> fmt::Debug for LocationBook<B> {
     }
 }
 
-/// `PermissionDenied`.
+/// `PermissionDenied` before the user decided what this app may do.
 #[must_use]
 pub fn no_consent() -> Status {
-    Status::new(ErrorName::PermissionDenied, "The user has not allowed this app to use network locations")
+    Status::new(ErrorName::PermissionDenied, "The user has not decided yet what this app may do")
+}
+
+/// `PermissionDenied` for an account the user has not allowed (or not decided on) for this app.
+#[must_use]
+pub fn not_allowed() -> Status {
+    Status::new(ErrorName::PermissionDenied, "The user has not allowed this app to use this account")
+        .with_detail("denied")
 }
 
 /// `NotFound`.
@@ -96,7 +103,7 @@ impl<B: Backend> LocationBook<B> {
         self.accounts = accounts;
     }
 
-    /// Consent was revoked.
+    /// The user's decision was removed.
     pub fn revoke(&mut self) {
         self.pools.clear();
         self.wipe_ad_hoc_secrets();
@@ -158,15 +165,15 @@ impl<B: Backend> LocationBook<B> {
     /// needs a connection.
     ///
     /// # Errors
-    /// `PermissionDenied` without consent, `NotFound` for an unknown id,
+    /// `PermissionDenied` before the user decided, `NotFound` for an unknown id,
     /// `Unsupported` when the provider's backend is missing.
     pub fn ensure_pool(
         &mut self,
         id: &str,
-        consent_granted: bool,
+        decided: bool,
         provider_available: impl FnOnce(&str) -> bool,
     ) -> Result<&Arc<LocationSpec>, Status> {
-        if !consent_granted {
+        if !decided {
             return Err(no_consent());
         }
         let spec = Arc::clone(self.find(id).ok_or_else(no_such_location)?);

@@ -4,17 +4,20 @@
 mod admin;
 mod drives;
 mod files;
+mod guard;
 mod jobs;
 pub mod nearby;
+pub mod own;
 pub mod questions;
 pub mod quota;
 pub mod states;
 
+use crate::access::{self, After, Own};
 use crate::accounts::helper::HelperDirectory;
 use crate::accounts::watch::AccountChanges;
 use crate::accounts::{AccountDirectory, AccountLocation, Attention, FilesAccess};
 use crate::config::{ConsumerInfo, Env};
-use crate::consent::{Consent, ConsentStore, ConsentWatcher};
+use crate::consent::{Consent, ConsentStore, ConsentWatcher, Grant, Level};
 use crate::drives::DriveSource;
 use crate::drives::udisks::UDisks;
 use crate::ffi::{Conn, Ffi, ParsedUrl};
@@ -25,7 +28,7 @@ use crate::locations::connector::{Connector, QUESTION_TIMEOUT};
 use crate::locations::copyjobs::{CopyId, CopyJobs};
 use crate::locations::knownhosts::KnownHosts;
 use crate::locations::pool::{CONNECTION_IDLE, PoolSet};
-use crate::locations::spec::LocationSpec;
+use crate::locations::spec::{LocationSpec, account_location_id};
 use crate::locations::state::StateSignal;
 use crate::locations::worker::{Turn, Work, WorkerId};
 use crate::locations::{Answer, AskId, CancelToken, TaskContext, WorkerEvent, WorkerEvents};
@@ -35,10 +38,10 @@ use crate::server::{self, Call, ListenAddress, Listener, OutSignal, Outbox, Repl
 use crate::status::Status;
 use admin::Waiter;
 use drives::DriveCall;
-use jobs::TransferCall;
 use nearby::{FfiNearby, Nearby, NearbySource};
 use netvfs_bridge_proto::limits::POOL_PER_HOST;
-use netvfs_bridge_proto::{Lane, WireNearby};
+use netvfs_bridge_proto::{ErrorName, Lane, WireNearby};
+use own::OwnItems;
 use questions::QuestionBroker;
 use quota::Quota;
 use states::{StateReport, States};
@@ -67,6 +70,8 @@ pub struct Config {
     pub consent_file: PathBuf,
     /// The consumer's known_hosts.
     pub known_hosts_file: PathBuf,
+    /// The items the consumer added at an add level.
+    pub added_file: PathBuf,
     /// `handoff.conf`.
     pub handoff_config: PathBuf,
     /// The idle exit.
@@ -84,6 +89,7 @@ impl Config {
         Self {
             consent_file: env.consent_file(),
             known_hosts_file: env.known_hosts_file(&consumer.id),
+            added_file: env.added_file(&consumer.id),
             handoff_config: PathBuf::from(handoff::DEFAULT_CONFIG),
             idle_exit: Duration::from_millis(env.idle_exit_ms()),
             connection_idle: CONNECTION_IDLE,
@@ -245,7 +251,7 @@ pub(crate) enum Event {
     Progress { sid: SessionId, job: u32, done: i64, total: i64 },
     JobFinished { sid: SessionId, job: u32, outcome: JobOutcome },
     ConsentFile,
-    ConsentStored(Consent),
+    Own { effect: Effect, error: Option<ErrorName> },
     Prompt(PromptEvent),
     AccountsChanged,
     AccountsListed { generation: u64, accounts: Vec<AccountLocation> },
@@ -271,7 +277,7 @@ impl CoreLink {
         self.0.send(event).is_ok()
     }
 
-    /// The consent question was answered or dismissed.
+    /// The request notification was tapped or dismissed.
     #[must_use = "false: the core has stopped"]
     pub fn prompt(&self, event: PromptEvent) -> bool {
         self.send(Event::Prompt(event))
@@ -388,6 +394,14 @@ impl Launcher for DynLauncher {
     }
 }
 
+/// What a finished call makes of the ownership of `path` in `loc` ([`access::after`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Effect {
+    loc: String,
+    path: Vec<u8>,
+    after: After,
+}
+
 pub(crate) struct Core {
     config: Config,
     ffi: Ffi,
@@ -397,12 +411,14 @@ pub(crate) struct Core {
     prompt: Box<dyn ConsentPrompt>,
     accounts: Rc<dyn Directory>,
     accounts_generation: u64,
+    all_accounts: Vec<AccountLocation>,
+    own: OwnItems,
     drives: Rc<dyn DriveSource>,
     handoff: Handoff<DynLauncher>,
     known_hosts: Arc<KnownHosts>,
     book: LocationBook<Connector>,
     copy_jobs: CopyJobs<Connector>,
-    copy_owners: HashMap<CopyId, (SessionId, u32)>,
+    copy_owners: HashMap<CopyId, (SessionId, u32, Option<Effect>)>,
     quota: Quota,
     questions: QuestionBroker<Waiter>,
     asks: HashMap<AskId, String>,
@@ -411,7 +427,6 @@ pub(crate) struct Core {
     state_signal: StateSignal,
     sessions: BTreeMap<SessionId, Session>,
     idle_deadline: Option<Instant>,
-    consent_writes: usize,
     url_override: Option<UrlOverride>,
 }
 
@@ -505,6 +520,8 @@ impl Core {
             prompt: services.prompt,
             accounts: services.accounts,
             accounts_generation: 0,
+            all_accounts: Vec::new(),
+            own: OwnItems::load(&config.added_file, own::now_ms()),
             drives: services.drives,
             handoff: Handoff::new(&config.handoff_config, DynLauncher(services.launcher)),
             known_hosts,
@@ -519,7 +536,6 @@ impl Core {
             state_signal,
             sessions: BTreeMap::new(),
             idle_deadline: None,
-            consent_writes: 0,
             url_override: None,
             config,
         }
@@ -573,15 +589,16 @@ impl Core {
                 self.finish_job(sid, job, outcome);
             }
             Event::ConsentFile => self.reload_consent(),
-            Event::ConsentStored(consent) => self.on_consent_stored(consent),
+            Event::Own { effect, error } => self.on_own(&effect, error),
             Event::Prompt(event) => self.on_prompt(event),
             Event::AccountsChanged => self.refresh_accounts(),
             Event::AccountsListed { generation, accounts } => {
                 if generation == self.accounts_generation {
                     self.set_accounts(&accounts);
-                    if self.consent == Consent::Granted {
+                    if self.consent.is_decided() {
                         self.locations_changed();
                     }
+                    self.update_prompt();
                 }
             }
             Event::Nearby(services) => self.nearby.changed(services, Instant::now()),
@@ -613,7 +630,6 @@ impl Core {
             && self.quota.active_requests() == 0
             && self.copy_jobs.is_idle()
             && !self.prompt.is_shown()
-            && self.consent_writes == 0
     }
 
     fn update_idle(&mut self) {
@@ -655,7 +671,7 @@ impl Core {
         if !self.sessions.contains_key(&sid) {
             return;
         }
-        if call.needs_consent() && self.consent != Consent::Granted {
+        if call.needs_consent() && !self.consent.is_decided() {
             reply.fail(&crate::locations::book::no_consent());
             return;
         }
@@ -682,67 +698,6 @@ impl Core {
             Call::Mount { drive } => self.on_drive_call(sid, reply, DriveCall::Mount(drive)),
             Call::Unmount { drive } => self.on_drive_call(sid, reply, DriveCall::Unmount(drive)),
             call => self.on_file_call(sid, reply, call, lane),
-        }
-    }
-
-    fn on_file_call(&mut self, sid: SessionId, reply: ReplyTo, call: Call, lane: Lane) {
-        match call {
-            Call::List { loc, dir, lane, batch } => self.on_list(sid, reply, &loc, dir, lane, batch),
-            Call::Stat { loc, path, follow, lane } => self.on_stat(sid, reply, &loc, path, follow, lane),
-            Call::ReadLink { loc, path } => self.on_read_link(sid, reply, &loc, path, lane),
-            Call::SpaceInfo { loc, path } => self.on_space_info(sid, reply, &loc, path, lane),
-            Call::Checksum { loc, path, algorithm } => {
-                self.on_checksum(sid, reply, &loc, path, algorithm, lane);
-            }
-            Call::MakeDir { loc, path, exclusive } => {
-                self.run_empty(sid, reply, &loc, lane, move |c| c.make_dir(path.as_bytes(), exclusive));
-            }
-            Call::RemoveFile { loc, path } => {
-                self.run_empty(sid, reply, &loc, lane, move |c| c.remove_file(path.as_bytes()));
-            }
-            Call::RemoveDir { loc, path } => {
-                self.run_empty(sid, reply, &loc, lane, move |c| c.remove_dir(path.as_bytes()));
-            }
-            Call::Rename { loc, from, to, replace } => {
-                self.run_empty(sid, reply, &loc, lane, move |c| {
-                    c.rename(from.as_bytes(), to.as_bytes(), replace)
-                });
-            }
-            Call::SetAttributes { loc, path, changes } => {
-                self.on_set_attributes(sid, reply, &loc, path, changes, lane);
-            }
-            Call::MakeSymlink { loc, target, link } => {
-                self.run_empty(sid, reply, &loc, lane, move |c| c.make_symlink(&target, link.as_bytes()));
-            }
-            Call::MakeHardlink { loc, existing, link } => {
-                self.run_empty(sid, reply, &loc, lane, move |c| {
-                    c.make_hardlink(existing.as_bytes(), link.as_bytes())
-                });
-            }
-            Call::ServerCopy { loc, from, to, opts } => {
-                self.on_server_copy(sid, reply, &loc, (from, to), opts, lane);
-            }
-            Call::OpenRead { loc, path, lane } => self.on_open_read(sid, reply, &loc, path, lane),
-            Call::Read { handle, offset, max } => self.on_read(sid, reply, handle, offset, max),
-            Call::ReadAhead { handle, offset, bytes } => {
-                self.on_read_ahead(sid, reply, handle, offset, bytes);
-            }
-            Call::Close { handle } => self.on_close(sid, reply, handle),
-            Call::Upload { loc, path, fd, opts, lane } => {
-                self.on_transfer(sid, reply, TransferCall { loc, path, fd, opts, lane, upload: true });
-            }
-            Call::Download { loc, path, fd, opts, lane } => {
-                self.on_transfer(sid, reply, TransferCall { loc, path, fd, opts, lane, upload: false });
-            }
-            Call::CopyAcross { loc, path, dest_loc, dest_path, opts } => {
-                self.on_copy_across(sid, reply, (&loc, path), (&dest_loc, dest_path), opts);
-            }
-            Call::RemoveTree { loc, path } => self.on_remove_tree(sid, reply, (&loc, lane), path),
-            Call::Walk { loc, path, opts } => self.on_walk(sid, reply, (&loc, lane), path, opts),
-            other => reply.fail(&Status::new(
-                netvfs_bridge_proto::ErrorName::Internal,
-                format!("{} has no handler", other.name()),
-            )),
         }
     }
 
@@ -789,14 +744,14 @@ impl Core {
     }
 
     fn connection_states(&self) -> States {
-        if self.consent == Consent::Granted { self.book.states() } else { States::new() }
+        if self.consent.is_decided() { self.book.states() } else { States::new() }
     }
 
     fn report_states(&mut self) {
         // Whether a change woke the core already does not matter: `ListLocations` may have asked for the look.
         let _woken = self.state_signal.take();
         let states = self.connection_states();
-        if self.states.check(states) && self.consent == Consent::Granted {
+        if self.states.check(states) && self.consent.is_decided() {
             self.broadcast(&OutSignal::LocationsChanged);
         }
     }
@@ -865,7 +820,10 @@ impl Core {
             WorkerEvent::CopyDone { id, result } => {
                 self.copy_jobs.finish(id, self.book.pools_mut());
                 self.quota.release_job();
-                if let Some((sid, job)) = self.copy_owners.remove(&id) {
+                if let Some((sid, job, effect)) = self.copy_owners.remove(&id) {
+                    if let Some(effect) = effect {
+                        self.on_own(&effect, result.as_ref().err().map(|s| s.name));
+                    }
                     // copy_across reports its own Canceled.
                     self.finish_job(sid, job, JobOutcome { result, extra: HashMap::new() });
                 }
@@ -914,15 +872,69 @@ impl Core {
     }
 
     fn set_accounts(&mut self, accounts: &[AccountLocation]) {
-        self.book.set_accounts(accounts.iter().map(account_spec).collect());
+        accounts.clone_into(&mut self.all_accounts);
+        self.apply_access();
+    }
+
+    /// The level of every account, `None`: not allowed or undecided.
+    fn levels(&self) -> BTreeMap<i32, Option<Level>> {
+        self.all_accounts.iter().map(|a| (a.account_id, self.level(a.account_id))).collect()
+    }
+
+    fn level(&self, account_id: i32) -> Option<Level> {
+        match self.consent.grant(account_id) {
+            Grant::Allowed(level) => Some(level),
+            Grant::Denied | Grant::Undecided => None,
+        }
+    }
+
+    /// Hands the book the accounts the consumer may use, at their levels.
+    fn apply_access(&mut self) {
+        let specs = self
+            .all_accounts
+            .iter()
+            .filter_map(|a| self.level(a.account_id).map(|level| account_spec(a).with_access(level)))
+            .collect();
+        self.book.set_accounts(specs);
         let states = self.connection_states();
         self.states.announced(states);
     }
 
+    /// Whether the user still has to choose: never decided, or an account waits for a choice.
+    fn pending(&self) -> bool {
+        !self.consent.is_decided()
+            || self.all_accounts.iter().any(|a| self.consent.grant(a.account_id) == Grant::Undecided)
+    }
+
     fn pool_for(&mut self, loc: &str) -> Result<Arc<LocationSpec>, Status> {
-        let granted = self.consent == Consent::Granted;
+        let decided = self.consent.is_decided();
         let ffi = self.ffi;
-        self.book.ensure_pool(loc, granted, |p| ffi.provider_available(p)).map(Arc::clone)
+        let found = self.book.ensure_pool(loc, decided, |p| ffi.provider_available(p)).map(Arc::clone);
+        match found {
+            Err(status) if status.name == ErrorName::NotFound && self.is_hidden_account(loc) => {
+                Err(crate::locations::book::not_allowed())
+            }
+            other => other,
+        }
+    }
+
+    /// An account the consumer may not use (not allowed or undecided).
+    fn is_hidden_account(&self, loc: &str) -> bool {
+        self.all_accounts
+            .iter()
+            .any(|a| account_location_id(a.account_id) == loc && self.level(a.account_id).is_none())
+    }
+
+    fn on_own(&mut self, effect: &Effect, error: Option<ErrorName>) {
+        let now = own::now_ms();
+        let before = self.own.own(&effect.loc, &effect.path, now);
+        let after = access::after(before, effect.after, error);
+        self.own.set(&effect.loc, &effect.path, after, now);
+    }
+
+    /// Whether `path` in `loc` is the consumer's own.
+    fn own_state(&self, loc: &str, path: &[u8]) -> Own {
+        self.own.own(loc, path, own::now_ms())
     }
 
     fn run_request(
@@ -933,6 +945,18 @@ impl Core {
         lane: Lane,
         body: impl FnOnce(&mut Conn) -> Result<Reply, Status> + Send + 'static,
     ) {
+        self.run_request_then(sid, reply, (loc, lane), body, None);
+    }
+
+    /// [`Self::run_request`], then `effect` with the result.
+    fn run_request_then(
+        &mut self,
+        sid: SessionId,
+        reply: ReplyTo,
+        (loc, lane): (&str, Lane),
+        body: impl FnOnce(&mut Conn) -> Result<Reply, Status> + Send + 'static,
+        effect: Option<Effect>,
+    ) {
         if let Err(status) = self.pool_for(loc) {
             reply.fail(&status);
             return;
@@ -942,6 +966,9 @@ impl Core {
         let work: Work<Connector> = Box::new(move |turn: Turn<'_, Connector>| {
             let result = turn.ready.and_then(body);
             let kept = result.as_ref().map(|_| ()).map_err(Status::clone);
+            if let Some(effect) = effect {
+                drop(tx.send(Event::Own { effect, error: kept.as_ref().err().map(|s| s.name) }));
+            }
             drop(tx.send(Event::Done { sid, op, result }));
             kept
         });
@@ -963,7 +990,7 @@ impl Core {
 
     fn report_nearby(&mut self) {
         let (to, services) = self.nearby.report();
-        if self.consent != Consent::Granted {
+        if !self.consent.is_decided() {
             return;
         }
         for sid in to {

@@ -993,7 +993,8 @@ pub(crate) mod tests {
     #[test]
     fn set_appends_a_section() {
         let mut empty = IniFile::default();
-        empty.set_string("Consent", "lautta", "granted");
+        empty.set_string("Access", "lautta/1", "read-add");
+        empty.set_string("Consent", "lautta", "ask");
         assert_eq!(empty.as_bytes(), include_bytes!("../tests/data/qsettings/fresh.conf"));
         let mut unterminated = IniFile::parse(b"[A]\nk=v".to_vec());
         unterminated.set_string("Consent", "x", "y");

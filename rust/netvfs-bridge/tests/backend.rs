@@ -717,10 +717,11 @@ fn list_streams_batches(env: &Env) {
             Box::new(move |conn, _, _| {
                 let cancel = AtomicBool::new(false);
                 let mut batches: Vec<(Vec<WireEntry>, usize)> = Vec::new();
-                let result = batch::list(conn, dir, batch_size, &budget, &cancel, |entries, bytes| {
-                    batches.push((entries, bytes));
-                    batches.len() < stop_after
-                });
+                let result =
+                    batch::list(conn, (dir, batch_size, false), &budget, &cancel, |entries, bytes| {
+                        batches.push((entries, bytes));
+                        batches.len() < stop_after
+                    });
                 ((batches, result.clone()), result)
             }),
         );
@@ -760,7 +761,7 @@ fn walk_and_remove_tree(env: &Env) {
                 let budget = FlowBudget::new(usize::MAX);
                 let cancel = AtomicBool::new(false);
                 let mut items: Vec<Vec<WireWalkItem>> = Vec::new();
-                let outcome = walk::walk(conn, b"/tree", &opts, &budget, &cancel, |batch, _| {
+                let outcome = walk::walk(conn, (b"/tree", &opts, false), &budget, &cancel, |batch, _| {
                     items.push(batch);
                     true
                 });

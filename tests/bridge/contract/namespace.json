@@ -1,6 +1,6 @@
 {
     "description": "Namespace operations and metadata (XB-10)",
-    "consent": "granted",
+    "consent": "full",
     "files": { "f.txt": "12345" },
     "steps": [
         { "call": "Hello", "sig": "s", "args": ["contract"], "reply": ["*"] },

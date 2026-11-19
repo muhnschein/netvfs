@@ -3,6 +3,7 @@
 //!
 //! A [`Batcher`] collects items into batches of at most `max_items` items or [`MAX_LIST_BATCH_BYTES`] bytes. Before handing a batch on it takes the batch's bytes from the session's [`FlowBudget`]; the emitter then owns them and gives them to [`Outbox::send_streamed`], which returns them once written.
 
+use crate::access::is_folder;
 use crate::ffi::Conn;
 use crate::server::encode::OutSignal;
 use crate::server::{FlowBudget, Outbox};
@@ -120,22 +121,30 @@ pub fn drain<T, E: FnMut(Vec<T>, usize) -> bool>(
     result
 }
 
-/// The `List` body: lists `dir` in backend batches of `batch` entries and hands every batch to `emit` (see [`list_batches`]). The caller sends `ListDone` through the core afterwards.
+/// The `List` body: lists `dir` in backend batches of `batch` entries and hands every batch to `emit` (see [`list_batches`]), folders only when `folders_only`. The caller sends `ListDone` through the core afterwards.
 ///
 /// # Errors
 /// The backend's failure; `Canceled` when canceled or when a batch could
 /// not be sent.
 pub fn list<E: FnMut(Vec<WireEntry>, usize) -> bool>(
     conn: &mut Conn,
-    dir: &[u8],
-    batch: u32,
+    (dir, batch, folders_only): (&[u8], u32, bool),
     budget: &FlowBudget,
     cancel: &AtomicBool,
     emit: E,
 ) -> Result<(), Status> {
     let max_items = usize::try_from(batch).unwrap_or(usize::MAX);
     let mut batcher = Batcher::new(max_items, entry_wire_size, emit, budget, cancel);
-    drain(&mut batcher, |b| conn.list(dir, batch, |entries| b.add_all(entries)))
+    drain(&mut batcher, |b| {
+        conn.list(dir, batch, |entries| {
+            if !folders_only {
+                return b.add_all(entries);
+            }
+            let folders: Vec<WireEntry> =
+                entries.iter().filter(|e| is_folder(e.kind, e.target_kind)).cloned().collect();
+            b.add_all(&folders)
+        })
+    })
 }
 
 /// An emitter of `ListBatch` signals of request `request` on `outbox`.

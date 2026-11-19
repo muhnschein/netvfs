@@ -2,7 +2,7 @@
 //! Shared contract against the `netvfs-bridge` binary with C ABI and fake backend: served introspection equals the contract XML byte for byte; every golden sequence replays on its own bridge. Skipped without the C ABI.
 #![allow(missing_docs, clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::print_stdout)]
 
-use netvfs_bridge::consent::Consent;
+use netvfs_bridge::consent::{Choice, Consent};
 use netvfs_bridge::testing::BridgeRun;
 use netvfs_bridge::testutil::TestChild;
 use netvfs_bridge_proto::OBJECT_PATH;
@@ -33,7 +33,7 @@ fn runtime() -> tokio::runtime::Runtime {
 }
 
 /// Bridge with the fake accounts helper and `consent`.
-fn bridge(consent: Consent) -> BridgeRun {
+fn bridge(consent: &Consent) -> BridgeRun {
     let mut run = BridgeRun::new(Path::new(BRIDGE), CONSUMER);
     run.with_consent(consent).with_fake_accounts(Path::new(HELPER));
     run
@@ -45,7 +45,7 @@ fn introspection_verbatim_and_ping() {
         return;
     }
     let contract = std::fs::read(contract_dir().join("org.netvfs.Bridge1.xml")).unwrap();
-    let mut run = bridge(Consent::Unknown);
+    let mut run = bridge(&Consent::unknown());
     let _child = run.spawn();
     runtime().block_on(async {
         let c = run.client().await;
@@ -73,9 +73,9 @@ fn introspection_verbatim_and_ping() {
 
 fn consent_of(seq: &Sequence) -> Consent {
     match seq.consent {
-        SeqConsent::Unknown => Consent::Unknown,
-        SeqConsent::Granted => Consent::Granted,
-        SeqConsent::Denied => Consent::Denied,
+        SeqConsent::Unknown => Consent::unknown(),
+        SeqConsent::Denied => Consent::all(Choice::Deny),
+        SeqConsent::Allowed(level) => Consent::all(Choice::Allow(level)),
     }
 }
 
@@ -94,7 +94,7 @@ async fn replay_on_the_binary(seq: &Sequence) -> Result<(), String> {
                 .collect();
             let files: Vec<(&[u8], &[u8])> =
                 files.iter().map(|(path, content)| (path.as_slice(), *content)).collect();
-            run.with_consent(consent_of(seq)).with_fake_accounts(Path::new(HELPER)).with_files(&files);
+            run.with_consent(&consent_of(seq)).with_fake_accounts(Path::new(HELPER)).with_files(&files);
             child = Some(run.spawn());
             Ok(())
         },

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! Asking the user whether a consumer may use the network locations; the bridge handles the answer.
+//! Telling the user that a consumer asks for the network locations. The notification decides nothing: tapping it opens the request in Settings, where the user chooses per account.
 //!
-//! [`NotificationPrompt`] posts an `org.freedesktop.Notifications` notification "<DisplayName> wants to use your network locations" with actions `allow` and `deny`, answered through `ActionInvoked`. Unverified on device: lipstick on Sailfish OS 5.2 showing freedesktop actions and emitting `ActionInvoked` to a process owning no bus name; Settings can always grant or revoke.
+//! [`NotificationPrompt`] posts an `org.freedesktop.Notifications` notification "<DisplayName> wants to use your network locations" with only the `default` action, reported through `ActionInvoked`. Unverified on device: lipstick on Sailfish OS 5.2 emitting `ActionInvoked` for a tap to a process owning no bus name; Settings › Accounts › Apps using network locations always works.
 
 use futures_lite::StreamExt;
 use std::collections::HashMap;
@@ -15,17 +15,17 @@ use zbus::{Connection, Message, MessageStream};
 const SERVICE: &str = "org.freedesktop.Notifications";
 const PATH: &str = "/org/freedesktop/Notifications";
 const INTERFACE: &str = "org.freedesktop.Notifications";
-const ALLOW: &str = "allow";
-const DENY: &str = "deny";
+const DEFAULT: &str = "default";
+const APP_NAME: &str = "Network locations";
 const NEVER_EXPIRES: i32 = 0;
 const NOTIFY_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// What became of a shown question.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PromptEvent {
-    /// The user allowed (`true`) or refused.
-    Answered(bool),
-    /// Closed without an answer, or could not be shown.
+    /// The user tapped it.
+    Opened,
+    /// Closed without a tap, or could not be shown.
     Dismissed,
 }
 
@@ -149,10 +149,11 @@ impl Actor {
             self.signals = subscribe(&bus).await;
         }
         let summary = format!("{display_name} wants to use your network locations");
+        let text = "Tap to choose what it may do on each account";
         let hints = HashMap::from([("category", Value::from("x-nemo.general")), ("urgency", Value::U8(1))]);
         // A slice: an array would be a structure on the bus.
-        let actions: &[&str] = &[ALLOW, "Allow", DENY, "Don't allow"];
-        let body = ("netvfs", self.id, "", summary, "", actions, hints, NEVER_EXPIRES);
+        let actions: &[&str] = &[DEFAULT, ""];
+        let body = (APP_NAME, self.id, "", summary, text, actions, hints, NEVER_EXPIRES);
         let call = bus.call_method(Some(SERVICE), PATH, Some(INTERFACE), "Notify", &body);
         match tokio::time::timeout(NOTIFY_TIMEOUT, call).await {
             Ok(Ok(reply)) => match reply.body().deserialize::<u32>() {
@@ -212,11 +213,13 @@ impl Actor {
         let body = message.body();
         let event = match header.member().map(zbus::names::MemberName::as_str) {
             Some("ActionInvoked") => match body.deserialize::<(u32, String)>() {
-                Ok((id, action)) if id == self.id => match action.as_str() {
-                    ALLOW => PromptEvent::Answered(true),
-                    DENY => PromptEvent::Answered(false),
-                    _ => PromptEvent::Dismissed,
-                },
+                Ok((id, action)) if id == self.id => {
+                    if action == DEFAULT {
+                        PromptEvent::Opened
+                    } else {
+                        PromptEvent::Dismissed
+                    }
+                }
                 _ => return,
             },
             Some("NotificationClosed") => match body.deserialize::<(u32, u32)>() {

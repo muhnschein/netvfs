@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! Settings handoff: `OpenAccountSettings`, `AddAccount`, `OpenStorageSettings` call the platform's settings D-Bus interface on the session bus, as the table in `handoff.conf` (QSettings INI syntax) says:
+//! Settings handoff: `OpenAccountSettings`, `AddAccount`, `OpenStorageSettings`, and the tapped request notification (`OpenAccessRequest`) call the platform's settings D-Bus interface on the session bus, as the table in `handoff.conf` (QSettings INI syntax) says:
 //!
 //! ```ini
 //! [OpenAccountSettings]
@@ -24,6 +24,7 @@ pub const DEFAULT_CONFIG: &str = "/usr/share/netvfs/bridge/handoff.conf";
 const OPEN_ACCOUNT_SETTINGS: &str = "OpenAccountSettings";
 const ADD_ACCOUNT: &str = "AddAccount";
 const OPEN_STORAGE_SETTINGS: &str = "OpenStorageSettings";
+const OPEN_ACCESS_REQUEST: &str = "OpenAccessRequest";
 
 /// One argument of a handoff call.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -97,6 +98,14 @@ impl<L: Launcher> Handoff<L> {
     /// As [`Self::resolve`] and [`Launcher::launch`].
     pub fn open_storage_settings(&self) -> Result<(), Status> {
         self.run(OPEN_STORAGE_SETTINGS, 0, "")
+    }
+
+    /// `OpenAccessRequest`: the request of an app that asks for network locations; `{accountId}` is `0` and `{provider}` empty.
+    ///
+    /// # Errors
+    /// As [`Self::resolve`] and [`Launcher::launch`].
+    pub fn open_access_request(&self) -> Result<(), Status> {
+        self.run(OPEN_ACCESS_REQUEST, 0, "")
     }
 
     /// Whether the table has a valid `OpenStorageSettings` entry (feature `storage-settings` of `GetFeatures`).

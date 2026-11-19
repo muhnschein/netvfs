@@ -6,7 +6,7 @@
 
 use crate::accounts::{AccountDirectory, AccountLocation, Attention, ConnectionParams, FilesAccess};
 use crate::config::ConsumerInfo;
-use crate::consent::{Consent, ConsentStore};
+use crate::consent::{Choice, Consent, ConsentStore, Level};
 use crate::core::nearby::NearbySource;
 use crate::core::{Config, CoreLink, Counters, Deps, LocalFuture, MakeServices, Services};
 use crate::drives::classify::Kind;
@@ -312,7 +312,7 @@ pub struct PromptState {
     pub display_name: String,
 }
 
-/// A [`ConsentPrompt`] that tests answer ([`Fixture::answer_prompt`]).
+/// A [`ConsentPrompt`] that tests tap ([`Fixture::tap_prompt`]).
 #[derive(Debug, Clone, Default)]
 pub struct FakePrompt(pub Arc<Mutex<PromptState>>);
 
@@ -530,7 +530,7 @@ pub struct Setup {
 impl Default for Setup {
     fn default() -> Self {
         Self {
-            consent: Consent::Granted,
+            consent: Consent::all(Choice::Allow(Level::Full)),
             idle_exit: FIXTURE_IDLE_EXIT,
             executable: None,
             handoff_conf: None,
@@ -584,9 +584,11 @@ impl Fixture {
                 display_name: "Test".to_owned(),
                 executable,
                 data_dir: "data".to_owned(),
+                access: Level::Full,
             },
             consent_file: dir.join("config/bridge.conf"),
             known_hosts_file: dir.join("known_hosts"),
+            added_file: dir.join("added"),
             handoff_config: dir.join("handoff.conf"),
             idle_exit: setup.idle_exit,
             connection_idle: setup.connection_idle,
@@ -604,7 +606,7 @@ impl Fixture {
             RecordingLauncher::default(),
             FakeDrives::default(),
         );
-        ConsentStore::new(&config.consent_file).set_consent(CONSUMER, setup.consent).expect("bridge.conf");
+        ConsentStore::new(&config.consent_file).set_consent(CONSUMER, &setup.consent).expect("bridge.conf");
         let (ready, linked) = mpsc::channel::<CoreLink>();
         let services: MakeServices = {
             let (accounts, prompt, nearby, launcher, drives) =
@@ -662,8 +664,8 @@ impl Fixture {
         assert!(self.link.drives_changed(), "the core has stopped");
     }
 
-    /// Stores `consent` in `bridge.conf`, as netvfs-ui does.
-    pub fn set_consent(&self, consent: Consent) {
+    /// Stores `consent` in `bridge.conf`, as the account UI does.
+    pub fn set_consent(&self, consent: &Consent) {
         ConsentStore::new(&self.config.consent_file).set_consent(CONSUMER, consent).expect("bridge.conf");
     }
 
@@ -673,10 +675,10 @@ impl Fixture {
         ConsentStore::new(&self.config.consent_file).consent(CONSUMER)
     }
 
-    /// The user answers the shown consent question.
-    pub fn answer_prompt(&self, allow: bool) {
+    /// The user taps the shown request notification (lipstick closes it).
+    pub fn tap_prompt(&self) {
         self.prompt.state().visible = false;
-        assert!(self.link.prompt(PromptEvent::Answered(allow)), "the core has stopped");
+        assert!(self.link.prompt(PromptEvent::Opened), "the core has stopped");
     }
 
     /// The way into the core (discovery results, account changes).
@@ -802,7 +804,7 @@ impl BridgeRun {
     }
 
     /// `bridge.conf` with `consent` for the consumer, as the account UI writes it.
-    pub fn with_consent(&mut self, consent: Consent) -> &mut Self {
+    pub fn with_consent(&mut self, consent: &Consent) -> &mut Self {
         ConsentStore::new(self.consent_file()).set_consent(&self.consumer, consent).expect("bridge.conf");
         self
     }

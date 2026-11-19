@@ -310,7 +310,7 @@ async fn connection_states_follow_use_disconnect_and_the_script() {
 #[tokio::test]
 async fn features_and_the_storage_handoff_need_no_consent() {
     let fake = fake_with_account().await;
-    fake.set_consent(netvfs_bridge_proto::fake::Consent::Denied).await;
+    fake.set_consent(netvfs_bridge_proto::fake::Consent::Unknown).await;
     let conn = fake.connect().await.unwrap();
     hello(&conn).await;
     assert_eq!(conn.proxy().get_features().await.unwrap(), ["storage-settings", "drives"]);
@@ -329,7 +329,7 @@ async fn drives_are_listed_mounted_and_unmounted_without_consent() {
     use netvfs_bridge_proto::fake::FakeDrive;
     use netvfs_bridge_proto::{drive_info, value_i64, value_str};
     let fake = fake_with_account().await;
-    fake.set_consent(netvfs_bridge_proto::fake::Consent::Denied).await;
+    fake.set_consent(netvfs_bridge_proto::fake::Consent::Unknown).await;
     let conn = fake.connect().await.unwrap();
     hello(&conn).await;
     let mut signals = conn.signals();

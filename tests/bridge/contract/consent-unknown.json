@@ -1,0 +1,15 @@
+{
+    "description": "Undecided: nothing is listed, location calls, discovery and ad-hoc fail with PermissionDenied until the user decides in Settings (XB-6)",
+    "consent": "unknown",
+    "steps": [
+        { "call": "Hello", "sig": "s", "args": ["contract"], "reply": ["*"] },
+        { "call": "GetConsent", "sig": "", "args": [], "reply": ["unknown"] },
+        { "call": "ListLocations", "sig": "", "args": [], "reply": [[]] },
+        { "call": "Stat", "sig": "saybs", "args": ["account:1", { "bytes": "" }, true, ""],
+          "error": "org.netvfs.Error.PermissionDenied" },
+        { "call": "Discover", "sig": "b", "args": [true], "error": "org.netvfs.Error.PermissionDenied" },
+        { "call": "ConnectAdHoc", "sig": "saya{sv}", "args": ["fake://user@h/", { "bytes": "" }, {}],
+          "error": "org.netvfs.Error.PermissionDenied" },
+        { "call": "RequestConsent", "sig": "", "args": [], "reply": [] }
+    ]
+}

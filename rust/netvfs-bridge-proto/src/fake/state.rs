@@ -2,6 +2,8 @@
 //! Shared state of the fake bridge and of one client session.
 
 use super::tree::Tree;
+use crate::access::{self, After, Level, Own};
+use crate::errors::ErrorName;
 use crate::wire::{WireCapabilities, WireDrive, WireLocation, WireNearby, drive_info, location_state};
 use std::collections::{BTreeMap, HashMap};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -11,25 +13,44 @@ use tokio::sync::oneshot;
 use tokio::time::Instant;
 use zbus::zvariant::{OwnedValue, Value};
 
-/// The user's answer to this app using network locations.
+/// What the user decided for this app, for every account location (ad-hoc ones are always `full`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Consent {
-    /// Not asked yet.
+    /// Not decided yet.
     Unknown,
-    /// Allowed.
-    Granted,
-    /// Refused.
+    /// No account.
     Denied,
+    /// Every account at this level.
+    Allowed(Level),
 }
 
 impl Consent {
-    /// The name on the wire.
+    /// The word of a contract sequence (as in `bridge.conf`).
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Unknown => "unknown",
-            Self::Granted => "granted",
             Self::Denied => "denied",
+            Self::Allowed(level) => level.as_str(),
+        }
+    }
+
+    /// The consent of a word of [`Consent::as_str`].
+    #[must_use]
+    pub fn parse(word: &str) -> Option<Self> {
+        match word {
+            "unknown" => Some(Self::Unknown),
+            "denied" => Some(Self::Denied),
+            _ => Level::parse(word).map(Self::Allowed),
+        }
+    }
+
+    /// What `GetConsent` and `ConsentChanged` say: `unknown` or `decided`.
+    #[must_use]
+    pub const fn wire(self) -> &'static str {
+        match self {
+            Self::Unknown => "unknown",
+            Self::Denied | Self::Allowed(_) => "decided",
         }
     }
 }
@@ -258,6 +279,10 @@ pub struct LocationRec {
 
 pub struct State {
     pub consent: Consent,
+    /// Per location, overriding [`State::consent`]: `None` not allowed.
+    pub access: HashMap<String, Option<Level>>,
+    /// What the app added at an add level.
+    pub own: HashMap<(String, Vec<u8>), Own>,
     pub consent_requests: u32,
     pub auto_consent: Option<Consent>,
     pub bridge_version: String,
@@ -289,7 +314,9 @@ pub struct State {
 impl Default for State {
     fn default() -> Self {
         Self {
-            consent: Consent::Granted,
+            consent: Consent::Allowed(Level::Full),
+            access: HashMap::new(),
+            own: HashMap::new(),
             consent_requests: 0,
             auto_consent: None,
             bridge_version: "0.2.0-fake".to_owned(),
@@ -383,13 +410,58 @@ impl State {
     pub fn wire_locations(&self) -> Vec<WireLocation> {
         self.locations
             .iter()
-            .map(|(id, rec)| WireLocation {
-                id: id.clone(),
-                provider: rec.provider.clone(),
-                name: rec.name.clone(),
-                info: rec.info.iter().map(|(k, v)| (k.clone(), v.to_owned_value())).collect(),
+            .filter_map(|(id, rec)| {
+                let level = self.level(id)?;
+                let mut info: HashMap<String, OwnedValue> =
+                    rec.info.iter().map(|(k, v)| (k.clone(), v.to_owned_value())).collect();
+                info.insert(
+                    access::KEY.to_owned(),
+                    InfoValue::Str(level.as_str().to_owned()).to_owned_value(),
+                );
+                Some(WireLocation {
+                    id: id.clone(),
+                    provider: rec.provider.clone(),
+                    name: rec.name.clone(),
+                    info,
+                })
             })
             .collect()
+    }
+
+    /// What the app may do in location `id`; `None` while undecided or not allowed. Ad-hoc locations: `full`.
+    pub fn level(&self, id: &str) -> Option<Level> {
+        let default = match self.consent {
+            Consent::Unknown => return None,
+            _ if id.starts_with("adhoc:") => return Some(Level::Full),
+            Consent::Denied => None,
+            Consent::Allowed(level) => Some(level),
+        };
+        self.access.get(id).copied().unwrap_or(default)
+    }
+
+    /// Whether `path` in `loc` is the app's.
+    pub fn own(&self, loc: &str, path: &[u8]) -> Own {
+        self.own.get(&(loc.to_owned(), path.to_vec())).copied().unwrap_or(Own::No)
+    }
+
+    /// Records what a finished `call` (`error`: the bare name of its failure) made of `path` in `loc`; nothing at a level that changes anything.
+    pub fn after_call(&mut self, loc: &str, path: &[u8], call: After, error: Option<&str>) {
+        if self.level(loc).is_none_or(Level::changes) {
+            return;
+        }
+        let error = error.map(|bare| ErrorName::parse(bare).unwrap_or(ErrorName::Internal));
+        let own = access::after(self.own(loc, path), call, error);
+        self.set_own(loc, path, own);
+    }
+
+    /// Records `own` for `path` in `loc`.
+    pub fn set_own(&mut self, loc: &str, path: &[u8], own: Own) {
+        let key = (loc.to_owned(), path.to_vec());
+        if own == Own::No {
+            self.own.remove(&key);
+        } else {
+            self.own.insert(key, own);
+        }
     }
 
     /// Takes the first scripted failure matching `method`, if it is due.
@@ -661,6 +733,7 @@ mod tests {
         st.remove_location("account:1");
         assert!(st.wire_locations().is_empty());
         assert_eq!(Consent::Denied.as_str(), "denied");
+        assert_eq!(Consent::Denied.wire(), "decided");
     }
 
     #[test]

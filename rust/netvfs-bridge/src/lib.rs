@@ -7,6 +7,7 @@
 //!
 //! Platform: [`config`], [`log`], consent ([`consent`], [`prompt`]), settings handoff ([`handoff`]), accounts helper ([`accounts`]), known hosts ([`locations::knownhosts`]), UDisks2 drives ([`drives`]). `unsafe` is confined to `ffi` and `sys`.
 
+pub mod access;
 pub mod accounts;
 pub mod config;
 pub mod consent;

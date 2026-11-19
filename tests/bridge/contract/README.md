@@ -10,7 +10,7 @@ Shared with consumers: lautta's `tests/bridge-contract/` holds same JSON and XML
 ```json
 {
   "description": "...",
-  "consent": "granted | denied | unknown",
+  "consent": "unknown | denied | full | read-add | read | add",
   "files": { "path/in/the/fake/server": "content" },
   "steps": [
     { "call": "Stat", "sig": "saybs", "args": [...], "reply": [...] },

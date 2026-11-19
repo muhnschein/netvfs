@@ -1,6 +1,8 @@
+Access/lautta/1|QString|read|1|read
+Access/lautta/2|QString|denied|1|denied
 Consent%/x|QString|y|1|y
-Consent/lautta|QString|denied|1|denied
-Consent/new-one|QString|granted|1|granted
+Consent/lautta|QString|ask|1|ask
+Consent/new-one|QString|full|1|full
 Ui/lastPage|QString|consent|1|consent
 Ui/odd key|QString|with, comma; and = signs|1|with, comma; and = signs
 Weird\u00e4/k\u4e00|QString|v|1|v

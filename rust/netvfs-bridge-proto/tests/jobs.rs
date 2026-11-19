@@ -7,10 +7,12 @@
 
 use futures_lite::StreamExt as _;
 use netvfs_bridge_proto::fake::FakeBridge;
+use netvfs_bridge_proto::zvariant::Fd;
 use netvfs_bridge_proto::{
-    BridgeError, Connection, OptsBuilder, Signal, SignalStream, WireNearby, value_i64,
+    BridgeError, Connection, Opts, OptsBuilder, Signal, SignalStream, WireNearby, value_i64, value_str,
 };
 use std::collections::HashMap;
+use std::os::fd::AsFd as _;
 use std::time::Duration;
 
 async fn setup() -> (FakeBridge, Connection, SignalStream) {
@@ -166,22 +168,50 @@ async fn discovery_results_arrive_as_signals() {
     }
 }
 
+/// The `access` of every listed location, by id.
+async fn levels(conn: &Connection) -> Vec<(String, String)> {
+    let locations = conn.proxy().list_locations().await.unwrap();
+    locations
+        .into_iter()
+        .map(|l| (l.id, l.info.get("access").and_then(|v| value_str(v)).expect("an access")))
+        .collect()
+}
+
 #[tokio::test]
-async fn consent_and_location_changes_are_signalled() {
-    let (fake, _conn, mut signals) = setup().await;
-    fake.set_consent(netvfs_bridge_proto::fake::Consent::Denied).await;
-    fake.add_account(3, "fake", "Fake 3", "third.example").await;
-    let mut seen = (false, false);
-    while seen != (true, true) {
-        match next_signal(&mut signals).await {
-            Signal::ConsentChanged(c) => {
-                assert_eq!(c, "denied");
-                seen.0 = true;
-            }
-            Signal::LocationsChanged => seen.1 = true,
-            other => panic!("unexpected {other:?}"),
-        }
-    }
+async fn consent_changes_as_in_the_bridge() {
+    use netvfs_bridge_proto::access::Level;
+    use netvfs_bridge_proto::fake::Consent;
+    let fake = FakeBridge::new();
+    fake.set_consent(Consent::Unknown).await;
+    fake.add_account(1, "fake", "Fake 1", "fake.example").await;
+    fake.add_account(2, "fake", "Fake 2", "other.example").await;
+    let conn = fake.connect().await.unwrap();
+    let mut signals = conn.signals();
+    conn.proxy().hello("test").await.unwrap();
+    assert_eq!(conn.proxy().get_consent().await.unwrap(), "unknown");
+    assert!(conn.proxy().list_locations().await.unwrap().is_empty());
+    fake.set_consent(Consent::Allowed(Level::Read)).await;
+    assert!(matches!(next_signal(&mut signals).await, Signal::ConsentChanged(c) if c == "decided"));
+    assert!(matches!(next_signal(&mut signals).await, Signal::LocationsChanged));
+    let read = |id: &str| (id.to_owned(), "read".to_owned());
+    assert_eq!(levels(&conn).await, [read("account:1"), read("account:2")]);
+    fake.set_access("account:2", Some(Level::Full)).await;
+    assert!(matches!(next_signal(&mut signals).await, Signal::LocationsChanged), "widening keeps clients");
+    assert_eq!(levels(&conn).await, [read("account:1"), ("account:2".to_owned(), "full".to_owned())]);
+    fake.set_access("account:1", None).await;
+    let ended = tokio::time::timeout(Duration::from_secs(5), async {
+        while let Some(Ok(_)) = signals.next().await {}
+    });
+    assert!(ended.await.is_ok(), "narrowing disconnects");
+    let again = fake.connect().await.unwrap();
+    again.proxy().hello("test").await.unwrap();
+    assert_eq!(levels(&again).await, [("account:2".to_owned(), "full".to_owned())]);
+    let stat = again.proxy().stat("account:1", b"", true, "").await.unwrap_err();
+    let detail = match BridgeError::from(stat) {
+        BridgeError::Remote { detail, .. } => detail,
+        other => panic!("{other:?}"),
+    };
+    assert_eq!(detail.as_deref(), Some("denied"));
 }
 
 #[tokio::test]
@@ -190,12 +220,102 @@ async fn failures_can_start_later_and_repeat() {
     let (fake, conn, _signals) = setup().await;
     fake.fail(Failure::new("GetConsent", "Locked", "busy").after(1).times(2));
     let p = conn.proxy();
-    assert_eq!(p.get_consent().await.unwrap(), "granted", "the first call is spared");
+    assert_eq!(p.get_consent().await.unwrap(), "decided", "the first call is spared");
     p.get_consent().await.unwrap_err();
     p.get_consent().await.unwrap_err();
-    assert_eq!(p.get_consent().await.unwrap(), "granted", "and then it is over");
+    assert_eq!(p.get_consent().await.unwrap(), "decided", "and then it is over");
     fake.fail(Failure::new("*", "Locked", "everything"));
     p.get_consent().await.unwrap_err();
     fake.clear_failures();
     p.get_consent().await.unwrap();
+}
+
+/// Uploads `content` to `path` of account 1 with `opts`: the job's error name, "" on success.
+async fn put(
+    conn: &Connection,
+    signals: &mut SignalStream,
+    path: &[u8],
+    content: &[u8],
+    opts: &Opts,
+) -> String {
+    let file = tempfile_with(content);
+    match conn.proxy().upload("account:1", path, Fd::from(file.as_fd()), opts).await {
+        Ok(job) => finish(signals, job).await.1,
+        Err(e) => BridgeError::from(e).netvfs_name().unwrap_or_default().to_owned(),
+    }
+}
+
+fn tempfile_with(content: &[u8]) -> std::fs::File {
+    let path = std::env::temp_dir().join(format!("fake-put-{}-{}", std::process::id(), rand_suffix()));
+    std::fs::write(&path, content).unwrap();
+    let file = std::fs::File::open(&path).unwrap();
+    std::fs::remove_file(&path).unwrap();
+    file
+}
+
+fn rand_suffix() -> u64 {
+    use std::hash::{BuildHasher as _, RandomState};
+    RandomState::new().hash_one(std::time::SystemTime::now())
+}
+
+/// The detail of a refused call.
+fn detail<T: std::fmt::Debug>(result: zbus::Result<T>) -> Option<String> {
+    match BridgeError::from(result.unwrap_err()) {
+        BridgeError::Remote { detail, .. } => detail,
+        other => panic!("{other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn add_only_keeps_what_the_app_added() {
+    use netvfs_bridge_proto::access::Level;
+    use netvfs_bridge_proto::fake::{Consent, JobFailure};
+    let fake = FakeBridge::new();
+    fake.set_consent(Consent::Allowed(Level::Add)).await;
+    fake.add_account(1, "fake", "Fake 1", "fake.example").await;
+    let conn = fake.connect().await.unwrap();
+    let mut signals = conn.signals();
+    conn.proxy().hello("test").await.unwrap();
+    fake.put_file("account:1", b"in/a.txt", b"hello");
+    fake.put_dir("account:1", b"in/sub");
+    let p = conn.proxy();
+    let add = Some("add".to_owned());
+    let req = p.list("account:1", b"in", "", 0).await.unwrap();
+    let names = loop {
+        if let Signal::ListBatch { req: r, entries } = next_signal(&mut signals).await {
+            assert_eq!(r, req);
+            break entries.into_iter().map(|e| e.name).collect::<Vec<_>>();
+        }
+    };
+    assert_eq!(names, [b"sub".to_vec()]);
+    assert_eq!(detail(p.stat("account:1", b"in/a.txt", true, "").await), add);
+    assert_eq!(detail(p.open_read("account:1", b"in/a.txt", "").await), add);
+    let create = OptsBuilder::new().build();
+    assert_eq!(put(&conn, &mut signals, b"in/.n.part", b"mine", &create).await, "");
+    let (handle, size) = p.open_read("account:1", b"in/.n.part", "").await.unwrap();
+    assert_eq!(size, 4);
+    p.close(handle).await.unwrap();
+    p.rename("account:1", b"in/.n.part", b"in/n.txt", false).await.unwrap();
+    assert_eq!(detail(p.stat("account:1", b"in/n.txt", true, "").await), add, "renamed: no longer the app's");
+    assert_eq!(put(&conn, &mut signals, b"in/a.txt", b"x", &create).await, "AlreadyExists");
+    let truncate = OptsBuilder::new().str("disposition", "truncate").build();
+    assert_eq!(put(&conn, &mut signals, b"in/a.txt", b"x", &truncate).await, "PermissionDenied");
+    assert_eq!(fake.file("account:1", b"in/a.txt").unwrap(), b"hello");
+    fake.fail_job(JobFailure::new("Upload", 0, "ConnectionLost", "cut"));
+    assert_eq!(put(&conn, &mut signals, b"in/.cut.part", b"abc", &create).await, "ConnectionLost");
+    assert_eq!(
+        put(&conn, &mut signals, b"in/.cut.part", b"abc", &truncate).await,
+        "",
+        "a cut upload stays the app's"
+    );
+    p.remove_file("account:1", b"in/.cut.part").await.unwrap();
+    assert!(!fake.exists("account:1", b"in/.cut.part"));
+    assert_eq!(detail(p.remove_file("account:1", b"in/a.txt").await), add);
+    assert_eq!(
+        BridgeError::from(p.remove_file("account:1", b"in/gone").await.unwrap_err()).netvfs_name(),
+        Some("NotFound")
+    );
+    let walk = p.walk("account:1", b"in", &OptsBuilder::new().build()).await.unwrap();
+    let (paths, error, _) = finish(&mut signals, walk).await;
+    assert_eq!((paths, error.as_str()), (vec![b"in/sub".to_vec()], ""));
 }

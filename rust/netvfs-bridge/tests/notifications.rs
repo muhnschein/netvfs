@@ -4,7 +4,7 @@
 #![allow(clippy::unwrap_used, clippy::arithmetic_side_effects, clippy::indexing_slicing, clippy::panic)]
 
 use futures_lite::StreamExt;
-use netvfs_bridge::consent::{Consent, ConsentStore};
+use netvfs_bridge::consent::{Choice, Consent, ConsentStore, Level, NewAccounts};
 use netvfs_bridge::prompt::{ConsentPrompt, NotificationPrompt, PromptEvent};
 use netvfs_bridge::testing::{BridgeRun, WAIT, wait_signal};
 use netvfs_bridge::testutil::{TestBus, TestChild};
@@ -138,7 +138,7 @@ async fn next_event(events: &mut mpsc::UnboundedReceiver<PromptEvent>) -> Prompt
 }
 
 #[tokio::test]
-async fn actions_answer() {
+async fn a_tap_opens() {
     let Some(mut s) = setup().await else { return };
     assert!(!s.prompt.is_shown());
     s.prompt.show("Lautta");
@@ -146,25 +146,28 @@ async fn actions_answer() {
     let (app, replaces, icon, summary, body, actions, hints, timeout) = s.fake.notify().await;
     assert_eq!(
         (app.as_str(), replaces, icon.as_str(), summary.as_str(), body.as_str(), timeout),
-        ("netvfs", 0, "", "Lautta wants to use your network locations", "", 0)
+        (
+            "Network locations",
+            0,
+            "",
+            "Lautta wants to use your network locations",
+            "Tap to choose what it may do on each account",
+            0
+        )
     );
-    assert_eq!(actions, ["allow", "Allow", "deny", "Don't allow"]);
+    assert_eq!(actions, ["default", ""]);
     assert_eq!(hints.len(), 2);
     assert_eq!(String::try_from(hints["category"].try_clone().unwrap()).unwrap(), "x-nemo.general");
     assert_eq!(u8::try_from(&hints["urgency"]).unwrap(), 1);
-    s.fake.action(7, "allow").await;
-    assert_eq!(next_event(&mut s.events).await, PromptEvent::Answered(true));
+    s.fake.action(7, "default").await;
+    assert_eq!(next_event(&mut s.events).await, PromptEvent::Opened);
     assert!(!s.prompt.is_shown());
 
-    for (id, action, event) in [
-        (8, "deny", PromptEvent::Answered(false)),
-        (9, "default", PromptEvent::Dismissed),
-        (10, "", PromptEvent::Dismissed),
-    ] {
+    for (id, action) in [(8, "allow"), (9, "")] {
         s.prompt.show("Lautta");
         assert_eq!(s.fake.notify().await.1, 0);
         s.fake.action(id, action).await;
-        assert_eq!(next_event(&mut s.events).await, event);
+        assert_eq!(next_event(&mut s.events).await, PromptEvent::Dismissed);
         assert!(!s.prompt.is_shown());
     }
 }
@@ -175,24 +178,24 @@ async fn closed_and_stale_signals() {
     s.prompt.show("A");
     s.fake.notify().await;
     s.fake.closed(6).await;
-    s.fake.action(8, "allow").await;
-    s.fake.action(0, "allow").await;
+    s.fake.action(8, "default").await;
+    s.fake.action(0, "default").await;
     emit(&s.fake.conn, None, "ActionInvoked", &7_u32).await;
     emit(&s.fake.conn, None, "NotificationClosed", &(7_u32, "x")).await;
-    emit(&s.fake.conn, None, "ActionInvoked2", &(7_u32, "allow")).await;
-    s.fake.action(7, "allow").await;
-    assert_eq!(next_event(&mut s.events).await, PromptEvent::Answered(true));
+    emit(&s.fake.conn, None, "ActionInvoked2", &(7_u32, "default")).await;
+    s.fake.action(7, "default").await;
+    assert_eq!(next_event(&mut s.events).await, PromptEvent::Opened);
     s.prompt.show("A");
     s.fake.notify().await;
     s.fake.closed(7).await;
     s.fake.closed(8).await;
     assert_eq!(next_event(&mut s.events).await, PromptEvent::Dismissed);
     assert!(!s.prompt.is_shown());
-    s.fake.action(8, "allow").await;
+    s.fake.action(8, "default").await;
     s.prompt.show("A");
     s.fake.notify().await;
-    s.fake.action(9, "deny").await;
-    assert_eq!(next_event(&mut s.events).await, PromptEvent::Answered(false));
+    s.fake.action(9, "default").await;
+    assert_eq!(next_event(&mut s.events).await, PromptEvent::Opened);
     assert_eq!(s.events.try_recv(), Err(mpsc::error::TryRecvError::Empty));
 }
 
@@ -206,18 +209,18 @@ async fn withdraw_closes_the_notification() {
     assert!(!s.prompt.is_shown());
     assert_eq!(s.fake.close().await, 7);
     s.prompt.withdraw();
-    s.fake.action(7, "allow").await;
+    s.fake.action(7, "default").await;
     s.prompt.show("A");
     assert_eq!(s.fake.notify().await.1, 0);
-    s.fake.action(8, "allow").await;
-    assert_eq!(next_event(&mut s.events).await, PromptEvent::Answered(true));
+    s.fake.action(8, "default").await;
+    assert_eq!(next_event(&mut s.events).await, PromptEvent::Opened);
 
     s.prompt.show("B");
     s.prompt.withdraw();
     assert!(!s.prompt.is_shown());
     s.fake.notify().await;
     assert_eq!(s.fake.close().await, 9);
-    s.fake.action(9, "allow").await;
+    s.fake.action(9, "default").await;
 
     s.prompt.show("C");
     s.fake.notify().await;
@@ -234,8 +237,8 @@ async fn show_replaces() {
     s.prompt.show("B");
     let args = s.fake.notify().await;
     assert_eq!((args.1, args.3.as_str()), (7, "B wants to use your network locations"));
-    s.fake.action(7, "allow").await;
-    assert_eq!(next_event(&mut s.events).await, PromptEvent::Answered(true));
+    s.fake.action(7, "default").await;
+    assert_eq!(next_event(&mut s.events).await, PromptEvent::Opened);
 }
 
 #[tokio::test]
@@ -245,8 +248,8 @@ async fn other_senders_are_ignored() {
     s.fake.notify().await;
     let other = s.bus.connect().await;
     let to = s.client.unique_name().unwrap().to_string();
-    emit(&other, Some(&to), "ActionInvoked", &(7_u32, "allow")).await;
-    emit(&other, None, "ActionInvoked", &(7_u32, "allow")).await;
+    emit(&other, Some(&to), "ActionInvoked", &(7_u32, "default")).await;
+    emit(&other, None, "ActionInvoked", &(7_u32, "default")).await;
     emit(&other, Some(&to), "NotificationClosed", &(7_u32, 1_u32)).await;
     other
         .call_method(
@@ -259,8 +262,8 @@ async fn other_senders_are_ignored() {
         .await
         .unwrap();
     assert!(s.prompt.is_shown());
-    s.fake.action(7, "deny").await;
-    assert_eq!(next_event(&mut s.events).await, PromptEvent::Answered(false));
+    s.fake.action(7, "default").await;
+    assert_eq!(next_event(&mut s.events).await, PromptEvent::Opened);
 }
 
 #[tokio::test]
@@ -277,8 +280,8 @@ async fn failures_dismiss() {
     *s.fake.answer.lock().unwrap() = Answer::Id;
     s.prompt.show("A");
     s.fake.notify().await;
-    s.fake.action(7, "allow").await;
-    assert_eq!(next_event(&mut s.events).await, PromptEvent::Answered(true));
+    s.fake.action(7, "default").await;
+    assert_eq!(next_event(&mut s.events).await, PromptEvent::Opened);
 }
 
 #[tokio::test]
@@ -343,38 +346,47 @@ async fn consent_changed(signals: &mut SignalStream) -> String {
     }
 }
 
+/// Waits until the bridge logged `text`.
+async fn logged(run: &BridgeRun, text: &str) {
+    let end = tokio::time::Instant::now() + WAIT;
+    while !run.log().contains(text) {
+        assert!(tokio::time::Instant::now() < end, "not logged: {text}\n{}", run.log());
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+}
+
 #[tokio::test]
-async fn an_allowed_notification_grants_consent() {
+async fn a_tapped_notification_opens_the_request() {
     let Some((_bus, mut fake, run, _child, client)) = bridge_on_bus().await else { return };
-    let mut signals = client.signals();
     client.proxy().request_consent().await.unwrap();
     let (app, _, _, summary, _, actions, _, _) = fake.notify().await;
     assert_eq!(
         (app.as_str(), summary.as_str()),
-        ("netvfs", "Process test wants to use your network locations")
+        ("Network locations", "Process test wants to use your network locations")
     );
-    assert_eq!(actions, ["allow", "Allow", "deny", "Don't allow"]);
-    assert_eq!(stored(&run), Consent::Unknown);
-    fake.action(7, "allow").await;
-    assert_eq!(consent_changed(&mut signals).await, "granted");
-    assert_eq!(stored(&run), Consent::Granted);
-    let conf = std::fs::read_to_string(run.consent_file()).unwrap();
-    assert!(conf.contains("[Consent]") && conf.contains("notified=granted"), "{conf}");
-    assert_eq!(client.proxy().get_consent().await.unwrap(), "granted");
+    assert_eq!(actions, ["default", ""]);
+    fake.action(7, "default").await;
+    logged(&run, "Cannot open the access request").await;
+    assert_eq!(stored(&run), Consent::unknown(), "the bridge never decides");
+    assert_eq!(client.proxy().get_consent().await.unwrap(), "unknown");
     client.proxy().request_consent().await.unwrap();
-    tokio::time::timeout(Duration::from_millis(300), fake.calls.recv()).await.unwrap_err();
+    assert_eq!(fake.notify().await.1, 0, "asked again until decided");
 }
 
 #[tokio::test]
-async fn a_denied_notification_denies_consent() {
+async fn a_decision_in_settings_withdraws_the_request() {
     let Some((_bus, mut fake, run, _child, client)) = bridge_on_bus().await else { return };
     let mut signals = client.signals();
     client.proxy().request_consent().await.unwrap();
     fake.notify().await;
-    fake.action(7, "deny").await;
-    assert_eq!(consent_changed(&mut signals).await, "denied");
-    assert_eq!(stored(&run), Consent::Denied);
-    assert_eq!(client.proxy().get_consent().await.unwrap(), "denied");
+    let decided =
+        Consent { new_accounts: Some(NewAccounts::Ask), accounts: [(1, Choice::Allow(Level::Read))].into() };
+    ConsentStore::new(run.consent_file()).set_consent(&run.consumer, &decided).unwrap();
+    assert_eq!(consent_changed(&mut signals).await, "decided");
+    assert_eq!(fake.close().await, 7);
+    assert_eq!(client.proxy().get_consent().await.unwrap(), "decided");
+    client.proxy().request_consent().await.unwrap();
+    tokio::time::timeout(Duration::from_millis(300), fake.calls.recv()).await.unwrap_err();
 }
 
 #[tokio::test]
@@ -396,9 +408,9 @@ async fn a_closed_notification_leaves_consent_unknown() {
     assert_eq!(call.header().member().unwrap().as_str(), "Notify");
     let (_, replaces, ..): NotifyArgs = call.body().deserialize().unwrap();
     assert_eq!(replaces, 0);
-    assert_eq!(stored(&run), Consent::Unknown);
+    assert_eq!(stored(&run), Consent::unknown());
     assert_eq!(client.proxy().get_consent().await.unwrap(), "unknown");
-    fake.action(8, "allow").await;
-    assert_eq!(consent_changed(&mut signals).await, "granted");
-    assert_eq!(stored(&run), Consent::Granted);
+    ConsentStore::new(run.consent_file()).set_consent(&run.consumer, &Consent::all(Choice::Deny)).unwrap();
+    assert_eq!(consent_changed(&mut signals).await, "decided");
+    assert_eq!(fake.close().await, 8);
 }
