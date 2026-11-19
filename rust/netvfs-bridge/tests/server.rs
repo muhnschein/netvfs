@@ -375,6 +375,12 @@ fn read_add_level(h: &Harness) {
         assert_eq!(refusal(p.remove_file(ACCOUNT_LOC, b"/docs/t.txt").await), refused, "finished");
         assert_eq!(refusal(p.rename(ACCOUNT_LOC, b"/docs/t.txt", b"/docs/u", false).await), refused);
         assert_eq!(refusal(p.remove_file(ACCOUNT_LOC, b"/docs/a.txt").await), refused);
+        fake.fail_op("lstat", ErrorName::PermissionDenied);
+        assert_eq!(
+            refusal(p.remove_file(ACCOUNT_LOC, b"/docs/a.txt").await),
+            refused,
+            "whatever the look found"
+        );
         let missing = p.remove_file(ACCOUNT_LOC, b"/docs/.gone.part").await;
         assert_eq!(error_name(&missing), name(ErrorName::NotFound));
         assert_eq!(put(&c, &mut signals, b"/docs/a.txt", b"x", &no_opts()).await, "AlreadyExists");
@@ -1423,7 +1429,7 @@ fn storage_settings(h: &Harness) {
 }
 
 fn drives(h: &Harness) {
-    let f = Fixture::new(h, Consent::all(Choice::Deny));
+    let f = Fixture::new(h, Consent::unknown());
     f.drives.state().drives = vec![FakeDrives::card("mmcblk1p1", "CARD"), FakeDrives::card("sda1", "")];
     block_on(async {
         let c = f.client().await;

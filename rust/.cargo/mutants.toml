@@ -95,6 +95,8 @@ exclude_re = [
     'netvfs-bridge-proto/src/errors\.rs:\d+:\d+: delete match arm "" in BridgeError::from_method_error$',
     # consent.rs: inotify masks are ORs of distinct single-bit flags, `|` equals `^`.
     'netvfs-bridge/src/consent\.rs:\d+:\d+: replace \| with \^',
+    # Equivalent: Consent::unknown is Self::default().
+    'netvfs-bridge/src/consent\.rs:\d+:\d+: replace Consent::unknown -> Self with Default::default\(\)$',
     # sys/lock.rs: LOCK_EX | LOCK_NB, distinct bits.
     'netvfs-bridge/src/sys/lock\.rs:\d+:\d+: replace \| with \^',
     # core/nearby.rs set_running warning when post refuses: log line only; post refuses only once Qt quits, which ends the test loop too.

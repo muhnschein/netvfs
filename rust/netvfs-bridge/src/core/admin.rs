@@ -351,7 +351,7 @@ impl Core {
             }
         }
         self.apply_access();
-        if decided && (before != after || !previous.is_decided()) {
+        if before != after {
             self.locations_changed();
         }
     }

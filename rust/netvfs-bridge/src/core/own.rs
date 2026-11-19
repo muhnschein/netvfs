@@ -184,12 +184,12 @@ mod tests {
         let file = dir.join("added");
         let mut own = OwnItems::load(&file, 0);
         own.set("l", b"/old", Own::Written, 0);
-        own.set("l", b"/new", Own::Writing, 25 * HOUR);
-        assert_eq!(std::fs::read_to_string(&file).unwrap(), format!("{} P l 2f6e6577\n", 25 * HOUR));
+        own.set("l", b"/new", Own::Writing, 24 * HOUR);
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), format!("{} P l 2f6e6577\n", 24 * HOUR));
         std::fs::remove_file(&file).unwrap();
-        own.set("l", b"/new", Own::Writing, 25 * HOUR + 1);
+        own.set("l", b"/new", Own::Writing, 24 * HOUR + 1);
         assert!(!file.exists(), "no change, no write");
-        own.set("l", b"/gone", Own::No, 25 * HOUR + 1);
+        own.set("l", b"/gone", Own::No, 24 * HOUR + 1);
         assert!(!file.exists());
     }
 
