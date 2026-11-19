@@ -1,7 +1,7 @@
 {
     "entries": [
         {
-            "path": "system_settings/netvfs/access",
+            "path": "accounts/netvfs_access",
             "title": "Apps using network locations",
             "type": "page",
             "params": {

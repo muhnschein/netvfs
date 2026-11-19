@@ -179,11 +179,10 @@ private slots:
         const QJsonObject entry = entries.at(0).toObject();
         QCOMPARE(entry.value(QStringLiteral("type")).toString(), QStringLiteral("page"));
         const QString path = entry.value(QStringLiteral("path")).toString();
-        QVERIFY(path.startsWith(QStringLiteral("system_settings/")));
-        // Parent system_settings/netvfs has no entry: System tab lists only depth-1 children, so no row.
+        // Child of the Accounts tab, whose view lists accounts, not entries: Settings shows no row for it.
         const QStringList parts = path.split(QLatin1Char('/'));
-        QCOMPARE(parts.size(), 3);
-        QCOMPARE(parts.at(1), QStringLiteral("netvfs"));
+        QCOMPARE(parts.size(), 2);
+        QCOMPARE(parts.at(0), QStringLiteral("accounts"));
         const QSettings handoff(SourceDir + QStringLiteral("/src/bridge/data/handoff.conf"), QSettings::IniFormat);
         QCOMPARE(handoff.value(QStringLiteral("OpenAccessRequest/Method")).toString(), QStringLiteral("showPage"));
         QCOMPARE(handoff.value(QStringLiteral("OpenAccessRequest/Arguments")).toString(), QStringLiteral("s:") + path);
