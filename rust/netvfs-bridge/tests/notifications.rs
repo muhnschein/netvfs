@@ -178,8 +178,8 @@ async fn closed_and_stale_signals() {
     s.prompt.show("A");
     s.fake.notify().await;
     s.fake.closed(6).await;
-    s.fake.action(8, "default").await;
-    s.fake.action(0, "default").await;
+    s.fake.action(8, "").await;
+    s.fake.action(0, "").await;
     emit(&s.fake.conn, None, "ActionInvoked", &7_u32).await;
     emit(&s.fake.conn, None, "NotificationClosed", &(7_u32, "x")).await;
     emit(&s.fake.conn, None, "ActionInvoked2", &(7_u32, "default")).await;

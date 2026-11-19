@@ -28,8 +28,6 @@ Column {
         return qsTrId("settings-accounts-netvfs-la-access_asks_read")
     }
 
-    width: parent.width
-
     PageHeader {
         title: column.access ? column.access.displayName : ""
         description: column.description

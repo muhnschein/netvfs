@@ -29,6 +29,7 @@ Page {
         AccessColumn {
             id: column
 
+            width: parent.width
             access: access
         }
 

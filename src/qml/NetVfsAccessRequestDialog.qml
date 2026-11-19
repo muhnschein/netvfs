@@ -39,6 +39,7 @@ Dialog {
         AccessColumn {
             id: column
 
+            width: parent.width
             anchors.top: header.bottom
             access: access
             description: {
