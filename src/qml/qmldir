@@ -8,8 +8,8 @@ NetVfsSettingsPage 1.0 NetVfsSettingsPage.qml
 NetVfsConsentPage 1.0 NetVfsConsentPage.qml
 NetVfsAccessPage 1.0 NetVfsAccessPage.qml
 NetVfsAccessRequestDialog 1.0 NetVfsAccessRequestDialog.qml
-internal AccessColumn AccessColumn.qml
-internal AccessComboBox AccessComboBox.qml
+AccessColumn 1.0 AccessColumn.qml
+AccessComboBox 1.0 AccessComboBox.qml
 ConnectionDialog 1.0 ConnectionDialog.qml
 ProbeBusyPage 1.0 ProbeBusyPage.qml
 ServerIdentityDialog 1.0 ServerIdentityDialog.qml
