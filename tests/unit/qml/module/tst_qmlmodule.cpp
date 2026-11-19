@@ -180,6 +180,10 @@ private slots:
         QCOMPARE(entry.value(QStringLiteral("type")).toString(), QStringLiteral("page"));
         const QString path = entry.value(QStringLiteral("path")).toString();
         QVERIFY(path.startsWith(QStringLiteral("system_settings/")));
+        // Parent system_settings/netvfs has no entry: System tab lists only depth-1 children, so no row.
+        const QStringList parts = path.split(QLatin1Char('/'));
+        QCOMPARE(parts.size(), 3);
+        QCOMPARE(parts.at(1), QStringLiteral("netvfs"));
         const QSettings handoff(SourceDir + QStringLiteral("/src/bridge/data/handoff.conf"), QSettings::IniFormat);
         QCOMPARE(handoff.value(QStringLiteral("OpenAccessRequest/Method")).toString(), QStringLiteral("showPage"));
         QCOMPARE(handoff.value(QStringLiteral("OpenAccessRequest/Arguments")).toString(), QStringLiteral("s:") + path);
