@@ -45,11 +45,11 @@ struct NETVFS_EXPORT AppConsent {
     bool isDecided() const { return !newAccounts.isEmpty(); }
     // Account `accountId`'s choice ("denied" or a level); "": waits for the user.
     QString choice(int accountId) const;
-    bool operator==(const AppConsent &other) const
+    friend bool operator==(const AppConsent &a, const AppConsent &b)
     {
-        return newAccounts == other.newAccounts && accounts == other.accounts;
+        return a.newAccounts == b.newAccounts && a.accounts == b.accounts;
     }
-    bool operator!=(const AppConsent &other) const { return !(*this == other); }
+    friend bool operator!=(const AppConsent &a, const AppConsent &b) { return !(a == b); }
 };
 
 class NETVFS_EXPORT ConsentStore

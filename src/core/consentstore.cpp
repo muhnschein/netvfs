@@ -79,8 +79,7 @@ bool isAccessLevel(const QString &word)
 
 QString AppConsent::choice(int accountId) const
 {
-    const QString own = accounts.value(accountId);
-    if (!own.isEmpty())
+    if (const QString own = accounts.value(accountId); !own.isEmpty())
         return own;
     return newAccounts == QLatin1String("ask") ? QString() : newAccounts;
 }
@@ -124,8 +123,8 @@ AppConsent ConsentStore::consent(const QString &id) const
     if (!ConsumerInfo::isValidId(id))
         return result;
     QSettings settings(m_path, QSettings::IniFormat);
-    const QString word = settings.value(QLatin1String(ConsentGroup) + QLatin1Char('/') + id).toString();
-    if (word == QLatin1String("granted"))
+    if (const QString word = settings.value(QLatin1String(ConsentGroup) + QLatin1Char('/') + id).toString();
+        word == QLatin1String("granted"))
         result.newAccounts = QStringLiteral("full");
     else if (word == QLatin1String("ask") || isChoice(word))
         result.newAccounts = word;

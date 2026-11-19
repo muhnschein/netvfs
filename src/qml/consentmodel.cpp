@@ -76,7 +76,7 @@ void ConsentModel::reload()
 
 QString ConsentModel::firstPending() const
 {
-    const int row = int(m_pending.indexOf(true));
+    const auto row = int(m_pending.indexOf(true));
     return row < 0 ? QString() : m_consumers.at(row).id;
 }
 
