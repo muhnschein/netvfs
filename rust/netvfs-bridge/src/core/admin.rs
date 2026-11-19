@@ -111,24 +111,19 @@ impl Core {
     }
 
     pub(super) fn on_list_locations(&mut self, reply: ReplyTo) {
-        // Nothing until decided; then the allowed accounts and the ad-hoc locations.
-        let locations = if self.consent.is_decided() {
-            let ffi = self.ffi;
-            let states = self.book.states();
-            let locations = self
-                .book
-                .visible()
-                .map(|spec| {
-                    let state = states.get(&spec.id).copied().unwrap_or_default();
-                    spec.wire(state, |params, path| ffi.url_format(params, path).ok())
-                })
-                .collect();
-            // A state not announced yet goes to every session soon.
-            self.states.listed(&states, Instant::now());
-            locations
-        } else {
-            Vec::new()
-        };
+        // The allowed accounts and the ad-hoc locations: none until decided (`apply_access`).
+        let ffi = self.ffi;
+        let states = self.book.states();
+        let locations = self
+            .book
+            .visible()
+            .map(|spec| {
+                let state = states.get(&spec.id).copied().unwrap_or_default();
+                spec.wire(state, |params, path| ffi.url_format(params, path).ok())
+            })
+            .collect();
+        // A state not announced yet goes to every session soon.
+        self.states.listed(&states, Instant::now());
         reply.ok(&Reply::Locations(locations));
     }
 

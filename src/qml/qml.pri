@@ -7,6 +7,7 @@ CONFIG *= link_pkgconfig
 PKGCONFIG *= accounts-qt5
 
 HEADERS += \
+    $$PWD/accessmodel.h \
     $$PWD/backendjobs.h \
     $$PWD/consentmodel.h \
     $$PWD/errortexts.h \
@@ -16,6 +17,7 @@ HEADERS += \
     $$PWD/sshkeytool.h
 
 SOURCES += \
+    $$PWD/accessmodel.cpp \
     $$PWD/backendjobs.cpp \
     $$PWD/consentmodel.cpp \
     $$PWD/errortexts.cpp \
@@ -34,6 +36,10 @@ NETVFS_QML_MODULE_FILES = \
     NetVfsUpdateAgent.qml \
     NetVfsSettingsPage.qml \
     NetVfsConsentPage.qml \
+    NetVfsAccessPage.qml \
+    NetVfsAccessRequestDialog.qml \
+    AccessColumn.qml \
+    AccessComboBox.qml \
     ConnectionDialog.qml \
     ProbeBusyPage.qml \
     ServerIdentityDialog.qml \

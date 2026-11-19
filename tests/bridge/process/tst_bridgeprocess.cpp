@@ -134,7 +134,7 @@ void tst_BridgeProcess::socketActivation()
     writeFile(dir.path() + QStringLiteral("/consumers/proc-test.conf"),
               "[Consumer]\nId=proc-test\nDisplayName=Process test\nExecutable=" + exe.toUtf8()
               + "\nDataDir=.local/share/proc-test\n");
-    writeFile(dir.path() + QStringLiteral("/config/netvfs/bridge.conf"), "[Consent]\nproc-test=granted\n");
+    writeFile(dir.path() + QStringLiteral("/config/netvfs/bridge.conf"), "[Consent]\nproc-test=full\n");
     QDir().mkpath(dir.path() + QStringLiteral("/home"));
     // one Files account in a private database, which the bridge reads
     // through the accounts helper (ACCOUNTS and AG_* are in the environment).
@@ -162,7 +162,7 @@ void tst_BridgeProcess::socketActivation()
         TestClient client(QStringLiteral("unix:path=") + socketPath);
         const TestClient::Message hello = client.hello();
         QVERIFY2(hello.valid && !hello.isError, qPrintable(hello.name));
-        QCOMPARE(client.call("GetConsent").args.value(0).toString(), QStringLiteral("granted"));
+        QCOMPARE(client.call("GetConsent").args.value(0).toString(), QStringLiteral("decided"));
         const QVariantList locations = client.call("ListLocations").args.value(0).toList();
         QCOMPARE(locations.size(), 1);
         const QVariantList location = locations.at(0).toList();

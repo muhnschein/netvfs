@@ -16,6 +16,7 @@ namespace {
 
 const char ConsumersDirDefault[] = "/usr/share/netvfs/consumers";
 const char ConsentGroup[] = "Consent";
+const char AccessGroup[] = "Access";
 constexpr int MaxIdLength = 64;
 constexpr int MaxPathLength = 1024;
 constexpr qint64 MaxConsumerFileBytes = 16 * 1024;
@@ -70,26 +71,18 @@ bool ConsumerInfo::isValidExecutable(const QString &executable)
         && hasOnlyPathChars(executable) && hasCleanComponents(executable.mid(1));
 }
 
-QString consentToString(Consent consent)
+bool isAccessLevel(const QString &word)
 {
-    switch (consent) {
-    case Consent::Granted:
-        return QStringLiteral("granted");
-    case Consent::Denied:
-        return QStringLiteral("denied");
-    case Consent::Unknown:
-        break;
-    }
-    return QStringLiteral("unknown");
+    return word == QLatin1String("full") || word == QLatin1String("read-add") || word == QLatin1String("read")
+        || word == QLatin1String("add");
 }
 
-Consent consentFromString(const QString &value)
+QString AppConsent::choice(int accountId) const
 {
-    if (value == QLatin1String("granted"))
-        return Consent::Granted;
-    if (value == QLatin1String("denied"))
-        return Consent::Denied;
-    return Consent::Unknown;
+    const QString own = accounts.value(accountId);
+    if (!own.isEmpty())
+        return own;
+    return newAccounts == QLatin1String("ask") ? QString() : newAccounts;
 }
 
 ConsentStore::ConsentStore()
@@ -108,28 +101,65 @@ QString ConsentStore::defaultFilePath()
         + QStringLiteral("/netvfs/bridge.conf");
 }
 
-Consent ConsentStore::consent(const QString &id) const
+namespace {
+
+bool isChoice(const QString &word)
 {
-    if (!ConsumerInfo::isValidId(id))
-        return Consent::Unknown;
-    const QSettings settings(m_path, QSettings::IniFormat);
-    return consentFromString(settings.value(QLatin1String(ConsentGroup) + QLatin1Char('/') + id).toString());
+    return word == QLatin1String("denied") || isAccessLevel(word);
 }
 
-void ConsentStore::setConsent(const QString &id, Consent consent) const
+// Positive int written as such ("01", "+1" are not).
+int accountIdOf(const QString &key)
+{
+    bool ok = false;
+    const int id = key.toInt(&ok);
+    return ok && id > 0 && QString::number(id) == key ? id : 0;
+}
+
+}
+
+AppConsent ConsentStore::consent(const QString &id) const
+{
+    AppConsent result;
+    if (!ConsumerInfo::isValidId(id))
+        return result;
+    QSettings settings(m_path, QSettings::IniFormat);
+    const QString word = settings.value(QLatin1String(ConsentGroup) + QLatin1Char('/') + id).toString();
+    if (word == QLatin1String("granted"))
+        result.newAccounts = QStringLiteral("full");
+    else if (word == QLatin1String("ask") || isChoice(word))
+        result.newAccounts = word;
+    settings.beginGroup(QLatin1String(AccessGroup) + QLatin1Char('/') + id);
+    for (const QString &key : settings.childKeys()) {
+        const QString choice = settings.value(key).toString();
+        if (const int account = accountIdOf(key); account > 0 && isChoice(choice))
+            result.accounts.insert(account, choice);
+    }
+    return result;
+}
+
+bool ConsentStore::setConsent(const QString &id, const AppConsent &consent) const
 {
     if (!ConsumerInfo::isValidId(id))
-        return;
+        return false;
     QDir().mkpath(QFileInfo(m_path).absolutePath());
     QSettings settings(m_path, QSettings::IniFormat);
+    settings.remove(QLatin1String(AccessGroup) + QLatin1Char('/') + id);
+    for (auto it = consent.accounts.cbegin(); it != consent.accounts.cend(); ++it) {
+        if (it.key() > 0 && isChoice(it.value()))
+            settings.setValue(QStringLiteral("%1/%2/%3").arg(QLatin1String(AccessGroup), id).arg(it.key()), it.value());
+    }
     const QString key = QLatin1String(ConsentGroup) + QLatin1Char('/') + id;
-    if (consent == Consent::Unknown)
-        settings.remove(key);
+    if (consent.isDecided())
+        settings.setValue(key, consent.newAccounts);
     else
-        settings.setValue(key, consentToString(consent));
+        settings.remove(key);
     settings.sync();
-    if (settings.status() != QSettings::NoError)
-        qCWarning(lcNetVfsCore) << "Cannot store the consent of" << id;
+    if (settings.status() != QSettings::NoError) {
+        qCWarning(lcNetVfsCore) << "Cannot store what" << id << "may do";
+        return false;
+    }
+    return true;
 }
 
 QString ConsentStore::consumersDir()
@@ -193,6 +223,8 @@ Result ConsentStore::parseConsumerFile(const QString &path, ConsumerInfo *out)
             info.executable = value;
         else if (key == QLatin1String("DataDir"))
             info.dataDir = value;
+        else if (key == QLatin1String("Access") && isAccessLevel(value))
+            info.access = value;
     }
     if (const QString stem = QFileInfo(path).completeBaseName(); !ConsumerInfo::isValidId(info.id) || info.id != stem)
         return invalid(path, QStringLiteral("Id must match [a-z0-9-]+ and the file name"));

@@ -4,9 +4,13 @@
 #include <QtCore/QDir>
 #include <QtCore/QDirIterator>
 #include <QtCore/QFile>
+#include <QtCore/QJsonArray>
+#include <QtCore/QJsonDocument>
+#include <QtCore/QJsonObject>
 #include <QtCore/QProcess>
 #include <QtCore/QRegularExpression>
 #include <QtCore/QSet>
+#include <QtCore/QSettings>
 #include <QtCore/QStandardPaths>
 #include <QtCore/QTranslator>
 #include <QtCore/QXmlStreamReader>
@@ -42,7 +46,8 @@ QStringList filesIn(const QString &dir, const QStringList &patterns)
 QStringList qmlFiles()
 {
     return filesIn(QStringLiteral("src/qml"), { QStringLiteral("*.qml") })
-            + filesIn(QStringLiteral("accounts/ui"), { QStringLiteral("*.qml") });
+            + filesIn(QStringLiteral("accounts/ui"), { QStringLiteral("*.qml") })
+            + filesIn(QStringLiteral("src/bridge/data"), { QStringLiteral("*.qml") });
 }
 
 // Source without // comments, so rules match code only.
@@ -150,8 +155,9 @@ private slots:
     {
         const QString qmldir = readFile(SourceDir + QStringLiteral("/src/qml/qmldir"));
         QVERIFY(qmldir.startsWith(QStringLiteral("module org.netvfs.accounts\nplugin netvfsaccountsplugin\n")));
-        const QSet<QString> listed = matches(qmldir, QRegularExpression(QStringLiteral("^\\w+ 1\\.0 (\\w+\\.qml)$"),
-                                                                        QRegularExpression::MultilineOption));
+        static const QRegularExpression entry(QStringLiteral("^(?:\\w+ 1\\.0|internal \\w+) (\\w+\\.qml)$"),
+                                              QRegularExpression::MultilineOption);
+        const QSet<QString> listed = matches(qmldir, entry);
         QSet<QString> present;
         for (const QString &file : filesIn(QStringLiteral("src/qml"), { QStringLiteral("*.qml") }))
             present.insert(QFileInfo(file).fileName());
@@ -161,6 +167,28 @@ private slots:
             QVERIFY2(pri.contains(QStringLiteral("    ") + file), qPrintable(file + QStringLiteral(" not installed")));
         for (const QString &file : present)
             QVERIFY2(QFile::exists(BuildDir + QStringLiteral("/qml/org/netvfs/accounts/") + file), qPrintable(file));
+    }
+
+    void settingsEntry()
+    {
+        // The bridge's tapped notification (handoff.conf) opens the Settings entry this package installs.
+        const QJsonArray entries = QJsonDocument::fromJson(
+                    readFile(SourceDir + QStringLiteral("/src/bridge/data/netvfs-access.json")).toUtf8())
+                .object().value(QStringLiteral("entries")).toArray();
+        QCOMPARE(entries.size(), 1);
+        const QJsonObject entry = entries.at(0).toObject();
+        QCOMPARE(entry.value(QStringLiteral("type")).toString(), QStringLiteral("page"));
+        const QString path = entry.value(QStringLiteral("path")).toString();
+        QVERIFY(path.startsWith(QStringLiteral("system_settings/")));
+        const QSettings handoff(SourceDir + QStringLiteral("/src/bridge/data/handoff.conf"), QSettings::IniFormat);
+        QCOMPARE(handoff.value(QStringLiteral("OpenAccessRequest/Method")).toString(), QStringLiteral("showPage"));
+        QCOMPARE(handoff.value(QStringLiteral("OpenAccessRequest/Arguments")).toString(), QStringLiteral("s:") + path);
+        const QString source = entry.value(QStringLiteral("params")).toObject().value(QStringLiteral("source")).toString();
+        QCOMPARE(source, QStringLiteral("/usr/share/jolla-settings/pages/netvfs-access.qml"));
+        const QString pro = readFile(SourceDir + QStringLiteral("/src/bridge/data/data.pro"));
+        QVERIFY(pro.contains(QStringLiteral("settingspage.path = ") + QFileInfo(source).path() + QLatin1Char('\n')));
+        QVERIFY(readFile(SourceDir + QStringLiteral("/src/bridge/data/netvfs-access.qml"))
+                .contains(QStringLiteral("NetVfsConsentPage {\n    openRequest: true\n}")));
     }
 
     void qmllintAccepts_data()
@@ -247,7 +275,9 @@ private slots:
             QStringLiteral("NetVfsUpdateAgent"), QStringLiteral("NetVfsSettingsPage"),
             QStringLiteral("ConnectionDialog"), QStringLiteral("ProbeBusyPage"),
             QStringLiteral("ServerIdentityDialog"), QStringLiteral("SshKeyPage"),
-            QStringLiteral("NetVfsConsentPage"), QStringLiteral("NetVfsConsentModel")
+            QStringLiteral("NetVfsConsentPage"), QStringLiteral("NetVfsConsentModel"), QStringLiteral("ListItem"),
+            QStringLiteral("Image"), QStringLiteral("NetVfsAccessPage"), QStringLiteral("NetVfsAccessRequestDialog"),
+            QStringLiteral("NetVfsAccessModel"), QStringLiteral("AccessColumn"), QStringLiteral("AccessComboBox")
         };
         const QSet<QString> agentMembers {
             QStringLiteral("initialPage"), QStringLiteral("delayDeletion"), QStringLiteral("accountManager"),
