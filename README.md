@@ -1,5 +1,7 @@
 # netvfs
 
+![netvfs - Network shares for Sailfish OS](art/cover.png)
+
 [![Security Rating](https://sonarcloud.io/api/project_badges/measure?project=muhnschein_netvfs&metric=security_rating)](https://sonarcloud.io/summary/new_code?id=muhnschein_netvfs)[![Reliability Rating](https://sonarcloud.io/api/project_badges/measure?project=muhnschein_netvfs&metric=reliability_rating)](https://sonarcloud.io/summary/new_code?id=muhnschein_netvfs)[![Coverage](https://sonarcloud.io/api/project_badges/measure?project=muhnschein_netvfs&metric=coverage)](https://sonarcloud.io/summary/new_code?id=muhnschein_netvfs)[![Lines of Code](https://sonarcloud.io/api/project_badges/measure?project=muhnschein_netvfs&metric=ncloc)](https://sonarcloud.io/summary/new_code?id=muhnschein_netvfs)
 
 ## Overview
@@ -12,9 +14,9 @@ netvfs adds SFTP, SMB, WebDAV and FTPS servers to Sailfish OS as a platform serv
 - **Backups.** The same accounts appear as targets in *Settings → Backup*.
   Backup, scheduled backup and restore work as they do for Nextcloud.
 - **Files for apps.** Sandboxed apps such as
-  [Lautta](https://github.com/muhnschein/lautta) browse the servers through
-  a bridge. They link nothing from netvfs, need no extra permission, and
-  never see a secret.
+  [Lautta](https://github.com/muhnschein/lautta) browse the accounts'
+  servers through a bridge, as far as you allow each app. They link nothing
+  from netvfs, need no extra permission, and never see a secret.
 
 The SFTP client is for OpenSSH servers; the SMB client speaks SMB 3.1.1 only
 (Samba, Windows); the WebDAV client (Nextcloud, Apache and others) uses HTTPS
@@ -25,13 +27,20 @@ vsftpd, pure-ftpd and others). All are written in Rust.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset=".github/readme/stack-dark.png">
-  <img alt="netvfs between Settings, the Sailfish OS services, sandboxed apps such as Lautta, and SFTP and SMB servers" src=".github/readme/stack-light.png" width="880">
+  <img alt="netvfs between Settings, the Sailfish OS services, sandboxed apps such as Lautta, and SFTP, SMB, WebDAV and FTPS servers" src=".github/readme/stack-light.png" width="880">
 </picture>
 
 - An account is made and edited only in Settings. Apps hand off to Settings
   for that; the bridge never changes an account.
-- The first time an app asks, netvfs posts a notification: allow or don't
-  allow. *Settings → Accounts* lists the apps and can revoke them.
+- Apps reach only servers set up as accounts. The bridge takes no server
+  address, password or one-time code from an app.
+- The first time an app asks, netvfs posts a notification. Tapping it opens
+  Settings, where you choose per account what the app may do: full access,
+  read and add, read only, add only, or not allowed. Every account starts at
+  not allowed. *Settings → Accounts → Apps using network locations* changes
+  it later.
+- An app's nearby-server list is a hint only: it leads to adding an account
+  in Settings.
 - The bridge serves one app over a socket in that app's own data folder,
   checks that the program on the other end is that app, and exits when idle.
   It reads and writes local files only through descriptors the app opened.
@@ -92,7 +101,7 @@ $ ./tools/ci/install-host-deps.sh
 $ ./tools/ci/cargo-tool.sh cargo-nextest 0.9.148
 
 # Rust checks, C++ unit tests, bridge tests, and interop tests against
-# OpenSSH and Samba containers (those need Docker).
+# OpenSSH, Samba, Apache and ProFTPD containers (those need Docker).
 $ make check
 ```
 
@@ -102,12 +111,17 @@ $ make check
 * [sspi-rs](https://github.com/Devolutions/sspi-rs), for NTLM sign-in.
 * [ring](https://github.com/briansmith/ring) and
   [RustCrypto](https://github.com/RustCrypto), for the cryptography.
+* [rustls](https://github.com/rustls/rustls), for TLS, and
+  [hyper](https://github.com/hyperium/hyper), for WebDAV's HTTP.
 * Jolla's Nextcloud account, for showing how a backup account plugs into
   Sailfish OS. netvfs's backup plugin is adapted from it.
+* [Inter](https://rsms.me/inter/), the typeface of the lettering on the cover
+  and the account icons.
 
 ## License
 
 Licensed LGPL-2.1-or-later, see the LICENSE file for details. The backup
-plugin parts adapted from Jolla are BSD-3-Clause; each file says so.
+plugin parts adapted from Jolla are BSD-3-Clause; each file says so. The lettering
+on the cover and the account icons is Inter, SIL Open Font License 1.1.
 
 Copyright © netvfs contributors.

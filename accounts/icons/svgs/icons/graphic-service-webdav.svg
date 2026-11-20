@@ -1,15 +1,31 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- SPDX-License-Identifier: LGPL-2.1-or-later -->
-<!-- WebDAV account: a globe in front of a folder. Original artwork. -->
+<!-- WebDAV account: netvfs mark ("nv" as two horseshoe magnets, poles apart) over protocol name. Name: Inter Bold (OFL-1.1) as outlines. Original artwork. -->
 <svg xmlns="http://www.w3.org/2000/svg" width="86" height="86" viewBox="0 0 86 86">
-  <path d="M6 20 a6 6 0 0 1 6 -6 h18 l7 8 h37 a6 6 0 0 1 6 6 v30 a6 6 0 0 1 -6 6 h-62 a6 6 0 0 1 -6 -6 z"
-        fill="#6a4c9c"/>
-  <path d="M6 30 a6 6 0 0 1 6 -6 h62 a6 6 0 0 1 6 6 v28 a6 6 0 0 1 -6 6 h-62 a6 6 0 0 1 -6 -6 z"
-        fill="#8a6cc0"/>
-  <circle cx="56" cy="56" r="21" fill="#ffffff"/>
-  <circle cx="56" cy="56" r="17" fill="none" stroke="#6a4c9c" stroke-width="3.5"/>
-  <ellipse cx="56" cy="56" rx="7.5" ry="17" fill="none" stroke="#6a4c9c" stroke-width="3"/>
-  <line x1="39" y1="56" x2="73" y2="56" stroke="#6a4c9c" stroke-width="3"/>
-  <line x1="42" y1="47" x2="70" y2="47" stroke="#6a4c9c" stroke-width="2.5"/>
-  <line x1="42" y1="65" x2="70" y2="65" stroke="#6a4c9c" stroke-width="2.5"/>
+  <defs>
+    <linearGradient id="ground" x1="6" y1="84" x2="82" y2="2" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#1b2636"/>
+      <stop offset="0.55" stop-color="#3d5471"/>
+      <stop offset="1" stop-color="#7391b2"/>
+    </linearGradient>
+    <linearGradient id="steel" x1="43" y1="24" x2="43" y2="68" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#d0dbe8"/>
+    </linearGradient>
+  </defs>
+  <path d="M43 .3H84.28A1.42 1.42 0 0 1 85.7 1.72V84.28A1.42 1.42 0 0 1 84.28 85.7H1.72A1.42 1.42 0 0 1 .3 84.28V43A42.7 42.7 0 0 1 43 .3Z"
+        fill="url(#ground)"/>
+  <path d="M.3 62H85.7V84.28A1.42 1.42 0 0 1 84.28 85.7H1.72A1.42 1.42 0 0 1 .3 84.28Z" fill="#0d141d" fill-opacity="0.55"/>
+  <g transform="translate(12.20 3.95) scale(0.7)" fill="none" stroke-width="9">
+    <g transform="translate(2.2 2.8)" stroke="#0d141d" stroke-opacity="0.45">
+      <path d="M15 65V41a11 11 0 0 1 22 0V65"/>
+      <path d="M47 27 60 62 73 27" stroke-linejoin="round"/>
+    </g>
+    <g stroke="url(#steel)">
+      <path d="M15 65V41a11 11 0 0 1 22 0V65"/>
+      <path d="M47 27 60 62 73 27" stroke-linejoin="round"/>
+    </g>
+    <path d="M15 65.2V56M37 65.2V56M46.93 26.81 50.13 35.44M73.07 26.81 69.87 35.44" stroke="#9fd4ff" stroke-width="9.4"/>
+  </g>
+  <path fill="#ffffff" d="M17.87 79H20L21.2 74.36C21.37 73.67 21.48 72.95 21.6 72.19C21.73 72.97 21.85 73.71 22.01 74.36L23.22 79H25.34L27.78 69.93H25.75L24.69 74.39C24.51 75.22 24.35 76.19 24.21 77.12C24.04 76.19 23.88 75.22 23.68 74.39L22.57 69.93H20.64L19.54 74.39C19.33 75.22 19.17 76.21 19.01 77.14C18.86 76.21 18.7 75.22 18.52 74.39L17.46 69.93H15.44ZM31.71 79.13C33.29 79.13 34.38 78.4 34.71 77.26L33.06 76.95C32.86 77.48 32.38 77.76 31.74 77.76C30.82 77.76 30.2 77.19 30.16 76.07H34.82V75.56C34.82 73.23 33.4 72.11 31.62 72.11C29.63 72.11 28.35 73.53 28.35 75.63C28.35 77.78 29.63 79.13 31.71 79.13ZM30.17 74.93C30.24 74.09 30.77 73.48 31.64 73.48C32.48 73.48 32.97 74.04 33.06 74.93ZM40.28 79.12C41.85 79.12 43.05 77.87 43.05 75.61C43.05 73.28 41.8 72.11 40.29 72.11C39.13 72.11 38.6 72.8 38.35 73.34H38.29V69.93H36.46V79H38.26V77.91H38.35C38.6 78.46 39.16 79.12 40.28 79.12ZM39.72 77.65C38.78 77.65 38.25 76.83 38.25 75.6C38.25 74.37 38.78 73.57 39.72 73.57C40.67 73.57 41.18 74.41 41.18 75.6C41.18 76.8 40.67 77.65 39.72 77.65ZM47.96 79C50.72 79 52.38 77.3 52.38 74.46C52.38 71.63 50.72 69.93 47.99 69.93H44.77V79ZM46.62 77.4V71.53H47.88C49.61 71.53 50.53 72.43 50.53 74.46C50.53 76.5 49.61 77.4 47.87 77.4ZM53.13 79H55.18L55.85 76.89H59.07L59.78 79H61.84L58.66 69.93H56.23ZM56.32 75.44 56.58 74.62C56.85 73.71 57.12 72.63 57.42 71.38C57.74 72.62 58.03 73.69 58.32 74.62L58.59 75.44ZM65.03 79H67.46L70.56 69.93H68.51L67.11 74.31C66.84 75.22 66.56 76.27 66.25 77.5C65.94 76.28 65.65 75.22 65.36 74.31L63.91 69.93H61.85Z"/>
 </svg>
