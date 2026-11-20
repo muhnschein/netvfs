@@ -3,17 +3,18 @@ import QtQuick 2.0
 import Sailfish.Silica 1.0
 import org.netvfs.accounts 1.0
 
-// "Apps using network locations". Lists apps registered for netvfs-bridge
-// (/usr/share/netvfs/consumers/<id>.conf) with the user's consent from
-// ~/.config/netvfs/bridge.conf; grants or revokes it. Writing the file is the whole contract: a
-// running bridge watches it and closes a revoked app's connections at once.
-// Opened from the pull-down menu of every account's settings page (NetVfsSettingsPage). Needs no
-// properties, so it can also be opened alone, e.g. from the bridge's consent notification.
+// "Apps using network locations": apps registered for netvfs-bridge
+// (/usr/share/netvfs/consumers/<id>.conf); each opens what it may do per account
+// (NetVfsAccessPage). Opened from the pull-down menu of every account's settings page, and as the
+// Settings entry the bridge's notification opens, which shows the request of the first app waiting
+// for the user (`openRequest`).
 Page {
     id: page
 
     // Consent file; empty: the default (~/.config/netvfs/bridge.conf).
     property alias storePath: consents.storePath
+    property bool openRequest
+    property bool _requested
 
     NetVfsConsentModel {
         id: consents
@@ -22,6 +23,28 @@ Page {
     onStatusChanged: {
         if (status === PageStatus.Activating) {
             consents.reload()
+        } else if (status === PageStatus.Active && openRequest && !_requested) {
+            _requested = true
+            var pending = consents.firstPending()
+            if (pending !== "") {
+                pageStack.push(requestDialog, { consumerId: pending })
+            }
+        }
+    }
+
+    Component {
+        id: requestDialog
+
+        NetVfsAccessRequestDialog {
+            storePath: page.storePath
+        }
+    }
+
+    Component {
+        id: appPage
+
+        NetVfsAccessPage {
+            storePath: page.storePath
         }
     }
 
@@ -45,8 +68,8 @@ Page {
                 wrapMode: Text.Wrap
                 color: Theme.secondaryHighlightColor
                 font.pixelSize: Theme.fontSizeSmall
-                //% "Allowed apps can browse, open and save files in the accounts whose file browsing is on. They never see passwords or keys."
-                text: qsTrId("settings-accounts-netvfs-la-consent_explanation")
+                //% "Allowed apps work in the accounts whose file browsing is on. They never see passwords or keys."
+                text: qsTrId("settings-accounts-netvfs-la-access_explanation")
             }
 
             Item {
@@ -55,29 +78,32 @@ Page {
             }
         }
 
-        delegate: TextSwitch {
-            width: list.width
-            automaticCheck: false
-            checked: model.consent === "granted"
-            text: model.displayName
-            description: {
-                if (model.consent === "granted") {
-                    //% "Allowed"
-                    return qsTrId("settings-accounts-netvfs-la-consent_granted")
-                }
-                if (model.consent === "denied") {
-                    //% "Not allowed"
-                    return qsTrId("settings-accounts-netvfs-la-consent_denied")
-                }
-                //% "Not asked yet"
-                return qsTrId("settings-accounts-netvfs-la-consent_unknown")
+        delegate: ListItem {
+            contentHeight: Theme.itemSizeMedium
+            onClicked: pageStack.push(appPage, { consumerId: model.consumerId })
+
+            Image {
+                id: icon
+
+                x: Theme.horizontalPageMargin
+                anchors.verticalCenter: parent.verticalCenter
+                width: Theme.iconSizeMedium
+                height: width
+                sourceSize.width: width
+                sourceSize.height: height
+                source: model.icon
             }
-            onClicked: {
-                if (checked) {
-                    consents.revoke(model.consumerId)
-                } else {
-                    consents.grant(model.consumerId)
+
+            Label {
+                anchors {
+                    left: icon.right
+                    leftMargin: Theme.paddingLarge
+                    right: parent.right
+                    rightMargin: Theme.horizontalPageMargin
+                    verticalCenter: parent.verticalCenter
                 }
+                truncationMode: TruncationMode.Fade
+                text: model.displayName
             }
         }
 

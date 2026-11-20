@@ -2,6 +2,7 @@
 //! [`LocationSpec`]: one location a consumer may see, an account with the Files service or an ad-hoc location it created, and [`Attention`].
 
 use super::state::ConnectionState;
+use crate::consent::Level;
 use crate::ffi::Params;
 use netvfs_bridge_proto::{WireLocation, location_state};
 use std::collections::HashMap;
@@ -94,6 +95,8 @@ pub struct LocationSpec {
     pub attention: Attention,
     /// Ad hoc only.
     pub ad_hoc_secret: Option<Arc<AdHocSecret>>,
+    /// What the consumer may do here: an account's level, `full` for an ad-hoc location.
+    pub access: Level,
     url: OnceLock<Option<String>>,
 }
 
@@ -117,8 +120,16 @@ impl LocationSpec {
             start_path: files_root,
             attention,
             ad_hoc_secret: None,
+            access: Level::Full,
             url: OnceLock::new(),
         }
+    }
+
+    /// The same location at `level`.
+    #[must_use]
+    pub fn with_access(mut self, level: Level) -> Self {
+        self.access = level;
+        self
     }
 
     /// An ad-hoc location with the id `id` (from [`LocationBook::reserve_ad_hoc_id`](super::book::LocationBook::reserve_ad_hoc_id)).
@@ -139,6 +150,7 @@ impl LocationSpec {
             start_path,
             attention: Attention::None,
             ad_hoc_secret: secret,
+            access: Level::Full,
             url: OnceLock::new(),
         }
     }
@@ -182,6 +194,7 @@ impl LocationSpec {
         }
         let kind = if self.account_id().is_some() { "account" } else { "adhoc" };
         map.insert("kind".to_owned(), text(kind));
+        map.insert("access".to_owned(), text(self.access.as_str()));
         map.insert("host".to_owned(), text(&self.params.host));
         if self.params.port > 0 {
             map.insert("port".to_owned(), OwnedValue::from(self.params.port));
@@ -323,7 +336,8 @@ mod tests {
             params("srv", 2222),
             b"/home/\xff".to_vec(),
             Attention::AuthFailed,
-        );
+        )
+        .with_access(Level::ReadAdd);
         let asked = Cell::new(0);
         let format = |p: &Params, path: &[u8]| {
             asked.set(asked.get() + 1);
@@ -340,7 +354,8 @@ mod tests {
         assert_eq!(string(&info, "attention").as_deref(), Some("auth-failed"));
         assert_eq!(string(&info, "state").as_deref(), Some("failed"));
         assert_eq!(string(&info, "stateError").as_deref(), Some("AuthFailed"));
-        assert_eq!(info.len(), 10);
+        assert_eq!(string(&info, "access").as_deref(), Some("read-add"));
+        assert_eq!(info.len(), 11);
         let again = spec.info(ConnectionState::Connected, |_: &Params, _: &[u8]| -> Option<String> {
             panic!("formatted twice")
         });
@@ -353,7 +368,8 @@ mod tests {
         let info = spec.info(ConnectionState::Disconnected, |_: &Params, _: &[u8]| None);
         let mut keys: Vec<&str> = info.keys().map(String::as_str).collect();
         keys.sort_unstable();
-        assert_eq!(keys, ["accountId", "host", "kind", "path", "state"]);
+        assert_eq!(keys, ["access", "accountId", "host", "kind", "path", "state"]);
+        assert_eq!(string(&info, "access").as_deref(), Some("full"));
         assert_eq!(string(&info, "state").as_deref(), Some("disconnected"));
     }
 
@@ -362,6 +378,7 @@ mod tests {
         let spec = LocationSpec::ad_hoc("adhoc:2", "Two", params("h", 21), b"/x".to_vec(), None);
         let info = spec.info(ConnectionState::Connecting, |_: &Params, _: &[u8]| Some(String::new()));
         assert_eq!(string(&info, "kind").as_deref(), Some("adhoc"));
+        assert_eq!(string(&info, "access").as_deref(), Some("full"));
         assert_eq!(string(&info, "state").as_deref(), Some("connecting"));
         assert!(
             !info.contains_key("url") && !info.contains_key("accountId") && !info.contains_key("attention")

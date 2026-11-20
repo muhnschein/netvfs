@@ -1,6 +1,6 @@
 {
     "description": "Read handles and a job with JobFinished (XB-10)",
-    "consent": "granted",
+    "consent": "full",
     "files": { "v.bin": "0123456789", "tree/a": "a", "tree/sub/b": "b" },
     "steps": [
         { "call": "Hello", "sig": "s", "args": ["contract"], "reply": ["*"] },

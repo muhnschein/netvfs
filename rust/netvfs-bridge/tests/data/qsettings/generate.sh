@@ -13,6 +13,7 @@ rm -f "$here/bridge-qt.conf"
 "$qsg" write "$here/bridge-qt.conf" \
     Consent/lautta s granted \
     Consent/photos s denied \
+    Access/photos/3 s read \
     Ui/lastPage s consent \
     'Ui/odd key' s 'with, comma; and = signs' \
     top s '@at start' \
@@ -27,13 +28,16 @@ rm -f "$here/bridge-qt.conf"
 
 cp "$here/bridge-qt.conf" "$work/edited.conf"
 "$qsg" write "$work/edited.conf" \
-    Consent/lautta s denied \
+    Access/lautta/1 s read \
+    Access/lautta/2 s denied \
+    Consent/lautta s ask \
+    Access/photos/3 r - \
     Consent/photos r - \
-    Consent/new-one s granted
+    Consent/new-one s full
 "$qsg" dump "$work/edited.conf" > "$here/bridge-qt-edited.dump"
 
 rm -f "$here/fresh.conf"
-"$qsg" write "$here/fresh.conf" Consent/lautta s granted
+"$qsg" write "$here/fresh.conf" Access/lautta/1 s read-add Consent/lautta s ask
 
 "$qsg" dump "$here/edge.conf" > "$here/edge.dump"
 

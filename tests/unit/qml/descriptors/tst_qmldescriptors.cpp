@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 // provider descriptors (the shipped ones and the validator) and
-// the consent model behind "Apps using network locations".
+// the models behind "Apps using network locations" (apps, levels per account).
+#include "accessmodel.h"
+#include "accountsfixture.h"
 #include "consentmodel.h"
 #include "consentstore.h"
 #include "netvfshelpers.h"
@@ -12,10 +14,12 @@
 #include <QtCore/QJsonArray>
 #include <QtCore/QJsonDocument>
 #include <QtCore/QSet>
+#include <QtCore/QSettings>
 #include <QtCore/QTemporaryDir>
 #include <QtTest/QtTest>
 
 #include <functional>
+#include <memory>
 
 using namespace NetVfs;
 using NetVfsUi::ProviderDescriptors;
@@ -81,6 +85,18 @@ class TestQmlDescriptors : public QObject
 private:
     QTemporaryDir consumersDir;
     QTemporaryDir configDir;
+    // Before the first Accounts::Manager.
+    std::unique_ptr<Test::AccountsFixture> accounts;
+    int firstAccount = 0;
+    int secondAccount = 0;
+
+    int filesAccount(const QString &host)
+    {
+        const int id = accounts->createAccount(
+            QStringLiteral("sftp"), { { QStringLiteral("netvfs/host"), host },
+                                      { QStringLiteral("netvfs/username"), QStringLiteral("alice") } });
+        return id > 0 && accounts->setService(id, QStringLiteral("sftp-files"), true) ? id : 0;
+    }
 
 private slots:
     void initTestCase()
@@ -89,6 +105,13 @@ private slots:
         QVERIFY(Test::installEngineeringEnglish(this));
         QVERIFY(consumersDir.isValid() && configDir.isValid());
         qputenv("NETVFS_CONSUMERS_DIR", consumersDir.path().toLocal8Bit());
+        accounts = std::make_unique<Test::AccountsFixture>(QStringList { QStringLiteral("sftp") });
+        QVERIFY(accounts->isValid());
+        firstAccount = filesAccount(QStringLiteral("a.example"));
+        secondAccount = filesAccount(QStringLiteral("b.example"));
+        // Backups only: not offered to apps.
+        QVERIFY(accounts->createAccount(QStringLiteral("sftp"), { { QStringLiteral("netvfs/host"), QStringLiteral("c.example") } }) > 0);
+        QVERIFY(firstAccount > 0 && secondAccount > firstAccount);
     }
 
     void shippedDescriptorsAreValid_data()
@@ -404,9 +427,10 @@ private slots:
     {
         writeFile(consumersDir.filePath(QStringLiteral("lautta.conf")),
                   "[Consumer]\nId=lautta\nDisplayName=Lautta\nExecutable=/usr/bin/harbour-lautta\n"
-                  "DataDir=.local/share/org.netvfs/lautta\n");
+                  "DataDir=.local/share/org.netvfs/lautta\nAccess=read-add\n");
         writeFile(consumersDir.filePath(QStringLiteral("aaa.conf")),
-                  "[Consumer]\nId=aaa\nDisplayName=Aaa\nExecutable=/usr/bin/aaa\nDataDir=.local/share/aaa\n");
+                  "[Consumer]\nId=aaa\nDisplayName=Aaa\nExecutable=/usr/bin/aaa\nDataDir=.local/share/aaa\n"
+                  "Access=everything\n");
         writeFile(consumersDir.filePath(QStringLiteral("mismatch.conf")),
                   "[Consumer]\nId=other\nDisplayName=X\nExecutable=/usr/bin/x\nDataDir=x\n");
         writeFile(consumersDir.filePath(QStringLiteral("readme.txt")), "[Consumer]\nId=readme\n");
@@ -414,13 +438,119 @@ private slots:
         const QVector<ConsumerInfo> list = ConsentStore::consumers();
         QCOMPARE(list.size(), 2);
         QCOMPARE(list.at(0).id, QStringLiteral("aaa"));
+        QCOMPARE(list.at(0).access, QStringLiteral("read"));
         QCOMPARE(list.at(1).displayName, QStringLiteral("Lautta"));
+        QCOMPARE(list.at(1).access, QStringLiteral("read-add"));
+    }
+
+    void accessLevels()
+    {
+        for (const char *word : { "full", "read-add", "read", "add" })
+            QVERIFY2(isAccessLevel(QLatin1String(word)), word);
+        for (const char *word : { "", "denied", "ask", "granted", "Read", "read-write" })
+            QVERIFY2(!isAccessLevel(QLatin1String(word)), word);
+    }
+
+    void consentStore()
+    {
+        const QString path = configDir.filePath(QStringLiteral("store/bridge.conf"));
+        const ConsentStore store(path);
+        QVERIFY(!store.consent(QStringLiteral("lautta")).isDecided());
+        QVERIFY(QDir().mkpath(QFileInfo(path).absolutePath()));
+        // As the bridge reads it; "granted" from before levels means full.
+        writeFile(path,
+                  "[Consent]\nlautta=granted\naaa=ask\nbbb=sometimes\n"
+                  "[Access]\nlautta\\1=read\nlautta\\07=full\nlautta\\2=bogus\nlautta\\-3=read\nlautta\\x=read\n"
+                  "lautta\\4=denied\naaa\\1=add\nlautta\\5\\6=read\n");
+        AppConsent lautta = store.consent(QStringLiteral("lautta"));
+        QCOMPARE(lautta.newAccounts, QStringLiteral("full"));
+        QCOMPARE(lautta.accounts, (QMap<int, QString> { { 1, QStringLiteral("read") }, { 4, QStringLiteral("denied") } }));
+        QCOMPARE(lautta.choice(1), QStringLiteral("read"));
+        QCOMPARE(lautta.choice(4), QStringLiteral("denied"));
+        QCOMPARE(lautta.choice(9), QStringLiteral("full"));
+        const AppConsent aaa = store.consent(QStringLiteral("aaa"));
+        QVERIFY(aaa.isDecided());
+        QCOMPARE(aaa.choice(1), QStringLiteral("add"));
+        QCOMPARE(aaa.choice(2), QString());
+        QVERIFY(!store.consent(QStringLiteral("bbb")).isDecided());
+        QVERIFY(!store.consent(QStringLiteral("../x")).isDecided());
+        QVERIFY(store.consent(QStringLiteral("../x")).accounts.isEmpty());
+
+        // Replaces what was stored for the app; others stay.
+        lautta.newAccounts = QStringLiteral("denied");
+        lautta.accounts = { { 2, QStringLiteral("read-add") }, { 0, QStringLiteral("full") }, { 3, QStringLiteral("ask") } };
+        QVERIFY(store.setConsent(QStringLiteral("lautta"), lautta));
+        const AppConsent stored = store.consent(QStringLiteral("lautta"));
+        QCOMPARE(stored.newAccounts, QStringLiteral("denied"));
+        QCOMPARE(stored.accounts, (QMap<int, QString> { { 2, QStringLiteral("read-add") } }));
+        QCOMPARE(stored.choice(1), QStringLiteral("denied"));
+        QCOMPARE(store.consent(QStringLiteral("aaa")), aaa);
+        QSettings raw(path, QSettings::IniFormat);
+        QCOMPARE(raw.value(QStringLiteral("Access/lautta/2")).toString(), QStringLiteral("read-add"));
+        QVERIFY(!raw.contains(QStringLiteral("Access/lautta/07")));
+
+        // Not decided: no Consent key, so the bridge asks again.
+        QVERIFY(store.setConsent(QStringLiteral("lautta"), AppConsent()));
+        QSettings after(path, QSettings::IniFormat);
+        QVERIFY(!after.contains(QStringLiteral("Consent/lautta")));
+        QVERIFY(after.contains(QStringLiteral("Consent/aaa")));
+        QCOMPARE(store.consent(QStringLiteral("lautta")), AppConsent());
+        QVERIFY(!store.setConsent(QStringLiteral("../x"), aaa));
+
+        QTemporaryDir blocked;
+        const QString dirAsFile = blocked.filePath(QStringLiteral("file"));
+        writeFile(dirAsFile, "x");
+        QVERIFY(!ConsentStore(dirAsFile + QStringLiteral("/bridge.conf")).setConsent(QStringLiteral("lautta"), aaa));
+    }
+
+    void pending()
+    {
+        const QVector<NetVfsUi::FilesAccount> accounts { { 1, QString() }, { 2, QString() } };
+        AppConsent consent;
+        QVERIFY(NetVfsUi::isPending(consent, {}));
+        consent.newAccounts = QStringLiteral("ask");
+        QVERIFY(!NetVfsUi::isPending(consent, {}));
+        QVERIFY(NetVfsUi::isPending(consent, accounts));
+        consent.accounts = { { 1, QStringLiteral("read") }, { 2, QStringLiteral("denied") } };
+        QVERIFY(!NetVfsUi::isPending(consent, accounts));
+        consent.accounts.remove(2);
+        QVERIFY(NetVfsUi::isPending(consent, accounts));
+        consent.newAccounts = QStringLiteral("denied");
+        QVERIFY(!NetVfsUi::isPending(consent, accounts));
+    }
+
+    void filesAccounts()
+    {
+        const QVector<NetVfsUi::FilesAccount> accounts = NetVfsUi::filesAccounts();
+        QCOMPARE(accounts.size(), 2);
+        QCOMPARE(accounts.at(0).id, firstAccount);
+        QCOMPARE(accounts.at(0).name, QStringLiteral("alice@a.example"));
+        QCOMPARE(accounts.at(1).id, secondAccount);
+    }
+
+    void icons()
+    {
+        QTemporaryDir icons;
+        QVERIFY(QDir(icons.path()).mkpath(QStringLiteral("86x86/apps")));
+        QVERIFY(QDir(icons.path()).mkpath(QStringLiteral("128x128/apps")));
+        writeFile(icons.filePath(QStringLiteral("86x86/apps/harbour-lautta.png")), "png");
+        QCOMPARE(NetVfsUi::ConsentModel::iconOf(QStringLiteral("/usr/bin/harbour-lautta"), icons.path()),
+                 icons.filePath(QStringLiteral("86x86/apps/harbour-lautta.png")));
+        writeFile(icons.filePath(QStringLiteral("128x128/apps/harbour-lautta.png")), "png");
+        QCOMPARE(NetVfsUi::ConsentModel::iconOf(QStringLiteral("/usr/bin/harbour-lautta"), icons.path()),
+                 icons.filePath(QStringLiteral("128x128/apps/harbour-lautta.png")));
+        QCOMPARE(NetVfsUi::ConsentModel::iconOf(QStringLiteral("/usr/bin/other"), icons.path()), QString());
+        QVERIFY(QDir(icons.path()).mkpath(QStringLiteral("86x86/apps/.png")));
+        QCOMPARE(NetVfsUi::ConsentModel::iconOf(QStringLiteral("/usr/bin/"), icons.path()), QString());
     }
 
     void consentModel()
     {
         const QString path = configDir.filePath(QStringLiteral("model/bridge.conf"));
-        ConsentStore(path).setConsent(QStringLiteral("aaa"), Consent::Denied);
+        AppConsent decided;
+        decided.newAccounts = QStringLiteral("ask");
+        decided.accounts = { { firstAccount, QStringLiteral("read") }, { secondAccount, QStringLiteral("denied") } };
+        QVERIFY(ConsentStore(path).setConsent(QStringLiteral("aaa"), decided));
         NetVfsUi::ConsentModel defaults;
         QVERIFY(defaults.storePath().isEmpty());
         QCOMPARE(defaults.count(), 2);
@@ -433,49 +563,164 @@ private slots:
         QCOMPARE(model.rowCount(), 2);
         QCOMPARE(model.count(), 2);
         QCOMPARE(model.rowCount(model.index(0)), 0);
+        using Role = NetVfsUi::ConsentModel::Role;
+        const auto role = [](Role r) { return NetVfsUi::ConsentModel::roleId(r); };
         const QHash<int, QByteArray> roles = model.roleNames();
-        QCOMPARE(roles.value(NetVfsUi::ConsentModel::roleId(NetVfsUi::ConsentModel::Role::ConsumerId)), QByteArray("consumerId"));
-        QCOMPARE(roles.value(NetVfsUi::ConsentModel::roleId(NetVfsUi::ConsentModel::Role::DisplayName)), QByteArray("displayName"));
-        QCOMPARE(roles.value(NetVfsUi::ConsentModel::roleId(NetVfsUi::ConsentModel::Role::Consent)), QByteArray("consent"));
-        QCOMPARE(model.data(model.index(1), NetVfsUi::ConsentModel::roleId(NetVfsUi::ConsentModel::Role::ConsumerId)).toString(), QStringLiteral("lautta"));
+        QCOMPARE(roles.value(role(Role::ConsumerId)), QByteArray("consumerId"));
+        QCOMPARE(roles.value(role(Role::DisplayName)), QByteArray("displayName"));
+        QCOMPARE(roles.value(role(Role::Icon)), QByteArray("icon"));
+        QCOMPARE(roles.value(role(Role::Pending)), QByteArray("pending"));
+        QCOMPARE(model.data(model.index(1), role(Role::ConsumerId)).toString(), QStringLiteral("lautta"));
         QCOMPARE(model.data(model.index(1), Qt::DisplayRole).toString(), QStringLiteral("Lautta"));
-        QCOMPARE(model.data(model.index(0), NetVfsUi::ConsentModel::roleId(NetVfsUi::ConsentModel::Role::DisplayName)).toString(), QStringLiteral("Aaa"));
-        QCOMPARE(model.data(model.index(1), NetVfsUi::ConsentModel::roleId(NetVfsUi::ConsentModel::Role::Consent)).toString(), QStringLiteral("unknown"));
-        QCOMPARE(model.data(model.index(0), NetVfsUi::ConsentModel::roleId(NetVfsUi::ConsentModel::Role::Consent)).toString(), QStringLiteral("denied"));
-        QVERIFY(!model.data(model.index(5), NetVfsUi::ConsentModel::roleId(NetVfsUi::ConsentModel::Role::Consent)).isValid());
+        QCOMPARE(model.data(model.index(0), role(Role::DisplayName)).toString(), QStringLiteral("Aaa"));
+        QCOMPARE(model.data(model.index(0), role(Role::Icon)).toString(), QString());
+        QCOMPARE(model.data(model.index(0), role(Role::Pending)).toBool(), false);
+        QCOMPARE(model.data(model.index(1), role(Role::Pending)).toBool(), true);
+        QVERIFY(!model.data(model.index(5), role(Role::Pending)).isValid());
         QVERIFY(!model.data(model.index(0), Qt::DecorationRole).isValid());
+        QCOMPARE(model.firstPending(), QStringLiteral("lautta"));
 
-        QSignalSpy changed(&model, &QAbstractItemModel::dataChanged);
-        QVERIFY(model.grant(QStringLiteral("lautta")));
-        QCOMPARE(changed.count(), 1);
-        QCOMPARE(model.data(model.index(1), NetVfsUi::ConsentModel::roleId(NetVfsUi::ConsentModel::Role::Consent)).toString(), QStringLiteral("granted"));
-        QCOMPARE(ConsentStore(path).consent(QStringLiteral("lautta")), Consent::Granted);
-        QCOMPARE(model.consent(QStringLiteral("lautta")), QStringLiteral("granted"));
-        QVERIFY(model.revoke(QStringLiteral("lautta")));
-        QCOMPARE(ConsentStore(path).consent(QStringLiteral("lautta")), Consent::Denied);
-        QCOMPARE(model.data(model.index(1), NetVfsUi::ConsentModel::roleId(NetVfsUi::ConsentModel::Role::Consent)).toString(), QStringLiteral("denied"));
-        // Only registered consumers.
-        QVERIFY(!model.grant(QStringLiteral("stranger")));
-        QCOMPARE(ConsentStore(path).consent(QStringLiteral("stranger")), Consent::Unknown);
-        QCOMPARE(changed.count(), 2);
-
-        // Changes made elsewhere (the bridge's notification) show after reload().
-        ConsentStore(path).setConsent(QStringLiteral("aaa"), Consent::Granted);
+        // Changes made elsewhere (the request dialog, the bridge's file) show after reload().
+        QVERIFY(ConsentStore(path).setConsent(QStringLiteral("lautta"), decided));
         model.reload();
-        QCOMPARE(model.data(model.index(0), NetVfsUi::ConsentModel::roleId(NetVfsUi::ConsentModel::Role::Consent)).toString(), QStringLiteral("granted"));
+        QCOMPARE(model.firstPending(), QString());
+        decided.accounts.remove(secondAccount);
+        QVERIFY(ConsentStore(path).setConsent(QStringLiteral("aaa"), decided));
+        model.reload();
+        QCOMPARE(model.firstPending(), QStringLiteral("aaa"));
         QSignalSpy countChanged(&model, &NetVfsUi::ConsentModel::countChanged);
-        QFile::remove(consumersDir.filePath(QStringLiteral("aaa.conf")));
+        QFile::rename(consumersDir.filePath(QStringLiteral("aaa.conf")), consumersDir.filePath(QStringLiteral("aaa.off")));
         model.reload();
         QCOMPARE(model.count(), 1);
         QCOMPARE(countChanged.count(), 1);
+        QCOMPARE(model.firstPending(), QString());
+        model.reload();
+        QCOMPARE(countChanged.count(), 1);
+        QFile::rename(consumersDir.filePath(QStringLiteral("aaa.off")), consumersDir.filePath(QStringLiteral("aaa.conf")));
+    }
 
-        // A consent file that cannot be written is reported.
+    void accessModel()
+    {
+        const QString path = configDir.filePath(QStringLiteral("access/bridge.conf"));
+        using Role = NetVfsUi::AccessModel::Role;
+        const auto role = [](Role r) { return NetVfsUi::AccessModel::roleId(r); };
+        NetVfsUi::AccessModel model;
+        QVERIFY(model.autoSave());
+        QSignalSpy changed(&model, &NetVfsUi::AccessModel::changed);
+        model.setStorePath(path);
+        model.setConsumerId(QStringLiteral("lautta"));
+        QCOMPARE(model.consumerId(), QStringLiteral("lautta"));
+        QCOMPARE(model.storePath(), path);
+        QCOMPARE(model.displayName(), QStringLiteral("Lautta"));
+        QCOMPARE(model.asked(), QStringLiteral("read-add"));
+        QVERIFY(!model.decided());
+        QCOMPARE(model.newAccounts(), QStringLiteral("ask"));
+        QVERIFY(changed.count() > 0);
+        const QHash<int, QByteArray> roles = model.roleNames();
+        QCOMPARE(roles.value(role(Role::AccountId)), QByteArray("accountId"));
+        QCOMPARE(roles.value(role(Role::Name)), QByteArray("name"));
+        QCOMPARE(roles.value(role(Role::Choice)), QByteArray("choice"));
+        QCOMPARE(model.count(), 2);
+        QCOMPARE(model.rowCount(model.index(0)), 0);
+        QCOMPARE(model.data(model.index(0), role(Role::AccountId)).toInt(), firstAccount);
+        QCOMPARE(model.data(model.index(0), role(Role::Name)).toString(), QStringLiteral("alice@a.example"));
+        QCOMPARE(model.data(model.index(1), Qt::DisplayRole).toString(), QStringLiteral("alice@b.example"));
+        // Each account starts at "Not allowed".
+        QCOMPARE(model.data(model.index(0), role(Role::Choice)).toString(), QStringLiteral("denied"));
+        QCOMPARE(model.data(model.index(1), role(Role::Choice)).toString(), QStringLiteral("denied"));
+        QVERIFY(!model.data(model.index(2), role(Role::Choice)).isValid());
+        QVERIFY(!model.data(model.index(0), Qt::DecorationRole).isValid());
+        QVERIFY(!QFile::exists(path));
+
+        // autoSave: each choice is stored at once, and makes the app decided.
+        QSignalSpy dataChanged(&model, &QAbstractItemModel::dataChanged);
+        QVERIFY(model.setChoice(secondAccount, QStringLiteral("add")));
+        QCOMPARE(dataChanged.count(), 1);
+        QCOMPARE(dataChanged.at(0).at(0).value<QModelIndex>().row(), 1);
+        QCOMPARE(model.data(model.index(1), role(Role::Choice)).toString(), QStringLiteral("add"));
+        QVERIFY(model.decided());
+        AppConsent stored = ConsentStore(path).consent(QStringLiteral("lautta"));
+        QCOMPARE(stored.newAccounts, QStringLiteral("ask"));
+        QCOMPARE(stored.accounts, (QMap<int, QString> { { firstAccount, QStringLiteral("denied") },
+                                                        { secondAccount, QStringLiteral("add") } }));
+        QVERIFY(!model.setChoice(secondAccount, QStringLiteral("ask")));
+        QVERIFY(!model.setChoice(secondAccount, QStringLiteral("granted")));
+        QVERIFY(!model.setChoice(99, QStringLiteral("read")));
+        QCOMPARE(dataChanged.count(), 1);
+        QVERIFY(model.setNewAccounts(QStringLiteral("read")));
+        QCOMPARE(model.newAccounts(), QStringLiteral("read"));
+        QCOMPARE(ConsentStore(path).consent(QStringLiteral("lautta")).newAccounts, QStringLiteral("read"));
+        QVERIFY(!model.setNewAccounts(QStringLiteral("granted")));
+        QCOMPARE(model.newAccounts(), QStringLiteral("read"));
+        // Decided, every account chosen: the app's page still lists them all.
+        model.reload();
+        QVERIFY(model.decided());
+        QCOMPARE(model.count(), 2);
+        QCOMPARE(model.data(model.index(1), role(Role::Choice)).toString(), QStringLiteral("add"));
+
+        // Request: the full list until decided, then only accounts without a choice.
+        NetVfsUi::AccessModel request;
+        request.setAutoSave(false);
+        request.setStorePath(path);
+        request.setRequest(true);
+        QVERIFY(request.request());
+        request.setConsumerId(QStringLiteral("lautta"));
+        QVERIFY(request.decided());
+        QCOMPARE(request.count(), 0);
+        QVERIFY(ConsentStore(path).setConsent(QStringLiteral("aaa"), AppConsent()));
+        request.setConsumerId(QStringLiteral("aaa"));
+        QVERIFY(!request.decided());
+        QCOMPARE(request.count(), 2);
+        QCOMPARE(request.asked(), QStringLiteral("read"));
+        // Not stored before save().
+        QVERIFY(request.setChoice(firstAccount, QStringLiteral("full")));
+        QVERIFY(request.setNewAccounts(QStringLiteral("denied")));
+        QVERIFY(!ConsentStore(path).consent(QStringLiteral("aaa")).isDecided());
+        QVERIFY(request.save());
+        QVERIFY(request.decided());
+        stored = ConsentStore(path).consent(QStringLiteral("aaa"));
+        QCOMPARE(stored.newAccounts, QStringLiteral("denied"));
+        QCOMPARE(stored.accounts, (QMap<int, QString> { { firstAccount, QStringLiteral("full") },
+                                                        { secondAccount, QStringLiteral("denied") } }));
+
+        // Decided, one account without a choice: the request shows only it; saving keeps the others.
+        stored.newAccounts = QStringLiteral("ask");
+        stored.accounts = { { firstAccount, QStringLiteral("full") }, { 77, QStringLiteral("read") } };
+        QVERIFY(ConsentStore(path).setConsent(QStringLiteral("aaa"), stored));
+        request.reload();
+        QVERIFY(request.decided());
+        QCOMPARE(request.count(), 1);
+        QCOMPARE(request.data(request.index(0), role(Role::AccountId)).toInt(), secondAccount);
+        QCOMPARE(request.data(request.index(0), role(Role::Choice)).toString(), QStringLiteral("denied"));
+        QVERIFY(!request.setChoice(firstAccount, QStringLiteral("read")));
+        QVERIFY(request.setChoice(secondAccount, QStringLiteral("read-add")));
+        QVERIFY(request.save());
+        stored = ConsentStore(path).consent(QStringLiteral("aaa"));
+        QCOMPARE(stored.newAccounts, QStringLiteral("ask"));
+        QCOMPARE(stored.accounts, (QMap<int, QString> { { firstAccount, QStringLiteral("full") },
+                                                        { secondAccount, QStringLiteral("read-add") },
+                                                        { 77, QStringLiteral("read") } }));
+
+        // An unknown app: no name, nothing stored.
+        NetVfsUi::AccessModel unknown;
+        unknown.setStorePath(path);
+        unknown.setConsumerId(QStringLiteral("stranger"));
+        QCOMPARE(unknown.displayName(), QString());
+        QCOMPARE(unknown.asked(), QStringLiteral("read"));
+        unknown.setConsumerId(QStringLiteral("../x"));
+        QVERIFY(!unknown.setChoice(firstAccount, QStringLiteral("read")));
+        QVERIFY(!unknown.save());
+
+        // A consent file that cannot be written is reported, and the app stays undecided.
         QTemporaryDir blocked;
         const QString dirAsFile = blocked.filePath(QStringLiteral("file"));
         writeFile(dirAsFile, "x");
-        model.setStorePath(dirAsFile + QStringLiteral("/bridge.conf"));
-        QVERIFY(!model.grant(QStringLiteral("lautta")));
-        QCOMPARE(model.data(model.index(0), NetVfsUi::ConsentModel::roleId(NetVfsUi::ConsentModel::Role::Consent)).toString(), QStringLiteral("unknown"));
+        NetVfsUi::AccessModel failing;
+        failing.setStorePath(dirAsFile + QStringLiteral("/bridge.conf"));
+        failing.setConsumerId(QStringLiteral("lautta"));
+        QVERIFY(!failing.setChoice(firstAccount, QStringLiteral("read")));
+        QVERIFY(!failing.decided());
+        QVERIFY(!failing.setNewAccounts(QStringLiteral("read")));
     }
 };
 

@@ -8,6 +8,7 @@ use super::fail::Fail;
 use super::iface::{Iface, ask_question};
 use super::state::{InfoValue, JobFailure, RecordedAnswer, Session, Shared};
 use super::tree::Tree;
+use crate::access::{self, After};
 use crate::errors::ErrorName;
 use crate::wire::{WireEntry, WireWalkItem};
 use std::collections::HashMap;
@@ -193,13 +194,13 @@ pub(super) async fn run_upload(
     env: Env,
     job: u32,
     cancel: Arc<AtomicBool>,
-    loc: String,
-    path: Vec<u8>,
+    (loc, path, call): (String, Vec<u8>, After),
     src: Source,
     opts: TransferOpts,
 ) {
     let failure = env.job_failure("Upload");
     let result = upload(&env, job, &cancel, (&loc, &path), &src, &opts, failure).await;
+    env.shared.with(|s| s.after_call(&loc, &path, call, result.as_ref().err().map(Fail::bare)));
     env.finish(job, result).await;
 }
 
@@ -355,14 +356,17 @@ pub(super) async fn run_walk(
     env: Env,
     job: u32,
     cancel: Arc<AtomicBool>,
-    loc: String,
-    root: Vec<u8>,
+    (loc, root, folders_only): (String, Vec<u8>, bool),
     opts: WalkOpts,
 ) {
     let listing = env
         .shared
         .with(|s| s.tree_mut(&loc).walk(&root, opts.max_depth, opts.post_order))
-        .map_err(Fail::from);
+        .map_err(Fail::from)
+        .map(|mut items| {
+            items.retain(|(_, e)| !folders_only || access::is_folder(e.kind, e.target_kind));
+            items
+        });
     let result = match listing {
         Ok(items) => walk_batches(&env, job, &cancel, items).await,
         Err(f) => Err(f),
@@ -409,6 +413,10 @@ pub(super) async fn run_copy_across(
     } else {
         copy_across(&env, &src, &dst, &opts)
     };
+    if !opts.recursive {
+        env.shared
+            .with(|s| s.after_call(&dst.0, &dst.1, After::Created, result.as_ref().err().map(Fail::bare)));
+    }
     if let Ok(extra) = &result {
         let bytes = extra.get("bytes").and_then(|v| crate::wire::value_i64(v)).unwrap_or(0);
         env.progress(job, u64::try_from(bytes).unwrap_or(0), u64::try_from(bytes).ok()).await;

@@ -3,7 +3,7 @@
 
 use super::questions::INSECURE_CONSENT;
 use super::{Core, Event};
-use crate::consent::{Consent, ConsentStore};
+use crate::consent::Consent;
 use crate::ffi::{Params, ParsedUrl, Value};
 use crate::locations::book::no_consent;
 use crate::locations::connector::Connector;
@@ -89,13 +89,11 @@ impl Core {
         }
         crate::log::debug(format_args!("Hello from {client}"));
         reply.ok(&Reply::Hello);
-        if self.consent == Consent::Unknown {
-            self.request_consent();
-        }
+        self.request_consent();
     }
 
     pub(super) fn on_get_consent(&self, reply: ReplyTo) {
-        reply.ok(&Reply::Text(self.consent.as_str().to_owned()));
+        reply.ok(&Reply::Text(self.consent.wire().to_owned()));
     }
 
     pub(super) fn on_get_features(&self, reply: ReplyTo) {
@@ -108,31 +106,24 @@ impl Core {
     }
 
     pub(super) fn on_request_consent(&mut self, reply: ReplyTo) {
-        if self.consent != Consent::Granted {
-            self.request_consent();
-        }
+        self.request_consent();
         reply.ok(&Reply::Empty);
     }
 
     pub(super) fn on_list_locations(&mut self, reply: ReplyTo) {
-        // Nothing until granted.
-        let locations = if self.consent == Consent::Granted {
-            let ffi = self.ffi;
-            let states = self.book.states();
-            let locations = self
-                .book
-                .visible()
-                .map(|spec| {
-                    let state = states.get(&spec.id).copied().unwrap_or_default();
-                    spec.wire(state, |params, path| ffi.url_format(params, path).ok())
-                })
-                .collect();
-            // A state not announced yet goes to every session soon.
-            self.states.listed(&states, Instant::now());
-            locations
-        } else {
-            Vec::new()
-        };
+        // The allowed accounts and the ad-hoc locations: none until decided (`apply_access`).
+        let ffi = self.ffi;
+        let states = self.book.states();
+        let locations = self
+            .book
+            .visible()
+            .map(|spec| {
+                let state = states.get(&spec.id).copied().unwrap_or_default();
+                spec.wire(state, |params, path| ffi.url_format(params, path).ok())
+            })
+            .collect();
+        // A state not announced yet goes to every session soon.
+        self.states.listed(&states, Instant::now());
         reply.ok(&Reply::Locations(locations));
     }
 
@@ -330,19 +321,24 @@ impl Core {
         self.apply_consent(consent);
     }
 
+    /// Takes the user's new choices. A level that allows less than before (or none) closes the consumer's connections at once and cancels its work; removing the decision also drops ad-hoc locations and secrets.
     pub(super) fn apply_consent(&mut self, consent: Consent) {
         if consent == self.consent {
             return;
         }
+        let before = self.levels();
         let previous = std::mem::replace(&mut self.consent, consent);
-        crate::log::debug(format_args!("Consent {}", consent.as_str()));
-        if consent != Consent::Unknown {
-            self.prompt.withdraw();
+        let after = self.levels();
+        let decided = self.consent.is_decided();
+        crate::log::debug(format_args!("Consent {}", self.consent.wire()));
+        self.update_prompt();
+        if previous.wire() != self.consent.wire() {
+            self.broadcast(&OutSignal::ConsentChanged(self.consent.wire().to_owned()));
         }
-        self.broadcast(&OutSignal::ConsentChanged(consent.as_str().to_owned()));
-        if previous == Consent::Granted {
-            // Revocation closes the consumer's connections at once and cancels its work; ad-hoc locations and secrets go.
-            crate::log::warning(format_args!("Consent revoked; closing all connections"));
+        let narrowed = previous.is_decided()
+            && (!decided || before.iter().any(|(id, old)| narrows(*old, after.get(id).copied().flatten())));
+        if narrowed {
+            crate::log::warning(format_args!("Access narrowed; closing all connections"));
             let sids: Vec<SessionId> = self.sessions.keys().copied().collect();
             for sid in sids {
                 if let Some(session) = self.sessions.get(&sid) {
@@ -350,37 +346,48 @@ impl Core {
                 }
                 self.cancel_session(sid);
             }
-            self.book.revoke();
-        } else if consent == Consent::Granted {
+            if !decided {
+                self.book.revoke();
+            }
+        }
+        self.apply_access();
+        if before != after {
             self.locations_changed();
         }
     }
 
+    /// Shows the request when the user still has to choose.
     pub(super) fn request_consent(&mut self) {
-        if self.consent == Consent::Granted || self.prompt.is_shown() {
-            return;
+        if self.pending() && !self.prompt.is_shown() {
+            self.prompt.show(&self.config.consumer.display_name);
         }
-        self.prompt.show(&self.config.consumer.display_name);
+    }
+
+    /// Withdraws the request once nothing waits for the user.
+    pub(super) fn update_prompt(&mut self) {
+        if !self.pending() {
+            self.prompt.withdraw();
+        } else if self.sessions.values().any(|s| s.hello) {
+            self.request_consent();
+        }
     }
 
     pub(super) fn on_prompt(&mut self, event: PromptEvent) {
-        let PromptEvent::Answered(allow) = event else { return };
-        let consent = if allow { Consent::Granted } else { Consent::Denied };
-        let store = ConsentStore::new(self.consent_store.path());
-        let (id, tx) = (self.config.consumer.id.clone(), self.tx.clone());
-        self.consent_writes = self.consent_writes.saturating_add(1);
-        // The file lock may wait: off the core's thread.
-        let writing = tokio::task::spawn_blocking(move || {
-            // A failure is logged by the store; the answer holds until restart.
-            drop(store.set_consent(&id, consent));
-            drop(tx.send(Event::ConsentStored(consent)));
-        });
-        drop(writing);
+        if event != PromptEvent::Opened {
+            return;
+        }
+        if let Err(status) = self.handoff.open_access_request() {
+            crate::log::warning(format_args!("Cannot open the access request: {}", status.message));
+        }
     }
+}
 
-    pub(super) fn on_consent_stored(&mut self, consent: Consent) {
-        self.consent_writes = self.consent_writes.saturating_sub(1);
-        self.apply_consent(consent);
+/// Whether going from `old` to `new` allows less.
+fn narrows(old: Option<crate::consent::Level>, new: Option<crate::consent::Level>) -> bool {
+    match (old, new) {
+        (Some(old), Some(new)) => !new.covers(old),
+        (Some(_), None) => true,
+        (None, _) => false,
     }
 }
 
@@ -396,6 +403,21 @@ mod tests {
 
     fn s(v: &str) -> Value {
         Value::Str(v.to_owned())
+    }
+
+    #[test]
+    fn narrowing() {
+        use crate::consent::Level::{Add, Full, Read, ReadAdd};
+        assert!(!narrows(None, None));
+        assert!(!narrows(None, Some(Read)));
+        assert!(narrows(Some(Read), None));
+        assert!(!narrows(Some(Read), Some(Read)));
+        assert!(!narrows(Some(Read), Some(ReadAdd)));
+        assert!(!narrows(Some(Add), Some(Full)));
+        assert!(narrows(Some(Full), Some(ReadAdd)));
+        assert!(narrows(Some(ReadAdd), Some(Read)));
+        assert!(narrows(Some(Read), Some(Add)));
+        assert!(narrows(Some(Add), Some(Read)));
     }
 
     #[test]

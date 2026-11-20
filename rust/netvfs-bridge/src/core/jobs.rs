@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 //! `Upload`, `Download`, `Walk`, `RemoveTree`, `CopyAcross`: reply with the job id at once, `JobProgress` at most every 250 ms, end with `JobFinished`.
 
-use super::{Core, Event, quota};
+use super::{Core, Effect, Event, quota};
 use crate::ffi::Conn;
 use crate::jobs::JobOutcome;
 use crate::jobs::fd::{FdAccess, check_transfer_fd};
@@ -57,6 +57,18 @@ impl Core {
         (job, cancel): (u32, CancelToken),
         body: impl FnOnce(&mut Conn, &AtomicBool) -> JobOutcome + Send + 'static,
     ) {
+        self.run_job_then(sid, (loc, lane), (job, cancel), body, None);
+    }
+
+    /// [`Self::run_job`], then `effect` with the outcome.
+    fn run_job_then(
+        &mut self,
+        sid: SessionId,
+        (loc, lane): (&LocId, Lane),
+        (job, cancel): (u32, CancelToken),
+        body: impl FnOnce(&mut Conn, &AtomicBool) -> JobOutcome + Send + 'static,
+        effect: Option<Effect>,
+    ) {
         let tx = self.tx.clone();
         let flag = Arc::clone(&cancel);
         let work: Work<Connector> = Box::new(move |turn: Turn<'_, Connector>| {
@@ -66,13 +78,22 @@ impl Core {
             };
             let outcome = outcome.settle(flag.load(Ordering::Acquire));
             let result = outcome.result.clone();
+            if let Some(effect) = effect {
+                drop(tx.send(Event::Own { effect, error: result.as_ref().err().map(|s| s.name) }));
+            }
             drop(tx.send(Event::JobFinished { sid, job, outcome }));
             result
         });
         self.book.submit(loc.as_str(), lane, TaskContext::new(sid, cancel), work);
     }
 
-    pub(super) fn on_transfer(&mut self, sid: SessionId, reply: ReplyTo, call: TransferCall) {
+    pub(super) fn on_transfer(
+        &mut self,
+        sid: SessionId,
+        reply: ReplyTo,
+        call: TransferCall,
+        effect: Option<Effect>,
+    ) {
         let need = if call.upload { FdAccess::Read } else { FdAccess::Write };
         let info = match check_transfer_fd(call.fd.as_raw_fd(), need) {
             Ok(info) => info,
@@ -95,9 +116,8 @@ impl Core {
             opts: call.opts,
             upload: call.upload,
         };
-        self.run_job(sid, (&call.loc, call.lane), started, move |conn, cancel| {
-            transfer(conn, &t, cancel, report)
-        });
+        let body = move |conn: &mut Conn, cancel: &AtomicBool| transfer(conn, &t, cancel, report);
+        self.run_job_then(sid, (&call.loc, call.lane), started, body, effect);
     }
 
     pub(super) fn on_remove_tree(
@@ -124,7 +144,7 @@ impl Core {
         reply: ReplyTo,
         (loc, lane): (&LocId, Lane),
         path: NPath,
-        opts: WalkOpts,
+        (opts, folders_only): (WalkOpts, bool),
     ) {
         if let Err(status) = self.pool_for(loc.as_str()) {
             reply.fail(&status);
@@ -135,7 +155,8 @@ impl Core {
         let job = started.0;
         self.run_job(sid, (loc, lane), started, move |conn, cancel| {
             let outbox: Outbox = outbox;
-            walk(conn, path.as_bytes(), &opts, outbox.flow(), cancel, walk_batches(&outbox, job))
+            let what = (path.as_bytes(), &opts, folders_only);
+            walk(conn, what, outbox.flow(), cancel, walk_batches(&outbox, job))
         });
     }
 
@@ -145,7 +166,7 @@ impl Core {
         reply: ReplyTo,
         (loc, path): (&LocId, NPath),
         (dest_loc, dest_path): (&LocId, NPath),
-        opts: CopyOpts,
+        (opts, effect): (CopyOpts, Option<Effect>),
     ) {
         let source = match self.pool_for(loc.as_str()) {
             Ok(spec) => spec,
@@ -171,7 +192,7 @@ impl Core {
         let task = TaskContext::new(sid, cancel);
         match self.copy_jobs.start(self.book.pools_mut(), source, destination, task, body) {
             Ok(id) => {
-                self.copy_owners.insert(id, (sid, job));
+                self.copy_owners.insert(id, (sid, job, effect));
             }
             Err(status) => {
                 self.quota.release_job();

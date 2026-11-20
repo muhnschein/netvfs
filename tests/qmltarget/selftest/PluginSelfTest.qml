@@ -18,6 +18,13 @@ Item {
         id: consents
     }
 
+    NetVfsAccessModel {
+        id: access
+
+        consumerId: "lautta"
+        autoSave: false
+    }
+
     function check(ok, what) {
         if (!ok) {
             throw new Error("plugin self-test failed: " + what)
@@ -49,6 +56,7 @@ Item {
         check(!NetVfsHelpers.serviceAllowed(NetVfsHelpers.makeParams("smb", "nas", "", "",
                                                                      { "security_profile": "guest", "share": "s" }),
                                             "backup"), "serviceAllowed")
-        check(consents.count >= 0 && consents.consent("lautta") !== "", "NetVfsConsentModel")
+        check(consents.count >= 0 && typeof consents.firstPending() === "string", "NetVfsConsentModel")
+        check(access.count >= 0 && access.autoSave === false && access.newAccounts !== "", "NetVfsAccessModel")
     }
 }

@@ -29,6 +29,10 @@
       <arg name="client" type="s" direction="in"/>
       <arg name="bridgeVersion" type="s" direction="out"/>
     </method>
+    <!-- Consent: "unknown" until the user decided in Settings what this app
+      may do, then "decided" (ConsentChanged on a change). RequestConsent and
+      the first Hello while anything is undecided post a notification that
+      opens the request in Settings. -->
     <method name="GetConsent">
       <arg name="consent" type="s" direction="out"/>
     </method>
@@ -49,8 +53,14 @@
     <!-- Locations
       ListLocations info (a{sv}): "kind" (s, "account" or "adhoc"), "host" (s),
       "port" (i) and "user" (s) when set, "path" (ay), "url" (s) when known,
-      for accounts "accountId" (i) and "attention" (s) when set, and "state" (s),
-      the connection state of the consumer's pool for the location (XB-12):
+      for accounts "accountId" (i) and "attention" (s) when set, "access" (s)
+      and "state" (s).
+      "access": what the user lets the app do there: "full"; "read-add" (read,
+      add new items); "read"; "add" (see folders, add new items); ad-hoc
+      locations "full". A call beyond it fails with PermissionDenied, the level
+      as detail. Accounts not allowed are not listed; calls on them fail with
+      PermissionDenied, detail "denied".
+      "state": the connection state of the consumer's pool for the location (XB-12):
         "connected"     at least one connection is established (connected and
                         authenticated);
         "connecting"    none is, at least one is being established;

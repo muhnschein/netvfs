@@ -1,6 +1,6 @@
 {
     "description": "Streamed listing: the reply carries the request id, ListBatch signals the entries, ListDone the result (XB-10)",
-    "consent": "granted",
+    "consent": "full",
     "files": { "docs/a.txt": "hello", "docs/b.txt": "x" },
     "steps": [
         { "call": "Hello", "sig": "s", "args": ["contract"], "reply": ["*"] },

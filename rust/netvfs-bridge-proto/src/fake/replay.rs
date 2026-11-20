@@ -101,12 +101,8 @@ fn parse_step(step: &Json) -> Result<Step, String> {
 /// A message naming what is malformed.
 pub fn parse(source: &str) -> Result<Sequence, String> {
     let doc: Json = serde_json::from_str(source).map_err(|e| e.to_string())?;
-    let consent = match text(&doc, "consent")? {
-        "granted" => Consent::Granted,
-        "denied" => Consent::Denied,
-        "unknown" => Consent::Unknown,
-        other => return Err(format!("unknown consent \"{other}\"")),
-    };
+    let word = text(&doc, "consent")?;
+    let consent = Consent::parse(word).ok_or_else(|| format!("unknown consent \"{word}\""))?;
     let files = match doc.get("files") {
         None => Vec::new(),
         Some(Json::Object(m)) => m
@@ -766,6 +762,9 @@ mod tests {
         assert_eq!(seq.files, vec![("a".to_owned(), "b".to_owned())]);
         assert_eq!(seq.steps.len(), 3);
         parse(r#"{"description":"d","consent":"maybe","steps":[]}"#).unwrap_err();
+        parse(r#"{"description":"d","consent":"granted","steps":[]}"#).unwrap_err();
+        let read = parse(r#"{"description":"d","consent":"read-add","steps":[]}"#).unwrap();
+        assert_eq!(read.consent, Consent::Allowed(crate::access::Level::ReadAdd));
         parse(r#"{"description":"d","consent":"denied","files":{"a":1},"steps":[]}"#).unwrap_err();
         let err =
             parse(r#"{"description":"d","consent":"denied","steps":[{"call":"X","sig":"","args":[]}]}"#)
@@ -797,7 +796,7 @@ mod tests {
     #[tokio::test]
     async fn a_failing_expectation_is_reported() {
         let seq = parse(
-            r#"{"description":"d","consent":"granted","steps":[
+            r#"{"description":"d","consent":"full","steps":[
                 {"call":"Hello","sig":"s","args":["t"],"reply":["another version"]}]}"#,
         )
         .unwrap();
@@ -807,7 +806,7 @@ mod tests {
 
     #[tokio::test]
     async fn seeding_and_connecting_failures_are_reported() {
-        let seq = parse(r#"{"description":"d","consent":"granted","steps":[]}"#).unwrap();
+        let seq = parse(r#"{"description":"d","consent":"full","steps":[]}"#).unwrap();
         let err =
             replay_sequence(&seq, async |_: &Sequence| Err("no".to_owned()), async || Err("x".to_owned()))
                 .await

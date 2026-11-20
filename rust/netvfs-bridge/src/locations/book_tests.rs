@@ -4,7 +4,7 @@
 
 use super::{
     Arc, Duration, ErrorName, Instant, Lane, LocationBook, LocationSpec, PinStore, PoolSet, Turn, WorkerId,
-    no_backend, no_consent, no_such_location,
+    no_backend, no_consent, no_such_location, not_allowed,
 };
 use crate::ffi::{Params, Value};
 use crate::locations::mock::{Mock, MockHandle, Seen, blocking, recv, reporting, task};
@@ -67,7 +67,11 @@ impl PinStore for Pins {
 #[test]
 fn errors_name_the_problem() {
     assert_eq!(no_consent().name, ErrorName::PermissionDenied);
-    assert_eq!(no_consent().message, "The user has not allowed this app to use network locations");
+    assert_eq!(no_consent().message, "The user has not decided yet what this app may do");
+    assert_eq!(
+        (not_allowed().name, not_allowed().message.as_str(), not_allowed().detail.as_str()),
+        (ErrorName::PermissionDenied, "The user has not allowed this app to use this account", "denied")
+    );
     assert_eq!(
         (no_such_location().name, no_such_location().message.as_str()),
         (ErrorName::NotFound, "No such location")

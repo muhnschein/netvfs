@@ -3,6 +3,7 @@
 
 use super::batch::{Batcher, drain, walk_item_wire_size};
 use super::{Extra, JobOutcome, count};
+use crate::access::is_folder;
 use crate::ffi::{Conn, WalkOptions};
 use crate::server::args::WalkOpts;
 use crate::server::encode::OutSignal;
@@ -50,17 +51,20 @@ fn stream<E: FnMut(Vec<WireWalkItem>, usize) -> bool>(
     JobOutcome { result, extra: walk_extra(entries) }
 }
 
-/// Walks the tree at `root` and hands every batch to `emit` (see [`walk_batches`]).
+/// Walks the tree at `root` and hands every batch to `emit` (see [`walk_batches`]), folders only when `folders_only`.
 pub fn walk<E: FnMut(Vec<WireWalkItem>, usize) -> bool>(
     conn: &mut Conn,
-    root: &[u8],
-    opts: &WalkOpts,
+    (root, opts, folders_only): (&[u8], &WalkOpts, bool),
     budget: &FlowBudget,
     cancel: &AtomicBool,
     emit: E,
 ) -> JobOutcome {
     let options = walk_options(opts);
-    stream(budget, cancel, emit, |visit| conn.walk(root, &options, visit))
+    stream(budget, cancel, emit, |visit| {
+        conn.walk(root, &options, &mut |path: &[u8], entry: WireEntry| {
+            (folders_only && !is_folder(entry.kind, entry.target_kind)) || visit(path, entry)
+        })
+    })
 }
 
 /// An emitter of `WalkBatch` signals of job `job` on `outbox`.

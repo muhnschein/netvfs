@@ -250,4 +250,7 @@ systemctl-user daemon-reload || :
 %{_datadir}/netvfs/consumers/lautta.conf
 %dir %{_datadir}/netvfs/bridge
 %config %{_datadir}/netvfs/bridge/handoff.conf
+# Settings entry the request notification opens.
+%{_datadir}/jolla-settings/entries/netvfs-access.json
+%{_datadir}/jolla-settings/pages/netvfs-access.qml
 

@@ -1,0 +1,31 @@
+{
+    "description": "Read only: everything is read, nothing is added, changed or removed (PermissionDenied, detail read)",
+    "consent": "read",
+    "files": { "docs/a.txt": "hello" },
+    "steps": [
+        { "call": "Hello", "sig": "s", "args": ["contract"], "reply": ["*"] },
+        { "call": "GetConsent", "sig": "", "args": [], "reply": ["decided"] },
+        { "call": "ListLocations", "sig": "", "args": [],
+          "reply": [[["account:1", "fake", "Fake 1", { "kind": "account", "access": "read" }]]] },
+        { "call": "Stat", "sig": "saybs", "args": ["account:1", { "bytes": "docs/a.txt" }, true, ""],
+          "reply": [[{ "bytes": "a.txt" }, 1, 0, 5, "..."]] },
+        { "call": "OpenRead", "sig": "says", "args": ["account:1", { "bytes": "docs/a.txt" }, ""], "reply": ["$h", 5] },
+        { "call": "Close", "sig": "u", "args": ["$h"], "reply": [] },
+        { "call": "MakeDir", "sig": "sayb", "args": ["account:1", { "bytes": "docs/new" }, true],
+          "error": "org.netvfs.Error.PermissionDenied" },
+        { "call": "Rename", "sig": "sayayb", "args": ["account:1", { "bytes": "docs/a.txt" }, { "bytes": "docs/b" }, false],
+          "error": "org.netvfs.Error.PermissionDenied" },
+        { "call": "RemoveFile", "sig": "say", "args": ["account:1", { "bytes": "docs/a.txt" }],
+          "error": "org.netvfs.Error.PermissionDenied" },
+        { "call": "RemoveFile", "sig": "say", "args": ["account:1", { "bytes": "docs/none" }],
+          "error": "org.netvfs.Error.PermissionDenied" },
+        { "call": "ServerCopy", "sig": "sayaya{sv}", "args": ["account:1", { "bytes": "docs/a.txt" }, { "bytes": "docs/c" }, {}],
+          "error": "org.netvfs.Error.PermissionDenied" },
+        { "call": "SetAttributes", "sig": "saya{sv}", "args": ["account:1", { "bytes": "docs" }, { "mtimeMs": 5000 }],
+          "error": "org.netvfs.Error.PermissionDenied" },
+        { "call": "RemoveTree", "sig": "say", "args": ["account:1", { "bytes": "docs" }],
+          "error": "org.netvfs.Error.PermissionDenied" },
+        { "call": "Stat", "sig": "saybs", "args": ["account:1", { "bytes": "docs/a.txt" }, true, ""],
+          "reply": [[{ "bytes": "a.txt" }, 1, 0, 5, "..."]] }
+    ]
+}

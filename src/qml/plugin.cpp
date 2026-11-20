@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
+#include "accessmodel.h"
 #include "consentmodel.h"
 #include "netvfshelpers.h"
 #include "netvfsprobe.h"
@@ -79,6 +80,7 @@ public:
         qmlRegisterType<NetVfsUi::NetVfsProbe>(uri, 1, 0, "NetVfsProbe");
         qmlRegisterType<NetVfsUi::SshKeyTool>(uri, 1, 0, "SshKeyTool");
         qmlRegisterType<NetVfsUi::ConsentModel>(uri, 1, 0, "NetVfsConsentModel");
+        qmlRegisterType<NetVfsUi::AccessModel>(uri, 1, 0, "NetVfsAccessModel");
         // Singletons are owned by the engine.
         qmlRegisterSingletonType<NetVfsUi::Helpers>(uri, 1, 0, "NetVfsHelpers", [](QQmlEngine *, QJSEngine *) -> QObject * {
             return std::make_unique<NetVfsUi::Helpers>().release();

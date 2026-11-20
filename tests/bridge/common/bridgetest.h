@@ -65,7 +65,7 @@ QString bridgeBinary();
 QProcessEnvironment bridgeEnvironment();
 
 // The bridge serving consumer "test" (executable: this test) on `--listen unix:path=<folder>/bridge.sock`,
-// with everything else in that temp folder: consumer file, home, bridge.conf with `consent` ("granted",
+// with everything else in that temp folder: consumer file, home, bridge.conf with `consent` ("full" or another level,
 // "denied", or "unknown" for none), and as accounts helper a script answering with bytes this class wrote
 // in the helper's format: one account "account:1" (provider "fake", "Fake 1", host fake.example, user
 // "user", no stored secret, which may be missing). The FakeServer behind it gets addFile() files and that
@@ -74,7 +74,7 @@ QProcessEnvironment bridgeEnvironment();
 class BridgeProcess
 {
 public:
-    explicit BridgeProcess(const QString &consent = QStringLiteral("granted"));
+    explicit BridgeProcess(const QString &consent = QStringLiteral("full"));
     ~BridgeProcess();
     BridgeProcess(const BridgeProcess &) = delete;
     BridgeProcess &operator=(const BridgeProcess &) = delete;

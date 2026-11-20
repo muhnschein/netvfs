@@ -1,6 +1,6 @@
 {
     "description": "Error names: backend results as org.netvfs.Error.<Name>, malformed calls as InvalidArgs (XB-9, XSEC-7)",
-    "consent": "granted",
+    "consent": "full",
     "files": { "a.txt": "a" },
     "steps": [
         { "call": "Hello", "sig": "s", "args": ["contract"], "reply": ["*"] },

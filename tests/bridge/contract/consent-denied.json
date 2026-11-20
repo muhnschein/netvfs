@@ -1,16 +1,16 @@
 {
-    "description": "Without consent nothing is listed and location calls fail with PermissionDenied (XB-6)",
+    "description": "No account allowed: nothing is listed, account calls fail with PermissionDenied, ad-hoc and discovery stay open (XB-6)",
     "consent": "denied",
     "steps": [
         { "call": "ListLocations", "sig": "", "args": [], "error": "org.netvfs.Error.ProtocolError" },
         { "call": "Hello", "sig": "s", "args": ["contract"], "reply": ["*"] },
-        { "call": "GetConsent", "sig": "", "args": [], "reply": ["denied"] },
+        { "call": "GetConsent", "sig": "", "args": [], "reply": ["decided"] },
         { "call": "ListLocations", "sig": "", "args": [], "reply": [[]] },
         { "call": "Stat", "sig": "saybs", "args": ["account:1", { "bytes": "" }, true, ""],
           "error": "org.netvfs.Error.PermissionDenied" },
         { "call": "List", "sig": "saysu", "args": ["account:1", { "bytes": "" }, "", 0],
           "error": "org.netvfs.Error.PermissionDenied" },
-        { "call": "Discover", "sig": "b", "args": [true], "error": "org.netvfs.Error.PermissionDenied" },
+        { "call": "Discover", "sig": "b", "args": [true], "reply": [] },
         { "call": "Cancel", "sig": "u", "args": [7], "error": "org.netvfs.Error.NotFound" }
     ]
 }

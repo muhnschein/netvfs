@@ -15,6 +15,7 @@ pub use state::{
     CallRecord, Consent, Failure, FakeDrive, InfoValue, JobFailure, RecordedAnswer, ScriptedQuestion,
 };
 
+use crate::access::Level;
 use crate::connect::Connection;
 use crate::errors::BridgeError;
 use crate::methods::OBJECT_PATH;
@@ -73,7 +74,7 @@ impl Default for FakeBridge {
 }
 
 impl FakeBridge {
-    /// A bridge with consent granted and no locations.
+    /// A bridge with every account `full` and no locations.
     #[must_use]
     pub fn new() -> Self {
         let shared = Arc::new(Shared::new(State::default()));
@@ -179,10 +180,18 @@ impl FakeBridge {
         self.shared.with(|s| s.consent)
     }
 
-    /// Changes consent and tells every client (`ConsentChanged`).
+    /// Changes what the user decided for this app, as the bridge does: `ConsentChanged` when `GetConsent` would say otherwise; when any location allows less, every client is disconnected, else `LocationsChanged`.
     pub async fn set_consent(&self, consent: Consent) {
-        self.shared.with(|s| s.consent = consent);
-        self.shared.broadcast_consent(consent).await;
+        self.shared.decide(|s| s.consent = consent).await;
+    }
+
+    /// Location `id` at `level` (`None`: not allowed) instead of what [`FakeBridge::set_consent`] says; as there.
+    pub async fn set_access(&self, id: &str, level: Option<Level>) {
+        self.shared
+            .decide(|s| {
+                s.access.insert(id.to_owned(), level);
+            })
+            .await;
     }
 
     /// How often the user was asked (first `Hello` while `unknown`,
@@ -192,7 +201,7 @@ impl FakeBridge {
         self.shared.with(|s| s.consent_requests)
     }
 
-    /// Answer the notification at once, as if the user tapped it.
+    /// The user decides at once in Settings when asked.
     pub fn auto_consent(&self, answer: Option<Consent>) {
         self.shared.with(|s| s.auto_consent = answer);
     }
@@ -471,11 +480,11 @@ pub(crate) mod tests {
         fake.set_attention(&id, None).await;
         assert!(!fake.locations()[0].info.contains_key("attention"));
 
+        fake.remove_location(&id).await;
+        assert!(fake.locations().is_empty());
         fake.set_consent(Consent::Unknown).await;
         assert_eq!(fake.consent(), Consent::Unknown);
         assert_eq!(fake.consent_requests(), 0);
-        fake.remove_location(&id).await;
-        assert!(fake.locations().is_empty());
         assert_eq!(fake.session_count(), 0);
         assert!(fake.calls().is_empty() && fake.handoffs().is_empty() && fake.answers().is_empty());
     }

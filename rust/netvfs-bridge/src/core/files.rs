@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 //! Listing, metadata, namespace operations and read handles.
 
-use super::{Core, Event, HandleRef, quota};
+use super::{Core, Effect, Event, HandleRef, quota};
+use crate::access;
+use crate::consent::Level;
 use crate::ffi::{Attributes, Conn};
 use crate::jobs::batch::{list, list_batches};
 use crate::locations::TaskContext;
@@ -47,9 +49,8 @@ impl Core {
         sid: SessionId,
         reply: ReplyTo,
         loc: &LocId,
-        dir: NPath,
-        lane: Lane,
-        batch: u32,
+        (dir, lane, batch): (NPath, Lane, u32),
+        folders_only: bool,
     ) {
         if let Err(status) = self.pool_for(loc.as_str()) {
             reply.fail(&status);
@@ -70,7 +71,8 @@ impl Core {
         let flag = std::sync::Arc::clone(&cancel);
         let work: Work<Connector> = Box::new(move |turn: Turn<'_, Connector>| {
             let result = turn.ready.and_then(|conn| {
-                list(conn, dir.as_bytes(), batch, outbox.flow(), &flag, list_batches(&outbox, request))
+                let what = (dir.as_bytes(), batch, folders_only);
+                list(conn, what, outbox.flow(), &flag, list_batches(&outbox, request))
             });
             drop(tx.send(Event::ListDone { sid, request, result: result.clone() }));
             result
@@ -85,17 +87,23 @@ impl Core {
         session.signal(&OutSignal::ListDone { request, result });
     }
 
+    /// `Stat`; `folders_only`: anything but a folder is refused at that level.
     pub(super) fn on_stat(
         &mut self,
         sid: SessionId,
         reply: ReplyTo,
         loc: &LocId,
-        path: NPath,
-        follow: bool,
-        lane: Lane,
+        (path, follow, lane): (NPath, bool, Lane),
+        folders_only: Option<Level>,
     ) {
         self.run_request(sid, reply, loc.as_str(), lane, move |conn| {
-            conn.stat(path.as_bytes(), follow).map(Reply::Entry)
+            let entry = conn.stat(path.as_bytes(), follow)?;
+            match folders_only {
+                Some(level) if !access::is_folder(entry.kind, entry.target_kind) => {
+                    Err(access::refused(level))
+                }
+                _ => Ok(Reply::Entry(entry)),
+            }
         });
     }
 
@@ -154,6 +162,19 @@ impl Core {
         self.run_request(sid, reply, loc.as_str(), lane, move |conn| body(conn).map(|()| Reply::Empty));
     }
 
+    /// [`Self::run_empty`], then `effect` with the result.
+    pub(super) fn run_empty_then(
+        &mut self,
+        sid: SessionId,
+        reply: ReplyTo,
+        (loc, lane): (&LocId, Lane),
+        body: impl FnOnce(&mut Conn) -> Result<(), Status> + Send + 'static,
+        effect: Option<Effect>,
+    ) {
+        let run = move |conn: &mut Conn| body(conn).map(|()| Reply::Empty);
+        self.run_request_then(sid, reply, (loc.as_str(), lane), run, effect);
+    }
+
     pub(super) fn on_set_attributes(
         &mut self,
         sid: SessionId,
@@ -178,11 +199,11 @@ impl Core {
         loc: &LocId,
         (from, to): (NPath, NPath),
         opts: CopyOpts,
-        lane: Lane,
+        (lane, effect): (Lane, Option<Effect>),
     ) {
-        self.run_empty(sid, reply, loc, lane, move |conn| {
-            conn.copy(from.as_bytes(), to.as_bytes(), opts.recursive, opts.replace)
-        });
+        let body =
+            move |conn: &mut Conn| conn.copy(from.as_bytes(), to.as_bytes(), opts.recursive, opts.replace);
+        self.run_empty_then(sid, reply, (loc, lane), body, effect);
     }
 
     pub(super) fn on_open_read(

@@ -5,6 +5,7 @@
 //! (`tests/bridge/contract`).
 #![forbid(unsafe_code)]
 
+pub mod access;
 pub mod connect;
 pub mod errors;
 pub mod limits;

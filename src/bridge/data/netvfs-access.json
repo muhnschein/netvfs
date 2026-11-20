@@ -1,0 +1,12 @@
+{
+    "entries": [
+        {
+            "path": "accounts/netvfs_access",
+            "title": "Apps using network locations",
+            "type": "page",
+            "params": {
+                "source": "/usr/share/jolla-settings/pages/netvfs-access.qml"
+            }
+        }
+    ]
+}

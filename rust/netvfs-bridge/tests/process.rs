@@ -11,7 +11,8 @@
 )]
 
 use netvfs_bridge::accounts::watch;
-use netvfs_bridge::consent::Consent;
+use netvfs_bridge::consent::{Choice, Consent, Level};
+const FULL: Choice = Choice::Allow(Level::Full);
 use netvfs_bridge::testing::{BridgeRun, WAIT, wait_signal};
 use netvfs_bridge::testutil::{TestBus, TestChild};
 use netvfs_bridge_proto::Signal;
@@ -105,16 +106,16 @@ fn serves_and_exits_when_idle() {
         return;
     }
     let mut run = BridgeRun::new(Path::new(BRIDGE), "proc-test");
-    run.with_consent(Consent::Granted);
+    run.with_consent(&Consent::all(FULL));
     let mut child = run.spawn();
     let started = Instant::now();
     tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap().block_on(async {
         let c = run.client().await;
         c.proxy().hello("process").await.unwrap();
-        assert_eq!(c.proxy().get_consent().await.unwrap(), "granted");
+        assert_eq!(c.proxy().get_consent().await.unwrap(), "decided");
         assert!(c.proxy().list_locations().await.unwrap().is_empty());
         tokio::time::sleep(Duration::from_millis(800)).await;
-        assert_eq!(c.proxy().get_consent().await.unwrap(), "granted");
+        assert_eq!(c.proxy().get_consent().await.unwrap(), "decided");
         c.close().await;
     });
     let (code, took) = idle_exit(&mut child, started);
@@ -159,7 +160,7 @@ fn exits_when_idle_after_a_client_vanished() {
         return;
     }
     let mut run = BridgeRun::new(Path::new(BRIDGE), "proc-test");
-    run.with_consent(Consent::Granted).with_fake_accounts(Path::new(HELPER));
+    run.with_consent(&Consent::all(FULL)).with_fake_accounts(Path::new(HELPER));
     let files: Vec<(Vec<u8>, &[u8])> =
         (0..200).map(|i| (format!("/many/f{i:03}").into_bytes(), &b"x"[..])).collect();
     let files: Vec<(&[u8], &[u8])> = files.iter().map(|(p, c)| (p.as_slice(), *c)).collect();
@@ -184,14 +185,14 @@ fn socket_activation() {
         return;
     }
     let mut run = BridgeRun::activated(Path::new(BRIDGE), "proc-test");
-    run.with_consent(Consent::Granted).with_fake_accounts(Path::new(HELPER));
+    run.with_consent(&Consent::all(FULL)).with_fake_accounts(Path::new(HELPER));
     run.with_files(&[(b"/hello.txt", b"hello")]);
     let mut child = run.spawn();
     let started = Instant::now();
     tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap().block_on(async {
         let c = run.client().await;
         assert_eq!(c.proxy().hello("process").await.unwrap(), env!("CARGO_PKG_VERSION"));
-        assert_eq!(c.proxy().get_consent().await.unwrap(), "granted");
+        assert_eq!(c.proxy().get_consent().await.unwrap(), "decided");
         let locations = c.proxy().list_locations().await.unwrap();
         assert_eq!(locations.len(), 1, "{locations:?}");
         let l = &locations[0];
@@ -218,7 +219,9 @@ fn account_changes_on_the_session_bus() {
         return;
     };
     let mut run = BridgeRun::new(Path::new(BRIDGE), "proc-test");
-    run.with_consent(Consent::Granted).with_fake_accounts(Path::new(HELPER)).with_session_bus(bus.address());
+    run.with_consent(&Consent::all(FULL))
+        .with_fake_accounts(Path::new(HELPER))
+        .with_session_bus(bus.address());
     let _child = run.spawn();
     tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap().block_on(async {
         let writer = bus.connect().await;

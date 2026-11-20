@@ -9,10 +9,14 @@
 //! DisplayName=Lautta
 //! Executable=/usr/bin/harbour-lautta
 //! DataDir=.local/share/org.netvfs/lautta
+//! Access=full
 //! ```
+//!
+//! `Access` is the level the app asks for (`full`, `read-add`, `read`, `add`); missing or unknown: `read`. The user decides per account.
 //!
 //! is valid only when both readers accept it: the C++ reader (`ConsentStore::parseConsumerFile`, a strict line reader, not QSettings) and the systemd generator (`netvfs-bridge-generator.c`) that made the bridge's units. The bridge thus serves exactly the consumers the generator set up: same consumers folder checks (`NETVFS_CONSUMERS_DIR`), file inside it after resolving links, values within the generator's buffers, no control characters in `DisplayName`.
 
+use crate::consent::Level;
 use crate::status::Status;
 use netvfs_bridge_proto::ErrorName;
 use std::collections::BTreeMap;
@@ -56,6 +60,8 @@ pub struct ConsumerInfo {
     pub executable: String,
     /// Relative to `$HOME`, same characters and components.
     pub data_dir: String,
+    /// The level it asks for.
+    pub access: Level,
 }
 
 /// `ConsumerInfo::isValidId`: `[a-z0-9-]{1,64}`.
@@ -150,6 +156,12 @@ impl Env {
     #[must_use]
     pub fn known_hosts_file(&self, consumer: &str) -> PathBuf {
         self.data_home().join("netvfs/bridge").join(consumer).join("known_hosts")
+    }
+
+    /// What `consumer` added at an add level: `~/.local/share/netvfs/bridge/<id>/added`.
+    #[must_use]
+    pub fn added_file(&self, consumer: &str) -> PathBuf {
+        self.data_home().join("netvfs/bridge").join(consumer).join("added")
     }
 
     /// The accounts helper: `NETVFS_ACCOUNTS_HELPER` when set (tests; even empty, as `qEnvironmentVariableIsSet`), else the installed one.
@@ -283,6 +295,7 @@ fn parse_consumer(content: &[u8], stem: &str) -> Result<ConsumerInfo, &'static s
         display_name: String::new(),
         executable: String::new(),
         data_dir: String::new(),
+        access: Level::Read,
     };
     let mut in_group = false;
     for raw in content.split(|b| *b == b'\n') {
@@ -297,6 +310,10 @@ fn parse_consumer(content: &[u8], stem: &str) -> Result<ConsumerInfo, &'static s
             continue;
         };
         let slot = match key.trim() {
+            "Access" => {
+                info.access = Level::parse(value.trim()).unwrap_or(Level::Read);
+                continue;
+            }
             "Id" => &mut info.id,
             "DisplayName" => &mut info.display_name,
             "Executable" => &mut info.executable,
@@ -489,8 +506,25 @@ mod tests {
                 display_name: "Lautta".into(),
                 executable: "/usr/bin/harbour-lautta".into(),
                 data_dir: ".local/share/org.netvfs/lautta".into(),
+                access: Level::Full,
             }
         );
+    }
+
+    #[test]
+    fn asked_levels() {
+        let asked =
+            |line: &str| parse_consumer(format!("{LAUTTA}{line}").as_bytes(), "lautta").unwrap().access;
+        assert_eq!(asked(""), Level::Read);
+        assert_eq!(asked("Access=full\n"), Level::Full);
+        assert_eq!(asked("Access = read-add \n"), Level::ReadAdd);
+        assert_eq!(asked("Access=read\n"), Level::Read);
+        assert_eq!(asked("Access=add\n"), Level::Add);
+        assert_eq!(asked("Access=add\nAccess=full\n"), Level::Full);
+        assert_eq!(asked("Access=granted\n"), Level::Read);
+        assert_eq!(asked("Access=Full\n"), Level::Read);
+        assert_eq!(asked("[Other]\nAccess=full\n"), Level::Read);
+        check_as_generator(format!("{LAUTTA}Access=full\n").as_bytes(), "lautta").unwrap();
     }
 
     #[test]
@@ -598,6 +632,8 @@ mod tests {
         let xdg = env.clone().with("XDG_CONFIG_HOME", "/c").with("XDG_DATA_HOME", "/d");
         assert_eq!(xdg.consent_file(), Path::new("/c/netvfs/bridge.conf"));
         assert_eq!(xdg.known_hosts_file("p"), Path::new("/d/netvfs/bridge/p/known_hosts"));
+        assert_eq!(env.added_file("lautta"), Path::new("/home/u/.local/share/netvfs/bridge/lautta/added"));
+        assert_eq!(xdg.added_file("p"), Path::new("/d/netvfs/bridge/p/added"));
         let empty = Env::default().with("HOME", "").with("XDG_CONFIG_HOME", "");
         assert_eq!(empty.consent_file(), Path::new("/.config/netvfs/bridge.conf"));
         assert_eq!(env.accounts_helper(), Path::new(ACCOUNTS_HELPER));

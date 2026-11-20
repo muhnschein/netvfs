@@ -12,7 +12,8 @@
 )]
 
 use netvfs_bridge::accounts::{Attention, Value};
-use netvfs_bridge::consent::Consent;
+use netvfs_bridge::consent::{Choice, Consent, Level, NewAccounts};
+const FULL: Choice = Choice::Allow(Level::Full);
 use netvfs_bridge::core::MAINTENANCE_INTERVAL;
 use netvfs_bridge::core::nearby::{self, NearbySource as _};
 use netvfs_bridge::handoff::HandoffArg;
@@ -37,9 +38,15 @@ use std::time::{Duration, Instant};
 const TESTS: &[(&str, Test)] = &[
     ("hello_first", hello_first),
     ("hello_and_locations", hello_and_locations),
-    ("consent_unknown_then_granted", consent_unknown_then_granted),
-    ("consent_denied", consent_denied),
+    ("consent_unknown_then_decided", consent_unknown_then_decided),
+    ("nothing_allowed", nothing_allowed),
+    ("new_account_asks_again", new_account_asks_again),
     ("revocation_mid_job", revocation_mid_job),
+    ("narrowing_closes_widening_keeps", narrowing_closes_widening_keeps),
+    ("read_level", read_level),
+    ("read_add_level", read_add_level),
+    ("add_level", add_level),
+    ("ad_hoc_locations_are_full", ad_hoc_locations_are_full),
     ("list_streams_batches", list_streams_batches),
     ("zbus_send_ordering", zbus_send_ordering),
     ("cancel_job", cancel_job),
@@ -72,7 +79,7 @@ const TESTS: &[(&str, Test)] = &[
     ("ffi_nearby_lives_on_the_qt_thread", ffi_nearby_lives_on_the_qt_thread),
     ("cancel_copy_across", cancel_copy_across),
     ("cancel_pending_job", cancel_pending_job),
-    ("idle_exit_after_an_answer", idle_exit_after_an_answer),
+    ("idle_exit_after_a_tap", idle_exit_after_a_tap),
     ("debug_output", debug_output),
 ];
 
@@ -91,20 +98,20 @@ fn no_opts() -> Opts {
 }
 
 fn hello_first(h: &Harness) {
-    let f = Fixture::new(h, Consent::Granted);
+    let f = Fixture::new(h, Consent::all(FULL));
     block_on(async {
         let c = f.client().await;
         let early = c.proxy().get_consent().await;
         assert_eq!(error_name(&early), name(ErrorName::ProtocolError));
         assert_eq!(c.proxy().hello("t").await.unwrap(), env!("CARGO_PKG_VERSION"));
-        assert_eq!(c.proxy().get_consent().await.unwrap(), "granted");
+        assert_eq!(c.proxy().get_consent().await.unwrap(), "decided");
         assert!(c.proxy().hello("t").await.is_ok());
         assert_eq!(f.prompt.state().shown, 0);
     });
 }
 
 fn hello_and_locations(h: &Harness) {
-    let f = Fixture::new(h, Consent::Granted);
+    let f = Fixture::new(h, Consent::all(FULL));
     block_on(async {
         let c = f.hello_client().await;
         let locations = c.proxy().list_locations().await.unwrap();
@@ -120,8 +127,38 @@ fn hello_and_locations(h: &Harness) {
     });
 }
 
-fn consent_unknown_then_granted(h: &Harness) {
-    let f = Fixture::new(h, Consent::Unknown);
+const ACCESS_CONF: &str =
+    "[OpenAccessRequest]\nService=a.b\nPath=/c\nInterface=a.b\nMethod=showPage\nArguments=s:system/access\n";
+
+/// Decided: account `id` at `choice`, new accounts `new_accounts`.
+fn choices(new_accounts: NewAccounts, accounts: &[(i32, Choice)]) -> Consent {
+    Consent { new_accounts: Some(new_accounts), accounts: accounts.iter().copied().collect() }
+}
+
+fn at(level: Level) -> Consent {
+    Consent::all(Choice::Allow(level))
+}
+
+/// `access` of `loc` in `ListLocations`; `None` when not listed.
+async fn access_of(c: &Connection, loc: &str) -> Option<String> {
+    let locations = c.proxy().list_locations().await.unwrap();
+    let info = &locations.iter().find(|l| l.id == loc)?.info;
+    Some(String::try_from(info.get("access").expect("an access").try_clone().unwrap()).unwrap())
+}
+
+/// The error name and detail of a failed call.
+fn refusal<T: std::fmt::Debug>(result: Result<T, zbus::Error>) -> (Option<String>, String) {
+    let name = error_name(&result);
+    match result.map_err(netvfs_bridge_proto::BridgeError::from) {
+        Err(netvfs_bridge_proto::BridgeError::Remote { detail, .. }) => (name, detail.unwrap_or_default()),
+        other => panic!("not refused: {other:?}"),
+    }
+}
+
+fn consent_unknown_then_decided(h: &Harness) {
+    let setup =
+        Setup { consent: Consent::unknown(), handoff_conf: Some(ACCESS_CONF.to_owned()), ..Setup::default() };
+    let f = Fixture::start(h, setup);
     block_on(async {
         let c = f.hello_client().await;
         let mut signals = c.signals();
@@ -132,40 +169,76 @@ fn consent_unknown_then_granted(h: &Harness) {
         let stat = c.proxy().stat(ACCOUNT_LOC, b"/x", true, "").await;
         assert_eq!(error_name(&stat), name(ErrorName::PermissionDenied));
         assert_eq!(error_name(&c.proxy().discover(true).await), name(ErrorName::PermissionDenied));
+        let ad_hoc = c.proxy().connect_ad_hoc("fake://user@h/", b"", &no_opts()).await;
+        assert_eq!(error_name(&ad_hoc), name(ErrorName::PermissionDenied));
         c.proxy().hello("t").await.unwrap();
+        c.proxy().request_consent().await.unwrap();
         assert_eq!(f.prompt.state().shown, 1);
-        f.answer_prompt(true);
+        assert!(f.launcher.calls().is_empty());
+        f.tap_prompt();
+        assert!(wait_for(WAIT, || !f.launcher.calls().is_empty()).await);
+        let calls = f.launcher.calls();
+        assert_eq!(
+            (calls[0].method.as_str(), calls[0].arguments.as_slice()),
+            ("showPage", &[HandoffArg::Str("system/access".to_owned())][..])
+        );
+        c.proxy().request_consent().await.unwrap();
+        assert_eq!(f.prompt.state().shown, 2, "asked again until decided");
+        f.set_consent(&choices(NewAccounts::Ask, &[(1, Choice::Allow(Level::ReadAdd))]));
         let changed = wait_signal(&mut signals, WAIT, |s| matches!(s, Signal::ConsentChanged(_))).await;
-        assert!(matches!(changed, Some(Signal::ConsentChanged(ref v)) if v == "granted"), "{changed:?}");
+        assert!(matches!(changed, Some(Signal::ConsentChanged(ref v)) if v == "decided"), "{changed:?}");
         assert!(wait_signal(&mut signals, WAIT, |s| matches!(s, Signal::LocationsChanged)).await.is_some());
-        assert_eq!(f.stored_consent(), Consent::Granted);
-        assert_eq!(c.proxy().list_locations().await.unwrap().len(), 1);
+        assert_eq!(access_of(&c, ACCOUNT_LOC).await.as_deref(), Some("read-add"));
         assert_eq!(f.prompt.state().withdrawn, 1);
+        assert!(!f.prompt.state().visible);
+        c.proxy().request_consent().await.unwrap();
+        assert_eq!(f.prompt.state().shown, 2, "nothing waits for the user");
     });
 }
 
-fn consent_denied(h: &Harness) {
-    let f = Fixture::new(h, Consent::Denied);
+fn nothing_allowed(h: &Harness) {
+    let f = Fixture::new(h, Consent::all(Choice::Deny));
+    block_on(async {
+        let c = f.hello_client().await;
+        assert_eq!(f.prompt.state().shown, 0);
+        assert_eq!(c.proxy().get_consent().await.unwrap(), "decided");
+        assert!(c.proxy().list_locations().await.unwrap().is_empty());
+        let list = c.proxy().list(ACCOUNT_LOC, b"", "", 0).await;
+        assert_eq!(refusal(list), (name(ErrorName::PermissionDenied), "denied".to_owned()));
+        assert_eq!(error_name(&c.proxy().stat("account:9", b"/", true, "").await), name(ErrorName::NotFound));
+        c.proxy().discover(true).await.unwrap();
+        c.proxy().request_consent().await.unwrap();
+        assert_eq!(f.prompt.state().shown, 0);
+    });
+}
+
+fn new_account_asks_again(h: &Harness) {
+    let f = Fixture::new(h, choices(NewAccounts::Ask, &[(1, FULL)]));
     block_on(async {
         let c = f.hello_client().await;
         let mut signals = c.signals();
         assert_eq!(f.prompt.state().shown, 0);
-        assert_eq!(c.proxy().get_consent().await.unwrap(), "denied");
-        assert!(c.proxy().list_locations().await.unwrap().is_empty());
-        let list = c.proxy().list(ACCOUNT_LOC, b"", "", 0).await;
-        assert_eq!(error_name(&list), name(ErrorName::PermissionDenied));
-        c.proxy().request_consent().await.unwrap();
+        f.accounts.state().accounts.push(FakeAccounts::fake_account(2));
+        f.accounts_changed();
+        assert!(wait_signal(&mut signals, WAIT, |s| matches!(s, Signal::LocationsChanged)).await.is_some());
         assert_eq!(f.prompt.state().shown, 1);
-        f.answer_prompt(false);
-        let changed =
-            wait_signal(&mut signals, Duration::from_millis(300), |s| matches!(s, Signal::ConsentChanged(_)))
-                .await;
-        assert!(changed.is_none(), "denied stays denied: {changed:?}");
-        assert_eq!(f.stored_consent(), Consent::Denied);
-        assert_eq!(c.proxy().get_consent().await.unwrap(), "denied");
+        assert_eq!(c.proxy().get_consent().await.unwrap(), "decided");
+        assert_eq!(access_of(&c, ACCOUNT_LOC).await.as_deref(), Some("full"));
+        assert_eq!(access_of(&c, "account:2").await, None);
+        let stat = c.proxy().stat("account:2", b"/", true, "").await;
+        assert_eq!(refusal(stat), (name(ErrorName::PermissionDenied), "denied".to_owned()));
+        f.set_consent(&choices(NewAccounts::Ask, &[(1, FULL), (2, Choice::Allow(Level::Read))]));
+        assert!(wait_signal(&mut signals, WAIT, |s| matches!(s, Signal::LocationsChanged)).await.is_some());
+        assert_eq!(access_of(&c, "account:2").await.as_deref(), Some("read"));
+        assert!(!f.prompt.state().visible);
+        f.accounts.state().accounts.push(FakeAccounts::fake_account(3));
+        f.accounts_changed();
+        assert!(wait_for(WAIT, || f.prompt.state().visible).await);
+        f.accounts.state().accounts.truncate(2);
+        f.accounts_changed();
+        assert!(wait_for(WAIT, || !f.prompt.state().visible).await);
     });
 }
-
 /// A download of 4 MiB at 50 ms a chunk into a pipe nobody reads.
 async fn slow_download(f: &Fixture, c: &Connection) -> (u32, std::io::PipeReader) {
     f.harness.fake.add_file(b"/big", &vec![b'x'; 4 << 20]);
@@ -177,7 +250,7 @@ async fn slow_download(f: &Fixture, c: &Connection) -> (u32, std::io::PipeReader
 }
 
 fn revocation_mid_job(h: &Harness) {
-    let f = Fixture::new(h, Consent::Granted);
+    let f = Fixture::new(h, Consent::all(FULL));
     block_on(async {
         let c = f.hello_client().await;
         let mut signals = c.signals();
@@ -185,7 +258,7 @@ fn revocation_mid_job(h: &Harness) {
         let probe = f.probe();
         assert_eq!(probe.wait_until(WAIT, |n| n.jobs == 1).await.unwrap().jobs, 1);
         let started = Instant::now();
-        f.set_consent(Consent::Denied);
+        f.set_consent(&Consent::all(Choice::Deny));
         assert!(wait_disconnected(&mut signals, Duration::from_secs(3)).await);
         let after =
             probe.wait_until(Duration::from_secs(3), |n| n.jobs == 0 && n.sessions == 0).await.unwrap();
@@ -194,12 +267,241 @@ fn revocation_mid_job(h: &Harness) {
         drop(reader);
         let again = f.hello_client().await;
         assert!(again.proxy().list_locations().await.unwrap().is_empty());
-        assert_eq!(again.proxy().get_consent().await.unwrap(), "denied");
+        assert_eq!(again.proxy().get_consent().await.unwrap(), "decided");
+    });
+}
+
+fn narrowing_closes_widening_keeps(h: &Harness) {
+    let f = Fixture::new(h, at(Level::Read));
+    block_on(async {
+        let c = f.hello_client().await;
+        let mut signals = c.signals();
+        let (_job, reader) = slow_download(&f, &c).await;
+        let probe = f.probe();
+        assert_eq!(probe.wait_until(WAIT, |n| n.jobs == 1).await.unwrap().jobs, 1);
+        f.set_consent(&at(Level::ReadAdd));
+        assert!(wait_signal(&mut signals, WAIT, |s| matches!(s, Signal::LocationsChanged)).await.is_some());
+        assert_eq!(access_of(&c, ACCOUNT_LOC).await.as_deref(), Some("read-add"));
+        assert_eq!(probe.counters().await.unwrap().jobs, 1, "widening keeps the work");
+        f.set_consent(&at(Level::Add));
+        assert!(wait_disconnected(&mut signals, Duration::from_secs(3)).await);
+        let after =
+            probe.wait_until(Duration::from_secs(3), |n| n.jobs == 0 && n.sessions == 0).await.unwrap();
+        assert_eq!((after.jobs, after.sessions, after.pools), (0, 0, 1));
+        drop(reader);
+        let again = f.hello_client().await;
+        assert_eq!(access_of(&again, ACCOUNT_LOC).await.as_deref(), Some("add"));
+    });
+}
+
+/// Uploads `content` to `path` with `opts` and waits: the error name, "" on success.
+async fn put(c: &Connection, signals: &mut SignalStream, path: &[u8], content: &[u8], opts: &Opts) -> String {
+    let dir = TempDir::new();
+    let local = temp_file(&dir, "put", content);
+    let fd = File::open(&local).unwrap();
+    match c.proxy().upload(ACCOUNT_LOC, path, Fd::from(fd.as_fd()), opts).await {
+        Ok(job) => finished(signals, job).await.0,
+        Err(e) => error_name(&Err::<(), _>(e))
+            .unwrap_or_default()
+            .trim_start_matches("org.netvfs.Error.")
+            .to_owned(),
+    }
+}
+
+fn read_level(h: &Harness) {
+    let f = Fixture::new(h, at(Level::Read));
+    let fake = h.fake;
+    fake.add_file(b"/docs/a.txt", b"hello");
+    block_on(async {
+        let c = f.hello_client().await;
+        let mut signals = c.signals();
+        let p = c.proxy();
+        assert_eq!(access_of(&c, ACCOUNT_LOC).await.as_deref(), Some("read"));
+        assert_eq!(p.stat(ACCOUNT_LOC, b"/docs/a.txt", true, "").await.unwrap().size, 5);
+        p.capabilities(ACCOUNT_LOC).await.unwrap();
+        p.space_info(ACCOUNT_LOC, b"/").await.unwrap();
+        let refused = (name(ErrorName::PermissionDenied), "read".to_owned());
+        assert_eq!(refusal(p.make_dir(ACCOUNT_LOC, b"/docs/new", true).await), refused);
+        assert_eq!(refusal(p.rename(ACCOUNT_LOC, b"/docs/a.txt", b"/docs/b", false).await), refused);
+        assert_eq!(refusal(p.remove_file(ACCOUNT_LOC, b"/docs/a.txt").await), refused);
+        assert_eq!(refusal(p.remove_file(ACCOUNT_LOC, b"/docs/none").await), refused);
+        assert_eq!(refusal(p.remove_dir(ACCOUNT_LOC, b"/docs").await), refused);
+        let mode = OptsBuilder::new().int("mode", 0o700).build();
+        assert_eq!(refusal(p.set_attributes(ACCOUNT_LOC, b"/docs", &mode).await), refused);
+        assert_eq!(refusal(p.make_symlink(ACCOUNT_LOC, b"t", b"/docs/l").await), refused);
+        assert_eq!(
+            refusal(p.server_copy(ACCOUNT_LOC, b"/docs/a.txt", b"/docs/c", &no_opts()).await),
+            refused
+        );
+        assert_eq!(refusal(p.remove_tree(ACCOUNT_LOC, b"/docs").await), refused);
+        assert_eq!(put(&c, &mut signals, b"/docs/up", b"x", &no_opts()).await, "PermissionDenied");
+        let dir = TempDir::new();
+        let target = temp_file(&dir, "down", b"");
+        let wr = OpenOptions::new().write(true).open(&target).unwrap();
+        let job = p.download(ACCOUNT_LOC, b"/docs/a.txt", Fd::from(wr.as_fd()), &no_opts()).await.unwrap();
+        drop(wr);
+        assert_eq!(finished(&mut signals, job).await.0, "");
+        assert_eq!(std::fs::read(&target).unwrap(), b"hello");
+        assert!(fake.exists(b"/docs/a.txt") && !fake.exists(b"/docs/new") && !fake.exists(b"/docs/up"));
+    });
+}
+
+fn read_add_level(h: &Harness) {
+    let f = Fixture::new(h, at(Level::ReadAdd));
+    let fake = h.fake;
+    fake.add_file(b"/docs/a.txt", b"hello");
+    block_on(async {
+        let c = f.hello_client().await;
+        let mut signals = c.signals();
+        let p = c.proxy();
+        let refused = (name(ErrorName::PermissionDenied), "read-add".to_owned());
+        p.make_dir(ACCOUNT_LOC, b"/docs/new", true).await.unwrap();
+        assert_eq!(refusal(p.remove_dir(ACCOUNT_LOC, b"/docs/new").await), refused, "folders are never own");
+        assert_eq!(put(&c, &mut signals, b"/docs/.t.part", b"new", &no_opts()).await, "");
+        assert_eq!(p.stat(ACCOUNT_LOC, b"/docs/.t.part", true, "").await.unwrap().size, 3);
+        let mtime = OptsBuilder::new().int("mtimeMs", 5000).build();
+        p.set_attributes(ACCOUNT_LOC, b"/docs/.t.part", &mtime).await.unwrap();
+        let resume = OptsBuilder::new().str("disposition", "resume").int("offset", 3).build();
+        assert_eq!(
+            put(&c, &mut signals, b"/docs/.t.part", b"newmore", &resume).await,
+            "PermissionDenied",
+            "written"
+        );
+        assert_eq!(refusal(p.rename(ACCOUNT_LOC, b"/docs/.t.part", b"/docs/a.txt", true).await), refused);
+        let taken = p.rename(ACCOUNT_LOC, b"/docs/.t.part", b"/docs/a.txt", false).await;
+        assert_eq!(error_name(&taken), name(ErrorName::AlreadyExists));
+        p.rename(ACCOUNT_LOC, b"/docs/.t.part", b"/docs/t.txt", false).await.unwrap();
+        assert_eq!(fake.file_data(b"/docs/t.txt").as_deref(), Some(&b"new"[..]));
+        assert_eq!(refusal(p.remove_file(ACCOUNT_LOC, b"/docs/t.txt").await), refused, "finished");
+        assert_eq!(refusal(p.rename(ACCOUNT_LOC, b"/docs/t.txt", b"/docs/u", false).await), refused);
+        assert_eq!(refusal(p.remove_file(ACCOUNT_LOC, b"/docs/a.txt").await), refused);
+        fake.fail_op("lstat", ErrorName::PermissionDenied);
+        assert_eq!(
+            refusal(p.remove_file(ACCOUNT_LOC, b"/docs/a.txt").await),
+            refused,
+            "whatever the look found"
+        );
+        let missing = p.remove_file(ACCOUNT_LOC, b"/docs/.gone.part").await;
+        assert_eq!(error_name(&missing), name(ErrorName::NotFound));
+        assert_eq!(put(&c, &mut signals, b"/docs/a.txt", b"x", &no_opts()).await, "AlreadyExists");
+        assert_eq!(
+            refusal(p.remove_file(ACCOUNT_LOC, b"/docs/a.txt").await),
+            refused,
+            "not taken by a refusal"
+        );
+        let truncate = OptsBuilder::new().str("disposition", "truncate").build();
+        assert_eq!(put(&c, &mut signals, b"/docs/a.txt", b"x", &truncate).await, "PermissionDenied");
+        assert_eq!(fake.file_data(b"/docs/a.txt").as_deref(), Some(&b"hello"[..]));
+        p.server_copy(ACCOUNT_LOC, b"/docs/a.txt", b"/docs/a2.txt", &no_opts()).await.unwrap();
+        p.remove_file(ACCOUNT_LOC, b"/docs/a2.txt").await.unwrap();
+        let replace = OptsBuilder::new().bool("replace", true).build();
+        assert_eq!(
+            refusal(p.server_copy(ACCOUNT_LOC, b"/docs/a.txt", b"/docs/t.txt", &replace).await),
+            refused
+        );
+        assert_eq!(refusal(p.remove_tree(ACCOUNT_LOC, b"/docs/new").await), refused);
+        assert_eq!(refusal(p.make_hardlink(ACCOUNT_LOC, b"/docs/a.txt", b"/docs/h").await), refused);
+        // A cut upload stays the app's: resumed, then cleaned up.
+        fake.fail_op("upload", ErrorName::ConnectionLost);
+        assert_eq!(put(&c, &mut signals, b"/docs/.cut.part", b"abc", &no_opts()).await, "ConnectionLost");
+        let added = std::fs::read_to_string(f.dir.join("added")).unwrap();
+        assert!(added.contains(" P account:1 2f646f63732f2e6375742e70617274\n"), "{added}");
+        if fake.exists(b"/docs/.cut.part") {
+            p.remove_file(ACCOUNT_LOC, b"/docs/.cut.part").await.unwrap();
+        } else {
+            assert_eq!(
+                error_name(&p.remove_file(ACCOUNT_LOC, b"/docs/.cut.part").await),
+                name(ErrorName::NotFound)
+            );
+        }
+        assert!(!std::fs::read_to_string(f.dir.join("added")).unwrap().contains("2e6375742e70617274"));
+    });
+}
+
+fn add_level(h: &Harness) {
+    let f = Fixture::new(h, at(Level::Add));
+    let fake = h.fake;
+    fake.add_file(b"/in/a.txt", b"hello");
+    fake.add_file(b"/in/sub/b.txt", b"b");
+    block_on(async {
+        let c = f.hello_client().await;
+        let mut signals = c.signals();
+        let proxy = c.proxy();
+        let refused = (name(ErrorName::PermissionDenied), "add".to_owned());
+        let request = proxy.list(ACCOUNT_LOC, b"/in", "", 0).await.unwrap();
+        let mut names = Vec::new();
+        loop {
+            match wait_signal(&mut signals, WAIT, |s| {
+                matches!(s, Signal::ListBatch { .. } | Signal::ListDone { .. })
+            })
+            .await
+            {
+                Some(Signal::ListBatch { req, entries }) if req == request => {
+                    names.extend(entries.into_iter().map(|entry| entry.name));
+                }
+                Some(Signal::ListDone { req, error, .. }) if req == request => {
+                    assert_eq!(error, "");
+                    break;
+                }
+                other => panic!("{other:?}"),
+            }
+        }
+        assert_eq!(names, [b"sub".to_vec()]);
+        assert_eq!(proxy.stat(ACCOUNT_LOC, b"/in/sub", true, "").await.unwrap().name, b"sub");
+        assert_eq!(refusal(proxy.stat(ACCOUNT_LOC, b"/in/a.txt", true, "").await), refused);
+        assert_eq!(
+            error_name(&proxy.stat(ACCOUNT_LOC, b"/in/none", true, "").await),
+            name(ErrorName::NotFound)
+        );
+        assert_eq!(refusal(proxy.open_read(ACCOUNT_LOC, b"/in/a.txt", "").await), refused);
+        assert_eq!(refusal(proxy.checksum(ACCOUNT_LOC, b"/in/a.txt", "md5").await), refused);
+        assert_eq!(refusal(proxy.read_link(ACCOUNT_LOC, b"/in/a.txt").await), refused);
+        assert_eq!(put(&c, &mut signals, b"/in/.n.part", b"mine", &no_opts()).await, "");
+        let (handle, size) = proxy.open_read(ACCOUNT_LOC, b"/in/.n.part", "").await.unwrap();
+        assert_eq!(size, 4);
+        proxy.close(handle).await.unwrap();
+        assert_eq!(proxy.stat(ACCOUNT_LOC, b"/in/.n.part", true, "").await.unwrap().size, 4);
+        proxy.rename(ACCOUNT_LOC, b"/in/.n.part", b"/in/n.txt", false).await.unwrap();
+        assert_eq!(refusal(proxy.stat(ACCOUNT_LOC, b"/in/n.txt", true, "").await), refused);
+        assert_eq!(put(&c, &mut signals, b"/in/a.txt", b"x", &no_opts()).await, "AlreadyExists");
+        proxy.make_dir(ACCOUNT_LOC, b"/in/sub/new", true).await.unwrap();
+        let job = proxy.walk(ACCOUNT_LOC, b"/in", &no_opts()).await.unwrap();
+        let mut paths = Vec::new();
+        loop {
+            match wait_signal(&mut signals, WAIT, |s| {
+                matches!(s, Signal::WalkBatch { .. } | Signal::JobFinished { .. })
+            })
+            .await
+            {
+                Some(Signal::WalkBatch { job: id, entries }) if id == job => {
+                    paths.extend(entries.into_iter().map(|item| item.path));
+                }
+                Some(Signal::JobFinished { job: id, error, .. }) if id == job => {
+                    assert_eq!(error, "");
+                    break;
+                }
+                other => panic!("{other:?}"),
+            }
+        }
+        paths.sort();
+        assert_eq!(paths, [b"/in/sub".to_vec(), b"/in/sub/new".to_vec()]);
+        assert_eq!(fake.file_data(b"/in/n.txt").as_deref(), Some(&b"mine"[..]));
+    });
+}
+
+fn ad_hoc_locations_are_full(h: &Harness) {
+    let f = Fixture::new(h, Consent::all(Choice::Deny));
+    block_on(async {
+        let c = f.hello_client().await;
+        let loc = c.proxy().connect_ad_hoc("fake://user@h/", b"", &no_opts()).await.unwrap();
+        assert_eq!(access_of(&c, &loc).await.as_deref(), Some("full"));
+        c.proxy().make_dir(&loc, b"/made", true).await.unwrap();
+        c.proxy().remove_dir(&loc, b"/made").await.unwrap();
     });
 }
 
 fn list_streams_batches(h: &Harness) {
-    let f = Fixture::new(h, Consent::Granted);
+    let f = Fixture::new(h, Consent::all(FULL));
     for i in 0..1000 {
         f.harness.fake.add_file(format!("/many/f{i:04}").as_bytes(), b"x");
     }
@@ -281,7 +583,7 @@ async fn next_arrival(stream: &mut zbus::MessageStream, serial: std::num::NonZer
 
 // One writer per session keeps the reply to List ahead of its ListBatch signals and those ahead of ListDone, every time.
 fn zbus_send_ordering(h: &Harness) {
-    let f = Fixture::new(h, Consent::Granted);
+    let f = Fixture::new(h, Consent::all(FULL));
     for i in 0..3 {
         h.fake.add_file(format!("/o/f{i}").as_bytes(), b"x");
     }
@@ -317,7 +619,7 @@ fn zbus_send_ordering(h: &Harness) {
 }
 
 fn cancel_job(h: &Harness) {
-    let f = Fixture::new(h, Consent::Granted);
+    let f = Fixture::new(h, Consent::all(FULL));
     block_on(async {
         let c = f.hello_client().await;
         let mut signals = c.signals();
@@ -339,7 +641,7 @@ fn cancel_job(h: &Harness) {
 }
 
 fn disconnect_cancels_jobs(h: &Harness) {
-    let f = Fixture::new(h, Consent::Granted);
+    let f = Fixture::new(h, Consent::all(FULL));
     block_on(async {
         let c = f.hello_client().await;
         let (_job, _reader) = slow_download(&f, &c).await;
@@ -354,12 +656,12 @@ fn disconnect_cancels_jobs(h: &Harness) {
 }
 
 fn idle_exit(h: &Harness) {
-    let mut f = Fixture::with_idle_exit(h, Consent::Granted, Duration::from_millis(300));
+    let mut f = Fixture::with_idle_exit(h, Consent::all(FULL), Duration::from_millis(300));
     block_on(async {
         let c = f.hello_client().await;
         tokio::time::sleep(Duration::from_millis(600)).await;
         assert!(f.probe().counters().await.is_some());
-        assert_eq!(c.proxy().get_consent().await.unwrap(), "granted");
+        assert_eq!(c.proxy().get_consent().await.unwrap(), "decided");
         c.close().await;
         drop(c);
         let started = Instant::now();
@@ -386,7 +688,7 @@ fn count(extra: &std::collections::HashMap<String, zbus::zvariant::OwnedValue>, 
 }
 
 fn metadata_and_namespace(h: &Harness) {
-    let f = Fixture::new(h, Consent::Granted);
+    let f = Fixture::new(h, Consent::all(FULL));
     let fake = h.fake;
     fake.add_file(b"/docs/a.txt", b"hello");
     block_on(async {
@@ -441,7 +743,7 @@ fn metadata_and_namespace(h: &Harness) {
 }
 
 fn path_validation(h: &Harness) {
-    let f = Fixture::new(h, Consent::Granted);
+    let f = Fixture::new(h, Consent::all(FULL));
     block_on(async {
         let c = f.hello_client().await;
         let p = c.proxy();
@@ -453,7 +755,7 @@ fn path_validation(h: &Harness) {
 }
 
 fn handles(h: &Harness) {
-    let f = Fixture::new(h, Consent::Granted);
+    let f = Fixture::new(h, Consent::all(FULL));
     h.fake.add_file(b"/v.bin", b"0123456789");
     block_on(async {
         let c = f.hello_client().await;
@@ -489,7 +791,7 @@ fn handles(h: &Harness) {
 }
 
 fn handle_limit(h: &Harness) {
-    let f = Fixture::new(h, Consent::Granted);
+    let f = Fixture::new(h, Consent::all(FULL));
     h.fake.add_file(b"/v.bin", b"x");
     block_on(async {
         let c = f.hello_client().await;
@@ -531,7 +833,7 @@ fn request_limit(h: &Harness) {
         assert_eq!(error_name(&over), name(ErrorName::TooManyConnections));
         let over = netvfs_bridge_proto::BridgeError::from(over.unwrap_err());
         assert!(format!("{over:?}").contains("1000"), "{over:?}");
-        assert_eq!(c.proxy().get_consent().await.unwrap(), "granted");
+        assert_eq!(c.proxy().get_consent().await.unwrap(), "decided");
         c.close().await;
         drop(c);
         let after = probe.wait_until(Duration::from_secs(5), |n| n.requests == 0).await.unwrap();
@@ -580,7 +882,7 @@ fn temp_file(dir: &TempDir, name: &str, data: &[u8]) -> std::path::PathBuf {
 }
 
 fn upload_and_download_regular(h: &Harness) {
-    let f = Fixture::new(h, Consent::Granted);
+    let f = Fixture::new(h, Consent::all(FULL));
     let dir = TempDir::new();
     let local = temp_file(&dir, "up.bin", b"0123456789");
     block_on(async {
@@ -617,7 +919,7 @@ fn upload_and_download_regular(h: &Harness) {
 }
 
 fn transfer_through_pipes(h: &Harness) {
-    let f = Fixture::new(h, Consent::Granted);
+    let f = Fixture::new(h, Consent::all(FULL));
     block_on(async {
         let c = f.hello_client().await;
         let mut signals = c.signals();
@@ -650,7 +952,7 @@ fn transfer_through_pipes(h: &Harness) {
 }
 
 fn fd_validation(h: &Harness) {
-    let f = Fixture::new(h, Consent::Granted);
+    let f = Fixture::new(h, Consent::all(FULL));
     h.fake.add_file(b"/a", b"a");
     let dir = TempDir::new();
     let local = temp_file(&dir, "l", b"l");
@@ -694,7 +996,7 @@ fn fd_validation(h: &Harness) {
 }
 
 fn walk_remove_tree_copy_across(h: &Harness) {
-    let f = Fixture::new(h, Consent::Granted);
+    let f = Fixture::new(h, Consent::all(FULL));
     f.accounts.state().accounts.push(FakeAccounts::fake_account(2));
     f.accounts_changed();
     let fake = h.fake;
@@ -760,7 +1062,7 @@ fn walk_remove_tree_copy_across(h: &Harness) {
 }
 
 fn walk_batch_limit(h: &Harness) {
-    let f = Fixture::new(h, Consent::Granted);
+    let f = Fixture::new(h, Consent::all(FULL));
     for i in 0..700 {
         h.fake.add_file(format!("/w/f{i}").as_bytes(), b"x");
     }
@@ -796,7 +1098,7 @@ const PIN_A: &str = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIA==";
 const PIN_B: &str = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIB==";
 
 fn account_identity_changed_sets_attention(h: &Harness) {
-    let f = Fixture::new(h, Consent::Granted);
+    let f = Fixture::new(h, Consent::all(FULL));
     h.fake.set_identity_pin(PIN_A);
     f.accounts.state().accounts[0]
         .params
@@ -843,7 +1145,7 @@ async fn question(
 }
 
 fn ad_hoc_identity_question(h: &Harness) {
-    let f = Fixture::new(h, Consent::Granted);
+    let f = Fixture::new(h, Consent::all(FULL));
     h.fake.set_identity_pin(PIN_A);
     block_on(async {
         let c = f.hello_client().await;
@@ -917,13 +1219,13 @@ fn ad_hoc_identity_question(h: &Harness) {
 
 /// A restarted bridge forgot its ad-hoc locations, but the consumer may still hold their ids (URIs on its clipboard): they name nothing now, never a location the new run connected.
 fn ad_hoc_ids_after_a_restart(h: &Harness) {
-    let mut f = Fixture::new(h, Consent::Granted);
+    let mut f = Fixture::new(h, Consent::all(FULL));
     let old = block_on(async {
         let c = f.hello_client().await;
         c.proxy().connect_ad_hoc("fake://user@one.example/", b"", &no_opts()).await.unwrap()
     });
     assert!(f.stop().is_some());
-    let f = Fixture::new(h, Consent::Granted);
+    let f = Fixture::new(h, Consent::all(FULL));
     block_on(async {
         let c = f.hello_client().await;
         let p = c.proxy();
@@ -937,7 +1239,7 @@ fn ad_hoc_ids_after_a_restart(h: &Harness) {
 }
 
 fn keyboard_interactive(h: &Harness) {
-    let f = Fixture::new(h, Consent::Granted);
+    let f = Fixture::new(h, Consent::all(FULL));
     h.fake.set_otp(b"123456");
     block_on(async {
         let c = f.hello_client().await;
@@ -970,7 +1272,7 @@ fn keyboard_interactive(h: &Harness) {
 }
 
 fn connect_ad_hoc_refusals(h: &Harness) {
-    let f = Fixture::new(h, Consent::Granted);
+    let f = Fixture::new(h, Consent::all(FULL));
     block_on(async {
         let c = f.hello_client().await;
         let p = c.proxy();
@@ -1022,7 +1324,7 @@ fn peer_check_refuses(h: &Harness) {
 }
 
 fn discovery(h: &Harness) {
-    let f = Fixture::new(h, Consent::Granted);
+    let f = Fixture::new(h, Consent::all(FULL));
     block_on(async {
         let c = f.hello_client().await;
         let mut signals = c.signals();
@@ -1077,7 +1379,7 @@ fn handoff(h: &Harness) {
         assert_eq!(calls[1].arguments, [HandoffArg::Str("smb".to_owned())]);
         assert_eq!(error_name(&c.proxy().open_account_settings("adhoc:7").await), name(ErrorName::NotFound));
     });
-    let f = Fixture::new(h, Consent::Granted);
+    let f = Fixture::new(h, Consent::all(FULL));
     block_on(async {
         let c = f.hello_client().await;
         assert_eq!(
@@ -1095,8 +1397,12 @@ const STORAGE_CONF: &str =
     "[OpenStorageSettings]\nService=a.b\nPath=/c\nInterface=a.b\nMethod=page\nArguments=s:system/storage\n";
 
 fn storage_settings(h: &Harness) {
-    for consent in [Consent::Unknown, Consent::Denied, Consent::Granted] {
-        let setup = Setup { consent, handoff_conf: Some(STORAGE_CONF.to_owned()), ..Setup::default() };
+    for consent in [Consent::unknown(), Consent::all(Choice::Deny), Consent::all(FULL)] {
+        let setup = Setup {
+            consent: consent.clone(),
+            handoff_conf: Some(STORAGE_CONF.to_owned()),
+            ..Setup::default()
+        };
         let f = Fixture::start(h, setup);
         block_on(async {
             let c = f.client().await;
@@ -1110,7 +1416,7 @@ fn storage_settings(h: &Harness) {
                 (calls[0].method.as_str(), calls[0].arguments.as_slice()),
                 ("page", &[HandoffArg::Str("system/storage".to_owned())][..])
             );
-            if consent == Consent::Granted {
+            if consent.is_decided() {
                 assert_eq!(error_name(&c.proxy().add_account("smb").await), name(ErrorName::Unsupported));
             } else {
                 assert_eq!(
@@ -1123,7 +1429,7 @@ fn storage_settings(h: &Harness) {
 }
 
 fn drives(h: &Harness) {
-    let f = Fixture::new(h, Consent::Denied);
+    let f = Fixture::new(h, Consent::unknown());
     f.drives.state().drives = vec![FakeDrives::card("mmcblk1p1", "CARD"), FakeDrives::card("sda1", "")];
     block_on(async {
         let c = f.client().await;
@@ -1158,7 +1464,7 @@ fn drives(h: &Harness) {
 }
 
 fn locations_changed(h: &Harness) {
-    let f = Fixture::new(h, Consent::Granted);
+    let f = Fixture::new(h, Consent::all(FULL));
     block_on(async {
         let c = f.hello_client().await;
         let quiet = f.client().await;
@@ -1211,7 +1517,7 @@ const QUIET: Duration = Duration::from_millis(750);
 
 /// The state of the consumer's pool for a location, and `LocationsChanged` when it changes, only then.
 fn connection_states(h: &Harness) {
-    let f = Fixture::new(h, Consent::Granted);
+    let f = Fixture::new(h, Consent::all(FULL));
     block_on(async {
         let c = f.hello_client().await;
         let mut signals = c.signals();
@@ -1296,7 +1602,7 @@ fn live_discoveries(h: &Harness) -> usize {
 }
 
 fn ffi_nearby_lives_on_the_qt_thread(h: &Harness) {
-    let f = Fixture::new(h, Consent::Granted);
+    let f = Fixture::new(h, Consent::all(FULL));
     let mut source = nearby::FfiNearby::new(h.ffi, f.link().clone());
     assert_eq!(live_discoveries(h), 0);
     source.set_running(false);
@@ -1312,7 +1618,7 @@ fn ffi_nearby_lives_on_the_qt_thread(h: &Harness) {
 }
 
 fn cancel_copy_across(h: &Harness) {
-    let f = Fixture::new(h, Consent::Granted);
+    let f = Fixture::new(h, Consent::all(FULL));
     f.accounts.state().accounts.push(FakeAccounts::fake_account(2));
     f.accounts_changed();
     h.fake.add_file(b"/big", &vec![b'x'; 4 << 20]);
@@ -1334,7 +1640,7 @@ fn cancel_copy_across(h: &Harness) {
 }
 
 fn cancel_pending_job(h: &Harness) {
-    let f = Fixture::new(h, Consent::Granted);
+    let f = Fixture::new(h, Consent::all(FULL));
     let mut accounts = f.accounts.state();
     accounts.accounts.push(FakeAccounts::fake_account(2));
     accounts.accounts.push(FakeAccounts::fake_account(3));
@@ -1371,21 +1677,21 @@ fn cancel_pending_job(h: &Harness) {
     });
 }
 
-fn idle_exit_after_an_answer(h: &Harness) {
-    let mut f = Fixture::with_idle_exit(h, Consent::Unknown, Duration::from_millis(300));
+fn idle_exit_after_a_tap(h: &Harness) {
+    let mut f = Fixture::with_idle_exit(h, Consent::unknown(), Duration::from_millis(300));
     block_on(async {
         let c = f.hello_client().await;
         assert_eq!(f.prompt.state().shown, 1);
         c.close().await;
         drop(c);
-        f.answer_prompt(false);
+        f.tap_prompt();
         assert_eq!(f.wait_exit(Duration::from_secs(5)).await, Some(ExitCode::SUCCESS));
-        assert_eq!(f.stored_consent(), Consent::Denied);
+        assert_eq!(f.stored_consent(), Consent::unknown(), "the bridge never decides");
     });
 }
 
 fn debug_output(h: &Harness) {
-    let mut f = Fixture::new(h, Consent::Granted);
+    let mut f = Fixture::new(h, Consent::all(FULL));
     let link = f.link().clone();
     assert_eq!(format!("{link:?}"), "CoreLink { closed: false }");
     let services = Services {

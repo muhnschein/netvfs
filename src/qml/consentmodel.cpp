@@ -1,5 +1,9 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 #include "consentmodel.h"
+#include "accessmodel.h"
+
+#include <QtCore/QFile>
+#include <QtCore/QFileInfo>
 
 using namespace NetVfs;
 
@@ -36,8 +40,10 @@ QVariant ConsentModel::data(const QModelIndex &index, int role) const
     case roleId(Role::DisplayName):
     case Qt::DisplayRole:
         return consumer.displayName;
-    case roleId(Role::Consent):
-        return consentToString(m_consents.at(index.row()));
+    case roleId(Role::Icon):
+        return iconOf(consumer.executable);
+    case roleId(Role::Pending):
+        return m_pending.at(index.row());
     default:
         return QVariant();
     }
@@ -48,7 +54,8 @@ QHash<int, QByteArray> ConsentModel::roleNames() const
     QHash<int, QByteArray> names;
     names.insert(roleId(Role::ConsumerId), "consumerId");
     names.insert(roleId(Role::DisplayName), "displayName");
-    names.insert(roleId(Role::Consent), "consent");
+    names.insert(roleId(Role::Icon), "icon");
+    names.insert(roleId(Role::Pending), "pending");
     return names;
 }
 
@@ -57,50 +64,32 @@ void ConsentModel::reload()
     const int before = count();
     beginResetModel();
     m_consumers = ConsentStore::consumers();
-    const ConsentStore consents = consentStore();
-    m_consents.clear();
+    const ConsentStore store = m_storePath.isEmpty() ? ConsentStore() : ConsentStore(m_storePath);
+    const QVector<FilesAccount> accounts = filesAccounts();
+    m_pending.clear();
     for (const ConsumerInfo &consumer : m_consumers)
-        m_consents << consents.consent(consumer.id);
+        m_pending << isPending(store.consent(consumer.id), accounts);
     endResetModel();
     if (count() != before)
         emit countChanged();
 }
 
-bool ConsentModel::grant(const QString &consumerId)
+QString ConsentModel::firstPending() const
 {
-    return store(consumerId, Consent::Granted);
+    const auto row = int(m_pending.indexOf(true));
+    return row < 0 ? QString() : m_consumers.at(row).id;
 }
 
-bool ConsentModel::revoke(const QString &consumerId)
+QString ConsentModel::iconOf(const QString &executable, const QString &iconsDir)
 {
-    return store(consumerId, Consent::Denied);
-}
-
-QString ConsentModel::consent(const QString &consumerId) const
-{
-    return consentToString(consentStore().consent(consumerId));
-}
-
-bool ConsentModel::store(const QString &consumerId, Consent consent)
-{
-    for (int row = 0; row < count(); ++row) {
-        if (m_consumers.at(row).id != consumerId)
-            continue;
-        ConsentStore consents = consentStore();
-        consents.setConsent(consumerId, consent);
-        if (consents.consent(consumerId) != consent)
-            return false;
-        m_consents[row] = consent;
-        const QModelIndex changed = index(row);
-        emit dataChanged(changed, changed, { roleId(Role::Consent) });
-        return true;
+    const QString dir = iconsDir.isEmpty() ? QStringLiteral("/usr/share/icons/hicolor") : iconsDir;
+    const QString name = QFileInfo(executable).fileName();
+    for (const char *size : { "172x172", "128x128", "108x108", "86x86" }) {
+        const QString path = QStringLiteral("%1/%2/apps/%3.png").arg(dir, QLatin1String(size), name);
+        if (!name.isEmpty() && QFile::exists(path))
+            return path;
     }
-    return false;
-}
-
-ConsentStore ConsentModel::consentStore() const
-{
-    return m_storePath.isEmpty() ? ConsentStore() : ConsentStore(m_storePath);
+    return QString();
 }
 
 }

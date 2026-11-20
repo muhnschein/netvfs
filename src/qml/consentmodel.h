@@ -8,9 +8,8 @@
 
 namespace NetVfsUi {
 
-// Registered consumers of netvfs-bridge and the user's consent for each (NetVfsConsentPage).
-// grant()/revoke() write bridge.conf at once (ConsentStore); a running bridge watches it and closes
-// a revoked app's connections immediately.
+// Registered consumers of netvfs-bridge (NetVfsConsentPage): name, icon, and whether one waits for
+// the user (not decided, or a files account without a choice while new accounts ask).
 class ConsentModel : public QAbstractListModel
 {
     Q_OBJECT
@@ -20,7 +19,7 @@ class ConsentModel : public QAbstractListModel
     Q_PROPERTY(int count READ count NOTIFY countChanged)
 
 public:
-    enum class Role { ConsumerId = Qt::UserRole + 1, DisplayName, Consent };
+    enum class Role { ConsumerId = Qt::UserRole + 1, DisplayName, Icon, Pending };
     static constexpr int roleId(Role role) { return static_cast<int>(role); }
 
     explicit ConsentModel(QObject *parent = nullptr);
@@ -34,23 +33,20 @@ public:
     QHash<int, QByteArray> roleNames() const override;
 
     Q_INVOKABLE void reload();
-    // Return false when the consent could not be stored.
-    Q_INVOKABLE bool grant(const QString &consumerId);
-    Q_INVOKABLE bool revoke(const QString &consumerId);
-    // "unknown", "granted" or "denied".
-    Q_INVOKABLE QString consent(const QString &consumerId) const;
+    // The first app waiting for the user; "" when none.
+    Q_INVOKABLE QString firstPending() const;
+
+    // Launcher icon of `executable` from the hicolor theme; "" when none.
+    static QString iconOf(const QString &executable, const QString &iconsDir = QString());
 
 Q_SIGNALS:
     void storePathChanged();
     void countChanged();
 
 private:
-    bool store(const QString &consumerId, NetVfs::Consent consent);
-    NetVfs::ConsentStore consentStore() const;
-
     QString m_storePath;
     QVector<NetVfs::ConsumerInfo> m_consumers;
-    QVector<NetVfs::Consent> m_consents;
+    QVector<bool> m_pending;
 };
 
 }
