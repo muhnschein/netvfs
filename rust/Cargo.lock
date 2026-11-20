@@ -1270,7 +1270,6 @@ dependencies = [
  "sha2",
  "tokio",
  "zbus",
- "zeroize",
 ]
 
 [[package]]

@@ -119,7 +119,7 @@ pub mod location_state {
 /// `(sssa{sv})`: id, provider, display name, info.
 #[derive(Debug, Serialize, Deserialize, Type)]
 pub struct WireLocation {
-    /// Location id (`account:<n>`, `adhoc:<run>-<n>`; opaque).
+    /// Location id (`account:<n>`; opaque).
     pub id: String,
     /// Backend provider (`sftp`, `smb`, …).
     pub provider: String,
@@ -199,7 +199,7 @@ pub struct WireWalkItem {
 /// An `a{sv}` argument built from plain Rust values.
 pub type Opts = HashMap<String, Value<'static>>;
 
-/// Builder for option dictionaries (`opts`, `changes`, `answer`).
+/// Builder for option dictionaries (`opts`, `changes`).
 #[derive(Debug, Default)]
 pub struct OptsBuilder(Opts);
 
@@ -235,14 +235,6 @@ impl OptsBuilder {
     #[must_use]
     pub fn bytes(mut self, key: &str, v: &[u8]) -> Self {
         self.0.insert(key.to_owned(), Value::from(v.to_vec()));
-        self
-    }
-
-    /// An array of byte arrays (`aay`), as `Answer` carries keyboard answers.
-    #[must_use]
-    pub fn byte_arrays(mut self, key: &str, v: &[Vec<u8>]) -> Self {
-        let items: Vec<Vec<u8>> = v.to_vec();
-        self.0.insert(key.to_owned(), Value::from(items));
         self
     }
 
@@ -391,18 +383,12 @@ mod tests {
 
     #[test]
     fn opts_builder_values_read_back() {
-        let o = OptsBuilder::new()
-            .bool("b", true)
-            .int("n", -5)
-            .str("s", "x")
-            .byte_arrays("a", &[b"p".to_vec()])
-            .build();
-        assert_eq!(o.len(), 4);
+        let o = OptsBuilder::new().bool("b", true).int("n", -5).str("s", "x").build();
+        assert_eq!(o.len(), 3);
         assert_eq!(value_bool(&o["b"]), Some(true));
         assert_eq!(value_i64(&o["n"]), Some(-5));
         assert_eq!(value_str(&o["s"]).as_deref(), Some("x"));
         assert_eq!(value_i64(&o["s"]), None);
-        assert_eq!(o["a"].value_signature().to_string(), "aay");
     }
 
     #[test]

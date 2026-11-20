@@ -1,5 +1,5 @@
 {
-    "description": "No account allowed: nothing is listed, account calls fail with PermissionDenied, ad-hoc and discovery stay open (XB-6)",
+    "description": "No account allowed: nothing is listed, account calls fail with PermissionDenied, discovery stays open (XB-6)",
     "consent": "denied",
     "steps": [
         { "call": "ListLocations", "sig": "", "args": [], "error": "org.netvfs.Error.ProtocolError" },

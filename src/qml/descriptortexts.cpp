@@ -10,7 +10,7 @@
 namespace NetVfsUi {
 
 namespace {
-constexpr std::array<const char *, 35> TextIds = { {
+constexpr std::array<const char *, 33> TextIds = { {
     //% "Server"
     QT_TRID_NOOP("settings-accounts-netvfs-la-server"),
     //% "Server name or IP address"
@@ -49,14 +49,10 @@ constexpr std::array<const char *, 35> TextIds = { {
     QT_TRID_NOOP("settings-accounts-netvfs-me-key_generate"),
     //% "SSH key: import a key file"
     QT_TRID_NOOP("settings-accounts-netvfs-me-key_import"),
-    //% "Ask each time (one-time codes)"
-    QT_TRID_NOOP("settings-accounts-netvfs-me-interactive"),
     //% "Use a strong password that you use nowhere else: any server this account connects to can try to guess it."
     QT_TRID_NOOP("settings-accounts-netvfs-la-smb_password_warning"),
     //% "After checking the server's identity you can copy the public key, or install it on the server with your password."
     QT_TRID_NOOP("settings-accounts-netvfs-la-key_mode_hint"),
-    //% "The server asks for the password or a one-time code whenever files are browsed. Such an account cannot be used for backups."
-    QT_TRID_NOOP("settings-accounts-netvfs-la-interactive_hint"),
     //% "Connection security"
     QT_TRID_NOOP("settings-accounts-netvfs-la-security_profile"),
     //% "Signed and encrypted (SMB 3)"

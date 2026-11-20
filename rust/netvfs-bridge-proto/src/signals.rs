@@ -62,15 +62,6 @@ pub enum Signal {
         /// `detail`, `retryAfterMs` and job results.
         extra: HashMap<String, OwnedValue>,
     },
-    /// The bridge asks the user something; `Answer` answers.
-    Question {
-        /// Question id.
-        id: String,
-        /// `identity-unknown`, `keyboard-interactive`, `insecure-consent`, …
-        kind: String,
-        /// What to show.
-        details: HashMap<String, OwnedValue>,
-    },
     /// The drives changed; `ListDrives` has the new list.
     DrivesChanged,
 }
@@ -127,10 +118,6 @@ fn decode_member(member: &str, msg: &Message) -> Result<Option<Signal>, BridgeEr
                 body::<(u32, String, String, HashMap<String, OwnedValue>)>(msg)?;
             Signal::JobFinished { job, error, message, extra }
         }
-        "Question" => {
-            let (id, kind, details) = body::<(String, String, HashMap<String, OwnedValue>)>(msg)?;
-            Signal::Question { id, kind, details }
-        }
         "DrivesChanged" => Signal::DrivesChanged,
         _ => return Ok(None),
     }))
@@ -139,7 +126,7 @@ fn decode_member(member: &str, msg: &Message) -> Result<Option<Signal>, BridgeEr
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::wire::{entry_kind, value_i64, value_str};
+    use crate::wire::{entry_kind, value_i64};
     use zbus::zvariant::{DynamicType, Value};
 
     fn signal<B: serde::Serialize + DynamicType>(iface: &str, member: &str, body: &B) -> Message {
@@ -153,20 +140,6 @@ mod tests {
             decode_signal(&msg).unwrap(),
             Some(Signal::JobProgress { job: 7, done: 512, total: -1 })
         ));
-    }
-
-    #[test]
-    fn question_decodes_its_details() {
-        let details = HashMap::from([("detail".to_owned(), Value::from("HTTP 429"))]);
-        let msg =
-            signal(INTERFACE, "Question", &("q1".to_owned(), "keyboard-interactive".to_owned(), details));
-        match decode_signal(&msg).unwrap() {
-            Some(Signal::Question { id, kind, details }) => {
-                assert_eq!((id.as_str(), kind.as_str()), ("q1", "keyboard-interactive"));
-                assert_eq!(value_str(&details["detail"]).as_deref(), Some("HTTP 429"));
-            }
-            other => panic!("unexpected {other:?}"),
-        }
     }
 
     #[test]

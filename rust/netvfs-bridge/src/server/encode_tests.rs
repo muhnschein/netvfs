@@ -219,11 +219,6 @@ fn all_signals() -> Vec<OutSignal> {
         OutSignal::JobProgress { job: 2, done: 3, total: -1 },
         OutSignal::WalkBatch { job: 2, items: vec![WireWalkItem { path: b"a/b".to_vec(), entry: entry() }] },
         OutSignal::JobFinished { job: 2, result: Ok(()), extra: HashMap::new() },
-        OutSignal::Question {
-            id: "q1".to_owned(),
-            kind: "identity-unknown".to_owned(),
-            details: HashMap::new(),
-        },
         OutSignal::DrivesChanged,
     ]
 }
@@ -275,12 +270,6 @@ fn signal_values() {
     let nearby = decoded(&all_signals()[2]);
     let (items,): (Vec<WireNearby>,) = nearby.body().deserialize().unwrap();
     assert_eq!((items[0].name.as_str(), items[0].port), ("n\u{fffd}", 445));
-    let details = OptsBuilder::new().str("host", "h").build_owned();
-    let question = decoded(&OutSignal::Question { id: "q\0".to_owned(), kind: "k\0".to_owned(), details });
-    let (id, kind, back): (String, String, HashMap<String, OwnedValue>) =
-        question.body().deserialize().unwrap();
-    assert_eq!((id.as_str(), kind.as_str()), ("q\u{fffd}", "k\u{fffd}"));
-    assert_eq!(value_str(&back["host"]).as_deref(), Some("h"));
 }
 
 #[test]

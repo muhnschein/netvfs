@@ -92,7 +92,7 @@ mod tests {
         assert!(report.check(failed(ErrorName::AuthFailed)));
         let two = states(&[
             ("account:1", ConnectionState::Disconnected),
-            ("adhoc:x-1", ConnectionState::Connected),
+            ("account:2", ConnectionState::Connected),
         ]);
         assert!(report.check(two.clone()));
         assert!(!report.check(two));

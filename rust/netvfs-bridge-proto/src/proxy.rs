@@ -33,12 +33,6 @@ pub trait Bridge1 {
     /// `Disconnect(loc)`: closes the pooled connections of a location.
     fn disconnect(&self, loc: &str) -> zbus::Result<()>;
 
-    /// `ConnectAdHoc(url, secret, opts)` → location id. See also
-    /// [`crate::Connection::connect_ad_hoc_wiping`].
-    fn connect_ad_hoc(&self, url: &str, secret: &[u8], opts: &Opts) -> zbus::Result<String>;
-    /// `ForgetAdHoc(loc)`.
-    fn forget_ad_hoc(&self, loc: &str) -> zbus::Result<()>;
-
     /// `Discover(on)`: starts or stops `NearbyChanged`.
     fn discover(&self, on: bool) -> zbus::Result<()>;
 
@@ -100,10 +94,6 @@ pub trait Bridge1 {
     fn walk(&self, loc: &str, root: &[u8], opts: &Opts) -> zbus::Result<u32>;
     /// `Cancel(id)`: a request or a job.
     fn cancel(&self, id: u32) -> zbus::Result<()>;
-
-    /// `Answer(id, answer)`: `accept` and keyboard-interactive `answers`. See
-    /// also [`crate::Connection::answer_wiping`].
-    fn answer(&self, id: &str, answer: &Opts) -> zbus::Result<()>;
 
     /// `OpenAccountSettings(loc)`: hands off to the account settings.
     fn open_account_settings(&self, loc: &str) -> zbus::Result<()>;

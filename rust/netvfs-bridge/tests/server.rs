@@ -17,7 +17,6 @@ const FULL: Choice = Choice::Allow(Level::Full);
 use netvfs_bridge::core::MAINTENANCE_INTERVAL;
 use netvfs_bridge::core::nearby::{self, NearbySource as _};
 use netvfs_bridge::handoff::HandoffArg;
-use netvfs_bridge::locations::knownhosts::KnownHosts;
 use netvfs_bridge::server::ListenAddress;
 use netvfs_bridge::testing::{
     self, ACCOUNT_LOC, FakeAccounts, FakeDrives, Fixture, Harness, Setup, Test, WAIT, block_on, error_name,
@@ -46,7 +45,6 @@ const TESTS: &[(&str, Test)] = &[
     ("read_level", read_level),
     ("read_add_level", read_add_level),
     ("add_level", add_level),
-    ("ad_hoc_locations_are_full", ad_hoc_locations_are_full),
     ("list_streams_batches", list_streams_batches),
     ("zbus_send_ordering", zbus_send_ordering),
     ("cancel_job", cancel_job),
@@ -64,10 +62,7 @@ const TESTS: &[(&str, Test)] = &[
     ("walk_remove_tree_copy_across", walk_remove_tree_copy_across),
     ("walk_batch_limit", walk_batch_limit),
     ("account_identity_changed_sets_attention", account_identity_changed_sets_attention),
-    ("ad_hoc_identity_question", ad_hoc_identity_question),
-    ("ad_hoc_ids_after_a_restart", ad_hoc_ids_after_a_restart),
-    ("keyboard_interactive", keyboard_interactive),
-    ("connect_ad_hoc_refusals", connect_ad_hoc_refusals),
+    ("account_keyboard_interactive_is_not_relayed", account_keyboard_interactive_is_not_relayed),
     ("peer_check_refuses", peer_check_refuses),
     ("discovery", discovery),
     ("handoff", handoff),
@@ -169,8 +164,6 @@ fn consent_unknown_then_decided(h: &Harness) {
         let stat = c.proxy().stat(ACCOUNT_LOC, b"/x", true, "").await;
         assert_eq!(error_name(&stat), name(ErrorName::PermissionDenied));
         assert_eq!(error_name(&c.proxy().discover(true).await), name(ErrorName::PermissionDenied));
-        let ad_hoc = c.proxy().connect_ad_hoc("fake://user@h/", b"", &no_opts()).await;
-        assert_eq!(error_name(&ad_hoc), name(ErrorName::PermissionDenied));
         c.proxy().hello("t").await.unwrap();
         c.proxy().request_consent().await.unwrap();
         assert_eq!(f.prompt.state().shown, 1);
@@ -486,17 +479,6 @@ fn add_level(h: &Harness) {
         paths.sort();
         assert_eq!(paths, [b"/in/sub".to_vec(), b"/in/sub/new".to_vec()]);
         assert_eq!(fake.file_data(b"/in/n.txt").as_deref(), Some(&b"mine"[..]));
-    });
-}
-
-fn ad_hoc_locations_are_full(h: &Harness) {
-    let f = Fixture::new(h, Consent::all(Choice::Deny));
-    block_on(async {
-        let c = f.hello_client().await;
-        let loc = c.proxy().connect_ad_hoc("fake://user@h/", b"", &no_opts()).await.unwrap();
-        assert_eq!(access_of(&c, &loc).await.as_deref(), Some("full"));
-        c.proxy().make_dir(&loc, b"/made", true).await.unwrap();
-        c.proxy().remove_dir(&loc, b"/made").await.unwrap();
     });
 }
 
@@ -1092,8 +1074,6 @@ fn walk_batch_limit(h: &Harness) {
     });
 }
 
-/// An ad-hoc location of the fake backend (`testing::fake_url`).
-const URL: &str = "fake://user@adhoc.example/";
 const PIN_A: &str = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIA==";
 const PIN_B: &str = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIB==";
 
@@ -1117,10 +1097,6 @@ fn account_identity_changed_sets_attention(h: &Harness) {
         assert_eq!(h.fake.log_count("authenticate"), 0);
         assert_eq!(state_of(&c, ACCOUNT_LOC).await, failed(ErrorName::ServerIdentityChanged));
         assert!(wait_signal(&mut signals, WAIT, |s| matches!(s, Signal::LocationsChanged)).await.is_some());
-        let questions =
-            wait_signal(&mut signals, Duration::from_millis(100), |s| matches!(s, Signal::Question { .. }))
-                .await;
-        assert!(questions.is_none(), "accounts are resolved in Settings");
         f.accounts.state().files_error =
             Some(netvfs_bridge::Status::new(ErrorName::NotFound, "No such account"));
         c.proxy().disconnect(ACCOUNT_LOC).await.unwrap();
@@ -1129,185 +1105,15 @@ fn account_identity_changed_sets_attention(h: &Harness) {
     });
 }
 
-/// `Answer(id, {accept})`.
-async fn answer(c: &Connection, id: &str, accept: bool) {
-    c.proxy().answer(id, &OptsBuilder::new().bool("accept", accept).build()).await.unwrap();
-}
-
-/// The next question: its id, kind and details.
-async fn question(
-    signals: &mut SignalStream,
-) -> (String, String, std::collections::HashMap<String, zbus::zvariant::OwnedValue>) {
-    match wait_signal(signals, WAIT, |s| matches!(s, Signal::Question { .. })).await {
-        Some(Signal::Question { id, kind, details }) => (id, kind, details),
-        other => panic!("{other:?}"),
-    }
-}
-
-fn ad_hoc_identity_question(h: &Harness) {
-    let f = Fixture::new(h, Consent::all(FULL));
-    h.fake.set_identity_pin(PIN_A);
-    block_on(async {
-        let c = f.hello_client().await;
-        let mut signals = c.signals();
-        let proxy = c.proxy().clone();
-        let connecting = tokio::spawn(async move { proxy.connect_ad_hoc(URL, b"", &Opts::new()).await });
-        let (id, kind, details) = question(&mut signals).await;
-        assert_eq!(kind, "identity-unknown");
-        assert_eq!(String::try_from(details["host"].clone()).unwrap(), "adhoc.example");
-        assert_ne!(String::try_from(details["fingerprint"].clone()).unwrap().len(), 0);
-        assert_eq!(
-            error_name(&c.proxy().answer(&id, &OptsBuilder::new().bool("accept", false).build()).await),
-            None
-        );
-        let declined = connecting.await.unwrap();
-        assert_eq!(error_name(&declined), name(ErrorName::ServerIdentityUnknown));
-        assert_eq!(h.fake.log_count("authenticate"), 0);
-        assert_eq!(c.proxy().list_locations().await.unwrap().len(), 1);
-        assert_eq!(f.probe().counters().await.unwrap().pools, 0);
-
-        let proxy = c.proxy().clone();
-        let connecting = tokio::spawn(async move { proxy.connect_ad_hoc(URL, b"", &Opts::new()).await });
-        let (id, _, _) = question(&mut signals).await;
-        let other = c.proxy().answer("q999", &OptsBuilder::new().bool("accept", true).build()).await;
-        assert_eq!(error_name(&other), name(ErrorName::NotFound));
-        answer(&c, &id, true).await;
-        let loc = connecting.await.unwrap().unwrap();
-        assert!(loc.starts_with("adhoc:"), "{loc}");
-        assert!(wait_signal(&mut signals, WAIT, |s| matches!(s, Signal::LocationsChanged)).await.is_some());
-        let locations = c.proxy().list_locations().await.unwrap();
-        assert_eq!(locations.len(), 2);
-        assert_eq!((locations[1].id.as_str(), locations[1].name.as_str()), (loc.as_str(), "adhoc.example"));
-        let pin = || KnownHosts::new(f.dir.join("known_hosts")).pin("fake://adhoc.example:0");
-        assert_eq!(pin(), PIN_A);
-        c.proxy().disconnect(&loc).await.unwrap();
-        c.proxy().stat(&loc, b"/", true, "").await.unwrap();
-        let asked =
-            wait_signal(&mut signals, Duration::from_millis(100), |s| matches!(s, Signal::Question { .. }))
-                .await;
-        assert!(asked.is_none(), "{asked:?}");
-
-        c.proxy().disconnect(&loc).await.unwrap();
-        h.fake.set_identity_pin(PIN_B);
-        assert_eq!(
-            error_name(&c.proxy().stat(&loc, b"/", true, "").await),
-            name(ErrorName::ServerIdentityChanged)
-        );
-        c.proxy().forget_ad_hoc(&loc).await.unwrap();
-        assert!(wait_signal(&mut signals, WAIT, |s| matches!(s, Signal::LocationsChanged)).await.is_some());
-        assert_eq!(pin(), "");
-        assert_eq!(error_name(&c.proxy().forget_ad_hoc(&loc).await), name(ErrorName::NotFound));
-        assert_eq!(error_name(&c.proxy().forget_ad_hoc(ACCOUNT_LOC).await), name(ErrorName::NotFound));
-        assert_eq!(c.proxy().list_locations().await.unwrap().len(), 1);
-        assert_eq!(error_name(&c.proxy().open_account_settings(&loc).await), name(ErrorName::NotFound));
-
-        h.fake.set_identity_pin(PIN_A);
-        let c2 = f.hello_client().await;
-        let mut signals2 = c2.signals();
-        let proxy = c2.proxy().clone();
-        let connecting = tokio::spawn(async move { proxy.connect_ad_hoc(URL, b"", &Opts::new()).await });
-        let _ = question(&mut signals2).await;
-        c2.close().await;
-        assert!(connecting.await.unwrap().is_err());
-        let probe = f.probe();
-        let after =
-            probe.wait_until(WAIT, |n| n.questions == 0 && n.requests == 0 && n.sessions == 1).await.unwrap();
-        assert_eq!((after.questions, after.requests, after.sessions), (0, 0, 1));
-        assert_eq!(c.proxy().list_locations().await.unwrap().len(), 1);
-    });
-}
-
-/// A restarted bridge forgot its ad-hoc locations, but the consumer may still hold their ids (URIs on its clipboard): they name nothing now, never a location the new run connected.
-fn ad_hoc_ids_after_a_restart(h: &Harness) {
-    let mut f = Fixture::new(h, Consent::all(FULL));
-    let old = block_on(async {
-        let c = f.hello_client().await;
-        c.proxy().connect_ad_hoc("fake://user@one.example/", b"", &no_opts()).await.unwrap()
-    });
-    assert!(f.stop().is_some());
-    let f = Fixture::new(h, Consent::all(FULL));
-    block_on(async {
-        let c = f.hello_client().await;
-        let p = c.proxy();
-        assert_eq!(error_name(&p.stat(&old, b"/", true, "").await), name(ErrorName::NotFound));
-        let new = p.connect_ad_hoc("fake://user@two.example/", b"", &no_opts()).await.unwrap();
-        assert_ne!(new, old);
-        assert_eq!(error_name(&p.stat(&old, b"/", true, "").await), name(ErrorName::NotFound));
-        assert_eq!(error_name(&p.forget_ad_hoc(&old).await), name(ErrorName::NotFound));
-        p.stat(&new, b"/", true, "").await.unwrap();
-    });
-}
-
-fn keyboard_interactive(h: &Harness) {
+/// Account sign-in prompts stay inside the bridge: one beyond the stored password fails sign-in.
+fn account_keyboard_interactive_is_not_relayed(h: &Harness) {
     let f = Fixture::new(h, Consent::all(FULL));
     h.fake.set_otp(b"123456");
     block_on(async {
         let c = f.hello_client().await;
-        let mut signals = c.signals();
-        let proxy = c.proxy().clone();
-        let stat = tokio::spawn(async move { proxy.stat(ACCOUNT_LOC, b"/", true, "").await });
-        let (id, kind, details) = question(&mut signals).await;
-        assert_eq!(kind, "keyboard-interactive");
-        assert!(details.contains_key("prompts"));
-        let answers =
-            OptsBuilder::new().bool("accept", true).byte_arrays("answers", &[b"123456".to_vec()]).build();
-        c.proxy().answer(&id, &answers).await.unwrap();
-        stat.await.unwrap().unwrap();
-        assert_eq!(error_name(&c.proxy().answer(&id, &answers).await), name(ErrorName::NotFound));
-
-        c.proxy().disconnect(ACCOUNT_LOC).await.unwrap();
-        let proxy = c.proxy().clone();
-        let stat = tokio::spawn(async move { proxy.stat(ACCOUNT_LOC, b"/", true, "").await });
-        let (id, _, _) = question(&mut signals).await;
-        let other = f.hello_client().await;
-        assert_eq!(error_name(&other.proxy().answer(&id, &answers).await), name(ErrorName::NotFound));
-        let probe = f.probe();
-        assert_eq!(probe.counters().await.unwrap().questions, 1);
-        c.close().await;
-        assert!(stat.await.unwrap().is_err());
-        let after =
-            probe.wait_until(Duration::from_secs(5), |n| n.requests == 0 && n.questions == 0).await.unwrap();
-        assert_eq!((after.requests, after.questions), (0, 0));
-    });
-}
-
-fn connect_ad_hoc_refusals(h: &Harness) {
-    let f = Fixture::new(h, Consent::all(FULL));
-    block_on(async {
-        let c = f.hello_client().await;
-        let p = c.proxy();
-        let refused = p.connect_ad_hoc("sftp://user:pw@host/", b"s", &no_opts()).await;
-        assert_eq!(error_name(&refused), name(ErrorName::SecurityPolicy));
-        let local = p.connect_ad_hoc("file:///etc", b"", &no_opts()).await;
-        assert_eq!(error_name(&local), name(ErrorName::PermissionDenied));
-        for url in ["dav://host/", "http://host/", "ftp://host/"] {
-            let plain = p.connect_ad_hoc(url, b"", &no_opts()).await;
-            assert_eq!(error_name(&plain), name(ErrorName::SecurityPolicy), "{url}");
-        }
-        let unknown = p.connect_ad_hoc("gopher://host/", b"", &no_opts()).await.unwrap_err();
-        assert_eq!(
-            netvfs_bridge_proto::BridgeError::from(unknown),
-            netvfs_bridge_proto::BridgeError::remote(
-                ErrorName::Unsupported,
-                "Unsupported URL scheme \"gopher\""
-            )
-        );
-        let missing = p.connect_ad_hoc("sftp://host/", b"", &no_opts()).await;
-        assert_eq!(error_name(&missing), name(ErrorName::Unsupported));
-        let bad =
-            p.connect_ad_hoc("sftp://host/", b"", &OptsBuilder::new().str("password", "x").build()).await;
-        assert_eq!(error_name(&bad).as_deref(), Some("org.freedesktop.DBus.Error.InvalidArgs"));
-        let profile = OptsBuilder::new().str("security_profile", "guest").build();
-        let not_smb = p.connect_ad_hoc("fake://user@h/", b"", &profile).await;
-        assert_eq!(error_name(&not_smb).as_deref(), Some("org.freedesktop.DBus.Error.InvalidArgs"));
-        let user = OptsBuilder::new().str("user", "other").build();
-        let wrong = p.connect_ad_hoc("fake://user@h/", b"", &user).await;
-        assert_eq!(error_name(&wrong), name(ErrorName::AuthFailed));
-        let right = OptsBuilder::new().str("user", "user").build();
-        let loc = p.connect_ad_hoc("fake://nobody@h/sub", b"", &right).await.unwrap();
-        let locations = p.list_locations().await.unwrap();
-        let info = &locations.iter().find(|l| l.id == loc).unwrap().info;
-        assert_eq!(String::try_from(info["user"].clone()).unwrap(), "user");
+        let stat = c.proxy().stat(ACCOUNT_LOC, b"/", true, "").await;
+        assert_eq!(error_name(&stat), name(ErrorName::AuthFailed));
+        assert_eq!(h.fake.log_count("answers:"), 0);
         assert_eq!(f.probe().counters().await.unwrap().requests, 0);
     });
 }
@@ -1377,7 +1183,10 @@ fn handoff(h: &Harness) {
             ("show", &[HandoffArg::Int(1)][..])
         );
         assert_eq!(calls[1].arguments, [HandoffArg::Str("smb".to_owned())]);
-        assert_eq!(error_name(&c.proxy().open_account_settings("adhoc:7").await), name(ErrorName::NotFound));
+        assert_eq!(
+            error_name(&c.proxy().open_account_settings("account:7").await),
+            name(ErrorName::NotFound)
+        );
     });
     let f = Fixture::new(h, Consent::all(FULL));
     block_on(async {
@@ -1706,10 +1515,9 @@ fn debug_output(h: &Harness) {
         ffi: h.ffi,
         listen: ListenAddress::parse("unix:path=/nowhere").unwrap(),
         services: Box::new(|_| panic!("never served")),
-        url_override: None,
     };
     let text = format!("{deps:?}");
-    assert!(text.starts_with("Deps { ffi: ") && text.ends_with("url_override: false, .. }"), "{text}");
+    assert!(text.starts_with("Deps { ffi: ") && text.ends_with(", .. }"), "{text}");
     assert!(text.contains("/nowhere"), "{text}");
     assert_eq!(f.stop(), Some(ExitCode::SUCCESS));
     assert_eq!(format!("{link:?}"), "CoreLink { closed: true }");

@@ -5,8 +5,8 @@
 
 use super::args::{CopyOpts, Disposition, TransferOpts, WalkOpts};
 use super::fail::Fail;
-use super::iface::{Iface, ask_question};
-use super::state::{InfoValue, JobFailure, RecordedAnswer, Session, Shared};
+use super::iface::Iface;
+use super::state::{JobFailure, Session, Shared};
 use super::tree::Tree;
 use crate::access::{self, After};
 use crate::errors::ErrorName;
@@ -32,10 +32,6 @@ pub(super) struct Env {
 }
 
 impl Env {
-    pub async fn ask(&self, kind: &str, details: &[(String, InfoValue)]) -> Option<RecordedAnswer> {
-        ask_question(&self.shared, &self.session, &self.ctx, kind, details).await
-    }
-
     fn chunk(&self) -> usize {
         self.shared.with(|s| s.chunk).max(1)
     }

@@ -51,13 +51,13 @@
     </method>
 
     <!-- Locations
-      ListLocations info (a{sv}): "kind" (s, "account" or "adhoc"), "host" (s),
-      "port" (i) and "user" (s) when set, "path" (ay), "url" (s) when known,
-      for accounts "accountId" (i) and "attention" (s) when set, "access" (s)
-      and "state" (s).
+      Every location is an account of Settings > Accounts; the bridge takes
+      no credentials from consumers and asks them nothing.
+      ListLocations info (a{sv}): "kind" (s, "account"), "host" (s), "port"
+      (i) and "user" (s) when set, "path" (ay), "url" (s) when known,
+      "accountId" (i), "attention" (s) when set, "access" (s) and "state" (s).
       "access": what the user lets the app do there: "full"; "read-add" (read,
-      add new items); "read"; "add" (see folders, add new items); ad-hoc
-      locations "full". A call beyond it fails with PermissionDenied, the level
+      add new items); "read"; "add" (see folders, add new items). A call beyond it fails with PermissionDenied, the level
       as detail. Accounts not allowed are not listed; calls on them fail with
       PermissionDenied, detail "denied".
       "state": the connection state of the consumer's pool for the location (XB-12):
@@ -83,17 +83,6 @@
       <arg name="capabilities" type="(asasx)" direction="out"/>
     </method>
     <method name="Disconnect">
-      <arg name="loc" type="s" direction="in"/>
-    </method>
-
-    <!-- Ad-hoc locations -->
-    <method name="ConnectAdHoc">
-      <arg name="url" type="s" direction="in"/>
-      <arg name="secret" type="ay" direction="in"/>
-      <arg name="opts" type="a{sv}" direction="in"/>
-      <arg name="loc" type="s" direction="out"/>
-    </method>
-    <method name="ForgetAdHoc">
       <arg name="loc" type="s" direction="in"/>
     </method>
 
@@ -267,17 +256,6 @@
       <arg name="message" type="s"/>
       <arg name="extra" type="a{sv}"/>
     </signal>
-
-    <!-- Questions -->
-    <signal name="Question">
-      <arg name="id" type="s"/>
-      <arg name="kind" type="s"/>
-      <arg name="details" type="a{sv}"/>
-    </signal>
-    <method name="Answer">
-      <arg name="id" type="s" direction="in"/>
-      <arg name="answer" type="a{sv}" direction="in"/>
-    </method>
 
     <!-- Handoff -->
     <method name="OpenAccountSettings">

@@ -11,8 +11,8 @@ use crate::core::nearby::NearbySource;
 use crate::core::{Config, CoreLink, Counters, Deps, LocalFuture, MakeServices, Services};
 use crate::drives::classify::Kind;
 use crate::drives::{Drive, DriveSource};
+use crate::ffi::Ffi;
 use crate::ffi::fake::{self, Fake};
-use crate::ffi::{Ffi, Params, ParsedUrl};
 use crate::handoff::{HandoffCall, Launcher};
 use crate::prompt::{ConsentPrompt, PromptEvent};
 use crate::server::ListenAddress;
@@ -488,8 +488,7 @@ impl Probe {
 pub struct Fixture {
     /// The C ABI and the fake backend.
     pub harness: Harness,
-    /// The temporary folder: `config/bridge.conf`, `known_hosts`,
-    /// `handoff.conf`, `bridge.sock`.
+    /// The temporary folder: `config/bridge.conf`, `handoff.conf`, `bridge.sock`.
     pub dir: TempDir,
     /// What the bridge runs with.
     pub config: Config,
@@ -540,21 +539,6 @@ impl Default for Setup {
     }
 }
 
-/// `fake://[user@]host[/path]`: an ad-hoc location of the fake backend (no URL scheme of its own); other URLs go to the C ABI.
-#[must_use = "the exit code of the test binary"]
-pub fn fake_url(url: &str) -> Option<ParsedUrl> {
-    let rest = url.strip_prefix("fake://")?;
-    let (authority, path) = rest.split_once('/').map_or((rest, ""), |(a, p)| (a, p));
-    let (user, host) = authority.split_once('@').map_or(("", authority), |(u, h)| (u, h));
-    let params = Params {
-        provider: "fake".to_owned(),
-        host: host.to_owned(),
-        username: user.to_owned(),
-        ..Params::default()
-    };
-    Some(ParsedUrl { params, path: format!("/{path}").into_bytes() })
-}
-
 impl Fixture {
     /// The bridge with `consent` stored, the fixture's idle exit.
     #[must_use]
@@ -587,12 +571,10 @@ impl Fixture {
                 access: Level::Full,
             },
             consent_file: dir.join("config/bridge.conf"),
-            known_hosts_file: dir.join("known_hosts"),
             added_file: dir.join("added"),
             handoff_config: dir.join("handoff.conf"),
             idle_exit: setup.idle_exit,
             connection_idle: setup.connection_idle,
-            question_timeout: crate::locations::connector::QUESTION_TIMEOUT,
         };
         if let Some(conf) = &setup.handoff_conf {
             std::fs::write(&config.handoff_config, conf).expect("handoff.conf");
@@ -624,12 +606,7 @@ impl Fixture {
                 })
             })
         };
-        let deps = Deps {
-            ffi: h.ffi,
-            listen: ListenAddress::Path(socket.clone()),
-            services,
-            url_override: Some(Arc::new(fake_url)),
-        };
+        let deps = Deps { ffi: h.ffi, listen: ListenAddress::Path(socket.clone()), services };
         let run = config.clone();
         let bridge = thread::Builder::new()
             .name("nvb-rt".to_owned())

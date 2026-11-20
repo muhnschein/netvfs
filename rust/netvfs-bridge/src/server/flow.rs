@@ -167,7 +167,7 @@ impl Outbox {
         self.sid
     }
 
-    /// Enqueues a signal that is not flow-controlled (`ConsentChanged`, `LocationsChanged`, `NearbyChanged`, `ListDone`, `JobProgress`, `JobFinished`, `Question`).
+    /// Enqueues a signal that is not flow-controlled (`ConsentChanged`, `LocationsChanged`, `NearbyChanged`, `ListDone`, `JobProgress`, `JobFinished`).
     #[must_use = "false: the session is closed"]
     pub fn signal(&self, signal: &OutSignal) -> bool {
         signal.build().is_ok_and(|message| self.send_message(message, 0))

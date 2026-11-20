@@ -12,7 +12,7 @@ Dialog {
 
     property string provider
     property bool credentialsOnly
-    // Preselects the sign-in method ("password", "publickey", "interactive")
+    // Preselects the sign-in method ("password", "publickey")
     property string initialAuthMode: "password"
 
     // { <field key>: value, auth_mode, key_source } (NetVfsProviders.initialValues)

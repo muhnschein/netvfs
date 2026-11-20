@@ -4,13 +4,11 @@
 use crate::errors::BridgeError;
 use crate::proxy::Bridge1Proxy;
 use crate::signals::{Signal, decode_signal};
-use crate::wire::Opts;
 use futures_lite::{Stream, StreamExt as _};
 use std::path::Path;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use tokio::net::UnixStream;
-use zeroize::{Zeroize, Zeroizing};
 
 /// A connected bridge: the zbus connection and its proxy.
 #[derive(Clone)]
@@ -68,54 +66,6 @@ impl Connection {
     #[must_use]
     pub fn signals(&self) -> SignalStream {
         SignalStream { inner: zbus::MessageStream::from(&self.conn), done: false }
-    }
-
-    /// `ConnectAdHoc` that wipes `secret` before returning, also on failure or drop. Passed as
-    /// `ay`; zbus's serialised copy lives in the message buffer until sent.
-    ///
-    /// # Errors
-    /// The bridge's refusal, or a broken connection.
-    pub async fn connect_ad_hoc_wiping(
-        &self,
-        url: &str,
-        secret: &mut Zeroizing<Vec<u8>>,
-        opts: &Opts,
-    ) -> Result<String, BridgeError> {
-        let guard = WipeOnDrop(secret);
-        let result = self.proxy.connect_ad_hoc(url, guard.0.as_slice(), opts).await;
-        drop(guard);
-        result.map_err(BridgeError::from)
-    }
-
-    /// `Answer` whose keyboard-interactive `answers` are wiped afterwards.
-    ///
-    /// # Errors
-    /// The bridge's refusal, or a broken connection.
-    pub async fn answer_wiping(
-        &self,
-        id: &str,
-        accept: bool,
-        answers: &mut Zeroizing<Vec<Vec<u8>>>,
-    ) -> Result<(), BridgeError> {
-        let mut builder = crate::wire::OptsBuilder::new().bool("accept", accept);
-        if !answers.is_empty() {
-            builder = builder.byte_arrays("answers", answers);
-        }
-        let opts = builder.build();
-        let result = self.proxy.answer(id, &opts).await;
-        for a in answers.iter_mut() {
-            a.zeroize();
-        }
-        answers.clear();
-        result.map_err(BridgeError::from)
-    }
-}
-
-struct WipeOnDrop<'a>(&'a mut Zeroizing<Vec<u8>>);
-
-impl Drop for WipeOnDrop<'_> {
-    fn drop(&mut self) {
-        self.0.zeroize();
     }
 }
 
