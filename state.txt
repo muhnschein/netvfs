@@ -1,0 +1,18 @@
+battery: 55% (gauge 88%) 4090mV ocv 4205mV 19C Discharging Good charging_enabled=0
+screen: 1080x2280
+nodeps: netvfs: Requires sailfish-version >= 5.2.0; phone 5.1.0.11 has glibc 2.41, binaries run; results hold on 5.1 only
+nodeps: netvfs-bridge: Requires sailfish-version >= 5.2.0; phone 5.1.0.11 has glibc 2.41, binaries run; results hold on 5.1 only
+nodeps: netvfs-backup: Requires sailfish-version >= 5.2.0; phone 5.1.0.11 has glibc 2.41, binaries run; results hold on 5.1 only
+rpm: netvfs-1.0.0-1.aarch64.rpm sha256 9dff96c51650ad1ef4918fb3e0632560bff14145cc0ae4f0b0ffc89de329a2a7
+rpm: netvfs-bridge-1.0.0-1.aarch64.rpm sha256 be492bb881ab5bc28b18e96f7b9228c5327b2f79796c7890534250f4ca7a7c1c
+rpm: netvfs-backup-1.0.0-1.aarch64.rpm sha256 89c4738149dc52011b879d39dd8b2a621b1b2a00f6466005b370d51a14431117
+source: muhnschein/netvfs run 44740161438 artifact 14630978016
+state: clean, before = netvfs run 44740161438
+nodeps: netvfs: Requires sailfish-version >= 5.2.0; phone 5.1.0.11 has glibc 2.41, binaries run; results hold on 5.1 only
+nodeps: netvfs-bridge: Requires sailfish-version >= 5.2.0; phone 5.1.0.11 has glibc 2.41, binaries run; results hold on 5.1 only
+nodeps: netvfs-backup: Requires sailfish-version >= 5.2.0; phone 5.1.0.11 has glibc 2.41, binaries run; results hold on 5.1 only
+rpm: netvfs-1.0.0-1.aarch64.rpm sha256 8774995cf06053b495ae0049242a4b84c9aff01a2599f26aef28ea2799402826
+rpm: netvfs-bridge-1.0.0-1.aarch64.rpm sha256 b106d2ec4aabc10d19e4005e98a0b29527a04098a7246ee79d9a15013fd7eb2d
+rpm: netvfs-backup-1.0.0-1.aarch64.rpm sha256 e3e5389e5d16e0775886fd3ee1ea670284e25ed6e00154c1c840492b8437656d
+source: muhnschein/netvfs run 44753164890 artifact 14636527973
+state: clean, after = netvfs run 44753164890
