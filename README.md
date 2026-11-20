@@ -1,5 +1,7 @@
 # netvfs
 
+![netvfs - Network shares for Sailfish OS](art/cover.png)
+
 [![Security Rating](https://sonarcloud.io/api/project_badges/measure?project=muhnschein_netvfs&metric=security_rating)](https://sonarcloud.io/summary/new_code?id=muhnschein_netvfs)[![Reliability Rating](https://sonarcloud.io/api/project_badges/measure?project=muhnschein_netvfs&metric=reliability_rating)](https://sonarcloud.io/summary/new_code?id=muhnschein_netvfs)[![Coverage](https://sonarcloud.io/api/project_badges/measure?project=muhnschein_netvfs&metric=coverage)](https://sonarcloud.io/summary/new_code?id=muhnschein_netvfs)[![Lines of Code](https://sonarcloud.io/api/project_badges/measure?project=muhnschein_netvfs&metric=ncloc)](https://sonarcloud.io/summary/new_code?id=muhnschein_netvfs)
 
 ## Overview
@@ -104,10 +106,12 @@ $ make check
   [RustCrypto](https://github.com/RustCrypto), for the cryptography.
 * Jolla's Nextcloud account, for showing how a backup account plugs into
   Sailfish OS. netvfs's backup plugin is adapted from it.
+* [Inter](https://rsms.me/inter/), the typeface of the lettering on the cover and the account icons.
 
 ## License
 
 Licensed LGPL-2.1-or-later, see the LICENSE file for details. The backup
-plugin parts adapted from Jolla are BSD-3-Clause; each file says so.
+plugin parts adapted from Jolla are BSD-3-Clause; each file says so. The lettering
+on the cover and the account icons is Inter, SIL Open Font License 1.1.
 
 Copyright © netvfs contributors.
