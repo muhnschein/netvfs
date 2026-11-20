@@ -253,4 +253,9 @@ systemctl-user daemon-reload || :
 # Settings entry the request notification opens.
 %{_datadir}/jolla-settings/entries/netvfs-access.json
 %{_datadir}/jolla-settings/pages/netvfs-access.qml
+%{_datadir}/jolla-settings/entries/netvfs-add.json
+%{_datadir}/jolla-settings/pages/netvfs-add-sftp.qml
+%{_datadir}/jolla-settings/pages/netvfs-add-smb.qml
+%{_datadir}/jolla-settings/pages/netvfs-add-webdav.qml
+%{_datadir}/jolla-settings/pages/netvfs-add-ftps.qml
 

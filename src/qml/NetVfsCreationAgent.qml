@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 import QtQuick 2.0
 import Sailfish.Silica 1.0
+import Sailfish.Accounts 1.0
 import com.jolla.settings.accounts 1.0
 import org.netvfs.accounts 1.0
 
@@ -34,6 +35,10 @@ AccountCreationAgent {
     }
 
     property SshKeyTool _keyTool: SshKeyTool {}
+
+    // Settings -> Accounts makes sync (backup) profiles of a new account; a flow started from an
+    // AddAccount entry skips that list. Makes only missing ones, so both paths end equal.
+    property AccountSyncManager _syncManager: AccountSyncManager {}
 
     property NetVfsAccountSetup _setup: NetVfsAccountSetup {
         onDone: root._created(accountId)
@@ -129,6 +134,7 @@ AccountCreationAgent {
         _password = ""
         connectionDialog.clearPassword()
         _keyTool.clear()
+        _syncManager.createAllProfiles(accountId)
         root.accountCreated(accountId)
         pageStack.replace(finishComponent, { "freeBytes": _probe.freeBytes, "backup": _backup })
     }

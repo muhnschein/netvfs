@@ -36,6 +36,7 @@ NETVFS_QML_MODULE_FILES = \
     NetVfsUpdateAgent.qml \
     NetVfsSettingsPage.qml \
     NetVfsConsentPage.qml \
+    NetVfsAddPage.qml \
     NetVfsAccessPage.qml \
     NetVfsAccessRequestDialog.qml \
     AccessColumn.qml \

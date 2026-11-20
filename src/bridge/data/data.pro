@@ -8,10 +8,10 @@ consumers.path = /usr/share/netvfs/consumers
 handoff.files = handoff.conf
 handoff.path = /usr/share/netvfs/bridge
 
-# Settings entry the request notification opens.
-settingsentry.files = netvfs-access.json
+# Settings entries the request notification and AddAccount open.
+settingsentry.files = netvfs-access.json netvfs-add.json
 settingsentry.path = /usr/share/jolla-settings/entries
-settingspage.files = netvfs-access.qml
+settingspage.files = netvfs-access.qml netvfs-add-sftp.qml netvfs-add-smb.qml netvfs-add-webdav.qml netvfs-add-ftps.qml
 settingspage.path = /usr/share/jolla-settings/pages
 
 INSTALLS += consumers handoff settingsentry settingspage

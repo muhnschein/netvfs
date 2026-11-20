@@ -70,7 +70,7 @@ User tests RPMs on phone; that test judges feel, lag, real servers. Say exactly 
 
 ## UI and words
 
-- Account UI (`accounts/ui`, *Settings → Accounts*): Silica stock components, platform account types of `jolla-settings-accounts` (`AccountCreationAgent`, `AccountSettingsAgent`, `AccountCredentialsAgent`, `AccountBusyPage`, `StandardAccountSettingsPullDownMenu`); no `OnlineSync*`, `AccountFactory` (assume HTTP); built like existing pages.
+- Account UI (`accounts/ui`, *Settings → Accounts*): Silica stock components, platform account types of `jolla-settings-accounts` (`AccountCreationAgent`, `AccountSettingsAgent`, `AccountCredentialsAgent`, `AccountBusyPage`, `StandardAccountSettingsPullDownMenu`, `AccountCreationManager`); no `OnlineSync*`, `AccountFactory` (assume HTTP); built like existing pages.
 - "Design first" / "no PR yet" → mockup, wait for approval, then code.
 - Every string `qsTrId()` with `//%` engineering English; catalogue generated at build (`translations/translations.pro`).
 - Host QML tests (`tests/unit/qml`) and target load (`tests/qmltarget`, real Silica) don't prove looks: unproven until device test. Say so.

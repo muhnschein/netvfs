@@ -1,0 +1,36 @@
+{
+    "entries": [
+        {
+            "path": "accounts/netvfs_add_sftp",
+            "title": "Add SFTP account",
+            "type": "page",
+            "params": {
+                "source": "/usr/share/jolla-settings/pages/netvfs-add-sftp.qml"
+            }
+        },
+        {
+            "path": "accounts/netvfs_add_smb",
+            "title": "Add SMB account",
+            "type": "page",
+            "params": {
+                "source": "/usr/share/jolla-settings/pages/netvfs-add-smb.qml"
+            }
+        },
+        {
+            "path": "accounts/netvfs_add_webdav",
+            "title": "Add WebDAV account",
+            "type": "page",
+            "params": {
+                "source": "/usr/share/jolla-settings/pages/netvfs-add-webdav.qml"
+            }
+        },
+        {
+            "path": "accounts/netvfs_add_ftps",
+            "title": "Add FTPS account",
+            "type": "page",
+            "params": {
+                "source": "/usr/share/jolla-settings/pages/netvfs-add-ftps.qml"
+            }
+        }
+    ]
+}

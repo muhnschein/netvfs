@@ -6,6 +6,7 @@ NetVfsSettingsAgent 1.0 NetVfsSettingsAgent.qml
 NetVfsUpdateAgent 1.0 NetVfsUpdateAgent.qml
 NetVfsSettingsPage 1.0 NetVfsSettingsPage.qml
 NetVfsConsentPage 1.0 NetVfsConsentPage.qml
+NetVfsAddPage 1.0 NetVfsAddPage.qml
 NetVfsAccessPage 1.0 NetVfsAccessPage.qml
 NetVfsAccessRequestDialog 1.0 NetVfsAccessRequestDialog.qml
 AccessColumn 1.0 AccessColumn.qml

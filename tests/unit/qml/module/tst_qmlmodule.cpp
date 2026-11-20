@@ -194,6 +194,38 @@ private slots:
                 .contains(QStringLiteral("NetVfsConsentPage {\n    openRequest: true\n}")));
     }
 
+    void addEntries()
+    {
+        // AddAccount (handoff.conf) opens one Settings entry per provider; each starts that provider's flow.
+        const QJsonArray entries = QJsonDocument::fromJson(
+                    readFile(SourceDir + QStringLiteral("/src/bridge/data/netvfs-add.json")).toUtf8())
+                .object().value(QStringLiteral("entries")).toArray();
+        const QString pri = readFile(SourceDir + QStringLiteral("/accounts/providers.pri"));
+        const QRegularExpression line(QStringLiteral("^NETVFS_PROVIDERS = (.*)$"), QRegularExpression::MultilineOption);
+        const QStringList providers = line.match(pri).captured(1).split(QLatin1Char(' '), QString::SkipEmptyParts);
+        QVERIFY(!providers.isEmpty());
+        QCOMPARE(entries.size(), providers.size());
+        const QSettings handoff(SourceDir + QStringLiteral("/src/bridge/data/handoff.conf"), QSettings::IniFormat);
+        QCOMPARE(handoff.value(QStringLiteral("AddAccount/Method")).toString(), QStringLiteral("showPage"));
+        const QString arguments = handoff.value(QStringLiteral("AddAccount/Arguments")).toString();
+        const QString pro = readFile(SourceDir + QStringLiteral("/src/bridge/data/data.pro"));
+        for (int i = 0; i < entries.size(); ++i) {
+            const QJsonObject entry = entries.at(i).toObject();
+            const QString provider = providers.at(i);
+            const QString path = entry.value(QStringLiteral("path")).toString();
+            QCOMPARE(entry.value(QStringLiteral("type")).toString(), QStringLiteral("page"));
+            QVERIFY2(path.startsWith(QStringLiteral("accounts/")), qPrintable(path));
+            QCOMPARE(QString(arguments).replace(QStringLiteral("{provider}"), provider), QStringLiteral("s:") + path);
+            const QString source = entry.value(QStringLiteral("params")).toObject().value(QStringLiteral("source")).toString();
+            const QString file = QFileInfo(source).fileName();
+            QCOMPARE(source, QStringLiteral("/usr/share/jolla-settings/pages/") + file);
+            QVERIFY2(pro.contains(QLatin1Char(' ') + file), qPrintable(file + QStringLiteral(" not installed")));
+            QVERIFY2(readFile(SourceDir + QStringLiteral("/src/bridge/data/") + file)
+                     .contains(QStringLiteral("NetVfsAddPage {\n    provider: \"") + provider + QStringLiteral("\"\n}")),
+                     qPrintable(file));
+        }
+    }
+
     void qmllintAccepts_data()
     {
         QTest::addColumn<QString>("file");
@@ -261,7 +293,8 @@ private slots:
         const QSet<QString> closedTypes {
             QStringLiteral("AccountCreationAgent"), QStringLiteral("AccountSettingsAgent"),
             QStringLiteral("AccountCredentialsAgent"), QStringLiteral("AccountBusyPage"),
-            QStringLiteral("StandardAccountSettingsPullDownMenu"), QStringLiteral("AccountCredentialsUpdater")
+            QStringLiteral("StandardAccountSettingsPullDownMenu"), QStringLiteral("AccountCredentialsUpdater"),
+            QStringLiteral("AccountCreationManager")
         };
         const QSet<QString> openTypes {
             QStringLiteral("Item"), QStringLiteral("Column"), QStringLiteral("Row"), QStringLiteral("Component"),
@@ -273,7 +306,7 @@ private slots:
             QStringLiteral("TextSwitch"), QStringLiteral("Button"), QStringLiteral("SectionHeader"),
             QStringLiteral("DetailItem"), QStringLiteral("VerticalScrollDecorator"), QStringLiteral("BusyIndicator"),
             QStringLiteral("FilePickerPage"), QStringLiteral("Account"), QStringLiteral("AccountManager"),
-            QStringLiteral("NetVfsProbe"), QStringLiteral("SshKeyTool"), QStringLiteral("NetVfsAccountSetup"),
+            QStringLiteral("AccountSyncManager"), QStringLiteral("NetVfsAddPage"), QStringLiteral("NetVfsProbe"), QStringLiteral("SshKeyTool"), QStringLiteral("NetVfsAccountSetup"),
             QStringLiteral("NetVfsCreationAgent"), QStringLiteral("NetVfsSettingsAgent"),
             QStringLiteral("NetVfsUpdateAgent"), QStringLiteral("NetVfsSettingsPage"),
             QStringLiteral("ConnectionDialog"), QStringLiteral("ProbeBusyPage"),

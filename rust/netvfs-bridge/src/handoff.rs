@@ -329,13 +329,17 @@ mod tests {
 
         let shipped = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../src/bridge/data/handoff.conf");
         let shipped = Handoff::new(shipped, Recorder::default());
-        for group in [OPEN_ACCOUNT_SETTINGS, ADD_ACCOUNT] {
-            let call = shipped.resolve(group, 1, "sftp").unwrap();
-            assert_eq!(
-                (call.service.as_str(), call.path.as_str(), call.method.as_str(), call.arguments.len()),
-                ("com.jolla.settings", "/com/jolla/settings/ui", "showAccounts", 0)
-            );
-        }
+        let call = shipped.resolve(OPEN_ACCOUNT_SETTINGS, 1, "sftp").unwrap();
+        assert_eq!(
+            (call.service.as_str(), call.path.as_str(), call.method.as_str(), call.arguments.len()),
+            ("com.jolla.settings", "/com/jolla/settings/ui", "showAccounts", 0)
+        );
+        let call = shipped.resolve(ADD_ACCOUNT, 0, "webdav").unwrap();
+        assert_eq!(
+            (call.service.as_str(), call.path.as_str(), call.method.as_str()),
+            ("com.jolla.settings", "/com/jolla/settings/ui", "showPage")
+        );
+        assert_eq!(call.arguments, [HandoffArg::Str("accounts/netvfs_add_webdav".into())]);
         assert!(shipped.offers_storage_settings());
         shipped.open_storage_settings().unwrap();
         let storage = shipped.launcher.0.borrow().clone();
