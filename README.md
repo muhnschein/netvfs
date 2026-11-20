@@ -57,6 +57,7 @@ one go.
 - Only modern crypto wherever possible: SSH only with Curve25519/hybrid PQC
   key exchange, AEAD ciphers; SMB 3.1.1 only; WebDAV and FTPS over TLS 1.3 only.
 - No folder sync, no mounting servers as file systems.
+- No one-time codes or two-factor sign-in for SFTP yet.
 - Not for the Jolla Store: it installs system files and a setgid helper.
 
 ## Installing

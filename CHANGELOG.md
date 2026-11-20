@@ -7,6 +7,7 @@
 - Backups to WebDAV and FTPS servers in *Settings › Backup*: manual, scheduled and restore, as for SFTP and SMB.
 - A refused sign-in no longer mentions a key for accounts that have none.
 - Breaking: you now choose per app and per account what an app may do: full access, read and add, read only, add only, or not allowed. Tapping an app's request opens the choice in Settings, where every account starts at not allowed; *Settings › Accounts › Apps using network locations* changes it later. An app you allowed before keeps full access. Apps need an update for this bridge, such as the next Lautta.
+- SFTP accounts no longer offer the sign-in "Ask each time (one-time codes)", and servers that ask for a one-time code or a second factor cannot be used for now. Existing such accounts fail to sign in until you switch them to a password or key in Settings.
 - Breaking: apps only reach servers set up as accounts in *Settings › Accounts*. The bridge no longer takes a server address, password or one-time code from an app, and no longer asks an app to trust a server. Apps need an update for this bridge, such as the next Lautta.
 
 ## 1.0.0 - 2026-11-17

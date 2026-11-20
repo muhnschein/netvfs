@@ -83,7 +83,7 @@ Second service per provider `<p>-files`, type `netvfs-files` (not `storage`, so 
 | `auth_mode=interactive` | no | yes |
 | else | yes | yes |
 
-Secrets read only by Buteo plugins (in msyncd) and the bridge. Interactive and guest accounts may have no secret.
+Secrets read only by Buteo plugins (in msyncd) and the bridge. Interactive and guest accounts may have no secret. Settings no longer offers `interactive` (nothing answers its prompts: netvfs#52); accounts made before keep it and fail sign-in.
 
 ## Bridge: sandboxed consumers
 

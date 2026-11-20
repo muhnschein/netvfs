@@ -348,9 +348,9 @@ private slots:
         QCOMPARE(d.authMode(p, values).value(QStringLiteral("source")).toString(), QStringLiteral("import"));
         QCOMPARE(d.secretKind(p, values), QStringLiteral("key"));
         QVERIFY(d.isVisible(field(d.descriptor(p), QStringLiteral("key_mode_hint")), values, QStringList()));
-        values.insert(QStringLiteral("auth_mode"), QStringLiteral("interactive"));
+        values.insert(QStringLiteral("auth_mode"), QStringLiteral("password"));
         values.insert(QStringLiteral("key_source"), QString());
-        QCOMPARE(d.secretKind(p, values), QStringLiteral("none"));
+        QCOMPARE(d.secretKind(p, values), QStringLiteral("password"));
         QVERIFY(!d.isVisible(field(d.descriptor(p), QStringLiteral("key_mode_hint")), values, QStringList()));
 
         QVariantMap pin;
@@ -360,7 +360,7 @@ private slots:
         QCOMPARE(params.host, QStringLiteral("fe80::1"));
         QCOMPARE(params.port, 2222);
         QCOMPARE(params.username, QStringLiteral("alice"));
-        QCOMPARE(params.option(QStringLiteral("auth_mode")), QStringLiteral("interactive"));
+        QCOMPARE(params.option(QStringLiteral("auth_mode")), QStringLiteral("password"));
         QCOMPARE(params.option(QStringLiteral("host_key")), QStringLiteral("ssh-ed25519 AAAA"));
         QCOMPARE(params.options.keys(), QStringList({ QStringLiteral("auth_mode"), QStringLiteral("host_key") }));
         // Connection keys, notes and service settings are not options.
