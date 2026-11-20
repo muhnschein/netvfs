@@ -16,7 +16,7 @@
   <path d="M43 .3H84.28A1.42 1.42 0 0 1 85.7 1.72V84.28A1.42 1.42 0 0 1 84.28 85.7H1.72A1.42 1.42 0 0 1 .3 84.28V43A42.7 42.7 0 0 1 43 .3Z"
         fill="url(#ground)"/>
   <path d="M.3 62H85.7V84.28A1.42 1.42 0 0 1 84.28 85.7H1.72A1.42 1.42 0 0 1 .3 84.28Z" fill="#0d141d" fill-opacity="0.55"/>
-  <g transform="translate(12.20 1.95) scale(0.7)" fill="none" stroke-width="9">
+  <g transform="translate(12.20 3.95) scale(0.7)" fill="none" stroke-width="9">
     <g transform="translate(2.2 2.8)" stroke="#0d141d" stroke-opacity="0.45">
       <path d="M15 65V41a11 11 0 0 1 22 0V65"/>
       <path d="M47 27 60 62 73 27" stroke-linejoin="round"/>
