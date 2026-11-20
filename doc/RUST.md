@@ -3,7 +3,7 @@
 Rust parts:
 
 - `netvfs-accounts` (package netvfs-bridge): setgid accounts helper. Requests `list`, `files <id>`, `attention <id> <state> [pin]`; `QDataStream` answer on stdout. Process with group `privileged` links libc, libgcc_s, libsqlite3 only: no Qt, GLib, libaccounts, GIO modules. All `unsafe` in `sandbox.rs` (descriptors, set-id, Landlock, seccomp).
-- `netvfs-bridge` (package netvfs-bridge): only netvfs process a sandboxed consumer reaches. Everything a consumer sends decoded and checked in Rust: zbus p2p server with own inbound limits, peer check, argument validation, consent, locations, questions, jobs. Reaches backends through `libnetvfs-bridge-ffi.so` (`src/bridge/ffi`, C ABI `netvfs_bridge_ffi.h`, one export), `dlopen`ed from `/usr/lib64/netvfs`. Binary links libc, libgcc_s, libm only. Protocol = `tests/bridge/contract`.
+- `netvfs-bridge` (package netvfs-bridge): only netvfs process a sandboxed consumer reaches. Everything a consumer sends decoded and checked in Rust: zbus p2p server with own inbound limits, peer check, argument validation, consent, locations, jobs. Reaches backends through `libnetvfs-bridge-ffi.so` (`src/bridge/ffi`, C ABI `netvfs_bridge_ffi.h`, one export), `dlopen`ed from `/usr/lib64/netvfs`. Binary links libc, libgcc_s, libm only. Protocol = `tests/bridge/contract`.
 - `libnetvfs-rs.so` (package netvfs): Rust backends `sftp`, `smb` (own SMB 3.1.1 client), `webdav` (HTTP/1.1 over TLS 1.3 only), `ftps` (explicit TLS 1.3 only), `mem` (tests). C++ plugins (`src/backends/rs` shim) `dlopen` it from `/usr/lib64/netvfs`; C ABI `src/backends/rs/netvfs_rs.h`: `nvr_get()` returns one table.
 
 Rest is C++.
@@ -18,8 +18,8 @@ Rest is C++.
 | `rust/netvfs-vfs/` | shared by bridge and backends: backend types, async `Backend`/`ReadHandle`/`WriteHandle`, `CancelToken`, `Status`, `nvb_*` types of both C ABIs (`abi.rs`); no `unsafe` |
 | `rust/netvfs-bridge/src/ffi/` | C ABI client: `raw.rs` table, `loader.rs` `dlopen` (`NETVFS_BRIDGE_FFI` for tests), `conn.rs` handles, `callback.rs` trampolines, `marshal.rs`, `discovery.rs` |
 | `rust/netvfs-bridge/src/server/` | socket front: listener, peer check, sessions, inbound limits (2 MiB, 2 fds), dispatch, `args.rs`/`paths.rs` validation, `encode.rs`, `flow.rs` outgoing budget |
-| `rust/netvfs-bridge/src/core/` | task owning state: sessions, consent, quotas, questions, discovery, connection states, drives, method handlers |
-| `rust/netvfs-bridge/src/locations/`, `jobs/` | visible locations, pools and lanes, worker threads owning backend connections, known hosts; listings, walks, removals, transfers (`fdio.rs`: consumer's fds) |
+| `rust/netvfs-bridge/src/core/` | task owning state: sessions, consent, quotas, discovery, connection states, drives, method handlers |
+| `rust/netvfs-bridge/src/locations/`, `jobs/` | visible locations, pools and lanes, worker threads owning backend connections; listings, walks, removals, transfers (`fdio.rs`: consumer's fds) |
 | `rust/netvfs-bridge/src/accounts/`, `drives/` | helper as bridge runs it; memory cards and USB drives via UDisks2 (`classify.rs` pure, fuzzed) |
 | `rust/netvfs-bridge/src/sys/` | libc calls: socket, peer creds, pidfd, fds, inotify, `flock` |
 | `rust/netvfs-backend/` | `libnetvfs-rs.so`: `ffi/` table, `runtime.rs` tokio runtime and cancel cut, `erased.rs`, `providers.rs`, `mem/` (feature `testing`) |

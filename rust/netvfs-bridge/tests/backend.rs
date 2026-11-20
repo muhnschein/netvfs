@@ -20,19 +20,16 @@ use netvfs_bridge::ffi::{Conn, Ffi, Handle, Params, Value};
 use netvfs_bridge::jobs::fd::{FdAccess, FdInfo, check_transfer_fd};
 use netvfs_bridge::jobs::{batch, remove, transfer, walk};
 use netvfs_bridge::locations::book::LocationBook;
-use netvfs_bridge::locations::connector::{
-    AccountAccess, Connector, IDENTITY_UNKNOWN, KEYBOARD_INTERACTIVE, PinStore,
-};
+use netvfs_bridge::locations::connector::{AccountAccess, Connector};
 use netvfs_bridge::locations::copyjobs::{CopyId, CopyJobs};
 use netvfs_bridge::locations::pool::{CONNECTION_IDLE, PoolSet};
-use netvfs_bridge::locations::spec::{AdHocSecret, Attention, LocationSpec};
+use netvfs_bridge::locations::spec::{Attention, LocationSpec};
 use netvfs_bridge::locations::worker::{Handles, Turn, WorkerId};
-use netvfs_bridge::locations::{Answer, AskId, TaskContext, WorkerEvent, WorkerEvents};
+use netvfs_bridge::locations::{TaskContext, WorkerEvent, WorkerEvents};
 use netvfs_bridge::server::FlowBudget;
 use netvfs_bridge::server::SessionId;
 use netvfs_bridge::server::args::{Disposition, TransferOpts, WalkOpts};
 use netvfs_bridge_proto::{ErrorName, Lane, WireEntry, WireWalkItem};
-use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::fs::{File, OpenOptions};
 use std::io::{Read as _, Write as _};
 use std::os::fd::{AsRawFd as _, OwnedFd};
@@ -43,8 +40,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 use std::time::{Duration, Instant};
-use zbus::zvariant::OwnedValue;
-use zeroize::Zeroizing;
 
 #[derive(Clone, Copy)]
 struct Env {
@@ -59,9 +54,7 @@ const TESTS: &[(&str, Test)] = &[
     ("account_identity_problems_set_attention", account_identity_problems_set_attention),
     ("account_auth_failure_sets_attention", account_auth_failure_sets_attention),
     ("account_data_failures", account_data_failures),
-    ("ad_hoc_identity_question", ad_hoc_identity_question),
-    ("ad_hoc_secret_and_forget", ad_hoc_secret_and_forget),
-    ("keyboard_interactive_question", keyboard_interactive_question),
+    ("account_sign_in_prompts_are_never_relayed", account_sign_in_prompts_are_never_relayed),
     ("connections_are_reused_and_dropped", connections_are_reused_and_dropped),
     ("cancel_kicks_a_running_listing", cancel_kicks_a_running_listing),
     ("list_streams_batches", list_streams_batches),
@@ -179,20 +172,17 @@ fn off_qt_thread<R: Send>(env: &Env, work: impl FnOnce(&Env) -> R + Send) -> R {
 /// What the core saw from workers.
 #[derive(Debug)]
 enum Seen {
-    Ask { kind: &'static str, details: HashMap<String, OwnedValue> },
-    Withdrawn(#[allow(dead_code)] AskId),
     Fetch(i32),
     Attention(i32, Attention, String),
     CopyDone(CopyId, Result<(), Status>),
-    Warning(String),
+    Warning,
 }
 
-/// Stand-in for the core: answers account fetches and questions from queues and records everything.
+/// Stand-in for the core: answers account fetches and records everything.
 #[derive(Default)]
 struct Core {
     access: Mutex<Option<Result<AccountAccess, Status>>>,
-    answers: Mutex<VecDeque<Option<Answer>>>,
-    /// Questions and fetches left unanswered (the senders stay alive).
+    /// Fetches left unanswered (the senders stay alive).
     held: Mutex<Vec<Box<dyn std::any::Any + Send>>>,
     seen: Mutex<Vec<Seen>>,
 }
@@ -209,15 +199,6 @@ impl Core {
 
     fn handle(&self, event: WorkerEvent) {
         let seen = match event {
-            WorkerEvent::Ask { ask: _, session: _, kind, details, answer } => {
-                let next = self.answers.lock().unwrap().pop_front();
-                match next {
-                    Some(reply) => drop(answer.send(reply)),
-                    None => self.held.lock().unwrap().push(Box::new(answer)),
-                }
-                Seen::Ask { kind, details }
-            }
-            WorkerEvent::CancelQuestion(id) => Seen::Withdrawn(id),
             WorkerEvent::FetchAccount { account_id, reply } => {
                 let access = self.access.lock().unwrap().clone();
                 match access {
@@ -230,7 +211,7 @@ impl Core {
                 Seen::Attention(account_id, attention, pin)
             }
             WorkerEvent::CopyDone { id, result } => Seen::CopyDone(id, result),
-            WorkerEvent::Warning(text) => Seen::Warning(text),
+            WorkerEvent::Warning(_) => Seen::Warning,
         };
         self.seen.lock().unwrap().push(seen);
     }
@@ -239,72 +220,25 @@ impl Core {
         *self.access.lock().unwrap() = access;
     }
 
-    fn answer(&self, reply: Option<Answer>) {
-        self.answers.lock().unwrap().push_back(reply);
-    }
-
     fn take(&self) -> Vec<Seen> {
         std::mem::take(&mut *self.seen.lock().unwrap())
-    }
-
-    fn asks(&self) -> Vec<(&'static str, HashMap<String, OwnedValue>)> {
-        let mut seen = self.seen.lock().unwrap();
-        let mut asks = Vec::new();
-        let mut rest = Vec::new();
-        for s in std::mem::take(&mut *seen) {
-            match s {
-                Seen::Ask { kind, details } => asks.push((kind, details)),
-                other => rest.push(other),
-            }
-        }
-        *seen = rest;
-        drop(seen);
-        asks
-    }
-}
-
-/// Known pins in memory.
-#[derive(Default)]
-struct Pins {
-    map: Mutex<BTreeMap<String, String>>,
-    read_only: AtomicBool,
-}
-
-impl PinStore for Pins {
-    fn pin(&self, key: &str) -> String {
-        self.map.lock().unwrap().get(key).cloned().unwrap_or_default()
-    }
-
-    fn set_pin(&self, key: &str, pin: &str) -> bool {
-        if self.read_only.load(Ordering::Acquire) {
-            return false;
-        }
-        self.map.lock().unwrap().insert(key.to_owned(), pin.to_owned());
-        true
-    }
-
-    fn remove(&self, key: &str) -> bool {
-        self.map.lock().unwrap().remove(key).is_some()
     }
 }
 
 struct Rig {
     core: Arc<Core>,
-    pins: Arc<Pins>,
     book: LocationBook<Connector>,
 }
 
 fn rig(env: &Env) -> Rig {
-    rig_with(env, Duration::from_secs(10), Duration::from_secs(10))
+    rig_with(env, Duration::from_secs(10))
 }
 
-fn rig_with(env: &Env, questions: Duration, fetch: Duration) -> Rig {
+fn rig_with(env: &Env, fetch: Duration) -> Rig {
     let core = Core::new();
-    let pins = Arc::new(Pins::default());
-    let pin_store: Arc<dyn PinStore> = Arc::<Pins>::clone(&pins);
-    let connector = Connector::new(env.ffi, pin_store, core.events(), questions).with_fetch_timeout(fetch);
+    let connector = Connector::new(env.ffi, core.events()).with_fetch_timeout(fetch);
     let book = LocationBook::new(PoolSet::new(Arc::new(connector), 4));
-    Rig { core, pins, book }
+    Rig { core, book }
 }
 
 fn params() -> Params {
@@ -341,8 +275,25 @@ fn pattern(size: usize) -> Vec<u8> {
 
 /// Account 7 at fake.example, its data with `host_key` (if any) and an optional secret (credentials id 0).
 fn account(rig: &mut Rig, host_key: Option<&str>) -> String {
-    let spec = LocationSpec::account(7, "fake", "Seven", params(), b"/".to_vec(), Attention::None);
-    rig.book.set_accounts(vec![spec]);
+    accounts(rig, host_key, &[7]).remove(0)
+}
+
+/// Accounts `ids` at fake.example, as [`account`] makes one.
+fn accounts(rig: &mut Rig, host_key: Option<&str>, ids: &[i32]) -> Vec<String> {
+    let specs = ids
+        .iter()
+        .map(|&id| {
+            LocationSpec::account(
+                id,
+                "fake",
+                format!("Account {id}"),
+                params(),
+                b"/".to_vec(),
+                Attention::None,
+            )
+        })
+        .collect();
+    rig.book.set_accounts(specs);
     let mut access_params = params();
     if let Some(pin) = host_key {
         access_params.options.insert("host_key".into(), Value::Str(pin.into()));
@@ -352,17 +303,17 @@ fn account(rig: &mut Rig, host_key: Option<&str>) -> String {
         credentials_id: 0,
         secret_optional: true,
     })));
-    assert!(rig.book.ensure_pool("account:7", true, |p| p == "fake").is_ok());
-    "account:7".to_owned()
+    let locs: Vec<String> = ids.iter().map(|id| format!("account:{id}")).collect();
+    for loc in &locs {
+        assert!(rig.book.ensure_pool(loc, true, |p| p == "fake").is_ok());
+    }
+    locs
 }
 
-/// An ad-hoc location at fake.example with `user` / `secret`.
-fn ad_hoc(rig: &mut Rig, secret: Option<&[u8]>) -> String {
-    let id = rig.book.reserve_ad_hoc_id();
-    let secret = secret.map(|s| AdHocSecret::new("user", Zeroizing::new(s.to_vec())));
-    let spec = LocationSpec::ad_hoc(&id, "fake.example", params(), b"/".to_vec(), secret);
-    assert!(rig.book.start_ad_hoc(spec));
-    id
+/// Account 7, whose sign-in the fake backend takes (user `user`, no password).
+fn signed_in(rig: &mut Rig, f: Fake) -> String {
+    f.set_credentials("user", b"");
+    account(rig, None)
 }
 
 type Body<R> = Box<dyn FnOnce(&mut Conn, &mut Handles<Handle>, WorkerId) -> (R, Result<(), Status>) + Send>;
@@ -411,7 +362,7 @@ fn get<R>(rig: &mut Rig, rx: &mpsc::Receiver<Result<R, Status>>) -> Result<R, St
     }
 }
 
-/// Establishes a connection of `loc` (an empty item, as `connectAdHoc`).
+/// Establishes a connection of `loc` (an empty item).
 #[track_caller]
 fn connect(rig: &mut Rig, loc: &str) -> Result<(), Status> {
     let rx = on_worker(rig, loc, TaskContext::detached(), Box::new(|_, _, _| ((), Ok(()))));
@@ -420,10 +371,6 @@ fn connect(rig: &mut Rig, loc: &str) -> Result<(), Status> {
 
 fn name_of<T>(r: &Result<T, Status>) -> Option<ErrorName> {
     r.as_ref().err().map(|s| s.name)
-}
-
-fn text(v: &OwnedValue) -> String {
-    String::try_from(v.try_clone().unwrap()).unwrap()
 }
 
 fn wait_until(what: &str, mut done: impl FnMut() -> bool) {
@@ -444,7 +391,6 @@ fn account_connects_with_its_pin_and_signon(env: &Env) {
     let seen = rig.core.take();
     assert!(matches!(seen.as_slice(), [Seen::Fetch(7)]), "{seen:?}");
     assert_eq!((f.log_count("connect"), f.log_count("authenticate")), (1, 1));
-    assert!(rig.pins.map.lock().unwrap().is_empty());
     rig.book.disconnect(&loc);
     rig.core.give(Some(Err(Status::new(ErrorName::NotFound, "No such account"))));
     let failed = connect(&mut rig, &loc);
@@ -492,12 +438,12 @@ fn account_auth_failure_sets_attention(env: &Env) {
 }
 
 fn account_data_failures(env: &Env) {
-    let mut rig = rig_with(env, Duration::from_secs(10), Duration::from_millis(150));
+    let mut rig = rig_with(env, Duration::from_millis(150));
     let loc = account(&mut rig, None);
     rig.core.give(None);
     let failed = connect(&mut rig, &loc).unwrap_err();
     assert_eq!((failed.name, failed.message.as_str()), (ErrorName::Timeout, "No account data"));
-    let mut rig = rig_with(env, Duration::from_secs(10), Duration::from_secs(10));
+    let mut rig = rig_with(env, Duration::from_secs(10));
     let loc = account(&mut rig, None);
     rig.core.give(None);
     let task = TaskContext::new(SessionId(3), Arc::new(AtomicBool::new(false)));
@@ -509,136 +455,25 @@ fn account_data_failures(env: &Env) {
     assert_eq!(env.fake.log_count("connect"), 0);
 }
 
-fn ad_hoc_identity_question(env: &Env) {
-    let f = env.fake;
-    f.set_identity_pin(&pin_for(b"k1"));
-    let mut rig = rig(env);
-    let host_key = "fake://fake.example:0";
-
-    let declined = ad_hoc(&mut rig, Some(b"secret"));
-    rig.core.answer(Some(Answer { accept: false, answers: Vec::new() }));
-    let failed = connect(&mut rig, &declined).unwrap_err();
-    assert_eq!(
-        (failed.name, failed.message.as_str()),
-        (ErrorName::ServerIdentityUnknown, "The server identity was not accepted")
-    );
-    let asks = rig.core.asks();
-    assert_eq!(asks.len(), 1);
-    let (kind, details) = &asks[0];
-    assert_eq!(*kind, IDENTITY_UNKNOWN);
-    assert_eq!(text(&details["location"]), declined);
-    assert_eq!(text(&details["host"]), "fake.example");
-    assert_eq!(text(&details["provider"]), "fake");
-    assert!(text(&details["fingerprint"]).starts_with("SHA256:"));
-    assert!(rig.pins.map.lock().unwrap().is_empty());
-    rig.book.abandon_ad_hoc(&declined);
-
-    let accepted = ad_hoc(&mut rig, Some(b"secret"));
-    rig.core.answer(Some(Answer { accept: true, answers: Vec::new() }));
-    connect(&mut rig, &accepted).unwrap();
-    assert!(rig.book.add_ad_hoc(&accepted));
-    assert_eq!(rig.core.asks().len(), 1);
-    assert_eq!(rig.pins.pin(host_key), pin_for(b"k1"));
-    rig.book.disconnect(&accepted);
-    connect(&mut rig, &accepted).unwrap();
-    assert_eq!(rig.core.asks().len(), 0);
-
-    f.set_identity_pin(&pin_for(b"k2"));
-    rig.book.disconnect(&accepted);
-    let failed = connect(&mut rig, &accepted);
-    assert_eq!(name_of(&failed), Some(ErrorName::ServerIdentityChanged));
-    assert_eq!(rig.core.asks().len(), 0);
-
-    rig.pins.map.lock().unwrap().clear();
-    let gone = ad_hoc(&mut rig, Some(b"secret"));
-    rig.core.answer(None);
-    assert_eq!(name_of(&connect(&mut rig, &gone)), Some(ErrorName::ServerIdentityUnknown));
-    rig.book.abandon_ad_hoc(&gone);
-
-    rig.pins.read_only.store(true, Ordering::Release);
-    let unsaved = ad_hoc(&mut rig, Some(b"secret"));
-    rig.core.answer(Some(Answer { accept: true, answers: Vec::new() }));
-    connect(&mut rig, &unsaved).unwrap();
-    let seen = rig.core.take();
-    assert!(
-        seen.iter().any(|s| matches!(s, Seen::Warning(w) if w == "Cannot store an accepted server identity"))
-    );
-}
-
-fn ad_hoc_secret_and_forget(env: &Env) {
-    let f = env.fake;
-    let mut rig = rig_with(env, Duration::from_millis(300), Duration::from_secs(10));
-    let wrong = ad_hoc(&mut rig, Some(b"wrong"));
-    assert_eq!(name_of(&connect(&mut rig, &wrong)), Some(ErrorName::AuthFailed));
-    rig.book.abandon_ad_hoc(&wrong);
-    let id = ad_hoc(&mut rig, Some(b"secret"));
-    connect(&mut rig, &id).unwrap();
-    assert!(rig.book.add_ad_hoc(&id));
-    f.set_credentials("", b"");
-    let none = ad_hoc(&mut rig, None);
-    connect(&mut rig, &none).unwrap();
-
-    f.set_identity_pin(&pin_for(b"k1"));
-    let unanswered = ad_hoc(&mut rig, None);
-    let failed = connect(&mut rig, &unanswered);
-    assert_eq!(name_of(&failed), Some(ErrorName::ServerIdentityUnknown));
-    let seen = rig.core.take();
-    assert!(seen.iter().any(|s| matches!(s, Seen::Withdrawn(_))), "{seen:?}");
-    rig.book.abandon_ad_hoc(&unanswered);
-
-    let pinned = ad_hoc(&mut rig, None);
-    rig.core.answer(Some(Answer { accept: true, answers: Vec::new() }));
-    connect(&mut rig, &pinned).unwrap();
-    assert!(rig.book.add_ad_hoc(&pinned));
-    assert!(!rig.pins.map.lock().unwrap().is_empty());
-    assert!(rig.book.forget_ad_hoc(&pinned, &*rig.pins));
-    assert!(rig.pins.map.lock().unwrap().is_empty());
-    let again = ad_hoc(&mut rig, None);
-    rig.core.answer(Some(Answer { accept: true, answers: Vec::new() }));
-    connect(&mut rig, &again).unwrap();
-    assert_eq!(rig.core.asks().len(), 2);
-}
-
-fn keyboard_interactive_question(env: &Env) {
+fn account_sign_in_prompts_are_never_relayed(env: &Env) {
     let f = env.fake;
     f.set_otp(b"246810");
     let mut rig = rig(env);
-    let yes = |answers: &[&[u8]]| Answer {
-        accept: true,
-        answers: answers.iter().map(|a| Zeroizing::new(a.to_vec())).collect(),
-    };
-    let id = ad_hoc(&mut rig, Some(b"secret"));
-    assert!(rig.book.add_ad_hoc(&id));
-    rig.core.answer(Some(yes(&[b"246810"])));
-    connect(&mut rig, &id).unwrap();
-    let asks = rig.core.asks();
-    assert_eq!(asks.len(), 1);
-    let (kind, details) = &asks[0];
-    assert_eq!(*kind, KEYBOARD_INTERACTIVE);
-    assert_eq!(text(&details["name"]), "fake");
-    assert_eq!(
-        Vec::<String>::try_from(details["prompts"].try_clone().unwrap()).unwrap(),
-        ["Verification code: "]
+    let loc = signed_in(&mut rig, f);
+    let failed = connect(&mut rig, &loc);
+    assert_eq!(name_of(&failed), Some(ErrorName::AuthFailed));
+    assert_eq!(f.log_count("answers:"), 0);
+    let seen = rig.core.take();
+    assert!(
+        matches!(seen.as_slice(), [Seen::Fetch(7), Seen::Attention(7, Attention::AuthFailed, _)]),
+        "{seen:?}"
     );
-    assert_eq!(f.log_count("answers:"), 1);
-    for reply in [yes(&[b"246810", b"1"]), Answer { accept: false, answers: Vec::new() }] {
-        rig.book.disconnect(&id);
-        rig.core.answer(Some(reply));
-        assert_eq!(name_of(&connect(&mut rig, &id)), Some(ErrorName::AuthFailed));
-    }
-    assert_eq!(f.log_count("answers:"), 1);
-    f.set_credentials("user", b"");
-    let loc = account(&mut rig, None);
-    rig.core.answer(Some(yes(&[b"246810"])));
-    connect(&mut rig, &loc).unwrap();
-    assert_eq!(rig.core.asks().len(), 3);
 }
 
 fn connections_are_reused_and_dropped(env: &Env) {
     let f = env.fake;
     let mut rig = rig(env);
-    let id = ad_hoc(&mut rig, Some(b"secret"));
-    assert!(rig.book.add_ad_hoc(&id));
+    let id = signed_in(&mut rig, f);
     connect(&mut rig, &id).unwrap();
     connect(&mut rig, &id).unwrap();
     assert_eq!((f.log_count("connect"), f.live_backends()), (1, 1));
@@ -672,7 +507,7 @@ fn cancel_kicks_a_running_listing(env: &Env) {
     }
     f.set_chunk_delay_ms(200);
     let mut rig = rig(env);
-    let id = ad_hoc(&mut rig, Some(b"secret"));
+    let id = signed_in(&mut rig, f);
     connect(&mut rig, &id).unwrap();
     let task = TaskContext::new(SessionId(1), Arc::new(AtomicBool::new(false)));
     let (started_tx, started) = mpsc::channel();
@@ -706,7 +541,7 @@ fn list_streams_batches(env: &Env) {
         f.add_file(format!("/dir/f{i}").as_bytes(), b"x");
     }
     let mut rig = rig(env);
-    let id = ad_hoc(&mut rig, Some(b"secret"));
+    let id = signed_in(&mut rig, f);
     let budget = Arc::new(FlowBudget::new(usize::MAX));
     let run = |rig: &mut Rig, dir: &'static [u8], batch_size: u32, stop_after: usize| {
         let budget = Arc::clone(&budget);
@@ -751,7 +586,7 @@ fn walk_and_remove_tree(env: &Env) {
     }
     f.add_file(b"/tree/top", b"y");
     let mut rig = rig(env);
-    let id = ad_hoc(&mut rig, Some(b"secret"));
+    let id = signed_in(&mut rig, f);
     let walk_with = |rig: &mut Rig, opts: WalkOpts| {
         let rx = on_worker(
             rig,
@@ -823,8 +658,7 @@ fn read_handles_live_on_their_worker(env: &Env) {
     let f = env.fake;
     f.add_file(b"/r", b"hello world");
     let mut rig = rig(env);
-    let id = ad_hoc(&mut rig, Some(b"secret"));
-    assert!(rig.book.add_ad_hoc(&id));
+    let id = signed_in(&mut rig, f);
     let rx = on_worker(
         &mut rig,
         &id,
@@ -895,7 +729,7 @@ fn transfers_of_regular_files(env: &Env) {
     let f = env.fake;
     let data = pattern(300_000);
     let mut rig = rig(env);
-    let id = ad_hoc(&mut rig, Some(b"secret"));
+    let id = signed_in(&mut rig, f);
 
     let path = temp_path("up");
     std::fs::write(&path, &data).unwrap();
@@ -964,7 +798,7 @@ fn transfers_through_pipes(env: &Env) {
     let f = env.fake;
     let data = pattern(200_000);
     let mut rig = rig(env);
-    let id = ad_hoc(&mut rig, Some(b"secret"));
+    let id = signed_in(&mut rig, f);
 
     let (r, mut w) = std::io::pipe().unwrap();
     let (fd, info) = checked(r.into(), FdAccess::Read);
@@ -1014,10 +848,9 @@ fn copy_jobs_use_two_connections(env: &Env) {
     f.add_file(b"/src/a", b"aaa");
     f.add_file(b"/src/b", b"bb");
     let mut rig = rig(env);
-    let source = ad_hoc(&mut rig, Some(b"secret"));
-    assert!(rig.book.add_ad_hoc(&source));
-    let destination = ad_hoc(&mut rig, Some(b"secret"));
-    assert!(rig.book.add_ad_hoc(&destination));
+    f.set_credentials("user", b"");
+    let mut locs = accounts(&mut rig, None, &[7, 8]).into_iter();
+    let (source, destination) = (locs.next().unwrap(), locs.next().unwrap());
     let backend = Arc::clone(rig.book.pools().backend());
     assert!(format!("{backend:?}").starts_with("Connector"));
     let mut jobs = CopyJobs::new(backend, rig.core.events());
@@ -1034,7 +867,11 @@ fn copy_jobs_use_two_connections(env: &Env) {
         )
         .unwrap();
     wait_until("the copy", || rig.core.seen.lock().unwrap().iter().any(|s| matches!(s, Seen::CopyDone(..))));
-    let seen = rig.core.take();
+    let (fetched, seen): (Vec<_>, Vec<_>) =
+        rig.core.take().into_iter().partition(|s| matches!(s, Seen::Fetch(_)));
+    let mut fetched: Vec<_> = fetched.iter().map(|s| format!("{s:?}")).collect();
+    fetched.sort();
+    assert_eq!(fetched, ["Fetch(7)", "Fetch(8)"]);
     assert!(matches!(seen.as_slice(), [Seen::CopyDone(done, Ok(()))] if *done == id), "{seen:?}");
     assert!(jobs.finish(id, rig.book.pools_mut()));
     assert_eq!(f.file_data(b"/dst/a").unwrap(), b"aaa");

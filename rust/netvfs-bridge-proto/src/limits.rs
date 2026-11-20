@@ -20,19 +20,12 @@ pub const MAX_READ_AHEAD: i64 = 16 << 20;
 pub const MAX_OFFSET: i64 = 1 << 62;
 /// Largest path, in bytes.
 pub const MAX_PATH: usize = 4096;
-/// Largest `ConnectAdHoc` secret, in bytes.
-pub const MAX_SECRET: usize = 64 * 1024;
-/// Longest `ConnectAdHoc` URL.
-pub const MAX_URL: usize = 4096;
-/// Longest short string (`Hello` client name, string options). A
-/// keyboard-interactive answer may have four times this many bytes.
+/// Longest short string (`Hello` client name, string options).
 pub const MAX_SHORT: usize = 256;
-/// Longest location or question id.
+/// Longest location id.
 pub const MAX_ID: usize = 64;
 /// Largest `maxDepth` of `Walk` (-1: unlimited).
 pub const MAX_WALK_DEPTH: i64 = 4096;
-/// Most keyboard-interactive answers in one `Answer`.
-pub const MAX_ANSWERS: usize = 16;
 /// Earliest time an option may set: 0001-01-01T00:00:00Z, in ms since the epoch.
 pub const MIN_TIME_MS: i64 = -62_135_596_800_000;
 /// Latest time an option may set: 9999-12-31T23:59:59.999Z, in ms since the epoch.
@@ -94,7 +87,6 @@ mod tests {
         assert_eq!(MAX_READ, 1_048_576);
         assert_eq!(MAX_READ_AHEAD, 16_777_216);
         assert_eq!(MAX_OFFSET, 4_611_686_018_427_387_904);
-        assert_eq!(MAX_SECRET, 65_536);
         assert_eq!(FLOW_LIMIT, 4_194_304);
     }
 

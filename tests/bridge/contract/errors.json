@@ -19,8 +19,6 @@
           "error": "org.freedesktop.DBus.Error.InvalidArgs" },
         { "call": "Frobnicate", "sig": "", "args": [], "error": "org.freedesktop.DBus.Error.UnknownMethod" },
         { "call": "Stat", "sig": "saybs", "args": ["no such", { "bytes": "" }, true, ""],
-          "error": "org.freedesktop.DBus.Error.InvalidArgs" },
-        { "call": "ConnectAdHoc", "sig": "saya{sv}", "args": ["sftp://user:pw@host/", { "bytes": "" }, {}],
-          "error": "org.netvfs.Error.SecurityPolicy" }
+          "error": "org.freedesktop.DBus.Error.InvalidArgs" }
     ]
 }

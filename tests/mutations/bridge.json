@@ -147,13 +147,6 @@
     "test": "cd rust && NETVFS_BRIDGE_FFI=$PWD/../build/lib/netvfs/libnetvfs-bridge-ffi.so NETVFS_BRIDGE_FFI_FAKE=$PWD/../build/lib/libnetvfs-bridge-ffi-fake.so NETVFS_BACKEND_PATH=$PWD/../build/lib/netvfs/test-backends cargo test --locked -q -p netvfs-bridge --features testing --test server"
   },
   {
-    "name": "XB-11 local ad-hoc location accepted",
-    "file": "rust/netvfs-bridge/src/core/admin.rs",
-    "search": "    if provider == \"local\" {",
-    "replace": "    if provider == \"local-none\" {",
-    "test": "cd rust && cargo test --locked -q -p netvfs-bridge --lib core::admin"
-  },
-  {
     "name": "XB-13 disconnect does not cancel",
     "file": "rust/netvfs-bridge/src/core/mod.rs",
     "search": "        for op in session.ops.values() {\n            op.cancel.store(true, Ordering::Release);\n        }",
@@ -161,46 +154,11 @@
     "test": "cd rust && NETVFS_BRIDGE_FFI=$PWD/../build/lib/netvfs/libnetvfs-bridge-ffi.so NETVFS_BRIDGE_FFI_FAKE=$PWD/../build/lib/libnetvfs-bridge-ffi-fake.so NETVFS_BACKEND_PATH=$PWD/../build/lib/netvfs/test-backends cargo test --locked -q -p netvfs-bridge --features testing --test server"
   },
   {
-    "name": "XB-14 declined ad-hoc identity accepted",
-    "file": "rust/netvfs-bridge/src/locations/connector.rs",
-    "search": "        if !accepted.is_some_and(|a| a.accept) {",
-    "replace": "        if accepted.is_none() {",
-    "test": "cd rust && cargo test --locked -q -p netvfs-bridge --lib locations::connector"
-  },
-  {
-    "name": "XB-14 accepted ad-hoc identity not pinned",
-    "file": "rust/netvfs-bridge/src/locations/connector.rs",
-    "search": "        if !self.pins.set_pin(&self.spec.host_key(), &seen.pin) {",
-    "replace": "        if false {",
-    "test": "cd rust && cargo test --locked -q -p netvfs-bridge --lib locations::connector"
-  },
-  {
     "name": "XB-14 account attention not set",
     "file": "rust/netvfs-bridge/src/locations/connector.rs",
     "search": "        Attention::ServerIdentityChanged => Some((Attention::ServerIdentityChanged, seen_pin.to_owned())),",
     "replace": "        Attention::ServerIdentityChanged => None,",
     "test": "cd rust && cargo test --locked -q -p netvfs-bridge --lib locations::connector"
-  },
-  {
-    "name": "XB-10 a restarted bridge gives ad-hoc ids again",
-    "file": "rust/netvfs-bridge/src/locations/book.rs",
-    "search": "            run: new_run(),",
-    "replace": "            run: 0,",
-    "test": "cd rust && cargo test --locked -q -p netvfs-bridge --lib locations::book"
-  },
-  {
-    "name": "XB-14 ForgetAdHoc keeps the pin",
-    "file": "rust/netvfs-bridge/src/locations/book.rs",
-    "search": "        let _had_pin = pins.remove(&spec.host_key());",
-    "replace": "        let _had_pin = false;",
-    "test": "cd rust && cargo test --locked -q -p netvfs-bridge --lib locations::book"
-  },
-  {
-    "name": "XB-16 ad-hoc secret not wiped when its location goes",
-    "file": "rust/netvfs-bridge/src/locations/spec.rs",
-    "search": "        *self.secret.lock().unwrap_or_else(PoisonError::into_inner) = Zeroizing::new(Vec::new());",
-    "replace": "        let _ = &self.secret;",
-    "test": "cd rust && cargo test --locked -q -p netvfs-bridge --lib locations::book"
   },
   {
     "name": "XB-17 request limit",

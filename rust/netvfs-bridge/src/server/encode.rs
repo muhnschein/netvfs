@@ -233,15 +233,6 @@ pub enum OutSignal {
         /// Job results (`files`, `dirs`, …).
         extra: HashMap<String, OwnedValue>,
     },
-    /// `ssa{sv}`.
-    Question {
-        /// The question id.
-        id: String,
-        /// `identity-unknown`, `keyboard-interactive`, `insecure-consent`, …
-        kind: String,
-        /// What to show.
-        details: HashMap<String, OwnedValue>,
-    },
 }
 
 impl OutSignal {
@@ -258,7 +249,6 @@ impl OutSignal {
             Self::JobProgress { .. } => "JobProgress",
             Self::WalkBatch { .. } => "WalkBatch",
             Self::JobFinished { .. } => "JobFinished",
-            Self::Question { .. } => "Question",
         }
     }
 
@@ -288,7 +278,6 @@ impl OutSignal {
                 let added = result.as_ref().err().map(status_extra).unwrap_or_default();
                 signal.build(&(*job, name, message, job_extra(extra, &added)))
             }
-            Self::Question { id, kind, details } => signal.build(&(wire_text(id), wire_text(kind), details)),
         }
     }
 }

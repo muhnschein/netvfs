@@ -24,6 +24,5 @@ pub use proxy::Bridge1Proxy;
 pub use signals::Signal;
 pub use wire::*;
 pub use zbus::zvariant;
-pub use zeroize::Zeroizing;
 /// Result of a proxy call, so that users need not depend on zbus.
 pub type ProxyResult<T> = zbus::Result<T>;

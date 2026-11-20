@@ -9,11 +9,10 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
-use tokio::sync::oneshot;
 use tokio::time::Instant;
 use zbus::zvariant::{OwnedValue, Value};
 
-/// What the user decided for this app, for every account location (ad-hoc ones are always `full`).
+/// What the user decided for this app, for every account location.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Consent {
     /// Not decided yet.
@@ -161,7 +160,7 @@ impl JobFailure {
     }
 }
 
-/// A value of the `info` dictionary or of question details.
+/// A value of the `info` dictionary.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InfoValue {
     /// `s`
@@ -239,26 +238,6 @@ impl FakeDrive {
     }
 }
 
-/// A question `ConnectAdHoc` asks before it connects.
-#[derive(Debug, Clone)]
-pub struct ScriptedQuestion {
-    /// `identity-unknown`, `keyboard-interactive`, `insecure-consent`, …
-    pub kind: String,
-    /// The details of the `Question` signal.
-    pub details: Vec<(String, InfoValue)>,
-}
-
-/// An `Answer` the fake received.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RecordedAnswer {
-    /// Question id.
-    pub id: String,
-    /// `accept`.
-    pub accept: bool,
-    /// Keyboard-interactive answers.
-    pub answers: Vec<Vec<u8>>,
-}
-
 /// A call the fake received.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CallRecord {
@@ -294,9 +273,6 @@ pub struct State {
     pub chunk: usize,
     pub failures: Vec<Failure>,
     pub job_failures: Vec<JobFailure>,
-    pub adhoc_questions: Vec<ScriptedQuestion>,
-    pub received_secrets: Vec<Vec<u8>>,
-    pub answers: Vec<RecordedAnswer>,
     pub calls: Vec<CallRecord>,
     pub handoffs: Vec<String>,
     /// What `GetFeatures` answers.
@@ -304,8 +280,6 @@ pub struct State {
     /// What `ListDrives` lists.
     pub drives: Vec<FakeDrive>,
     pub nearby: Vec<WireNearby>,
-    pub next_adhoc: u32,
-    pub next_question: u32,
     pub sessions: Vec<Arc<Session>>,
     pub accepting: bool,
     pub accepts: Vec<Instant>,
@@ -328,9 +302,6 @@ impl Default for State {
             chunk: 64 * 1024,
             failures: Vec::new(),
             job_failures: Vec::new(),
-            adhoc_questions: Vec::new(),
-            received_secrets: Vec::new(),
-            answers: Vec::new(),
             calls: Vec::new(),
             handoffs: Vec::new(),
             features: vec![
@@ -339,8 +310,6 @@ impl Default for State {
             ],
             drives: Vec::new(),
             nearby: Vec::new(),
-            next_adhoc: 1,
-            next_question: 1,
             sessions: Vec::new(),
             accepting: true,
             accepts: Vec::new(),
@@ -428,11 +397,10 @@ impl State {
             .collect()
     }
 
-    /// What the app may do in location `id`; `None` while undecided or not allowed. Ad-hoc locations: `full`.
+    /// What the app may do in location `id`; `None` while undecided or not allowed.
     pub fn level(&self, id: &str) -> Option<Level> {
         let default = match self.consent {
             Consent::Unknown => return None,
-            _ if id.starts_with("adhoc:") => return Some(Level::Full),
             Consent::Denied => None,
             Consent::Allowed(level) => Some(level),
         };
@@ -505,7 +473,6 @@ pub struct SessionState {
     next_handle: u32,
     pub handles: HashMap<u32, (String, Vec<u8>)>,
     jobs: HashMap<u32, Arc<AtomicBool>>,
-    questions: HashMap<String, oneshot::Sender<RecordedAnswer>>,
     pub discovering: bool,
 }
 
@@ -528,7 +495,6 @@ impl Session {
                 next_handle: 1,
                 handles: HashMap::new(),
                 jobs: HashMap::new(),
-                questions: HashMap::new(),
                 discovering: false,
             }),
         }
@@ -593,26 +559,15 @@ impl Session {
         })
     }
 
-    /// The client is gone: its jobs are canceled, questions unanswerable, handles closed, as in the
+    /// The client is gone: its jobs are canceled, handles closed, as in the
     /// real bridge.
     pub fn shut(&self) {
         self.with(|s| {
             for flag in s.jobs.values() {
                 flag.store(true, Ordering::SeqCst);
             }
-            s.questions.clear();
             s.handles.clear();
         });
-    }
-
-    pub fn add_question(&self, id: &str) -> oneshot::Receiver<RecordedAnswer> {
-        let (tx, rx) = oneshot::channel();
-        self.with(|s| s.questions.insert(id.to_owned(), tx));
-        rx
-    }
-
-    pub fn take_question(&self, id: &str) -> Option<oneshot::Sender<RecordedAnswer>> {
-        self.with(|s| s.questions.remove(id))
     }
 }
 
@@ -741,21 +696,8 @@ mod tests {
         let s = Session::new();
         let flag = s.register_job(1);
         s.add_handle("a", b"f");
-        let mut rx = s.add_question("q1");
         s.shut();
         assert!(flag.load(Ordering::SeqCst));
         assert_eq!(s.open_handles(), 0);
-        assert!(matches!(rx.try_recv(), Err(oneshot::error::TryRecvError::Closed)));
-    }
-
-    #[test]
-    fn question_round_trip() {
-        let s = Session::new();
-        let mut rx = s.add_question("q1");
-        rx.try_recv().unwrap_err();
-        let tx = s.take_question("q1").unwrap();
-        tx.send(RecordedAnswer { id: "q1".into(), accept: true, answers: vec![] }).unwrap();
-        assert!(rx.try_recv().unwrap().accept);
-        assert!(s.take_question("q1").is_none());
     }
 }

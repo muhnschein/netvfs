@@ -6,7 +6,7 @@
 use super::DEFAULT_CAPS;
 use super::args::{self, Dict};
 use super::fail::Fail;
-use super::state::{CancelOutcome, Consent, FakeDrive, InfoValue, RecordedAnswer, Session, Shared, State};
+use super::state::{CancelOutcome, Consent, FakeDrive, Session, Shared, State};
 use super::transfer::{self, Env};
 use super::tree::{Tree, TreeError};
 use crate::access::{self, After, Level, Op, Verdict};
@@ -229,28 +229,6 @@ impl Iface {
         tokio::spawn(work(env, job, cancel));
         job
     }
-
-    async fn ask_in(
-        &self,
-        ctxt: &SignalEmitter<'_>,
-        kind: &str,
-        details: &[(String, InfoValue)],
-    ) -> Option<RecordedAnswer> {
-        let env = self.env(ctxt);
-        env.ask(kind, details).await
-    }
-
-    async fn adhoc_questions(&self, ctxt: &SignalEmitter<'_>) -> Result<(), Fail> {
-        let questions = self.shared.with(|s| s.adhoc_questions.clone());
-        for q in questions {
-            match self.ask_in(ctxt, &q.kind, &q.details).await {
-                Some(a) if a.accept => {}
-                Some(_) => return Err(declined(&q.kind)),
-                None => return Err(Fail::net(ErrorName::Canceled, "The question was not answered")),
-            }
-        }
-        Ok(())
-    }
 }
 
 /// `PermissionDenied` for what `level` does not allow; the level as detail.
@@ -268,82 +246,6 @@ fn refused(level: Level) -> Fail {
 /// A copy's destination.
 const fn copy_op(replace: bool) -> Op {
     if replace { Op::Unrestricted } else { Op::Create }
-}
-
-fn declined(kind: &str) -> Fail {
-    match kind {
-        "identity-unknown" => {
-            Fail::net(ErrorName::ServerIdentityUnknown, "The server identity was not accepted")
-        }
-        "keyboard-interactive" => Fail::net(ErrorName::AuthFailed, "The sign-in was cancelled"),
-        _ => Fail::net(ErrorName::SecurityPolicy, "The insecure connection was declined"),
-    }
-}
-
-struct AdHocUrl {
-    provider: &'static str,
-    host: String,
-    port: Option<i32>,
-    user: Option<String>,
-    path: Vec<u8>,
-}
-
-fn parse_adhoc(url: &str, opts: &args::AdHocOpts) -> Result<AdHocUrl, Fail> {
-    let (scheme, rest) = url.split_once("://").ok_or_else(|| Fail::args("Not a valid URL"))?;
-    let provider = match scheme {
-        "sftp" | "ssh" => "sftp",
-        "smb" => "smb",
-        "davs" | "https" => "webdav",
-        "dav" | "http" => {
-            return Err(Fail::net(ErrorName::SecurityPolicy, "WebDAV needs TLS; use davs:// or https://"));
-        }
-        "ftps" => "ftps",
-        "ftp" => return Err(Fail::net(ErrorName::SecurityPolicy, "FTP needs TLS; use ftps://")),
-        "fake" => "fake",
-        "file" | "local" => {
-            return Err(Fail::net(ErrorName::PermissionDenied, "The bridge never accesses local files"));
-        }
-        _ => return Err(Fail::net(ErrorName::Unsupported, "No backend for this scheme is installed")),
-    };
-    let (authority, path) = rest.split_once('/').unwrap_or((rest, ""));
-    let (userinfo, hostport) = authority.rsplit_once('@').map_or((None, authority), |(u, h)| (Some(u), h));
-    if userinfo.is_some_and(|u| u.contains(':')) {
-        return Err(Fail::net(ErrorName::SecurityPolicy, "A password in the URL is refused"));
-    }
-    let (host, port) = match hostport.rsplit_once(':') {
-        Some((h, p)) => (h, Some(p.parse::<i32>().map_err(|e| Fail::args(&format!("Invalid port: {e}")))?)),
-        None => (hostport, None),
-    };
-    if host.is_empty() {
-        return Err(Fail::args("A URL needs a host"));
-    }
-    if opts.security_profile.is_some() && provider != "smb" {
-        return Err(Fail::args("security_profile applies to SMB only"));
-    }
-    Ok(AdHocUrl {
-        provider,
-        host: host.to_owned(),
-        port,
-        user: opts.user.clone().or_else(|| userinfo.map(str::to_owned)),
-        path: args::path(path.as_bytes())?,
-    })
-}
-
-fn adhoc_info(p: &AdHocUrl) -> Vec<(String, InfoValue)> {
-    // The bridge shows an ad-hoc location once connected.
-    let mut info = vec![
-        ("kind".to_owned(), InfoValue::Str("adhoc".into())),
-        ("host".to_owned(), InfoValue::Str(p.host.clone())),
-        ("path".to_owned(), InfoValue::Bytes(p.path.clone())),
-        (location_state::KEY.to_owned(), InfoValue::Str(location_state::CONNECTED.into())),
-    ];
-    if let Some(port) = p.port {
-        info.push(("port".to_owned(), InfoValue::Int(port)));
-    }
-    if let Some(user) = &p.user {
-        info.push(("user".to_owned(), InfoValue::Str(user.clone())));
-    }
-    info
 }
 
 #[zbus::interface(name = "org.netvfs.Bridge1")]
@@ -402,41 +304,6 @@ impl Iface {
         self.begin("Disconnect", None, &loc).await?;
         self.require_location(&loc)?;
         self.set_state(&loc, location_state::DISCONNECTED);
-        Ok(())
-    }
-
-    async fn connect_ad_hoc(
-        &self,
-        url: String,
-        secret: Vec<u8>,
-        opts: Dict,
-        #[zbus(signal_emitter)] ctxt: SignalEmitter<'_>,
-    ) -> Result<String, Fail> {
-        args::url(&url)?;
-        args::secret(&secret)?;
-        let opts = args::adhoc_opts(&opts)?;
-        self.begin("ConnectAdHoc", None, &url).await?;
-        let parsed = parse_adhoc(&url, &opts)?;
-        self.shared.with(|s| s.received_secrets.push(secret));
-        self.adhoc_questions(&ctxt).await?;
-        let id = self.shared.with(|s| {
-            let id = format!("adhoc:{}", s.next_adhoc);
-            s.next_adhoc = s.next_adhoc.saturating_add(1);
-            s.add_location(&id, parsed.provider, &parsed.host, adhoc_info(&parsed));
-            id
-        });
-        self.shared.broadcast_locations().await;
-        Ok(id)
-    }
-
-    async fn forget_ad_hoc(&self, loc: String) -> Result<(), Fail> {
-        let loc = args::location(&loc)?;
-        self.begin("ForgetAdHoc", None, &loc).await?;
-        if !loc.starts_with("adhoc:") || !self.shared.with(|s| s.locations.contains_key(&loc)) {
-            return Err(Fail::net(ErrorName::NotFound, "No such ad-hoc location"));
-        }
-        self.shared.with(|s| s.remove_location(&loc));
-        self.shared.broadcast_locations().await;
         Ok(())
     }
 
@@ -756,20 +623,6 @@ impl Iface {
         }
     }
 
-    async fn answer(&self, id: String, answer: Dict) -> Result<(), Fail> {
-        let id = args::location(&id)?;
-        let answer = args::answer_opts(&answer)?;
-        self.begin("Answer", None, &id).await?;
-        let Some(tx) = self.session.take_question(&id) else {
-            return Err(Fail::net(ErrorName::NotFound, "No such question"));
-        };
-        let recorded = RecordedAnswer { id, accept: answer.accept, answers: answer.answers };
-        self.shared.with(|s| s.answers.push(recorded.clone()));
-        // The asker may have given up; the answer is still recorded.
-        tx.send(recorded).ok();
-        Ok(())
-    }
-
     async fn open_account_settings(&self, loc: String) -> Result<(), Fail> {
         let loc = args::location(&loc)?;
         self.begin("OpenAccountSettings", None, &loc).await?;
@@ -853,13 +706,6 @@ impl Iface {
         error: String,
         message: String,
         extra: HashMap<String, OwnedValue>,
-    ) -> zbus::Result<()>;
-    #[zbus(signal)]
-    pub async fn question(
-        ctxt: &SignalEmitter<'_>,
-        id: String,
-        kind: String,
-        details: HashMap<String, OwnedValue>,
     ) -> zbus::Result<()>;
 }
 
@@ -959,91 +805,5 @@ impl Shared {
                 Iface::nearby_changed(&ctx, nearby.clone()).await.ok();
             }
         }
-    }
-
-    /// A question to the newest client.
-    pub async fn ask(&self, kind: &str, details: &[(String, InfoValue)]) -> Option<RecordedAnswer> {
-        let session = self.sessions_snapshot().pop()?;
-        let ctx = context(&session)?;
-        ask_question(self, &session, &ctx, kind, details).await
-    }
-}
-
-/// Sends a `Question` signal and waits for the matching `Answer`. `None` when
-/// the asker is gone before an answer arrives.
-pub(super) async fn ask_question(
-    shared: &Shared,
-    session: &Session,
-    ctx: &SignalEmitter<'_>,
-    kind: &str,
-    details: &[(String, InfoValue)],
-) -> Option<RecordedAnswer> {
-    let id = shared.with(|s| {
-        let id = format!("q{}", s.next_question);
-        s.next_question = s.next_question.saturating_add(1);
-        id
-    });
-    let rx = session.add_question(&id);
-    let details: HashMap<String, OwnedValue> =
-        details.iter().map(|(k, v)| (k.clone(), v.to_owned_value())).collect();
-    Iface::question(ctx, id, kind.to_owned(), details).await.ok()?;
-    rx.await.ok()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::fake::args::AdHocOpts;
-
-    fn plain() -> AdHocOpts {
-        AdHocOpts::default()
-    }
-
-    #[test]
-    fn ad_hoc_urls_are_taken_apart() {
-        let opts = AdHocOpts { user: Some("me".into()), security_profile: None };
-        let p = parse_adhoc("sftp://other@host.example:2222/a//b/", &opts).unwrap();
-        assert_eq!((p.provider, p.host.as_str(), p.port), ("sftp", "host.example", Some(2222)));
-        assert_eq!(p.user.as_deref(), Some("me"), "the option wins over the URL");
-        assert_eq!(p.path, b"a/b");
-        let p = parse_adhoc("sftp://other@host/", &plain()).unwrap();
-        assert_eq!(p.user.as_deref(), Some("other"));
-        let info = adhoc_info(&p);
-        assert!(info.contains(&("kind".to_owned(), InfoValue::Str("adhoc".into()))));
-        assert!(info.contains(&("user".to_owned(), InfoValue::Str("other".into()))));
-        assert!(!info.iter().any(|(k, _)| k == "port"));
-        assert_eq!(parse_adhoc("smb://h/", &plain()).unwrap().provider, "smb");
-        for url in ["davs://h/", "https://h/"] {
-            assert_eq!(parse_adhoc(url, &plain()).unwrap().provider, "webdav", "{url}");
-        }
-        assert_eq!(parse_adhoc("ftps://h/", &plain()).unwrap().provider, "ftps");
-    }
-
-    #[test]
-    fn ad_hoc_urls_are_refused_as_the_bridge_refuses_them() {
-        let bare = |url: &str, opts: &AdHocOpts| parse_adhoc(url, opts).err().map(|f| f.bare().to_owned());
-        assert_eq!(bare("sftp://u:pw@h/", &plain()).as_deref(), Some("SecurityPolicy"));
-        assert_eq!(bare("file:///x", &plain()).as_deref(), Some("PermissionDenied"));
-        assert_eq!(bare("gopher://h/", &plain()).as_deref(), Some("Unsupported"));
-        for url in ["dav://h/", "http://h/", "ftp://h/"] {
-            assert_eq!(bare(url, &plain()).as_deref(), Some("SecurityPolicy"), "{url}");
-        }
-        let unknown = parse_adhoc("gopher://h/", &plain()).err();
-        assert_eq!(unknown.as_ref().map(Fail::message), Some("No backend for this scheme is installed"));
-        let guest = AdHocOpts { user: None, security_profile: Some("guest".into()) };
-        assert!(bare("sftp://h/", &guest).is_some_and(|n| n.contains("InvalidArgs")));
-        assert!(bare("smb://h/", &guest).is_none());
-        assert!(bare("nonsense", &plain()).is_some());
-        assert!(bare("sftp:///x", &plain()).is_some());
-        assert!(bare("sftp://h:notaport/", &plain()).is_some());
-        assert!(bare("sftp://h/a/../b", &plain()).is_some());
-    }
-
-    #[test]
-    fn declining_maps_to_the_error_of_the_question() {
-        assert_eq!(declined("identity-unknown").bare(), "ServerIdentityUnknown");
-        assert_eq!(declined("keyboard-interactive").bare(), "AuthFailed");
-        assert_eq!(declined("insecure-consent").bare(), "SecurityPolicy");
-        assert_eq!(declined("anything-else").bare(), "SecurityPolicy");
     }
 }

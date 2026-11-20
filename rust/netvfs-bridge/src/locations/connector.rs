@@ -1,51 +1,27 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! How the bridge opens a connection: `conn_establish` keeps the order connect → identity verdict → credentials → authenticate; this module decides the verdicts and where credentials come from.
+//! How the bridge opens a connection: `conn_establish` keeps the order connect → identity verdict → credentials → authenticate; this module decides where the connection data and the secret come from.
 //!
-//! - Accounts: connection data comes from the helper's `files` answer (asked through the core, [`WorkerEvent::FetchAccount`]); identity is checked against the account's `host_key` pin and only then the secret is fetched from signond.
-//!   An identity or authentication failure is returned as an error and sets the account's attention state ([`WorkerEvent::Attention`]); resolution happens in Settings, never through a question.
-//! - Ad hoc: identity is checked against this consumer's known_hosts ([`PinStore`]). Unknown identity becomes `Question(identity-unknown)` with the full server identity; an accepted one is pinned.
-//!   A changed identity is `ServerIdentityChanged` (re-pinning needs `ForgetAdHoc`). Only then is the consumer's secret used.
-//! - Keyboard-interactive prompts are relayed as `Question(keyboard-interactive)` to the session whose request opened the connection; canceling the request ends the wait.
-//!
-//! A question waits in 100 ms slices, looking at the request's cancel flag, for at most the question timeout (10 min), then withdraws ([`WorkerEvent::CancelQuestion`]).
+//! Every location is an account: connection data comes from the helper's `files` answer (asked through the core, [`WorkerEvent::FetchAccount`]); identity is checked against the account's `host_key` pin and only then the secret is fetched from signond.
+//! An identity or authentication failure is returned as an error and sets the account's attention state ([`WorkerEvent::Attention`]); resolution happens in Settings. No prompt hook: consumers are never asked for a secret.
 
-use super::spec::{Attention, LocationKind, LocationSpec};
+use super::spec::{Attention, LocationSpec};
 use super::worker::Backend;
-use super::{Answer, AskId, TaskContext, WorkerEvent, WorkerEvents};
+use super::{TaskContext, WorkerEvent, WorkerEvents};
 use crate::Status;
 use crate::ffi::{
-    CancelHandle, Conn, EstablishError, EstablishHooks, Ffi, Handle, Identity, Params, Phase, PromptRequest,
-    Reply, Secret, Value, Verdict,
+    CancelHandle, Conn, EstablishError, EstablishHooks, Ffi, Handle, Identity, Params, Phase, Secret, Value,
+    Verdict,
 };
 use netvfs_bridge_proto::ErrorName;
-use std::collections::HashMap;
 use std::fmt;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, mpsc};
+use std::sync::mpsc;
 use std::time::{Duration, Instant};
-use zbus::zvariant::{self, OwnedValue, Str};
-use zeroize::Zeroizing;
 
-/// `Question` kind of an unknown server identity of an ad-hoc location.
-pub const IDENTITY_UNKNOWN: &str = "identity-unknown";
-/// `Question` kind of a keyboard-interactive prompt.
-pub const KEYBOARD_INTERACTIVE: &str = "keyboard-interactive";
-/// How long a question waits for its answer.
-pub const QUESTION_TIMEOUT: Duration = Duration::from_mins(10);
 /// How long an account's connection data may take.
 pub const FETCH_TIMEOUT: Duration = Duration::from_mins(1);
-/// How often a waiting worker looks at its cancel flag.
+/// How often a worker waiting for account data looks at its cancel flag.
 pub const WAIT_SLICE: Duration = Duration::from_millis(100);
-
-/// The pins of identities the user accepted for ad-hoc locations, by host key.
-pub trait PinStore: Send + Sync {
-    /// The pin of `key`.
-    fn pin(&self, key: &str) -> String;
-    /// Stores `pin` for `key`.
-    fn set_pin(&self, key: &str, pin: &str) -> bool;
-    /// Forgets the pin of `key`.
-    fn remove(&self, key: &str) -> bool;
-}
 
 /// What a connection to an account needs.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -100,95 +76,6 @@ fn wait_for<T>(rx: &mpsc::Receiver<T>, cancel: &AtomicBool, timeout: Duration) -
     }
 }
 
-/// Asks questions through the core.
-#[derive(Debug, Clone)]
-pub struct Asker {
-    events: WorkerEvents,
-    timeout: Duration,
-}
-
-impl Asker {
-    /// Questions go through `events` and wait at most `timeout`.
-    #[must_use]
-    pub const fn new(events: WorkerEvents, timeout: Duration) -> Self {
-        Self { events, timeout }
-    }
-
-    /// Asks `task`'s session and waits for the answer.
-    #[must_use]
-    pub fn ask(
-        &self,
-        task: &TaskContext,
-        kind: &'static str,
-        details: HashMap<String, OwnedValue>,
-    ) -> Option<Answer> {
-        let (tx, rx) = mpsc::channel();
-        let ask = AskId::next();
-        self.events.send(WorkerEvent::Ask { ask, session: task.session, kind, details, answer: tx });
-        match wait_for(&rx, &task.cancel, self.timeout) {
-            Waited::Got(answer) => answer,
-            Waited::Gone => None,
-            Waited::Canceled | Waited::TimedOut => {
-                self.events.send(WorkerEvent::CancelQuestion(ask));
-                None
-            }
-        }
-    }
-}
-
-fn text(s: &str) -> OwnedValue {
-    OwnedValue::from(Str::from(s.to_owned()))
-}
-
-fn owned(v: zvariant::Value<'_>) -> Option<OwnedValue> {
-    OwnedValue::try_from(v).ok()
-}
-
-/// The details of `Question(identity-unknown)`.
-#[must_use]
-pub fn identity_details(identity: &Identity, spec: &LocationSpec) -> HashMap<String, OwnedValue> {
-    let mut d = HashMap::new();
-    d.insert("location".to_owned(), text(&spec.id));
-    d.insert("host".to_owned(), text(&spec.params.host));
-    d.insert("port".to_owned(), OwnedValue::from(spec.params.port));
-    d.insert("provider".to_owned(), text(&spec.provider));
-    d.insert("algorithm".to_owned(), text(&identity.algorithm));
-    d.insert("fingerprint".to_owned(), text(&identity.fingerprint));
-    if let Some(key) = owned(zvariant::Value::from(identity.public_key.clone())) {
-        d.insert("publicKey".to_owned(), key);
-    }
-    d
-}
-
-/// The details of `Question(keyboard-interactive)`.
-#[must_use]
-pub fn prompt_details(request: &PromptRequest) -> HashMap<String, OwnedValue> {
-    let mut d = HashMap::new();
-    d.insert("name".to_owned(), text(&request.name));
-    d.insert("instruction".to_owned(), text(&request.instruction));
-    let texts: Vec<String> = request.prompts.iter().map(|p| p.text.clone()).collect();
-    if let Some(prompts) = owned(zvariant::Value::from(texts)) {
-        d.insert("prompts".to_owned(), prompts);
-    }
-    let echo: Vec<zvariant::Value<'_>> =
-        request.prompts.iter().map(|p| zvariant::Value::new(zvariant::Value::from(p.echo))).collect();
-    if let Some(echo) = owned(zvariant::Value::from(echo)) {
-        d.insert("echo".to_owned(), echo);
-    }
-    d
-}
-
-/// The answers to give for `request`.
-#[must_use]
-pub fn prompt_answers(
-    asker: &Asker,
-    task: &TaskContext,
-    request: &PromptRequest,
-) -> Option<Vec<Zeroizing<Vec<u8>>>> {
-    let answer = asker.ask(task, KEYBOARD_INTERACTIVE, prompt_details(request))?;
-    (answer.accept && answer.answers.len() == request.prompts.len()).then_some(answer.answers)
-}
-
 /// The attention state a failed account connection leaves, with the pin to record (the one seen, for an identity problem).
 #[must_use]
 pub fn attention_for(failure: &EstablishError, seen_pin: &str) -> Option<(Attention, String)> {
@@ -212,56 +99,24 @@ pub fn account_pin(params: &Params) -> String {
     }
 }
 
-struct AdHocIdentity<'a> {
-    asker: &'a Asker,
-    pins: &'a dyn PinStore,
-    events: &'a WorkerEvents,
-    task: &'a TaskContext,
-    spec: &'a LocationSpec,
-    declined: bool,
-}
-
-impl AdHocIdentity<'_> {
-    fn verdict(&mut self, seen: &Identity, check: Option<&Status>) -> Verdict {
-        if check.is_none_or(|s| s.name != ErrorName::ServerIdentityUnknown) {
-            return Verdict::UseCheck;
-        }
-        let accepted = self.asker.ask(self.task, IDENTITY_UNKNOWN, identity_details(seen, self.spec));
-        if !accepted.is_some_and(|a| a.accept) {
-            if self.task.canceled() {
-                return Verdict::Cancel;
-            }
-            self.declined = true;
-            return Verdict::UseCheck;
-        }
-        if !self.pins.set_pin(&self.spec.host_key(), &seen.pin) {
-            self.events.send(WorkerEvent::Warning("Cannot store an accepted server identity".to_owned()));
-        }
-        Verdict::AcceptUnknown
-    }
-}
-
 /// The production [`Backend`].
 pub struct Connector {
     ffi: Ffi,
-    pins: Arc<dyn PinStore>,
     events: WorkerEvents,
-    asker: Asker,
     fetch_timeout: Duration,
 }
 
 impl fmt::Debug for Connector {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Connector").field("asker", &self.asker).finish_non_exhaustive()
+        f.debug_struct("Connector").field("fetch_timeout", &self.fetch_timeout).finish_non_exhaustive()
     }
 }
 
 impl Connector {
-    /// Connections through `ffi`, ad-hoc pins in `pins`, questions, account data and attention through `events`.
+    /// Connections through `ffi`, account data and attention through `events`.
     #[must_use]
-    pub fn new(ffi: Ffi, pins: Arc<dyn PinStore>, events: WorkerEvents, question_timeout: Duration) -> Self {
-        let asker = Asker::new(events.clone(), question_timeout);
-        Self { ffi, pins, events, asker, fetch_timeout: FETCH_TIMEOUT }
+    pub const fn new(ffi: Ffi, events: WorkerEvents) -> Self {
+        Self { ffi, events, fetch_timeout: FETCH_TIMEOUT }
     }
 
     /// The same with another wait for account data (tests).
@@ -281,13 +136,6 @@ impl Connector {
         Err(Status::new(name, "No account data"))
     }
 
-    fn prompt(&self, task: &TaskContext, request: &PromptRequest, reply: &mut Reply<'_>) -> bool {
-        prompt_answers(&self.asker, task, request).is_some_and(|answers| {
-            reply.set(&answers);
-            true
-        })
-    }
-
     fn establish_account(&self, conn: &mut Conn, account_id: i32, task: &TaskContext) -> Result<(), Status> {
         let access = self.fetch(account_id, task)?;
         let pin = account_pin(&access.params);
@@ -303,9 +151,7 @@ impl Connector {
                 seen_pin.clone_from(&seen.pin);
                 Verdict::UseCheck
             };
-            let mut prompt =
-                |request: &PromptRequest, reply: &mut Reply<'_>| self.prompt(task, request, reply);
-            let mut hooks = EstablishHooks { identity: Some(&mut identity), prompt: Some(&mut prompt) };
+            let mut hooks = EstablishHooks { identity: Some(&mut identity), prompt: None };
             conn.establish(&access.params, &pin, &secret, &mut hooks)
         };
         result.map_err(|failure| {
@@ -313,41 +159,6 @@ impl Connector {
                 self.events.send(WorkerEvent::Attention { account_id, attention, pin });
             }
             failure.status
-        })
-    }
-
-    fn establish_ad_hoc(
-        &self,
-        conn: &mut Conn,
-        spec: &LocationSpec,
-        task: &TaskContext,
-    ) -> Result<(), Status> {
-        let pin = self.pins.pin(&spec.host_key());
-        let secret = spec.ad_hoc_secret.as_ref().map_or_else(
-            || Secret::None { user: String::new() },
-            |s| Secret::Bytes { user: s.user().to_owned(), secret: s.secret() },
-        );
-        let mut judge = AdHocIdentity {
-            asker: &self.asker,
-            pins: &*self.pins,
-            events: &self.events,
-            task,
-            spec,
-            declined: false,
-        };
-        let result = {
-            let mut identity = |seen: &Identity, check: Option<&Status>| judge.verdict(seen, check);
-            let mut prompt =
-                |request: &PromptRequest, reply: &mut Reply<'_>| self.prompt(task, request, reply);
-            let mut hooks = EstablishHooks { identity: Some(&mut identity), prompt: Some(&mut prompt) };
-            conn.establish(&spec.params, &pin, &secret, &mut hooks)
-        };
-        result.map_err(|failure| {
-            if judge.declined && failure.status.name == ErrorName::ServerIdentityUnknown {
-                Status::new(ErrorName::ServerIdentityUnknown, "The server identity was not accepted")
-            } else {
-                failure.status
-            }
         })
     }
 }
@@ -371,10 +182,7 @@ impl Backend for Connector {
     }
 
     fn establish(&self, conn: &mut Conn, spec: &LocationSpec, task: &TaskContext) -> Result<(), Status> {
-        match spec.kind {
-            LocationKind::Account { account_id } => self.establish_account(conn, account_id, task),
-            LocationKind::AdHoc => self.establish_ad_hoc(conn, spec, task),
-        }
+        self.establish_account(conn, spec.account_id, task)
     }
 
     fn reset_cancel(&self, conn: &mut Conn) {

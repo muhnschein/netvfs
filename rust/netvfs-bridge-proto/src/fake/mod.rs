@@ -11,9 +11,7 @@ mod state;
 mod transfer;
 mod tree;
 
-pub use state::{
-    CallRecord, Consent, Failure, FakeDrive, InfoValue, JobFailure, RecordedAnswer, ScriptedQuestion,
-};
+pub use state::{CallRecord, Consent, Failure, FakeDrive, InfoValue, JobFailure};
 
 use crate::access::Level;
 use crate::connect::Connection;
@@ -355,29 +353,6 @@ impl FakeBridge {
         });
     }
 
-    /// Questions `ConnectAdHoc` asks (in order) before it connects.
-    pub fn script_adhoc_questions(&self, questions: Vec<ScriptedQuestion>) {
-        self.shared.with(|s| s.adhoc_questions = questions);
-    }
-
-    /// The bridge asks a question out of the blue (keyboard-interactive during
-    /// a session); resolves with the app's answer.
-    pub async fn ask(&self, kind: &str, details: Vec<(String, InfoValue)>) -> Option<RecordedAnswer> {
-        self.shared.ask(kind, &details).await
-    }
-
-    /// Secrets that reached `ConnectAdHoc`.
-    #[must_use]
-    pub fn received_secrets(&self) -> Vec<Vec<u8>> {
-        self.shared.with(|s| s.received_secrets.clone())
-    }
-
-    /// Answers that reached `Answer`.
-    #[must_use]
-    pub fn answers(&self) -> Vec<RecordedAnswer> {
-        self.shared.with(|s| s.answers.clone())
-    }
-
     /// Calls received, in order.
     #[must_use]
     pub fn calls(&self) -> Vec<CallRecord> {
@@ -486,7 +461,7 @@ pub(crate) mod tests {
         assert_eq!(fake.consent(), Consent::Unknown);
         assert_eq!(fake.consent_requests(), 0);
         assert_eq!(fake.session_count(), 0);
-        assert!(fake.calls().is_empty() && fake.handoffs().is_empty() && fake.answers().is_empty());
+        assert!(fake.calls().is_empty() && fake.handoffs().is_empty());
     }
 
     #[tokio::test]

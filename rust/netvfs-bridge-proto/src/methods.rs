@@ -82,7 +82,7 @@ const fn method(
 use Lane::{Bulk, Interactive, Stream};
 
 /// The methods, in the order of `args.cpp` and of the XML.
-pub const METHODS: [MethodInfo; 40] = [
+pub const METHODS: [MethodInfo; 37] = [
     method("Hello", "s", "s", Interactive, false),
     method("GetConsent", "", "s", Interactive, false),
     method("RequestConsent", "", "", Interactive, false),
@@ -92,8 +92,6 @@ pub const METHODS: [MethodInfo; 40] = [
     method("ListLocations", "", "a(sssa{sv})", Interactive, false),
     method("Capabilities", "s", "(asasx)", Interactive, true),
     method("Disconnect", "s", "", Interactive, true),
-    method("ConnectAdHoc", "saya{sv}", "s", Interactive, true),
-    method("ForgetAdHoc", "s", "", Interactive, true),
     method("Discover", "b", "", Interactive, true),
     method("List", "saysu", "u", Interactive, true),
     method("Stat", "saybs", ENTRY_SIGNATURE, Interactive, true),
@@ -117,9 +115,8 @@ pub const METHODS: [MethodInfo; 40] = [
     method("CopyAcross", "saysaya{sv}", "u", Bulk, true),
     method("RemoveTree", "say", "u", Bulk, true),
     method("Walk", "saya{sv}", "u", Bulk, true),
-    // Cancel and Answer need no consent.
+    // Cancel needs no consent.
     method("Cancel", "u", "", Interactive, false),
-    method("Answer", "sa{sv}", "", Interactive, false),
     method("OpenAccountSettings", "s", "", Interactive, true),
     method("AddAccount", "s", "", Interactive, true),
     // Shows nothing of the user's locations.
@@ -131,7 +128,7 @@ pub const METHODS: [MethodInfo; 40] = [
 ];
 
 /// The signals as `(name, signature)`, in the order of the XML.
-pub const SIGNALS: [(&str, &str); 10] = [
+pub const SIGNALS: [(&str, &str); 9] = [
     ("ConsentChanged", "s"),
     ("LocationsChanged", ""),
     ("NearbyChanged", "a(sssq)"),
@@ -140,7 +137,6 @@ pub const SIGNALS: [(&str, &str); 10] = [
     ("JobProgress", "uxx"),
     ("WalkBatch", "ua(ay(ayyyxxxxixxssqays))"),
     ("JobFinished", "ussa{sv}"),
-    ("Question", "ssa{sv}"),
     ("DrivesChanged", ""),
 ];
 
@@ -176,8 +172,6 @@ mod tests {
             "ListLocations",
             "Capabilities",
             "Disconnect",
-            "ConnectAdHoc",
-            "ForgetAdHoc",
             "Discover",
             "List",
             "Stat",
@@ -202,7 +196,6 @@ mod tests {
             "RemoveTree",
             "Walk",
             "Cancel",
-            "Answer",
             "OpenAccountSettings",
             "AddAccount",
             "OpenStorageSettings",
@@ -226,7 +219,6 @@ mod tests {
                 "GetFeatures",
                 "ListLocations",
                 "Cancel",
-                "Answer",
                 "OpenStorageSettings",
                 "ListDrives",
                 "Mount",

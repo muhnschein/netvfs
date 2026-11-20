@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 //! Read half of a session's socket: zbus accepts messages up to 128 MiB and queues up to `max_queued`, so the bridge reads frames itself and closes the connection on a header declaring more than [`MAX_MESSAGE_BYTES`] (before the body is read) or more than [`MAX_MESSAGE_FDS`] descriptors.
 //!
-//! Largest legitimate call: `ConnectAdHoc` (64 KiB secret, 4 KiB URL); `Upload` and `Download` carry one descriptor.
+//! `Upload` and `Download` carry one descriptor; no other call carries any.
 
 use crate::sys::frame::message_from_frame;
 use std::future::Future;

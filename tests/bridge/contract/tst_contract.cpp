@@ -144,7 +144,7 @@ void tst_Contract::signalsOfTheXml()
                                             QStringLiteral("org.netvfs.Bridge1"));
     const QStringList expectedSignals = { "ConsentChanged", "DrivesChanged", "JobFinished", "JobProgress",
                                           "ListBatch", "ListDone", "LocationsChanged", "NearbyChanged",
-                                          "Question", "WalkBatch" };
+                                          "WalkBatch" };
     QCOMPARE(xml.signalSignatures.keys(), expectedSignals);
     QCOMPARE(xml.signalSignatures.value("ListBatch"), QByteArray("ua(ayyyxxxxixxssqays)"));
 }

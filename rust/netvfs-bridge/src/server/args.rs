@@ -2,34 +2,27 @@
 //! Argument validation: a method call becomes a typed [`Call`]. Paths are normalised ([`super::paths`]), numbers range-checked, strings length- and charset-checked, unknown option keys refused. File descriptors are checked later.
 //!
 //! Errors: `InvalidName` for paths and link targets, `ProtocolError` for everything else (dispatch replies `org.freedesktop.DBus.Error.InvalidArgs`), `Unsupported` for an unknown method.
-//!
-//! Secrets (`ConnectAdHoc` secret, keyboard-interactive `Answer`s) are copied once into [`Secret`]s, which wipe on drop. zbus's received message and decoding buffers are not wiped.
 
 use super::paths::{NPath, normalize};
 use crate::status::Status;
 use netvfs_bridge_proto::limits::{
-    DECODE_MAX_DEPTH, DECODE_MAX_ELEMENTS, DEFAULT_LIST_BATCH, MAX_ANSWERS, MAX_ID, MAX_LIST_BATCH,
-    MAX_OFFSET, MAX_PATH, MAX_READ, MAX_READ_AHEAD, MAX_SECRET, MAX_SHORT, MAX_TIME_MS, MAX_URL,
-    MAX_WALK_DEPTH, MIN_TIME_MS,
+    DECODE_MAX_DEPTH, DECODE_MAX_ELEMENTS, DEFAULT_LIST_BATCH, MAX_ID, MAX_LIST_BATCH, MAX_OFFSET, MAX_PATH,
+    MAX_READ, MAX_READ_AHEAD, MAX_SHORT, MAX_TIME_MS, MAX_WALK_DEPTH, MIN_TIME_MS,
 };
 use netvfs_bridge_proto::methods::find_method;
 use netvfs_bridge_proto::{ErrorName, Lane, MethodInfo, drive_info};
 use std::collections::BTreeMap;
-use std::fmt;
 use std::os::fd::OwnedFd;
 use zbus::Message;
 use zbus::message::Body;
 use zbus::zvariant::{self, Value};
-use zeroize::Zeroizing;
 
 const MAX_TOKEN: usize = 32;
-const MAX_ANSWER_BYTES: usize = MAX_SHORT * 4;
 const MAX_MODE: i64 = 0o7777;
 /// Largest body of a call.
 pub const MAX_CALL_BODY: usize = 128 * 1024;
-const SECURITY_PROFILES: [&str; 3] = ["strict", "signed", "guest"];
 
-/// A validated location id (`account:12`, `adhoc:<run>-3`).
+/// A validated location id (`account:12`).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LocId(String);
 
@@ -39,39 +32,6 @@ impl LocId {
     pub fn as_str(&self) -> &str {
         &self.0
     }
-}
-
-/// Secret bytes, wiped on drop.
-#[derive(Clone, PartialEq, Eq)]
-pub struct Secret(Zeroizing<Vec<u8>>);
-
-impl Secret {
-    /// The bytes.
-    #[must_use]
-    pub fn expose(&self) -> &[u8] {
-        &self.0
-    }
-
-    /// The wiping container, taken.
-    #[must_use]
-    pub fn into_inner(self) -> Zeroizing<Vec<u8>> {
-        self.0
-    }
-}
-
-impl fmt::Debug for Secret {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Secret({} bytes)", self.0.len())
-    }
-}
-
-/// `ConnectAdHoc` options.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct AdHocOpts {
-    /// `user`.
-    pub user: Option<String>,
-    /// `security_profile` (SMB only).
-    pub security_profile: Option<String>,
 }
 
 /// `SetAttributes` changes.
@@ -159,14 +119,6 @@ pub enum Call {
         loc: LocId,
     },
     Disconnect {
-        loc: LocId,
-    },
-    ConnectAdHoc {
-        url: String,
-        secret: Secret,
-        opts: AdHocOpts,
-    },
-    ForgetAdHoc {
         loc: LocId,
     },
     Discover {
@@ -292,11 +244,6 @@ pub enum Call {
     Cancel {
         id: u32,
     },
-    Answer {
-        id: String,
-        accept: bool,
-        answers: Vec<Secret>,
-    },
     OpenAccountSettings {
         loc: LocId,
     },
@@ -326,8 +273,6 @@ impl Call {
             Self::ListLocations => "ListLocations",
             Self::Capabilities { .. } => "Capabilities",
             Self::Disconnect { .. } => "Disconnect",
-            Self::ConnectAdHoc { .. } => "ConnectAdHoc",
-            Self::ForgetAdHoc { .. } => "ForgetAdHoc",
             Self::Discover { .. } => "Discover",
             Self::List { .. } => "List",
             Self::Stat { .. } => "Stat",
@@ -352,7 +297,6 @@ impl Call {
             Self::RemoveTree { .. } => "RemoveTree",
             Self::Walk { .. } => "Walk",
             Self::Cancel { .. } => "Cancel",
-            Self::Answer { .. } => "Answer",
             Self::OpenAccountSettings { .. } => "OpenAccountSettings",
             Self::AddAccount { .. } => "AddAccount",
             Self::OpenStorageSettings => "OpenStorageSettings",
@@ -411,7 +355,7 @@ pub fn decode(msg: &Message) -> Result<Call, Status> {
 
 type Decoder = fn(&Body) -> Result<Call, Status>;
 
-const DECODERS: [(&str, Decoder); 40] = [
+const DECODERS: [(&str, Decoder); 37] = [
     ("Hello", hello),
     ("GetConsent", |_| Ok(Call::GetConsent)),
     ("RequestConsent", |_| Ok(Call::RequestConsent)),
@@ -419,8 +363,6 @@ const DECODERS: [(&str, Decoder); 40] = [
     ("ListLocations", |_| Ok(Call::ListLocations)),
     ("Capabilities", |b| loc_only(b).map(|loc| Call::Capabilities { loc })),
     ("Disconnect", |b| loc_only(b).map(|loc| Call::Disconnect { loc })),
-    ("ConnectAdHoc", connect_ad_hoc),
-    ("ForgetAdHoc", |b| loc_only(b).map(|loc| Call::ForgetAdHoc { loc })),
     ("Discover", |b| deserialize::<(bool,)>(b).map(|(on,)| Call::Discover { on })),
     ("List", list),
     ("Stat", stat),
@@ -445,7 +387,6 @@ const DECODERS: [(&str, Decoder); 40] = [
     ("RemoveTree", |b| loc_path(b).map(|(loc, path)| Call::RemoveTree { loc, path })),
     ("Walk", walk),
     ("Cancel", |b| deserialize::<(u32,)>(b).map(|(id,)| Call::Cancel { id })),
-    ("Answer", answer),
     ("OpenAccountSettings", |b| loc_only(b).map(|loc| Call::OpenAccountSettings { loc })),
     ("AddAccount", add_account),
     ("OpenStorageSettings", |_| Ok(Call::OpenStorageSettings)),
@@ -540,19 +481,6 @@ fn loc_path(body: &Body) -> Result<(LocId, NPath), Status> {
 fn hello(body: &Body) -> Result<Call, Status> {
     let (client,): (String,) = deserialize(body)?;
     Ok(Call::Hello { client: short_string(client, 1, MAX_SHORT)? })
-}
-
-fn connect_ad_hoc(body: &Body) -> Result<Call, Status> {
-    let (url, secret, opts): (String, &[u8], Options<'_>) = deserialize(body)?;
-    let url = short_string(url, 1, MAX_URL)?;
-    // The only copy of the secret in our hands, wiped on drop.
-    let secret = Secret(Zeroizing::new(secret.to_vec()));
-    if secret.expose().len() > MAX_SECRET {
-        return Err(Status::invalid_args("Secret too long"));
-    }
-    let mut parsed = AdHocOpts::default();
-    each_option(&opts, |key, value| ad_hoc_option(key, value, &mut parsed))?;
-    Ok(Call::ConnectAdHoc { url, secret, opts: parsed })
 }
 
 fn list(body: &Body) -> Result<Call, Status> {
@@ -679,18 +607,6 @@ fn walk(body: &Body) -> Result<Call, Status> {
     let mut parsed = WalkOpts::default();
     each_option(&opts, |key, value| walk_option(key, value, &mut parsed))?;
     Ok(Call::Walk { loc, path, opts: parsed })
-}
-
-fn answer(body: &Body) -> Result<Call, Status> {
-    let (id, opts): (String, Options<'_>) = deserialize(body)?;
-    let id = short_string(id, 1, MAX_ID)?;
-    if !is_valid_location_id(&id) {
-        return Err(Status::invalid_args("Invalid question id"));
-    }
-    let mut accept = false;
-    let mut answers = Vec::new();
-    each_option(&opts, |key, value| answer_option(key, value, &mut accept, &mut answers))?;
-    Ok(Call::Answer { id, accept, answers })
 }
 
 fn drive_only(body: &Body) -> Result<String, Status> {
@@ -878,73 +794,6 @@ fn transfer_option(
         _ => return Err(unknown_option(key)),
     }
     Ok(())
-}
-
-fn ad_hoc_option(key: &str, value: &Value<'_>, opts: &mut AdHocOpts) -> Result<(), Status> {
-    let s = as_str(value)
-        .filter(|s| utf16_len(s) <= MAX_SHORT)
-        .ok_or_else(|| Status::invalid_args(format!("Option \"{key}\" must be a short string")))?;
-    match key {
-        "user" if s.contains('\0') => Err(Status::invalid_args("Option \"user\" contains NUL")),
-        "user" => {
-            opts.user = (!s.is_empty()).then(|| s.to_owned());
-            Ok(())
-        }
-        "security_profile" if !SECURITY_PROFILES.contains(&s) => {
-            Err(Status::invalid_args("Unknown security profile"))
-        }
-        "security_profile" => {
-            opts.security_profile = Some(s.to_owned());
-            Ok(())
-        }
-        _ => Err(unknown_option(key)),
-    }
-}
-
-fn answer_option(
-    key: &str,
-    value: &Value<'_>,
-    accept: &mut bool,
-    answers: &mut Vec<Secret>,
-) -> Result<(), Status> {
-    match key {
-        "accept" => {
-            *accept = option_bool(key, value)?;
-            Ok(())
-        }
-        "answers" => {
-            *answers = answer_list(value)?;
-            Ok(())
-        }
-        _ => Err(unknown_option(key)),
-    }
-}
-
-fn answer_list(value: &Value<'_>) -> Result<Vec<Secret>, Status> {
-    let items = match value {
-        Value::Array(a) if a.element_signature() != "y" && a.element_signature() != "s" => a.inner(),
-        _ => return Err(Status::invalid_args("Option \"answers\" must be an array of byte arrays")),
-    };
-    if items.len() > MAX_ANSWERS {
-        return Err(Status::invalid_args("Too many answers"));
-    }
-    items.iter().map(|item| answer_bytes(unwrap_variant(item))).collect()
-}
-
-fn answer_bytes(item: &Value<'_>) -> Result<Secret, Status> {
-    let invalid = || Status::invalid_args("Invalid answer");
-    let Value::Array(bytes) = item else { return Err(invalid()) };
-    if bytes.element_signature() != "y" || bytes.len() > MAX_ANSWER_BYTES {
-        return Err(invalid());
-    }
-    let mut secret = Zeroizing::new(Vec::with_capacity(bytes.len()));
-    for b in bytes.inner() {
-        match b {
-            Value::U8(b) => secret.push(*b),
-            _ => return Err(invalid()),
-        }
-    }
-    Ok(Secret(secret))
 }
 
 #[cfg(test)]

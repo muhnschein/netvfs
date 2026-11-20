@@ -152,12 +152,6 @@ impl Env {
         self.config_home().join("netvfs/bridge.conf")
     }
 
-    /// Accepted ad-hoc identities of `consumer`: `~/.local/share/netvfs/bridge/<id>/known_hosts`.
-    #[must_use]
-    pub fn known_hosts_file(&self, consumer: &str) -> PathBuf {
-        self.data_home().join("netvfs/bridge").join(consumer).join("known_hosts")
-    }
-
     /// What `consumer` added at an add level: `~/.local/share/netvfs/bridge/<id>/added`.
     #[must_use]
     pub fn added_file(&self, consumer: &str) -> PathBuf {
@@ -625,13 +619,8 @@ mod tests {
     fn paths() {
         let env = Env::default().with("HOME", "/home/u");
         assert_eq!(env.consent_file(), Path::new("/home/u/.config/netvfs/bridge.conf"));
-        assert_eq!(
-            env.known_hosts_file("lautta"),
-            Path::new("/home/u/.local/share/netvfs/bridge/lautta/known_hosts")
-        );
         let xdg = env.clone().with("XDG_CONFIG_HOME", "/c").with("XDG_DATA_HOME", "/d");
         assert_eq!(xdg.consent_file(), Path::new("/c/netvfs/bridge.conf"));
-        assert_eq!(xdg.known_hosts_file("p"), Path::new("/d/netvfs/bridge/p/known_hosts"));
         assert_eq!(env.added_file("lautta"), Path::new("/home/u/.local/share/netvfs/bridge/lautta/added"));
         assert_eq!(xdg.added_file("p"), Path::new("/d/netvfs/bridge/p/added"));
         let empty = Env::default().with("HOME", "").with("XDG_CONFIG_HOME", "");

@@ -3,11 +3,10 @@
 #![allow(clippy::assertions_on_result_states, clippy::arithmetic_side_effects)]
 
 use super::{
-    AdHocOpts, AttributeChanges, Call, CopyOpts, DECODE_MAX_ELEMENTS, Disposition, ErrorName, Lane,
-    MAX_ANSWER_BYTES, MAX_ANSWERS, MAX_CALL_BODY, MAX_ID, MAX_OFFSET, MAX_PATH, MAX_READ, MAX_READ_AHEAD,
-    MAX_SECRET, MAX_SHORT, MAX_TIME_MS, MAX_URL, MIN_TIME_MS, Message, SECURITY_PROFILES, Secret, Status,
-    TransferOpts, Value, WalkOpts, Zeroizing, ad_hoc_option, decode, decoder, is_valid_location_id,
-    is_valid_token, lane_hint, location_id,
+    AttributeChanges, Call, CopyOpts, DECODE_MAX_ELEMENTS, Disposition, ErrorName, Lane, MAX_CALL_BODY,
+    MAX_ID, MAX_OFFSET, MAX_PATH, MAX_READ, MAX_READ_AHEAD, MAX_TIME_MS, MIN_TIME_MS, Message, Status,
+    TransferOpts, Value, WalkOpts, decode, decoder, is_valid_location_id, is_valid_token, lane_hint,
+    location_id,
 };
 use netvfs_bridge_proto::methods::{INTERFACE, METHODS, OBJECT_PATH};
 use std::collections::HashMap;
@@ -56,8 +55,7 @@ fn valid_message(name: &str) -> Message {
         | "OpenStorageSettings"
         | "ListDrives" => message(name, &()),
         "Mount" | "Unmount" => message(name, &("mmcblk1p1",)),
-        "Capabilities" | "Disconnect" | "ForgetAdHoc" | "OpenAccountSettings" => message(name, &(LOC,)),
-        "ConnectAdHoc" => message(name, &("sftp://h/", p, none())),
+        "Capabilities" | "Disconnect" | "OpenAccountSettings" => message(name, &(LOC,)),
         "Discover" => message(name, &(true,)),
         "List" => message(name, &(LOC, p, "", 0u32)),
         "Stat" => message(name, &(LOC, p, true, "")),
@@ -74,7 +72,6 @@ fn valid_message(name: &str) -> Message {
         "Close" | "Cancel" => message(name, &(1u32,)),
         "Upload" | "Download" => message(name, &(LOC, p, fd, none())),
         "CopyAcross" => message(name, &(LOC, p, "account:2", p, none())),
-        "Answer" => message(name, &("q1", none())),
         "AddAccount" => message(name, &("sftp",)),
         other => panic!("no body for {other}"),
     }
@@ -355,12 +352,12 @@ fn tree_options() {
     assert_eq!(copy_err(&[("force", Value::from(true))]), "Unknown option \"force\"");
     let Call::CopyAcross { loc, dest_loc, dest_path, opts, .. } = validate(
         "CopyAcross",
-        &(LOC, b"a".as_slice(), "adhoc:2", b"b/".as_slice(), map(&[("replace", Value::from(true))])),
+        &(LOC, b"a".as_slice(), "account:2", b"b/".as_slice(), map(&[("replace", Value::from(true))])),
     )
     .unwrap() else {
         panic!()
     };
-    assert_eq!((loc.as_str(), dest_loc.as_str(), dest_path.as_bytes()), (LOC, "adhoc:2", b"b".as_slice()));
+    assert_eq!((loc.as_str(), dest_loc.as_str(), dest_path.as_bytes()), (LOC, "account:2", b"b".as_slice()));
     assert_eq!(opts, CopyOpts { recursive: false, replace: true });
     assert_eq!(
         error("CopyAcross", &(LOC, b"a".as_slice(), "Bad", b"b".as_slice(), none())),
@@ -400,7 +397,7 @@ fn lanes_and_links() {
 #[test]
 fn identifiers() {
     assert!(is_valid_location_id("account:12"));
-    assert!(is_valid_location_id("adhoc:3"));
+    assert!(is_valid_location_id("account:3-1"));
     assert!(is_valid_location_id("a-b"));
     assert!(!is_valid_location_id("Account:1"));
     assert!(!is_valid_location_id("a/b"));
@@ -446,84 +443,6 @@ fn identifiers() {
 }
 
 #[test]
-fn ad_hoc_options() {
-    let secret = b"s".as_slice();
-    let opts = map(&[("user", Value::from("bob")), ("security_profile", Value::from("signed"))]);
-    let Call::ConnectAdHoc { url, opts, .. } = validate("ConnectAdHoc", &("smb://h/", secret, opts)).unwrap()
-    else {
-        panic!()
-    };
-    assert_eq!(url, "smb://h/");
-    assert_eq!(opts, AdHocOpts { user: Some("bob".to_owned()), security_profile: Some("signed".to_owned()) });
-    let Call::ConnectAdHoc { opts, .. } =
-        validate("ConnectAdHoc", &("smb://h/", secret, map(&[("user", Value::from(""))]))).unwrap()
-    else {
-        panic!()
-    };
-    assert_eq!(opts, AdHocOpts::default());
-    let err = |pairs: &[(&str, Value<'_>)]| {
-        validate("ConnectAdHoc", &("u", secret, map(pairs))).unwrap_err().message
-    };
-    assert_eq!(err(&[("user", Value::from(1i32))]), "Option \"user\" must be a short string");
-    assert_eq!(err(&[("user", Value::from("u".repeat(257)))]), "Option \"user\" must be a short string");
-    assert_eq!(
-        error("ConnectAdHoc", &("u", secret, map(&[("user", Value::from("a\0b"))]))),
-        ErrorName::ProtocolError
-    );
-    let nul = ad_hoc_option("user", &Value::from("a\0b"), &mut AdHocOpts::default()).unwrap_err();
-    assert_eq!(nul.message, "Option \"user\" contains NUL");
-    assert_eq!(err(&[("security_profile", Value::from("weak"))]), "Unknown security profile");
-    assert_eq!(err(&[("other", Value::from(1i32))]), "Option \"other\" must be a short string");
-    assert_eq!(err(&[("other", Value::from("x"))]), "Unknown option \"other\"");
-    for profile in SECURITY_PROFILES {
-        assert!(
-            validate("ConnectAdHoc", &("u", secret, map(&[("security_profile", Value::from(profile))])))
-                .is_ok()
-        );
-    }
-    assert!(validate("ConnectAdHoc", &("u".repeat(MAX_URL), secret, none())).is_ok());
-    assert_eq!(
-        validate("ConnectAdHoc", &("u".repeat(MAX_URL + 1), secret, none())).unwrap_err().message,
-        "Argument 1 is too long"
-    );
-}
-
-#[test]
-fn secrets_are_zeroizing() {
-    let Call::ConnectAdHoc { secret, .. } =
-        validate("ConnectAdHoc", &("sftp://h/", b"hunter2".as_slice(), none())).unwrap()
-    else {
-        panic!()
-    };
-    assert_eq!(secret.expose(), b"hunter2");
-    assert_eq!(format!("{secret:?}"), "Secret(7 bytes)");
-    let call = validate("ConnectAdHoc", &("sftp://h/", b"hunter2".as_slice(), none())).unwrap();
-    assert!(!format!("{call:?}").contains("hunter2"));
-    let wiping: Zeroizing<Vec<u8>> = secret.into_inner();
-    assert_eq!(wiping.as_slice(), b"hunter2");
-
-    let answers = map(&[("accept", Value::from(true)), ("answers", Value::from(vec![b"123456".to_vec()]))]);
-    let call = validate("Answer", &("q1", answers)).unwrap();
-    assert!(!format!("{call:?}").contains("123456"));
-    let Call::Answer { id, accept, answers } = call else { panic!() };
-    assert_eq!((id.as_str(), accept, answers.len()), ("q1", true, 1));
-    assert_eq!(answers[0].expose(), b"123456");
-
-    let too_long = vec![b'x'; MAX_SECRET + 1];
-    assert_eq!(
-        validate("ConnectAdHoc", &("sftp://h/", too_long.as_slice(), none())).unwrap_err().message,
-        "Secret too long"
-    );
-    assert!(validate("ConnectAdHoc", &("sftp://h/", &too_long[1..], none())).is_ok());
-    let url = "\u{ffff}".repeat(MAX_URL);
-    let big = map(&[
-        ("user", Value::from("\u{ffff}".repeat(MAX_SHORT))),
-        ("security_profile", Value::from("strict")),
-    ]);
-    assert!(validate("ConnectAdHoc", &(url, &too_long[1..], big)).is_ok());
-}
-
-#[test]
 fn body_size_limit() {
     let p = b"a".as_slice();
     let bytes = |n: usize| map(&[("mode", Value::from(vec![1u8; n]))]);
@@ -533,41 +452,6 @@ fn body_size_limit() {
     assert_eq!(fits.message, "Option \"mode\" must be an integer");
     let over = validate("SetAttributes", &(LOC, p, bytes(MAX_CALL_BODY - overhead + 1))).unwrap_err();
     assert_eq!((over.name, over.message.as_str()), (ErrorName::ProtocolError, "Arguments too large"));
-}
-
-#[test]
-fn answers() {
-    let answer = |opts: Map<'_>| validate("Answer", &("q7", opts));
-    let message = |opts: Map<'_>| answer(opts).unwrap_err().message;
-    let av = Value::from(vec![Value::Value(Box::new(Value::from(b"a".to_vec()))), Value::from(b"".to_vec())]);
-    let Call::Answer { accept, answers, .. } = answer(map(&[("answers", av)])).unwrap() else { panic!() };
-    assert!(!accept);
-    assert_eq!(answers.iter().map(Secret::expose).collect::<Vec<_>>(), [b"a".as_slice(), b"".as_slice()]);
-    let empty: Vec<Vec<u8>> = vec![];
-    assert!(answer(map(&[("answers", Value::from(empty))])).is_ok());
-    let must = "Option \"answers\" must be an array of byte arrays";
-    assert_eq!(message(map(&[("answers", Value::from(b"ab".to_vec()))])), must);
-    assert_eq!(message(map(&[("answers", Value::from(vec!["a"]))])), must);
-    let no_strings: Vec<String> = vec![];
-    assert_eq!(message(map(&[("answers", Value::from(no_strings))])), must);
-    assert_eq!(message(map(&[("answers", Value::from(1i32))])), must);
-    assert_eq!(
-        message(map(&[("answers", Value::from(vec![vec![1u8]; MAX_ANSWERS + 1]))])),
-        "Too many answers"
-    );
-    assert!(answer(map(&[("answers", Value::from(vec![vec![1u8]; MAX_ANSWERS]))])).is_ok());
-    assert_eq!(
-        message(map(&[("answers", Value::from(vec![vec![1u8; MAX_ANSWER_BYTES + 1]]))])),
-        "Invalid answer"
-    );
-    assert!(answer(map(&[("answers", Value::from(vec![vec![1u8; MAX_ANSWER_BYTES]]))])).is_ok());
-    assert_eq!(MAX_ANSWER_BYTES, 1024);
-    assert_eq!(message(map(&[("answers", Value::from(vec![Value::from(1i32)]))])), "Invalid answer");
-    assert_eq!(message(map(&[("answers", Value::from(vec![vec![1u16]]))])), "Invalid answer");
-    assert_eq!(message(map(&[("accept", Value::from("yes"))])), "Option \"accept\" must be a boolean");
-    assert_eq!(message(map(&[("reason", Value::from(true))])), "Unknown option \"reason\"");
-    assert_eq!(validate("Answer", &("Q1", none())).unwrap_err().message, "Invalid question id");
-    assert_eq!(validate("Answer", &("q".repeat(65), none())).unwrap_err().message, "Argument 1 is too long");
 }
 
 fn six_levels() -> Value<'static> {

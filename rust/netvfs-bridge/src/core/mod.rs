@@ -8,7 +8,6 @@ mod guard;
 mod jobs;
 pub mod nearby;
 pub mod own;
-pub mod questions;
 pub mod quota;
 pub mod states;
 
@@ -20,29 +19,26 @@ use crate::config::{ConsumerInfo, Env};
 use crate::consent::{Consent, ConsentStore, ConsentWatcher, Grant, Level};
 use crate::drives::DriveSource;
 use crate::drives::udisks::UDisks;
-use crate::ffi::{Conn, Ffi, ParsedUrl};
+use crate::ffi::{Conn, Ffi};
 use crate::handoff::{self, Handoff, HandoffCall, Launcher, SessionBusLauncher};
 use crate::jobs::JobOutcome;
 use crate::locations::book::LocationBook;
-use crate::locations::connector::{Connector, QUESTION_TIMEOUT};
+use crate::locations::connector::Connector;
 use crate::locations::copyjobs::{CopyId, CopyJobs};
-use crate::locations::knownhosts::KnownHosts;
 use crate::locations::pool::{CONNECTION_IDLE, PoolSet};
 use crate::locations::spec::{LocationSpec, account_location_id};
 use crate::locations::state::StateSignal;
 use crate::locations::worker::{Turn, Work, WorkerId};
-use crate::locations::{Answer, AskId, CancelToken, TaskContext, WorkerEvent, WorkerEvents};
+use crate::locations::{CancelToken, TaskContext, WorkerEvent, WorkerEvents};
 use crate::peer::PeerChecker;
 use crate::prompt::{ConsentPrompt, NotificationPrompt, PromptEvent};
 use crate::server::{self, Call, ListenAddress, Listener, OutSignal, Outbox, Reply, ReplyTo, SessionId};
 use crate::status::Status;
-use admin::Waiter;
 use drives::DriveCall;
 use nearby::{FfiNearby, Nearby, NearbySource};
 use netvfs_bridge_proto::limits::POOL_PER_HOST;
 use netvfs_bridge_proto::{ErrorName, Lane, WireNearby};
 use own::OwnItems;
-use questions::QuestionBroker;
 use quota::Quota;
 use states::{StateReport, States};
 use std::collections::{BTreeMap, HashMap};
@@ -68,8 +64,6 @@ pub struct Config {
     pub consumer: ConsumerInfo,
     /// `bridge.conf`.
     pub consent_file: PathBuf,
-    /// The consumer's known_hosts.
-    pub known_hosts_file: PathBuf,
     /// The items the consumer added at an add level.
     pub added_file: PathBuf,
     /// `handoff.conf`.
@@ -78,8 +72,6 @@ pub struct Config {
     pub idle_exit: Duration,
     /// Pooled connections without work are closed after this.
     pub connection_idle: Duration,
-    /// How long a question waits for its answer.
-    pub question_timeout: Duration,
 }
 
 impl Config {
@@ -88,12 +80,10 @@ impl Config {
     pub fn new(env: &Env, consumer: ConsumerInfo) -> Self {
         Self {
             consent_file: env.consent_file(),
-            known_hosts_file: env.known_hosts_file(&consumer.id),
             added_file: env.added_file(&consumer.id),
             handoff_config: PathBuf::from(handoff::DEFAULT_CONFIG),
             idle_exit: Duration::from_millis(env.idle_exit_ms()),
             connection_idle: CONNECTION_IDLE,
-            question_timeout: QUESTION_TIMEOUT,
             consumer,
         }
     }
@@ -149,9 +139,6 @@ impl fmt::Debug for Services {
 /// Makes the [`Services`] on the runtime thread, once the core's channel exists ([`CoreLink`]).
 pub type MakeServices = Box<dyn FnOnce(CoreLink) -> LocalFuture<'static, Services> + Send>;
 
-/// Parses `ConnectAdHoc` URLs; `None` falls through to the C ABI.
-pub type UrlOverride = Arc<dyn Fn(&str) -> Option<ParsedUrl> + Send + Sync>;
-
 /// The injectable dependencies of [`serve`](crate::serve).
 pub struct Deps {
     /// The C ABI (loaded and `init`ed on the main thread).
@@ -160,17 +147,11 @@ pub struct Deps {
     pub listen: ListenAddress,
     /// The accounts, the prompt, the discovery and the handoff launcher.
     pub services: MakeServices,
-    /// URLs parsed before the C ABI sees them.
-    pub url_override: Option<UrlOverride>,
 }
 
 impl fmt::Debug for Deps {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Deps")
-            .field("ffi", &self.ffi)
-            .field("listen", &self.listen)
-            .field("url_override", &self.url_override.is_some())
-            .finish_non_exhaustive()
+        f.debug_struct("Deps").field("ffi", &self.ffi).field("listen", &self.listen).finish_non_exhaustive()
     }
 }
 
@@ -180,7 +161,7 @@ impl Deps {
     pub fn system(ffi: Ffi, listen: ListenAddress, env: &Env) -> Self {
         let helper = env.accounts_helper();
         let services: MakeServices = Box::new(move |link| Box::pin(system_services(ffi, helper, link)));
-        Self { ffi, listen, services, url_override: None }
+        Self { ffi, listen, services }
     }
 }
 
@@ -230,8 +211,6 @@ pub struct Counters {
     pub handles: usize,
     /// Running jobs.
     pub jobs: usize,
-    /// Pending questions.
-    pub questions: usize,
     /// Running copy jobs.
     pub copy_jobs: usize,
     /// Pools of locations.
@@ -245,7 +224,6 @@ pub(crate) enum Event {
     Server(server::Event),
     Worker(WorkerEvent),
     Done { sid: SessionId, op: u64, result: Result<Reply, Status> },
-    AdHocDone { sid: SessionId, op: u64, loc: String, result: Result<(), Status> },
     ListDone { sid: SessionId, request: u32, result: Result<(), Status> },
     Opened { sid: SessionId, op: u64, loc: String, opened: Result<(WorkerId, u32, i64), Status> },
     Progress { sid: SessionId, job: u32, done: i64, total: i64 },
@@ -415,19 +393,15 @@ pub(crate) struct Core {
     own: OwnItems,
     drives: Rc<dyn DriveSource>,
     handoff: Handoff<DynLauncher>,
-    known_hosts: Arc<KnownHosts>,
     book: LocationBook<Connector>,
     copy_jobs: CopyJobs<Connector>,
     copy_owners: HashMap<CopyId, (SessionId, u32, Option<Effect>)>,
     quota: Quota,
-    questions: QuestionBroker<Waiter>,
-    asks: HashMap<AskId, String>,
     nearby: Nearby,
     states: StateReport,
     state_signal: StateSignal,
     sessions: BTreeMap<SessionId, Session>,
     idle_deadline: Option<Instant>,
-    url_override: Option<UrlOverride>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -466,7 +440,6 @@ pub(crate) async fn run(config: Config, deps: Deps) -> ExitCode {
     let services = (deps.services)(CoreLink(tx.clone())).await;
     watch_consent_file(&config, &tx);
     let mut core = Core::new(config, deps.ffi, tx, services);
-    core.url_override = deps.url_override;
     let accounts = core.accounts.list().await;
     core.set_accounts(&accounts);
     core.run(&mut rx).await;
@@ -501,9 +474,7 @@ impl Core {
         let events = WorkerEvents::new(move |event| {
             drop(worker_tx.send(Event::Worker(event)));
         });
-        let known_hosts = Arc::new(KnownHosts::new(&config.known_hosts_file));
-        let pins: Arc<dyn crate::locations::connector::PinStore> = Arc::<KnownHosts>::clone(&known_hosts);
-        let connector = Arc::new(Connector::new(ffi, pins, events.clone(), config.question_timeout));
+        let connector = Arc::new(Connector::new(ffi, events.clone()));
         let consent_store = ConsentStore::new(&config.consent_file);
         let consent = consent_store.consent(&config.consumer.id);
         let state_tx = tx.clone();
@@ -524,19 +495,15 @@ impl Core {
             own: OwnItems::load(&config.added_file, own::now_ms()),
             drives: services.drives,
             handoff: Handoff::new(&config.handoff_config, DynLauncher(services.launcher)),
-            known_hosts,
             book: LocationBook::new(pools),
             copy_jobs: CopyJobs::new(connector, events),
             copy_owners: HashMap::new(),
             quota: Quota::default(),
-            questions: QuestionBroker::default(),
-            asks: HashMap::new(),
             nearby: Nearby::new(services.nearby),
             states: StateReport::default(),
             state_signal,
             sessions: BTreeMap::new(),
             idle_deadline: None,
-            url_override: None,
             config,
         }
     }
@@ -580,7 +547,6 @@ impl Core {
             Event::Server(event) => self.on_server(event),
             Event::Worker(event) => self.on_worker(event),
             Event::Done { sid, op, result } => self.on_done(sid, op, result),
-            Event::AdHocDone { sid, op, loc, result } => self.on_ad_hoc_done(sid, op, &loc, result),
             Event::ListDone { sid, request, result } => self.on_list_done(sid, request, result),
             Event::Opened { sid, op, loc, opened } => self.on_opened(sid, op, loc, opened),
             Event::Progress { sid, job, done, total } => self.on_progress(sid, job, done, total),
@@ -617,7 +583,6 @@ impl Core {
             ops: self.sessions.values().map(|s| s.ops.len()).sum(),
             handles: self.quota.open_handles(),
             jobs: self.quota.running_jobs(),
-            questions: self.questions.pending(),
             copy_jobs: self.copy_jobs.len(),
             pools: self.book.pools().iter().count(),
             discovering: self.nearby.is_running(),
@@ -684,13 +649,8 @@ impl Core {
             Call::ListLocations => self.on_list_locations(reply),
             Call::Capabilities { loc } => self.on_capabilities(sid, reply, &loc, lane),
             Call::Disconnect { loc } => self.on_disconnect(reply, &loc),
-            Call::ConnectAdHoc { url, secret, opts } => {
-                self.on_connect_ad_hoc(sid, reply, &url, secret, opts);
-            }
-            Call::ForgetAdHoc { loc } => self.on_forget_ad_hoc(reply, &loc),
             Call::Discover { on } => self.on_discover(sid, reply, on),
             Call::Cancel { id } => self.on_cancel(sid, reply, id),
-            Call::Answer { id, accept, answers } => self.on_answer(sid, reply, &id, accept, answers),
             Call::OpenAccountSettings { loc } => self.on_open_account_settings(reply, &loc),
             Call::AddAccount { provider } => self.on_add_account(reply, &provider),
             Call::OpenStorageSettings => self.on_open_storage_settings(reply),
@@ -718,9 +678,6 @@ impl Core {
         for h in handles.into_values() {
             self.quota.release_handle();
             self.book.close_worker_handle(&h.loc, h.worker, h.handle);
-        }
-        for waiter in self.questions.drop_session(sid) {
-            self.resolve(waiter, None);
         }
         self.nearby.set_discovering(sid, false, Instant::now());
         self.kick_all();
@@ -789,18 +746,6 @@ impl Core {
 
     fn on_worker(&mut self, event: WorkerEvent) {
         match event {
-            WorkerEvent::Ask { ask, session, kind, details, answer } => {
-                let id = self.questions.ask(session, Waiter::Worker { ask, answer });
-                self.asks.insert(ask, id.clone());
-                self.emit_question(session, &id, kind, details);
-            }
-            WorkerEvent::CancelQuestion(ask) => {
-                if let Some(id) = self.asks.remove(&ask)
-                    && let Some(waiter) = self.questions.cancel(&id)
-                {
-                    self.resolve(waiter, None);
-                }
-            }
             WorkerEvent::FetchAccount { account_id, reply } => {
                 let accounts = Rc::clone(&self.accounts);
                 tokio::task::spawn_local(async move {
@@ -829,35 +774,6 @@ impl Core {
                 }
             }
             WorkerEvent::Warning(text) => crate::log::warning(format_args!("{text}")),
-        }
-    }
-
-    fn emit_question(
-        &mut self,
-        sid: SessionId,
-        id: &str,
-        kind: &str,
-        details: HashMap<String, zbus::zvariant::OwnedValue>,
-    ) {
-        let sent = self.sessions.get(&sid).is_some_and(|s| !s.canceled)
-            && self.sessions.get(&sid).is_some_and(|s| {
-                s.outbox.signal(&OutSignal::Question { id: id.to_owned(), kind: kind.to_owned(), details })
-            });
-        if !sent && let Some(waiter) = self.questions.cancel(id) {
-            self.resolve(waiter, None);
-        }
-    }
-
-    fn resolve(&mut self, waiter: Waiter, answer: Option<Answer>) {
-        match waiter {
-            Waiter::Worker { ask, answer: tx } => {
-                self.asks.remove(&ask);
-                // The worker may have stopped waiting.
-                drop(tx.send(answer));
-            }
-            Waiter::Insecure { sid, pending, reply } => {
-                self.insecure_answered(sid, *pending, reply, answer.is_some_and(|a| a.accept));
-            }
         }
     }
 

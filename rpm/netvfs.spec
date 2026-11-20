@@ -36,7 +36,7 @@ BuildRequires: qt5-qttools-linguist
 BuildRequires: sailfish-svg2png
 BuildRequires: pkgconfig(Qt5Core)
 BuildRequires: pkgconfig(Qt5DBus)
-# Discovery in libnetvfs; the bridge's ad-hoc locations.
+# Discovery in libnetvfs.
 BuildRequires: pkgconfig(Qt5Network)
 BuildRequires: pkgconfig(Qt5Concurrent)
 BuildRequires: pkgconfig(Qt5Qml)

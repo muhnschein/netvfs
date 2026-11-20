@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! What a consumer may reach and how: location specs ([`spec`]), connection pools with lanes and the per-host limit ([`pool`]), connection state ([`state`]), one std thread per backend connection ([`worker`]), copy jobs on threads of their own ([`copyjobs`]), connection policy for accounts and ad-hoc locations ([`connector`]), the book holding them for the core ([`book`]) and pins of ad-hoc identities ([`knownhosts`]).
+//! What a consumer may reach and how: location specs ([`spec`]), connection pools with lanes and the per-host limit ([`pool`]), connection state ([`state`]), one std thread per backend connection ([`worker`]), copy jobs on threads of their own ([`copyjobs`]), connection policy for accounts ([`connector`]) and the book holding them for the core ([`book`]).
 //!
 //! # Threads
 //!
@@ -8,13 +8,12 @@
 //!
 //! # Worker → core
 //!
-//! Workers and copy jobs report through [`WorkerEvents`] ([`WorkerEvent`]): questions and their withdrawal, account connection data, account attention state, finished copy jobs, log warnings.
+//! Workers and copy jobs report through [`WorkerEvents`] ([`WorkerEvent`]): account connection data, account attention state, finished copy jobs, log warnings.
 //! The core folds `WorkerEvent` into `core::Event`; results of ordinary work items come from the closures the core builds.
 
 pub mod book;
 pub mod connector;
 pub mod copyjobs;
-pub mod knownhosts;
 #[cfg(test)]
 mod mock;
 pub mod pool;
@@ -27,21 +26,18 @@ use crate::server::SessionId;
 use connector::AccountAccess;
 use copyjobs::CopyId;
 use spec::Attention;
-use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
-use zbus::zvariant::OwnedValue;
-use zeroize::Zeroizing;
 
-/// The cancel flag of one request or job: set by the core, polled by workers, descriptor devices and question waits.
+/// The cancel flag of one request or job: set by the core, polled by workers and descriptor devices.
 pub type CancelToken = Arc<AtomicBool>;
 
-/// Who a piece of work is for: the session (for questions) and the request's cancel flag.
+/// Who a piece of work is for: the session and the request's cancel flag.
 #[derive(Debug, Clone)]
 pub struct TaskContext {
-    /// The session whose request this is (questions go there).
+    /// The session whose request this is.
     pub session: SessionId,
     /// Set when the request is canceled.
     pub cancel: CancelToken,
@@ -73,55 +69,9 @@ pub fn canceled() -> Status {
     Status::new(netvfs_bridge_proto::ErrorName::Canceled, "")
 }
 
-/// One question a worker asks (identity-unknown, keyboard-interactive),
-/// unique in the process; [`WorkerEvent::CancelQuestion`] names it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct AskId(pub u64);
-
-impl AskId {
-    /// A new id.
-    #[must_use]
-    pub fn next() -> Self {
-        static NEXT: AtomicU64 = AtomicU64::new(1);
-        Self(NEXT.fetch_add(1, Ordering::Relaxed))
-    }
-}
-
-/// A consumer's answer to a question (`Answer` call).
-#[derive(Clone, PartialEq, Eq, Default)]
-pub struct Answer {
-    /// Whether the consumer accepted.
-    pub accept: bool,
-    /// Keyboard-interactive answers, one per prompt; wiped on drop.
-    pub answers: Vec<Zeroizing<Vec<u8>>>,
-}
-
-impl fmt::Debug for Answer {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Answer").field("accept", &self.accept).field("answers", &self.answers.len()).finish()
-    }
-}
-
 /// What a worker or copy job needs from the core.
 #[derive(Debug)]
 pub enum WorkerEvent {
-    /// Ask `session` a question (`Question` signal); the answer (`None`: none) goes through `answer`, once.
-    /// The worker waits at most the question timeout, then sends [`WorkerEvent::CancelQuestion`].
-    Ask {
-        /// The question's id on the worker side.
-        ask: AskId,
-        /// The session whose request opened the connection.
-        session: SessionId,
-        /// `identity-unknown` or `keyboard-interactive`.
-        kind: &'static str,
-        /// The `a{sv}` of the `Question` signal.
-        details: HashMap<String, OwnedValue>,
-        /// Where the answer goes.
-        answer: mpsc::Sender<Option<Answer>>,
-    },
-    /// The worker stopped waiting (canceled, timed out): withdraw the
-    /// question if it is still pending.
-    CancelQuestion(AskId),
     /// What a connection to the account needs (the helper's `files` answer), sent through `reply`, once.
     FetchAccount {
         /// The account.
@@ -203,16 +153,6 @@ mod tests {
     }
 
     #[test]
-    fn ask_ids_are_unique_and_answers_hide_secrets() {
-        let (a, b) = (AskId::next(), AskId::next());
-        assert!(b > a);
-        let answer = Answer { accept: true, answers: vec![Zeroizing::new(b"123456".to_vec())] };
-        let text = format!("{answer:?}");
-        assert!(text.contains("accept: true") && text.contains("answers: 1"), "{text}");
-        assert!(!text.contains("49"), "{text}");
-    }
-
-    #[test]
     fn events_reach_the_channel() {
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         let events = WorkerEvents::channel(tx);
@@ -221,6 +161,6 @@ mod tests {
         assert!(matches!(rx.try_recv(), Ok(WorkerEvent::Warning(w)) if w == "w"));
         drop(rx);
         // A gone core: dropped quietly.
-        events.send(WorkerEvent::CancelQuestion(AskId(1)));
+        events.send(WorkerEvent::Warning("late".into()));
     }
 }

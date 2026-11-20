@@ -1,68 +1,16 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! [`LocationSpec`]: one location a consumer may see, an account with the Files service or an ad-hoc location it created, and [`Attention`].
+//! [`LocationSpec`]: one location a consumer may see, an account with the Files service, and [`Attention`].
 
 use super::state::ConnectionState;
 use crate::consent::Level;
 use crate::ffi::Params;
 use netvfs_bridge_proto::{WireLocation, location_state};
 use std::collections::HashMap;
-use std::fmt;
-use std::sync::{Arc, Mutex, OnceLock, PoisonError};
+use std::sync::OnceLock;
 use zbus::zvariant::{OwnedValue, Str, Value};
-use zeroize::Zeroizing;
 
 /// Why an account needs the user.
 pub use crate::accounts::Attention;
-
-/// Which kind of location.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum LocationKind {
-    /// A netvfs account with the Files service enabled.
-    Account {
-        /// Its libaccounts id.
-        account_id: i32,
-    },
-    /// An ad-hoc location this consumer created (`ConnectAdHoc`).
-    AdHoc,
-}
-
-/// The secret a consumer gave for an ad-hoc location, held for the connections of its pool and wiped when the location goes away.
-pub struct AdHocSecret {
-    user: String,
-    secret: Mutex<Zeroizing<Vec<u8>>>,
-}
-
-impl AdHocSecret {
-    /// The credentials `user` / `secret`.
-    #[must_use]
-    pub fn new(user: impl Into<String>, secret: Zeroizing<Vec<u8>>) -> Arc<Self> {
-        Arc::new(Self { user: user.into(), secret: Mutex::new(secret) })
-    }
-
-    /// The user name.
-    #[must_use]
-    pub fn user(&self) -> &str {
-        &self.user
-    }
-
-    /// A copy of the secret (wiped when dropped).
-    #[must_use]
-    pub fn secret(&self) -> Zeroizing<Vec<u8>> {
-        self.secret.lock().unwrap_or_else(PoisonError::into_inner).clone()
-    }
-
-    /// Wipes the secret (the location went away).
-    pub fn wipe(&self) {
-        *self.secret.lock().unwrap_or_else(PoisonError::into_inner) = Zeroizing::new(Vec::new());
-    }
-}
-
-impl fmt::Debug for AdHocSecret {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let len = self.secret.lock().unwrap_or_else(PoisonError::into_inner).len();
-        f.debug_struct("AdHocSecret").field("user", &self.user).field("secret_bytes", &len).finish()
-    }
-}
 
 /// The id of an account's location.
 #[must_use]
@@ -70,19 +18,13 @@ pub fn account_location_id(account_id: i32) -> String {
     format!("account:{account_id}")
 }
 
-/// The id of the `n`th ad-hoc location of the bridge run `run`.
-#[must_use]
-pub fn ad_hoc_location_id(run: u64, n: u64) -> String {
-    format!("adhoc:{run:016x}-{n}")
-}
-
 /// One location.
 #[derive(Debug, Clone)]
 pub struct LocationSpec {
-    /// `account:<n>` or `adhoc:<run>-<n>`.
+    /// `account:<n>`.
     pub id: String,
-    /// Account or ad hoc.
-    pub kind: LocationKind,
+    /// The account's libaccounts id.
+    pub account_id: i32,
     /// The backend (`sftp`, `smb`, …).
     pub provider: String,
     /// The display name.
@@ -93,9 +35,7 @@ pub struct LocationSpec {
     pub start_path: Vec<u8>,
     /// An account's attention state.
     pub attention: Attention,
-    /// Ad hoc only.
-    pub ad_hoc_secret: Option<Arc<AdHocSecret>>,
-    /// What the consumer may do here: an account's level, `full` for an ad-hoc location.
+    /// What the consumer may do here.
     pub access: Level,
     url: OnceLock<Option<String>>,
 }
@@ -113,13 +53,12 @@ impl LocationSpec {
     ) -> Self {
         Self {
             id: account_location_id(account_id),
-            kind: LocationKind::Account { account_id },
+            account_id,
             provider: provider.into(),
             name: display_name.into(),
             params,
             start_path: files_root,
             attention,
-            ad_hoc_secret: None,
             access: Level::Full,
             url: OnceLock::new(),
         }
@@ -130,38 +69,6 @@ impl LocationSpec {
     pub fn with_access(mut self, level: Level) -> Self {
         self.access = level;
         self
-    }
-
-    /// An ad-hoc location with the id `id` (from [`LocationBook::reserve_ad_hoc_id`](super::book::LocationBook::reserve_ad_hoc_id)).
-    #[must_use]
-    pub fn ad_hoc(
-        id: impl Into<String>,
-        name: impl Into<String>,
-        params: Params,
-        start_path: Vec<u8>,
-        secret: Option<Arc<AdHocSecret>>,
-    ) -> Self {
-        Self {
-            id: id.into(),
-            kind: LocationKind::AdHoc,
-            provider: params.provider.clone(),
-            name: name.into(),
-            params,
-            start_path,
-            attention: Attention::None,
-            ad_hoc_secret: secret,
-            access: Level::Full,
-            url: OnceLock::new(),
-        }
-    }
-
-    /// The account's id.
-    #[must_use]
-    pub const fn account_id(&self) -> Option<i32> {
-        match self.kind {
-            LocationKind::Account { account_id } => Some(account_id),
-            LocationKind::AdHoc => None,
-        }
     }
 
     /// `<provider>://<host>:<port>` with the host in lower case.
@@ -192,8 +99,7 @@ impl LocationSpec {
         if let Some(error) = state.error() {
             map.insert(location_state::ERROR_KEY.to_owned(), text(error.as_str()));
         }
-        let kind = if self.account_id().is_some() { "account" } else { "adhoc" };
-        map.insert("kind".to_owned(), text(kind));
+        map.insert("kind".to_owned(), text("account"));
         map.insert("access".to_owned(), text(self.access.as_str()));
         map.insert("host".to_owned(), text(&self.params.host));
         if self.params.port > 0 {
@@ -210,11 +116,9 @@ impl LocationSpec {
         if let Some(url) = url {
             map.insert("url".to_owned(), text(url));
         }
-        if let Some(account_id) = self.account_id() {
-            map.insert("accountId".to_owned(), OwnedValue::from(account_id));
-            if self.attention != Attention::None {
-                map.insert("attention".to_owned(), text(self.attention.as_str()));
-            }
+        map.insert("accountId".to_owned(), OwnedValue::from(self.account_id));
+        if self.attention != Attention::None {
+            map.insert("attention".to_owned(), text(self.attention.as_str()));
         }
         map
     }
@@ -281,11 +185,9 @@ mod tests {
     }
 
     #[test]
-    fn ids_kinds_and_host_keys() {
+    fn ids_and_host_keys() {
         assert_eq!(account_location_id(12), "account:12");
-        assert_eq!(ad_hoc_location_id(0x1f, 3), "adhoc:000000000000001f-3");
-        assert_eq!(ad_hoc_location_id(u64::MAX, 12), "adhoc:ffffffffffffffff-12");
-        assert!(is_valid_location_id(&ad_hoc_location_id(u64::MAX, u64::MAX)));
+        assert!(is_valid_location_id(&account_location_id(i32::MIN)));
         let account = LocationSpec::account(
             7,
             "sftp",
@@ -295,15 +197,10 @@ mod tests {
             Attention::None,
         );
         assert_eq!(account.id, "account:7");
-        assert_eq!(account.kind, LocationKind::Account { account_id: 7 });
-        assert_eq!(account.account_id(), Some(7));
+        assert_eq!(account.account_id, 7);
         assert_eq!((account.provider.as_str(), account.name.as_str()), ("sftp", "Seven"));
         assert_eq!(account.start_path, b"/r");
         assert_eq!(account.host_key(), "sftp://host.example:2222");
-        let adhoc = LocationSpec::ad_hoc("adhoc:1", "Mine", params("h", 0), Vec::new(), None);
-        assert_eq!((adhoc.kind, adhoc.account_id()), (LocationKind::AdHoc, None));
-        assert_eq!(adhoc.attention, Attention::None);
-        assert_eq!(adhoc.host_key(), "sftp://h:0");
     }
 
     #[test]
@@ -374,45 +271,23 @@ mod tests {
     }
 
     #[test]
-    fn info_of_an_ad_hoc_location_and_wire() {
-        let spec = LocationSpec::ad_hoc("adhoc:2", "Two", params("h", 21), b"/x".to_vec(), None);
+    fn info_without_url_and_wire() {
+        let spec = LocationSpec::account(2, "sftp", "Two", params("h", 21), b"/x".to_vec(), Attention::None);
         let info = spec.info(ConnectionState::Connecting, |_: &Params, _: &[u8]| Some(String::new()));
-        assert_eq!(string(&info, "kind").as_deref(), Some("adhoc"));
-        assert_eq!(string(&info, "access").as_deref(), Some("full"));
         assert_eq!(string(&info, "state").as_deref(), Some("connecting"));
-        assert!(
-            !info.contains_key("url") && !info.contains_key("accountId") && !info.contains_key("attention")
-        );
+        assert!(!info.contains_key("url") && !info.contains_key("attention"));
         let failed = ConnectionState::Failed(ErrorName::NetworkUnreachable);
         let wire = spec.wire(failed, |_: &Params, _: &[u8]| Some("sftp://h:21/x".into()));
         assert_eq!(
             (wire.id.as_str(), wire.provider.as_str(), wire.name.as_str()),
-            ("adhoc:2", "sftp", "Two")
+            ("account:2", "sftp", "Two")
         );
         assert_eq!(string(&wire.info, "state").as_deref(), Some("failed"));
         assert_eq!(string(&wire.info, "stateError").as_deref(), Some("NetworkUnreachable"));
         assert!(!wire.info.contains_key("url"));
-        let fresh = LocationSpec::ad_hoc("adhoc:2", "Two", params("h", 21), b"/x".to_vec(), None);
+        let fresh = LocationSpec::account(2, "sftp", "Two", params("h", 21), b"/x".to_vec(), Attention::None);
         let wire =
             fresh.wire(ConnectionState::Connected, |_: &Params, _: &[u8]| Some("sftp://h:21/x".into()));
         assert_eq!(string(&wire.info, "url").as_deref(), Some("sftp://h:21/x"));
-    }
-
-    #[test]
-    fn ad_hoc_secrets_are_shared_and_wiped() {
-        let secret = AdHocSecret::new("u", Zeroizing::new(b"pw".to_vec()));
-        let spec =
-            LocationSpec::ad_hoc("adhoc:1", "n", params("h", 0), Vec::new(), Some(Arc::clone(&secret)));
-        let copy = spec.clone();
-        assert_eq!(copy.ad_hoc_secret.as_ref().unwrap().user(), "u");
-        assert_eq!(copy.ad_hoc_secret.as_ref().unwrap().secret().as_slice(), b"pw");
-        // Not echoed on failure: a Debug output that fails the check is the
-        // one that shows the secret.
-        let shown = format!("{secret:?}");
-        assert!(shown.contains("secret_bytes: 2"), "the Debug output does not count the secret");
-        assert!(!shown.contains("pw"), "the Debug output shows the secret");
-        spec.ad_hoc_secret.as_ref().unwrap().wipe();
-        assert!(copy.ad_hoc_secret.as_ref().unwrap().secret().is_empty());
-        assert!(format!("{secret:?}").contains("secret_bytes: 0"));
     }
 }

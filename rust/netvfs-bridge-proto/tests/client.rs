@@ -6,8 +6,8 @@
 #![cfg(feature = "fake")]
 
 use futures_lite::StreamExt as _;
-use netvfs_bridge_proto::fake::{Failure, FakeBridge, RecordedAnswer};
-use netvfs_bridge_proto::{BridgeError, OptsBuilder, Signal, SignalStream, Zeroizing, connect};
+use netvfs_bridge_proto::fake::{Failure, FakeBridge};
+use netvfs_bridge_proto::{BridgeError, OptsBuilder, Signal, SignalStream, connect};
 use std::time::Duration;
 
 struct TempDir(std::path::PathBuf);
@@ -181,75 +181,6 @@ async fn the_signal_stream_ends_when_the_bridge_goes_away() {
 }
 
 #[tokio::test]
-async fn the_secret_is_wiped_after_the_call_whatever_happens() {
-    let fake = fake_with_account().await;
-    let conn = fake.connect().await.unwrap();
-    hello(&conn).await;
-    let none = OptsBuilder::new().build();
-
-    let mut secret = Zeroizing::new(b"hunter2".to_vec());
-    let loc = conn.connect_ad_hoc_wiping("sftp://host/", &mut secret, &none).await.unwrap();
-    assert_eq!(loc, "adhoc:1");
-    assert!(secret.is_empty(), "wiped after success");
-    assert_eq!(fake.received_secrets(), vec![b"hunter2".to_vec()], "the bridge did get it");
-
-    let mut secret = Zeroizing::new(b"hunter3".to_vec());
-    let e = conn.connect_ad_hoc_wiping("sftp://u:pw@host/", &mut secret, &none).await.unwrap_err();
-    assert_eq!(e.netvfs_name(), Some("SecurityPolicy"));
-    assert!(secret.is_empty(), "wiped after a refusal");
-
-    // The caller gives up while the bridge is still working.
-    fake.set_latency(Duration::from_secs(5));
-    let mut secret = Zeroizing::new(b"hunter4".to_vec());
-    let call = conn.connect_ad_hoc_wiping("sftp://host/", &mut secret, &none);
-    tokio::time::timeout(Duration::from_millis(50), call).await.unwrap_err();
-    assert!(secret.is_empty(), "wiped when the future is dropped");
-}
-
-#[tokio::test]
-async fn keyboard_answers_are_wiped_after_the_call() {
-    let fake = fake_with_account().await;
-    let conn = fake.connect().await.unwrap();
-    hello(&conn).await;
-    let mut answers = Zeroizing::new(vec![b"123456".to_vec()]);
-    // No such question: the bridge refuses, the answers are gone anyway.
-    let e = conn.answer_wiping("q1", true, &mut answers).await.unwrap_err();
-    assert_eq!(e.netvfs_name(), Some("NotFound"));
-    assert!(answers.is_empty());
-}
-
-async fn next_question(signals: &mut SignalStream) -> String {
-    tokio::time::timeout(Duration::from_secs(5), async {
-        loop {
-            if let Signal::Question { id, .. } = signals.next().await.unwrap().unwrap() {
-                return id;
-            }
-        }
-    })
-    .await
-    .expect("no Question signal")
-}
-
-#[tokio::test]
-async fn keyboard_answers_reach_the_bridge_then_are_wiped() {
-    let fake = fake_with_account().await;
-    let conn = fake.connect().await.unwrap();
-    let mut signals = conn.signals();
-    hello(&conn).await;
-    let mut answers = Zeroizing::new(vec![b"123456".to_vec(), b"second".to_vec()]);
-    let answering = async {
-        let id = next_question(&mut signals).await;
-        conn.answer_wiping(&id, true, &mut answers).await.unwrap();
-        assert!(answers.is_empty(), "wiped after the answer was sent");
-        id
-    };
-    let (asked, id) = tokio::join!(fake.ask("keyboard-interactive", Vec::new()), answering);
-    let want = RecordedAnswer { id, accept: true, answers: vec![b"123456".to_vec(), b"second".to_vec()] };
-    assert_eq!(asked, Some(want.clone()), "the bridge got the answers and the acceptance");
-    assert_eq!(fake.answers(), vec![want]);
-}
-
-#[tokio::test]
 async fn a_connection_debugs_as_its_type() {
     let fake = fake_with_account().await;
     let conn = fake.connect().await.unwrap();
@@ -303,8 +234,6 @@ async fn connection_states_follow_use_disconnect_and_the_script() {
     conn.proxy().stat("account:1", b"", true, "").await.unwrap();
     let quiet = tokio::time::timeout(Duration::from_millis(200), signals.next()).await;
     assert!(quiet.is_err(), "{quiet:?}");
-    let loc = conn.proxy().connect_ad_hoc("sftp://h/", b"", &OptsBuilder::new().build()).await.unwrap();
-    assert_eq!(state_of(&conn, &loc).await, s("connected", None));
 }
 
 #[tokio::test]

@@ -76,9 +76,6 @@ exclude_re = [
     # jobs/fdio.rs write_at, pwrite failing after an earlier one of the same call (written > 0 -> false):
     # loops only above 2 GiB (MAX_CHUNK), untestable.
     'netvfs-bridge/src/jobs/fdio\.rs:\d+:\d+: replace match guard written > 0 with false in <impl WriteAt for FdDevice<._>>::write_at$',
-    # locations/connector.rs establish_ad_hoc (declined && Unknown -> ||): a declined identity always ends in
-    # ServerIdentityUnknown, and only after a decline (accepted passes, canceled ask ends Canceled).
-    'netvfs-bridge/src/locations/connector\.rs:\d+:\d+: replace && with \|\| in Connector::establish_ad_hoc$',
     # locations/connector.rs reset_cancel -> (): defensive; a worker cancels only items whose flag is set,
     # and those always drop the connection, so no canceled one is reused.
     'netvfs-bridge/src/locations/connector\.rs:\d+:\d+: replace <impl Backend for Connector>::reset_cancel with \(\)$',
@@ -101,9 +98,6 @@ exclude_re = [
     'netvfs-bridge/src/sys/lock\.rs:\d+:\d+: replace \| with \^',
     # core/nearby.rs set_running warning when post refuses: log line only; post refuses only once Qt quits, which ends the test loop too.
     'netvfs-bridge/src/core/nearby\.rs:\d+:\d+: delete ! in <impl NearbySource for FfiNearby>::set_running$',
-    # core/admin.rs insecure_answered: reached only via insecure-consent (smb ad-hoc URL, guest profile, smb backend
-    # installed); test-backends has only the fake one. needs_insecure_consent and insecure_details are unit-tested.
-    'netvfs-bridge/src/core/admin\.rs:\d+:\d+: (replace Core::insecure_answered with \(\)|delete ! in Core::insecure_answered)$',
     # Equivalent: SQLITE_OPEN_READ_ONLY/_READ_WRITE and SQLITE_OPEN_NO_MUTEX are disjoint bits, `^` is `|`.
     'netvfs-accounts/src/db\.rs:\d+:\d+: replace \| with \^ in Database::open$',
     # Equivalent where tests run: SystemOwner uses sandbox::privileged_ids, None without user `privileged` (Sailfish OS only);
