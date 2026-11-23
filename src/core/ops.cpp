@@ -401,9 +401,7 @@ class SourceProgress : public Progress
 {
 public:
     explicit SourceProgress(BoundedPipe *pipe) : m_pipe(pipe) {}
-    void update(qint64, qint64) override
-    {
-    }
+    void update(qint64, qint64) override {} // NOSONAR
     bool canceled() const override { return !m_pipe->result().ok(); }
 
 private:
