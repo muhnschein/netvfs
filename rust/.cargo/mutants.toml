@@ -17,7 +17,7 @@ exclude_re = [
     'netvfs-accounts/src/sandbox\.rs:.*: replace \| with \^ in Filter::deny_created_mode_bits$',
     'netvfs-accounts/src/sandbox\.rs:\d+:\d+: replace \| with \^$',
     'netvfs-accounts/src/sandbox\.rs:.*: replace privileged_ids -> Option<\(u32, u32\)> with None$',
-    'netvfs-accounts/src/sandbox\.rs:(230:32|263:37|268:51|299:47): replace << with >>$',
+    'netvfs-accounts/src/sandbox\.rs:(203:32|236:37|241:51|272:47): replace << with >>$',
     'netvfs-accounts/src/sandbox\.rs:\d+:\d+: replace \| with \^ in (landlock_access|allow_beneath)$',
     'netvfs-accounts/src/sandbox\.rs:\d+:\d+: replace && with \|\| in reset_process_state$',
     'netvfs-accounts/src/sandbox\.rs:\d+:\d+: replace < with <= in allow_beneath$',
