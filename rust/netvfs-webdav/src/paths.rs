@@ -193,7 +193,6 @@ mod tests {
         for bad in [&b"x/y"[..], b"https://nas", b"https://nas?x", b"/a%zz", b"/a%00", b"", b"1a://nas/x"] {
             assert_eq!(href_path(bad), None, "{}", String::from_utf8_lossy(bad));
         }
-        // 8 KiB, as doc/SPEC.md says.
         let long = [b"/".as_slice(), &[b'a'; 8 * 1024 - 1]].concat();
         assert!(href_path(&long).is_some());
         let longer = [long.as_slice(), b"b"].concat();

@@ -1,7 +1,4 @@
 # SPDX-License-Identifier: LGPL-2.1-or-later
-# Package netvfs-files-services: a "<p>-files" service of type "netvfs-files" for every provider,
-# plus the service type. The type differs from "storage", so the Backup page does not list these.
-# Generated into <build>/accounts/files-services/services/.
 TEMPLATE = aux
 include(../providers.pri)
 

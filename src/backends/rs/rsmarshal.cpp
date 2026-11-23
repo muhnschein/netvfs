@@ -11,8 +11,6 @@ static_assert(static_cast<uint32_t>(WriteOptions::Disposition::Truncate) == NVB_
 static_assert(static_cast<uint32_t>(WriteOptions::Disposition::Resume) == NVB_DISPOSITION_RESUME);
 
 namespace {
-
-// -1 is unknown (invalid QDateTime), as Ffi::toMs() writes it.
 QDateTime timeOf(int64_t ms)
 {
     return ms == -1 ? QDateTime() : Ffi::fromMs(ms);

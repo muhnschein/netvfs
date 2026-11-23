@@ -93,9 +93,7 @@ impl Times {
     }
 }
 
-/// FILETIME of the Unix epoch.
 const EPOCH_FILETIME: u64 = 116_444_736_000_000_000;
-/// FILETIME units per millisecond.
 const PER_MS: u64 = 10_000;
 
 /// Milliseconds since the Unix epoch of a FILETIME; `None` for 0 (no time)
@@ -138,22 +136,22 @@ impl Create<'_> {
         let name = utf16le(self.name);
         let mut w = Writer::new();
         w.u16(57)
-            .u8(0) // SecurityFlags
-            .u8(0) // RequestedOplockLevel: none
-            .u32(2) // ImpersonationLevel: Impersonation
-            .u64(0) // SmbCreateFlags
-            .u64(0) // Reserved
+            .u8(0)
+            .u8(0)
+            .u32(2)
+            .u64(0)
+            .u64(0)
             .u32(self.access)
             .u32(self.attributes)
             .u32(SHARE_ALL)
             .u32(self.disposition)
             .u32(self.options)
-            .u16(120) // NameOffset: header + 56
+            .u16(120)
             .u16(to_u16(name.len())?)
-            .u32(0) // CreateContextsOffset
-            .u32(0); // CreateContextsLength
+            .u32(0)
+            .u32(0);
         if name.is_empty() {
-            w.u8(0); // the Buffer holds at least one byte
+            w.u8(0);
         } else {
             w.bytes(&name);
         }
@@ -181,9 +179,9 @@ impl Created {
     /// A malformed body or create contexts outside the message.
     pub fn decode(msg: &[u8]) -> Result<Self> {
         let mut r = body_reader(msg, 89, "CREATE response")?;
-        r.skip(6)?; // OplockLevel, Flags, CreateAction
+        r.skip(6)?;
         let times = Times::read(&mut r)?;
-        r.skip(8)?; // AllocationSize
+        r.skip(8)?;
         let end_of_file = r.u64()?;
         let attributes = r.u32()?;
         r.skip(4)?;
@@ -236,17 +234,17 @@ pub fn check_flush_response(msg: &[u8]) -> Result<()> {
 pub fn read_request(file_id: &FileId, offset: u64, length: usize) -> Result<Vec<u8>> {
     let mut w = Writer::new();
     w.u16(49)
-        .u8(0x50) // Padding: the data right after the 16-byte response body
-        .u8(0) // Flags
+        .u8(0x50)
+        .u8(0)
         .u32(to_u32(length)?)
         .u64(offset)
         .bytes(file_id)
-        .u32(0) // MinimumCount
-        .u32(0) // Channel
-        .u32(0) // RemainingBytes
-        .u16(0) // ReadChannelInfoOffset
-        .u16(0) // ReadChannelInfoLength
-        .u8(0); // Buffer
+        .u32(0)
+        .u32(0)
+        .u32(0)
+        .u16(0)
+        .u16(0)
+        .u8(0);
     Ok(w.into_vec())
 }
 
@@ -278,15 +276,15 @@ pub fn read_response(msg: &[u8], requested: usize) -> Result<&[u8]> {
 pub fn write_request(file_id: &FileId, offset: u64, data: &[u8]) -> Result<Vec<u8>> {
     let mut w = Writer::new();
     w.u16(49)
-        .u16(112) // DataOffset: header + 48
+        .u16(112)
         .u32(to_u32(data.len())?)
         .u64(offset)
         .bytes(file_id)
-        .u32(0) // Channel
-        .u32(0) // RemainingBytes
-        .u16(0) // WriteChannelInfoOffset
-        .u16(0) // WriteChannelInfoLength
-        .u32(0) // Flags
+        .u32(0)
+        .u32(0)
+        .u16(0)
+        .u16(0)
+        .u32(0)
         .bytes(data);
     Ok(w.into_vec())
 }
@@ -299,7 +297,7 @@ pub fn write_response(msg: &[u8], sent: usize) -> Result<usize> {
     let mut r = body_reader(msg, 17, "WRITE response")?;
     r.skip(2)?;
     let count = from_u32(r.u32()?)?;
-    r.skip(8)?; // Remaining, WriteChannelInfoOffset/Length
+    r.skip(8)?;
     if count > sent {
         return Err(protocol(format!("WRITE wrote {count} bytes of {sent}")));
     }
@@ -316,13 +314,13 @@ pub fn ioctl_request(ctl_code: u32, file_id: &FileId, input: &[u8], max_output: 
         .u16(0)
         .u32(ctl_code)
         .bytes(file_id)
-        .u32(120) // InputOffset: header + 56
+        .u32(120)
         .u32(to_u32(input.len())?)
-        .u32(0) // MaxInputResponse
-        .u32(0) // OutputOffset
-        .u32(0) // OutputCount
+        .u32(0)
+        .u32(0)
+        .u32(0)
         .u32(to_u32(max_output)?)
-        .u32(1) // Flags: SMB2_0_IOCTL_IS_FSCTL
+        .u32(1)
         .u32(0)
         .bytes(input);
     Ok(w.into_vec())
@@ -334,7 +332,7 @@ pub fn ioctl_request(ctl_code: u32, file_id: &FileId, input: &[u8], max_output: 
 /// A malformed body, output outside the message or above the maximum.
 pub fn ioctl_response(msg: &[u8], max_output: usize) -> Result<&[u8]> {
     let mut r = body_reader(msg, 49, "IOCTL response")?;
-    r.skip(2 + 4 + 16 + 8)?; // Reserved, CtlCode, FileId, InputOffset/Count
+    r.skip(2 + 4 + 16 + 8)?;
     let offset = from_u32(r.u32()?)?;
     let len = from_u32(r.u32()?)?;
     if len > max_output {
@@ -353,12 +351,12 @@ pub fn ioctl_response(msg: &[u8], max_output: usize) -> Result<&[u8]> {
 pub fn query_directory_request(file_id: &FileId, restart: bool, out_len: usize) -> Result<Vec<u8>> {
     let mut w = Writer::new();
     w.u16(33)
-        .u8(0x25) // FileIdBothDirectoryInformation
-        .u8(u8::from(restart)) // SMB2_RESTART_SCANS
-        .u32(0) // FileIndex
+        .u8(0x25)
+        .u8(u8::from(restart))
+        .u32(0)
         .bytes(file_id)
-        .u16(96) // FileNameOffset: header + 32
-        .u16(2) // FileNameLength: "*"
+        .u16(96)
+        .u16(2)
         .u32(to_u32(out_len)?)
         .bytes(&[b'*', 0]);
     Ok(w.into_vec())
@@ -409,10 +407,10 @@ pub fn parse_id_both_directory(buf: &[u8]) -> Result<Vec<DirEntry>> {
         let entry = buf.get(pos..).ok_or_else(|| protocol("entry offset outside the buffer"))?;
         let mut r = Reader::new(entry);
         let next = from_u32(r.u32()?)?;
-        r.skip(4)?; // FileIndex
+        r.skip(4)?;
         let times = Times::read(&mut r)?;
         let size = r.u64()?;
-        r.skip(8)?; // AllocationSize
+        r.skip(8)?;
         let attributes = r.u32()?;
         let name_len = from_u32(r.u32()?)?;
         if name_len > MAX_NAME_BYTES {
@@ -437,16 +435,7 @@ pub fn parse_id_both_directory(buf: &[u8]) -> Result<Vec<DirEntry>> {
 /// An output length above 32 bits.
 pub fn query_fs_info_request(file_id: &FileId, class: u8, out_len: usize) -> Result<Vec<u8>> {
     let mut w = Writer::new();
-    w.u16(41)
-        .u8(2) // InfoType: SMB2_0_INFO_FILESYSTEM
-        .u8(class)
-        .u32(to_u32(out_len)?)
-        .u16(0) // InputBufferOffset
-        .u16(0)
-        .u32(0) // InputBufferLength
-        .u32(0) // AdditionalInformation
-        .u32(0) // Flags
-        .bytes(file_id);
+    w.u16(41).u8(2).u8(class).u32(to_u32(out_len)?).u16(0).u16(0).u32(0).u32(0).u32(0).bytes(file_id);
     Ok(w.into_vec())
 }
 
@@ -478,7 +467,7 @@ pub fn fs_full_size_response(msg: &[u8]) -> Result<FsFullSize> {
     let mut b = Reader::new(slice_at(msg, offset, len)?);
     let total_units = b.u64()?;
     let caller_available_units = b.u64()?;
-    b.skip(8)?; // ActualAvailableAllocationUnits
+    b.skip(8)?;
     let sectors = u64::from(b.u32()?);
     let bytes = u64::from(b.u32()?);
     Ok(FsFullSize { total_units, caller_available_units, unit_bytes: sectors.saturating_mul(bytes) })
@@ -490,15 +479,7 @@ pub fn fs_full_size_response(msg: &[u8]) -> Result<FsFullSize> {
 /// A buffer above 32 bits.
 pub fn set_info_request(file_id: &FileId, class: u8, buffer: &[u8]) -> Result<Vec<u8>> {
     let mut w = Writer::new();
-    w.u16(33)
-        .u8(1) // InfoType: SMB2_0_INFO_FILE
-        .u8(class)
-        .u32(to_u32(buffer.len())?)
-        .u16(96) // BufferOffset: header + 32
-        .u16(0)
-        .u32(0) // AdditionalInformation
-        .bytes(file_id)
-        .bytes(buffer);
+    w.u16(33).u8(1).u8(class).u32(to_u32(buffer.len())?).u16(96).u16(0).u32(0).bytes(file_id).bytes(buffer);
     Ok(w.into_vec())
 }
 
@@ -522,12 +503,7 @@ pub const DISPOSITION_INFORMATION: u8 = 13;
 #[must_use]
 pub fn basic_information(last_write: Option<u64>, last_access: Option<u64>) -> Vec<u8> {
     let mut w = Writer::new();
-    w.u64(0) // CreationTime
-        .u64(last_access.unwrap_or(0))
-        .u64(last_write.unwrap_or(0))
-        .u64(0) // ChangeTime
-        .u32(0) // FileAttributes: unchanged
-        .u32(0);
+    w.u64(0).u64(last_access.unwrap_or(0)).u64(last_write.unwrap_or(0)).u64(0).u32(0).u32(0);
     w.into_vec()
 }
 

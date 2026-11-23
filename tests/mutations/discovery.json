@@ -51,8 +51,8 @@
   {
     "name": "cache: a PTR goodbye (TTL 0) does not remove the service",
     "file": "src/core/discoverycache.cpp",
-    "search": "if (rec.ttl == 0) {                             // RFC 6762 section 10.1: goodbye",
-    "replace": "if (false) {",
+    "search": "Dns::canonicalName(rec.target);\n    if (rec.ttl == 0) {",
+    "replace": "Dns::canonicalName(rec.target);\n    if (false) {",
     "test": "timeout 120 build/tests/unit/discovery/tst_discovery"
   },
   {

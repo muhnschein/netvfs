@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! Drive calls need no consent; source changes reach every session as `DrivesChanged`.
 
 use super::{Core, Event};
 use crate::drives::Drive;
@@ -23,7 +22,6 @@ impl Core {
                 DriveCall::Mount(drive) => drives.mount(&drive).await.map(Reply::Bytes),
                 DriveCall::Unmount(drive) => drives.unmount(&drive).await.map(|()| Reply::Empty),
             };
-            // A closed channel: the core has stopped.
             drop(tx.send(Event::Done { sid, op, result }));
         });
     }

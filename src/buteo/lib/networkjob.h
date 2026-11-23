@@ -11,11 +11,6 @@
 #include <functional>
 
 namespace NetVfs {
-
-// One connection's worth of network work on its own thread. run() creates a fresh Backend,
-// establishes the connection (identity check before authentication), wipes its copy of the
-// credentials, runs the body, disconnects. The Backend never leaves that thread; only cancel()
-// reaches it from outside. finished() is delivered to the thread that owns the job.
 class NetworkJob : public QThread
 {
     Q_OBJECT
@@ -27,7 +22,6 @@ public:
     ~NetworkJob() override;
     Q_DISABLE_COPY(NetworkJob)
 
-    // Thread-safe; the in-flight call returns Canceled.
     void cancel();
 
     Result result() const { return m_result; }

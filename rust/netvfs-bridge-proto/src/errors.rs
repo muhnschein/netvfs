@@ -119,7 +119,6 @@ impl BridgeError {
             _ => {
                 let mut e = Self::from_bare(name, &message, extra)
                     .unwrap_or_else(|| Self::Protocol("error without a name".to_owned()));
-                // from_bare prefixed the name; keep it as it came.
                 if let Self::Remote { name: n, .. } = &mut e {
                     name.clone_into(n);
                 }

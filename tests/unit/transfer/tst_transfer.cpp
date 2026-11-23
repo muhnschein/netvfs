@@ -23,7 +23,6 @@ public:
     int calls = 0;
 };
 
-// A source that cannot seek, so resuming has to skip by reading.
 class SequentialSource : public QIODevice
 {
 public:
@@ -45,7 +44,6 @@ private:
     qint64 m_pos = 0;
 };
 
-// Stops the transfer through Progress::canceled() after the first update.
 class CancelingProgress : public Progress
 {
 public:
@@ -61,7 +59,7 @@ QByteArray pattern(int size)
         data[i] = static_cast<char>(i * 31 + 7);
     return data;
 }
-} // namespace
+}
 
 class TestTransfer : public QObject
 {
@@ -88,7 +86,6 @@ private slots:
 
     void partName() { QCOMPARE(Transfer::partName(QStringLiteral("a/b.tar")), QStringLiteral("a/b.tar.part")); }
 
-    // data goes to.part, then rename; final file appears only at the end.
     void uploadViaPartAndRename()
     {
         QByteArray data = pattern(300 * 1024);
@@ -107,7 +104,6 @@ private slots:
         QCOMPARE(server->log, expected);
     }
 
-    // no transfer when the server reports too little space.
     void noSpaceBeforeTransfer()
     {
         server->freeBytes = 10;
@@ -156,7 +152,6 @@ private slots:
         QCOMPARE(server->log.size(), 1);
     }
 
-    // Connection dropped mid-upload: .part removed (best effort), no final file.
     void failedUploadRemovesPart()
     {
         server->failUploadAfterBytes = 64 * 1024;
@@ -209,7 +204,6 @@ private slots:
         QByteArray data = pattern(100);
         QBuffer buffer(&data);
         buffer.open(QIODevice::ReadOnly);
-        // no remote path in a warning.
         QTest::ignoreMessage(QtWarningMsg, QRegularExpression(QStringLiteral("^Could not remove partial file \"PermissionDenied\"$")));
         QCOMPARE(Transfer::upload(backend.data(), &buffer, data.size(), QStringLiteral("dir/b")).error(),
                  Error::PermissionDenied);
@@ -224,7 +218,6 @@ private slots:
         QVERIFY(server->log.isEmpty());
     }
 
-    // cancel() from another thread ends the transfer with Canceled.
     void cancelFromOtherThread()
     {
         server->chunkDelayMs = 20;
@@ -391,7 +384,6 @@ private slots:
         QCOMPARE(server->fileData(QStringLiteral("dir/c")), data);
     }
 
-    // the commit mode reaches rename(); NoReplace keeps an existing file.
     void noReplaceCommit()
     {
         server->addFile(QStringLiteral("dir/b"), "old");
@@ -450,7 +442,6 @@ private slots:
         QVERIFY(!server->exists(QStringLiteral("dir/b.part")));
     }
 
-    // resume: the offset must match the temporary file's size.
     void resumeAtCorrectOffset_data()
     {
         QTest::addColumn<bool>("sequential");
@@ -558,7 +549,6 @@ private slots:
                  Error::Unsupported);
         QCOMPARE(server->fileData(QStringLiteral("dir/b.part")), data.left(10));
 
-        // A local file shorter than the offset cannot be resumed.
         server->capabilities = FakeServer::fullCapabilities();
         policy.resumeOffset = 10;
         SequentialSource shortSource(data.left(5));
@@ -579,7 +569,7 @@ private slots:
         QVERIFY(!server->exists(QStringLiteral("dir/.a.uploading")));
         QVERIFY(server->exists(QStringLiteral("dir/b.part")));
         QVERIFY(server->exists(QStringLiteral("dir/c.uploading.keep")));
-        QVERIFY(server->exists(QStringLiteral("dir/.d.uploading")));   // only regular files
+        QVERIFY(server->exists(QStringLiteral("dir/.d.uploading")));
 
         QVERIFY(Transfer::removeStaleParts(backend.data(), QStringLiteral("dir"), now, 10 * 24 * 3600).ok());
         QVERIFY(server->exists(QStringLiteral("dir/b.part")));

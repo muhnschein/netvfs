@@ -8,9 +8,6 @@
 #include <QtCore/QObject>
 
 namespace NetVfs {
-
-// Root object of libnetvfs-sftp.so: provider "sftp" of the Rust backends plus the SSH key tools.
-// Shim stays out of this header: Qt 5.6 moc cannot parse C++17 nested namespaces.
 class SftpPlugin : public QObject, public BackendFactory, public SshKeyTools
 {
     Q_OBJECT

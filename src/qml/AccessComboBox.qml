@@ -2,7 +2,6 @@
 import QtQuick 2.0
 import Sailfish.Silica 1.0
 
-// What an app may do: a level or "denied"; also "ask" with `withAsk` (new accounts).
 ComboBox {
     id: box
 

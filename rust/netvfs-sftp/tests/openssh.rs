@@ -1,10 +1,4 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! netvfs-sftp against real servers: the interop containers of tests/interop/sftp (OpenSSH 10.3p1, 9.6p1 and 8.9p1),
-//! which `run.sh` starts and describes in the file `NETVFS_SFTP_INTEROP_CONFIG` names. Without it every test passes at
-//! once and says it was skipped.
-//!
-//! Tests run in parallel against shared servers: each works in folders of its own, and reads a server log only for
-//! lines its own connection adds.
 #![allow(
     missing_docs,
     clippy::unwrap_used,
@@ -27,14 +21,12 @@ use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, Instant};
 
-/// The servers of one run.sh.
 struct Servers {
     password: String,
     otp: String,
     by_name: serde_json::Value,
 }
 
-/// The servers, or `None` (and a note) when run.sh did not start them.
 fn servers() -> Option<Servers> {
     let Some(path) = std::env::var_os("NETVFS_SFTP_INTEROP_CONFIG") else {
         eprintln!("skipped: NETVFS_SFTP_INTEROP_CONFIG is not set (tests/interop/sftp/run.sh sets it)");
@@ -52,8 +44,6 @@ impl Servers {
         i32::try_from(port).expect("a port")
     }
 
-    /// `sh -c script` in the server's container, as root, with `input` on
-    /// its standard input; its output. A failing script fails the test.
     fn exec(&self, server: &str, script: &str, input: &[u8]) -> Vec<u8> {
         let container = self.by_name[server]["container"].as_str().expect("a container");
         let mut child = Command::new("docker")
@@ -73,7 +63,6 @@ impl Servers {
         String::from_utf8(self.exec(server, script, b"")).expect("UTF-8").trim_end().to_owned()
     }
 
-    /// How often `line` is in the log of an OpenSSH instance.
     fn log_count(&self, server: &str, instance: &str, line: &str) -> usize {
         self.text(server, &format!("cat /var/log/sshd-{instance}.log")).matches(line).count()
     }
@@ -94,13 +83,11 @@ impl Servers {
         p
     }
 
-    /// The pin of the server's host key of `kind` (ed25519, ecdsa, rsa).
     fn host_key(&self, server: &str, kind: &str) -> String {
         let line = self.text(server, &format!("cat /etc/ssh/ssh_host_{kind}_key.pub"));
         line.split(' ').take(2).collect::<Vec<_>>().join(" ")
     }
 
-    /// Adds `key` to the keys of `user` on an OpenSSH server.
     fn authorize(&self, server: &str, user: &str, key: &keys::KeyMaterial) {
         let file = format!("/etc/ssh/authorized_keys/{user}");
         let script = format!("cat >> {file} && chmod 644 {file}");
@@ -133,7 +120,6 @@ fn c() -> CancelToken {
     CancelToken::new()
 }
 
-/// A name no other test (or earlier run) uses.
 fn unique(prefix: &str) -> String {
     static COUNTER: AtomicU32 = AtomicU32::new(0);
     let nanos =
@@ -141,7 +127,6 @@ fn unique(prefix: &str) -> String {
     format!("{prefix}-{}-{nanos}-{}", std::process::id(), COUNTER.fetch_add(1, Ordering::Relaxed))
 }
 
-/// Connects, pins what the server presents, and signs in.
 async fn sign_in(params: &Params, credentials: &Credentials) -> Result<Sftp, Status> {
     let mut sftp = Sftp::new();
     let identity = sftp.connect(params, &c()).await?.expect("an identity");
@@ -196,7 +181,6 @@ impl ListSink for Entries {
     }
 }
 
-/// Answers by prompt text and records the questions.
 struct Answers {
     password: String,
     code: String,
@@ -224,8 +208,6 @@ async fn get(sftp: &mut Sftp, path: &str, offset: u64, length: Option<u64>) -> R
     Ok(sink.0)
 }
 
-/// What each server negotiates with the hardened lists, read from the lines this test's own sign-in adds to the
-/// server's log.
 #[tokio::test]
 async fn negotiates_the_hardened_lists() {
     let Some(s) = servers() else { return };
@@ -252,8 +234,6 @@ async fn negotiates_the_hardened_lists() {
     }
 }
 
-/// The lists are never widened; a server that offers only what they leave out is refused, and the message says what
-/// it offers.
 #[tokio::test]
 async fn refuses_what_the_lists_leave_out() {
     let Some(s) = servers() else { return };
@@ -270,14 +250,11 @@ async fn refuses_what_the_lists_leave_out() {
         let mut sftp = Sftp::new();
         let p = s.params(server, instance, "alice", None);
         assert_eq!(sftp.connect(&p, &c()).await, Err(expected.clone()), "{instance}");
-        // Narrowed to a pinned type, the refusal is the same.
         let pinned = with_pin(p, &s.host_key(server, "rsa"));
         assert_eq!(sftp.connect(&pinned, &c()).await, Err(expected), "{instance} pinned");
     }
 }
 
-/// Each host key type pins (the list is narrowed to the pinned type, rsa-sha2-512 for RSA); a pinned type the server
-/// no longer offers reports the key it has now, and nothing is sent.
 #[tokio::test]
 async fn pins_each_host_key_type() {
     let Some(s) = servers() else { return };
@@ -307,7 +284,6 @@ async fn pins_each_host_key_type() {
         assert!(s.log_count("o103", "default", &line) > before, "{line}");
     }
 
-    // The hardened instance has only its Ed25519 key.
     let probe = unique("pinprobe");
     let mut sftp = Sftp::new();
     let p = with_pin(s.params("o103", "hardened", &probe, None), &s.host_key("o103", "ecdsa"));
@@ -319,7 +295,6 @@ async fn pins_each_host_key_type() {
     );
     let refused = sftp.authenticate(&s.credentials(&probe), None, &c()).await.unwrap_err();
     assert_eq!(refused.name, ErrorName::ServerIdentityChanged);
-    // A key of the same type that is not the server's.
     let other = with_pin(s.params("o103", "default", &probe, None), &s.host_key("o96", "ed25519"));
     sftp.connect(&other, &c()).await.unwrap();
     let refused = sftp.authenticate(&s.credentials(&probe), None, &c()).await.unwrap_err();
@@ -329,7 +304,6 @@ async fn pins_each_host_key_type() {
     }
 }
 
-/// Passwords and Ed25519/ECDSA keys; a password is never tried as a key nor a key as a password.
 #[tokio::test]
 async fn signs_in_with_passwords_and_keys() {
     let Some(s) = servers() else { return };
@@ -343,7 +317,6 @@ async fn signs_in_with_passwords_and_keys() {
     assert_eq!(failed.name, ErrorName::AuthFailed);
     assert!(failed.message.contains("password"), "{failed:?}");
 
-    // Keys: generated Ed25519, and ECDSA keys of the server's ssh-keygen.
     let user = "alice";
     let mut keys = vec![keys::generate().unwrap()];
     for bits in [256, 384, 521] {
@@ -366,7 +339,6 @@ async fn signs_in_with_passwords_and_keys() {
         });
         sftp.stat(b"", true, &c()).await.unwrap();
     }
-    // A password in publickey mode, a key in password mode: refused here.
     let probe = unique("keyprobe");
     let as_key =
         sign_in(&s.params("o103", "default", &probe, Some("publickey")), &s.credentials(&probe)).await;
@@ -376,7 +348,6 @@ async fn signs_in_with_passwords_and_keys() {
     assert_eq!(as_password.err().map(|e| e.name), Some(ErrorName::AuthFailed));
     assert_eq!(s.log_count("o103", "default", &probe), 0);
 
-    // A key-only server says so; the password is not offered.
     let probe = unique("pwprobe");
     let refused =
         sign_in(&s.params("o103", "hardened", &probe, None), &s.credentials(&probe)).await.err().unwrap();
@@ -384,7 +355,6 @@ async fn signs_in_with_passwords_and_keys() {
     assert!(refused.message.contains("only accepts SSH keys"), "{refused:?}");
     assert_eq!(s.log_count("o103", "hardened", &format!("method password for invalid user {probe}")), 0);
 
-    // A second step without a prompter is refused, not half done.
     let twofactor = keys::generate().unwrap();
     s.authorize("o103", "twofactor", &twofactor);
     let credentials = key_credentials("twofactor", &twofactor);
@@ -396,7 +366,6 @@ async fn signs_in_with_passwords_and_keys() {
     assert!(partial.message.contains("second sign-in step"), "{partial:?}");
 }
 
-/// Keyboard-interactive with the stored password, and with a prompter through PAM's one-time code stub.
 #[tokio::test]
 async fn keyboard_interactive() {
     let Some(s) = servers() else { return };
@@ -406,12 +375,10 @@ async fn keyboard_interactive() {
     let failed = sign_in(&s.params("o96", "kbdint", "alice", None), &wrong).await.err().unwrap();
     assert_eq!(failed.name, ErrorName::AuthFailed);
 
-    // Two rounds (password, code): refused without a prompter...
     let otp = s.params("o96", "otp", "otp", None);
     let refused = sign_in(&otp, &s.credentials("otp")).await.err().unwrap();
     assert_eq!(refused.name, ErrorName::AuthFailed);
     assert!(refused.message.contains("interactive sign-in"), "{refused:?}");
-    // ... and with one, only the code is asked: the password answers its round.
     let mut sftp = Sftp::new();
     let identity = sftp.connect(&otp, &c()).await.unwrap().unwrap();
     let pin = format!("{} {}", identity.algorithm, data_encoding::BASE64.encode(&identity.public_key));
@@ -421,14 +388,12 @@ async fn keyboard_interactive() {
     assert_eq!(answers.asked, ["Verification code: "]);
     sftp.stat(b"", true, &c()).await.unwrap();
 
-    // A wrong code fails.
     sftp.connect(&with_pin(otp, &pin), &c()).await.unwrap();
     let mut wrong = Answers { password: s.password.clone(), code: "000000".to_owned(), asked: Vec::new() };
     let failed = sftp.authenticate(&s.credentials("otp"), Some(&mut wrong), &c()).await.unwrap_err();
     assert_eq!(failed.name, ErrorName::AuthFailed);
 }
 
-/// What each server offers, and so what the backend reports.
 #[tokio::test]
 async fn capabilities_of_each_server() {
     let Some(s) = servers() else { return };
@@ -443,7 +408,6 @@ async fn capabilities_of_each_server() {
         Capability::NativeNoReplace,
     ];
     let never = [Capability::ServerCopyRecursive, Capability::Checksums, Capability::AtomicPut];
-    // AtomicReplace, SpaceInfo, Hardlinks, ServerCopy, Ownership
     for (server, instance, offers) in [
         ("o103", "default", [true, true, true, true, true]),
         ("o103", "noext", [false, false, false, false, false]),
@@ -473,7 +437,6 @@ async fn capabilities_of_each_server() {
     }
 }
 
-/// Directory operations as the server's disk shows them, on OpenSSH with its extensions and without them.
 #[tokio::test]
 async fn files_on_the_servers_disk() {
     let Some(s) = servers() else { return };
@@ -490,7 +453,6 @@ async fn files_on_the_servers_disk() {
             ErrorName::AlreadyExists
         );
 
-        // Upload with a mode and a time; download ranges.
         let data: Vec<u8> = (0..300_000u32).map(|i| i.wrapping_mul(131).to_le_bytes()[1]).collect();
         let options = WriteOptions {
             create_mode: Some(0o640),
@@ -513,7 +475,6 @@ async fn files_on_the_servers_disk() {
         put(&mut sftp, &at("small"), b"tiny", &truncate).await.unwrap();
         assert_eq!(s.text("o103", &format!("cat '{}'", on_disk("small"))), "tiny");
 
-        // Handles: reads at offsets, a resumed write.
         let mut reader = sftp.open_read(at("data").as_bytes(), &c()).await.unwrap();
         assert_eq!(reader.size(), Some(300_000));
         let mut buf = vec![0u8; 5000];
@@ -529,7 +490,6 @@ async fn files_on_the_servers_disk() {
         writer.commit(&c()).await.unwrap();
         assert_eq!(s.text("o103", &format!("cat '{}'", on_disk("small"))), "tiny-er");
 
-        // Renames: NoReplace keeps the target; Replace replaces a file.
         let kept =
             sftp.rename(at("small").as_bytes(), at("data").as_bytes(), RenameMode::NoReplace, &c()).await;
         assert_eq!(kept.unwrap_err().name, ErrorName::AlreadyExists);
@@ -541,7 +501,6 @@ async fn files_on_the_servers_disk() {
             sftp.rename(at("data").as_bytes(), at("sub").as_bytes(), RenameMode::Replace, &c()).await;
         assert_eq!(onto_folder.unwrap_err().name, ErrorName::AlreadyExists);
 
-        // SYMLINK in OpenSSH's order lands as asked.
         sftp.make_symlink(b"../sub dir/target", at("link").as_bytes(), &c()).await.unwrap();
         assert_eq!(s.text("o103", &format!("readlink '{}'", on_disk("link"))), "../sub dir/target");
         assert_eq!(sftp.read_link(at("link").as_bytes(), &c()).await.unwrap(), b"../sub dir/target");
@@ -549,14 +508,12 @@ async fn files_on_the_servers_disk() {
         assert_eq!(link.kind, EntryType::Symlink);
         assert_eq!(sftp.stat(at("link").as_bytes(), true, &c()).await.unwrap_err().name, ErrorName::NotFound);
 
-        // Modes and times.
         let changes = Attributes { mode: Some(0o604), mtime_ms: Some(1_200_000_000_000), atime_ms: None };
         sftp.set_attributes(at("data").as_bytes(), &changes, &c()).await.unwrap();
         assert_eq!(s.text("o103", &format!("stat -c '%a %Y' '{}'", on_disk("data"))), "604 1200000000");
         let entry = sftp.stat(at("data").as_bytes(), true, &c()).await.unwrap();
         assert_eq!((entry.mode, entry.mtime_ms, entry.size), (Some(0o604), Some(1_200_000_000_000), Some(7)));
 
-        // Listing: names, types, no "." or "..".
         let mut entries = Entries::default();
         let options = ListOptions { batch_size: 2, resolve_symlink_types: true };
         sftp.list(dir.as_bytes(), options, &mut entries, &c()).await.unwrap();
@@ -572,7 +529,6 @@ async fn files_on_the_servers_disk() {
             ]
         );
 
-        // Extensions where offered, Unsupported where not.
         let caps = sftp.capabilities();
         let hard = sftp.make_hardlink(at("data").as_bytes(), at("hard").as_bytes(), &c()).await;
         let space = sftp.space_info(dir.as_bytes(), &c()).await;
@@ -595,7 +551,6 @@ async fn files_on_the_servers_disk() {
             assert_eq!((entry.owner.as_str(), entry.group.as_str()), ("", ""));
         }
 
-        // Removal: a folder is not a file, a full folder stays.
         assert_eq!(
             sftp.remove_file(at("sub").as_bytes(), &c()).await.unwrap_err().name,
             ErrorName::IsADirectory
@@ -613,12 +568,9 @@ async fn files_on_the_servers_disk() {
     }
 }
 
-/// Cancel ends a request the server holds back (sftpproxy.py --hold-file), the connection goes on; a request
-/// timeout ends it too.
 #[tokio::test]
 async fn cancel_and_request_timeout() {
     let Some(s) = servers() else { return };
-    // Not left over from a run that stopped half way.
     s.exec("o89", "rm -f /tmp/hold", b"");
     let mut sftp = password_session(&s, "o89", "hold").await;
     s.exec("o89", "touch /tmp/hold", b"");
@@ -632,7 +584,6 @@ async fn cancel_and_request_timeout() {
     s.exec("o89", "rm -f /tmp/hold", b"");
     assert_eq!(held.unwrap_err().name, ErrorName::Canceled);
     assert!(elapsed < Duration::from_secs(2), "{elapsed:?}");
-    // The held reply comes, and is not taken for the next request's.
     let entry = sftp.stat(b"/", true, &c()).await.unwrap();
     assert_eq!(entry.kind, EntryType::Directory);
     sftp.keep_alive(&c()).await.unwrap();
@@ -649,8 +600,6 @@ async fn cancel_and_request_timeout() {
     assert!(elapsed >= Duration::from_millis(1400) && elapsed < Duration::from_secs(5), "{elapsed:?}");
 }
 
-/// Refusals after sign-in: no session (MaxSessions 0), no SFTP subsystem.
-/// A dropped connection is ConnectionLost.
 #[tokio::test]
 async fn sessions_and_lost_connections() {
     let Some(s) = servers() else { return };
@@ -676,8 +625,6 @@ async fn sessions_and_lost_connections() {
     assert_eq!(sftp.keep_alive(&c()).await.unwrap_err().name, ErrorName::ConnectionLost);
     assert_eq!(sftp.stat(b"", true, &c()).await.unwrap_err().name, ErrorName::ConnectionLost);
 
-    // A session that ends says so (DISCONNECT, as ssh does) before the
-    // connection closes.
     let line = "Received disconnect from";
     let before = s.log_count("o96", "default", line);
     let mut sftp = password_session(&s, "o96", "default").await;

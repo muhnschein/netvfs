@@ -1,9 +1,4 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! [`CancelToken`]: `Backend::cancel` for async code. One token
-//! stands for one connection between two `resetCancel`s: the C ABI trips it
-//! from any thread, every call of the connection sees it, and
-//! `resetCancel` gives the connection a fresh token, so that a call that
-//! saw the old one stays canceled.
 
 use crate::status::Status;
 use std::future::{Future, poll_fn};
@@ -58,8 +53,6 @@ impl CancelToken {
         loop {
             let notified = self.inner.notify.notified();
             let mut notified = pin!(notified);
-            // Registered before the flag is read: a cancel in between
-            // still wakes this waiter.
             notified.as_mut().enable();
             if self.is_canceled() {
                 return;
@@ -108,7 +101,6 @@ mod tests {
         assert_eq!(token.check(), Err(Status::canceled()));
         clone.cancel();
         assert!(token.is_canceled());
-        // A fresh token is a new flag (resetCancel).
         assert!(!CancelToken::new().is_canceled());
     }
 
@@ -182,7 +174,6 @@ mod tests {
 
     #[tokio::test]
     async fn guard_prefers_a_finished_call() {
-        // Both are ready at the first poll: the result wins.
         let token = CancelToken::new();
         let inner = token.clone();
         let r = token

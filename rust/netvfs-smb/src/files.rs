@@ -46,7 +46,6 @@ impl Open {
         self.tree.target()
     }
 
-    /// CLOSE, waited for.
     async fn close(&self, cancel: &CancelToken) -> Result<()> {
         let resp = self
             .conn
@@ -60,7 +59,6 @@ impl Open {
         check_close_response(&resp.msg)
     }
 
-    /// CLOSE, waited for also after a cancel: Samba holds a CLOSE until the handle's WRITEs are done, and a remove before that only marks the file for deletion. After a cancel, GRACE ends the wait.
     async fn close_anyway(&self) {
         drop(self.close(&CancelToken::new()).await);
     }
@@ -70,7 +68,6 @@ fn status(e: Error, context: &str) -> Status {
     e.status(context, Phase::Established)
 }
 
-/// One READ on the way or answered.
 #[derive(Debug)]
 struct Chunk {
     offset: u64,
@@ -81,12 +78,10 @@ struct Chunk {
 }
 
 impl Chunk {
-    /// Bytes requested and not yet handed out.
     fn left(&self) -> usize {
         if self.ticket.is_some() { self.count } else { self.data.len().saturating_sub(self.used) }
     }
 
-    /// Where the next byte handed out comes from.
     fn next(&self) -> u64 {
         self.offset.saturating_add(u64::try_from(self.used).unwrap_or(u64::MAX))
     }
@@ -114,7 +109,6 @@ impl SmbRead {
         Ok(open)
     }
 
-    /// Where the queue ends.
     fn queue_end(&self) -> Option<u64> {
         self.queue.back().map(|c| c.offset.saturating_add(u64::try_from(c.count).unwrap_or(u64::MAX)))
     }
@@ -123,12 +117,10 @@ impl SmbRead {
         self.queue.iter().map(Chunk::left).sum()
     }
 
-    /// Drops the queue; outstanding READs are canceled.
     fn discard(&mut self) {
         self.queue.clear();
     }
 
-    /// The next READ of [`Self::fill`]: offset and length, if one is due.
     fn due(&self, from: u64, to: u64) -> Option<(u64, usize)> {
         let next = self.queue_end().unwrap_or(from);
         let room = self.queue.is_empty() || self.queued().saturating_add(self.chunk) <= MAX_IN_FLIGHT;
@@ -148,7 +140,6 @@ impl SmbRead {
         self.queue.push_back(Chunk { offset, count, ticket: Some(ticket), data: Vec::new(), used: 0 });
     }
 
-    /// READs for `from..to` until the window is full, waiting for credits.
     async fn fill(&mut self, from: u64, to: u64, cancel: &CancelToken) -> Result<()> {
         while let Some((offset, count)) = self.due(from, to) {
             let element = self.request(offset, count)?;
@@ -159,8 +150,6 @@ impl SmbRead {
         Ok(())
     }
 
-    /// Hands out what the front chunk has for `buf`; `true` at the end of
-    /// the file.
     async fn consume(&mut self, buf: &mut [u8], cancel: &CancelToken) -> Result<(usize, bool)> {
         let front = self.queue.front_mut().ok_or_else(|| crate::error::protocol("no read queued"))?;
         if let Some(ticket) = front.ticket.take() {
@@ -187,7 +176,6 @@ impl SmbRead {
 
     async fn read_inner(&mut self, offset: u64, buf: &mut [u8], cancel: &CancelToken) -> Result<usize> {
         self.open()?;
-        // Checked also when the requested data has already arrived.
         if cancel.is_canceled() {
             return Err(Error::Canceled);
         }
@@ -198,7 +186,6 @@ impl SmbRead {
         let mut filled = 0usize;
         while filled < buf.len() {
             let at = offset.saturating_add(u64::try_from(filled).unwrap_or(u64::MAX));
-            // Parallel up to the size at open; past it one chunk at a time, in case the file grew.
             let to = if at < self.size {
                 end.min(self.size)
             } else {
@@ -275,7 +262,6 @@ impl Drop for SmbRead {
     }
 }
 
-/// One WRITE on the way.
 #[derive(Debug)]
 struct InFlight {
     offset: u64,
@@ -287,7 +273,6 @@ struct InFlight {
 #[derive(Debug)]
 pub struct SmbWrite {
     open: Option<Open>,
-    /// The file's path, for the modification time after the close.
     path: Vec<u16>,
     mtime_ms: Option<i64>,
     chunk: usize,
@@ -296,8 +281,6 @@ pub struct SmbWrite {
     buffer: Vec<u8>,
     in_flight: VecDeque<InFlight>,
     in_flight_bytes: usize,
-    /// A failed write leaves the file in an unknown state: later writes and
-    /// commit report the same failure.
     failed: Option<Status>,
 }
 
@@ -340,7 +323,6 @@ impl SmbWrite {
         s
     }
 
-    /// Sends the buffer as one WRITE, after retiring what the window needs.
     async fn send(&mut self, cancel: &CancelToken) -> Result<()> {
         let count = self.buffer.len();
         while !self.in_flight.is_empty() && self.in_flight_bytes.saturating_add(count) > MAX_IN_FLIGHT {
@@ -367,7 +349,6 @@ impl SmbWrite {
         self.write_rest(&w.data, written, w.offset, cancel).await
     }
 
-    /// After a short write the rest goes one request at a time, in order.
     async fn write_rest(
         &self,
         data: &[u8],
@@ -414,7 +395,6 @@ impl SmbWrite {
         Ok(())
     }
 
-    /// Everything sent and answered, FLUSH (stable storage before the caller's size check and rename).
     async fn finish(&mut self, cancel: &CancelToken) -> Result<()> {
         if !self.buffer.is_empty() {
             self.send(cancel).await?;
@@ -461,7 +441,6 @@ impl WriteHandle for SmbWrite {
         };
         r?;
         closed?;
-        // Time is set after the close so that no later write of this handle moves it.
         if let Some(ft) = self.mtime_ms.and_then(filetime_of_ms) {
             fs::set_times(&open.conn, open.target(), &self.path, Some(ft), None, cancel)
                 .await

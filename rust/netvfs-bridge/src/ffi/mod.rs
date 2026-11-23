@@ -47,7 +47,6 @@ pub const DEFAULT_PATH: &str = "/usr/lib64/netvfs/libnetvfs-bridge-ffi.so";
 /// Overrides [`DEFAULT_PATH`], for tests only.
 pub const PATH_ENV: &str = "NETVFS_BRIDGE_FFI";
 
-/// The thread `init` made the Qt thread.
 static QT_THREAD: OnceLock<ThreadId> = OnceLock::new();
 
 /// The loaded table. Cheap to copy, `Send` and `Sync`: the library is never unloaded.
@@ -62,7 +61,6 @@ impl std::fmt::Debug for Ffi {
     }
 }
 
-/// A block C++ allocated, freed when this goes.
 struct Owned<T> {
     ffi: Ffi,
     ptr: *mut T,
@@ -141,7 +139,6 @@ impl Ffi {
         if unsafe { (self.t.init)(NvbBytes::of(app_name.as_bytes())) } != 0 {
             return Err(Status::internal("the Qt application exists already"));
         }
-        // The first init on the main thread wins; a later one was refused.
         QT_THREAD.get_or_init(|| std::thread::current().id());
         Ok(())
     }

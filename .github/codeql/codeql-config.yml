@@ -1,4 +1,3 @@
-# Scope of codeql.yml: shipped code, as sonar-project.properties draws it. Left out: tests, fuzz targets, vendored crates (rust/vendor), host-only Buteo (vendor/host). Rust test modules and test-only features drop out through the extractor options in the workflow. Rust: codeql-config-rust.yml.
 paths-ignore:
   - rust/*/tests
   - rust/fuzz

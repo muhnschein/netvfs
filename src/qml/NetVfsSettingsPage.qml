@@ -5,21 +5,9 @@ import Sailfish.Accounts 1.0
 import com.jolla.settings.accounts 1.0
 import org.netvfs.accounts 1.0
 
-// Account settings page: plain page with own switches and fields (not
-// StandardAccountSettingsDisplay). Changes saved when the page is left, holding the agent's
-// delayDeletion meanwhile.
-// One switch per service the provider offers: backups (<p>-backup, where offered and allowed) and
-// browsing files (<p>-files, when its service file is installed). Account is enabled while any
-// service is.
-// "Test connection" runs NetVfsProbe.identify() on the stored settings, then verifyAccount() for
-// backups when on, else for files (writes nothing). Stored secret is read from signond by the C++
-// core, never reaches QML. A changed server identity is reported, never accepted here; the update
-// flow resolves it.
 Page {
     id: page
 
-    // The AccountSettingsAgent (accountId, accountsHeaderText, delayDeletion,
-    // accountDeletionRequested())
     property QtObject agent
     property string provider
 
@@ -33,7 +21,6 @@ Page {
     property bool _storedBackup
     property bool _storedFiles
     property string _storedName
-    // "", "running", "ok" or "failed"
     property string _testState
     property string _testText
     property string _testDetail
@@ -41,7 +28,6 @@ Page {
 
     readonly property string _backupService: NetVfsHelpers.backupServiceName(provider)
     readonly property string _filesService: NetVfsHelpers.filesServiceName(provider)
-    // Backup services come with netvfs-backup.
     readonly property bool _offersBackup: NetVfsProviders.offersService(provider, "backup")
                                           && NetVfsHelpers.isServiceInstalled(_backupService)
     readonly property bool _offersFiles: NetVfsProviders.offersService(provider, "files")
@@ -124,7 +110,6 @@ Page {
         return changed
     }
 
-    // Returns true when a write was started.
     function save(blocking) {
         if (!_loaded || _saving) {
             return false
@@ -390,7 +375,6 @@ Page {
             }
 
             Repeater {
-                // Fields of the provider descriptor, read-only.
                 model: page._details
 
                 DetailItem {

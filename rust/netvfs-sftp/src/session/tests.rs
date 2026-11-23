@@ -25,14 +25,12 @@ fn open_script() -> Script {
     Script { open: true, ..Script::password() }
 }
 
-/// A session to `server` through a proxy.
 async fn through_proxy(server: &Server) -> (Session, Proxy) {
     let proxy = Proxy::start(server.addr).await;
     let session = connect(&target(proxy.addr), &CancelToken::new()).await.unwrap();
     (session, proxy)
 }
 
-/// Signed in with `none` (the open script), ready for channels.
 async fn signed_in(server: &Server) -> Session {
     let mut session = connect(&target(server.addr), &CancelToken::new()).await.unwrap();
     assert!(session.handle().authenticate_none("u").await.unwrap().success());
@@ -57,7 +55,6 @@ async fn the_identity_is_the_host_key() {
     );
     assert!(printed.contains(ED25519_FINGERPRINT), "{printed}");
     assert!(printed.ends_with(", closed: false, .. }"), "{printed}");
-    // Nothing was sent for signing in.
     assert_eq!(server.take_log(), Vec::<String>::new());
     session.close().await;
 }
@@ -67,7 +64,6 @@ async fn a_pin_picks_the_host_key_of_its_type() {
     let keys = vec![host_key("rsa-openssh"), host_key("ecdsa384-openssh"), host_key("ed25519-openssh")];
     let server = Server::with_keys(Script::password(), keys).await;
     let c = CancelToken::new();
-    // Unpinned, the client's order decides: Ed25519 first.
     assert_eq!(connect(&target(server.addr), &c).await.unwrap().identity().algorithm, "ssh-ed25519");
     for (key_type, index) in [("ssh-rsa", 0), ("ecdsa-sha2-nistp384", 1), ("ssh-ed25519", 2)] {
         let session = connect(&pinned(server.addr, key_type), &c).await.unwrap();
@@ -83,11 +79,9 @@ async fn a_pinned_type_the_server_dropped_shows_the_new_key() {
     let session = connect(&pinned(proxy.addr, "ecdsa-sha2-nistp256"), &c).await.unwrap();
     assert_eq!(session.identity().algorithm, "ssh-ed25519");
     assert_eq!(proxy.connections(), 2);
-    // A type this app does not accept narrows nothing: one connection.
     let other = Proxy::start(server.addr).await;
     connect(&pinned(other.addr, "ssh-dss"), &c).await.unwrap();
     assert_eq!(other.connections(), 1);
-    // Neither does a pin of the type the server has.
     let same = Proxy::start(server.addr).await;
     connect(&pinned(same.addr, "ssh-ed25519"), &c).await.unwrap();
     assert_eq!(same.connections(), 1);
@@ -111,9 +105,6 @@ async fn no_common_algorithm_is_a_security_policy_failure() {
             let (socket, _) = listener.accept().await.unwrap();
             drop(russh::server::run_stream(config, socket, NoAuth).await);
         });
-        // With a pin of a type the server lacks, too: the key exchange
-        // fails first, and only a host key mismatch is tried again (the
-        // listener takes one connection).
         let t = if kind == "kex" { pinned(addr, "ecdsa-sha2-nistp256") } else { target(addr) };
         let e = connect(&t, &CancelToken::new()).await.unwrap_err();
         assert_eq!(e.name, ErrorName::SecurityPolicy, "{e:?}");
@@ -138,7 +129,6 @@ fn quoted_offers_are_whole_names_up_to_a_cap() {
     assert_eq!(offer_text(&names(&[&long, "y"])), format!("{long}, …"));
     let over = "x".repeat(MAX_OFFER_TEXT + 1);
     assert_eq!(offer_text(&names(&[&over, "y"])), "…");
-    // Exactly the cap with the separator: kept; one byte more: cut.
     let head = "h".repeat(MAX_OFFER_TEXT - 3);
     assert_eq!(offer_text(&names(&[&head, "z"])), format!("{head}, z"));
     assert_eq!(offer_text(&names(&[&head, "zz", "w"])), format!("{head}, …"));
@@ -146,7 +136,6 @@ fn quoted_offers_are_whole_names_up_to_a_cap() {
     assert!(offer_text(&many).len() <= MAX_OFFER_TEXT + ", …".len());
 }
 
-/// A server handler that takes nobody.
 struct NoAuth;
 impl russh::server::Handler for NoAuth {
     type Error = russh::Error;
@@ -155,7 +144,6 @@ impl russh::server::Handler for NoAuth {
 #[tokio::test]
 async fn transport_failures_before_ssh() {
     let c = CancelToken::new();
-    // Refused.
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = listener.local_addr().unwrap();
     drop(listener);
@@ -163,7 +151,6 @@ async fn transport_failures_before_ssh() {
     assert_eq!(e.name, ErrorName::NetworkUnreachable);
     assert_eq!(e.message, format!("Cannot connect to 127.0.0.1 port {}", addr.port()));
     assert_ne!(e.detail, "");
-    // Accepted and closed at once.
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     tokio::spawn(async move {
@@ -176,7 +163,6 @@ async fn transport_failures_before_ssh() {
         (e.name, e.message.as_str()),
         (ErrorName::NetworkUnreachable, "The server closed the connection")
     );
-    // Not SSH: a line longer than an identification may be.
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     tokio::spawn(async move {
@@ -199,7 +185,6 @@ async fn a_stalled_handshake_times_out_and_leaves_nothing_running() {
     let e = connect(&t, &CancelToken::new()).await.unwrap_err();
     assert_eq!((e.name, e.message.as_str()), (ErrorName::Timeout, "The server did not answer within 1 s"));
     assert!(started.elapsed() < Duration::from_secs(3));
-    // The session task russh started is gone: its socket closed.
     assert!(proxy.all_closed().await);
 }
 
@@ -217,7 +202,6 @@ async fn a_canceled_handshake_leaves_nothing_running() {
     let e = connect(&target(proxy.addr), &cancel).await.unwrap_err();
     assert_eq!(e, Status::canceled());
     assert!(proxy.all_closed().await);
-    // Tripped before: nothing is tried.
     let before = Proxy::start(server.addr).await;
     assert_eq!(connect(&target(before.addr), &cancel).await.unwrap_err(), Status::canceled());
     assert_eq!(before.connections(), 0);
@@ -238,8 +222,6 @@ async fn a_dropped_connect_leaves_nothing_running() {
 
 #[tokio::test]
 async fn a_handshake_stalled_after_the_version_lines_leaves_nothing_running() {
-    // The server's version line, then nothing: russh's session task holds
-    // the stream by then.
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let server = tokio::spawn(async move {
@@ -256,7 +238,6 @@ async fn a_handshake_stalled_after_the_version_lines_leaves_nothing_running() {
     });
     let t = Target { connect_timeout: Duration::from_millis(300), ..target(addr) };
     assert_eq!(connect(&t, &CancelToken::new()).await.unwrap_err().name, ErrorName::Timeout);
-    // The client end closed.
     let read = tokio::time::timeout(Duration::from_secs(5), server).await.expect("still open").unwrap();
     read.unwrap();
 }
@@ -270,8 +251,6 @@ async fn dropping_or_closing_a_session_closes_the_connection() {
     let (session, proxy) = through_proxy(&server).await;
     session.close().await;
     assert!(proxy.all_closed().await);
-    // Also while its SFTP channel is still held, which keeps russh's
-    // session task going.
     let server = Server::start(open_script()).await;
     let (mut session, proxy) = through_proxy(&server).await;
     assert!(session.handle().authenticate_none("u").await.unwrap().success());
@@ -287,7 +266,6 @@ async fn keep_alive_proves_the_connection() {
     let (mut session, proxy) = through_proxy(&server).await;
     assert!(session.handle().authenticate_none("u").await.unwrap().success());
     let c = CancelToken::new();
-    // russh's server, like OpenSSH, refuses the request: that is an answer.
     session.keep_alive(Duration::from_secs(5), &c).await.unwrap();
     proxy.stall(true);
     let e = session.keep_alive(Duration::from_millis(200), &c).await.unwrap_err();
@@ -401,7 +379,6 @@ async fn a_server_disconnect_is_recorded() {
     let server = Server::start(Script { max_failures: Some(1), ..Script::password() }).await;
     let mut session = connect(&target(server.addr), &CancelToken::new()).await.unwrap();
     let r = session.handle().authenticate_password("u", "wrong").await;
-    // The server hung up instead of answering.
     assert!(!r.unwrap().success());
     for _ in 0..100 {
         if session.end().is_some() {
@@ -474,7 +451,6 @@ async fn a_cut_stream_fails_waiting_reads_and_writes() {
     assert_eq!(a.write(b"x").await.map_err(|e| e.kind()), Err(io::ErrorKind::ConnectionAborted));
     assert_eq!(a.flush().await.map_err(|e| e.kind()), Err(io::ErrorKind::ConnectionAborted));
     a.shutdown().await.unwrap();
-    // A writer blocked on a full pipe is woken too.
     let (a, _b) = tokio::io::duplex(4);
     let (mut a, cut) = Cuttable::new(a);
     let writer = tokio::spawn(async move { a.write_all(&[0; 64]).await.map_err(|e| e.kind()) });
@@ -490,7 +466,6 @@ async fn an_uncut_stream_passes_the_shutdown_on() {
     let (mut a, _cut) = Cuttable::new(a);
     a.write_all(b"hi").await.unwrap();
     a.shutdown().await.unwrap();
-    // The end of the stream, while `a` is still there.
     let mut all = Vec::new();
     tokio::time::timeout(Duration::from_secs(5), b.read_to_end(&mut all)).await.unwrap().unwrap();
     assert_eq!(all, b"hi");
@@ -512,7 +487,6 @@ async fn the_channel_reader_reads_data_only() {
         all.extend_from_slice(&buf[..n]);
     }
     assert_eq!(all, b"abcd");
-    // Ended for good.
     assert_eq!(reader.read(&mut buf).await.unwrap(), 0);
     assert!(format!("{reader:?}").contains("ChannelReader"));
 }

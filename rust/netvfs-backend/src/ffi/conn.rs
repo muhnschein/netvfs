@@ -1,10 +1,4 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! Table functions: argument checks, one call at a time per connection, the call on the runtime, results as
-//! blocks, panics as `Internal`.
-//!
-//! `cancel` may come from any thread during a call, so the token sits apart from the rest, which sits behind a lock
-//! a call holds from start to end; a second call (other thread or callback) fails with `Internal` instead of waiting.
-//! Handles (`nvr_read *`, `nvr_write *`) point back to their connection, which lists them for `conn_free`.
 
 use super::callback::{IoSink, IoSource, ListAdapter, ProgressAdapter, PromptAdapter};
 use super::marshal::{
@@ -69,7 +63,6 @@ impl Conn {
     fn enter(&self) -> Result<(MutexGuard<'_, State>, CancelToken), Status> {
         let state = match self.state.try_lock() {
             Ok(state) => state,
-            // Poisoned by a panicked call (reported as Internal); state is still usable.
             Err(TryLockError::Poisoned(poisoned)) => poisoned.into_inner(),
             Err(TryLockError::WouldBlock) => {
                 return Err(Status::internal(
@@ -106,22 +99,16 @@ fn bad(what: &str) -> Status {
     Status::invalid_args(format!("Missing {what} from the plugin"))
 }
 
-/// # Safety
-/// `c` is NULL or a connection of `conn_new` not yet freed.
 unsafe fn conn<'a>(c: *mut NvrConn) -> Result<&'a Conn, Status> {
     // SAFETY: contract.
     unsafe { c.cast::<Conn>().as_ref() }.ok_or_else(|| bad("connection"))
 }
 
-/// # Safety
-/// `p` is NULL or valid for the call.
 unsafe fn arg<'a, T>(p: *const T, what: &str) -> Result<&'a T, Status> {
     // SAFETY: contract.
     unsafe { p.as_ref() }.ok_or_else(|| bad(what))
 }
 
-/// # Safety
-/// `out` is NULL or writable.
 unsafe fn out<'a, T>(out: *mut *mut T) -> Result<&'a mut *mut T, Status> {
     // SAFETY: contract.
     let slot = unsafe { out.as_mut() }.ok_or_else(|| bad("result pointer"))?;
@@ -134,8 +121,6 @@ fn give<T>(slot: &mut *mut T, block: Option<*mut T>) -> Result<(), Status> {
     Ok(())
 }
 
-/// # Safety
-/// `provider` is readable; `out` is writable.
 pub unsafe extern "C" fn conn_new(provider: NvbBytes, out_conn: *mut *mut NvrConn) -> *mut NvbError {
     status(|| {
         // SAFETY: contract.
@@ -149,10 +134,6 @@ pub unsafe extern "C" fn conn_new(provider: NvbBytes, out_conn: *mut *mut NvrCon
     })
 }
 
-/// Closes left-open handles, disconnects and frees `c`, also if a step panics. A connection in use is left alone.
-///
-/// # Safety
-/// `c` is NULL or a connection not yet freed; no cancel overlaps.
 pub unsafe extern "C" fn conn_free(c: *mut NvrConn) {
     let conn = c.cast::<Conn>();
     if conn.is_null() {
@@ -189,15 +170,11 @@ pub unsafe extern "C" fn conn_free(c: *mut NvrConn) {
     }
 }
 
-/// # Safety
-/// `c` is NULL or a live connection; it is not freed meanwhile.
 pub unsafe extern "C" fn cancel(c: *mut NvrConn) {
     // SAFETY: contract.
     quietly(|| unsafe { conn(c) }.map_or((), |conn| conn.token().cancel()));
 }
 
-/// # Safety
-/// `c` is NULL or a live connection.
 pub unsafe extern "C" fn reset_cancel(c: *mut NvrConn) {
     quietly(|| {
         // SAFETY: contract.
@@ -207,11 +184,6 @@ pub unsafe extern "C" fn reset_cancel(c: *mut NvrConn) {
     });
 }
 
-/// `*seen` stays NULL without an identity.
-///
-/// # Safety
-/// `c` is a live connection; `p` and what it points to are readable;
-/// `seen` is writable.
 pub unsafe extern "C" fn connect(
     c: *mut NvrConn,
     p: *const NvbParams,
@@ -228,11 +200,6 @@ pub unsafe extern "C" fn connect(
     })
 }
 
-/// A NULL prompter or prompt function is none.
-///
-/// # Safety
-/// `c` is a live connection; `cr` and its bytes are readable; `pr` is NULL
-/// or readable, its function callable for the call.
 pub unsafe extern "C" fn authenticate(
     c: *mut NvrConn,
     cr: *const NvrCredentials,
@@ -252,8 +219,6 @@ pub unsafe extern "C" fn authenticate(
     })
 }
 
-/// # Safety
-/// `c` is a live connection; `out_caps` is writable.
 pub unsafe extern "C" fn capabilities(c: *mut NvrConn, out_caps: *mut *mut NvbCapabilities) -> *mut NvbError {
     status(|| {
         // SAFETY: contract.
@@ -263,8 +228,6 @@ pub unsafe extern "C" fn capabilities(c: *mut NvrConn, out_caps: *mut *mut NvbCa
     })
 }
 
-/// # Safety
-/// `c` is NULL or a live connection.
 pub unsafe extern "C" fn disconnect(c: *mut NvrConn) {
     quietly(|| {
         // SAFETY: contract.
@@ -274,8 +237,6 @@ pub unsafe extern "C" fn disconnect(c: *mut NvrConn) {
     });
 }
 
-/// # Safety
-/// `c` is a live connection.
 pub unsafe extern "C" fn keep_alive(c: *mut NvrConn) -> *mut NvbError {
     status(|| {
         // SAFETY: contract.
@@ -284,8 +245,6 @@ pub unsafe extern "C" fn keep_alive(c: *mut NvrConn) -> *mut NvbError {
     })
 }
 
-/// # Safety
-/// `c` is a live connection; `path` is readable; `out_entry` is writable.
 pub unsafe extern "C" fn stat(
     c: *mut NvrConn,
     path: NvbBytes,
@@ -301,9 +260,6 @@ pub unsafe extern "C" fn stat(
     })
 }
 
-/// # Safety
-/// `c` is a live connection; `dir` is readable; `sink` is callable with
-/// `ctx` for the call.
 pub unsafe extern "C" fn list(
     c: *mut NvrConn,
     dir: NvbBytes,
@@ -323,8 +279,6 @@ pub unsafe extern "C" fn list(
     })
 }
 
-/// # Safety
-/// `c` is a live connection; `path` is readable.
 pub unsafe extern "C" fn make_dir(c: *mut NvrConn, path: NvbBytes, exclusive: i32) -> *mut NvbError {
     status(|| {
         // SAFETY: contract.
@@ -334,8 +288,6 @@ pub unsafe extern "C" fn make_dir(c: *mut NvrConn, path: NvbBytes, exclusive: i3
     })
 }
 
-/// # Safety
-/// `c` is a live connection; `path` is readable.
 pub unsafe extern "C" fn remove_file(c: *mut NvrConn, path: NvbBytes) -> *mut NvbError {
     status(|| {
         // SAFETY: contract.
@@ -345,8 +297,6 @@ pub unsafe extern "C" fn remove_file(c: *mut NvrConn, path: NvbBytes) -> *mut Nv
     })
 }
 
-/// # Safety
-/// `c` is a live connection; `path` is readable.
 pub unsafe extern "C" fn remove_dir(c: *mut NvrConn, path: NvbBytes) -> *mut NvbError {
     status(|| {
         // SAFETY: contract.
@@ -360,8 +310,6 @@ const fn mode(replace: i32) -> RenameMode {
     if replace != 0 { RenameMode::Replace } else { RenameMode::NoReplace }
 }
 
-/// # Safety
-/// `c` is a live connection; the paths are readable.
 pub unsafe extern "C" fn rename(
     c: *mut NvrConn,
     from: NvbBytes,
@@ -376,8 +324,6 @@ pub unsafe extern "C" fn rename(
     })
 }
 
-/// # Safety
-/// `c` is a live connection; `path` and `a` are readable.
 pub unsafe extern "C" fn set_attributes(
     c: *mut NvrConn,
     path: NvbBytes,
@@ -391,8 +337,6 @@ pub unsafe extern "C" fn set_attributes(
     })
 }
 
-/// # Safety
-/// `c` is a live connection; `path` is readable; `target` is writable.
 pub unsafe extern "C" fn read_link(
     c: *mut NvrConn,
     path: NvbBytes,
@@ -407,8 +351,6 @@ pub unsafe extern "C" fn read_link(
     })
 }
 
-/// # Safety
-/// `c` is a live connection; the paths are readable.
 pub unsafe extern "C" fn make_symlink(c: *mut NvrConn, target: NvbBytes, link: NvbBytes) -> *mut NvbError {
     status(|| {
         // SAFETY: contract.
@@ -418,8 +360,6 @@ pub unsafe extern "C" fn make_symlink(c: *mut NvrConn, target: NvbBytes, link: N
     })
 }
 
-/// # Safety
-/// `c` is a live connection; the paths are readable.
 pub unsafe extern "C" fn make_hardlink(c: *mut NvrConn, existing: NvbBytes, link: NvbBytes) -> *mut NvbError {
     status(|| {
         // SAFETY: contract.
@@ -429,8 +369,6 @@ pub unsafe extern "C" fn make_hardlink(c: *mut NvrConn, existing: NvbBytes, link
     })
 }
 
-/// # Safety
-/// `c` is a live connection; the paths are readable.
 pub unsafe extern "C" fn copy(
     c: *mut NvrConn,
     from: NvbBytes,
@@ -446,9 +384,6 @@ pub unsafe extern "C" fn copy(
     })
 }
 
-/// # Safety
-/// `c` is a live connection; `path` and `algorithm` are readable;
-/// `digest` is writable.
 pub unsafe extern "C" fn checksum(
     c: *mut NvrConn,
     path: NvbBytes,
@@ -464,8 +399,6 @@ pub unsafe extern "C" fn checksum(
     })
 }
 
-/// # Safety
-/// `c` is a live connection; `dir` is readable; `out_space` is writable.
 pub unsafe extern "C" fn space_info(
     c: *mut NvrConn,
     dir: NvbBytes,
@@ -481,11 +414,6 @@ pub unsafe extern "C" fn space_info(
     })
 }
 
-/// `*size` -1 unknown.
-///
-/// # Safety
-/// `c` is a live connection; `path` is readable; `out_read` is writable,
-/// `size` NULL or writable.
 pub unsafe extern "C" fn open_read(
     c: *mut NvrConn,
     path: NvbBytes,
@@ -508,8 +436,6 @@ pub unsafe extern "C" fn open_read(
     })
 }
 
-/// # Safety
-/// `h` is NULL or a live handle.
 unsafe fn read_slot<'a>(
     h: *mut NvrRead,
 ) -> Result<(&'a mut ReadSlot, MutexGuard<'a, State>, CancelToken), Status> {
@@ -521,11 +447,6 @@ unsafe fn read_slot<'a>(
     }
 }
 
-/// Fills `buf[..cap]` from `offset`; short only at end of file.
-///
-/// # Safety
-/// `h` is a live handle; `buf` is writable for `cap` bytes (NULL only with
-/// `cap` 0); `len` is writable.
 pub unsafe extern "C" fn read(
     h: *mut NvrRead,
     offset: i64,
@@ -568,10 +489,6 @@ pub unsafe extern "C" fn read(
     })
 }
 
-/// Hint; negative numbers ignored.
-///
-/// # Safety
-/// `h` is NULL or a live handle.
 pub unsafe extern "C" fn read_ahead(h: *mut NvrRead, offset: i64, bytes: i64) {
     quietly(|| {
         // SAFETY: contract.
@@ -592,10 +509,6 @@ fn unlist<T>(list: &mut Vec<*mut T>, p: *mut T) -> Result<Box<T>, Status> {
     Ok(unsafe { Box::from_raw(p) })
 }
 
-/// Frees the handle.
-///
-/// # Safety
-/// `h` is a live handle; it is not used afterwards.
 pub unsafe extern "C" fn read_close(h: *mut NvrRead) -> *mut NvbError {
     status(|| {
         // SAFETY: contract.
@@ -605,9 +518,6 @@ pub unsafe extern "C" fn read_close(h: *mut NvrRead) -> *mut NvbError {
     })
 }
 
-/// # Safety
-/// `c` is a live connection; `path` and `o` are readable; `out_write` is
-/// writable.
 pub unsafe extern "C" fn open_write(
     c: *mut NvrConn,
     path: NvbBytes,
@@ -636,8 +546,6 @@ pub unsafe extern "C" fn open_write(
     })
 }
 
-/// # Safety
-/// `h` is NULL or a live handle.
 unsafe fn write_slot<'a>(
     h: *mut NvrWrite,
 ) -> Result<(&'a mut WriteSlot, MutexGuard<'a, State>, CancelToken), Status> {
@@ -649,9 +557,6 @@ unsafe fn write_slot<'a>(
     }
 }
 
-/// # Safety
-/// `h` is a live handle; `data` is readable for `len` bytes (NULL only
-/// with `len` 0).
 pub unsafe extern "C" fn write(h: *mut NvrWrite, data: *const u8, len: usize) -> *mut NvbError {
     status(|| {
         // SAFETY: contract.
@@ -665,10 +570,6 @@ pub unsafe extern "C" fn write(h: *mut NvrWrite, data: *const u8, len: usize) ->
     })
 }
 
-/// -1 for a bad or busy handle.
-///
-/// # Safety
-/// `h` is NULL or a live handle.
 pub unsafe extern "C" fn position(h: *const NvrWrite) -> i64 {
     catch_unwind(AssertUnwindSafe(|| {
         // SAFETY: contract; handle unchanged.
@@ -678,10 +579,6 @@ pub unsafe extern "C" fn position(h: *const NvrWrite) -> i64 {
     .unwrap_or(-1)
 }
 
-/// Frees the handle; a canceled connection aborts the write instead.
-///
-/// # Safety
-/// `h` is a live handle; it is not used afterwards.
 pub unsafe extern "C" fn commit(h: *mut NvrWrite) -> *mut NvbError {
     status(|| {
         // SAFETY: contract.
@@ -695,10 +592,6 @@ pub unsafe extern "C" fn commit(h: *mut NvrWrite) -> *mut NvbError {
     })
 }
 
-/// Frees the handle.
-///
-/// # Safety
-/// `h` is NULL or a live handle; it is not used afterwards.
 pub unsafe extern "C" fn abort(h: *mut NvrWrite) {
     quietly(|| {
         // SAFETY: contract.
@@ -710,9 +603,6 @@ pub unsafe extern "C" fn abort(h: *mut NvrWrite) {
     });
 }
 
-/// # Safety
-/// `c` is a live connection; `path`, `o` and `io` are readable, `pr` NULL
-/// or readable; their functions are callable for the call.
 pub unsafe extern "C" fn upload(
     c: *mut NvrConn,
     path: NvbBytes,
@@ -739,11 +629,6 @@ pub unsafe extern "C" fn upload(
     })
 }
 
-/// `length` -1: to the end.
-///
-/// # Safety
-/// `c` is a live connection; `path` and `io` are readable, `pr` NULL or
-/// readable; their functions are callable for the call.
 pub unsafe extern "C" fn download(
     c: *mut NvrConn,
     path: NvbBytes,
@@ -763,8 +648,6 @@ pub unsafe extern "C" fn download(
     })
 }
 
-/// # Safety
-/// `out_key` is NULL or writable.
 unsafe fn give_key(
     out_key: *mut *mut NvrKey,
     tool: impl FnOnce() -> Result<netvfs_sftp::keys::KeyMaterial, Status>,
@@ -776,17 +659,11 @@ unsafe fn give_key(
     })
 }
 
-/// # Safety
-/// `out_key` is NULL or writable.
 pub unsafe extern "C" fn key_generate(out_key: *mut *mut NvrKey) -> *mut NvbError {
     // SAFETY: contract.
     unsafe { give_key(out_key, netvfs_sftp::keys::generate) }
 }
 
-/// Decrypts with `passphrase` if encrypted.
-///
-/// # Safety
-/// `file` and `passphrase` are readable; `out_key` is NULL or writable.
 pub unsafe extern "C" fn key_import(
     file: NvbBytes,
     passphrase: NvbBytes,
@@ -798,8 +675,6 @@ pub unsafe extern "C" fn key_import(
     unsafe { give_key(out_key, || netvfs_sftp::keys::import(file, passphrase)) }
 }
 
-/// # Safety
-/// `private_key` is readable; `out_key` is NULL or writable.
 pub unsafe extern "C" fn key_describe(private_key: NvbBytes, out_key: *mut *mut NvrKey) -> *mut NvbError {
     // SAFETY: contract.
     let private_key = unsafe { slice(private_key) };

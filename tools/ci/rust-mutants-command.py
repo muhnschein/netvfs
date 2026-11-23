@@ -1,25 +1,5 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: LGPL-2.1-or-later
-"""The interop mode of tools/ci/rust-mutants.sh: tests each mutant that
-`cargo mutants --list --json --diff` listed with a command of its own
-instead of the Rust tests.
-
-For each mutant, in place and one at a time: apply its diff, check that its
-package still builds (else it is unviable), run the command (sh -c, from the
-repository root), restore the file. The command failing catches the mutant;
-passing misses it; running out of time counts as caught (the mutant made it
-hang). The command first runs once unmutated and must pass; its time limit
-per mutant is 300 s plus three times that run's duration
-(NETVFS_MUTANTS_TIMEOUT: seconds, instead).
-
-Results in rust/mutants.out as cargo-mutants writes them (caught.txt,
-missed.txt, timeout.txt, unviable.txt) with each run's output in log/.
-Exit status 0 when nothing was missed, 1 when something was, 4 when the
-unmutated run failed or a diff did not apply. Afterwards the build the
-command made holds the last mutant: rebuild before using it.
-
-Usage: rust-mutants-command.py <mutants.json> <command>
-"""
 import json
 import os
 import shutil
@@ -34,9 +14,6 @@ OUT = os.path.join(RUST, "mutants.out")
 
 
 def run(command, log, timeout=None):
-    """Runs `command` (sh -c, from the repository root) into `log`: its exit
-    status, or None when it ran out of time (its whole process group is
-    then killed)."""
     with open(log, "a") as out:
         out.write(f"$ {command}\n")
         out.flush()
@@ -52,14 +29,11 @@ def run(command, log, timeout=None):
 
 
 def patched(mutant):
-    """The mutant's diff with its file as the new name too (cargo-mutants
-    puts the mutation's description there)."""
     lines = mutant["diff"].splitlines(keepends=True)
     return "".join(f"+++ {mutant['file']}\n" if line.startswith("+++ ") else line for line in lines)
 
 
 def test(mutant, command, timeout, log):
-    """The outcome of one mutant: caught, missed, timeout or unviable."""
     path = os.path.join(RUST, mutant["file"])
     with open(path, "rb") as f:
         original = f.read()

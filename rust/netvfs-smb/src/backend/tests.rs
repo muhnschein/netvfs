@@ -26,8 +26,6 @@ fn s(v: &str) -> Value {
     Value::Str(v.to_owned())
 }
 
-/// A backend signed in on the fake server: `max_io` bytes per READ and
-/// WRITE, IPC$ (server mode) or the share as tree 9.
 async fn signed(options: &[(&str, Value)], max_io: usize) -> (Smb, Peer) {
     let (client, peer) = pair().await;
     let conn = Conn::start(client, T);
@@ -63,7 +61,6 @@ fn le64(b: &[u8]) -> u64 {
     u64::from_le_bytes(b.try_into().unwrap())
 }
 
-/// Answers the next TREE_CONNECT with `tree_id`; returns its path.
 async fn tree_connect(peer: &mut Peer, tree_id: u32) -> String {
     let req = peer.recv_one().await;
     assert_eq!(req.command(), Command::TreeConnect);
@@ -81,15 +78,12 @@ fn unc(req: &Req) -> String {
         .unwrap()
 }
 
-/// Refuses the next TREE_CONNECT.
 async fn tree_refused(peer: &mut Peer, status: NtStatus) {
     let req = peer.recv_one().await;
     assert_eq!(req.command(), Command::TreeConnect);
     peer.send(&[fake::error(&req, status, 1)], false).await;
 }
 
-/// Answers a CREATE + CLOSE chain with `attributes` and `size`; returns
-/// the tree and the CREATE's name.
 async fn stat_chain(peer: &mut Peer, attributes: u32, size: u64) -> (u32, Vec<u16>) {
     let reqs = peer.recv().await;
     let cmds: Vec<Command> = reqs.iter().map(Req::command).collect();
@@ -108,13 +102,11 @@ fn create_name(req: &Req) -> Vec<u16> {
     b[56..][..len].chunks(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect()
 }
 
-/// Disposition and options of a CREATE.
 fn create_of(req: &Req) -> (u32, u32, u32) {
     let b = req.body();
     (le32(&b[24..28]), le32(&b[36..40]), le32(&b[40..44]))
 }
 
-/// Answers one CREATE; returns it.
 async fn create(peer: &mut Peer, status: NtStatus, attributes: u32, size: u64) -> Req {
     let req = peer.recv_one().await;
     assert_eq!(req.command(), Command::Create);
@@ -153,7 +145,6 @@ fn write_body(count: usize) -> Vec<u8> {
     w.into_vec()
 }
 
-/// Receives `n` READs, then answers them from a file of `size` bytes.
 async fn serve_reads(peer: &mut Peer, size: u64, n: usize) -> Vec<(u64, usize)> {
     let mut reqs = Vec::new();
     for _ in 0..n {

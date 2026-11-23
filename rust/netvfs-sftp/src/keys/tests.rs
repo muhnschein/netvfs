@@ -1,6 +1,4 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! Key files in `testdata/keys` were made with ssh-keygen (OpenSSH 9.6p1) and openssl 3.0.13; `golden.txt` holds
-//! the expected outcome of each: Ed25519 and ECDSA keys must come out the same, byte for byte.
 
 use super::*;
 
@@ -33,8 +31,6 @@ const UNUSABLE: &str = "The file is not a key this app can use (Ed25519 or ECDSA
 const PROTECTED: &str = "The key is protected by a passphrase";
 const NOT_CORRECT: &str = "The passphrase is not correct";
 
-/// One line of `golden.txt`: `file | passphrase | ok | algorithm | public
-/// line | fingerprint` or `file | passphrase | error | name | message`.
 struct Golden {
     file: String,
     passphrase: Vec<u8>,
@@ -69,7 +65,6 @@ fn ed25519_and_ecdsa_keys_come_out_as_the_libssh_tools_made_them() {
     for g in golden() {
         let got = import(&fixture(&g.file), &g.passphrase);
         let what = format!("{} with {:?}", g.file, String::from_utf8_lossy(&g.passphrase));
-        // RSA keys and legacy encrypted PEM are refused whatever the passphrase.
         let now_refused = if g.file.starts_with("rsa-") {
             Some(RSA)
         } else if g.file.ends_with("-legacyenc") {
@@ -92,7 +87,6 @@ fn ed25519_and_ecdsa_keys_come_out_as_the_libssh_tools_made_them() {
                 accepted += 1;
             }
             (None, Err((name, message))) => {
-                // The DSA message does not suggest RSA.
                 let message = if g.file.starts_with("dsa-") { DSA.to_owned() } else { message };
                 let (got_name, got_message) = refusal(got);
                 assert_eq!((format!("{got_name:?}"), got_message), (name, message), "{what}");
@@ -105,7 +99,6 @@ fn ed25519_and_ecdsa_keys_come_out_as_the_libssh_tools_made_them() {
 
 #[test]
 fn fingerprints_are_the_ones_ssh_keygen_prints() {
-    // `ssh-keygen -lf <file>.pub`, OpenSSH 9.6p1.
     for (file, passphrase, expected) in [
         ("ed25519-openssh", &b""[..], "SHA256:ZGPW31uwJF+/lR0hhEstPwJCRwMYsx0C3T2YPcRL/3c"),
         ("ed25519-openssh-enc", PASSPHRASE, "SHA256:V3dDf1W0ahmN12EbuUrVqKGy5H6JjR9COfxe/qTnMXA"),
@@ -119,10 +112,7 @@ fn fingerprints_are_the_ones_ssh_keygen_prints() {
     }
 }
 
-/// The length of the private scalar of an unencrypted OpenSSH ECDSA key
-/// file, as stored (an SSH mpint: no leading zero bytes).
 fn stored_scalar_len(file: &str) -> usize {
-    /// The SSH string at the start of `data`, and what follows it.
     fn string(data: &[u8]) -> (&[u8], &[u8]) {
         let (len, rest) = data.split_at(4);
         rest.split_at(usize::try_from(u32::from_be_bytes(len.try_into().unwrap())).unwrap())
@@ -132,22 +122,19 @@ fn stored_scalar_len(file: &str) -> usize {
     let blob = BASE64.decode(body.as_bytes()).unwrap();
     let mut rest = blob.strip_prefix(b"openssh-key-v1\0").unwrap();
     for _ in 0..3 {
-        rest = string(rest).1; // cipher, KDF, KDF options
+        rest = string(rest).1;
     }
-    rest = rest.split_at(4).1; // number of keys
-    rest = string(rest).1; // public key
-    let mut rest = string(rest).0.split_at(8).1; // the private part after its check bytes
+    rest = rest.split_at(4).1;
+    rest = string(rest).1;
+    let mut rest = string(rest).0.split_at(8).1;
     for _ in 0..3 {
-        rest = string(rest).1; // key type, curve, public point
+        rest = string(rest).1;
     }
     string(rest).0.len()
 }
 
 #[test]
 fn p256_keys_with_a_short_scalar() {
-    // ssh-keygen writes a P-256 scalar with a leading zero byte as 31 bytes
-    // (about one key in 256); this key (OpenSSH 9.6p1, then `ssh-keygen -p`
-    // for the encrypted copy) is one. rust/vendor/ssh-key reads it.
     assert_eq!(stored_scalar_len("ecdsa256-short-scalar"), 31);
     let pub_file = String::from_utf8(fixture("ecdsa256-short-scalar.pub")).unwrap();
     let blob = pub_file.split_whitespace().nth(1).unwrap();
@@ -163,13 +150,10 @@ fn p256_keys_with_a_short_scalar() {
         let material = material(&key).unwrap();
         assert_eq!(material.algorithm, "ecdsa-sha2-nistp256");
         assert_eq!(material.public_line, format!("ecdsa-sha2-nistp256 {blob} sailfish-backup"));
-        // `ssh-keygen -lf ecdsa256-short-scalar.pub`.
         assert_eq!(material.fingerprint, "SHA256:eHNCT7aZVPJ7aBziwLCZ5kCrJrZ99PG/sVG9z//cpwo");
-        // The key signs, and its public key verifies the signature.
         let signature = key.sign("netvfs", HashAlg::Sha256, b"message").unwrap();
         key.public_key().verify("netvfs", b"message", &signature).unwrap();
         assert!(key.public_key().verify("netvfs", b"massage", &signature).is_err());
-        // The stored form (the scalar written back as 32 bytes) reads again.
         assert_eq!(describe(&material.private_key).unwrap(), material);
     }
     assert_eq!(refusal(import(&fixture("ecdsa256-short-scalar-enc"), WRONG)), auth(NOT_CORRECT));
@@ -200,7 +184,6 @@ fn encrypted_keys_need_the_right_passphrase() {
         assert_eq!(refusal(import(&fixture(file), b"")), auth(PROTECTED), "{file}");
         assert_eq!(refusal(import(&fixture(file), WRONG)), auth(NOT_CORRECT), "{file}");
         assert_eq!(refusal(describe(&fixture(file))), auth(PROTECTED), "{file}");
-        // Stored unencrypted, in OpenSSH format, without the comment.
         let text = std::str::from_utf8(&key.private_key).unwrap();
         assert!(text.starts_with("-----BEGIN OPENSSH PRIVATE KEY-----\n"), "{file}");
         let stored = PrivateKey::from_openssh(text).unwrap();
@@ -208,9 +191,7 @@ fn encrypted_keys_need_the_right_passphrase() {
         assert!(stored.comment().is_empty());
         assert_eq!(describe(&key.private_key).unwrap(), key);
     }
-    // A passphrase that is not UTF-8 cannot be a PKCS#8 one.
     assert_eq!(refusal(import(&fixture("ed25519-pkcs8-enc"), b"\xff")), auth(NOT_CORRECT));
-    // A plain key takes no passphrase, and ignores one.
     import(&fixture("ed25519-openssh"), WRONG).unwrap();
     import(&fixture("ecdsa256-pkcs8"), WRONG).unwrap();
 }
@@ -218,14 +199,10 @@ fn encrypted_keys_need_the_right_passphrase() {
 const TOO_COSTLY: &str =
     "Opening this key would take too long; protect it with fewer rounds, or generate a new key";
 
-/// `file` (an encrypted OpenSSH key) with its bcrypt rounds set to
-/// `rounds`: the field after the kdf name and the salt, a fixed-width
-/// `uint32`, so nothing else moves.
 fn with_bcrypt_rounds(file: &str, rounds: u32) -> Vec<u8> {
     with_openssh_blob(file, |blob| {
         let plus = |a: usize, b: usize| a.checked_add(b).unwrap();
         let kdf = plus(blob.windows(6).position(|w| w == b"bcrypt").unwrap(), 6);
-        // uint32 length of the options, then the salt (uint32 length + bytes).
         let salt_len = u32::from_be_bytes(blob[plus(kdf, 4)..plus(kdf, 8)].try_into().unwrap());
         let at = plus(plus(kdf, 8), usize::try_from(salt_len).unwrap());
         let field = at..plus(at, 4);
@@ -238,7 +215,6 @@ fn with_bcrypt_rounds(file: &str, rounds: u32) -> Vec<u8> {
     })
 }
 
-/// `file` (an OpenSSH key) with its binary form changed by `change`.
 fn with_openssh_blob(file: &str, change: impl FnOnce(&mut Vec<u8>)) -> Vec<u8> {
     let text = String::from_utf8(fixture(file)).unwrap();
     let body: String = text.lines().filter(|l| !l.starts_with("-----")).collect();
@@ -249,7 +225,6 @@ fn with_openssh_blob(file: &str, change: impl FnOnce(&mut Vec<u8>)) -> Vec<u8> {
     format!("{OPENSSH_BEGIN}\n{}\n-----END OPENSSH PRIVATE KEY-----\n", lines.join("\n")).into_bytes()
 }
 
-/// `file` (an encrypted PKCS#8 key) with its PBES2 parameters changed.
 fn with_pbes2(file: &str, change: impl FnOnce(&mut pbes2::Parameters)) -> Vec<u8> {
     use pkcs8::der::EncodePem;
     let text = String::from_utf8(fixture(file)).unwrap();
@@ -264,15 +239,11 @@ fn with_pbes2(file: &str, change: impl FnOnce(&mut pbes2::Parameters)) -> Vec<u8
 
 #[test]
 fn keys_too_costly_to_open_are_refused_before_the_passphrase() {
-    // Made by ssh-keygen -a 1025, and by openssl with 1000001 PBKDF2
-    // iterations and with scrypt p = 5: refused whatever the passphrase.
     for file in ["ed25519-openssh-rounds1025", "ecdsa256-pkcs8-iter1000001", "ecdsa256-pkcs8-scrypt-p5"] {
         for passphrase in [PASSPHRASE, b"", WRONG] {
             assert_eq!(refusal(import(&fixture(file), passphrase)), unsupported(TOO_COSTLY), "{file}");
         }
     }
-    // At the bound the passphrase is asked for (none given: no key
-    // derivation runs), past it the key is refused.
     let bcrypt = |rounds| refusal(import(&with_bcrypt_rounds("ed25519-openssh-enc", rounds), b""));
     assert_eq!(bcrypt(MAX_BCRYPT_ROUNDS), auth(PROTECTED));
     assert_eq!(bcrypt(MAX_BCRYPT_ROUNDS + 1), unsupported(TOO_COSTLY));
@@ -293,7 +264,6 @@ fn keys_too_costly_to_open_are_refused_before_the_passphrase() {
         });
         refusal(import(&file, b""))
     };
-    // 128 · r · N bytes: 64 MiB is the bound, by N or by r.
     assert_eq!(scrypt(1 << 16, 8, 1), auth(PROTECTED));
     assert_eq!(scrypt(1 << 17, 8, 1), unsupported(TOO_COSTLY));
     assert_eq!(scrypt(1 << 14, 32, 1), auth(PROTECTED));
@@ -301,7 +271,6 @@ fn keys_too_costly_to_open_are_refused_before_the_passphrase() {
     assert_eq!(scrypt(u64::MAX, u16::MAX, 1), unsupported(TOO_COSTLY));
     assert_eq!(scrypt(1 << 14, 8, MAX_SCRYPT_PARALLELISM), auth(PROTECTED));
     assert_eq!(scrypt(1 << 14, 8, MAX_SCRYPT_PARALLELISM + 1), unsupported(TOO_COSTLY));
-    // The files themselves are within the bounds (openssl's defaults).
     for file in ["ed25519-openssh-enc", "ecdsa256-pkcs8-enc", "ecdsa256-pkcs8-scrypt"] {
         assert_eq!(refusal(import(&fixture(file), b"")), auth(PROTECTED), "{file}");
     }
@@ -311,7 +280,6 @@ fn keys_too_costly_to_open_are_refused_before_the_passphrase() {
 fn refused_keys_name_the_fix() {
     for (file, passphrase, expected) in [
         ("rsa-openssh", &b""[..], unsupported(RSA)),
-        // Refused before the passphrase is asked for.
         ("rsa-openssh-enc", b"", unsupported(RSA)),
         ("rsa-openssh-enc", PASSPHRASE, unsupported(RSA)),
         ("rsa-pem-pkcs1", b"", unsupported(RSA)),
@@ -361,11 +329,9 @@ fn files_that_are_no_keys() {
     for (text, expected) in cases {
         assert_eq!(refusal(import(text, b"")), expected, "{}", String::from_utf8_lossy(text));
     }
-    // Leading blank lines and indentation do not hide a key.
     let mut padded = b"\n\n  ".to_vec();
     padded.extend(fixture("ed25519-openssh"));
     import(&padded, b"").unwrap();
-    // A file too large to be a key is not read.
     let mut large = fixture("ed25519-openssh");
     large.resize(MAX_KEY_FILE + 1, b'\n');
     assert_eq!(refusal(import(&large, b"")), unsupported(NOT_A_KEY));
@@ -375,8 +341,6 @@ fn files_that_are_no_keys() {
 
 #[test]
 fn ecdsa_keys_whose_curve_is_not_their_points_are_unusable() {
-    // The curve names (length-prefixed) in the public key and the private
-    // section; the point stays a P-384 one.
     let p256 = with_openssh_blob("ecdsa384-openssh", |blob| {
         let (from, to) = (b"\0\0\0\x08nistp384", b"\0\0\0\x08nistp256");
         assert_eq!(blob.windows(from.len()).filter(|w| *w == from).count(), 2);

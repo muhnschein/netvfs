@@ -146,7 +146,6 @@ impl Connector {
         };
         let mut seen_pin = String::new();
         let result = {
-            // The account's pin decides; the pin seen is kept for the attention record.
             let mut identity = |seen: &Identity, _check: Option<&Status>| {
                 seen_pin.clone_from(&seen.pin);
                 Verdict::UseCheck
@@ -177,7 +176,6 @@ impl Backend for Connector {
     }
 
     fn cancel(&self, handle: &CancelHandle) {
-        // False only when the connection is gone: nothing left to cancel.
         let _live = handle.cancel();
     }
 
@@ -186,7 +184,6 @@ impl Backend for Connector {
     }
 
     fn reset_cancel(&self, conn: &mut Conn) {
-        // Refused only inside a callback, which a worker never is here.
         drop(conn.reset_cancel());
     }
 }

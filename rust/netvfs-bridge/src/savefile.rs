@@ -42,7 +42,6 @@ fn write_synced(file: &mut File, path: &Path, contents: &[u8], mode: Mode) -> io
     file.sync_all()
 }
 
-/// `<name>.<pid>-<n>` next to `path`, created exclusively; names left by an earlier process are skipped.
 fn create_temporary(path: &Path, next: &AtomicU32) -> io::Result<(PathBuf, File)> {
     let name = path.file_name().ok_or_else(|| io::Error::from(io::ErrorKind::InvalidInput))?;
     let mut last = io::Error::from(io::ErrorKind::AlreadyExists);

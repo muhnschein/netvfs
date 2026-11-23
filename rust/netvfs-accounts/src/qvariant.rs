@@ -183,7 +183,6 @@ mod tests {
         assert_eq!(trimmed(&Some("  ".into())).as_deref(), Some(""));
         assert!(is_qt_space('\u{2029}'));
         assert!(!is_qt_space('\u{200b}'));
-        // By code unit: a supplementary character sorts before U+FFFF.
         assert_eq!(compare_qstring("\u{1f600}", "\u{ffff}"), Ordering::Less);
         assert_eq!(compare_qstring("a", "b"), Ordering::Less);
         assert_eq!(compare_qstring("b", "b"), Ordering::Equal);

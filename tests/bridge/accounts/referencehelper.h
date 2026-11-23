@@ -11,15 +11,9 @@ class Manager;
 
 namespace NetVfs {
 namespace Test {
-
-// The golden reference for netvfs-accounts: the C++ helper of netvfs 0.3
-// (AccountsHelper::serve over libaccounts-qt and AccountStore), kept as it
-// was. The Rust helper must answer every request with the same bytes, except
-// for the text of a PermissionDenied message (which named libaccounts'
-// error).
 QByteArray referenceServe(Accounts::Manager *manager, const QStringList &arguments);
 
-} // namespace Test
-} // namespace NetVfs
+}
+}
 
 #endif

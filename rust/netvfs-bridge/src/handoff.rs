@@ -167,7 +167,6 @@ fn is_valid_entry(call: &HandoffCall) -> bool {
         && call.path.strip_prefix('/').is_some_and(|rest| is_dbus_name(rest, '/'))
 }
 
-/// 1 to 255 ASCII letters, digits, `_` and `separator` (coarse: the bus refuses the rest).
 fn is_dbus_name(s: &str, separator: char) -> bool {
     (1..=255).contains(&s.len()) && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == separator)
 }
@@ -201,7 +200,6 @@ fn parse_argument(spec: &str, account_id: i32, provider: &str) -> Option<Handoff
     match kind {
         's' => Some(HandoffArg::Str(value)),
         'i' => qt_trimmed(&value).parse().ok().map(HandoffArg::Int),
-        // QString::toUInt refuses any sign but "+", even "-0".
         'u' => Some(qt_trimmed(&value)).filter(|v| !v.starts_with('-'))?.parse().ok().map(HandoffArg::UInt),
         'b' => match value.as_str() {
             "true" => Some(HandoffArg::Bool(true)),
@@ -227,7 +225,6 @@ impl SessionBusLauncher {
 }
 
 impl Launcher for SessionBusLauncher {
-    /// Builds the message now, sends on the current tokio runtime.
     fn launch(&self, call: &HandoffCall) -> Result<(), Status> {
         let failed = || Status::new(ErrorName::Unsupported, "Settings cannot be opened");
         let bus = self.bus.clone().ok_or_else(failed)?;

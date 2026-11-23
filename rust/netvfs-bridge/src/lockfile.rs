@@ -13,10 +13,8 @@ use std::time::{Duration, Instant, SystemTime};
 
 /// `QLockFile`'s default stale lock time.
 pub const STALE_AFTER: Duration = Duration::from_secs(30);
-/// `QLockFile::lock`'s first pause; doubles up to 5 s.
 const FIRST_PAUSE: Duration = Duration::from_millis(100);
 const MAX_PAUSE: Duration = Duration::from_secs(5);
-/// Stale `.rmlock` levels cleared (Qt goes on as long as each is stale).
 const RMLOCK_LEVELS: u32 = 4;
 
 /// A held lock; removed on drop.
@@ -58,7 +56,6 @@ impl LockFile {
 
 impl Drop for LockFile {
     fn drop(&mut self) {
-        // Removed while still flocked, so nobody takes it for stale in between (Qt closes first).
         fs::remove_file(&self.path).ok();
     }
 }
@@ -73,7 +70,6 @@ fn try_lock_at(path: &Path, depth: u32) -> io::Result<Option<LockFile>> {
     let Some(depth) = depth.checked_sub(1) else { return Ok(None) };
     let mut rmlock = path.as_os_str().to_os_string();
     rmlock.push(".rmlock");
-    // Only one process removes it; repeated under the rmlock, which a crashed remover may have left.
     let removed = match try_lock_at(Path::new(&rmlock), depth)? {
         Some(_guard) => is_stale(path) && remove_stale(path),
         None => false,
@@ -81,7 +77,6 @@ fn try_lock_at(path: &Path, depth: u32) -> io::Result<Option<LockFile>> {
     if removed { create(path) } else { Ok(None) }
 }
 
-/// Creates the lock file exclusively; `None` if it exists. Owner-only (Qt: `0666` less umask): others need not see the pid.
 fn create(path: &Path) -> io::Result<Option<LockFile>> {
     let mut file = match OpenOptions::new()
         .write(true)
@@ -94,7 +89,6 @@ fn create(path: &Path) -> io::Result<Option<LockFile>> {
         Err(e) if e.kind() == io::ErrorKind::AlreadyExists => return Ok(None),
         Err(e) => return Err(e),
     };
-    // As Qt: a lock without flock still works, only easier to steal.
     if let Err(e) = lock_exclusive_nonblocking(file.as_fd()) {
         crate::log::debug(format_args!("No flock on {}: {e}", path.display()));
     }
@@ -325,7 +319,6 @@ mod tests {
         }
     }
 
-    /// Against Qt's own QLockFile via the qsettings-golden tool built by tests/data/qsettings/generate.sh, named by `NETVFS_QSETTINGS_GOLDEN` (skipped without it).
     #[test]
     fn qlockfile_interop() {
         use std::io::{BufRead, BufReader};

@@ -61,7 +61,6 @@ pub struct Response {
     pub props: Props,
 }
 
-/// The elements whose place matters.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum El {
     Multistatus,
@@ -108,7 +107,6 @@ fn bad(why: impl Into<String>) -> Status {
     Status::new(ErrorName::ProtocolError, "The server sent a malformed folder listing").with_detail(why)
 }
 
-/// The status code of `HTTP/1.1 200 OK`.
 fn status_code(line: &str) -> Option<u16> {
     line.split_ascii_whitespace().nth(1)?.parse().ok()
 }
@@ -127,7 +125,6 @@ fn http_date_ms(text: &str) -> Option<i64> {
     i64::try_from(since.as_millis()).ok()
 }
 
-/// Where the parser is.
 #[derive(Debug, Default)]
 struct Parser {
     stack: Vec<El>,
@@ -204,7 +201,6 @@ impl Parser {
                 merge(&mut self.props, p);
             }
             (Some(El::Multistatus), El::Response) => {
-                // Exactly one usable href; a response with several (RFC 4918 status form) names no one entry.
                 if let (true, 1, Some(path)) = (self.response_ok, self.href_count, self.href.take()) {
                     self.out.push(Response { path, props: std::mem::take(&mut self.props) });
                 }
@@ -236,7 +232,6 @@ impl Parser {
     }
 }
 
-/// Later 2xx propstats add to earlier ones.
 fn merge(into: &mut Props, p: Props) {
     into.collection |= p.collection;
     into.length = p.length.or(into.length);

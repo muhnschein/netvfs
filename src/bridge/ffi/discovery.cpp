@@ -1,6 +1,4 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-// Discovery of nearby servers, Qt thread only. The caller decides when it runs and how often it
-// reports; this part reports every change.
 #include "ffi_p.h"
 
 #include "discovery.h"
@@ -44,7 +42,6 @@ nvb_discovery *discoveryNew(const nvb_discovery_hooks *hooks) noexcept
         d->discovery = std::make_unique<Discovery>();
         const nvb_discovery *self = d.get();
         const Discovery *discovery = d->discovery.get();
-        // The discovery is the context: no hook call once it is deleted.
         QObject::connect(discovery, &Discovery::found, discovery, [self]() { report(self); });
         QObject::connect(discovery, &Discovery::updated, discovery, [self]() { report(self); });
         QObject::connect(discovery, &Discovery::lost, discovery, [self]() { report(self); });
@@ -52,7 +49,6 @@ nvb_discovery *discoveryNew(const nvb_discovery_hooks *hooks) noexcept
     });
 }
 
-// Idempotent: Discovery::start()/stop() are reference counted, this holds at most one reference.
 int32_t discoverySetRunning(nvb_discovery *d, int32_t on) noexcept
 {
     return guardedValue<int32_t>(0, [d, on]() {

@@ -51,7 +51,7 @@ QVariantMap sftpGlobals()
     globals.insert(QStringLiteral("netvfs/smb/share"), QStringLiteral("not mine"));
     return globals;
 }
-} // namespace
+}
 
 class TestAccounts : public QObject
 {
@@ -163,7 +163,6 @@ private slots:
         QCOMPARE(store.clearAttention(99999).error(), Error::NotFound);
     }
 
-    // / 6.4: only an unusable identity or secret flags the account.
     void signonErrorMapping_data()
     {
         QTest::addColumn<int>("type");
@@ -238,8 +237,6 @@ private slots:
 
     void openUsesDefaults()
     {
-        // The production entry point: default manager, signond. Credentials id
-        // 0 fails fast with AuthFailed without talking to signond.
         const int id = fixture->createAccount(QStringLiteral("fake"), sftpGlobals());
         AccountSession *session = AccountSession::open(id, Service::Backup, this);
         QSignalSpy failed(session, &AccountSession::failed);
@@ -285,7 +282,6 @@ private slots:
         QVERIFY(!config.serviceEnabled);
         QVERIFY(!config.enabled);
 
-        // Defaults: no files service value, provider without services.
         const int plain = fixture->createAccount(QStringLiteral("sftp"), sftpGlobals());
         QVERIFY(store.load(plain, Service::Files, &config).ok());
         QVERIFY(config.filesRoot.isEmpty());
@@ -431,7 +427,6 @@ private slots:
 
     void missingSecretDecision()
     {
-        // keeps for everything else, and never hides an outage.
         const Result noSecret(Error::AuthFailed, QStringLiteral("empty"));
         const Result outage(Error::Internal, QStringLiteral("signond down"));
         QVERIFY(acceptsMissingSecret(noSecret, true));
@@ -442,7 +437,6 @@ private slots:
 
     void secretSourceWithoutIdentity()
     {
-        // Credentials id 0 is decided without signond.
         SignonSecretSource source;
         QVERIFY(!source.secretOptional());
         QSignalSpy fetched(&source, &SecretSource::fetched);
@@ -475,7 +469,6 @@ private slots:
         QCOMPARE(options.size(), 1);
     }
 
-    // the session refuses a configuration before reading the secret.
     void sessionServiceGating()
     {
         QVariantMap globals = sftpGlobals();
@@ -536,7 +529,6 @@ private slots:
         QCOMPARE(failed.at(0).at(0).value<Result>().error(), Error::SecurityPolicy);
     }
 
-    // a Files run records the same attention; CredentialsNeedUpdateFrom names the service.
     void attentionFromFiles()
     {
         const int id = fixture->createAccount(QStringLiteral("sftp"), sftpGlobals());
@@ -584,7 +576,6 @@ private slots:
         QVERIFY(failed.wait(15000));
         QCOMPARE(failed.at(0).at(0).value<Result>().error(), Error::AuthFailed);
 
-        // No identity at all: immediate AuthFailed.
         source.fetch(0);
         QCOMPARE(failed.count(), 2);
         QCOMPARE(failed.at(1).at(0).value<Result>().error(), Error::AuthFailed);
@@ -601,13 +592,11 @@ private slots:
         QCOMPARE(failed.at(2).at(0).value<Result>().error(), Error::AuthFailed);
         QCOMPARE(fetched.count(), 1);
 
-        // the same lookups for an account without a secret by design.
         source.setSecretOptional(true);
         source.fetch(emptyStored.at(0).at(0).toUInt());
         QVERIFY(fetched.wait(15000));
         QCOMPARE(fetched.count(), 2);
         QVERIFY(fetched.at(1).at(0).value<Credentials>().secret.isEmpty());
-        // signond reports the empty secret as an error: no user name (the session uses the settings one).
         source.fetch(credentialsId + 1000);
         QVERIFY(fetched.wait(15000));
         QCOMPARE(fetched.count(), 3);

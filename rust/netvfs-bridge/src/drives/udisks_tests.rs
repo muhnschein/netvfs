@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-// Client against a fake UDisks2 on a private bus, describing the phone of `sample`; mounts below /run/media/user.
 #![allow(clippy::arithmetic_side_effects)]
 
 use super::{Bus, CALL_TIMEOUT, DEBOUNCE, ERROR_PREFIX, MANAGER, SERVICE, UDisks, error_name};

@@ -132,7 +132,7 @@ fn a_full_host_borrows_another_lane_then_waits() {
     assert_eq!(recv(&rx), Seen::Failed(ErrorName::Canceled));
     drop(go);
     wait_until(|| set.closing() == 1 && set.get("a").unwrap().retired[0].worker.finished());
-    assert_eq!(set.hosts().in_use("fake://h:0"), 1); // counted until reaped
+    assert_eq!(set.hosts().in_use("fake://h:0"), 1);
     assert!(set.maintain(Instant::now(), IDLE));
     assert_eq!(recv(&rx), Seen::Conn(2));
     assert_eq!(set.get("b").unwrap().pending_count(), 0);

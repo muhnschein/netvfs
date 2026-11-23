@@ -95,7 +95,6 @@ impl<'a> Reader<'a> {
     }
 }
 
-/// Offset of the request id in a packet: after the length and the type.
 const ID_AT: usize = 5;
 
 /// An outgoing packet: `uint32 length`, `byte type`, `uint32 id`, fields.
@@ -105,7 +104,6 @@ pub struct Packet {
 }
 
 impl fmt::Debug for Packet {
-    // Only type and size shown: packets carry file data.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Packet").field("type", &self.buf.get(4)).field("len", &self.buf.len()).finish()
     }
@@ -203,7 +201,6 @@ mod tests {
         assert_eq!(Reader::new(&[1, 2, 3]).u32(), Err(SHORT));
         assert_eq!(Reader::new(&[0; 7]).u64(), Err(SHORT));
         assert_eq!(Reader::new(&[]).u8(), Err(SHORT));
-        // A string whose length runs past the packet.
         assert_eq!(Reader::new(&[0, 0, 0, 3, b'a', b'b']).string(10, "x"), Err(SHORT));
         assert_eq!(Reader::new(&[0, 0, 0, 3, b'a', b'b']).skip_string(), Err(SHORT));
         assert_eq!(Reader::new(&[0, 0, 0]).skip_string(), Err(SHORT));
@@ -211,10 +208,8 @@ mod tests {
 
     #[test]
     fn strings_over_the_cap_are_refused_before_reading() {
-        // The length claims 4 GiB: refused by the cap, nothing allocated.
         let mut r = Reader::new(&[0xff, 0xff, 0xff, 0xff, b'a']);
         assert_eq!(r.string(4096, "name too long"), Err(WireError("name too long")));
-        // Exactly at the cap is fine; one past it is not.
         let buf = [0, 0, 0, 2, b'a', b'b'];
         assert_eq!(Reader::new(&buf).string(2, "x"), Ok(&b"ab"[..]));
         assert_eq!(Reader::new(&buf).string(1, "x"), Err(WireError("x")));
@@ -234,9 +229,7 @@ mod tests {
 
     #[test]
     fn packets_over_the_cap_are_refused() {
-        // OpenSSH's 256 KiB and 1 KiB for the header.
         assert_eq!(MAX_PACKET, 263_168);
-        // Header 9 bytes + string 4 + data: exactly MAX_PACKET body is fine.
         let fits = vec![0; MAX_PACKET - 4 - 4 - 1];
         let p = Packet::request(6).string(&fits).finish(1).unwrap();
         assert_eq!(p.len(), MAX_PACKET + 4);

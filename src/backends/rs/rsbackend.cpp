@@ -198,7 +198,6 @@ Result RsBackend::readLink(const QString &path, QString *target)
     return r;
 }
 
-// Target goes verbatim, as the bytes of its name.
 Result RsBackend::makeSymlink(const QString &target, const QString &linkPath)
 {
     return onPaths(target, linkPath,

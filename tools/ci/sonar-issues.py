@@ -1,11 +1,4 @@
 #!/usr/bin/env python3
-"""Lists every open SonarCloud issue and unreviewed security hotspot for this
-pull request (or branch) and fails if there is any: maintainability,
-reliability and security findings all gate, not only the quality gate's
-rating thresholds.
-
-Env: SONAR_TOKEN, SONAR_SCOPE ("pullRequest=<n>" or "branch=<name>").
-"""
 import base64
 import json
 import os
@@ -36,8 +29,6 @@ def location(item):
 
 
 def fetch_all(path, list_name):
-    """Pages through a search endpoint; returns (items, total). The issues API
-    stops at 10 000 results, which is far beyond what is useful in a log."""
     items = []
     page = 1
     while True:

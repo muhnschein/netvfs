@@ -1,36 +1,22 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! Descriptor calls of transfers: what a descriptor is (`fstat`, `F_GETFL`), positioned reads and writes of regular files (`pread`, `pwrite`), sequential ones of FIFOs (`read`, `write`), waiting for a FIFO (`poll`). The checks and the device over a checked descriptor are in `crate::jobs::fd` and `crate::jobs::fdio`.
-//!
-//! `EINTR` is repeated; `poll` reports it as "not ready yet" so the caller looks at its cancel flag again.
 
 use super::check;
 use std::io;
 use std::os::fd::{AsRawFd as _, BorrowedFd, RawFd};
 
-/// The type of a file, from `st_mode`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FileKind {
-    /// `S_IFREG`.
     Regular,
-    /// `S_IFIFO`.
     Fifo,
-    /// Anything else (folder, socket, device, link).
     Other,
 }
 
-/// What `fstat` says about a descriptor.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FileStat {
-    /// The file's type.
     pub kind: FileKind,
-    /// `st_size`.
     pub size: i64,
 }
 
-/// `fstat(fd)`; `fstat` only reads the descriptor table.
-///
-/// # Errors
-/// The OS error (`EBADF`, …).
 pub fn stat(fd: RawFd) -> io::Result<FileStat> {
     // SAFETY: an all-zero `stat` is a valid value of the plain C struct.
     let mut st: libc::stat = unsafe { std::mem::zeroed() };
@@ -44,10 +30,6 @@ pub fn stat(fd: RawFd) -> io::Result<FileStat> {
     Ok(FileStat { kind, size: st.st_size })
 }
 
-/// `fcntl(fd, F_GETFL)`: the descriptor's status flags.
-///
-/// # Errors
-/// The OS error (`EBADF`, …).
 pub fn status_flags(fd: RawFd) -> io::Result<libc::c_int> {
     // SAFETY: F_GETFL takes no argument, only reads the descriptor table.
     check(unsafe { libc::fcntl(fd, libc::F_GETFL) })
@@ -66,10 +48,6 @@ fn retry(mut call: impl FnMut() -> libc::ssize_t) -> io::Result<usize> {
     }
 }
 
-/// `pread` into `buf` at `offset`; the descriptor's own offset is not used or moved.
-///
-/// # Errors
-/// The OS error; `InvalidInput` for an offset `off_t` cannot hold.
 pub fn pread(fd: BorrowedFd<'_>, buf: &mut [u8], offset: i64) -> io::Result<usize> {
     let offset =
         libc::off_t::try_from(offset).map_err(|_too_big| io::Error::from(io::ErrorKind::InvalidInput))?;
@@ -77,10 +55,6 @@ pub fn pread(fd: BorrowedFd<'_>, buf: &mut [u8], offset: i64) -> io::Result<usiz
     retry(|| unsafe { libc::pread(fd.as_raw_fd(), buf.as_mut_ptr().cast(), buf.len(), offset) })
 }
 
-/// `pwrite` `data` at `offset`; the descriptor's own offset is not used or moved. May write fewer bytes.
-///
-/// # Errors
-/// The OS error; `InvalidInput` for an offset `off_t` cannot hold.
 pub fn pwrite(fd: BorrowedFd<'_>, data: &[u8], offset: i64) -> io::Result<usize> {
     let offset =
         libc::off_t::try_from(offset).map_err(|_too_big| io::Error::from(io::ErrorKind::InvalidInput))?;
@@ -88,37 +62,22 @@ pub fn pwrite(fd: BorrowedFd<'_>, data: &[u8], offset: i64) -> io::Result<usize>
     retry(|| unsafe { libc::pwrite(fd.as_raw_fd(), data.as_ptr().cast(), data.len(), offset) })
 }
 
-/// `read` (a FIFO): 0 at the end.
-///
-/// # Errors
-/// The OS error.
 pub fn read(fd: BorrowedFd<'_>, buf: &mut [u8]) -> io::Result<usize> {
     // SAFETY: `buf` writable for `buf.len()` bytes during the call; `fd` a live borrowed descriptor.
     retry(|| unsafe { libc::read(fd.as_raw_fd(), buf.as_mut_ptr().cast(), buf.len()) })
 }
 
-/// `write` (a FIFO): may write fewer bytes.
-///
-/// # Errors
-/// The OS error (`EPIPE` once the reader is gone).
 pub fn write(fd: BorrowedFd<'_>, data: &[u8]) -> io::Result<usize> {
     // SAFETY: `data` readable for `data.len()` bytes during the call; `fd` a live borrowed descriptor.
     retry(|| unsafe { libc::write(fd.as_raw_fd(), data.as_ptr().cast(), data.len()) })
 }
 
-/// What a descriptor is waited for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Ready {
-    /// Data to read (or the end).
     Read,
-    /// Room to write (or the reader is gone).
     Write,
 }
 
-/// `poll` one descriptor for at most `timeout_ms`: true when ready (also for error or hang-up, which the next read or write reports), false on timeout or interruption.
-///
-/// # Errors
-/// The OS error other than `EINTR`.
 pub fn poll(fd: BorrowedFd<'_>, ready: Ready, timeout_ms: i32) -> io::Result<bool> {
     let events = match ready {
         Ready::Read => libc::POLLIN,

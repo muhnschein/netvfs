@@ -23,7 +23,6 @@ fn named(name: ErrorName, message: &str) -> (ErrorName, String) {
     (name, message.to_owned())
 }
 
-/// Waits until `check` holds (the server runs on its own task).
 async fn eventually(mut check: impl FnMut() -> bool) {
     for _ in 0..500 {
         if check() {
@@ -37,7 +36,6 @@ async fn eventually(mut check: impl FnMut() -> bool) {
 #[derive(Debug, Default)]
 struct Recorder {
     updates: Vec<(u64, Option<u64>)>,
-    /// `canceled()` answers true after this many updates.
     stop_after: Option<usize>,
 }
 
@@ -54,12 +52,9 @@ impl Progress for Recorder {
 struct Bytes {
     data: Vec<u8>,
     at: usize,
-    /// Each read hands out at most this many bytes.
     step: usize,
-    /// Reading past this offset fails.
     fail_at: Option<usize>,
     size: Option<u64>,
-    /// Reads that found the end.
     ends: usize,
 }
 
@@ -166,15 +161,12 @@ async fn upload_in_chunks_then_fsync_and_close() {
 #[tokio::test]
 async fn upload_reads_the_source_until_its_end() {
     let (fake, remote) = setup().await;
-    // A source that hands out a byte at a time and does not know its size.
     let mut source = Bytes { step: 1, size: None, ..Bytes::new(b"abcdefghij") };
     let progress = upload(&remote, b"/home/u/new", &create_new(), &mut source).await.unwrap();
     assert_eq!(fake.data("/home/u/new"), Some(b"abcdefghij".to_vec()));
     assert_eq!(progress.updates, [(4, None), (8, None), (10, None)]);
     assert_eq!(fake.requests(FXP_WRITE).len(), 3);
-    // A short block is the end: the source is not read again.
     assert_eq!(source.ends, 1);
-    // An empty source makes an empty file.
     upload(&remote, b"/home/u/empty", &create_new(), &mut Bytes::new(b"")).await.unwrap();
     assert_eq!(fake.data("/home/u/empty"), Some(Vec::new()));
     assert_eq!(fake.requests(FXP_WRITE).len(), 3);
@@ -200,7 +192,6 @@ async fn upload_dispositions() {
     upload(&remote, b"/home/u/f", &with(Disposition::Truncate), &mut Bytes::new(b"new")).await.unwrap();
     assert_eq!(fake.data("/home/u/f"), Some(b"new".to_vec()));
     assert_eq!(fake.requests(FXP_OPEN).last().unwrap().pflags, Some(FXF_WRITE | FXF_CREAT | FXF_TRUNC));
-    // An existing file the server will not open: what the server said.
     fake.rule(Rule::new(FXP_OPEN, Action::Status(FX_PERMISSION_DENIED, "no")).once());
     assert_eq!(
         err(upload(&remote, b"/home/u/f", &with(Disposition::Truncate), &mut Bytes::new(b"x")).await),
@@ -225,7 +216,6 @@ async fn upload_dispositions() {
     );
     assert_eq!(fake.requests(FXP_WRITE).len(), writes);
     eventually(|| fake.open_handles() == 0).await;
-    // Resume needs the file.
     assert_eq!(
         err(upload(&remote, b"/home/u/g", &wrong, &mut Bytes::new(b"x")).await).0,
         ErrorName::NotFound
@@ -261,7 +251,6 @@ async fn upload_without_fsync() {
 #[tokio::test]
 async fn upload_failures() {
     let (fake, remote) = setup().await;
-    // A plain failure with less space free than the block is NoSpace.
     fake.state().statvfs[1] = 1;
     fake.state().statvfs[4] = 3;
     fake.rule(Rule::new(FXP_WRITE, Action::Status(FX_FAILURE, "Failure")).once());
@@ -270,21 +259,18 @@ async fn upload_failures() {
         named(ErrorName::NoSpace, "The server has no space left for /home/u/a")
     );
     eventually(|| fake.open_handles() == 0).await;
-    // With space for the block it stays what the server said.
     fake.state().statvfs[4] = 4;
     fake.rule(Rule::new(FXP_WRITE, Action::Status(FX_FAILURE, "Failure")).once());
     assert_eq!(
         err(upload(&remote, b"/home/u/b", &create_new(), &mut Bytes::new(b"x")).await),
         named(ErrorName::ProtocolError, "/home/u/b: Failure")
     );
-    // The source's failure, as it is.
     let mut source = Bytes { fail_at: Some(8), ..Bytes::new(&digits(20)) };
     assert_eq!(
         err(upload(&remote, b"/home/u/c", &create_new(), &mut source).await),
         named(ErrorName::Internal, "source failed")
     );
     eventually(|| fake.open_handles() == 0).await;
-    // fsync and CLOSE failures.
     fake.rule(Rule::ext("fsync@openssh.com", Action::Status(FX_PERMISSION_DENIED, "no")).once());
     assert_eq!(
         err(upload(&remote, b"/home/u/d", &create_new(), &mut Bytes::new(b"x")).await),
@@ -297,7 +283,6 @@ async fn upload_failures() {
         err(upload(&remote, b"/home/u/e", &create_new(), &mut Bytes::new(b"x")).await),
         named(ErrorName::NoSpace, "The server has no space left for /home/u/e")
     );
-    // The modification time is not set after a failure.
     assert_eq!(fake.requests(FXP_SETSTAT), []);
 }
 
@@ -324,7 +309,6 @@ async fn upload_is_canceled() {
 #[tokio::test]
 async fn upload_keeps_sixteen_writes_in_flight() {
     let (fake, remote) = setup().await;
-    // The first WRITE is never answered.
     fake.rule(Rule::new(FXP_WRITE, Action::Ignore).once());
     let c = cancel();
     let trip = c.clone();
@@ -364,7 +348,6 @@ async fn download_whole_and_ranges() {
     let (data, progress) = download(&remote, b"/home/u/f", 0, None).await.unwrap();
     assert_eq!(data, b"0123456789");
     assert_eq!(progress.updates, [(4, Some(10)), (8, Some(10)), (10, Some(10))]);
-    // Up to the size, then the rest of the short block finds the end.
     assert_eq!(reads(&fake), [(0, 4), (4, 4), (8, 4), (10, 2)]);
     assert_eq!(fake.requests(FXP_OPEN)[0].pflags, Some(FXF_READ));
     eventually(|| fake.open_handles() == 0).await;
@@ -400,7 +383,6 @@ async fn download_keeps_the_window_full_and_follows_a_growing_file() {
     let (fake, remote) = setup().await;
     let content = digits(200);
     fake.file("/home/u/f", &content);
-    // The first READ is held back: the others are sent meanwhile.
     fake.rule(Rule::new(FXP_READ, Action::Delay(Duration::from_millis(50))).once());
     let (data, _) = download(&remote, b"/home/u/f", 0, None).await.unwrap();
     assert_eq!(data, content);
@@ -410,14 +392,12 @@ async fn download_keeps_the_window_full_and_follows_a_growing_file() {
     assert_eq!(reads(&fake).len(), 51);
     fake.take_log();
 
-    // The file grew after it was opened: reading goes on to its end.
     let opened = Attrs { size: Some(8), permissions: Some(0o100_644), ..Attrs::default() };
     fake.rule(Rule::new(FXP_FSTAT, Action::Reply(FXP_ATTRS, encode_attrs(&opened))).once());
     let (data, progress) = download(&remote, b"/home/u/f", 0, None).await.unwrap();
     assert_eq!(data, content);
     assert_eq!(progress.updates[..3], [(4, Some(8)), (8, Some(8)), (12, Some(8))]);
     let offsets: Vec<u64> = reads(&fake).into_iter().map(|(o, _)| o).collect();
-    // Two up to the size, one beyond; then data beyond it fills the window.
     assert_eq!(offsets[..3], [0, 4, 8]);
     let window: Vec<u64> = (0..WINDOW as u64).map(|i| 12 + 4 * i).collect();
     assert_eq!(offsets[3..3 + WINDOW], window);
@@ -427,7 +407,6 @@ async fn download_keeps_the_window_full_and_follows_a_growing_file() {
 async fn download_keeps_sixteen_reads_in_flight() {
     let (fake, remote) = setup().await;
     fake.file("/home/u/f", &digits(400));
-    // The first READ is never answered.
     fake.rule(Rule::new(FXP_READ, Action::Ignore).once());
     let c = cancel();
     let trip = c.clone();
@@ -451,7 +430,6 @@ async fn download_keeps_sixteen_reads_in_flight() {
 async fn download_finds_the_end_once_the_rest_has_come() {
     let (fake, remote) = setup().await;
     fake.file("/home/u/f", b"01234567");
-    // The first READ is held back; the READ past the size waits for it.
     fake.rule(Rule::new(FXP_READ, Action::Delay(Duration::from_millis(200))).once());
     let watcher = fake.clone();
     let seen = tokio::spawn(async move {
@@ -472,7 +450,6 @@ async fn download_survives_short_reads() {
     fake.rule(Rule::new(FXP_READ, Action::ShortRead(3)).once());
     let (data, _) = download(&remote, b"/home/u/f", 0, None).await.unwrap();
     assert_eq!(data, digits(50));
-    // After the short answer at 0 the next request asks for byte 3.
     let reads = fake.requests(FXP_READ);
     assert!(reads.iter().any(|r| r.offset == Some(3)), "{reads:?}");
     fake.rule(Rule::new(FXP_READ, Action::ShortRead(1)));
@@ -493,7 +470,6 @@ async fn download_refusals() {
         err(download(&remote, b"/home/u/g", 0, None).await),
         named(ErrorName::NotFound, "/home/u/g: not found")
     );
-    // More data than asked for.
     fake.rule(Rule::new(FXP_READ, Action::Reply(FXP_DATA, string(b"12345"))).once());
     assert_eq!(
         err(download(&remote, b"/home/u/f", 0, None).await),
@@ -504,15 +480,12 @@ async fn download_refusals() {
         err(download(&remote, b"/home/u/f", 0, None).await),
         named(ErrorName::PermissionDenied, "/home/u/f: permission denied")
     );
-    // An empty DATA ends the file.
     fake.rule(Rule::new(FXP_READ, Action::Reply(FXP_DATA, string(b""))).once());
     assert_eq!(download(&remote, b"/home/u/f", 0, None).await.unwrap().0, b"");
-    // A server that cannot FSTAT still reads.
     fake.rule(Rule::new(FXP_FSTAT, Action::Status(FX_FAILURE, "no")).once());
     let (data, progress) = download(&remote, b"/home/u/f", 0, None).await.unwrap();
     assert_eq!((data.as_slice(), progress.updates[0]), (&b"0123456789"[..], (4, None)));
     eventually(|| fake.open_handles() == 0).await;
-    // A lost connection while asking.
     fake.rule(Rule::new(FXP_FSTAT, Action::Hangup).once());
     assert_eq!(err(download(&remote, b"/home/u/f", 0, None).await).0, ErrorName::ConnectionLost);
 }
@@ -604,27 +577,22 @@ async fn read_handle_reads_ahead_while_sequential() {
     assert_eq!(h.size(), Some(200));
     assert_eq!(read(&mut h, 0, 4).await.unwrap(), content[..4]);
     assert_eq!(read_offsets(&fake), [0]);
-    // Sequential: the next chunk is asked for ahead of time.
     assert_eq!(read(&mut h, 4, 4).await.unwrap(), content[4..8]);
     offsets_become(&fake, &[0, 4, 8]).await;
     assert_eq!(read(&mut h, 8, 4).await.unwrap(), content[8..12]);
-    // 8 was on its way; the read-ahead doubles to 8 bytes beyond 12.
     offsets_become(&fake, &[0, 4, 8, 12, 16]).await;
     for at in (12..60).step_by(4) {
         assert_eq!(read(&mut h, at, 4).await.unwrap(), content[at as usize..at as usize + 4]);
     }
     tokio::time::sleep(Duration::from_millis(20)).await;
-    // At most the window: 16 requests from the last read's offset on.
     let offsets = read_offsets(&fake);
     assert_eq!(offsets.last(), Some(&(56 + 15 * 4)));
     let mut unique = offsets.clone();
     unique.dedup();
     assert_eq!(unique, offsets, "each chunk is asked for once");
-    // A jump drops what is on its way and starts again without read-ahead.
     fake.take_log();
     assert_eq!(read(&mut h, 150, 4).await.unwrap(), content[150..154]);
     assert_eq!(read_offsets(&fake), [150]);
-    // Read-ahead stops at the size the file had at open.
     for at in (154..198).step_by(4) {
         assert_eq!(read(&mut h, at, 4).await.unwrap(), content[at as usize..at as usize + 4]);
     }
@@ -642,22 +610,16 @@ async fn read_handle_keeps_what_a_reply_brought_beyond_the_read() {
     let content = digits(40);
     fake.file("/home/u/f", &content);
     let mut h = reader(&fake, &remote, b"/home/u/f", 8).await;
-    // A first read asks for what it needs only.
     assert_eq!(read(&mut h, 0, 3).await.unwrap(), content[..3]);
     assert_eq!(reads(&fake), [(0, 3)]);
-    // Sequential: a chunk more.
     assert_eq!(read(&mut h, 3, 3).await.unwrap(), content[3..6]);
     reads_become(&fake, &[(0, 3), (3, 8), (11, 3)]).await;
-    // Bytes 6..11 came with the second reply: no request.
     assert_eq!(read(&mut h, 6, 5).await.unwrap(), content[6..11]);
     tokio::time::sleep(Duration::from_millis(20)).await;
     assert_eq!(reads(&fake).len(), 3);
     assert_eq!(read(&mut h, 11, 3).await.unwrap(), content[11..14]);
-    // The read-ahead doubles to 32, but stops at the size (40).
     reads_become(&fake, &[(0, 3), (3, 8), (11, 3), (14, 8), (22, 8), (30, 8), (38, 2)]).await;
-    // Kept and on their way, part of a read each.
     assert_eq!(read(&mut h, 14, 10).await.unwrap(), content[14..24]);
-    // Going back drops both.
     fake.take_log();
     assert_eq!(read(&mut h, 1, 2).await.unwrap(), content[1..3]);
     assert_eq!(reads(&fake), [(1, 2)]);
@@ -672,7 +634,6 @@ async fn read_handle_hands_out_kept_data_in_parts() {
     assert_eq!(read(&mut h, 0, 3).await.unwrap(), content[..3]);
     assert_eq!(read(&mut h, 3, 3).await.unwrap(), content[3..6]);
     reads_become(&fake, &[(0, 3), (3, 8), (11, 3)]).await;
-    // 6..11 came with the second reply: two reads take it, no request.
     assert_eq!(read(&mut h, 6, 2).await.unwrap(), content[6..8]);
     assert_eq!(read(&mut h, 8, 3).await.unwrap(), content[8..11]);
     tokio::time::sleep(Duration::from_millis(20)).await;
@@ -684,8 +645,6 @@ async fn read_ahead_hints_and_the_kept_data() {
     let (fake, remote) = setup().await;
     let content = digits(40);
     fake.file("/home/u/f", &content);
-    // A hint of one chunk, then a read of its start: 3..8 is kept and
-    // nothing is on its way.
     let kept = || async {
         let mut h = reader(&fake, &remote, b"/home/u/f", 8).await;
         h.read_ahead(0, 8);
@@ -693,24 +652,20 @@ async fn read_ahead_hints_and_the_kept_data() {
         assert_eq!(reads(&fake), [(0, 8)]);
         h
     };
-    // Before the kept data: its range is asked for.
     let mut h = kept().await;
     h.read_ahead(1, 4);
     reads_become(&fake, &[(0, 8), (1, 4)]).await;
     assert_eq!(read(&mut h, 1, 4).await.unwrap(), content[1..5]);
-    // Where it ends: what follows is asked for, the kept data stays.
     let mut h = kept().await;
     h.read_ahead(8, 4);
     reads_become(&fake, &[(0, 8), (8, 4)]).await;
     assert_eq!(read(&mut h, 3, 9).await.unwrap(), content[3..12]);
     reads_become(&fake, &[(0, 8), (8, 4), (12, 8)]).await;
-    // At its start: what follows it is asked for.
     let mut h = kept().await;
     h.read_ahead(3, 9);
     reads_become(&fake, &[(0, 8), (8, 4)]).await;
     assert_eq!(read(&mut h, 3, 9).await.unwrap(), content[3..12]);
     reads_become(&fake, &[(0, 8), (8, 4), (12, 8)]).await;
-    // Beyond it: from the hint on, not from the end of the kept data.
     let mut h = kept().await;
     h.read_ahead(20, 4);
     reads_become(&fake, &[(0, 8), (20, 4)]).await;
@@ -728,7 +683,6 @@ async fn reads_the_kept_data_answers_leave_the_requests_on_their_way() {
     h.read_ahead(0, 16);
     reads_become(&fake, &[(0, 8), (8, 8)]).await;
     assert_eq!(read(&mut h, 0, 3).await.unwrap(), content[..3]);
-    // 3..8 kept, 8..16 on its way.
     assert_eq!(read(&mut h, 3, 2).await.unwrap(), content[3..5]);
     assert_eq!(read(&mut h, 5, 3).await.unwrap(), content[5..8]);
     assert_eq!(read(&mut h, 8, 8).await.unwrap(), content[8..16]);
@@ -756,7 +710,6 @@ async fn read_handle_at_the_end() {
     assert_eq!(read(&mut h, 8, 10).await.unwrap(), b"89");
     assert_eq!(read(&mut h, 10, 4).await.unwrap(), b"");
     assert_eq!(read(&mut h, 50, 4).await.unwrap(), b"");
-    // Reading on after the end works.
     assert_eq!(read(&mut h, 0, 10).await.unwrap(), digits(10));
     fake.take_log();
     assert_eq!(read(&mut h, 3, 0).await.unwrap(), b"");
@@ -793,32 +746,26 @@ async fn read_ahead_hints() {
     assert_eq!(read_offsets(&fake), [20, 24, 28, 32]);
     assert_eq!(read(&mut h, 20, 16).await.unwrap(), content[20..36]);
     assert_eq!(read_offsets(&fake), [20, 24, 28, 32]);
-    // A hint that continues what is on its way, or nothing: requests go out.
     h.read_ahead(36, 8);
     eventually(|| fake.requests(FXP_READ).len() == 6).await;
-    // A hint elsewhere while requests are on their way is ignored.
     h.read_ahead(80, 8);
-    // So is one that starts before them, also when it reaches beyond.
     h.read_ahead(30, 20);
     tokio::time::sleep(Duration::from_millis(20)).await;
     assert_eq!(read_offsets(&fake), [20, 24, 28, 32, 36, 40]);
     h.read_ahead(0, 0);
     assert_eq!(read(&mut h, 36, 8).await.unwrap(), content[36..44]);
-    // A hint that starts where the requests on their way end adds to them.
     let mut h = reader(&fake, &remote, b"/home/u/f", 4).await;
     h.read_ahead(60, 8);
     h.read_ahead(68, 8);
     eventually(|| fake.requests(FXP_READ).len() == 4).await;
     assert_eq!(read_offsets(&fake), [60, 64, 68, 72]);
     assert_eq!(read(&mut h, 60, 16).await.unwrap(), content[60..76]);
-    // So does a longer hint from where they start.
     let mut h = reader(&fake, &remote, b"/home/u/f", 4).await;
     h.read_ahead(80, 8);
     h.read_ahead(80, 16);
     eventually(|| fake.requests(FXP_READ).len() == 4).await;
     assert_eq!(read_offsets(&fake), [80, 84, 88, 92]);
     assert_eq!(read(&mut h, 80, 16).await.unwrap(), content[80..96]);
-    // A hint is capped at 4 MiB.
     let big = digits(5 << 20);
     fake.file("/home/u/big", &big);
     let mut h = reader(&fake, &remote, b"/home/u/big", 256 * 1024).await;
@@ -835,10 +782,8 @@ async fn read_ahead_hint_without_bytes_is_ignored() {
     let content = digits(200);
     fake.file("/home/u/f", &content);
     let mut h = reader(&fake, &remote, b"/home/u/f", 4).await;
-    // A window of requests for the hint; it is kept up while reading.
     h.read_ahead(0, 100);
     eventually(|| fake.requests(FXP_READ).len() == WINDOW).await;
-    // No bytes: the hint before it stays.
     h.read_ahead(8, 0);
     assert_eq!(read(&mut h, 0, 4).await.unwrap(), content[..4]);
     assert_eq!(read(&mut h, 4, 4).await.unwrap(), content[4..8]);
@@ -857,13 +802,11 @@ async fn read_handle_failures() {
         err(read(&mut h, 0, 4).await),
         named(ErrorName::PermissionDenied, "/home/u/f: permission denied")
     );
-    // The next read starts again.
     assert_eq!(read(&mut h, 0, 8).await.unwrap(), content[..8]);
     let c = cancel();
     c.cancel();
     let mut buf = [0; 4];
     assert_eq!(h.read(8, &mut buf, &c).await.unwrap_err().name, ErrorName::Canceled);
-    // After the connection is gone.
     remote.client().end(crate::errors::connection_lost());
     assert_eq!(err(read(&mut h, 8, 4).await).0, ErrorName::ConnectionLost);
     h.read_ahead(8, 4);
@@ -916,7 +859,6 @@ async fn write_handle_resumes_at_the_offset() {
     h.write(b"de", &cancel()).await.unwrap();
     h.commit(&cancel()).await.unwrap();
     assert_eq!(fake.data("/home/u/f"), Some(b"abcde".to_vec()));
-    // No time asked for: none set.
     assert_eq!(fake.requests(FXP_SETSTAT), []);
 }
 
@@ -925,8 +867,6 @@ async fn write_handle_failures_stick() {
     let (fake, remote) = setup().await;
     let mut h = writer(&fake, &remote, b"/home/u/f", &WriteOptions::default(), 4).await;
     fake.rule(Rule::new(FXP_WRITE, Action::Status(FX_PERMISSION_DENIED, "no")).once());
-    // The failure shows once its answer is waited for: at the latest on
-    // commit.
     h.write(b"0123", &cancel()).await.unwrap();
     assert_eq!(
         err(h.commit(&cancel()).await),
@@ -937,7 +877,6 @@ async fn write_handle_failures_stick() {
 
     let mut h = writer(&fake, &remote, b"/home/u/g", &WriteOptions::default(), 4).await;
     fake.rule(Rule::new(FXP_WRITE, Action::Status(FX_PERMISSION_DENIED, "no")).once());
-    // More than the window: the oldest answer is waited for on the way.
     let denied = named(ErrorName::PermissionDenied, "/home/u/g: permission denied");
     let e = h.write(&digits(4 * (WINDOW + 1)), &cancel()).await;
     assert_eq!(err(e), denied);
@@ -968,8 +907,6 @@ async fn write_handle_commit_failures() {
         named(ErrorName::NoSpace, "The server has no space left for /home/u/g")
     );
     eventually(|| fake.open_handles() == 1).await;
-    // The CLOSE that failed above left one handle open on the server;
-    // the fsync failure closed its own.
     let mut h = writer(&fake, &remote, b"/home/u/h", &WriteOptions::default(), 4).await;
     remote.client().end(crate::errors::connection_lost());
     assert_eq!(err(h.write(b"x", &cancel()).await).0, ErrorName::ConnectionLost);

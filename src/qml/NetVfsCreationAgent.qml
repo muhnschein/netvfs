@@ -4,10 +4,6 @@ import Sailfish.Silica 1.0
 import com.jolla.settings.accounts 1.0
 import org.netvfs.accounts 1.0
 
-// Creation flow shared by the providers' <p>.qml: input (from the provider descriptor) -> identify
-// (no credentials) -> confirm server identity (SSH key) -> [SSH key page] -> verify (backup when
-// chosen, else files: nothing written) -> create with the chosen services -> final dialog. Uses
-// only AccountCreationAgent members; no OnlineSync* component or AccountFactory.
 AccountCreationAgent {
     id: root
 
@@ -26,7 +22,6 @@ AccountCreationAgent {
     property Item _keyPage
     property bool _verifying
 
-    // Parented to the agent so they outlive the pages.
     property NetVfsProbe _probe: NetVfsProbe {
         onIdentified: root._identified()
         onVerified: root._verified()
@@ -40,7 +35,6 @@ AccountCreationAgent {
         onFailed: root._setupFailed(text)
     }
 
-    // Hold the agent while the account is written.
     delayDeletion: _setup.busy
 
     function _collectInput() {
@@ -71,7 +65,6 @@ AccountCreationAgent {
         _probe.identify(_params)
     }
 
-    // A result is only acted on while its busy page is still shown.
     function _onBusyPage() {
         return _busyPage !== null && pageStack.currentPage === _busyPage
     }
@@ -83,7 +76,6 @@ AccountCreationAgent {
         if (_probe.identityStatus === NetVfsProbe.IdentityUnknown) {
             pageStack.replace(identityComponent, { "identity": _probe.serverIdentity })
         } else if (_probe.identityStatus === NetVfsProbe.NoIdentity) {
-            // SMB has no server identity to confirm.
             _busyPage.showBusy(_verifyText())
             _startVerify(_busyPage)
         } else {
@@ -92,7 +84,6 @@ AccountCreationAgent {
         }
     }
 
-    // host_key.
     function _identityAccepted(pinOptions) {
         _params = connectionDialog.connectionParams(pinOptions)
     }
@@ -101,7 +92,6 @@ AccountCreationAgent {
         _busyPage = page
         _verifying = true
         if (_authMode === "publickey") {
-            // Stored with the account for display.
             _params = NetVfsHelpers.withOptions(_params, { "public_key": _keyTool.publicKey })
         }
         if (_backup) {
@@ -163,7 +153,6 @@ AccountCreationAgent {
         return qsTrId("settings-accounts-netvfs-la-verifying_files")
     }
 
-    // Back to the input, or to the key page when the key was refused.
     function _goBack() {
         _probe.cancel()
         if (_verifying && _keyPage !== null && _probe.error === NetVfsProbe.AuthFailed) {
@@ -241,7 +230,6 @@ AccountCreationAgent {
     Component {
         id: finishComponent
 
-        // Editable description; accept goes to the end destination.
         Dialog {
             id: finishDialog
 

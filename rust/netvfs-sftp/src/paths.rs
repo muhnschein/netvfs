@@ -152,7 +152,6 @@ mod tests {
     fn display_marks_each_invalid_byte() {
         assert_eq!(display(b"caf\xc3\xa9"), "café");
         assert_eq!(display(b"a\xff\xfeb"), "a\u{fffd}\u{fffd}b");
-        // A truncated sequence: one mark per byte, not one per sequence.
         assert_eq!(display(b"\xe2\x82"), "\u{fffd}\u{fffd}");
         assert_eq!(display(b""), "");
     }

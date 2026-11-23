@@ -9,7 +9,6 @@ use crate::wire::Writer;
 const T: Duration = Duration::from_secs(5);
 const TREE: Target = Target { tree_id: 3, encrypt: false };
 const FID: FileId = [0x11; 16];
-/// [`FT`] in ms.
 const MS: i64 = 1_609_459_200_000;
 
 async fn started() -> (Conn, Peer) {
@@ -20,7 +19,6 @@ async fn started() -> (Conn, Peer) {
     (conn, peer)
 }
 
-/// UTF-16 of an ASCII literal as a `&'static [u16]`, built at compile time: nothing leaks (LSan).
 macro_rules! units {
     ($s:literal) => {{
         const U: [u16; $s.len()] = ascii_units($s);
@@ -45,7 +43,6 @@ fn set_info_body() -> Vec<u8> {
     vec![2, 0]
 }
 
-/// Answers a chain: one (status, body) per request, chained back.
 async fn answer(peer: &mut Peer, reqs: &[Req], answers: Vec<(NtStatus, Vec<u8>)>) {
     assert_eq!(reqs.len(), answers.len());
     let msgs: Vec<Vec<u8>> = reqs
@@ -391,7 +388,6 @@ async fn set_times_and_space() {
     assert_eq!(r.unwrap(), SpaceInfo { free: Some(i64::MAX.unsigned_abs()), total: Some(40960), used: None });
 }
 
-/// Batches handed to the sink; `stop_after` batches, then `false`.
 struct Batches {
     got: Vec<Vec<Vec<u8>>>,
     stop_after: usize,

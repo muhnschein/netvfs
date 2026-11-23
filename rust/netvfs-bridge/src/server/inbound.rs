@@ -53,7 +53,6 @@ pub fn frame_size(header: &[u8]) -> io::Result<FrameSize> {
     };
     let body = u64::from(read(field(4)?));
     let fields = u64::from(read(field(12)?));
-    // The header is padded to 8 bytes before the body.
     let padded = fields.saturating_add(16).next_multiple_of(8);
     Ok(FrameSize { endian, total: padded.saturating_add(body) })
 }

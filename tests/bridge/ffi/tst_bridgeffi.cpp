@@ -1,8 +1,4 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-// C ABI of libnetvfs-bridge-ffi.so called through its table as the Rust bridge does (dlopen, nvb_ffi_get,
-// init on the main thread first), with the fake backend steered through libnetvfs-bridge-ffi-fake.so. Runs
-// in the normal and sanitizer builds. marshal.h templates are compiled in too, for cases no backend
-// produces.
 #include "netvfs_bridge_ffi.h"
 #include "nvb_fake.h"
 
@@ -32,9 +28,6 @@ const nvb_ffi *t = nullptr;
 const nvb_fake *f = nullptr;
 void *ffiLibrary = nullptr;
 
-
-// Secrets given to the library carry this canary; every block freed while the scan is armed is searched for
-// it. A hit is a copy released without wiping.
 namespace SecretScan {
 const char Canary[] = "C4nary-0f-a-s3cret";
 std::atomic<bool> armed { false };
@@ -47,9 +40,9 @@ void check(const volatile void *block, size_t size)
             && memmem(const_cast<const void *>(block), size, Canary, length))
         hits.fetch_add(1);
 }
-} // namespace SecretScan
+}
 
-} // namespace
+}
 
 #if defined(__SANITIZE_ADDRESS__)
 extern "C" int __sanitizer_install_malloc_and_free_hooks(void (*mallocHook)(const volatile void *, size_t),
@@ -71,10 +64,8 @@ void installSecretScan()
     static const bool installed = __sanitizer_install_malloc_and_free_hooks(ignoreAllocated, scanFreed) != 0;
     QVERIFY(installed);
 }
-} // namespace
+}
 #else
-// Without ASan, free() itself is interposed (the libraries' calls bind to
-// this definition) and hands the block on to glibc's own.
 extern "C" void __libc_free(void *p);
 
 extern "C" void free(void *p) noexcept
@@ -88,7 +79,7 @@ namespace {
 void installSecretScan()
 {
 }
-} // namespace
+}
 #endif
 
 namespace {
@@ -185,8 +176,6 @@ QByteArray pinFor(const QByteArray &key)
     return "ssh-ed25519 " + key.toBase64();
 }
 
-// Runs `fn` on another thread while this one runs the Qt event loop (the
-// Rust bridge's layout: workers block, the main thread serves signond).
 void offQtThread(const std::function<void()> &fn)
 {
     std::thread worker([fn]() {
@@ -269,7 +258,7 @@ bool insideBlock(const void *block, nvb_bytes b)
     return b.ptr >= start && b.ptr + b.len <= start + size;
 }
 
-} // namespace
+}
 
 class tst_BridgeFfi : public QObject
 {
@@ -317,7 +306,6 @@ void tst_BridgeFfi::init()
 
 void tst_BridgeFfi::fakeSeed()
 {
-    // NETVFS_FAKE_SEED, read by the plugin on the first create().
     QTemporaryDir dir;
     QFile seed(dir.filePath(QStringLiteral("seed")));
     QVERIFY(seed.open(QIODevice::WriteOnly));
@@ -394,7 +382,6 @@ void tst_BridgeFfi::connLifecycle()
     QVERIFY(!opened);
     QVERIFY(handle);
     QCOMPARE(size, int64_t(10));
-    // conn_free closes the open handle (LSan sees a leak otherwise).
     conn.reset();
     QCOMPARE(logCount("close:a"), 1);
     QCOMPARE(f->live_backends(), 0);
@@ -453,7 +440,7 @@ struct IdentitySeen {
     }
 };
 
-} // namespace
+}
 
 void tst_BridgeFfi::establishIdentityHook()
 {
@@ -483,7 +470,6 @@ void tst_BridgeFfi::establishIdentityHook()
     QCOMPARE(seen.kind, uint32_t(NVB_IDENTITY_SSH));
     QCOMPARE(seen.fingerprint, "SHA256:" + QCryptographicHash::hash(serverKey, QCryptographicHash::Sha256)
                                                .toBase64(QByteArray::OmitTrailingEquals));
-    // the hook runs before anything is sent; a refusal sends nothing.
     QCOMPARE(seen.authenticatedBefore, 0);
     QCOMPARE(logCount("authenticate"), error.isEmpty() ? 1 : 0);
     QCOMPARE(logCount("disconnect"), error.isEmpty() ? 0 : 1);
@@ -510,7 +496,6 @@ void tst_BridgeFfi::establishTlsIdentity()
 
 void tst_BridgeFfi::establishNoAuthenticateBeforeIdentity()
 {
-    // No hook: an unknown identity fails (USE_CHECK) before authenticate.
     f->set_identity_pin(bytes(pinFor("k1")));
     ConnPtr conn = newConn();
     Establish e;
@@ -524,8 +509,6 @@ void tst_BridgeFfi::establishNoAuthenticateBeforeIdentity()
 namespace {
 
 struct Prompted {
-    // reply_set() calls in this order (the last one counts); split before
-    // the secret scan is armed, so that the test makes no copies itself.
     std::vector<std::vector<QByteArray>> replies;
     int answer = 1;
     int calls = 0;
@@ -552,7 +535,7 @@ struct Prompted {
     }
 };
 
-} // namespace
+}
 
 void tst_BridgeFfi::establishPromptReplySet()
 {
@@ -595,11 +578,9 @@ void tst_BridgeFfi::establishPromptReplySet()
         QCOMPARE(prompted.text, QByteArray("Verification code: "));
         QCOMPARE(prompted.echo, uint8_t(0));
         QVERIFY2(logCount("answers:") == c.delivered, c.name);
-        // no copy of an answer was released unwiped.
         QVERIFY2(SecretScan::hits == 0, c.name);
     }
 
-    // No prompt hook: no prompter, so the second factor fails.
     f->reset();
     f->set_otp(bytes(otp));
     ConnPtr conn = newConn();
@@ -611,7 +592,6 @@ void tst_BridgeFfi::establishPromptReplySet()
 
 void tst_BridgeFfi::establishSecretsWiped()
 {
-    //  the secret is copied once into Credentials and wiped.
     const QByteArray secret = QByteArray(SecretScan::Canary) + "-pw";
     f->set_credentials(lit("user"), bytes(secret));
     installSecretScan();
@@ -631,9 +611,6 @@ void tst_BridgeFfi::establishSecretsWiped()
 
 void tst_BridgeFfi::establishSignonId0Optional()
 {
-    // credentials id 0 with an optional secret yields empty
-    // credentials without signond; the empty fetched user name becomes the
-    // given one. Waits on a worker while the Qt thread serves the lookup.
     f->set_credentials(lit("user"), lit(""));
     for (const bool optional : { true, false }) {
         f->reset();
@@ -657,7 +634,6 @@ void tst_BridgeFfi::establishSignonId0Optional()
         }
     }
 
-    // On the Qt thread itself the wait could never end: refused.
     ConnPtr conn = newConn();
     Establish e;
     e.source.source = NVB_SECRET_SIGNON;
@@ -667,9 +643,6 @@ void tst_BridgeFfi::establishSignonId0Optional()
 }
 
 namespace {
-
-// Holds the Qt thread until `release` is set, so that what is posted after
-// it waits in the queue.
 struct Blocker {
     std::atomic<bool> release { false };
 
@@ -681,12 +654,10 @@ struct Blocker {
     }
 };
 
-} // namespace
+}
 
 void tst_BridgeFfi::establishSignonCancel()
 {
-    // conn_cancel also ends the wait for signond (the lookup is queued
-    // behind a busy Qt thread here, so it never answers in time).
     Blocker blocker;
     ConnPtr conn = newConn();
     Establish e;
@@ -800,7 +771,7 @@ struct Walked {
     }
 };
 
-} // namespace
+}
 
 void tst_BridgeFfi::walkVisitAndStop()
 {
@@ -852,7 +823,7 @@ struct Progressed {
     }
 };
 
-} // namespace
+}
 
 void tst_BridgeFfi::removeTreeCounts()
 {
@@ -1082,7 +1053,7 @@ QMap<QString, QString> optionsOf(const nvb_params &params)
     return options;
 }
 
-} // namespace
+}
 
 void tst_BridgeFfi::urlParseFormat()
 {
@@ -1169,8 +1140,6 @@ void tst_BridgeFfi::errorBlockContents()
 
 void tst_BridgeFfi::mapValuesNotCarried()
 {
-    // fillMap() leaves out values the ABI cannot carry and keeps key order. With none left the array is
-    // empty: never indexed, not null, in the block.
     using namespace NetVfs::Ffi;
     const auto packed = [](const QVariantMap &map) {
         return Owned<nvb_params>(pack<nvb_params>([&map](auto &arena, nvb_params *out) {
@@ -1211,7 +1180,6 @@ void tst_BridgeFfi::mapValuesNotCarried()
 
 void tst_BridgeFfi::exceptionsBecomeInternal()
 {
-    // a C++ exception (here from a callback) never crosses the ABI.
     f->add_file(lit("/x/a"), lit("a"));
     ConnPtr conn = connected();
     QVERIFY(conn);
@@ -1243,12 +1211,10 @@ struct Nearby {
     }
 };
 
-} // namespace
+}
 
 void tst_BridgeFfi::discoveryStartStopFree()
 {
-    // on the Qt thread; sockets may be unavailable in a sandbox
-    // so only the bookkeeping is checked.
     Nearby nearby;
     const nvb_discovery_hooks hooks { &nearby, Nearby::changed };
     nvb_discovery *d = t->discovery_new(&hooks);
@@ -1283,13 +1249,11 @@ struct Posted {
     }
 };
 
-} // namespace
+}
 
 void tst_BridgeFfi::postAndQuit()
 {
     QCOMPARE(t->post(nullptr, nullptr), 0);
-    // From another thread while the loop runs; the functor runs on the Qt
-    // thread and its quit() ends run() with the code.
     Posted posted;
     posted.quitWith = 7;
     int32_t queued = -1;
@@ -1306,8 +1270,6 @@ void tst_BridgeFfi::postAndQuit()
     Posted late;
     QCOMPARE(t->post(Posted::fn, &late), 0);
 
-    // A quit() before run() still ends the next run(); a functor posted
-    // before it runs first.
     t->quit(5);
     QCOMPARE(t->run(), 5);
     QCOMPARE(late.runs.load(), 0);

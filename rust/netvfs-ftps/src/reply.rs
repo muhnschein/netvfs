@@ -38,7 +38,6 @@ fn garbled(what: &str) -> Status {
     Status::new(ErrorName::ProtocolError, "The server sent an unreadable reply").with_detail(what.to_owned())
 }
 
-/// One line without its end; `None` at the end of the stream.
 async fn line(r: &mut (impl AsyncBufRead + Unpin), budget: &mut usize) -> Result<Option<Vec<u8>>, Status> {
     let mut out = Vec::new();
     loop {
@@ -180,7 +179,6 @@ mod tests {
         }
         many.extend_from_slice(b"211 End\r\n");
         assert_eq!(parse(&many).await.unwrap_err().name, ErrorName::ProtocolError);
-        // 64 KiB in all is still read.
         let mut full = b"211-x\r\n".to_vec();
         while full.len() + 1000 <= 64 * 1024 - 9 {
             full.extend_from_slice(&[b' '; 998]);

@@ -241,7 +241,6 @@ pub fn decode_reply(body: &[u8]) -> Result<(u32, Reply), WireError> {
     let reply = match kind {
         FXP_STATUS => {
             let code = r.u32()?;
-            // Old servers end the packet after the code.
             let (message, _language) = if r.is_empty() {
                 (&b""[..], &b""[..])
             } else {
@@ -487,7 +486,6 @@ mod tests {
         let mut b = be(ATTR_EXTENDED);
         b.extend(be(65));
         assert_eq!(Attrs::decode(&mut Reader::new(&b)), Err(WireError("too many extended attributes")));
-        // 64 is the cap: accepted when they are there.
         let mut b = be(ATTR_EXTENDED);
         b.extend(be(64));
         for _ in 0..128 {
@@ -507,7 +505,6 @@ mod tests {
     fn status_replies_keep_a_bounded_message() {
         let r = decode_reply(&body(FXP_STATUS, 7, &[&be(4), &s(b"Failure"), &s(b"en")])).unwrap();
         assert_eq!(r, (7, Reply::Status(StatusReply { code: 4, message: "Failure".into() })));
-        // Old servers send only the code.
         let r = decode_reply(&body(FXP_STATUS, 1, &[&be(2)])).unwrap();
         assert_eq!(r.1, Reply::Status(StatusReply { code: 2, message: String::new() }));
         let long = vec![b'x'; MAX_MESSAGE + 10];
@@ -518,7 +515,6 @@ mod tests {
         assert_eq!(st.message.len(), MAX_MESSAGE);
         let invalid = decode_reply(&body(FXP_STATUS, 1, &[&be(4), &s(b"a\xffb"), &s(b"")])).unwrap().1;
         assert_eq!(invalid, Reply::Status(StatusReply { code: 4, message: "a\u{fffd}b".into() }));
-        // A message without its language tag is short.
         decode_reply(&body(FXP_STATUS, 1, &[&be(4), &s(b"m")])).unwrap_err();
     }
 
@@ -555,15 +551,12 @@ mod tests {
                 Name { filename: b"x\xff".to_vec(), attrs: Attrs::default() },
             ])
         );
-        // Count over the cap: refused before reading any name.
         assert_eq!(
             decode_reply(&body(FXP_NAME, 6, &[&be(MAX_NAMES + 1)])),
             Err(WireError("too many names in one reply"))
         );
-        // A count larger than what follows is a short packet, not an allocation.
         let short = decode_reply(&body(FXP_NAME, 6, &[&be(MAX_NAMES)])).unwrap_err();
         assert_ne!(short, WireError("too many names in one reply"));
-        // At the cap: read.
         let full: Vec<u8> = (0..MAX_NAMES).flat_map(|_| two.clone()).collect();
         let r = decode_reply(&body(FXP_NAME, 6, &[&be(MAX_NAMES), &full])).unwrap();
         assert!(matches!(r.1, Reply::Name(n) if n.len() == usize::try_from(MAX_NAMES).unwrap()));
@@ -622,7 +615,6 @@ mod tests {
             Err(WireError("the server did not answer with VERSION"))
         );
         decode_version(&[FXP_VERSION, 0, 0]).unwrap_err();
-        // A name without its data.
         decode_version(&[vec![FXP_VERSION, 0, 0, 0, 3], s(b"n")].concat()).unwrap_err();
     }
 

@@ -37,12 +37,10 @@ pub enum Body {
 }
 
 impl Body {
-    /// Whether it can be sent again after a failed attempt.
     const fn replayable(&self) -> bool {
         !matches!(self, Self::Stream(..))
     }
 
-    /// A copy for one attempt; a stream moves.
     fn take(&mut self) -> Self {
         match self {
             Self::Empty => Self::Empty,
@@ -147,7 +145,6 @@ impl Target {
 #[derive(Debug)]
 struct Conn {
     sender: SendRequest<Body>,
-    /// A request was sent whose answer was not read to the end.
     busy: bool,
     idle_since: Instant,
 }
@@ -169,7 +166,6 @@ pub fn lost(detail: impl Into<String>) -> Status {
     Status::new(ErrorName::ConnectionLost, "The connection to the server dropped").with_detail(detail)
 }
 
-/// Whether `e` says the server closed the connection before answering: a reused connection that went stale.
 fn dropped_unanswered(e: &hyper::Error) -> bool {
     if e.is_canceled() || e.is_closed() || e.is_incomplete_message() {
         return true;
@@ -241,7 +237,6 @@ impl Http {
         let left = t.connect_timeout.saturating_sub(started.elapsed());
         let tls = self.tls.handshake(tcp, left).await?;
         let (sender, conn) = http1::handshake(TokioIo::new(tls)).await.map_err(|e| lost(e.to_string()))?;
-        // Ends when the server closes, or once `sender` and any answer body are dropped.
         tokio::spawn(async move { drop(conn.await) });
         self.conn = Some(Conn { sender, busy: false, idle_since: Instant::now() });
         Ok(())

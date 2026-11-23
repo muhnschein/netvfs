@@ -26,7 +26,6 @@ class BackupService;
 
 enum class BackupOperation { Backup, BackupQuery, BackupRestore };
 
-// How a run opens its account session (caller-owned result); empty means AccountSession::open().
 using SessionFactory = std::function<AccountSession *(int accountId, QObject *parent)>;
 
 struct RunSpec {
@@ -37,8 +36,6 @@ struct RunSpec {
     QString restoreFile;
 };
 
-// One run of a backup operation on the plugin thread. Network work runs in NetworkJobs. Emits
-// finished() exactly once; after that the run is inert.
 class BackupRun : public QObject
 {
     Q_OBJECT
@@ -48,8 +45,6 @@ public:
     Q_DISABLE_COPY(BackupRun)
 
     void start();
-    // Cancels the in-flight call; finished(Canceled) follows once the worker returns. No attention
-    // state is recorded for an aborted run.
     void abort();
     bool isRunning() const { return m_running; }
 

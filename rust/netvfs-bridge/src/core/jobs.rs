@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! `Upload`, `Download`, `Walk`, `RemoveTree`, `CopyAcross`: reply with the job id at once, `JobProgress` at most every 250 ms, end with `JobFinished`.
 
 use super::{Core, Effect, Event, quota};
 use crate::ffi::Conn;
@@ -60,7 +59,6 @@ impl Core {
         self.run_job_then(sid, (loc, lane), (job, cancel), body, None);
     }
 
-    /// [`Self::run_job`], then `effect` with the outcome.
     fn run_job_then(
         &mut self,
         sid: SessionId,

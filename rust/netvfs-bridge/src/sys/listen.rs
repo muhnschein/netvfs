@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! The listening socket systemd passes as fd 3 (`sd_listen_fds`: `LISTEN_PID`, `LISTEN_FDS`, read by `crate::server::listener`), checked to be a listening unix stream socket.
 
 use super::{check, socket_option_int};
 use std::io;
@@ -7,12 +6,10 @@ use std::os::fd::{AsFd as _, FromRawFd as _, OwnedFd, RawFd};
 use std::os::unix::net::UnixListener;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-/// `SD_LISTEN_FDS_START`.
 pub const LISTEN_FDS_START: RawFd = 3;
 
 static TAKEN: AtomicBool = AtomicBool::new(false);
 
-/// Takes ownership of the first socket systemd passed. Once per process: a second call fails, so fd 3 never has two owners.
 pub fn take_systemd_socket() -> io::Result<OwnedFd> {
     if TAKEN.swap(true, Ordering::SeqCst) {
         return Err(io::Error::new(io::ErrorKind::AlreadyExists, "the systemd socket was already taken"));
@@ -20,7 +17,6 @@ pub fn take_systemd_socket() -> io::Result<OwnedFd> {
     take_fd(LISTEN_FDS_START)
 }
 
-/// Takes ownership of `fd` if open; sets close-on-exec (as libdbus did).
 fn take_fd(fd: RawFd) -> io::Result<OwnedFd> {
     // SAFETY: fcntl on an integer descriptor; F_GETFD reads flags, EBADF if closed.
     let flags = check(unsafe { libc::fcntl(fd, libc::F_GETFD) })?;
@@ -30,7 +26,6 @@ fn take_fd(fd: RawFd) -> io::Result<OwnedFd> {
     Ok(unsafe { OwnedFd::from_raw_fd(fd) })
 }
 
-/// Listener on `fd`, a listening unix stream socket; set non-blocking.
 pub fn adopt_listener(fd: OwnedFd) -> io::Result<UnixListener> {
     let wrong =
         |what: &str| io::Error::new(io::ErrorKind::InvalidInput, format!("the passed socket is {what}"));

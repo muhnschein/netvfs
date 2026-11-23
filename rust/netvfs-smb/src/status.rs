@@ -136,7 +136,6 @@ impl fmt::Debug for NtStatus {
 /// Detail for DFS statuses.
 pub const DFS_DETAIL: &str = "DFS referral";
 
-/// Statuses with a netvfs error of their own, and the text that names them. Any other status is `ProtocolError`.
 const TABLE: [(NtStatus, ErrorName, &str); 22] = [
     (NtStatus::LOGON_FAILURE, ErrorName::AuthFailed, "the server rejected the user name or password"),
     (NtStatus::WRONG_PASSWORD, ErrorName::AuthFailed, "the server rejected the password"),

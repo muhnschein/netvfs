@@ -23,7 +23,6 @@ use tokio::net::TcpStream;
 
 /// SSH default port.
 pub const DEFAULT_PORT: u16 = 22;
-/// Wait for the session task to send `DISCONNECT` before the stream is cut.
 const CLOSE_WAIT: Duration = Duration::from_millis(500);
 const KEEPALIVE: &str = "keepalive@openssh.com";
 
@@ -71,7 +70,6 @@ impl End {
     }
 }
 
-/// What the handler saw: the host key, the end.
 #[derive(Debug, Default)]
 struct Seen {
     host_key: Option<PublicKey>,
@@ -107,7 +105,6 @@ impl client::Handler for Recorder {
                     self.seen.lock().host_key = Some(key.clone());
                     Ok(true)
                 }
-                // Never negotiated: the lists hold no certificate algorithm.
                 PublicKeyOrCertificate::Certificate(_) => Ok(false),
             }
         })
@@ -234,7 +231,6 @@ pub struct Cut(Arc<CutState>);
 #[derive(Debug, Default)]
 struct CutState {
     done: AtomicBool,
-    /// The read and the write side's wakers.
     wakers: Mutex<[Option<Waker>; 2]>,
 }
 
@@ -254,7 +250,6 @@ impl Cut {
         self.0.done.load(Ordering::SeqCst)
     }
 
-    /// `Err` once cut; else remembers `cx`'s waker for `side`.
     fn check(&self, side: usize, cx: &Context<'_>) -> io::Result<()> {
         if self.is_cut() {
             return Err(io::Error::from(io::ErrorKind::ConnectionAborted));
@@ -266,7 +261,6 @@ impl Cut {
             *slot = Some(cx.waker().clone());
         }
         drop(wakers);
-        // A cut between the first check and the registration took no waker of ours.
         if self.is_cut() {
             return Err(io::Error::from(io::ErrorKind::ConnectionAborted));
         }
@@ -274,7 +268,6 @@ impl Cut {
     }
 }
 
-/// Cuts on drop unless disarmed: a half-done connect ends its session task.
 #[derive(Debug)]
 struct CutOnDrop(Option<Cut>);
 
@@ -409,7 +402,6 @@ pub async fn connect(target: &Target, cancel: &CancelToken) -> Result<Session, S
     open(target, None, cancel).await.map_err(Opening::status)
 }
 
-/// A connect that failed: before the handshake, or in it.
 #[derive(Debug)]
 enum Opening {
     Failed(Status),
@@ -429,7 +421,6 @@ impl Opening {
 #[must_use]
 pub fn handshake_failure(e: &russh::Error) -> Status {
     if let Some((list, offered)) = policy::no_common_algorithm(e) {
-        // Server's offer goes in the message: tells the user what it lacks.
         return Status::new(
             ErrorName::SecurityPolicy,
             format!(
@@ -447,11 +438,8 @@ pub fn handshake_failure(e: &russh::Error) -> Status {
     }
 }
 
-/// The longest list of the server's algorithm names a message quotes.
 const MAX_OFFER_TEXT: usize = 512;
 
-/// The server's names, comma-separated; whole names only, up to
-/// [`MAX_OFFER_TEXT`] bytes, and "…" when some are left out.
 fn offer_text(offered: &[String]) -> String {
     let mut text = String::new();
     for name in offered {
@@ -471,7 +459,6 @@ async fn open(
     pinned: Option<&russh::keys::Algorithm>,
     cancel: &CancelToken,
 ) -> Result<Session, Opening> {
-    // Dropped on cancel or timeout: the guard cuts the stream, ending the handshake's session task.
     let work = async {
         let stream = tcp(target).await.map_err(Opening::Failed)?;
         let (stream, cut) = Cuttable::new(stream);
@@ -503,7 +490,6 @@ async fn open(
     }
 }
 
-/// The TCP connection: every address of the host in turn.
 async fn tcp(target: &Target) -> Result<TcpStream, Status> {
     let unreachable = |what: String, e: &io::Error| {
         Status::new(ErrorName::NetworkUnreachable, what).with_detail(e.to_string())
@@ -515,7 +501,6 @@ async fn tcp(target: &Target) -> Result<TcpStream, Status> {
     for address in addresses {
         match TcpStream::connect(address).await {
             Ok(stream) => {
-                // Small requests (keep-alive, metadata) go out at once.
                 drop(stream.set_nodelay(true));
                 return Ok(stream);
             }
@@ -544,7 +529,6 @@ impl Session {
         self.handle.is_closed() || self.cut.is_cut()
     }
 
-    /// The russh handle, for signing in.
     pub(crate) const fn handle(&mut self) -> &mut Handle<Recorder> {
         &mut self.handle
     }
@@ -621,8 +605,6 @@ impl Session {
             return self.failure(e);
         };
         match reason {
-            // OpenSSH refuses a session beyond MaxSessions with "connect failed" (2); others say
-            // "administratively prohibited" (1) or "resource shortage" (4).
             russh::ChannelOpenFailure::AdministrativelyProhibited
             | russh::ChannelOpenFailure::ConnectFailed
             | russh::ChannelOpenFailure::ResourceShortage => Status::new(
@@ -652,7 +634,6 @@ pub fn sftp_not_enabled() -> Status {
     Status::unsupported("SFTP is not enabled for this user")
 }
 
-/// Waits for the answer to the subsystem request.
 async fn subsystem_reply(read: &mut ChannelReadHalf) -> Result<(), Status> {
     loop {
         match read.wait().await {
@@ -666,7 +647,6 @@ async fn subsystem_reply(read: &mut ChannelReadHalf) -> Result<(), Status> {
                     "The server sent data before it started SFTP",
                 ));
             }
-            // Window adjustments, stderr text, exit status: not the answer.
             Some(_) => {}
         }
     }

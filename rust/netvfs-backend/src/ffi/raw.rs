@@ -10,7 +10,6 @@ use std::marker::{PhantomData, PhantomPinned};
 /// `NVR_ENTRY`, NUL-terminated for `dlsym`.
 pub const NVR_ENTRY: &[u8] = b"nvr_get\0";
 
-/// Opaque pointee: not constructible, not `Send`, `Sync` or `Unpin`.
 macro_rules! opaque {
     ($($(#[$doc:meta])* $name:ident),* $(,)?) => {$(
         $(#[$doc])*

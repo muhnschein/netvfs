@@ -55,7 +55,6 @@ AccountSession *openSession(int accountId, Service service, QObject *parent)
     return AccountSession::open(accountId, service, parent);
 }
 
-// Interactive sign-in cannot be answered here: connect and check the identity only.
 void verifyIdentityOnly(Backend *backend, const ConnectionParams &params, ProbeOutcome *outcome)
 {
     outcome->result = backend->connect(params, &outcome->identity);
@@ -106,7 +105,6 @@ ProbeOutcome runVerify(Backend *backend, const ConnectionParams &params, const C
     outcome.result = establish(backend, params, credentials, &outcome.identity);
     outcome.identityCheck = identityCheckFor(outcome.identity, params);
     if (outcome.result.ok()) {
-        // Files never writes (read-only shares, guests).
         outcome.result = service == Service::Backup ? verifyAccess(backend, folder, &outcome.freeBytes)
                                                     : verifyBrowseAccess(backend, folder, &outcome.freeBytes);
         backend->disconnect();
@@ -184,7 +182,6 @@ void NetVfsProbe::verifyAccount(int accountId, const QVariantMap &pinOptions, co
     });
     connect(session, &AccountSession::failed, this, [this, service](const NetVfs::Result &result) {
         closeSession();
-        // The session refuses a configuration before reading the secret.
         Activity activity = Activity::StoredSecret;
         if (result.error() == Error::SecurityPolicy)
             activity = service == Service::Backup ? Activity::ServicePolicy : Activity::Connect;
@@ -231,10 +228,8 @@ void NetVfsProbe::startVerify(const ConnectionParams &params, const Credentials 
     qCDebug(lcNetVfsUi) << "Verifying" << params.host << serviceId(service) << folder;
     setState(State::Verifying);
     auto outcome = std::make_shared<ProbeOutcome>();
-    // A backup verify creates the backups folder the way backups do.
     const ConnectionParams serviceParams = service == Service::Backup ? withBackupDirMode(params) : params;
     m_jobs.start([backend, serviceParams, credentials, folder, service, outcome](CancelToken *token) {
-        // Captured credentials wipe themselves when the job is released.
         std::unique_ptr<Backend> owned(backend);
         token->attach(backend);
         *outcome = runVerify(backend, serviceParams, credentials, folder, service);
@@ -256,7 +251,6 @@ void NetVfsProbe::finishIdentify(const ProbeOutcome &outcome)
 
 void NetVfsProbe::finishVerify(const ProbeOutcome &outcome, Service service)
 {
-    // The identity was checked unless the connection itself failed.
     if (const Error error = outcome.result.error();
             outcome.result.ok() || !outcome.identity.isEmpty() || error == Error::ServerIdentityChanged) {
         m_identity = outcome.identity;

@@ -114,7 +114,6 @@ impl WorkerEvents {
     #[must_use]
     pub fn channel(tx: tokio::sync::mpsc::UnboundedSender<WorkerEvent>) -> Self {
         Self::new(move |event| {
-            // A closed channel means the core has stopped: nothing to do.
             drop(tx.send(event));
         })
     }
@@ -160,7 +159,6 @@ mod tests {
         events.send(WorkerEvent::Warning("w".into()));
         assert!(matches!(rx.try_recv(), Ok(WorkerEvent::Warning(w)) if w == "w"));
         drop(rx);
-        // A gone core: dropped quietly.
         events.send(WorkerEvent::Warning("late".into()));
     }
 }

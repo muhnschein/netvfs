@@ -1,9 +1,5 @@
 #!/bin/sh
 # SPDX-License-Identifier: LGPL-2.1-or-later
-# Restarts one sshd instance of start-sshd.sh as a server restart would look to a client of USER: listener and every
-# session of USER end, then the listener starts again on the same port (container and published ports stay). Used by the
-# conformance suite's keepAlive case.
-# Usage: restart-instance.sh INSTANCE USER
 set -eu
 
 instance=$1
@@ -14,12 +10,10 @@ log="/var/log/sshd-$instance.log"
 if [ -f "/run/sshd-$instance.pid" ]; then
     listener=$(cat "/run/sshd-$instance.pid")
     kill "$listener" 2>/dev/null || true
-    # Gone, or a zombie (PID 1 of the container does not reap).
     while grep -q '^State:.*[^Z] (' "/proc/$listener/status" 2>/dev/null; do
         sleep 0.1
     done
 fi
-# No procps in the images: find the user's processes in /proc.
 uid=$(id -u "$user")
 for p in /proc/[0-9]*; do
     if [ "$(stat -c %u "$p" 2>/dev/null)" = "$uid" ]; then

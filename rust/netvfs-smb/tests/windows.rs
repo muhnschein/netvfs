@@ -126,7 +126,6 @@ impl Progress for Quiet {
     }
 }
 
-/// strict and signed: SMB 3.1.1; strict encrypts, signed signs (the share does not ask for encryption).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn profiles() {
     let Some(windows) = Windows::get() else { return };
@@ -156,7 +155,6 @@ async fn profiles() {
     );
 }
 
-/// Transfers and the namespace on the share, with the server's READ and WRITE sizes (multi-credit).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_share_round_trip() {
     let Some(windows) = Windows::get() else { return };
@@ -187,7 +185,6 @@ async fn a_share_round_trip() {
     smb.disconnect().await;
 }
 
-/// Server mode: Windows's srvsvc lists the share (NetrShareEnum level 1).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn server_mode_lists_the_share() {
     let Some(windows) = Windows::get() else { return };

@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! [`Discovery`] of nearby servers, Qt thread only.
 
 use super::Ffi;
 use super::callback::{self, Ctx, NearbyHook};
@@ -13,7 +12,6 @@ use std::ptr::NonNull;
 pub struct Discovery {
     ffi: Ffi,
     raw: NonNull<NvbDiscovery>,
-    /// Leaked box: C++ holds its address until `discovery_free`.
     ctx: NonNull<Ctx<NearbyHook>>,
 }
 
@@ -65,7 +63,6 @@ impl Drop for Discovery {
         unsafe { (self.ffi.t.discovery_free)(self.raw.as_ptr()) };
         // SAFETY: box leaked in `new`; C++ no longer holds it.
         let mut ctx = unsafe { Box::from_raw(self.ctx.as_ptr()) };
-        // Untaken panic is kept for `take_orphan_panics`.
         if let Some(text) = ctx.take_panic() {
             callback::record_orphan(text);
         }

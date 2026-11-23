@@ -1,9 +1,4 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! A small SFTP v3 server over an in-memory tree, for the unit tests: it
-//! answers like OpenSSH's sftp-server (errno as OpenSSH maps it, `.` and
-//! `..` in listings, SYMLINK as (target, link)), offers the extensions a
-//! test picks, logs every request, and follows [`Rule`]s that change or
-//! hold back answers.
 #![allow(
     clippy::arithmetic_side_effects,
     clippy::cast_possible_truncation,
@@ -27,39 +22,24 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, DuplexStream};
 
-/// A node of the tree.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Node {
-    /// A regular file.
     File { data: Vec<u8>, mode: u32, mtime: u32, atime: u32 },
-    /// A folder.
     Dir { mode: u32, mtime: u32 },
-    /// A symbolic link.
     Link { target: Vec<u8> },
 }
 
-/// What a rule does to a request it matches.
 #[derive(Debug, Clone)]
 pub enum Action {
-    /// Answer with this STATUS code and message instead.
     Status(u32, &'static str),
-    /// Answer with these raw packet bytes (length included) instead.
     Raw(Vec<u8>),
-    /// Answer with a reply of this type and body after the request's id.
     Reply(u8, Vec<u8>),
-    /// Do not answer at all.
     Ignore,
-    /// Answer after this long.
     Delay(Duration),
-    /// Answer READ with at most this many bytes.
     ShortRead(u32),
-    /// Close the connection.
     Hangup,
 }
 
-/// Changes the answer to requests of `kind` (and of `ext` for EXTENDED)
-/// whose first string argument ends with `path` (empty: any); `times` is
-/// how often (0: always).
 #[derive(Debug, Clone)]
 pub struct Rule {
     pub kind: u8,
@@ -89,22 +69,15 @@ impl Rule {
     }
 }
 
-/// One request as received.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Logged {
     pub kind: u8,
     pub id: u32,
-    /// The extension name for EXTENDED.
     pub ext: String,
-    /// The string arguments in order (paths, handles, data).
     pub strings: Vec<Vec<u8>>,
-    /// The first uint64 (READ/WRITE offset), if any.
     pub offset: Option<u64>,
-    /// The pflags of OPEN.
     pub pflags: Option<u32>,
-    /// The length of READ.
     pub len: Option<u32>,
-    /// The attributes of OPEN, MKDIR, SETSTAT.
     pub attrs: Option<Attrs>,
 }
 
@@ -119,7 +92,6 @@ pub struct State {
     pub groups: BTreeMap<u32, &'static str>,
     pub uid: u32,
     pub gid: u32,
-    /// READDIR names per reply.
     pub batch: usize,
     pub rules: Vec<Rule>,
     pub log: Vec<Logged>,
@@ -134,7 +106,6 @@ enum Open {
     Dir { listing: Vec<(Vec<u8>, Attrs)>, at: usize },
 }
 
-/// The server's shared state: the tree, the rules, the log.
 #[derive(Debug, Clone)]
 pub struct Fake {
     state: Arc<Mutex<State>>,
@@ -151,7 +122,6 @@ pub const ALL_EXTENSIONS: [(&str, &str); 7] = [
 ];
 
 impl Fake {
-    /// A server with home `/home/u` (a folder) and every extension.
     pub fn new() -> Self {
         let mut nodes = BTreeMap::new();
         for dir in [&b"/"[..], b"/home", b"/home/u"] {
@@ -223,7 +193,6 @@ impl Fake {
         }
     }
 
-    /// Requests of `kind` received so far.
     pub fn requests(&self, kind: u8) -> Vec<Logged> {
         self.state().log.iter().filter(|l| l.kind == kind).cloned().collect()
     }
@@ -232,13 +201,11 @@ impl Fake {
         self.state().handles.len()
     }
 
-    /// Serves one client on `stream` until it closes.
     pub fn serve(&self, stream: DuplexStream) -> tokio::task::JoinHandle<()> {
         let fake = self.clone();
         tokio::spawn(async move { fake.run(stream).await })
     }
 
-    /// Serves one client on any stream (an SSH channel) until it closes.
     pub fn serve_stream<S: AsyncRead + AsyncWrite + Unpin + Send + 'static>(
         &self,
         stream: S,
@@ -247,31 +214,26 @@ impl Fake {
         tokio::spawn(async move { fake.run(stream).await })
     }
 
-    /// A connected pair: the client's end, and the server task.
     pub fn connect(&self) -> (DuplexStream, tokio::task::JoinHandle<()>) {
         let (client, server) = tokio::io::duplex(4 * MAX_PACKET);
         (client, self.serve(server))
     }
 
-    /// A started client.
     pub async fn client(&self) -> (Client, ServerVersion) {
         let (stream, _task) = self.connect();
         let (r, w) = tokio::io::split(stream);
         Client::start(r, w, async {}, Duration::from_secs(10), &CancelToken::new()).await.unwrap()
     }
 
-    /// The file operations, folders made with mode 0o750.
     pub async fn remote(&self) -> Remote {
         let (client, version) = self.client().await;
         Remote::new(client, &version, 0o750, &CancelToken::new()).await.unwrap()
     }
 
-    /// The log so far, then cleared.
     pub fn take_log(&self) -> Vec<Logged> {
         std::mem::take(&mut self.state().log)
     }
 
-    /// The kinds of the requests so far (extension names for EXTENDED).
     pub fn kinds(&self) -> Vec<String> {
         self.state()
             .log
@@ -328,7 +290,6 @@ enum Answer {
     Bytes(Vec<u8>),
 }
 
-/// A request type's name, for readable assertions.
 pub fn kind_name(kind: u8) -> &'static str {
     match kind {
         FXP_OPEN => "OPEN",
@@ -393,7 +354,6 @@ fn base(path: &[u8]) -> &[u8] {
     }
 }
 
-/// `/a/b/../c` → `/a/c`; `.` components dropped.
 fn normalize(path: &[u8]) -> Vec<u8> {
     let mut parts: Vec<&[u8]> = Vec::new();
     for part in path.split(|&b| b == b'/') {
@@ -419,7 +379,6 @@ const EOF: (u32, &str) = (FX_EOF, "End of file");
 const BAD_HANDLE: (u32, &str) = (FX_FAILURE, "bad handle");
 const UNSUPPORTED: (u32, &str) = (FX_OP_UNSUPPORTED, "Operation unsupported");
 
-/// The next string argument of a request.
 fn arg(r: &mut Reader<'_>) -> Vec<u8> {
     r.string(MAX_PACKET, "").unwrap().to_vec()
 }
@@ -428,7 +387,6 @@ fn ok(id: u32) -> Vec<u8> {
     status(id, FX_OK, "Success")
 }
 
-/// A NAME reply with one name (and the same long name, no attributes).
 fn one_name(id: u32, name: &[u8]) -> Vec<u8> {
     let mut rest = 1u32.to_be_bytes().to_vec();
     rest.extend(string(name));
@@ -437,7 +395,6 @@ fn one_name(id: u32, name: &[u8]) -> Vec<u8> {
     packet(FXP_NAME, id, &rest)
 }
 
-/// Writes `chunk` into `data` at `offset`, growing it with zeros.
 fn put_at(data: &mut Vec<u8>, offset: usize, chunk: &[u8]) {
     if data.len() < offset + chunk.len() {
         data.resize(offset + chunk.len(), 0);
@@ -457,7 +414,6 @@ impl State {
         }
     }
 
-    /// Follows symlinks of the final component (`follow`) and of parents.
     fn resolve(&self, path: &[u8], follow: bool) -> Result<Vec<u8>, (u32, &'static str)> {
         let mut current = self.absolute(path);
         for _ in 0..16 {
@@ -960,7 +916,6 @@ fn log_entry(kind: u8, id: u32, body: &[u8]) -> Logged {
                 logged.ext = String::from_utf8_lossy(name).into_owned();
             }
             if logged.ext == "copy-data" {
-                // read handle, offset, length, write handle, offset
                 one(&mut r, &mut logged);
                 logged.offset = r.u64().ok();
                 let _length = r.u64();

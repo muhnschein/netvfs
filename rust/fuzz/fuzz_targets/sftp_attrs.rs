@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! SFTP v3 attribute blocks: decode never panics; decoded attrs re-encode to the same attrs; entry keeps permission bits within 0o7777.
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;

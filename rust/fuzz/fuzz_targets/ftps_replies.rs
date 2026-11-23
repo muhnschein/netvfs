@@ -1,6 +1,4 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! FTPS server text: control replies through the reply reader, listing lines through the MLSD parser. No
-//! panic; caps hold; entry names are one component.
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;

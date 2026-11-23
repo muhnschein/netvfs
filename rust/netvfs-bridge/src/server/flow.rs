@@ -112,7 +112,6 @@ impl Link {
 
     pub(crate) fn close(&self) {
         if !self.closed.send_replace(true) {
-            // An error only means the peer is gone already.
             drop(self.socket.shutdown(std::net::Shutdown::Both));
         }
     }
@@ -123,8 +122,6 @@ impl Link {
 
     pub(crate) async fn wait_closed(&self) {
         let mut rx = self.closed.subscribe();
-        // An error means the sender is gone, which cannot happen while
-        // `self` lives; the guard is released at once.
         drop(rx.wait_for(|closed| *closed).await);
     }
 

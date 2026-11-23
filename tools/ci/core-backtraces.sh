@@ -1,10 +1,5 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: LGPL-2.1-or-later
-# Backtrace each test process that died by signal. ci.yml points `kernel.core_pattern` at `<dir>/core.%p.%E` (%E: binary path, `/` as `!`).
-# Each core gets its binary copied beside it and `<core>.txt` (all threads' stacks, also printed to the log).
-# gdb is fetched only here: green runs never pay for it.
-#
-#   tools/ci/core-backtraces.sh <dir>
 set -euo pipefail
 
 dir=${1:?usage: tools/ci/core-backtraces.sh <dir>}
@@ -24,7 +19,6 @@ fi
 
 for core in "${cores[@]}"; do
     name=${core##*/}
-    # core.<pid>.<path, ! for />
     exe=${name#core.*.}
     exe=${exe//!//}
     echo "core-backtraces: $name, from $exe"

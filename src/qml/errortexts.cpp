@@ -6,7 +6,6 @@ using namespace NetVfs;
 namespace NetVfsUi {
 
 namespace {
-// Files verify writes nothing, so the backup wording does not apply.
 QString browseText(Error error)
 {
     switch (error) {
@@ -24,7 +23,6 @@ QString browseText(Error error)
     }
 }
 
-// Errors whose meaning depends on the activity; empty when the generic text applies.
 QString activityText(Error error, Activity activity)
 {
     if (activity == Activity::Browse)

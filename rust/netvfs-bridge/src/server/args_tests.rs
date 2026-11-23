@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-// Restriction lints that only add noise to tests.
 #![allow(clippy::assertions_on_result_states, clippy::arithmetic_side_effects)]
 
 use super::{
@@ -98,7 +97,7 @@ fn signatures_and_counts() {
     assert!(matches!(validate("Hello", &("x",)).unwrap(), Call::Hello { ref client } if client == "x"));
     let wrong = validate("Hello", &(1u32,)).unwrap_err();
     assert_eq!((wrong.name, wrong.message.as_str()), (ErrorName::ProtocolError, "Hello takes (s)"));
-    assert_eq!(error("Hello", &()), ErrorName::ProtocolError); // count
+    assert_eq!(error("Hello", &()), ErrorName::ProtocolError);
     assert_eq!(error("Hello", &("x", 2u32)), ErrorName::ProtocolError);
     assert_eq!(error("Hello", &(ObjectPath::try_from("/x").unwrap(),)), ErrorName::ProtocolError);
     assert_eq!(error("Hello", &(Signature::try_from("s").unwrap(),)), ErrorName::ProtocolError);
@@ -199,7 +198,7 @@ fn attribute_options() {
     assert_eq!(refuse(&[("mode", Value::from(0o10000i32))]), "Option \"mode\" is out of range");
     assert_eq!(refuse(&[("mode", Value::from(-1i32))]), "Option \"mode\" is out of range");
     assert_eq!(refuse(&[("mode", Value::from("644"))]), "Option \"mode\" must be an integer");
-    assert_eq!(refuse(&[("owner", Value::from(1i32))]), "Unknown option \"owner\""); // unknown keys are refused
+    assert_eq!(refuse(&[("owner", Value::from(1i32))]), "Unknown option \"owner\"");
     assert_eq!(refuse(&[("mtimeMs", Value::from(MAX_TIME_MS + 1))]), "Option \"mtimeMs\" is out of range");
     assert_eq!(refuse(&[("atimeMs", Value::from(MIN_TIME_MS - 1))]), "Option \"atimeMs\" is out of range");
     let edges = map(&[

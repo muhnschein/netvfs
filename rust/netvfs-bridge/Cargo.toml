@@ -11,9 +11,7 @@ publish.workspace = true
 workspace = true
 
 [features]
-# Fake control table, fixtures, private dbus-daemon for session-bus tests.
 testing = []
-# Fake accounts helper `netvfs-accounts-fake`.
 test-bins = []
 
 [dependencies]
@@ -21,7 +19,6 @@ netvfs-vfs = { path = "../netvfs-vfs" }
 netvfs-bridge-proto = { path = "../netvfs-bridge-proto" }
 libc = "0.2"
 zeroize = "1"
-# p2p server with fd passing; `bus-impl` for `Builder::build_message_stream`. Also the session-bus client.
 zbus = { version = "5", default-features = false, features = ["tokio", "p2p", "bus-impl"] }
 tokio = { version = "1", features = ["rt", "net", "sync", "time", "signal", "macros"] }
 futures-lite = { version = "2", default-features = false, features = ["std"] }
@@ -30,7 +27,6 @@ futures-lite = { version = "2", default-features = false, features = ["std"] }
 netvfs-bridge-proto = { path = "../netvfs-bridge-proto", features = ["fake"] }
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "net", "sync", "time", "macros", "io-util", "test-util"] }
 
-# C ABI against the real libnetvfs-bridge-ffi.so and fake backend. Own main(): `init` runs on the main thread. Skipped without the NETVFS_BRIDGE_FFI* variables.
 [[test]]
 name = "ffi"
 path = "tests/ffi.rs"
@@ -43,14 +39,12 @@ path = "tests/backend.rs"
 harness = false
 required-features = ["testing"]
 
-# Bridge end to end, in-process.
 [[test]]
 name = "server"
 path = "tests/server.rs"
 harness = false
 required-features = ["testing"]
 
-# `netvfs-bridge [--listen ADDRESS] <consumer-id>`
 [[bin]]
 name = "netvfs-bridge"
 path = "src/main.rs"

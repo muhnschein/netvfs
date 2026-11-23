@@ -7,8 +7,6 @@
 #include <mutex>
 
 namespace NetVfs {
-
-// std::mutex for the TSan reason in boundedpipe.cpp.
 struct BlockingPrompter::State
 {
     enum class Phase { Idle, Waiting, Answered, Declined };
@@ -54,7 +52,6 @@ bool BlockingPrompter::answer(const QString &name, const QString &instruction, c
     m_state->changed.wait(lock, [this]() { return m_state->canceled || m_state->phase != State::Phase::Waiting; });
     const bool answered = !m_state->canceled && m_state->phase == State::Phase::Answered;
     if (answered && answers) {
-        // Backend's copies must not share data with ours, so wiping ours overwrites the held bytes.
         *answers = m_state->answers;
         for (QByteArray &answer : *answers)
             answer.detach();

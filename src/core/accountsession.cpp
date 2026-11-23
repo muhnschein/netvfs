@@ -18,7 +18,6 @@ AccountSession *AccountSession::open(int accountId, Service service, QObject *pa
     auto session = std::make_unique<AccountSession>(manager.get(), std::make_unique<SignonSecretSource>().release(),
                                                     parent);
     manager.release()->setParent(session.get());
-    // Deferred so callers can connect to ready()/failed() first.
     AccountSession *raw = session.release();
     QTimer::singleShot(0, raw, [raw, accountId, service]() { raw->start(accountId, service); });
     return raw;

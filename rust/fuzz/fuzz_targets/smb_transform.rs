@@ -1,6 +1,4 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! netvfs-smb integrity glue: frame never opens without its key; sealed or signed message round-trips, not with a bit flipped.
-//! Byte 0 picks the cipher, next two the bit, rest is the message.
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;

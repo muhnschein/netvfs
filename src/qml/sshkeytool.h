@@ -9,12 +9,8 @@
 #include <QtCore/QVariantMap>
 
 namespace NetVfsUi {
-
-// `path` may be a file:// URL. Fails for files that cannot be key files (missing, too large).
 NetVfs::Result readKeyFile(const QString &path, QByteArray *contents);
 
-// Key generation and import, and installing the public key with a password. The private key stays
-// in this object until account setup takes secret(); never written to disk.
 class SshKeyTool : public QObject
 {
     Q_OBJECT
@@ -37,7 +33,6 @@ public:
     enum class InstallState { InstallIdle, Installing, Installed, InstallFailed };
     Q_ENUM(InstallState)
 
-    // `tools` defaults to the SFTP backend plugin's implementation.
     explicit SshKeyTool(QObject *parent = nullptr);
     SshKeyTool(NetVfs::SshKeyTools *tools, QObject *parent);
     ~SshKeyTool() override;
@@ -55,12 +50,8 @@ public:
     QString installErrorDetail() const { return m_installErrorDetail; }
 
     Q_INVOKABLE void generate();
-    // Asks for a passphrase (state NeedsPassphrase) when the file is encrypted.
     Q_INVOKABLE void importFile(const QString &path, const QString &passphrase = QString());
-    // "netvfs-key-v1:<base64>" for createSignInCredentials(); empty while no key is held.
     Q_INVOKABLE QString secret() const;
-    // Signs in once with `password` (not stored, wiped after use) and appends the public key to
-    // ~/.ssh/authorized_keys. `params` must carry the accepted host key pin.
     Q_INVOKABLE void installWithPassword(const QVariantMap &params, const QString &password);
     Q_INVOKABLE void cancel();
     Q_INVOKABLE void clear();

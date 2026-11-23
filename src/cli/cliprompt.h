@@ -7,11 +7,7 @@
 #include <QtCore/QFile>
 #include <QtCore/QTextStream>
 
-// Keyboard-interactive authentication on the terminal (netvfs-cli --prompt).
 namespace NetVfs::Cli {
-
-// Switches the terminal echo; the real one uses termios on the controlling terminal, tests
-// substitute a recorder.
 class EchoControl
 {
 public:
@@ -19,8 +15,6 @@ public:
     virtual bool setEcho(bool on) = 0;
 };
 
-// Controlling terminal (/dev/tty), opened for reading answers. Echo restored on every path out of a
-// prompt.
 class Terminal : public EchoControl
 {
 public:
@@ -36,9 +30,6 @@ private:
     QFile m_file;
 };
 
-// Asks every server prompt on `prompts` (the terminal, never stdout), reads one line per prompt
-// from `input`. No-echo prompts read with echo off. Server text sanitised before display. End of
-// input declines (AuthFailed).
 class TerminalPrompter : public AuthPrompter
 {
 public:

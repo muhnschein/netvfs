@@ -13,7 +13,6 @@ namespace {
 const char SshDir[] = ".ssh";
 const char AuthorizedKeys[] = ".ssh/authorized_keys";
 
-// "<algorithm> <base64>" of an authorized_keys line, ignoring options and comment.
 QByteArray keyPart(const QByteArray &line)
 {
     const QList<QByteArray> fields = line.simplified().split(' ');

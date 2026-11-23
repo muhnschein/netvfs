@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! Session, consent, locations and settings handoff calls.
 
 use super::Core;
 use crate::consent::Consent;
@@ -41,7 +40,6 @@ impl Core {
     }
 
     pub(super) fn on_list_locations(&mut self, reply: ReplyTo) {
-        // The allowed accounts: none until decided (`apply_access`).
         let ffi = self.ffi;
         let states = self.book.states();
         let locations = self
@@ -52,7 +50,6 @@ impl Core {
                 spec.wire(state, |params, path| ffi.url_format(params, path).ok())
             })
             .collect();
-        // A state not announced yet goes to every session soon.
         self.states.listed(&states, Instant::now());
         reply.ok(&Reply::Locations(locations));
     }
@@ -120,7 +117,6 @@ impl Core {
         self.apply_consent(consent);
     }
 
-    /// Takes the user's new choices. A level that allows less than before (or none) closes the consumer's connections at once and cancels its work.
     pub(super) fn apply_consent(&mut self, consent: Consent) {
         if consent == self.consent {
             return;
@@ -155,14 +151,12 @@ impl Core {
         }
     }
 
-    /// Shows the request when the user still has to choose.
     pub(super) fn request_consent(&mut self) {
         if self.pending() && !self.prompt.is_shown() {
             self.prompt.show(&self.config.consumer.display_name);
         }
     }
 
-    /// Withdraws the request once nothing waits for the user.
     pub(super) fn update_prompt(&mut self) {
         if !self.pending() {
             self.prompt.withdraw();
@@ -181,7 +175,6 @@ impl Core {
     }
 }
 
-/// Whether going from `old` to `new` allows less.
 fn narrows(old: Option<crate::consent::Level>, new: Option<crate::consent::Level>) -> bool {
     match (old, new) {
         (Some(old), Some(new)) => !new.covers(old),

@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! NTLM CHALLENGE_MESSAGE in a SPNEGO NegTokenResp (NTLMv2) and raw (anonymous). No panic; accepted challenge gives AUTHENTICATE token.
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;

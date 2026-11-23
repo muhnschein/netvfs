@@ -1,8 +1,4 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-// netvfs-bridge-generator: golden unit files
-// validation of consumer files (the same rules as ConsumerInfo), and the
-// folder deletion/recreation logic of the rendezvous check, run against a
-// fake systemctl because CI has no systemd --user.
 #include "consentstore.h"
 
 #include <QtCore/QDir>
@@ -73,7 +69,7 @@ QString writeConsumer(const QTemporaryDir &dir, const QString &id, const QString
     return folder;
 }
 
-} // namespace
+}
 
 class tst_Generator : public QObject
 {
@@ -115,7 +111,6 @@ void tst_Generator::goldenUnits()
         const QByteArray expected = readFile(golden.filePath());
         QCOMPARE(QString::fromUtf8(readFile(actual.filePath())), QString::fromUtf8(expected));
     }
-    // The folders of the links are for the user manager only.
     const QFileInfo wants(out.path() + QStringLiteral("/sockets.target.wants"));
     QVERIFY(wants.isDir());
     QVERIFY(!(wants.permissions() & (QFileDevice::ReadGroup | QFileDevice::WriteGroup | QFileDevice::ExeGroup
@@ -134,7 +129,7 @@ void tst_Generator::skipsInvalidConsumers()
 {
     QTemporaryDir out;
     const Run run = generate(Inputs, { out.path() });
-    QCOMPARE(run.exitCode, 0);   // generators never fail the boot over a bad file
+    QCOMPARE(run.exitCode, 0);
     for (const char *name : { "Upper.conf", "absolute.conf", "escape.conf", "mismatch.conf", "newline.conf",
                               "specifier.conf" })
         QVERIFY2(run.stderrText.contains(QLatin1String(name)), name);
@@ -145,7 +140,6 @@ void tst_Generator::skipsInvalidConsumers()
                      || entry.endsWith(QLatin1String(".wants")), qPrintable(entry));
 }
 
-// A file name cannot forge a line of the log.
 void tst_Generator::messagesHideControlCharacters()
 {
     QTemporaryDir dir;
@@ -157,7 +151,6 @@ void tst_Generator::messagesHideControlCharacters()
     QVERIFY(!run.stderrText.contains(QLatin1String("a\nb.conf")));
 }
 
-// NETVFS_CONSUMERS_DIR is for tests: only a plain absolute folder is used.
 void tst_Generator::ignoresUnsafeFolderOverrides()
 {
     QTemporaryDir dir;
@@ -173,7 +166,6 @@ void tst_Generator::ignoresUnsafeFolderOverrides()
     QVERIFY(QFile::exists(out.path() + QStringLiteral("/netvfs-bridge@probe.socket")));
 }
 
-// A consumer file that is a link to a file outside the folder is not read.
 void tst_Generator::ignoresLinksLeadingOut()
 {
     QTemporaryDir elsewhere;
@@ -281,7 +273,6 @@ void tst_Generator::rendezvousCheck()
     fake.close();
     fake.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner);
 
-    // systemd turns "$$" into "$" before running the command.
     const QString script = m.captured(1).replace(QStringLiteral("$$"), QStringLiteral("$"));
     QProcess sh;
     QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
@@ -314,7 +305,6 @@ void tst_Generator::systemdAccepts()
     const QString output = QString::fromUtf8(p.readAllStandardError() + p.readAllStandardOutput());
     if (output.contains(QLatin1String("Failed to initialize manager")))
         QSKIP("no usable systemd manager here");
-    // The bridge binary is not installed on a build host; anything else is a unit error.
     for (const QString &line : output.split(QLatin1Char('\n'), NETVFS_SKIP_EMPTY_PARTS)) {
         if (line.contains(QLatin1String("is not executable")) || line.contains(QLatin1String("system bus")))
             continue;

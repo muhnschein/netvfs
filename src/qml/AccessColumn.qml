@@ -3,8 +3,6 @@ import QtQuick 2.0
 import Sailfish.Silica 1.0
 import org.netvfs.accounts 1.0
 
-// The app's name, the level it asks for, a level per account and for new accounts (NetVfsAccessPage,
-// NetVfsAccessRequestDialog).
 Column {
     id: column
 

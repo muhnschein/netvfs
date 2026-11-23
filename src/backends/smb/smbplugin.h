@@ -7,8 +7,6 @@
 #include <QtCore/QObject>
 
 namespace NetVfs {
-
-// Single-level namespace: Qt 5.6 moc cannot parse C++17 nested namespace definitions.
 class SmbBackendFactory : public QObject, public BackendFactory
 {
     Q_OBJECT

@@ -10,10 +10,7 @@ use netvfs_vfs::Status;
 
 /// A share name's longest length in UTF-16 units (NNLEN).
 pub const MAX_SHARE_NAME: usize = 80;
-/// Characters Windows refuses in a file name.
 const WINDOWS_FORBIDDEN: &str = "\\:*?\"<>|";
-/// Characters Windows refuses in a share name; ',' also separates the
-/// account option `shares`.
 const SHARE_FORBIDDEN: &str = "/\\:*?\"<>|[]+=;,";
 
 /// UTF-16 to WTF-8: pairs as UTF-8, a lone surrogate in its 3-byte form.
@@ -30,7 +27,6 @@ pub fn wtf8_from_utf16(units: &[u16]) -> Vec<u8> {
     out
 }
 
-/// Generalised UTF-8 of one code point (surrogates included).
 fn push_utf8(out: &mut Vec<u8>, code: u32) {
     let byte = |v: u32| u8::try_from(v & 0xFF).unwrap_or_default();
     if code < 0x80 {
@@ -143,7 +139,6 @@ pub fn components(path: &[u8]) -> Result<Vec<&[u8]>, Status> {
     Ok(parts)
 }
 
-/// `Paths::windowsComponentProblem`, for a component given as UTF-16.
 fn windows_problem(component: &[u8], units: &[u16]) -> Option<String> {
     let shown = display(component);
     for c in char::decode_utf16(units.iter().copied()) {

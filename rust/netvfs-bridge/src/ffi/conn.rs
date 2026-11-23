@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! [`Conn`]: one backend connection, owned by one thread, with its read [`Handle`]s and its [`CancelHandle`], the one part another thread may use.
 
 use super::Ffi;
 use super::callback::{self, Ctx, EstablishCtx, EstablishHooks, Progress, ReadAt, WriteAt};
@@ -54,7 +53,6 @@ impl fmt::Debug for CancelHandle {
     }
 }
 
-/// The connection itself; its handles keep it alive (`conn_free` would close them).
 struct Core {
     ffi: Ffi,
     raw: NonNull<NvbConn>,
@@ -62,7 +60,6 @@ struct Core {
 }
 
 impl Core {
-    /// No connection call from inside a callback.
     fn ready(&self) -> Result<*mut NvbConn, Status> {
         if callback::active() {
             return Err(Status::internal("connection call from inside a callback (T6)"));
@@ -144,7 +141,6 @@ pub enum Secret {
 }
 
 impl Secret {
-    /// The C form, borrowing from `self`.
     fn raw(&self) -> NvbSecret {
         let mut raw = NvbSecret {
             source: NVB_SECRET_NONE,
@@ -283,7 +279,6 @@ pub struct TreeCounts {
     pub dirs: i64,
 }
 
-/// The context of an optional progress, and its C form.
 struct ProgressArg<'p, 'q> {
     ctx: Option<Ctx<&'p mut (dyn Progress + 'q)>>,
 }
@@ -293,7 +288,6 @@ impl<'p, 'q> ProgressArg<'p, 'q> {
         Self { ctx: progress.map(Ctx::new) }
     }
 
-    /// The `nvb_progress`, NULL without one; valid while `self` stays put.
     fn raw(&mut self) -> Option<NvbProgress> {
         self.ctx.as_mut().map(|ctx| NvbProgress {
             ctx: ctx.as_ctx(),

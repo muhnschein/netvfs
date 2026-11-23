@@ -16,7 +16,6 @@ pub enum Op {
     Other,
 }
 
-/// Longest `Retry-After` taken: a day.
 const MAX_RETRY_AFTER: Duration = Duration::from_hours(24);
 
 /// `Retry-After` (seconds or HTTP date) in ms from `now`, capped at a day; `None` when absent or unreadable.
@@ -113,7 +112,6 @@ mod tests {
         assert_eq!(name(404, Op::Put), NotFound);
         let s = error(StatusCode::NOT_FOUND, Op::Other, &HeaderMap::new(), SystemTime::UNIX_EPOCH);
         assert_eq!(s.detail, "HTTP 404 Not Found");
-        // Protocol errors say what went wrong.
         let message = |code| {
             error(StatusCode::from_u16(code).unwrap(), Op::Other, &HeaderMap::new(), SystemTime::UNIX_EPOCH)
                 .message
@@ -147,7 +145,6 @@ mod tests {
         assert_eq!((s.name, s.retry_after_ms), (ErrorName::RateLimited, 7000));
         h.insert(header::RETRY_AFTER, HeaderValue::from_static("Mon, 12 Jan 1970 13:46:50 GMT"));
         assert_eq!(retry_after_ms(&h, now), Some(10_000));
-        // Past dates: no wait; long waits: a day.
         h.insert(header::RETRY_AFTER, HeaderValue::from_static("Thu, 01 Jan 1970 00:00:00 GMT"));
         assert_eq!(retry_after_ms(&h, now), Some(0));
         h.insert(header::RETRY_AFTER, HeaderValue::from_static("99999999"));

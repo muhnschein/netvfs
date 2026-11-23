@@ -1,19 +1,4 @@
 # SPDX-License-Identifier: LGPL-2.1-or-later
-#
-#   make               build everything
-#   make check         Rust checks, unit tests, then the interop suite (needs docker)
-#   make check-rust    the Rust workspace (rust/): format, lint, tests (nextest), lockfile, MSRV,
-#                      netvfs-smb's crypto fence
-#   make check-unit    unit tests only
-#   make check-rust-ffi the Rust side of the C ABI against the built libnetvfs-bridge-ffi.so
-#   make check-interop interop suite against containerised servers
-#   make check-packaging  install tree against rpm %files
-#   make coverage      unit + interop tests instrumented, writes build-coverage/coverage.xml
-#                      (C++, gcovr) and build-coverage/rust-lcov.info (Rust, llvm-cov)
-#   make clippy-report clippy findings as JSON for SonarQube, build-coverage/clippy.json
-#   make SANITIZE=1 check   the same under ASan + UBSan
-#   make HOST_BUTEO=0  use the system buteosyncfw5 (pkg-config) instead of
-#                      building the pinned vendor/host/buteo-syncfw
 
 QMAKE ?= $(shell command -v qmake-qt5 || command -v qmake)
 JOBS ?= $(shell getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)
@@ -22,7 +7,6 @@ QMAKE_ARGS ?=
 ifeq ($(SANITIZE),1)
 BUILD ?= build-asan
 QMAKE_ARGS += NETVFS_SANITIZE=1
-# ASan heavy: one test per core.
 NEXTEST_ARGS = --test-threads num-cpus
 export LSAN_OPTIONS := suppressions=$(CURDIR)/tools/sanitizer/lsan.supp:print_suppressions=0
 else ifeq ($(COVERAGE),1)
@@ -39,12 +23,9 @@ QMAKE_ARGS += NETVFS_HOST_BUTEO=$(BUILD_DIR)/host-buteo
 endif
 TEST_ENV = QT_QPA_PLATFORM=offscreen
 
-# Under COVERAGE=1 qmake builds the Rust helper instrumented; counters go to RUST_COVERAGE_DIR.
 CARGO ?= cargo
-# nextest profile (rust/.config/nextest.toml); CI uses "ci".
 NEXTEST_PROFILE ?= default
 RUST_FEATURES = --features netvfs-accounts/probe,netvfs-bridge/testing,netvfs-bridge/test-bins,netvfs-backend/testing
-# rust-toolchain.toml would override the job's toolchain: name the oldest supported one (rust-version).
 RUST_MSRV = $(shell sed -n -e 's/^rust-version = "\([0-9]*\.[0-9]*\)"/\1.0/p' \
     -e 's/^rust-version = "\([0-9]*\.[0-9]*\.[0-9]*\)"/\1/p' rust/Cargo.toml)
 ifeq ($(COVERAGE),1)
@@ -57,13 +38,12 @@ else
 RUST_ENV =
 endif
 
-.PHONY: all host-buteo configure check check-rust check-rust-ffi check-unit check-interop check-packaging \
+.PHONY: all host-buteo configure check check-comments check-rust check-rust-ffi check-unit check-interop check-packaging \
     coverage clippy-report clean distclean
 
 all: configure
 	$(MAKE) -C $(BUILD_DIR) $(if $(findstring -j,$(MAKEFLAGS)),,-j$(JOBS))
 
-# Host has no buteo packages.
 host-buteo:
 ifeq ($(HOST_BUTEO),1)
 	./vendor/host/build-host-buteo.sh $(BUILD_DIR)/host-buteo
@@ -73,7 +53,11 @@ configure: host-buteo
 	mkdir -p $(BUILD_DIR)
 	cd $(BUILD_DIR) && $(QMAKE) -r $(CURDIR)/netvfs.pro $(QMAKE_ARGS)
 
-check: check-rust check-unit check-rust-ffi check-interop
+check: check-comments check-rust check-unit check-rust-ffi check-interop
+
+check-comments:
+	python3 tools/no_comments_test.py
+	python3 tools/no_comments.py
 
 check-rust:
 	./tools/ci/check-lockfile.sh rust/Cargo.lock
@@ -84,7 +68,6 @@ check-rust:
 	cd rust && $(RUST_ENV) $(CARGO) test --locked --workspace --doc $(RUST_FEATURES)
 	cd rust && $(CARGO) +$(RUST_MSRV) check --locked --workspace --all-targets $(RUST_FEATURES)
 
-# netvfs-bridge tests needing the C ABI, against this build's C++ library with the fake backend. Whole package runs. Same build as check-rust (`make coverage` finds counters). Under SANITIZE=1 the library is ASan-instrumented: preload the runtime into the test binary only (cargo target runner); preloaded into cargo/rustc it deadlocks rustc.
 FFI_TEST_ENV = NETVFS_BRIDGE_FFI=$(BUILD_DIR)/lib/netvfs/libnetvfs-bridge-ffi.so \
     NETVFS_BRIDGE_FFI_FAKE=$(BUILD_DIR)/lib/libnetvfs-bridge-ffi-fake.so \
     NETVFS_BACKEND_PATH=$(BUILD_DIR)/lib/netvfs/test-backends
@@ -92,7 +75,6 @@ ifeq ($(SANITIZE),1)
 RUST_HOST := $(shell rustc -vV | sed -n 's/^host: //p' | tr a-z- A-Z_)
 FFI_TEST_ENV += CARGO_TARGET_$(RUST_HOST)_RUNNER="env \
     LD_PRELOAD=$$($(CXX) -print-file-name=libasan.so):$$($(CXX) -print-file-name=libubsan.so)"
-# RSS tests skip under ASan (quarantine keeps freed memory).
 FFI_TEST_ENV += NETVFS_TEST_SANITIZER=address
 endif
 check-rust-ffi: all
@@ -104,7 +86,6 @@ clippy-report:
 	cd rust && $(CARGO) clippy --locked --workspace --all-targets $(RUST_FEATURES) --message-format=json \
 	    > $(BUILD_DIR)/clippy.json
 
-# Test binaries in parallel (-O): they mostly wait on event loops and timers.
 check-unit: all
 	$(TEST_ENV) dbus-run-session -- $(MAKE) -C $(BUILD_DIR)/tests \
 	    $(if $(findstring -j,$(MAKEFLAGS)),,-j$(JOBS)) -Otarget check
@@ -112,7 +93,6 @@ check-unit: all
 check-interop: all
 	$(TEST_ENV) ./tests/interop/run.sh $(BUILD_DIR)
 
-# Every installed file in exactly one package of rpm/netvfs.spec. Host has no sailfish-svg2png: no icons; tests install to /usr/tests. ffi lib, libnetvfs-rs.so and Rust plugins must look for libs where spec/qmake install them (tools/ci/check-ffi-lib.sh, check-rs-lib.sh).
 PACKAGE_ROOT := $(BUILD_DIR)/install-root
 PACKAGE_FILES = ./tools/ci/check-files.py --map "$$($(QMAKE) -query QT_INSTALL_LIBS)=/usr/lib64" \
     --allow-missing '/usr/share/themes/*'

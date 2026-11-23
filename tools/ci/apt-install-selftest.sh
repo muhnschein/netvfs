@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: LGPL-2.1-or-later
-# Prove apt-install.sh drops the right apt lists, keeps the rest. Deleting the Ubuntu archive (sources.list or a .sources file under sources.list.d) is the catastrophic failure: cases cover both.
 set -u
 
 root=$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd)
@@ -20,14 +19,12 @@ stage() {
     rm -rf "$work/sources"
     mkdir -p "$work/sources"
 
-    # GitHub image's extras beside Ubuntu's, one-line format.
     cat >"$work/sources/google-chrome.list" <<'EOF'
 deb [arch=amd64] https://dl.google.com/linux/chrome/deb/ stable main
 EOF
     cat >"$work/sources/microsoft-prod.list" <<'EOF'
 deb [arch=amd64] https://packages.microsoft.com/ubuntu/22.04/prod jammy main
 EOF
-    # Ubuntu archive, deb822 (current image). Dropping it is the mistake that matters.
     cat >"$work/sources/ubuntu.sources" <<'EOF'
 Types: deb
 URIs: http://azure.archive.ubuntu.com/ubuntu/
@@ -35,18 +32,15 @@ Suites: noble noble-updates noble-backports
 Components: main universe restricted multiverse
 Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
 EOF
-    # One-line format (older image).
     cat >"$work/sources/archive.list" <<'EOF'
 deb http://archive.ubuntu.com/ubuntu jammy main
 EOF
-    # Not a source list: apt ignores anything without the two extensions.
     cat >"$work/sources/google-chrome.list.save" <<'EOF'
 deb [arch=amd64] https://dl.google.com/linux/chrome/deb/ stable main
 EOF
     return 0
 }
 
-# survives <file> <yes|no> <why>
 survives() {
     local name=$1 want=$2 why=$3
     cases=$((cases + 1))
@@ -82,7 +76,6 @@ survives ubuntu.sources yes "the archive in deb822 form is kept"
 survives archive.list yes "the archive in one-line form is kept"
 survives google-chrome.list.save yes "a file apt would not read is left alone"
 
-# Log names each file acted on.
 cases=$((cases + 1))
 if grep -q "dropping google-chrome.list" <<<"$out" &&
     grep -q "keeping ubuntu.sources" <<<"$out"; then
@@ -93,7 +86,6 @@ else
     status=1
 fi
 
-# Empty and missing dir both fine. "accepted", not "not an error": Sonar S7677 reads any message with "error" as an error.
 rm -rf "$work/sources"
 mkdir -p "$work/sources"
 cases=$((cases + 1))
@@ -112,7 +104,6 @@ else
     status=1
 fi
 
-# No packages, no --prune-only: workflow lost its list. Refuse, not silent no-op.
 stage
 cases=$((cases + 1))
 if APT_SOURCES_DIR="$work/sources" "$script" >/dev/null 2>&1; then
@@ -122,7 +113,6 @@ else
     echo "selftest: ok   naming no packages is refused"
 fi
 
-# Mirror down: stand-in apt fails `update` while $APT_DOWN holds "once" or "always"; `install` alike with "install-once", "install-always". "update-slow", "download-slow" hang that call once. "installed": nothing left to fetch. `--print-uris` names two debs, big one first. Logs every call.
 cat >"$work/apt-get" <<'EOF'
 #!/usr/bin/env bash
 echo "$*" >>"$APT_LOG"
@@ -165,7 +155,6 @@ exit 0
 EOF
 chmod +x "$work/apt-get"
 
-# Stand-in curl: answers per $APT_SPEEDS for URL's host ("<host> <status> <bytes> <seconds>"); unlisted host = no connection. Logs every call.
 cat >"$work/curl" <<'EOF'
 #!/usr/bin/env bash
 echo "$*" >>"$APT_PROBES"
@@ -181,7 +170,6 @@ exit 7
 EOF
 chmod +x "$work/curl"
 
-# Mirror speeds for next run_install. Default: azure fastest.
 default_speeds() {
     printf '%s\n' 'azure.archive.ubuntu.com 206 2097152 0.2' \
         'archive.ubuntu.com 206 2097152 1.0' \
@@ -189,7 +177,6 @@ default_speeds() {
     return 0
 }
 
-# Image's mirror list (ubuntu.sources names it `mirror+file:`): azure first.
 image_mirrors() {
     printf '%s\tpriority:%s\n' http://azure.archive.ubuntu.com/ubuntu/ 1 \
         https://archive.ubuntu.com/ubuntu/ 2 \
@@ -197,7 +184,6 @@ image_mirrors() {
     return 0
 }
 
-# run_install <down mode>: script with stand-in apt and curl, staged lists. Speeds from $work/speeds, reset after.
 run_install() {
     local mode=$1
     stage
@@ -211,7 +197,6 @@ run_install() {
     return $?
 }
 
-# run_again: as run_install, on lists as last run left them.
 run_again() {
     [[ -f "$work/speeds" ]] || default_speeds
     rm -f "$work/apt.log"
@@ -227,19 +212,16 @@ run_again() {
     return "$rc"
 }
 
-# Mirror list's URLs in order, one line.
 mirror_order() {
     cut -f1 "$work/apt-mirrors.txt" | tr '\n' ' '
     return 0
 }
 
-# set_speeds <line>...: speeds for next run_install.
 set_speeds() {
     printf '%s\n' "$@" >"$work/speeds"
     return 0
 }
 
-# check <why> <command...>: one case, passes when command does.
 check() {
     local why=$1
     shift
@@ -284,7 +266,6 @@ check "a failed download is tried once more" test "$(grep -c '' "$work/apt.log")
 check "the download retry goes to archive.ubuntu.com" \
     grep -q 'URIs: http://archive.ubuntu.com/ubuntu/' "$work/sources/ubuntu.sources"
 
-# slow <mode> <why>: trickling call cut at cap, rest from archive, well before stand-in's 60 s.
 slow() {
     local mode=$1 why=$2 began=$SECONDS
     run_install "$mode"
@@ -297,7 +278,6 @@ slow() {
 slow update-slow "a trickling index is cut short and fetched again"
 slow download-slow "a trickling download is cut short and fetched again"
 
-# Mirror pick. Slow runner: azure trickles, others fast. Security fastest, still never first: own pocket's debs only.
 set_speeds 'azure.archive.ubuntu.com 206 131072 5.0' \
     'archive.ubuntu.com 206 2097152 0.4' \
     'mirrors.edge.kernel.org 206 2097152 0.8' \
@@ -316,7 +296,6 @@ check "the log gives each mirror's speed" \
 check "the log names the mirror picked" \
     grep -q 'debs from https://archive.ubuntu.com/ubuntu/ first' "$work/out"
 
-# Second run in same job: list already has kernel.org. Timed once, listed once.
 rm -f "$work/probes"
 set_speeds 'azure.archive.ubuntu.com 206 2097152 0.2' \
     'archive.ubuntu.com 206 2097152 1.0' \
@@ -327,7 +306,6 @@ check "a mirror already listed is timed once" \
 check "a mirror already listed is listed once" \
     test "$(mirror_order)" = "http://azure.archive.ubuntu.com/ubuntu/ https://mirrors.edge.kernel.org/ubuntu/ https://archive.ubuntu.com/ubuntu/ http://security.ubuntu.com/ubuntu/ "
 
-# Error page comes fast: by bytes per second alone, azure would win.
 set_speeds 'azure.archive.ubuntu.com 404 283 0.0001' \
     'archive.ubuntu.com 206 2097152 1.0' \
     'mirrors.edge.kernel.org 206 1048576 5.0'
@@ -346,7 +324,6 @@ check "nothing to fetch: no mirror timed" test ! -s "$work/probes"
 check "nothing to fetch: mirror list as it was" \
     test "$(cat "$work/apt-mirrors.txt")" = "$(image_mirrors)"
 
-# Picked mirror trickles after all: fallback puts next fastest first.
 set_speeds 'azure.archive.ubuntu.com 206 131072 5.0' \
     'archive.ubuntu.com 206 2097152 0.4' \
     'mirrors.edge.kernel.org 206 2097152 0.8'
@@ -354,7 +331,6 @@ run_install download-slow
 check "a picked mirror that trickles after all hands over to the next fastest" \
     test "$(mirror_order)" = "https://mirrors.edge.kernel.org/ubuntu/ http://azure.archive.ubuntu.com/ubuntu/ http://security.ubuntu.com/ubuntu/ https://archive.ubuntu.com/ubuntu/ "
 
-# fails <mode> <why>: archive no better, job must fail.
 fails() {
     local mode=$1 why=$2
     cases=$((cases + 1))

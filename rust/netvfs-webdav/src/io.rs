@@ -48,11 +48,8 @@ pub fn range_start(headers: &HeaderMap) -> Option<u64> {
     rest.split_once('-')?.0.trim().parse().ok()
 }
 
-/// What the body of a GET holds from the wanted offset on.
 enum Got {
-    /// The body starts `skip` bytes before the wanted offset.
     Body { body: hyper::body::Incoming, skip: u64 },
-    /// The offset is at or past the end.
     Nothing,
 }
 
@@ -75,7 +72,6 @@ async fn get(http: &mut Http, path: Vec<u8>, offset: u64, length: Option<u64>) -
             }
             Ok(Got::Body { body, skip: 0 })
         }
-        // No range support: the whole file.
         StatusCode::OK => Ok(Got::Body { body, skip: offset }),
         StatusCode::RANGE_NOT_SATISFIABLE => {
             http.discard(body, MAX_ERROR_BODY).await;
@@ -88,8 +84,6 @@ async fn get(http: &mut Http, path: Vec<u8>, offset: u64, length: Option<u64>) -
     }
 }
 
-/// Feeds `body` from `skip` bytes on to `take`, at most `limit` bytes; returns the count. The connection stays
-/// usable only when the body was read to its end.
 async fn pump(
     http: &mut Http,
     mut body: hyper::body::Incoming,
@@ -115,7 +109,6 @@ async fn pump(
             }
         }
         if limit.is_some_and(|l| done >= l) {
-            // Enough: the rest of the body is not wanted.
             http.close();
             return Ok(done);
         }
@@ -194,7 +187,6 @@ pub async fn upload(
             buf.truncate(n);
             sent = sent.saturating_add(n as u64);
             if tx.send(Bytes::from(buf)).await.is_err() {
-                // The request ended early; its answer says why.
                 return Ok(sent);
             }
             progress.update(sent, size);
@@ -222,7 +214,6 @@ pub async fn upload(
     http.discard(body, MAX_ERROR_BODY).await;
     let ok = head.status.is_success();
     if !ok {
-        // The body may be half sent: no reuse.
         http.close();
     }
     drop(http);

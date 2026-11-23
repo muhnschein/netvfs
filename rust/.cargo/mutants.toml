@@ -1,10 +1,6 @@
 # SPDX-License-Identifier: LGPL-2.1-or-later
-# cargo-mutants (tools/ci/rust-mutants.sh). Every mutant must be caught; these none can tell from the original, with why.
-# Matched against mutant name with line and column (\d+:\d+).
 
-# Test doubles, never shipped (features `fake` / `testing`): FakeBridge, fake control table loader, bridge fixture, mem backend of libnetvfs-rs.so. They are the tests' oracle.
 exclude_globs = [
-    # Patched crates.io copies: not workspace members.
     "vendor/**",
     "netvfs-bridge-proto/src/fake/**",
     "netvfs-bridge/src/ffi/fake.rs",
@@ -13,110 +9,52 @@ exclude_globs = [
 ]
 
 exclude_re = [
-    # NoHandle (backend without handles) is an empty enum: no value exists, its methods and no_future never run.
     'netvfs-vfs/src/backend\.rs:\d+:\d+: replace (<impl (ReadHandle|WriteHandle) for NoHandle>::|no_future )',
-    # Diagnostics only: stderr line; probe result is exit status and check count.
     'netvfs-accounts/src/bin/probe\.rs:.*: replace report with \(\)$',
-    # Built only under --cfg netvfs_asan (tools/ci/rust-sanitize.sh); elsewhere mutants change nothing.
-    # Weekly ASan run is its test.
     'netvfs-accounts/src/(main|bin/probe)\.rs:\d+:\d+: replace __asan_default_options ',
-    # Diagnostics only: stderr line when kernel refuses Landlock or seccomp; no test can force it.
     'netvfs-accounts/src/sandbox\.rs:.*: replace warn with \(\)$',
-    # Equivalent: SECCOMP_RET_ERRNO and the 16 data bits are disjoint, `^` is `|`.
     'netvfs-accounts/src/sandbox\.rs:.*: replace \| with \^ in errno_action$',
-    # Equivalent: O_CREAT and __O_TMPFILE are disjoint bits, `^` is `|`.
     'netvfs-accounts/src/sandbox\.rs:.*: replace \| with \^ in Filter::deny_created_mode_bits$',
-    # Equivalent: constant combining distinct Landlock access bits (e.g. landlock::NULL_DEVICE), `^` is `|`.
     'netvfs-accounts/src/sandbox\.rs:\d+:\d+: replace \| with \^$',
-    # Equivalent where tests run: only Sailfish OS has user `privileged`; elsewhere None anyway.
-    # user_ids tested with root and missing user.
     'netvfs-accounts/src/sandbox\.rs:.*: replace privileged_ids -> Option<\(u32, u32\)> with None$',
-    # Equivalent: `1 << 0` and `1 >> 0` are both 1 (landlock::EXECUTE, NET_BIND_TCP, SCOPE_ABSTRACT_UNIX_SOCKET,
-    # CREATE_RULESET_VERSION). Constants have no function to name and the column alone is shared with
-    # SCOPE_SIGNAL (1 << 1): positions must follow line moves (mutants come back missed).
     'netvfs-accounts/src/sandbox\.rs:(230:32|263:37|268:51|299:47): replace << with >>$',
-    # Equivalent: distinct bits, `^` is `|` (TCP rights, scopes in landlock_access; O_PATH | O_CLOEXEC in allow_beneath).
     'netvfs-accounts/src/sandbox\.rs:\d+:\d+: replace \| with \^ in (landlock_access|allow_beneath)$',
-    # Equivalent: reset_process_state skips SIGKILL and SIGSTOP (&& -> || does not); their signal() fails with EINVAL.
     'netvfs-accounts/src/sandbox\.rs:\d+:\d+: replace && with \|\| in reset_process_state$',
-    # Equivalent: allow_beneath runs with the ruleset open, which took the lowest free fd, so open(2) never
-    # returns 0 and `fd < 0` is `fd <= 0`. (Probe makes the ruleset fd 0; restrict_filesystem's `< 0` must accept it.)
     'netvfs-accounts/src/sandbox\.rs:\d+:\d+: replace < with <= in allow_beneath$',
-    # Equivalent: probe's open flags, modes, clone flags are distinct bits, `^` is `|`.
     'netvfs-accounts/src/bin/probe\.rs:\d+:\d+: replace \| with \^ in (syscalls|filesystem|clone_refused)$',
-    # RTLD_LOCAL is 0 on Linux: `RTLD_NOW | RTLD_LOCAL` equals `RTLD_NOW ^ RTLD_LOCAL`.
     'ffi/loader\.rs:\d+:\d+: replace \| with \^ in entry_point',
-    # Hint without result; fake backend's readAhead ignores it, as backends may.
     'ffi/conn\.rs:\d+:\d+: replace Handle::read_ahead with \(\)',
-    # Multicast socket opening depends on host (sandboxes, some runners have none); test cannot require `true`.
     'ffi/discovery\.rs:\d+:\d+: replace Discovery::set_running -> bool with false',
-    # Hook runs only on a report from a network server, which a test cannot provide; Ctx::take_panic is unit-tested (callback.rs).
     'ffi/discovery\.rs:\d+:\d+: replace Discovery::take_panic -> Option<String> with None',
-    # peer.rs COMPARE_CHUNK_BYTES (64 * 1024 -> 64 + 1024): chunk size only bounds memory; verdict identical.
     'netvfs-bridge/src/peer\.rs:\d+:\d+: replace \* with \+$',
-    # peer.rs check_process, device half of the same-inode fast path (dev == -> !=): the registered executable
-    # falls through to content comparison, which accepts it; only cost differs.
     'netvfs-bridge/src/peer\.rs:\d+:27: replace == with != in PeerChecker::check_process$',
-    # peer.rs read_fully EINTR retry: regular files and /proc reads are not interrupted on Linux; defensive.
     'netvfs-bridge/src/peer\.rs:\d+:\d+: replace match guard e\.kind\(\) == io::ErrorKind::Interrupted with false in read_fully$',
-    # listener.rs unescape (high << 4 | low): operands share no bit, `|` equals `^`.
     'netvfs-bridge/src/server/listener\.rs:\d+:\d+: replace \| with \^ in unescape$',
-    # listener.rs serve transient-error guard: needs EMFILE or a permanently failing listener, which no test
-    # can produce (shutdown(2) does not make AF_UNIX accept fail). is_transient is tested.
     'netvfs-bridge/src/server/listener\.rs:\d+:\d+: replace match guard is_transient\(&e\) with (true|false) in Listener::serve$',
-    # sys/peer.rs effective_uid -> 0: tests run as root (CI containers), mutant returns the right value;
-    # as other user credentials_of_a_socketpair_are_ours and clock_and_uid catch it.
     'netvfs-bridge/src/sys/peer\.rs:\d+:\d+: replace effective_uid -> u32 with 0$',
-    # sys/peer.rs clock_ticks_per_second (hz > 0 -> >= 0): sysconf(_SC_CLK_TCK) is never 0 on Linux; guard only turns -1 into None.
     'netvfs-bridge/src/sys/peer\.rs:\d+:\d+: replace > with >= in clock_ticks_per_second$',
-    # jobs/fdio.rs `n > 0` guards after write(2) to a FIFO and pwrite(2) to a regular file (-> true, -> >=):
-    # neither returns 0 for a non-empty buffer.
     'netvfs-bridge/src/jobs/fdio\.rs:\d+:\d+: replace match guard n > 0 with true in (FdDevice<.a>::write_fifo|<impl WriteAt for FdDevice<._>>::write_at)$',
     'netvfs-bridge/src/jobs/fdio\.rs:\d+:\d+: replace > with >= in (FdDevice<.a>::write_fifo|<impl WriteAt for FdDevice<._>>::write_at)$',
-    # jobs/fdio.rs write_at, pwrite failing after an earlier one of the same call (written > 0 -> false):
-    # loops only above 2 GiB (MAX_CHUNK), untestable.
     'netvfs-bridge/src/jobs/fdio\.rs:\d+:\d+: replace match guard written > 0 with false in <impl WriteAt for FdDevice<._>>::write_at$',
-    # locations/connector.rs reset_cancel -> (): defensive; a worker cancels only items whose flag is set,
-    # and those always drop the connection, so no canceled one is reused.
     'netvfs-bridge/src/locations/connector\.rs:\d+:\d+: replace <impl Backend for Connector>::reset_cancel with \(\)$',
-    # locations/pool.rs retire (index < len -> <=): callers pass the index of a connection just found.
     'netvfs-bridge/src/locations/pool\.rs:\d+:\d+: replace < with <= in Pool<B>::retire$',
-    # locations/pool.rs reap_pool (released > 0 -> >=): releasing 0 slots changes nothing;
-    # resubmitting waiting work with no free slot requeues it in the same order.
     'netvfs-bridge/src/locations/pool\.rs:\d+:\d+: replace > with >= in PoolSet<B>::reap_pool$',
-    # sys/fd.rs EINTR arms of retry and poll: no test can make read/write/pread/pwrite/poll fail with EINTR
-    # (no signal handlers); poll of one live pollfd has no other testable error (closed fd is POLLNVAL in revents).
     'netvfs-bridge/src/sys/fd\.rs:\d+:\d+: replace match guard e\.kind\(\) == io::ErrorKind::Interrupted with (false in retry|(true|false) in poll)$',
     'netvfs-bridge/src/sys/fd\.rs:\d+:\d+: replace == with != in poll$',
-    # Equivalent: an empty name is no error name, from_bare returns None, so the `_` arm gives the same Protocol error.
     'netvfs-bridge-proto/src/errors\.rs:\d+:\d+: delete match arm "" in BridgeError::from_method_error$',
-    # consent.rs: inotify masks are ORs of distinct single-bit flags, `|` equals `^`.
     'netvfs-bridge/src/consent\.rs:\d+:\d+: replace \| with \^',
-    # Equivalent: Consent::unknown is Self::default().
     'netvfs-bridge/src/consent\.rs:\d+:\d+: replace Consent::unknown -> Self with Default::default\(\)$',
-    # sys/lock.rs: LOCK_EX | LOCK_NB, distinct bits.
     'netvfs-bridge/src/sys/lock\.rs:\d+:\d+: replace \| with \^',
-    # core/nearby.rs set_running warning when post refuses: log line only; post refuses only once Qt quits, which ends the test loop too.
     'netvfs-bridge/src/core/nearby\.rs:\d+:\d+: delete ! in <impl NearbySource for FfiNearby>::set_running$',
-    # Equivalent: SQLITE_OPEN_READ_ONLY/_READ_WRITE and SQLITE_OPEN_NO_MUTEX are disjoint bits, `^` is `|`.
     'netvfs-accounts/src/db\.rs:\d+:\d+: replace \| with \^ in Database::open$',
-    # Equivalent where tests run: SystemOwner uses sandbox::privileged_ids, None without user `privileged` (Sailfish OS only);
-    # system_owner_is_the_user_privileged catches other values.
     'netvfs-accounts/src/lib\.rs:\d+:\d+: replace <impl db::PrivilegedOwner for SystemOwner>::privileged_ids -> Option<\(u32, u32\)> with None$',
-    # Equivalent: SFTP open flags (SSH_FXF_*) are distinct bits, `^` is `|`.
     'netvfs-sftp/src/(remote|io)\.rs:\d+:\d+: replace \| with \^ in (Remote::copy_data|open_for_write)$',
-    # Equivalent: ORs of distinct single-bit flags, `^` is `|`: anonymous NTLMSSP flags, CREATE access masks, NEGOTIATE
-    # security mode and capabilities, PFC_FIRST_FRAG | PFC_LAST_FRAG, IS_GUEST | IS_NULL.
     'netvfs-smb/src/auth\.rs:\d+:\d+: replace \| with \^ in anonymous_(negotiate|authenticate)$',
     'netvfs-smb/src/backend\.rs:\d+:\d+: replace \| with \^ in Smb::(open_file|open_writer)$',
     'netvfs-smb/src/negotiate\.rs:\d+:\d+: replace \| with \^ in Offer::request$',
     'netvfs-smb/src/rpc\.rs:\d+:\d+: replace \| with \^ in header$',
     'netvfs-smb/src/session\.rs:\d+:\d+: replace \| with \^ in finish$',
-    # Equivalent: UTF-8 assembly ORs a lead or continuation marker with non-overlapping payload bits, `^` is `|`.
     'netvfs-smb/src/names\.rs:\d+:\d+: replace \| with \^ in (push_utf8|utf16_from_wtf8)$',
-    # Equivalent: usable() idle `elapsed < stale_after` vs `<=` differs only when elapsed equals it to the
-    # nanosecond; tests pin both sides (ZERO, one hour).
     'netvfs-webdav/src/http\.rs:\d+:\d+: replace < with <= in Http::usable$',
-    # Equivalent: FTPS offers no capability; capabilities() already returns Capabilities::default().
     'netvfs-ftps/src/backend\.rs:\d+:\d+: replace <impl Backend for Ftps>::capabilities -> Capabilities with Default::default\(\)$',
 ]

@@ -18,7 +18,6 @@ using namespace NetVfs;
 namespace NetVfsUi {
 
 namespace {
-// Generous upper bound: an OpenSSH RSA-16384 private key is about 12 kB.
 constexpr qint64 MaxKeyFileSize = 64 * 1024;
 
 struct KeyOutcome {
@@ -74,7 +73,6 @@ void SshKeyTool::generate()
 void SshKeyTool::importFile(const QString &path, const QString &passphrase)
 {
     SshKeyTools *tools = m_tools;
-    // One shared, self-wiping copy of the passphrase.
     const auto secret = std::make_shared<Credentials>(QString(), passphrase.toUtf8());
     runKeyJob([tools, path, secret](SshKeyMaterial *out) {
         QByteArray contents;
@@ -118,8 +116,6 @@ void SshKeyTool::finishKeyJob(const Result &result, const SshKeyMaterial &materi
         return;
     }
     if (job != KeyJob::Generate && result.error() == Error::AuthFailed) {
-        // An encrypted file: ask for the passphrase. Message shown only when a passphrase was given
-        // and was wrong.
         m_state = State::NeedsPassphrase;
         m_errorText = job == KeyJob::ImportWithPassphrase ? userErrorText(Error::AuthFailed, Activity::KeyFile)
                                                           : QString();

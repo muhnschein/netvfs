@@ -117,7 +117,6 @@ pub fn log(level: Level, message: fmt::Arguments<'_>) {
     logger().write_to(&mut std::io::stderr().lock(), level, message);
 }
 
-/// Unit tests read what the code under test logs on their thread, as `QTest::ignoreMessage` does.
 #[cfg(test)]
 pub(crate) mod capture {
     use super::Level;

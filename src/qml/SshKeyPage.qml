@@ -4,15 +4,11 @@ import Sailfish.Silica 1.0
 import Sailfish.Pickers 1.0
 import org.netvfs.accounts 1.0
 
-// Generates or imports the account's key, shows the public line with "Copy to clipboard" and offers
-// "Install on server using password". The password is used once and not stored.
 Dialog {
     id: dialog
 
     property SshKeyTool keyTool
-    // "generate" or "import"
     property string keySource: "generate"
-    // Connection parameters with the accepted host key (for the install)
     property var params: ({})
 
     property string _keyPath

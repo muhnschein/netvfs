@@ -1,19 +1,5 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: LGPL-2.1-or-later
-"""TCP proxies in front of an SMB server, for fail-closed tests.
-
-Usage: flipproxy.py PORT:MODE:FRAME:TARGET_HOST [...]
-
-Each listener forwards to TARGET_HOST:445. Server-to-client traffic is split
-into NetBIOS session frames (4-byte header, 24-bit length); FRAME counts them
-from 1 per connection (negotiate, two session setup replies and the tree
-connect come first, so frame 5 is the first reply after sign-in).
-  pass   forward unchanged
-  flip   invert the low bit of the last byte of frame FRAME (M-T12)
-  stall  stop forwarding server data from frame FRAME on (M-12 cancel tests)
-  drop   close both connections instead of forwarding frame FRAME
-  dialect  set DialectRevision of reply FRAME (the negotiate reply) to SMB 2.1
-"""
 import socket
 import sys
 import threading
@@ -21,8 +7,6 @@ import threading
 
 
 def container_address():
-    """The container's own address: published ports are forwarded to it, so
-    the proxy does not need to listen on every interface."""
     return socket.gethostbyname(socket.gethostname())
 
 def recv_exact(sock, count):
@@ -67,7 +51,6 @@ def server_to_client(server, client, mode, frame):
             if mode == "drop" and count == frame:
                 break
             if mode == "dialect" and count == frame and len(payload) >= 70:
-                # SMB2 header (64 bytes), StructureSize, SecurityMode, DialectRevision
                 payload = payload[:68] + b"\x10\x02" + payload[70:]
             if mode == "flip" and count == frame and payload:
                 payload = payload[:-1] + bytes([payload[-1] ^ 0x01])

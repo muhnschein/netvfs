@@ -1,17 +1,11 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! The file tree of a `mem` store: numbered nodes (files, folders,
-//! symlinks), folders mapping names to nodes, hard links as two names of
-//! one node. Paths are bytes split at `/`; every path starts at the root.
-//! Errors follow the local backend's errno mapping (ELOOP is `NotFound`).
 
 use netvfs_vfs::{Attributes, Disposition, Entry, EntryFlags, EntryType, ErrorName, Status, WriteOptions};
 use std::collections::BTreeMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const ROOT: u64 = 1;
-/// Symlinks followed in one lookup at most (Linux's 40).
 const MAX_HOPS: u32 = 40;
-/// The longest name, in bytes (`maxNameBytes`).
 pub const MAX_NAME: u64 = 255;
 const OWNER_ID: u64 = 1000;
 const OWNER: &str = "mem";
@@ -137,7 +131,6 @@ impl Tree {
         Ok(self.children(dir)?.get(name).copied())
     }
 
-    /// Symlinks are followed in every component but the last, and in the last with `follow_last`.
     fn walk(&self, start: u64, comps: &[&[u8]], follow_last: bool, hops: &mut u32) -> Result<u64, Status> {
         let last = comps.len().saturating_sub(1);
         let mut at = start;
@@ -235,7 +228,6 @@ impl Tree {
                 Err(_) => flags = flags.union(EntryFlags::TARGET_UNKNOWN),
             }
         }
-        // Symlinks have only a modification time, as on servers that report no more.
         let link = matches!(node.data, Data::Link(_));
         Ok(Entry {
             name: name.to_vec(),
@@ -281,7 +273,6 @@ impl Tree {
         self.add(dir, name, Data::Dir(BTreeMap::new()), DIR_MODE).map(drop)
     }
 
-    /// `removeFile` (`folder` false) or `removeDir`.
     pub fn remove(&mut self, path: &[u8], folder: bool) -> Result<(), Status> {
         let (dir, name) = self.parent_of(path)?;
         let id = self.child(dir, name)?.ok_or_else(not_found)?;
@@ -312,7 +303,6 @@ impl Tree {
                 return Err(exists());
             }
             if target == id {
-                // Two names of one file: the source name goes.
                 return self.unlink(from_dir, from_name);
             }
             self.unlink(to_dir, to_name)?;
@@ -330,7 +320,6 @@ impl Tree {
         Ok(())
     }
 
-    /// Everything is checked before anything changes.
     pub fn set_attributes(&mut self, path: &[u8], changes: &Attributes) -> Result<(), Status> {
         let id = self.resolve(path, true)?;
         if changes.mode.is_some_and(|m| m > 0o7777) {
@@ -351,7 +340,6 @@ impl Tree {
         Ok(())
     }
 
-    /// The target, verbatim.
     pub fn read_link(&self, path: &[u8]) -> Result<Vec<u8>, Status> {
         let (dir, name) = self.parent_of(path)?;
         let id = self.child(dir, name)?.ok_or_else(not_found)?;
@@ -361,7 +349,6 @@ impl Tree {
         }
     }
 
-    /// `link` pointing to `target`, verbatim.
     pub fn make_symlink(&mut self, target: &[u8], link: &[u8]) -> Result<(), Status> {
         if target.is_empty() {
             return Err(Status::new(ErrorName::InvalidName, "The link target is empty"));
@@ -373,7 +360,6 @@ impl Tree {
         self.add(dir, name, Data::Link(target.to_vec()), 0o777).map(drop)
     }
 
-    /// A second name of a file (not a folder).
     pub fn make_hardlink(&mut self, existing: &[u8], link: &[u8]) -> Result<(), Status> {
         let id = self.resolve(existing, false)?;
         if self.is_dir(id) {

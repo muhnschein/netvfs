@@ -1,6 +1,4 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! An FTPS server in memory (explicit TLS 1.3, `EPSV`, `MLSD`/`MLST`), for tests: enough of RFC 959, 3659 and
-//! 4217 for the backend, plus knobs for odd servers.
 #![allow(
     clippy::arithmetic_side_effects,
     clippy::too_many_lines,
@@ -25,7 +23,6 @@ const LEAF_KEY: &[u8] = include_bytes!("../../netvfs-tls/testdata/leaf.key.der")
 pub const SELF: &[u8] = include_bytes!("../../netvfs-tls/testdata/self.der");
 const SELF_KEY: &[u8] = include_bytes!("../../netvfs-tls/testdata/self.key.der");
 
-/// `modify` of every node.
 pub const MODIFY: &str = "20261028000000";
 pub const MTIME_MS: i64 = 1_793_145_600_000;
 pub const USER: &str = "alice";
@@ -39,35 +36,20 @@ pub enum Node {
 
 #[derive(Debug)]
 pub struct State {
-    /// Absolute paths without trailing `/`; "/" is the root.
     pub tree: BTreeMap<Vec<u8>, Node>,
-    /// Every command line, `PASS` masked.
     pub seen: Vec<Vec<u8>>,
-    /// `FEAT` lines.
     pub features: Vec<&'static str>,
-    /// Answer `AUTH TLS` with this code instead of 234.
     pub auth_code: u16,
-    /// Answer `PROT P` with this code instead of 200.
     pub prot_code: u16,
-    /// Data connections whose TLS session was not resumed are refused (as proftpd and vsftpd do).
     pub require_reuse: bool,
-    /// Data connections that resumed the control session.
     pub resumed: usize,
-    /// Control connections accepted.
     pub connections: usize,
-    /// Answer this path's commands 550 (no permission).
     pub forbidden: Option<Vec<u8>>,
-    /// Answer this verb on this path with this reply.
     pub refuse: Option<(&'static str, Vec<u8>, &'static str)>,
-    /// Send `120` before the greeting.
     pub greeting_wait: bool,
-    /// The whole `MLSD` payload instead of the tree's.
     pub listing: Option<Vec<u8>>,
-    /// The reply ending a `RETR` instead of 226.
     pub retr_end: Option<&'static str>,
-    /// One more reply after `ABOR`'s, as proftpd sends at times.
     pub abort_extra: Option<&'static str>,
-    /// Extra raw `MLSD` lines.
     pub extra_lines: Vec<Vec<u8>>,
 }
 
@@ -97,9 +79,7 @@ impl Default for State {
 
 #[derive(Debug, Clone, Copy)]
 pub enum Cert {
-    /// Signed by the test CA for localhost and 127.0.0.1.
     Trusted,
-    /// Self-signed.
     SelfSigned,
 }
 
@@ -132,7 +112,6 @@ impl Fake {
         let addr = listener.local_addr().unwrap();
         let state = Arc::new(Mutex::new(State::default()));
         let config = config(cert);
-        // As proftpd: no session ticket on a connection the server never writes to.
         let mut quiet = (*config).clone();
         quiet.send_tls13_tickets = 0;
         let acceptor = TlsAcceptor::from(config);
@@ -159,7 +138,6 @@ impl Fake {
         self.with(|s| s.tree.get(path.as_bytes()).cloned())
     }
 
-    /// The verbs seen, in order.
     pub fn verbs(&self) -> Vec<String> {
         self.with(|s| {
             s.seen
@@ -235,7 +213,6 @@ async fn serve(tcp: TcpStream, acceptor: TlsAcceptor, uploads: TlsAcceptor, stat
     }
 }
 
-/// The plain part: greeting, then `AUTH TLS`.
 async fn plain(tcp: TcpStream, state: &Mutex<State>) -> Option<TcpStream> {
     let mut plain = BufReader::new(tcp);
     let wait = state.lock().unwrap().greeting_wait;
@@ -264,7 +241,6 @@ async fn plain(tcp: TcpStream, state: &Mutex<State>) -> Option<TcpStream> {
     }
 }
 
-/// One protected control connection.
 struct Conn {
     ctrl: Ctrl,
     acceptor: TlsAcceptor,
@@ -283,7 +259,6 @@ impl Conn {
         say(self.ctrl.get_mut(), text).await;
     }
 
-    /// Answers `line`; false ends the session.
     async fn command(&mut self, line: &[u8]) -> bool {
         let raw = line.trim_ascii_end().to_vec();
         let (verb, arg) = match raw.iter().position(|b| *b == b' ') {
@@ -313,7 +288,6 @@ impl Conn {
         true
     }
 
-    /// The reply refusing `verb` on `path` before it runs, if any.
     fn refusal(&self, verb: &[u8], path: &[u8]) -> Option<String> {
         if !self.signed_in && !matches!(verb, b"USER" | b"PASS" | b"QUIT" | b"FEAT") {
             return Some("530 Please sign in".into());
@@ -435,7 +409,6 @@ impl Conn {
         self.say(&reply).await;
     }
 
-    /// What `verb` sends or accepts on `path`, if it can run.
     fn payload(&mut self, verb: &[u8], path: &[u8]) -> Option<Vec<u8>> {
         let rest = std::mem::take(&mut self.rest);
         let s = self.state.lock().unwrap();
@@ -465,7 +438,6 @@ impl Conn {
         }
     }
 
-    /// `MLSD`, `RETR`, `STOR`; false ends the session.
     async fn transfer(&mut self, verb: &[u8], path: &[u8]) -> bool {
         let Some(l) = self.listener.take() else {
             self.say("425 Use EPSV first").await;
@@ -503,7 +475,6 @@ impl Conn {
         let mut left = Vec::new();
         let sent = data.write_all(&payload).await.and(data.shutdown().await);
         if sent.and(data.read_to_end(&mut left).await).is_err() {
-            // As proftpd: a data connection reset or closed without TLS close ends the session.
             return false;
         }
         let end = self.state.lock().unwrap().retr_end.filter(|_| verb == b"RETR");
@@ -512,7 +483,6 @@ impl Conn {
     }
 }
 
-/// `ok` → runs `apply`, `yes`; else `no`.
 fn change<T>(ok: bool, apply: impl FnOnce() -> T, yes: &str, no: &str) -> String {
     if ok {
         drop(apply());
@@ -522,7 +492,6 @@ fn change<T>(ok: bool, apply: impl FnOnce() -> T, yes: &str, no: &str) -> String
     }
 }
 
-/// Moves `from` and all below it to `to`, if `to`'s folder exists.
 fn rename(tree: &mut BTreeMap<Vec<u8>, Node>, from: &[u8], to: &[u8]) -> String {
     if tree.get(&parent(to)) != Some(&Node::Dir) {
         return "550 Cannot rename".to_owned();

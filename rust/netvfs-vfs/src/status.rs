@@ -200,7 +200,6 @@ impl std::error::Error for Status {}
 mod tests {
     use super::*;
 
-    // The 23 names of src/core/error.cpp (all but `None`), in order.
     #[test]
     fn names_are_the_xc21_names() {
         let names: Vec<&str> = ErrorName::ALL.iter().map(|n| n.as_str()).collect();

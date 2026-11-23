@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! Session bus replies to the helper's announcement: any bytes through the exchange.
 #![no_main]
 
 use std::io::{Read, Write};

@@ -1,7 +1,4 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! The values of `src/core/types.h` as a Rust backend sees them: entries, capabilities, connection
-//! parameters, credentials, prompts, attributes, write options, space. Paths and names are protocol
-//! bytes (`Names::encode`); "unknown" is `None` where C++ has -1 or an invalid date.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -450,11 +447,9 @@ mod tests {
         assert!(!EntryFlags::HIDDEN.contains(both));
         assert!(both.contains(EntryFlags::NONE));
         assert_eq!(EntryFlags::default(), EntryFlags::NONE);
-        // A flag set twice stays set.
         assert_eq!(both.union(EntryFlags::HIDDEN), both);
     }
 
-    // The 21 names of capabilityName() (src/core/types.cpp), in order.
     #[test]
     fn capabilities_are_the_cpp_names() {
         let names: Vec<&str> = Capability::ALL.iter().map(|c| c.as_str()).collect();

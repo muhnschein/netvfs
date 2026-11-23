@@ -76,7 +76,6 @@ bool logHas(const QString &prefix)
     return false;
 }
 
-// Delivers a fixed outcome asynchronously, as signond would.
 class StaticSecretSource : public SecretSource
 {
 public:
@@ -98,7 +97,7 @@ private:
     Result m_result;
     Credentials m_credentials;
 };
-} // namespace
+}
 
 class TestQmlProbe : public QObject
 {
@@ -279,7 +278,6 @@ private slots:
 
     void verifyChecksPinBeforeCredentials()
     {
-        // no credential leaves the device unless the identity matches.
         QFETCH(QString, pin);
         QFETCH(int, error);
         QFETCH(int, status);
@@ -338,8 +336,6 @@ private slots:
 
     void cancelReachesBackend()
     {
-        // through the UI: cancel() stops the call in flight and
-        // discards its result.
         FakeServer::instance()->chunkDelayMs = 600;
         NetVfsProbe probe;
         QSignalSpy verified(&probe, &NetVfsProbe::verified);
@@ -397,7 +393,7 @@ private slots:
         ServerIdentity seen;
         QCOMPARE(backend.connect(ConnectionParams(), &seen).error(), Error::Canceled);
         token.detach();
-        token.cancel();   // no backend attached any more
+        token.cancel();
     }
 
     void resetClearsState()
@@ -535,7 +531,6 @@ private slots:
         QVERIFY(!logHas(QStringLiteral("upload")));
     }
 
-    // refused before anything is sent.
     void verifyRefusedByPolicy()
     {
         QVariantMap guest = params();
@@ -551,7 +546,6 @@ private slots:
         QVERIFY(probe.errorText().startsWith(QStringLiteral("These settings cannot be used for backups.")));
         QVERIFY(serverLog().isEmpty());
 
-        // The same configuration is fine for files.
         probe.verify(guest, credentials(QStringLiteral("secret")), QString(), QStringLiteral("files"));
         QTRY_COMPARE(verified.count(), 1);
 
@@ -562,7 +556,6 @@ private slots:
 
     void verifyInteractiveChecksIdentityOnly()
     {
-        // Interactive sign-in needs a person: connect and identity only.
         FakeServer::instance()->identity = identityOf(KeyBlob);
         QVariantMap interactive = params(pinOf(KeyBlob));
         QVariantMap options = interactive.value(QStringLiteral("options")).toMap();
@@ -576,14 +569,12 @@ private slots:
         QCOMPARE(serverLog(), QStringList({ QStringLiteral("connect"), QStringLiteral("disconnect") }));
         QCOMPARE(probe.identityStatus(), NetVfsProbe::IdentityStatus::IdentityMatches);
 
-        // An unconfirmed identity still fails, before any credential.
         options.remove(QStringLiteral("host_key"));
         interactive.insert(QStringLiteral("options"), options);
         probe.verify(interactive, credentials(QString()), QString(), QStringLiteral("files"));
         QTRY_COMPARE(failed.count(), 1);
         QCOMPARE(probe.error(), NetVfsProbe::ErrorCode::ServerIdentityUnknown);
 
-        // Never for backups.
         probe.verify(interactive, credentials(QString()),
                      QStringLiteral("b"), QStringLiteral("backup"));
         QTRY_COMPARE(failed.count(), 2);
@@ -638,8 +629,6 @@ private slots:
 
     void verifyAccountDefaultSession()
     {
-        // The production factory (AccountSession::open) on an unknown account
-        // fails while loading, before signond is involved.
         NetVfsProbe probe;
         QSignalSpy failed(&probe, &NetVfsProbe::failed);
         probe.verifyAccount(424242);

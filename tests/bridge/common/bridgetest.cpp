@@ -20,8 +20,6 @@ const char ObjectPath[] = "/org/netvfs/Bridge";
 const char Interface[] = "org.netvfs.Bridge1";
 
 namespace {
-
-// The consumer the bridge serves and the time it stays without a client.
 const char ConsumerId[] = "test";
 const char IdleExitMs[] = "2000";
 
@@ -37,9 +35,6 @@ bool spin(const std::function<bool()> &done, int timeoutMs)
     return true;
 }
 
-// A stream socket listens at `path`: socket file exists after bind(), before
-// listen(), and a connect in between is refused. /proc/net/unix rows: Num
-// RefCount Protocol Flags Type St Inode Path; __SO_ACCEPTCON 0x10000.
 bool listening(const QString &path)
 {
     QFile table(QStringLiteral("/proc/net/unix"));
@@ -62,8 +57,6 @@ bool writeFile(const QString &path, const QByteArray &content)
     return f.open(QIODevice::WriteOnly | QIODevice::Truncate) && f.write(content) == content.size();
 }
 
-// An answer of netvfs-accounts that reports success: QDataStream
-// Qt_5_6, error 0 and a null message, then `payload`.
 QByteArray helperAnswer(const std::function<void(QDataStream &)> &payload = nullptr)
 {
     QByteArray bytes;
@@ -75,15 +68,13 @@ QByteArray helperAnswer(const std::function<void(QDataStream &)> &payload = null
     return bytes;
 }
 
-// The connection parameters of account 1: provider, host, port, user name,
-// options, connect and request timeout.
 void writeAccountParams(QDataStream &stream)
 {
     stream << QStringLiteral("fake") << QStringLiteral("fake.example") << qint32(0) << QStringLiteral("user")
            << QVariantMap() << qint32(0) << qint32(0);
 }
 
-} // namespace
+}
 
 
 TestClient::TestClient(const QString &address, QObject *parent)
@@ -208,8 +199,6 @@ QProcessEnvironment bridgeEnvironment()
 #ifdef NETVFS_TEST_BRIDGE_PRELOAD
     env.insert(QStringLiteral("LD_PRELOAD"), QStringLiteral(NETVFS_TEST_BRIDGE_PRELOAD));
 #endif
-    // Not socket-activated, and no session bus: no consent notification, no
-    // account change signals.
     env.remove(QStringLiteral("LISTEN_PID"));
     env.remove(QStringLiteral("LISTEN_FDS"));
     env.remove(QStringLiteral("DBUS_SESSION_BUS_ADDRESS"));
@@ -239,13 +228,10 @@ bool BridgeProcess::writeAccountsHelper() const
     const QString folder = m_dir.filePath(QStringLiteral("helper"));
     const QString script = folder + QStringLiteral("/netvfs-accounts");
     return writeFile(folder + QStringLiteral("/list"), helperAnswer([](QDataStream &s) {
-               // One account: id, provider, display name, the parameters,
-               // files root, attention.
                s << qint32(1) << qint32(1) << QStringLiteral("fake") << QStringLiteral("Fake 1");
                writeAccountParams(s);
                s << QStringLiteral("") << qint32(0);
            }))
-        // credentials id 0 with an optional secret, so no signond.
         && writeFile(folder + QStringLiteral("/files-1"), helperAnswer([](QDataStream &s) {
                writeAccountParams(s);
                s << quint32(0) << true;
@@ -275,7 +261,6 @@ bool BridgeProcess::writeFiles() const
         && writeFile(m_dir.filePath(QStringLiteral("config/netvfs/bridge.conf")), consent)
         && QDir().mkpath(m_dir.filePath(QStringLiteral("home")))
         && writeAccountsHelper()
-        // The account's user, with no secret (see writeAccountsHelper).
         && writeFile(m_dir.filePath(QStringLiteral("seed")), m_seed + "credentials user\n");
 }
 
@@ -406,7 +391,7 @@ bool writeBasic(WireWriter &w, char type, const QJsonValue &value)
     }
 }
 
-} // namespace
+}
 
 bool writeJson(WireWriter &w, const QByteArray &signature, const QJsonValue &value)
 {
@@ -535,5 +520,5 @@ bool matchJson(const QJsonValue &expected, const QJsonValue &actual, QHash<QStri
     return false;
 }
 
-} // namespace BridgeTest
-} // namespace NetVfs
+}
+}

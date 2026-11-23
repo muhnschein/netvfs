@@ -9,9 +9,6 @@
 #include <functional>
 
 namespace NetVfs {
-
-// Receiver for one asynchronous D-Bus call (QDBusConnection::callWithCallback()). Runs its callback
-// at most once, for the reply or the error, then reports itself delivered.
 class ReplyHandler : public QObject
 {
     Q_OBJECT

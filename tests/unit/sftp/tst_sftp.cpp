@@ -1,7 +1,4 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-// The SFTP plugin of the build tree, through BackendLoader as every consumer
-// reaches it: the SSH key tools of its root object and the
-// connection failures that need no SSH server.
 #include "backendloader.h"
 #include "sshkeys.h"
 
@@ -26,7 +23,7 @@ char *toString(const NetVfs::Error &error)
 {
     return qstrdup(qPrintable(NetVfs::errorName(error)));
 }
-} // namespace QTest
+}
 
 namespace {
 
@@ -49,8 +46,6 @@ QByteArray wireString(const QByteArray &data)
     return wireUint32(static_cast<quint32>(data.size())) + data;
 }
 
-// An OpenSSH private key container (PROTOCOL.key) whose first public key
-// has the given type; the private section is filler.
 QByteArray openSshKeyText(const QByteArray &type)
 {
     QByteArray binary("openssh-key-v1", 15);
@@ -64,8 +59,6 @@ QByteArray openSshKeyText(const QByteArray &type)
     return text + "-----END OPENSSH PRIVATE KEY-----\n";
 }
 
-// A TCP peer on 127.0.0.1, in its own thread, that accepts one connection,
-// sends `greeting` and then reads until the client goes away.
 class ScriptedPeer : public QThread
 {
 public:
@@ -111,7 +104,6 @@ private:
     std::atomic<bool> m_stop { false };
 };
 
-// Banner plus a KEXINIT whose key exchange no client supports.
 QByteArray unsupportedKexGreeting()
 {
     QByteArray payload(1, '\x14');
@@ -141,7 +133,7 @@ ConnectionParams localParams(int port)
     return params;
 }
 
-} // namespace
+}
 
 class TestSftp : public QObject
 {
@@ -172,8 +164,6 @@ private:
         return !QStandardPaths::findExecutable(QString::fromLatin1(program)).isEmpty();
     }
 
-    // A new key file of ssh-keygen (and its .pub); false when ssh-keygen
-    // fails (callers skip only when it is not installed).
     bool keygen(const QString &name, const QStringList &arguments, const QByteArray &passphrase)
     {
         QFile::remove(m_dir.filePath(name));
@@ -256,8 +246,6 @@ private slots:
         QCOMPARE(described.algorithm, first.algorithm);
         QVERIFY(m_tools->generate(nullptr).ok());
 
-        // the fingerprint is the one ssh-keygen prints; ssh-keygen reads
-        // the exported private key, which is not encrypted (stored in signond).
         writeFile(QStringLiteral("generated.pub"), first.publicLine.toLatin1() + '\n');
         writeFile(QStringLiteral("generated"), first.privateKey);
         if (!installed("ssh-keygen"))
@@ -348,7 +336,6 @@ private slots:
             QSKIP("ssh-keygen is not installed");
         QVERIFY(this->keygen(name, keygen, passphrase));
         const QByteArray contents = file(name);
-        // Refused before (and without) the passphrase, and with it.
         for (const QByteArray &given : { QByteArray(), passphrase, QByteArray("wrong") }) {
             SshKeyMaterial key;
             const Result r = m_tools->importKey(contents, given, &key);
@@ -360,9 +347,6 @@ private slots:
         QCOMPARE(m_tools->describe(contents, nullptr).message(), message);
     }
 
-    // A key whose passphrase protection would take too long to open is
-    // refused before any key derivation runs, whatever the passphrase (the
-    // right one is correct-horse).
     void costlyKeys_data()
     {
         QTest::addColumn<QString>("fixture");
@@ -429,7 +413,6 @@ private slots:
         QCOMPARE(r.error(), Error::Unsupported);
         QCOMPARE(r.message(), QStringLiteral("This is a public key; choose the private key file"));
 
-        // Looks like a key, but is none.
         r = m_tools->importKey(openSshKeyText("ssh-ed25519"), QByteArray(), &key);
         QCOMPARE(r.error(), Error::Unsupported);
         r = m_tools->describe("not a key", &key);
@@ -465,7 +448,7 @@ private slots:
         QCOMPARE(b->freeSpace(QStringLiteral("x"), &bytes).error(), Error::Internal);
         QCOMPARE(b->read(QStringLiteral("x"), 0, 1, &data).error(), Error::Internal);
         QCOMPARE(b->keepAlive().error(), Error::Internal);
-        QVERIFY(b->capabilities().flags.isEmpty());   // valid after authenticate()
+        QVERIFY(b->capabilities().flags.isEmpty());
         QCOMPARE(b->setAttributes(QStringLiteral("x"), AttributeChanges()).error(), Error::Internal);
         QString target;
         QCOMPARE(b->readLink(QStringLiteral("x"), &target).error(), Error::Internal);
@@ -478,7 +461,6 @@ private slots:
         QCOMPARE(b->openRead(QStringLiteral("x"), &reader).error(), Error::Internal);
         QVERIFY(!reader);
         QCOMPARE(b->copy(QStringLiteral("x"), QStringLiteral("y"), CopyOptions()).error(), Error::Internal);
-        // Checksums are computed locally (SFTP reports no Checksums).
         QCOMPARE(b->checksum(QStringLiteral("x"), QStringLiteral("sha256"), &data).error(), Error::Unsupported);
         SpaceInfo space;
         QCOMPARE(b->spaceInfo(QStringLiteral("x"), &space).error(), Error::Internal);
@@ -531,8 +513,7 @@ private slots:
 
     void timeout()
     {
-        // the connect timeout applies while waiting for the banner.
-        QTcpServer silent;   // listens, never accepts or answers
+        QTcpServer silent;
         QVERIFY(silent.listen(QHostAddress::LocalHost));
         auto b = backend();
         ConnectionParams params = localParams(silent.serverPort());
@@ -546,8 +527,6 @@ private slots:
 
     void noCommonAlgorithm()
     {
-        // no common algorithm is SecurityPolicy, naming the list and
-        // what the server offers.
         const ScriptedPeer peer(unsupportedKexGreeting());
         auto b = backend();
         const Result r = b->connect(localParams(peer.port()), nullptr);

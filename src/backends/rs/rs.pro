@@ -1,9 +1,4 @@
 # SPDX-License-Identifier: LGPL-2.1-or-later
-# libnetvfs-rs.so: the Rust backends (rust/netvfs-backend), loaded with dlopen by plugins that
-# include rs.pri. cargo builds it with profile rs-release: unwinds a panic (reported as Internal;
-# binaries abort), fat LTO. Its only export is nvr_get (check-rs-lib.sh).
-# Variables as in src/bridge/rust/rust.pro: NETVFS_CARGO, NETVFS_RUST_TARGET, NETVFS_CARGO_FLAGS,
-# NETVFS_RUST_PREBUILT (library as CI cross-built it, tools/ci/cross-build.sh, installed as is).
 include(../../../common.pri)
 
 TEMPLATE = aux
@@ -29,7 +24,6 @@ isEmpty(NETVFS_RUST_PREBUILT) {
         cp -f $$shell_quote($$NETVFS_RUST_PREBUILT/libnetvfs-rs.so) $$shell_quote($$RS_LIB)
 }
 
-# cargo decides what is out of date; always ask it.
 rslib.target = rs-library
 rslib.depends = FORCE
 rslib.commands = $$RS_COMMANDS

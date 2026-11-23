@@ -9,8 +9,6 @@ use std::marker::{PhantomData, PhantomPinned};
 /// `NVB_FFI_ENTRY`, NUL-terminated for `dlsym`.
 pub const NVB_FFI_ENTRY: &[u8] = b"nvb_ffi_get\0";
 
-/// An opaque C++ object behind a pointer: neither constructible, nor
-/// `Send`, `Sync` or `Unpin` (the nomicon's pattern).
 macro_rules! opaque {
     ($($(#[$doc:meta])* $name:ident),* $(,)?) => {$(
         $(#[$doc])*

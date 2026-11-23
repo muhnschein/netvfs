@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-// Peer checks with a fake /proc in a temporary folder.
 #![allow(clippy::assertions_on_result_states, clippy::arithmetic_side_effects)]
 
 use super::{
@@ -14,7 +13,6 @@ use std::os::unix::net::UnixStream;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI32, Ordering};
 
-/// A fake /proc.
 #[derive(Clone)]
 struct FakeProc(Arc<TempDir>);
 
@@ -36,7 +34,6 @@ impl FakeProc {
     }
 
     fn set_start_time(&self, pid: i32, start_time: i64) {
-        // Field 22 is starttime; comm has spaces and parentheses on purpose.
         let mut stat = format!("{pid} (we (ird) name) S");
         for _ in 4..=21 {
             stat.push_str(" 0");
@@ -125,7 +122,6 @@ fn executable() {
 
 #[test]
 fn executable_copy() {
-    // Sailjail (firejail --private-bin) runs a copy of the registered executable from a tmpfs. Larger than one comparison chunk.
     let proc = FakeProc::new();
     let dir = TempDir::new();
     let mut content = b"\x7fELF".to_vec();
@@ -180,7 +176,6 @@ fn copy_pid_reuse() {
     let (p, c) = (proc.clone(), copy.clone());
     env.after_exe_read = Some(Box::new(move || p.add_process(100, &c, 51)));
     assert!(denied(check(&registered, env)));
-    // Content comes from the file opened inside the start-time window, not a second look at /proc/<pid>/exe.
     proc.add_process(100, &other, 50);
     let mut env = fake_environment(&proc, 4242, 100, false);
     let (p, c) = (proc.clone(), copy.clone());
@@ -237,7 +232,6 @@ fn pidfd() {
     };
     check(&exe, with_pidfd(100)).unwrap();
     assert_eq!(check(&exe, with_pidfd(-1)).unwrap_err().message, "peer process 100 exited during the check");
-    // SO_PEERPIDFD: credentials' pidfd is used, pidfd_open is not.
     let proc = FakeProc::new();
     proc.add_process(100, &exe, 50);
     let mut env = fake_environment(&proc, 4242, 100, true);

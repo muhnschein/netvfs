@@ -47,8 +47,6 @@ Result verifyAccess(Backend *backend, const QString &dir, qint64 *freeBytes)
     if (!r.ok())
         return r;
 
-    // Best effort: some servers drop the connection on this query (Samba with quotas on ZFS); free
-    // space then unknown, not a failed verify.
     qint64 available = -1;
     r = backend->freeSpace(target, &available);
     if (r.error() == Error::Canceled)

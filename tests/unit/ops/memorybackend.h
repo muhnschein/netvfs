@@ -8,16 +8,12 @@
 #include <functional>
 #include <map>
 
-// A self-contained in-memory v2 Backend for the Ops tests: folders, files,
-// symlinks (resolved like a file system, including through path components),
-// batched listings, fault injection and an operation log. Single-threaded
-// like every backend, except cancel() which is thread-safe.
 class MemoryBackend : public NetVfs::Backend
 {
 public:
     struct Node {
         NetVfs::EntryType type = NetVfs::EntryType::File;
-        QByteArray data;                 // file contents unless discarded
+        QByteArray data;
         qint64 size = 0;
         quint64 hash = 0;
         QString target;
@@ -43,11 +39,11 @@ public:
     QStringList log;
     std::function<NetVfs::Result(const QString &op, const QString &path)> intercept;
     bool listSymlinksAsTargets = false;
-    bool discardData = false;            // uploads keep only size and hash
+    bool discardData = false;
     qint64 chunkSize = 16 * 1024;
-    int chunkDelayUs = 0;                // sleep per uploaded chunk
-    qint64 failDownloadAfter = -1;       // ConnectionLost after this many bytes
-    qint64 failUploadAfter = -1;         // NoSpace after this many bytes
+    int chunkDelayUs = 0;
+    qint64 failDownloadAfter = -1;
+    qint64 failUploadAfter = -1;
     std::atomic<qint64> bytesWritten { 0 };
     std::atomic<qint64> bytesRead { 0 };
 
@@ -82,7 +78,7 @@ private:
     bool isEmptyDir(const QString &key) const;
     NetVfs::Result checkWritable(const QString &key, const NetVfs::WriteOptions &options);
 
-    std::map<QString, Node> m_nodes;     // key: normalized path without a leading '/'
+    std::map<QString, Node> m_nodes;
     std::atomic<bool> m_canceled { false };
 };
 

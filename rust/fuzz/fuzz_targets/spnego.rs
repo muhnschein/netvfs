@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! SPNEGO tokens raw: first SESSION_SETUP response and the final one after a well-formed challenge. No panic; final token accepted only with a valid MIC.
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
@@ -32,7 +31,6 @@ fn av(id: u16, value: &[u8]) -> Vec<u8> {
     v
 }
 
-/// MS-NLMP 4.2.4.3 CHALLENGE_MESSAGE in a NegTokenResp.
 fn challenge() -> Vec<u8> {
     const FLAGS: u32 = 0xe28a_8233;
     let name = utf16("Server");

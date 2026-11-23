@@ -12,7 +12,6 @@ use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 
 const RUNTIME_ROOT: &str = "/run/user";
-/// Signals 1 to 64 (glibc's `NSIG` is 65).
 const NSIG: i32 = 65;
 
 fn warn(what: &str) {
@@ -51,7 +50,6 @@ pub fn close_inherited_descriptors() {
     close_from(3);
 }
 
-/// Closes every descriptor from `lowest` on, by /proc listing.
 fn close_from(lowest: i32) {
     let Ok(entries) = std::fs::read_dir("/proc/self/fd") else { return };
     let open: Vec<i32> = entries
@@ -71,10 +69,9 @@ pub fn reset_process_state() {
     // SAFETY: plain process-state calls on valid arguments.
     unsafe {
         libc::umask(0o077);
-        // Ignored signals and the mask survive exec, handlers do not.
         for sig in 1..NSIG {
             if sig != libc::SIGKILL && sig != libc::SIGSTOP {
-                libc::signal(sig, libc::SIG_DFL); // EINVAL for glibc's own signals
+                libc::signal(sig, libc::SIG_DFL);
             }
         }
         let mut none: libc::sigset_t = std::mem::zeroed();
@@ -229,21 +226,21 @@ pub mod landlock {
     /// Make a symbolic link.
     pub const MAKE_SYM: u64 = 1 << 12;
     /// Move or link a file to another folder.
-    pub const REFER: u64 = 1 << 13; // ABI 2
+    pub const REFER: u64 = 1 << 13;
     /// Truncate a file.
-    pub const TRUNCATE: u64 = 1 << 14; // ABI 3
+    pub const TRUNCATE: u64 = 1 << 14;
     /// Send ioctl to a device file.
-    pub const IOCTL_DEV: u64 = 1 << 15; // ABI 5
+    pub const IOCTL_DEV: u64 = 1 << 15;
 
     /// Bind a TCP port.
-    pub const NET_BIND_TCP: u64 = 1 << 0; // ABI 4
+    pub const NET_BIND_TCP: u64 = 1 << 0;
     /// Connect to a TCP port.
-    pub const NET_CONNECT_TCP: u64 = 1 << 1; // ABI 4
+    pub const NET_CONNECT_TCP: u64 = 1 << 1;
 
     /// Connect to abstract unix sockets outside the domain.
-    pub const SCOPE_ABSTRACT_UNIX_SOCKET: u64 = 1 << 0; // ABI 6
+    pub const SCOPE_ABSTRACT_UNIX_SOCKET: u64 = 1 << 0;
     /// Send signals to processes outside the domain.
-    pub const SCOPE_SIGNAL: u64 = 1 << 1; // ABI 6
+    pub const SCOPE_SIGNAL: u64 = 1 << 1;
 
     /// Every file system right of ABI 1.
     pub const ABI1_FS: u64 = EXECUTE
@@ -279,8 +276,8 @@ pub mod landlock {
     #[repr(C)]
     pub(super) struct RulesetAttr {
         pub(super) handled_access_fs: u64,
-        pub(super) handled_access_net: u64, // ABI 4
-        pub(super) scoped: u64,             // ABI 6
+        pub(super) handled_access_net: u64,
+        pub(super) scoped: u64,
     }
 
     #[repr(C, packed)]
@@ -342,7 +339,6 @@ pub struct FilesystemRestriction {
     pub enforced: bool,
 }
 
-/// Syscalls added since Linux 5.1 have one number on every architecture.
 mod nr {
     pub const IO_URING_SETUP: i64 = 425;
     pub const IO_URING_ENTER: i64 = 426;
@@ -362,8 +358,6 @@ mod nr {
     pub const FCHMODAT2: i64 = 452;
 }
 
-/// One rule below `path` for the `access` the ruleset handles. Missing path: no rule. A refused
-/// rule is reported as `label`, never the path (uid, home).
 fn allow_beneath(ruleset: i32, handled: u64, path: &Path, label: &str, mut access: u64) {
     let Some(c) = c_path(path) else { return };
     // SAFETY: a NUL-terminated path; the descriptor is closed below.
@@ -395,7 +389,6 @@ fn allow_beneath(ruleset: i32, handled: u64, path: &Path, label: &str, mut acces
     unsafe { libc::close(fd) };
 }
 
-/// Build-added folders: `coverage` (NETVFS_RUST_COVERAGE_DIR at build) for coverage counters.
 fn build_folders(coverage: Option<&str>) -> Vec<PathBuf> {
     coverage.map(PathBuf::from).into_iter().collect()
 }
@@ -417,11 +410,10 @@ pub fn restrict_filesystem(writable: &[PathBuf], allow_abstract_sockets: bool) -
         )
     };
     if abi <= 0 {
-        return result; // ENOSYS: not built; EOPNOTSUPP: not enabled at boot
+        return result;
     }
     result.abi = i32::try_from(abi).unwrap_or(LANDLOCK_NEWEST_ABI);
     let handled = landlock_access(result.abi, allow_abstract_sockets);
-    // Older kernels take the larger struct if unknown fields are zero.
     let attr = landlock::RulesetAttr {
         handled_access_fs: handled.fs,
         handled_access_net: handled.net,
@@ -446,7 +438,6 @@ pub fn restrict_filesystem(writable: &[PathBuf], allow_abstract_sockets: bool) -
         allow_beneath(ruleset, fs, Path::new(system), "system folder", landlock::READ_ONLY);
     }
     allow_beneath(ruleset, fs, Path::new("/dev/null"), "null device", landlock::NULL_DEVICE);
-    // Uid's own runtime folder, never XDG_RUNTIME_DIR (caller-set).
     allow_beneath(ruleset, fs, &runtime_dir(), "runtime folder", landlock::READ_ONLY);
     for dir in writable {
         allow_beneath(ruleset, fs, dir, "database folder", landlock::READ_WRITE);
@@ -471,7 +462,6 @@ pub fn restrict_filesystem(writable: &[PathBuf], allow_abstract_sockets: bool) -
 #[derive(Debug, Default)]
 pub struct Filter {
     program: Vec<libc::sock_filter>,
-    /// A syscall number over 32 bits was named: `install()` refuses the program.
     broken: bool,
 }
 
@@ -511,7 +501,6 @@ impl Filter {
         self.program.push(libc::sock_filter { code, jt, jf, k });
     }
 
-    /// `JEQ` on syscall `nr`. A number over 32 bits marks the filter broken.
     fn jump_number(&mut self, nr: i64, jt: u8, jf: u8) {
         let Ok(k) = u32::try_from(nr) else {
             self.broken = true;
@@ -606,11 +595,11 @@ impl Filter {
 }
 
 #[cfg(target_arch = "x86_64")]
-const NATIVE_ARCH: Option<u32> = Some(0xc000_003e); // AUDIT_ARCH_X86_64
+const NATIVE_ARCH: Option<u32> = Some(0xc000_003e);
 #[cfg(target_arch = "aarch64")]
-const NATIVE_ARCH: Option<u32> = Some(0xc000_00b7); // AUDIT_ARCH_AARCH64
+const NATIVE_ARCH: Option<u32> = Some(0xc000_00b7);
 #[cfg(all(target_arch = "arm", target_endian = "little"))]
-const NATIVE_ARCH: Option<u32> = Some(0x4000_0028); // AUDIT_ARCH_ARM
+const NATIVE_ARCH: Option<u32> = Some(0x4000_0028);
 #[cfg(not(any(
     target_arch = "x86_64",
     target_arch = "aarch64",
@@ -618,7 +607,6 @@ const NATIVE_ARCH: Option<u32> = Some(0x4000_0028); // AUDIT_ARCH_ARM
 )))]
 const NATIVE_ARCH: Option<u32> = None;
 
-/// Syscalls the helper never needs; would widen what code inside it could do with the group.
 fn denied_syscalls() -> Vec<i64> {
     let mut list = vec![
         libc::SYS_execve,
@@ -684,16 +672,15 @@ pub fn syscall_filter(native_arch: u32) -> Filter {
     let mut f = Filter::default();
     f.load_arch();
     f.jump(bpf::JMP_JEQ_K, native_arch, 1, 0);
-    f.ret(Filter::DENY); // another ABI's numbers would mean other syscalls
+    f.ret(Filter::DENY);
     f.load_number();
     if cfg!(target_arch = "x86_64") {
-        f.jump(bpf::JMP_JGE_K, 0x4000_0000, 0, 1); // x32
+        f.jump(bpf::JMP_JGE_K, 0x4000_0000, 0, 1);
         f.ret(Filter::DENY);
     }
     for nr in denied_syscalls() {
         f.on(nr, Filter::DENY);
     }
-    // Arguments behind a pointer are invisible to the filter.
     f.on(nr::CLONE3, Filter::NO_SYS);
     f.on(nr::OPENAT2, Filter::NO_SYS);
     f.deny_argument_bits(libc::SYS_clone, 0, NEW_NAMESPACES.cast_unsigned());
@@ -745,12 +732,12 @@ mod tests {
         let levels: Vec<_> = (0..=LANDLOCK_NEWEST_ABI + 2).map(|abi| landlock_access(abi, false)).collect();
         assert_eq!(levels[0], LandlockAccess::default());
         assert!(levels[1].fs != 0 && levels[1].net == 0 && levels[1].scoped == 0);
-        assert!(widens(levels[1].fs, levels[2].fs)); // renames and links
-        assert!(widens(levels[2].fs, levels[3].fs)); // truncation
-        assert_eq!(levels[4].fs, levels[3].fs); // TCP
+        assert!(widens(levels[1].fs, levels[2].fs));
+        assert!(widens(levels[2].fs, levels[3].fs));
+        assert_eq!(levels[4].fs, levels[3].fs);
         assert!(levels[3].net == 0 && levels[4].net != 0);
-        assert!(widens(levels[4].fs, levels[5].fs)); // device ioctls
-        assert!(levels[5].scoped == 0 && levels[6].scoped != 0); // signals, abstract sockets
+        assert!(widens(levels[4].fs, levels[5].fs));
+        assert!(levels[5].scoped == 0 && levels[6].scoped != 0);
         for level in &levels[7..] {
             assert_eq!(*level, levels[6]);
         }
@@ -759,12 +746,9 @@ mod tests {
         assert_eq!(landlock_access(5, true), levels[5]);
         assert_eq!(levels[1].fs, landlock::ABI1_FS);
         assert_eq!(levels[6].net, landlock::NET_BIND_TCP | landlock::NET_CONNECT_TCP);
-        // Exactly: with an abstract bus only the signal scope is left.
         let scopes = landlock::SCOPE_SIGNAL | landlock::SCOPE_ABSTRACT_UNIX_SOCKET;
         assert_eq!(levels[6].scoped, scopes);
         assert_eq!(abstract_bus, LandlockAccess { scoped: landlock::SCOPE_SIGNAL, ..levels[6] });
-        // ABI 1 rights are bits 0 to 12; a file rule may hold execute, write, read, truncate,
-        // device ioctl.
         assert_eq!(landlock::ABI1_FS, 0x1fff);
         assert_eq!(landlock::FILE_RIGHTS, 0xc007);
         assert_eq!(levels[6].fs, 0xffff);
@@ -787,8 +771,8 @@ mod tests {
         std::os::unix::fs::symlink(&dir, &link).unwrap();
         assert!(owned_directory(&dir, uid()));
         assert!(!owned_directory(&dir, uid().wrapping_add(1)));
-        assert!(!owned_directory(&file, uid())); // no folder
-        assert!(!owned_directory(&link, uid())); // a link to one
+        assert!(!owned_directory(&file, uid()));
+        assert!(!owned_directory(&link, uid()));
         assert!(!owned_directory(&dir.join("missing"), uid()));
         std::fs::remove_dir_all(&dir).unwrap();
     }
@@ -883,7 +867,6 @@ mod tests {
         }
         assert_eq!(user_ids(c"netvfs-no-such-user"), None);
         assert_eq!(user_ids(c""), None);
-        // Only Sailfish OS has the user.
         assert_eq!(privileged_ids(), passwd_ids("privileged"));
     }
 }

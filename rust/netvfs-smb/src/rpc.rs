@@ -41,36 +41,22 @@ const PTYPE_BIND_ACK: u8 = 12;
 const PTYPE_BIND_NAK: u8 = 13;
 const PFC_FIRST_FRAG: u8 = 0x01;
 const PFC_LAST_FRAG: u8 = 0x02;
-/// Little-endian integers, ASCII, IEEE floats.
 const DREP: [u8; 4] = [0x10, 0, 0, 0];
-/// The common header (C706 12.6.3.1).
 const COMMON_LEN: usize = 16;
-/// A response PDU's header: the common one, alloc_hint, p_cont_id,
-/// cancel_count, reserved.
 const RESPONSE_LEN: usize = 24;
-/// NetrShareEnum.
 const OPNUM_NETR_SHARE_ENUM: u16 = 15;
 const BIND_CALL: u32 = 1;
 const ENUM_CALL: u32 = 2;
-/// A non-null unique pointer.
 const REFERENT: u32 = 0x0002_0000;
-/// The pipe's DesiredAccess: read, write, attributes, read control,
-/// synchronize.
 const PIPE_ACCESS: u32 = 0x0012_019F;
-/// What one pipe READ asks for.
 const READ_LEN: usize = MAX_FRAG;
-/// Bytes read from the pipe for one reply at most.
 const MAX_READ_TOTAL: usize = MAX_STUB + MAX_STUB / 8;
-/// WERROR ERROR_ACCESS_DENIED.
 const WERR_ACCESS_DENIED: u32 = 5;
 
-/// An interface or transfer syntax: UUID (NDR byte order) and version.
 type Syntax = ([u8; 16], u32);
 
-/// srvsvc 4b324fc8-1670-01d3-1278-5a47bf6ee188 v3.0.
 const SRVSVC: Syntax =
     ([0xc8, 0x4f, 0x32, 0x4b, 0x70, 0x16, 0xd3, 0x01, 0x12, 0x78, 0x5a, 0x47, 0xbf, 0x6e, 0xe1, 0x88], 3);
-/// NDR 8a885d04-1ceb-11c9-9fe8-08002b104860 v2.
 const NDR: Syntax =
     ([0x04, 0x5d, 0x88, 0x8a, 0xeb, 0x1c, 0xc9, 0x11, 0x9f, 0xe8, 0x08, 0x00, 0x2b, 0x10, 0x48, 0x60], 2);
 
@@ -95,10 +81,9 @@ impl ShareInfo {
 
 fn header(w: &mut Writer, ptype: u8, call_id: u32) {
     w.u8(5).u8(0).u8(ptype).u8(PFC_FIRST_FRAG | PFC_LAST_FRAG).bytes(&DREP);
-    w.u16(0).u16(0).u32(call_id); // frag_length (set by `finish`), auth_length
+    w.u16(0).u16(0).u32(call_id);
 }
 
-/// Sets frag_length.
 fn finish(w: Writer) -> Result<Vec<u8>> {
     let mut pdu = w.into_vec();
     let len = to_u16(pdu.len())?.to_le_bytes();
@@ -120,15 +105,14 @@ pub fn bind_request() -> Result<Vec<u8>> {
     let mut w = Writer::new();
     header(&mut w, PTYPE_BIND, BIND_CALL);
     let frag = to_u16(MAX_FRAG)?;
-    w.u16(frag).u16(frag).u32(0); // max_xmit_frag, max_recv_frag, assoc_group_id
-    w.u8(1).u8(0).u16(0); // one presentation context
-    w.u16(0).u8(1).u8(0); // p_cont_id 0, one transfer syntax
+    w.u16(frag).u16(frag).u32(0);
+    w.u8(1).u8(0).u16(0);
+    w.u16(0).u8(1).u8(0);
     syntax(&mut w, &SRVSVC);
     syntax(&mut w, &NDR);
     finish(w)
 }
 
-/// A conformant varying string with its terminating NUL.
 fn ndr_string(w: &mut Writer, text: &str) -> Result<()> {
     let mut units: Vec<u16> = text.encode_utf16().collect();
     units.push(0);
@@ -138,7 +122,7 @@ fn ndr_string(w: &mut Writer, text: &str) -> Result<()> {
         w.u16(*u);
     }
     if units.len() % 2 == 1 {
-        w.u16(0); // to 4 bytes
+        w.u16(0);
     }
     Ok(())
 }
@@ -149,12 +133,12 @@ fn ndr_string(w: &mut Writer, text: &str) -> Result<()> {
 /// A server name too long for the PDU.
 pub fn share_enum_request(host: &str) -> Result<Vec<u8>> {
     let mut stub = Writer::new();
-    stub.u32(REFERENT); // ServerName
+    stub.u32(REFERENT);
     ndr_string(&mut stub, &format!(r"\\{host}"))?;
-    stub.u32(1).u32(1).u32(REFERENT); // Level, union switch, the container
-    stub.u32(0).u32(0); // EntriesRead, Buffer (null)
-    stub.u32(u32::MAX); // PreferedMaximumLength
-    stub.u32(REFERENT).u32(0); // ResumeHandle
+    stub.u32(1).u32(1).u32(REFERENT);
+    stub.u32(0).u32(0);
+    stub.u32(u32::MAX);
+    stub.u32(REFERENT).u32(0);
     let stub = stub.into_vec();
     if stub.len() > MAX_FRAG.saturating_sub(RESPONSE_LEN) {
         return Err(protocol("the server name is too long for the share list request"));
@@ -165,7 +149,6 @@ pub fn share_enum_request(host: &str) -> Result<Vec<u8>> {
     finish(w)
 }
 
-/// The common header of a PDU.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Common {
     ptype: u8,
@@ -174,9 +157,6 @@ struct Common {
     call_id: u32,
 }
 
-/// The common header at the start of `pdu`; refuses another version, a
-/// byte order other than little-endian, authentication data and a
-/// fragment shorter than its header.
 fn common(pdu: &[u8]) -> Result<Common> {
     let mut r = Reader::new(pdu);
     let (major, minor) = (r.u8()?, r.u8()?);
@@ -200,7 +180,6 @@ fn common(pdu: &[u8]) -> Result<Common> {
     Ok(Common { ptype, flags, frag_len, call_id })
 }
 
-/// A fault or reject as an error.
 fn refused(pdu: &[u8], c: &Common, what: &str) -> Error {
     if c.ptype == PTYPE_FAULT {
         let mut r = Reader::new(pdu);
@@ -234,7 +213,7 @@ pub fn check_bind_ack(pdu: &[u8]) -> Result<()> {
     }
     let mut r = Reader::new(pdu);
     r.seek(COMMON_LEN)?;
-    r.skip(8)?; // max_xmit_frag, max_recv_frag, assoc_group_id
+    r.skip(8)?;
     let port_len = usize::from(r.u16()?);
     r.skip(port_len)?;
     r.seek(r.pos().next_multiple_of(4))?;
@@ -244,7 +223,7 @@ pub fn check_bind_ack(pdu: &[u8]) -> Result<()> {
         return Err(protocol("an RPC bind_ack without results"));
     }
     let result = r.u16()?;
-    r.skip(2)?; // reason
+    r.skip(2)?;
     let transfer: Syntax = (r.array()?, r.u32()?);
     if result != 0 {
         return Err(Error::Local(Status::new(
@@ -265,7 +244,6 @@ pub struct Reassembly {
     pending: Vec<u8>,
     stub: Vec<u8>,
     fragments: usize,
-    /// Bytes fed, headers included: at most [`MAX_READ_TOTAL`].
     fed: usize,
     done: bool,
 }
@@ -342,7 +320,6 @@ impl Reassembly {
     }
 }
 
-/// NDR reader: 4-byte alignment from the stub's start.
 struct Ndr<'a>(Reader<'a>);
 
 impl Ndr<'_> {
@@ -360,7 +337,6 @@ impl Ndr<'_> {
         Ok(n)
     }
 
-    /// A conformant varying string; the terminating NUL dropped.
     fn string(&mut self) -> Result<Vec<u16>> {
         let max = self.count(MAX_STRING_UNITS, "characters in a string")?;
         let offset = self.u32()?;
@@ -377,7 +353,6 @@ impl Ndr<'_> {
     }
 }
 
-/// shi1_netname, shi1_type and shi1_remark as sent.
 type RawShare = (Option<Vec<u16>>, u32, Option<Vec<u16>>);
 
 /// Decodes the stub of a NetrShareEnum level 1 response (MS-SRVS
@@ -401,7 +376,6 @@ pub fn decode_share_enum(stub: &[u8]) -> Result<Vec<ShareInfo>> {
             if max != entries {
                 return Err(protocol("the share list's counts differ"));
             }
-            // 12 bytes per element, checked before the vector is made.
             if r.0.remaining() < max.saturating_mul(12) {
                 return Err(protocol("the share list is shorter than its count"));
             }
@@ -418,9 +392,9 @@ pub fn decode_share_enum(stub: &[u8]) -> Result<Vec<ShareInfo>> {
             return Err(protocol("a share list without its entries"));
         }
     }
-    r.u32()?; // TotalEntries
+    r.u32()?;
     if r.u32()? != 0 {
-        r.u32()?; // ResumeHandle
+        r.u32()?;
     }
     match r.u32()? {
         0 => {}
@@ -448,7 +422,6 @@ pub fn decode_share_enum(stub: &[u8]) -> Result<Vec<ShareInfo>> {
         .collect())
 }
 
-/// The pipe, open on IPC$.
 struct Pipe<'a> {
     conn: &'a Conn,
     tree: &'a Tree,
@@ -456,8 +429,6 @@ struct Pipe<'a> {
 }
 
 impl Pipe<'_> {
-    /// One IOCTL transceive: `pdu` in, the start of the reply out
-    /// (BUFFER_OVERFLOW: more to READ).
     async fn transceive(&self, pdu: &[u8], cancel: &CancelToken) -> Result<Vec<u8>> {
         let body = ioctl_request(FSCTL_PIPE_TRANSCEIVE, &self.file_id, pdu, MAX_FRAG)?;
         let resp = self.conn.call(self.tree.target(), Element::new(Command::Ioctl, body), cancel).await?;
@@ -477,7 +448,6 @@ impl Pipe<'_> {
         Ok(data.to_vec())
     }
 
-    /// A whole call: `pdu` out, the reply's fragments in.
     async fn call(&self, pdu: &[u8], cancel: &CancelToken) -> Result<Vec<u8>> {
         let mut reply = Reassembly::new();
         reply.feed(&self.transceive(pdu, cancel).await?)?;
@@ -496,9 +466,6 @@ impl Pipe<'_> {
     }
 }
 
-/// Whether the reply to the bind in `pdu` is still short of its fragment.
-/// A bind_ack fits one fragment: beyond [`MAX_FRAG`] nothing more is read,
-/// and [`check_bind_ack`] reports what is there.
 fn bind_reply_wants_more(pdu: &[u8]) -> Result<bool> {
     if pdu.len() > MAX_FRAG {
         return Ok(false);

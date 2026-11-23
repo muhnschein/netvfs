@@ -34,9 +34,7 @@ pub const IDLE_EXIT_MS: u64 = 30_000;
 const MAX_ID: usize = 64;
 const MAX_VALUE: usize = 1024;
 const MAX_FILE_BYTES: u64 = 16 * 1024;
-/// The generator's `fgets` buffer (`MAX_LINE`), less the NUL.
 const GENERATOR_LINE: usize = 2047;
-/// `MAX_PATH_LENGTH / 2` of the generator.
 const MAX_CONSUMERS_DIR: usize = 2048;
 
 const VARIABLES: [&str; 7] = [
@@ -93,7 +91,6 @@ pub fn is_valid_data_dir(dir: &str) -> bool {
 /// `ConsumerInfo::isValidExecutable`.
 #[must_use]
 pub fn is_valid_executable(executable: &str) -> bool {
-    // The C++ also asks for more than "/": an empty component covers it.
     executable.len() <= MAX_VALUE
         && executable.bytes().all(is_path_char)
         && executable.strip_prefix('/').is_some_and(has_clean_components)
@@ -190,7 +187,6 @@ impl Env {
     }
 }
 
-/// The generator's `consumers_dir()` checks.
 fn is_acceptable_consumers_dir(dir: &[u8]) -> bool {
     dir.first() == Some(&b'/')
         && dir.len() <= MAX_CONSUMERS_DIR
@@ -198,9 +194,7 @@ fn is_acceptable_consumers_dir(dir: &[u8]) -> bool {
         && !dir.split(|b| *b == b'/').any(|part| part == b"..")
 }
 
-/// `qEnvironmentVariableIntValue`: `strtoll` base 0 (leading white space, sign, `0x` hex or `0` octal), whole value, in `int` range.
 fn qt_env_int(value: &[u8]) -> Option<i32> {
-    // Qt refuses what does not fit its buffer.
     if value.len() > 13 {
         return None;
     }
@@ -242,7 +236,6 @@ pub fn load_consumer(env: &Env, id: &str) -> Result<ConsumerInfo, Status> {
     }
     let dir = env.consumers_dir();
     let path = dir.join(format!("{id}.conf"));
-    // The generator reads the file only below the folder's real path.
     let base = dir.canonicalize().map_err(|_e| unreadable(&path))?;
     let resolved = path.canonicalize().map_err(|_e| unreadable(&path))?;
     if resolved.parent().is_none_or(|parent| !parent.starts_with(&base)) {
@@ -295,7 +288,6 @@ fn parse_consumer(content: &[u8], stem: &str) -> Result<ConsumerInfo, &'static s
     for raw in content.split(|b| *b == b'\n') {
         let decoded = String::from_utf8_lossy(raw);
         let line = decoded.trim();
-        // Comments need no rule: their keys would start with '#' or ';', which no field has.
         if line.starts_with('[') {
             in_group = line == "[Consumer]";
             continue;
@@ -331,7 +323,6 @@ fn parse_consumer(content: &[u8], stem: &str) -> Result<ConsumerInfo, &'static s
     Ok(info)
 }
 
-/// The generator's reading of the same file (`parse_consumer`, `validate`): `fgets` lines of at most 2047 bytes, cut at a NUL, trimmed of spaces and tabs; values within its buffers; no control characters in DisplayName.
 fn check_as_generator(content: &[u8], stem: &str) -> Result<(), &'static str> {
     let mut fields: [&[u8]; 4] = [b""; 4];
     let mut in_group = false;

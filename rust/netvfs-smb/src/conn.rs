@@ -41,13 +41,10 @@ use crate::transport::{self, INITIAL_MAX_FRAME};
 
 /// Credits kept in hand: requests ask for enough to return to this.
 pub const CREDIT_TARGET: u32 = 128;
-/// Never count more credits than this.
 const CREDIT_CAP: u32 = 8192;
-/// Interim responses accepted for one request.
 const MAX_INTERIM: u8 = 8;
 /// One credit's worth of payload (MS-SMB2 3.1.5.2).
 pub const CREDIT_UNIT: usize = 65_536;
-/// How long `close` waits for the last frames to go out.
 const CLOSE_WAIT: Duration = Duration::from_millis(500);
 /// Why calls fail after `close`.
 pub const CLOSED: &str = "the connection was closed";
@@ -163,21 +160,17 @@ impl Response {
     }
 }
 
-/// The receive-side keys of the session (shared with the reader, which
-/// checks outside the lock).
 #[derive(Debug)]
 struct Keys {
     signing: SigningKey,
     open: Option<OpenKey>,
 }
 
-/// A request waiting for its final response.
 #[derive(Debug)]
 struct Pending {
     command: u16,
     protect: Protect,
     tree_id: u32,
-    /// `None` once the caller abandoned it.
     tx: Option<oneshot::Sender<Result<Response>>>,
     async_id: Option<u64>,
     interims: u8,
@@ -185,8 +178,6 @@ struct Pending {
     owns_handle: bool,
 }
 
-/// The message ids of a dispatched chain and their receivers (none for a
-/// detached chain).
 type Sent = Vec<(u64, Option<oneshot::Receiver<Result<Response>>>)>;
 
 #[derive(Debug)]
@@ -198,11 +189,9 @@ struct State {
     session_id: u64,
     keys: Option<Arc<Keys>>,
     seal: Option<SealKey>,
-    /// Session.EncryptData: every request is encrypted.
     encrypt: bool,
     established: bool,
     pending: HashMap<u64, Pending>,
-    /// To the writer; `None` once the connection is broken or closed.
     tx: Option<mpsc::UnboundedSender<Vec<u8>>>,
     broken: Option<Error>,
     timeout: Duration,
@@ -213,7 +202,6 @@ struct State {
 #[derive(Debug)]
 struct Shared {
     state: Mutex<State>,
-    /// Credits came back, or the connection broke.
     credits: Notify,
 }
 
@@ -223,11 +211,9 @@ pub struct Conn(Arc<Shared>);
 
 impl Shared {
     fn lock(&self) -> MutexGuard<'_, State> {
-        // Nothing panics while holding the lock; if one did, state is still good enough to fail the calls.
         self.state.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// Ends the connection with `error` (the first reason wins).
     fn break_with(&self, error: Error) {
         self.lock().fail(error);
         self.credits.notify_waiters();
@@ -235,7 +221,6 @@ impl Shared {
 }
 
 impl State {
-    /// What a call sees of a failure: once established, every way of losing the connection is [`Error::Lost`].
     fn failure(&self, error: &Error) -> Error {
         match error {
             Error::Lost(_) => error.clone(),
@@ -271,7 +256,6 @@ impl State {
         }
     }
 
-    /// Credits and message ids a request of `payload` bytes takes.
     fn cost(&self, command: Command, payload: usize) -> Result<u16> {
         if command == Command::Negotiate || payload <= CREDIT_UNIT {
             return Ok(1);
@@ -286,10 +270,6 @@ impl State {
             .map_err(|_overflow| Error::Local(netvfs_vfs::Status::internal("request too large")))
     }
 
-    /// Builds, protects and queues `elements` as one chain. Returns the
-    /// message ids and receivers (none for `detached` requests, whose
-    /// responses are discarded) and the plain chain (for the preauth
-    /// hash). The caller checked that the credits suffice.
     fn dispatch(
         &mut self,
         tree_id: u32,
@@ -304,7 +284,6 @@ impl State {
             return Err(protocol(format!("{total} credits needed, {} granted", self.credits)));
         }
         let first_mid = self.next_mid;
-        // `end` is one past the last id this chain takes: below u64::MAX, NOTIFICATION_MID, which no request may use.
         let end = first_mid.checked_add(u64::from(total)).ok_or_else(|| protocol("message ids used up"))?;
         let left = self.credits.saturating_sub(total);
         let top_up = CREDIT_TARGET.saturating_sub(left);
@@ -382,8 +361,6 @@ impl State {
         Ok((out, chain))
     }
 
-    /// Dispatches `elements` when the credits suffice (`None`: wait for
-    /// more).
     fn try_dispatch(
         &mut self,
         target: Target,
@@ -409,7 +386,6 @@ impl State {
         Ok(None)
     }
 
-    /// Dispatches `elements` if the credits suffice now.
     fn dispatch_if_credits(
         &mut self,
         target: Target,
@@ -427,8 +403,6 @@ impl State {
         Ok(Some((self.dispatch(target.tree_id, protect, elements, false)?.0, protect)))
     }
 
-    /// Takes the credits of a checked response; for a final one, the
-    /// request is done: returns where the response goes (`None`: nowhere).
     fn accept(
         &mut self,
         header: &Header,
@@ -460,8 +434,6 @@ impl State {
         Ok(entry.tx)
     }
 
-    /// SMB2 CANCEL of an outstanding request (MS-SMB2 3.2.4.24): no credit,
-    /// no message id of its own, protected as the request was.
     fn send_cancel(&mut self, mid: u64) {
         let Some(entry) = self.pending.get(&mid) else { return };
         let mut header = Header::request(Command::Cancel, mid, self.session_id, entry.tree_id);
@@ -487,7 +459,6 @@ impl State {
         }
     }
 
-    /// Closes a handle nobody waits for any more, if a credit is at hand.
     fn close_detached(&mut self, tree_id: u32, protect: Protect, file_id: &FileId) {
         if self.credits == 0 {
             return;
@@ -496,7 +467,6 @@ impl State {
     }
 }
 
-/// A failure of the crypto glue.
 fn integrity(what: &str, e: CryptoError) -> Error {
     policy(format!("{what}: {e}"))
 }
@@ -595,13 +565,11 @@ impl Conn {
         self.0.lock().credits
     }
 
-    /// The largest frame the receive task accepts.
     #[cfg(test)]
     pub(crate) fn max_frame(&self) -> usize {
         self.0.lock().max_frame
     }
 
-    /// Sets the credits in hand (tests of other modules).
     #[cfg(test)]
     pub(crate) fn grant(&self, credits: u32) {
         self.0.lock().credits = credits;
@@ -629,7 +597,6 @@ impl Conn {
         Ok(self.send_raw(target, elements, cancel).await?.0)
     }
 
-    /// As [`Self::send`], with the plain chain as sent (for the preauth hash).
     async fn send_raw(
         &self,
         target: Target,
@@ -804,7 +771,6 @@ pub struct Ticket {
     shared: Arc<Shared>,
     mid: u64,
     rx: oneshot::Receiver<Result<Response>>,
-    /// Tree and protection for closing an owned handle nobody took.
     cleanup: Option<(u32, Protect)>,
     done: bool,
 }
@@ -866,22 +832,15 @@ impl Ticket {
     }
 }
 
-// `dispatch` relies on it.
 const _: () = assert!(NOTIFICATION_MID == u64::MAX);
 
-/// Why a wait for a response woke.
 enum Woke {
-    /// The response, or the connection's failure.
     Response(Result<Response>),
-    /// The sender went without sending.
     Closed,
-    /// The token tripped.
     Canceled,
-    /// The deadline passed (an interim response may have moved it).
     Deadline,
 }
 
-/// `d` from now.
 fn after(d: Duration) -> Instant {
     let now = Instant::now();
     now.checked_add(d).unwrap_or(now)
@@ -908,7 +867,6 @@ impl Drop for Ticket {
     }
 }
 
-/// Reads frames until the connection ends.
 async fn read_loop(shared: Arc<Shared>, mut rd: OwnedReadHalf) {
     let error = loop {
         let max = shared.lock().max_frame;
@@ -923,7 +881,6 @@ async fn read_loop(shared: Arc<Shared>, mut rd: OwnedReadHalf) {
     shared.break_with(error);
 }
 
-/// Writes queued frames until the queue closes, then shuts the socket down.
 async fn write_loop(shared: Arc<Shared>, mut wr: OwnedWriteHalf, mut rx: mpsc::UnboundedReceiver<Vec<u8>>) {
     while let Some(frame) = rx.recv().await {
         if let Err(e) = wr.write_all(&frame).await {
@@ -934,8 +891,6 @@ async fn write_loop(shared: Arc<Shared>, mut wr: OwnedWriteHalf, mut rx: mpsc::U
     drop(wr.shutdown().await);
 }
 
-/// One received frame: opened when encrypted, then each message of the
-/// chain in it.
 fn receive(shared: &Shared, frame: Vec<u8>) -> Result<()> {
     let keys = shared.lock().keys.clone();
     let (msg, encrypted) = match frame.get(..4) {
@@ -958,7 +913,6 @@ fn receive(shared: &Shared, frame: Vec<u8>) -> Result<()> {
     Ok(())
 }
 
-/// One received message (a chain element).
 fn response(shared: &Shared, element: &[u8], encrypted: bool, keys: Option<&Keys>) -> Result<()> {
     let header = Header::decode(element)?;
     if !header.is_response() {
@@ -966,7 +920,6 @@ fn response(shared: &Shared, element: &[u8], encrypted: bool, keys: Option<&Keys
     }
     let mid = header.message_id;
     if mid == NOTIFICATION_MID {
-        // Oplock and lease breaks: none is asked for, nothing in them is used (credits included).
         return Ok(());
     }
     let (protect, session_id) = {
@@ -992,7 +945,6 @@ fn response(shared: &Shared, element: &[u8], encrypted: bool, keys: Option<&Keys
     Ok(())
 }
 
-/// The integrity rules of the module comment for one message.
 fn check(
     header: &Header,
     element: &[u8],

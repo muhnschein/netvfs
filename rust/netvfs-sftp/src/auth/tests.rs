@@ -18,12 +18,10 @@ fn target(addr: SocketAddr) -> Target {
     }
 }
 
-/// Gives the replies it holds in turn and records what it was asked.
 #[derive(Default)]
 struct Answers {
     replies: VecDeque<Option<Vec<&'static [u8]>>>,
     asked: Vec<PromptRequest>,
-    /// Tripped while answering.
     cancel: Option<CancelToken>,
 }
 
@@ -72,7 +70,6 @@ fn denied(text: &str) -> Status {
     Status::new(ErrorName::AuthFailed, format!("Sign-in was refused. {text}"))
 }
 
-/// The key secret of a fixture, and the public key the server wants.
 fn key_secret(file: &str) -> (Zeroizing<Vec<u8>>, russh::keys::PublicKey) {
     let path = format!("{}/testdata/keys/{file}", env!("CARGO_MANIFEST_DIR"));
     let key = keys::import(&std::fs::read(path).unwrap(), b"").unwrap();
@@ -103,7 +100,6 @@ fn secrets_must_fit_the_mode() {
         Mode::Password.check_secret(&key),
         auth("The account uses a password, but the stored credential is a key")
     );
-    // A broken key secret is still a key: never sent as a password.
     assert_eq!(
         Mode::Password.check_secret(b"netvfs-key-v1:!!"),
         auth("The account uses a password, but the stored credential is a key")
@@ -165,13 +161,11 @@ fn what_a_round_gets() {
             assert_eq!(round_action(&[], usable, has), Acknowledge);
         }
     }
-    // Without a prompter: whatever the text.
     assert_eq!(round_action(&pass, true, false), AnswerWithSecret);
     assert_eq!(round_action(&code, true, false), AnswerWithSecret);
     assert_eq!(round_action(&pass, false, false), Refuse);
     assert_eq!(round_action(&echo, true, false), Refuse);
     assert_eq!(round_action(&two, true, false), Refuse);
-    // With one: the stored password answers a password prompt only.
     assert_eq!(round_action(&pass, true, true), AnswerWithSecret);
     assert_eq!(round_action(&code, true, true), AskPrompter);
     assert_eq!(round_action(&pass, false, true), AskPrompter);
@@ -222,7 +216,6 @@ async fn password_sign_in() {
     let e = sign_in(&server, b"wrong", Mode::Password).await.unwrap_err();
     assert_eq!(e, denied("The server accepts: publickey, password."));
     assert_eq!(server.take_log(), ["none alice", "password alice wrong"]);
-    // Not UTF-8: refused before anything is sent.
     let e = sign_in(&server, b"\xff", Mode::Password).await.unwrap_err();
     assert_eq!(e.message, "The password is not valid UTF-8 text");
     assert_eq!(server.take_log(), ["none alice"]);
@@ -253,22 +246,18 @@ async fn a_server_that_names_no_method() {
 
 #[tokio::test]
 async fn keyboard_interactive_takes_the_stored_password() {
-    // Only keyboard-interactive, one non-echo prompt.
     let server =
         Server::start(script(vec![KI], vec![Step::Interactive(vec![Round::one("Password: ", "secret")])]))
             .await;
     sign_in(&server, b"secret", Mode::Password).await.unwrap();
     assert_eq!(server.take_log(), ["none alice", "kbd alice", "answers secret"]);
-    // OpenSSH's empty round after PAM is acknowledged.
     let rounds = vec![Round::one("Password: ", "secret"), Round::empty()];
     let server = Server::start(script(vec![KI], vec![Step::Interactive(rounds)])).await;
     sign_in(&server, b"secret", Mode::Password).await.unwrap();
     assert_eq!(server.take_log(), ["none alice", "kbd alice", "answers secret", "answers "]);
-    // The stored password answers one round only.
     let rounds = vec![Round::one("Password: ", "secret"), Round::one("Password again: ", "secret")];
     let server = Server::start(script(vec![KI], vec![Step::Interactive(rounds)])).await;
     assert_eq!(sign_in(&server, b"secret", Mode::Password).await.unwrap_err(), interactive_not_supported());
-    // A wrong password: refused with the methods.
     let server =
         Server::start(script(vec![KI], vec![Step::Interactive(vec![Round::one("Password: ", "secret")])]))
             .await;
@@ -310,8 +299,6 @@ async fn too_many_rounds() {
 
 #[tokio::test]
 async fn key_sign_in() {
-    // Ed25519 and ECDSA keys from the secret.
-    // The P-256 key's scalar has a leading zero byte (31 bytes in the file).
     for (file, algorithm) in [
         ("ed25519-openssh", "ssh-ed25519"),
         ("ecdsa384-openssh", "ecdsa-sha2-nistp384"),
@@ -324,18 +311,15 @@ async fn key_sign_in() {
         assert_eq!(log.first().map(String::as_str), Some("none alice"));
         assert_eq!(log.last().unwrap(), &format!("publickey alice {algorithm}"), "{log:?}");
     }
-    // Another key: refused.
     let (secret, _) = key_secret("ed25519-openssh");
     let (_, other) = key_secret("ecdsa384-openssh");
     let server = Server::start(script(vec![PK, PW], vec![Step::Key(other.clone())])).await;
     let e = sign_in(&server, &secret, Mode::PublicKey).await.unwrap_err();
     assert_eq!(e, denied("The server accepts: publickey, password."));
-    // A server without publickey: nothing is sent.
     let server = Server::start(script(vec![PW], vec![Step::Key(other)])).await;
     let e = sign_in(&server, &secret, Mode::PublicKey).await.unwrap_err();
     assert_eq!(e, denied("The server accepts: password."));
     assert_eq!(server.take_log(), ["none alice"]);
-    // A stored key that cannot be used.
     let server = Server::start(script(vec![PK], vec![])).await;
     let rsa = std::fs::read(format!("{}/testdata/keys/rsa-openssh", env!("CARGO_MANIFEST_DIR"))).unwrap();
     let e = sign_in(&server, &keys::encode_key_secret(&rsa), Mode::PublicKey).await.unwrap_err();
@@ -352,7 +336,6 @@ async fn partial_success_without_a_prompter_fails() {
 
 #[tokio::test]
 async fn password_and_one_time_code() {
-    // The code goes to the prompter, never the stored password.
     let chain =
         vec![Step::Password("secret"), Step::Interactive(vec![Round::one("Verification code: ", "123456")])];
     let server = Server::start(script(vec![PW], chain)).await;
@@ -371,7 +354,6 @@ async fn key_and_prompted_password() {
     assert_eq!(answers.texts(), [["Password: "]]);
     assert!(!answers.asked[0].prompts[0].echo);
     assert_eq!(server.take_log().last().unwrap(), "password alice second");
-    // A partial success that names nothing this app does.
     let (secret, public) = key_secret("ed25519-openssh");
     let (_, other) = key_secret("ecdsa384-openssh");
     let server = Server::start(script(vec![PK], vec![Step::Key(public), Step::Key(other)])).await;
@@ -382,7 +364,6 @@ async fn key_and_prompted_password() {
 
 #[tokio::test]
 async fn keyboard_interactive_after_the_configured_method_failed() {
-    // With a prompter.
     let rounds = vec![Round::one("Password: ", "secret"), Round::one("Code: ", "42")];
     let server = Server::start(script(vec![PW, KI], vec![Step::Interactive(rounds)])).await;
     let mut answers = Answers::with(vec![Some(vec![b"42"])]);
@@ -392,7 +373,6 @@ async fn keyboard_interactive_after_the_configured_method_failed() {
         ["none alice", "password alice secret", "kbd alice", "answers secret", "answers 42"]
     );
     assert_eq!(answers.texts(), [["Code: "]]);
-    // Without a prompter the denial stands.
     let rounds = vec![Round::one("Password: ", "secret")];
     let server = Server::start(script(vec![PW, KI], vec![Step::Interactive(rounds)])).await;
     let e = sign_in(&server, b"secret", Mode::Password).await.unwrap_err();
@@ -412,7 +392,6 @@ async fn the_prompter_can_say_no() {
         assert_eq!(e, interactive_declined(), "{reply:?}");
         assert_eq!(server.take_log(), ["none alice", "kbd alice"], "{reply:?}");
     }
-    // A wrong code: refused by the server.
     let server = Server::start(script(vec![KI], round())).await;
     let mut answers = Answers::with(vec![Some(vec![b"41"])]);
     let e = sign_in_with(&server, b"", Mode::Interactive, Some(&mut answers)).await.unwrap_err();
@@ -422,24 +401,19 @@ async fn the_prompter_can_say_no() {
 #[tokio::test]
 async fn interactive_mode() {
     let rounds = || vec![Step::Interactive(vec![Round::one("Code: ", "42")])];
-    // No secret: keyboard-interactive through the prompter.
     let server = Server::start(script(vec![PW, KI], rounds())).await;
     let mut answers = Answers::with(vec![Some(vec![b"42"])]);
     sign_in_with(&server, b"", Mode::Interactive, Some(&mut answers)).await.unwrap();
     assert_eq!(server.take_log(), ["none alice", "kbd alice", "answers 42"]);
-    // Without a prompter it cannot work.
     let server = Server::start(script(vec![KI], rounds())).await;
     assert_eq!(sign_in(&server, b"", Mode::Interactive).await.unwrap_err(), interactive_not_supported());
-    // Nor without keyboard-interactive.
     let server = Server::start(script(vec![PK], rounds())).await;
     let mut answers = Answers::default();
     let e = sign_in_with(&server, b"", Mode::Interactive, Some(&mut answers)).await.unwrap_err();
     assert_eq!(e, denied("This server only accepts SSH keys (publickey)."));
-    // A stored password goes where the server takes one.
     let server = Server::start(Script::password()).await;
     sign_in(&server, b"secret", Mode::Interactive).await.unwrap();
     assert_eq!(server.take_log(), ["none alice", "password alice secret"]);
-    // The stored password never answers a round in this mode.
     let server =
         Server::start(script(vec![KI], vec![Step::Interactive(vec![Round::one("Password: ", "secret")])]))
             .await;
@@ -478,9 +452,7 @@ async fn cancel_while_the_prompter_answers() {
         &cancel,
     );
     assert_eq!(login.run().await, Err(Status::canceled()));
-    // The answer was not sent.
     assert_eq!(server.take_log(), ["none alice", "kbd alice"]);
-    // Tripped before: nothing is sent at all.
     let mut session = connect(&target(server.addr), &CancelToken::new()).await.unwrap();
     let login =
         Login::new(&mut session, "alice", b"secret", None, Mode::Password, Duration::from_secs(5), &cancel);

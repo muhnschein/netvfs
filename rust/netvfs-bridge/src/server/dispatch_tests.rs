@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-// Restriction lints that only add noise to tests.
 #![allow(clippy::assertions_on_result_states, clippy::arithmetic_side_effects)]
 
 use super::{

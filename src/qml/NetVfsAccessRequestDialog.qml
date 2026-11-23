@@ -3,13 +3,10 @@ import QtQuick 2.0
 import Sailfish.Silica 1.0
 import org.netvfs.accounts 1.0
 
-// The bridge's request, opened from its notification: what one app may do on each account (all,
-// or once decided only the accounts added since), stored on Save.
 Dialog {
     id: dialog
 
     property alias consumerId: access.consumerId
-    // Consent file; empty: the default (~/.config/netvfs/bridge.conf).
     property alias storePath: access.storePath
 
     NetVfsAccessModel {

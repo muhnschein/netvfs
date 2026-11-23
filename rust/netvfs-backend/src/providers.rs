@@ -1,13 +1,8 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! The backends by provider name (`conn_new`).
 
 use crate::erased::DynBackend;
 use netvfs_vfs::Status;
 
-/// New, unconnected backend of `provider`.
-///
-/// # Errors
-/// `Unsupported` for an unknown provider.
 pub fn create(provider: &[u8]) -> Result<Box<dyn DynBackend>, Status> {
     match provider {
         b"sftp" => Ok(Box::new(netvfs_sftp::backend::Sftp::new())),

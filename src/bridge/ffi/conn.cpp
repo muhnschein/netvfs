@@ -38,7 +38,6 @@ ReadHandle *readHandleOf(const nvb_handle *h)
     return h->handle.get();
 }
 
-// `sink` gets one backend batch and says whether to go on.
 class SinkAdapter final : public ListSink
 {
 public:
@@ -81,7 +80,6 @@ void connFree(nvb_conn *conn) noexcept
     guardedVoid([conn]() { std::unique_ptr<nvb_conn> owned(conn); });
 }
 
-// Any thread, also while an owner-thread call runs.
 void connCancel(nvb_conn *conn) noexcept
 {
     guardedVoid([conn]() {
@@ -214,7 +212,6 @@ nvb_error *connSetAttributes(nvb_conn *conn, nvb_bytes path, const nvb_attribute
     });
 }
 
-// Target is verbatim (not a normalised path).
 nvb_error *connMakeSymlink(nvb_conn *conn, nvb_bytes target, nvb_bytes linkPath) noexcept
 {
     return guarded([conn, target, linkPath]() {
@@ -262,7 +259,6 @@ nvb_error *connOpenRead(nvb_conn *conn, nvb_bytes path, nvb_handle **out, int64_
     });
 }
 
-// Short read only at EOF.
 nvb_error *handleRead(nvb_handle *h, int64_t offset, uint8_t *buf, size_t cap, size_t *len) noexcept
 {
     if (len)
@@ -290,7 +286,6 @@ void handleReadAhead(nvb_handle *h, int64_t offset, int64_t bytes) noexcept
     guardedVoid([h, offset, bytes]() { readHandleOf(h)->readAhead(offset, bytes); });
 }
 
-// Always frees the handle, also when close() fails.
 nvb_error *handleClose(nvb_handle *h) noexcept
 {
     return guarded([h]() {

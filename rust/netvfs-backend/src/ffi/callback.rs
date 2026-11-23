@@ -1,6 +1,4 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! C++ callbacks as netvfs-vfs traits. The backend's future calls them while `block_on` polls it on the caller's
-//! thread; arguments are borrowed for the callback only; C++ catches its own exceptions.
 
 use super::marshal::{fill_entry, items, slice};
 use super::raw::{
@@ -27,7 +25,6 @@ impl ListAdapter {
 
 impl ListSink for ListAdapter {
     fn entries(&mut self, batch: &[Entry]) -> bool {
-        // Views into `batch`; it outlives the callback.
         let views: Vec<NvbEntry> = batch.iter().map(|e| fill_entry(e, NvbBytes::of)).collect();
         // SAFETY: caller's `sink` and `ctx`; views live until the call returns.
         unsafe { (self.sink)(self.ctx, views.as_ptr(), views.len()) != 0 }
@@ -39,11 +36,6 @@ pub struct Reply {
     answers: Option<Vec<Zeroizing<Vec<u8>>>>,
 }
 
-/// Table `reply_set`: copies answers into wiped-on-drop buffers; a later call replaces earlier answers. NULL `r`
-/// is a no-op.
-///
-/// # Safety
-/// `r` is NULL or a running prompt's reply; `answers` has `n` readable items.
 pub unsafe extern "C" fn reply_set(r: *mut NvbReply, answers: *const NvbBytes, n: usize) {
     let set = || {
         // SAFETY: `r` is NULL or the live `Reply` its prompt waits on; answers readable by contract.
@@ -271,11 +263,9 @@ mod tests {
         assert_eq!(got.iter().map(|a| a.as_slice()).collect::<Vec<_>>(), [&b"123"[..], b"9"]);
         assert_eq!((asked.name.as_slice(), asked.instruction.as_slice()), (&b"mem"[..], &b"say"[..]));
         assert_eq!(asked.prompts, [(b"Code:".to_vec(), 1), (b"PIN:".to_vec(), 0)]);
-        // Declined: 0 even with answers set.
         asked.result = 0;
         let mut prompter = PromptAdapter::new(answer, (&raw mut asked).cast());
         assert!(prompter.answer(&request()).is_none());
-        // One answer for two prompts: declined.
         asked.result = 1;
         asked.answers = vec![b"123"];
         let mut prompter = PromptAdapter::new(answer, (&raw mut asked).cast());

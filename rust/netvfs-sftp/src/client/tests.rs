@@ -34,7 +34,6 @@ fn name(f: &Failure) -> ErrorName {
     f.status("x").name
 }
 
-/// Waits until `check` holds (the reader task runs on its own).
 async fn eventually(mut check: impl FnMut() -> bool) {
     for _ in 0..500 {
         if check() {
@@ -74,13 +73,11 @@ async fn handshake_refuses_other_versions() {
         .await
         .unwrap_err();
     assert_eq!((e.name, e.detail.as_str()), (ErrorName::Unsupported, "version 4"));
-    // The channel is closed after a failed start.
     tokio::time::timeout(LONG, rx).await.unwrap().unwrap();
 }
 
 #[tokio::test]
 async fn handshake_ends_on_timeout_and_cancel() {
-    // Nothing answers on the other end.
     let (stream, _quiet) = tokio::io::duplex(1024);
     let (r, w) = split(stream);
     let e = Client::start(r, w, async {}, Duration::from_millis(50), &CancelToken::new()).await.unwrap_err();
@@ -106,7 +103,6 @@ async fn handshake_refuses_a_broken_version_and_a_closed_channel() {
         let mut init = [0; 9];
         server.read_exact(&mut init).await.unwrap();
         assert_eq!(init, [0, 0, 0, 5, 1, 0, 0, 0, 3]);
-        // VERSION with a truncated extension.
         server.write_all(&[0, 0, 0, 7, 2, 0, 0, 0, 3, 0, 0]).await.unwrap();
         tokio::time::sleep(LONG).await;
     });
@@ -124,7 +120,6 @@ async fn handshake_refuses_a_broken_version_and_a_closed_channel() {
 async fn pipelined_replies_find_their_requests() {
     let fake = Fake::new();
     fake.file("/home/u/a", b"0123456789");
-    // The first read is answered last.
     fake.rule(Rule::new(FXP_READ, Action::Delay(Duration::from_millis(50))).once());
     let client = start(&fake).await;
     let c = CancelToken::new();
@@ -139,7 +134,6 @@ async fn pipelined_replies_find_their_requests() {
     assert!(matches!(eof, Reply::Status(StatusReply { code: FX_EOF, .. })));
     client.close(&h, &c).await.unwrap();
     assert_eq!(fake.open_handles(), 0);
-    // Ids are unique and increase.
     let ids: Vec<u32> = fake.state().log.iter().map(|l| l.id).collect();
     assert!(ids.windows(2).all(|w| w[0] < w[1]), "{ids:?}");
 }
@@ -175,7 +169,6 @@ async fn typed_requests_and_their_replies() {
     client.simple(Simple::Remove(b"/home/u/f"), &c).await.unwrap();
     let failed = client.simple(Simple::Remove(b"/home/u/f"), &c).await.unwrap_err();
     assert_eq!(failed.code(), Some(FX_NO_SUCH_FILE));
-    // A folder listing ends with None.
     let d = client.opendir(b"/home/u", &c).await.unwrap();
     let names = client.readdir(&d, &c).await.unwrap().unwrap();
     assert!(names.iter().any(|n| n.filename == b"l"));
@@ -197,7 +190,6 @@ async fn replies_of_the_wrong_kind_are_protocol_errors() {
     let fake = Fake::new();
     let client = start(&fake).await;
     let c = CancelToken::new();
-    // STAT answered by a HANDLE, REALPATH by two names, OPEN by OK.
     let id_of = |n: usize| u32::try_from(n).unwrap();
     fake.rule(Rule::new(FXP_STAT, Action::Raw(raw(FXP_HANDLE, id_of(1), &crate::fake::string(b"h")))).once());
     let e = client.stat(b"/", true, &c).await.unwrap_err();
@@ -220,7 +212,6 @@ async fn replies_of_the_wrong_kind_are_protocol_errors() {
     assert_eq!(client.readdir(b"h", &c).await.unwrap_err(), unexpected());
     fake.rule(Rule::new(FXP_REMOVE, Action::Raw(raw(FXP_ATTRS, id_of(5), &[0, 0, 0, 0]))).once());
     assert_eq!(client.simple(Simple::Remove(b"/x"), &c).await.unwrap_err(), unexpected());
-    // A status that is not OK where a value was wanted is the server's.
     fake.rule(Rule::new(FXP_FSTAT, Action::Status(FX_FAILURE, "no")).once());
     let e = client.fstat(b"h", &c).await.unwrap_err();
     assert_eq!(e, Failure::Server(StatusReply { code: FX_FAILURE, message: "no".into() }));
@@ -236,7 +227,6 @@ async fn timeouts_and_cancels_abandon_the_request() {
     let e = client.stat(b"/", true, &c).await.unwrap_err();
     assert_eq!(e.status("x"), timed_out(50));
     assert_eq!(client.shared.table().abandoned, 1);
-    // The late reply is dropped when it comes, and the client goes on.
     eventually(|| client.shared.table().abandoned == 0).await;
     assert!(client.shared.table().slots.is_empty());
     client.stat(b"/", true, &c).await.unwrap();
@@ -275,14 +265,12 @@ async fn an_abandoned_open_closes_its_handle() {
     let client = start(&fake).await;
     let c = CancelToken::new();
     c.cancel();
-    // Canceled before the reply: the handle that comes later is closed.
     let e = client.open(b"/home/u/a", FXF_READ, &Attrs::default(), &c).await.unwrap_err();
     assert_eq!(e, Failure::Local(Status::canceled()));
     eventually(|| fake.requests(FXP_CLOSE).len() == 1).await;
     eventually(|| fake.open_handles() == 0 && client.shared.table().slots.is_empty()).await;
     assert_eq!(client.shared.table().abandoned, 0);
 
-    // Dropped after the reply arrived but before it was taken.
     let pending = client.send_as(Packet::request(FXP_OPENDIR).string(b"/home/u"), true).unwrap();
     eventually(|| client.shared.table().slots.is_empty()).await;
     assert_eq!(fake.open_handles(), 1);
@@ -290,13 +278,11 @@ async fn an_abandoned_open_closes_its_handle() {
     eventually(|| fake.open_handles() == 0).await;
     assert_eq!(fake.requests(FXP_CLOSE).len(), 2);
 
-    // An abandoned request of another kind closes nothing.
     let pending = client.send(Packet::request(FXP_OPENDIR).string(b"/home/u")).unwrap();
     drop(pending);
     eventually(|| client.shared.table().slots.is_empty()).await;
     assert_eq!(fake.open_handles(), 1);
     assert_eq!(fake.requests(FXP_CLOSE).len(), 2);
-    // A detached close goes out and its reply is dropped.
     client.close_detached(b"h3");
     eventually(|| fake.open_handles() == 0 && client.shared.table().slots.is_empty()).await;
     assert_eq!(client.shared.table().abandoned, 0);
@@ -352,10 +338,10 @@ async fn a_reply_to_no_request_ends_the_client() {
 #[tokio::test]
 async fn malformed_replies_end_the_client() {
     for bad in [
-        raw(FXP_STATUS, 1, &[0, 0]),                                   // short
-        raw(77, 1, &[]),                                               // unknown type
-        vec![0, 0, 0, 0],                                              // empty packet
-        u32::try_from(MAX_PACKET + 1).unwrap().to_be_bytes().to_vec(), // too long
+        raw(FXP_STATUS, 1, &[0, 0]),
+        raw(77, 1, &[]),
+        vec![0, 0, 0, 0],
+        u32::try_from(MAX_PACKET + 1).unwrap().to_be_bytes().to_vec(),
     ] {
         let fake = Fake::new();
         fake.rule(Rule::new(FXP_STAT, Action::Raw(bad.clone())).once());

@@ -33,12 +33,6 @@ void seedLine(FakeServer *server, const QByteArray &line)
     }
 }
 
-// NETVFS_FAKE_SEED=<file> prepares the FakeServer of a process
-// a test starts (the bridge binary), on the first backend created. Lines:
-//   file <path-hex> <data-hex>
-//   dir <path-hex>
-//   credentials <user> [<secret-hex>]   (without one, the secret is empty)
-//   identity <pin>
 void seedFromEnvironment()
 {
     const QByteArray path = qgetenv("NETVFS_FAKE_SEED");
@@ -57,7 +51,7 @@ void seedFromEnvironment()
     }
 }
 
-} // namespace
+}
 
 class FakeBackendFactory : public QObject, public NetVfs::BackendFactory
 {

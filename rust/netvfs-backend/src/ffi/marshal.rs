@@ -1,6 +1,4 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! C values to and from netvfs-vfs values. Readers copy what the caller passed; writers make blocks the caller
-//! frees, or views valid for a callback. Out-of-range numbers from C++ are `ProtocolError`.
 
 use super::alloc::{Out, pack};
 use super::raw::{
@@ -15,8 +13,6 @@ use netvfs_vfs::{
     SpaceInfo, Status, Value, ValueMap, WriteOptions, Zeroizing,
 };
 
-/// # Safety
-/// `b.ptr` is NULL or points to `b.len` bytes readable for `'a`.
 pub unsafe fn slice<'a>(b: NvbBytes) -> &'a [u8] {
     if b.ptr.is_null() || b.len == 0 {
         return &[];
@@ -25,8 +21,6 @@ pub unsafe fn slice<'a>(b: NvbBytes) -> &'a [u8] {
     unsafe { std::slice::from_raw_parts(b.ptr, b.len) }
 }
 
-/// # Safety
-/// `p` is NULL or points to `n` initialised items readable for `'a`.
 pub unsafe fn items<'a, T>(p: *const T, n: usize) -> &'a [T] {
     if p.is_null() || n == 0 {
         return &[];
@@ -35,8 +29,6 @@ pub unsafe fn items<'a, T>(p: *const T, n: usize) -> &'a [T] {
     unsafe { std::slice::from_raw_parts(p, n) }
 }
 
-/// # Safety
-/// As for [`slice`].
 pub unsafe fn text(b: NvbBytes) -> String {
     // SAFETY: forwarded.
     String::from_utf8_lossy(unsafe { slice(b) }).into_owned()
@@ -46,16 +38,10 @@ fn bad(what: &str) -> Status {
     Status::invalid_args(format!("Invalid {what} from the plugin"))
 }
 
-/// # Errors
-/// `ProtocolError` if negative.
 pub fn unsigned(value: i64, what: &str) -> Result<u64, Status> {
     u64::try_from(value).map_err(|_negative| bad(what))
 }
 
-/// -1 is `None`.
-///
-/// # Errors
-/// `ProtocolError` below -1.
 pub fn optional(value: i64, what: &str) -> Result<Option<u64>, Status> {
     if value == -1 { Ok(None) } else { unsigned(value, what).map(Some) }
 }
@@ -64,8 +50,6 @@ fn mode(value: i32, what: &str) -> Result<Option<u32>, Status> {
     if value == -1 { Ok(None) } else { u32::try_from(value).map(Some).map_err(|_negative| bad(what)) }
 }
 
-/// # Safety
-/// What `v` points to is valid (as for [`slice`] and [`items`]).
 unsafe fn value(v: &NvbValue) -> Result<Value, Status> {
     // SAFETY: forwarded, for each arm.
     unsafe {
@@ -82,11 +66,6 @@ unsafe fn value(v: &NvbValue) -> Result<Value, Status> {
     }
 }
 
-/// # Safety
-/// Everything `p` points to is valid (as for [`slice`] and [`items`]).
-///
-/// # Errors
-/// `ProtocolError` for an option of unknown kind.
 pub unsafe fn params(p: &NvbParams) -> Result<Params, Status> {
     let mut options = ValueMap::new();
     // SAFETY: forwarded.
@@ -108,9 +87,6 @@ pub unsafe fn params(p: &NvbParams) -> Result<Params, Status> {
     })
 }
 
-///
-/// # Safety
-/// As for [`slice`], for each field.
 pub unsafe fn credentials(c: &NvrCredentials) -> Credentials {
     // SAFETY: forwarded.
     unsafe {
@@ -122,8 +98,6 @@ pub unsafe fn credentials(c: &NvrCredentials) -> Credentials {
     }
 }
 
-/// # Errors
-/// `ProtocolError` for a mode below -1.
 pub fn attributes(a: &NvbAttributes) -> Result<Attributes, Status> {
     Ok(Attributes {
         mode: mode(a.mode, "mode")?,
@@ -134,22 +108,14 @@ pub fn attributes(a: &NvbAttributes) -> Result<Attributes, Status> {
 
 #[derive(Debug, Clone, Copy)]
 pub struct RawWriteOptions {
-    /// `NVB_DISPOSITION_*`.
     pub disposition: u32,
-    /// -1: backend default.
     pub create_mode: i32,
-    /// `Resume`'s offset.
     pub resume_offset: i64,
-    /// -1 unknown.
     pub expected_size: i64,
-    /// Whether `mtime_ms` is set.
     pub has_mtime: u8,
-    /// Modification time.
     pub mtime_ms: i64,
 }
 
-/// # Errors
-/// `ProtocolError` for an unknown disposition or a negative number.
 pub fn write_options(o: RawWriteOptions) -> Result<WriteOptions, Status> {
     let disposition = match o.disposition {
         NVB_DISPOSITION_CREATE_NEW => Disposition::CreateNew,
@@ -166,12 +132,10 @@ pub fn write_options(o: RawWriteOptions) -> Result<WriteOptions, Status> {
     })
 }
 
-/// -1 for unknown; clamped to `i64::MAX`.
 fn known(value: Option<u64>) -> i64 {
     value.map_or(-1, |v| i64::try_from(v).unwrap_or(i64::MAX))
 }
 
-/// Aborts the process if even this block cannot be allocated.
 pub fn error(status: &Status) -> *mut NvbError {
     let block = pack(|out| NvbError {
         name: out.bytes(status.name.as_str().as_bytes()),
@@ -217,7 +181,6 @@ pub fn blob(data: &[u8]) -> Option<*mut NvbBlob> {
     pack(|out| NvbBlob { data: out.bytes(data) })
 }
 
-/// `pin` is left empty (C++ computes it); so is the fingerprint if the backend left it empty.
 pub fn identity(id: &ServerIdentity) -> Option<*mut NvbIdentity> {
     pack(|out| NvbIdentity {
         kind: match id.kind {

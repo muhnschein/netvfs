@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-// BoundedPipe.
 #include "boundedpipe.h"
 
 #include <QtCore/QThread>
@@ -40,8 +39,6 @@ struct Writer {
     }
 };
 
-// Writes `data` in pieces of random size, closes the pipe at the end and
-// stores the last write() result.
 void startWriter(Writer *writer, BoundedPipe *pipe, const QByteArray &data, quint32 seed, int maxPiece)
 {
     writer->thread = std::thread([writer, pipe, data, seed, maxPiece] {
@@ -58,7 +55,7 @@ void startWriter(Writer *writer, BoundedPipe *pipe, const QByteArray &data, quin
     });
 }
 
-} // namespace
+}
 
 class TstBoundedPipe : public QObject
 {
@@ -77,8 +74,6 @@ private slots:
         QTest::newRow("large ring") << 65536 << 3000 << 1500000;
     }
 
-    // Data passes unchanged through a ring much smaller than the data; the
-    // ring never holds more than its capacity.
     void roundTrip()
     {
         QFETCH(int, capacity);
@@ -172,21 +167,19 @@ private slots:
         std::atomic<bool> done { false };
         QByteArray got;
         std::thread reader([&] {
-            got = pipe.reader()->read(100);      // blocks until data arrives
+            got = pipe.reader()->read(100);
             done = true;
         });
         QThread::msleep(100);
         QVERIFY(!done);
         pipe.writer()->write("hello", 5);
-        QVERIFY(waitFor(done, 5000));            // returns what is there, not 100 bytes
+        QVERIFY(waitFor(done, 5000));
         reader.join();
         QCOMPARE(got, QByteArray("hello"));
         pipe.writer()->close();
         QVERIFY(pipe.reader()->read(100).isEmpty());
     }
 
-    // fail() wakes a writer blocked on a full ring; both sides then return -1
-    // and result() carries the failure, even for data still buffered.
     void failWakesBlockedWriter()
     {
         BoundedPipe pipe(4);
@@ -262,7 +255,6 @@ private slots:
         QCOMPARE(pipe.reader()->read(&c, 1), qint64(-1));
     }
 
-    // A reader that goes away before EOF fails the next (or a blocked) write.
     void earlyReaderCloseFailsWriter()
     {
         BoundedPipe pipe(4);
@@ -305,9 +297,6 @@ private slots:
         QCOMPARE(pipe.buffered(), qint64(1));
     }
 
-    // Many producer/consumer pairs with random sizes and a random failure
-    // while a monitor thread watches the fill level: every thread ends, the
-    // ring never exceeds its capacity, and without failure all data arrives.
     void stress()
     {
         for (int round = 0; round < 40; ++round) {

@@ -70,7 +70,6 @@ pub async fn run(stream: UnixStream, shutdown: StdUnixStream, sid: SessionId, si
     }
     link.close();
     drop(messages);
-    // The writer ends once the link is closed; its result is nothing.
     drop(writer.await);
     sink.deliver(Event::Closed { sid });
 }

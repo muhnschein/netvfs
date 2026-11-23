@@ -14,7 +14,7 @@ constexpr int PercentDivisor = 100;
 constexpr std::array<int, ServiceCache::RefreshStages> RefreshPercent = {{80, 90, 95}};
 constexpr int MaxTextLength = 256;
 constexpr int MaxHostLength = 253;
-constexpr int CacheFlushGraceMs = 1000;  // RFC 6762 section 10.2
+constexpr int CacheFlushGraceMs = 1000;
 constexpr int ControlLimit = 0x20;
 constexpr int C1First = 0x7F;
 constexpr int C1Last = 0x9F;
@@ -48,8 +48,6 @@ bool hostByteAllowed(char c)
         || u == '-' || u == '_' || u >= 0x80;
 }
 
-// Host names go into URLs: only letters, digits, '-', '_', UTF-8; anything else rejects the SRV
-// record.
 bool cleanHost(const QByteArray &target, QString *host)
 {
     bool ok = false;
@@ -70,7 +68,6 @@ bool cleanHost(const QByteArray &target, QString *host)
     return true;
 }
 
-// Link-local IPv6 needs an interface scope that mDNS answers lack: unusable.
 bool usableAddress(const QHostAddress &a)
 {
     if (a.isNull() || a == QHostAddress::AnyIPv4 || a == QHostAddress::AnyIPv6)
@@ -199,7 +196,7 @@ void ServiceCache::handlePtr(const Dns::Record &rec, Context *c)
     if (!type || !instanceLabel(rec.target, typeName, &label))
         return;
     const QByteArray key = Dns::canonicalName(rec.target);
-    if (rec.ttl == 0) {                             // RFC 6762 section 10.1: goodbye
+    if (rec.ttl == 0) {
         removeInstance(key, c);
         return;
     }
@@ -275,8 +272,6 @@ void ServiceCache::handleAddress(const Dns::Record &rec, Context *c)
     markHostDirty(host, c);
 }
 
-// RFC 6762 section 10.2: cache-flush replaces cached records of that name and type, except those
-// from the last second.
 void ServiceCache::flushFamily(const QByteArray &host, quint16 type, Context *c)
 {
     const QPair key(host, type);
@@ -357,7 +352,6 @@ void ServiceCache::evaluate(Instance *inst, Context *c) const
     } else if (inst->nextResolve < 0 && inst->attempts == 0 && !inst->gaveUp) {
         inst->nextResolve = c->now;
     }
-    // A lost record never un-announces; service is not re-announced with less.
     const bool ready = inst->hasSrv && (complete || (inst->gaveUp && !inst->everAnnounced));
     Event e;
     e.service = ready ? snapshot(*inst) : inst->last;

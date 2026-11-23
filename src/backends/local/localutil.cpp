@@ -71,8 +71,6 @@ int fstatatFallback(int dirFd, const char *path, int flags, NativeStat *out)
 }
 
 #ifdef STATX_BTIME
-// statx() is missing on old kernels (ENOSYS) and blocked by some seccomp profiles (EPERM);
-// fstatat() is used from then on.
 std::atomic<bool> &statxUsable()
 {
     static std::atomic<bool> usable { true };
@@ -115,7 +113,6 @@ int statxAt(int dirFd, const char *path, int flags, NativeStat *out)
 }
 #endif
 
-// getpwuid_r/getgrgid_r with a growing buffer; ERANGE asks for more.
 template<typename Lookup>
 QString lookupName(Lookup lookup)
 {
@@ -144,7 +141,6 @@ int Fd::close()
         return 0;
     const int rc = ::close(m_fd);
     m_fd = -1;
-    // Linux releases the descriptor even when close() reports EINTR.
     return rc == 0 || errno == EINTR ? 0 : errno;
 }
 

@@ -1,12 +1,10 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! Test support (feature `testing`): between `fork` and `exec` of started processes. A child dies with the thread that started it (`PR_SET_PDEATHSIG`); a bridge started like systemd finds its socket at fd 3.
 
 use std::io;
 use std::os::fd::{AsRawFd as _, OwnedFd, RawFd};
 use std::os::unix::process::CommandExt as _;
 use std::process::Command;
 
-/// SIGKILLs the child of `command` when the spawning thread ends, so no child outlives its test. Spawn from the test's own thread, not a pool thread.
 pub fn kill_with_parent(command: &mut Command) -> &mut Command {
     let parent = std::process::id();
     let pre_exec = move || {
@@ -14,7 +12,6 @@ pub fn kill_with_parent(command: &mut Command) -> &mut Command {
         super::check(unsafe { libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL) })?;
         // SAFETY: getppid takes nothing and cannot fail.
         let ppid = unsafe { libc::getppid() };
-        // Parent died before the call above: nobody would kill us.
         if u32::try_from(ppid).ok() != Some(parent) {
             return Err(io::Error::from_raw_os_error(libc::ESRCH));
         }
@@ -24,7 +21,6 @@ pub fn kill_with_parent(command: &mut Command) -> &mut Command {
     unsafe { command.pre_exec(pre_exec) }
 }
 
-/// Places `listener` at fd 3 ([`super::listen::LISTEN_FDS_START`]) of the child, without close-on-exec, as systemd does. `LISTEN_PID` and `LISTEN_FDS` are the caller's business.
 pub fn place_listener(command: &mut Command, listener: OwnedFd) -> &mut Command {
     let target = super::listen::LISTEN_FDS_START;
     let pre_exec = move || move_to(listener.as_raw_fd(), target);
@@ -32,7 +28,6 @@ pub fn place_listener(command: &mut Command, listener: OwnedFd) -> &mut Command 
     unsafe { command.pre_exec(pre_exec) }
 }
 
-/// `dup2(fd, target)`; if `fd == target`, clears close-on-exec (dup2 leaves it set).
 fn move_to(fd: RawFd, target: RawFd) -> io::Result<()> {
     if fd == target {
         // SAFETY: fcntl on an open descriptor; F_SETFD 0 clears FD_CLOEXEC.
@@ -77,7 +72,6 @@ mod tests {
         assert!(move_to(raw, c.as_raw_fd()).is_err());
     }
 
-    /// Waits up to 10 s for `child`, then kills it: whether it ended by itself, and how.
     fn ended(child: &mut Child) -> (bool, std::process::ExitStatus) {
         let end = Instant::now().checked_add(Duration::from_secs(10)).unwrap();
         while Instant::now() < end {

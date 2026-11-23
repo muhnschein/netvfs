@@ -1,5 +1,4 @@
 name: Weekly
-# Advisories against locked crates, next stable clippy, online workflow audit, Rust tests under ASan and LSan, netvfs-bridge's FFI test with the C++ side instrumented too.
 on:
   schedule:
     - cron: "41 4 * * 1"
@@ -13,7 +12,6 @@ env:
   DENY_VERSION: 0.20.2
   ZIZMOR_VERSION: 1.30.1
   NEXTEST_VERSION: 0.9.148
-  # -Zsanitizer needs nightly; pinned so a nightly regression is not mistaken for a finding.
   SANITIZER_NIGHTLY: nightly-2026-10-01
 jobs:
   advisories:
@@ -21,11 +19,11 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
       - name: Cache cargo-deny
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
         with:
           path: ~/.cargo/bin/cargo-deny
           key: cargo-deny-${{ env.DENY_VERSION }}-ubuntu-24.04
@@ -40,7 +38,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
       - name: Install dependencies
@@ -56,7 +54,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
       - name: zizmor
@@ -71,7 +69,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
       - name: Install dependencies
@@ -79,13 +77,12 @@ jobs:
           ./tools/ci/install-host-deps.sh
           rustup toolchain install "$SANITIZER_NIGHTLY" --profile minimal --component rust-src
       - name: Cache cargo-nextest
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
         with:
           path: ~/.cargo/bin/cargo-nextest
           key: cargo-nextest-${{ env.NEXTEST_VERSION }}-ubuntu-24.04
       - name: Install cargo-nextest
         run: ./tools/ci/cargo-tool.sh cargo-nextest "$NEXTEST_VERSION"
-      # C++ side of the FFI test with clang's ASan, whose runtime the Rust test binary links: clang of rustc's LLVM major, checked by rust-sanitize.sh.
       - name: Build the FFI's C++ libraries with ASan (the clang of rustc's LLVM)
         run: |
           major=$(rustc +"$SANITIZER_NIGHTLY" -vV | sed -n 's/^LLVM version: \([0-9]*\).*/\1/p')

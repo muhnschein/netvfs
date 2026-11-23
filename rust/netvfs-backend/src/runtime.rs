@@ -1,9 +1,4 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! One tokio runtime per process, made on first use, never shut down. Workers `nvr-io-<n>`; every C ABI call
-//! runs its future with `block_on` on the caller's thread, so callbacks run there too.
-//!
-//! A canceled call is dropped [`GRACE`] after the cancel and reports `Canceled`, so one backend await that misses
-//! the token cannot break the 2 s bound.
 
 use netvfs_vfs::{CancelToken, Status};
 use std::future::{Future, poll_fn};
@@ -60,16 +55,11 @@ fn drive<T>(cancel: &CancelToken, work: impl Future<Output = T>) -> Result<Optio
     }))
 }
 
-/// `Canceled` at once if `cancel` is tripped, else `work`'s result, or `Canceled` if it runs [`GRACE`] past a cancel.
-///
-/// # Errors
-/// `work`'s error, `Canceled`, or `Internal` without a runtime.
 pub fn run<T>(cancel: &CancelToken, work: impl Future<Output = Result<T, Status>>) -> Result<T, Status> {
     cancel.check()?;
     drive(cancel, work)?.unwrap_or_else(|| Err(Status::canceled()))
 }
 
-/// Teardown: runs even when `cancel` is tripped; dropped [`GRACE`] after a cancel, not run without a runtime.
 pub fn finish(cancel: &CancelToken, work: impl Future<Output = ()>) {
     drop(drive(cancel, work));
 }

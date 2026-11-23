@@ -1,8 +1,4 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-// netvfs-accounts: the setgid helper that is the bridge's only access to the accounts database. Its
-// confinement and set-id tests are Rust (rust/netvfs-accounts). These run the built helper: answers must be
-// the bytes the replaced C++ helper gave (referencehelper.h), read back as the C++ bridge read them
-// (referencedecoder.h), writes what libaccounts would store, change signal one libaccounts reads.
 #include "accountsfixture.h"
 #include "referencedecoder.h"
 #include "referencehelper.h"
@@ -32,7 +28,7 @@ char *toString(const NetVfs::Error &error)
 {
     return qstrdup(qPrintable(NetVfs::errorName(error)));
 }
-} // namespace QTest
+}
 
 namespace {
 
@@ -138,7 +134,7 @@ QVariantMap globalSettings(const QString &accounts, int accountId)
     return settings;
 }
 
-} // namespace
+}
 
 class tst_BridgeAccounts : public QObject
 {
@@ -173,8 +169,6 @@ private:
                       quint32 credentialsId = 0);
     void compareAnswers(const QList<QStringList> &requests);
 
-    // A session bus of this test's own: other tests writing accounts concurrently would announce their
-    // changes here too.
     QProcess busDaemon;
     QStringList ownedNames;
     std::unique_ptr<AccountsFixture> fixture;
@@ -196,7 +190,6 @@ void tst_BridgeAccounts::initTestCase()
     QVERIFY(busDaemon.waitForReadyRead(10000));
     const QByteArray address = busDaemon.readLine().trimmed();
     QVERIFY(!address.isEmpty());
-    // Before the first use of the session bus in this process; helpers and libaccounts inherit it.
     qputenv("DBUS_SESSION_BUS_ADDRESS", address);
     QVERIFY(QDBusConnection::sessionBus().connect(
         QStringLiteral("org.freedesktop.DBus"), QStringLiteral("/org/freedesktop/DBus"),
@@ -238,7 +231,6 @@ int tst_BridgeAccounts::listedAccount(const QString &provider, const QVariantMap
 
 void tst_BridgeAccounts::list()
 {
-    // only enabled accounts with the Files service enabled.
     QVector<AccountLocation> accounts;
     QVERIFY(decodeList(serve(fixture.get(), { QStringLiteral("list") }), &accounts).ok());
     QCOMPARE(accounts.size(), 1);
@@ -275,7 +267,6 @@ void tst_BridgeAccounts::files()
 
 void tst_BridgeAccounts::filesPolicy()
 {
-    // is applied by the helper, before the bridge looks up a secret.
     const int bogus = fixture->createAccount(
         QStringLiteral("smb"), globals(QStringLiteral("nas.example"),
                                        { { QStringLiteral("netvfs/smb/security_profile"), QStringLiteral("bogus") } }));
@@ -284,7 +275,6 @@ void tst_BridgeAccounts::filesPolicy()
     QCOMPARE(decodeFiles(serve(fixture.get(), { QStringLiteral("files"), QString::number(bogus) }),
                                          &access).error(),
              Error::SecurityPolicy);
-    // a guest profile with consent needs no secret.
     const int guest = fixture->createAccount(
         QStringLiteral("smb"), globals(QStringLiteral("guest.example"),
                                        { { QStringLiteral("netvfs/smb/security_profile"), QStringLiteral("guest") },
@@ -311,7 +301,6 @@ void tst_BridgeAccounts::attention()
                 .ok());
     QCOMPARE(fixture->value(listed, QStringLiteral("netvfs/attention")).toString(), QStringLiteral("auth-failed"));
 
-    // Clearing it is not the bridge's, and anyone can run the helper.
     for (const QString &state : { QStringLiteral("none"), QString(), QStringLiteral("whatever") }) {
         QCOMPARE(decodeStatus(serve(fixture.get(), { QStringLiteral("attention"),
                                                                      QString::number(listed), state }))
@@ -319,7 +308,6 @@ void tst_BridgeAccounts::attention()
                  Error::Unsupported);
     }
     QCOMPARE(fixture->value(listed, QStringLiteral("netvfs/attention")).toString(), QStringLiteral("auth-failed"));
-    // Nor on an account the bridge does not list.
     QCOMPARE(decodeStatus(serve(fixture.get(), { QStringLiteral("attention"), QString::number(unlisted),
                                                                  QStringLiteral("auth-failed") }))
                  .error(),
@@ -345,8 +333,6 @@ void tst_BridgeAccounts::usage()
 
 void tst_BridgeAccounts::databaseUnusable()
 {
-    // What a helper without the group sees on Sailfish OS: an error naming
-    // the setgid bit, not an empty list; also before the request is read.
     QTemporaryDir dir;
     QFile file(dir.path() + QStringLiteral("/file"));
     QVERIFY(file.open(QIODevice::WriteOnly));
@@ -412,8 +398,6 @@ void tst_BridgeAccounts::compareAnswers(const QList<QStringList> &requests)
 
 void tst_BridgeAccounts::goldenAnswers()
 {
-    // The answers of the C++ helper, byte for byte, for what the accounts
-    // UI writes and for what other writers of the database could.
     fixture->installProvider(QStringLiteral("sftp"));
     QVariantMap typed = globals(QStringLiteral("types.example"), {
         { QStringLiteral("netvfs/sftp/string"), QStringLiteral("ünïcødé \U0001F600 \"'\\\n\t") },
@@ -523,9 +507,6 @@ void tst_BridgeAccounts::goldenAnswers()
 
 void tst_BridgeAccounts::goldenStoredValues()
 {
-    // Each value as libaccounts-glib could find it in the database, as an
-    // option, the port, the credentials, the attention state, the Files
-    // root and the Files service's enabled flag.
     const QList<QPair<QString, QString>> values {
         { "s", "'x'" }, { "s", "\"it's\"" }, { "s", "' 7 '" }, { "s", "'-7'" }, { "s", "'+7'" }, { "s", "'7x'" },
         { "s", "'0x10'" }, { "s", "'010'" }, { "s", "'2147483648'" }, { "s", "'-2147483649'" },
@@ -550,8 +531,6 @@ void tst_BridgeAccounts::goldenStoredValues()
     const QString files = QStringLiteral("(SELECT id FROM Services WHERE name = 'sftp-files')");
     QList<int> ids;
     for (const auto &[type, text] : values) {
-        // One account with the value as its settings, one with it as the
-        // Files service's flag.
         const int id = listedAccount(QStringLiteral("sftp"), globals(QStringLiteral("values.example")));
         const int flag = listedAccount(QStringLiteral("sftp"), globals(QStringLiteral("flag.example")));
         QVERIFY(id > 0 && flag > 0);
@@ -576,8 +555,6 @@ void tst_BridgeAccounts::goldenStoredValues()
 
 void tst_BridgeAccounts::goldenAttention()
 {
-    // The same request on two copies of the database: the same answer, and
-    // the same settings afterwards, as libaccounts reads them.
     QVERIFY(fixture->setService(unlisted, QStringLiteral("sftp-files"), false));
     const int other = listedAccount(QStringLiteral("smb"), globals(QStringLiteral("nas.example")));
     QVERIFY(other > 0);
@@ -620,10 +597,6 @@ void tst_BridgeAccounts::goldenAttention()
 
 void tst_BridgeAccounts::attentionSignal()
 {
-    // libaccounts' writers announce a change on the session bus, from a
-    // name of their own; a process that has the account loaded reads the
-    // new settings from the signal (on the path of the global service, the
-    // one such a manager of Files accounts listens to).
     Accounts::Manager watcher(QStringLiteral("netvfs-files"));
     Accounts::Account *account = watcher.account(static_cast<Accounts::AccountId>(listed));
     QVERIFY(account);
@@ -637,7 +610,6 @@ void tst_BridgeAccounts::attentionSignal()
     QTRY_COMPARE_WITH_TIMEOUT(account->value(QStringLiteral("netvfs/attention")).toString(),
                               QStringLiteral("server-identity-changed"), 10000);
     QCOMPARE(account->value(QStringLiteral("netvfs/sftp/host_key_seen")).toString(), QStringLiteral("SHA256:it's"));
-    // A boolean, not the string "true" (QVariant's == would convert it).
     const QVariant needsUpdate = account->value(QStringLiteral("CredentialsNeedUpdate"));
     QCOMPARE(needsUpdate.userType(), int(QMetaType::Bool));
     QVERIFY(needsUpdate.toBool());
@@ -665,7 +637,6 @@ void tst_BridgeAccounts::attentionWithoutBus()
 
 void tst_BridgeAccounts::helperLinks()
 {
-    // no Qt, GLib or libaccounts in the setgid helper.
     QProcess readelf;
     readelf.start(QStringLiteral("readelf"), { QStringLiteral("-d"), Helper });
     QVERIFY2(readelf.waitForFinished(10000), "readelf is needed");

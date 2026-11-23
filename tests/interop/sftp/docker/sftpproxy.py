@@ -1,25 +1,5 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: LGPL-2.1-or-later
-"""Stalling proxies for the SFTP interop suite.
-
-Subsystem mode (the default): an SFTP subsystem wrapper. Runs the real
-sftp-server and passes the client's data through unchanged. The server's
-replies are forwarded as whole SFTP packets, with two optional changes:
-
-  --no-extensions    rewrite SSH_FXP_VERSION to plain version 3 without
-                     extension pairs (S-T17: no posix-rename, fsync,
-                     statvfs or limits)
-  --hold-file PATH   while PATH exists, hold back further replies; the
-                     client then waits for an answer without ever seeing
-                     half a packet (C-9 cancel while waiting)
-
-Relay mode (--relay LISTEN_PORT TARGET_PORT --hold-file PATH): a TCP relay
-to 127.0.0.1:TARGET_PORT for whole SSH connections. While PATH exists it
-forwards nothing in either direction, so every request of a connection,
-SSH global requests (keepalive@openssh.com) included, stays unanswered.
-The conformance suite engages it only while a connection is idle, so no
-reply is ever cut in half (tests/conformance, cancelStalledProxy).
-"""
 import os
 import select
 import socket
@@ -34,8 +14,6 @@ HOLD_POLL = 0.05
 
 
 def container_address():
-    """The container's own address: published ports are forwarded to it, so
-    the proxy does not need to listen on every interface."""
     return socket.gethostbyname(socket.gethostname())
 
 def read_exact(fd, size):
@@ -74,7 +52,6 @@ def next_reply(fd, strip):
     if not body:
         return None
     if strip:
-        # type (SSH_FXP_VERSION) and version only; drop the extensions.
         return (5).to_bytes(4, "big") + body[:5]
     return header + body
 

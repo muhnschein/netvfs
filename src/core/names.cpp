@@ -24,7 +24,6 @@ bool isContinuation(uint b)
     return (b & 0xC0) == 0x80;
 }
 
-// Length of the well-formed UTF-8 sequence at `i` (RFC 3629), 0 if ill-formed.
 int sequenceLength(const QByteArray &bytes, int i, uint *codePoint)
 {
     const auto at = [&bytes](int k) { return static_cast<uint>(static_cast<uchar>(bytes.at(k))); };

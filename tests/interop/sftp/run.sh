@@ -1,21 +1,5 @@
 #!/bin/sh
 # SPDX-License-Identifier: LGPL-2.1-or-later
-# SFTP interop suite. Builds the OpenSSH server images, starts one container per server version, runs the QtTest driver
-# tst_interop_sftp, netvfs-cli, the backend conformance suite (tests/conformance) and the Rust tests of netvfs-sftp
-# (rust/netvfs-sftp/tests/openssh.rs) against them, and removes the containers again, also on failure or interrupt.
-#
-# Usage: run.sh <build dir> [tst_interop_sftp arguments]
-# With driver arguments (for example a list of test functions) only the
-# driver runs, not the CLI check, the conformance suite or the Rust tests.
-# With NETVFS_INTEROP_CLI_ONLY=1 only the CLI check runs.
-# NETVFS_SFTP_CONFORMANCE=0 skips the conformance suite, NETVFS_SFTP_RUST=0
-# the Rust tests; NETVFS_SFTP_KEEP=1 leaves the containers running for
-# inspection. With NETVFS_SFTP_SERVERS_ONLY=1 nothing runs: the containers
-# stay, and the last line printed is NETVFS_SFTP_INTEROP_CONFIG=<file>, the
-# configuration of the servers. With NETVFS_SFTP_INTEROP_CONFIG set, run.sh
-# uses the servers it names instead of starting its own, and leaves them
-# running (cargo-mutants starts them once per shard this way; docker rm -f
-# the containers the configuration names to remove them).
 set -eu
 
 here=$(cd "$(dirname "$0")" && pwd)
@@ -84,7 +68,6 @@ instance_port() {
     esac
 }
 
-# start <key> <image> "<instances>" [docker run options...]
 start() {
     key=$1
     image=$2
@@ -95,7 +78,6 @@ start() {
     for instance in $instances; do
         publish="$publish -p 127.0.0.1::$(instance_port "$instance")"
     done
-    # shellcheck disable=SC2086 # $publish is a list of options
     docker run -d --name "$container" -e TEST_PASSWORD="$password" -e TEST_OTP="$otp" -e INSTANCES="$instances" \
         $publish "$@" "$image" >/dev/null
     containers="$containers $container"
@@ -116,7 +98,6 @@ wait_ready() {
     done
 }
 
-# JSON object {"<instance>": <host port>, ...} for one container.
 ports_json() {
     server=$1
     instances=$2
@@ -137,7 +118,6 @@ server_json() {
     printf '    "%s": { "container": "%s", "ports": %s }' "$server" "$prefix-$server" "$(ports_json "$server" "$instances")"
 }
 
-# expect_code <exit code> <command...>: the command must fail with exactly that code.
 expect_code() {
     want=$1
     shift
@@ -172,7 +152,6 @@ cli_check() {
     "$cli" "$@" verify "cli check"
     "$cli" "$@" put "$work/cli.bin" "cli check/cli.bin"
     "$cli" "$@" ls "cli check" | grep -q -- "- 3000000 cli.bin\$"
-    # ls -l: mode owner group size mtime(UTC) flags name.
     "$cli" "$@" ls -l "cli check" | grep -Eq -- "^-rw[-rwx]+ [^ ]+ [^ ]+ 3000000 [0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z [-A-Z]+ cli.bin\$"
     "$cli" "$@" stat "cli check/cli.bin" | grep -Eq -- "^-rw[-rwx]+ .* 3000000 .* cli check/cli.bin\$"
     "$cli" "$@" stat --json "cli check/cli.bin" | grep -q -- '"size": 3000000'
@@ -182,23 +161,19 @@ cli_check() {
     cmp "$work/cli.bin" "$work/cli.out"
     test "$(docker exec "$container" sha256sum "/home/alice/cli check/cli.bin" | cut -d ' ' -f 1)" \
         = "$(sha256sum "$work/cli.bin" | cut -d ' ' -f 1)"
-    # cat with a range (DownloadOptions)
     "$cli" "$@" cat --offset 1000 --length 500 "cli check/cli.bin" > "$work/cli.range"
     tail -c +1001 "$work/cli.bin" | head -c 500 | cmp - "$work/cli.range"
     "$cli" "$@" cat "cli check/cli.bin" | cmp - "$work/cli.bin"
-    # mkdir without -p needs the parent; --exclusive refuses an existing entry (exit 10 + AlreadyExists)
     expect_code 19 "$cli" "$@" mkdir "cli check/no/parent"
     "$cli" "$@" mkdir -p "cli check/tree/inner"
     "$cli" "$@" mkdir "cli check/tree"
     expect_code 20 "$cli" "$@" mkdir --exclusive "cli check/tree"
-    # What the server can do decides which attribute and link checks apply.
     caps=$("$cli" "$@" caps | sed -n 's/^capabilities: //p')
     has_cap() {
         wanted=$1
         case " $caps " in *" $wanted "*) return 0 ;; esac
         return 1
     }
-    # touch creates an empty file; chmod and touch --mtime need the capabilities
     "$cli" "$@" touch "cli check/empty"
     "$cli" "$@" stat "cli check/empty" | grep -Eq -- "^-[-rwx?]+ .* 0 "
     if has_cap PosixModes; then
@@ -216,23 +191,19 @@ cli_check() {
         "$cli" "$@" stat "cli check/link" | grep -q -- "^-"
         "$cli" "$@" rm "cli check/link"
     fi
-    # mv refuses to replace unless asked (exit 10 + AlreadyExists)
     "$cli" "$@" put "$work/cli.bin" "cli check/other.bin"
     expect_code 20 "$cli" "$@" mv "cli check/other.bin" "cli check/cli.bin"
     "$cli" "$@" mv --replace "cli check/other.bin" "cli check/cli.bin"
     "$cli" "$@" stat "cli check/other.bin" 2>/dev/null && { log "mv left the source"; return 1; }
-    # cp: server side or across, files and trees; NoReplace by default
     "$cli" "$@" cp "cli check/cli.bin" "cli check/copy.bin"
     "$cli" "$@" get "cli check/copy.bin" "$work/cli.out"
     cmp "$work/cli.bin" "$work/cli.out"
     expect_code 20 "$cli" "$@" cp "cli check/cli.bin" "cli check/copy.bin"
     "$cli" "$@" cp -r "cli check/tree" "cli check/tree2"
     "$cli" "$@" ls "cli check/tree2" | grep -q -- "inner\$"
-    # sum, when the server computes checksums
     if has_cap Checksums; then
         "$cli" "$@" sum --algo sha256 "cli check/cli.bin" | grep -q -- "^$(sha256sum "$work/cli.bin" | cut -d ' ' -f 1)  "
     fi
-    # rm without -r refuses folders, rmdir only empty ones, rm -r removes a tree
     expect_code 27 "$cli" "$@" rm "cli check/tree"
     "$cli" "$@" put "$work/cli.bin" "cli check/tree/inner/f"
     expect_code 28 "$cli" "$@" rmdir "cli check/tree/inner"
@@ -241,7 +212,6 @@ cli_check() {
     "$cli" "$@" stat "cli check/tree" 2>/dev/null && { log "rm -r left the tree"; return 1; }
     "$cli" "$@" rm "cli check/copy.bin"
     "$cli" "$@" rm "cli check/empty"
-    # --url instead of --provider/--host/--port/--user; a password in the URL is refused (exit 17)
     "$cli" --url "sftp://alice@127.0.0.1:$port" --option "host_key=$pin" ls "cli check" | grep -q -- "cli.bin\$"
     "$cli" --host-key "$pin" --url "sftp://alice@127.0.0.1:$port/home/alice/cli%20check" ls "" | grep -q -- "cli.bin\$"
     expect_code 17 "$cli" --url "sftp://alice:pw@127.0.0.1:$port/" ls ""
@@ -252,7 +222,6 @@ cli_check() {
         log "removed file still present"
         return 1
     fi
-    # A wrong pin is refused before sign-in (exit code 10 + ServerIdentityChanged).
     set +e
     "$cli" --provider sftp --host 127.0.0.1 --port "$port" --user alice \
         --option "host_key=ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl" \
@@ -267,8 +236,6 @@ cli_check() {
     log "netvfs-cli ok"
 }
 
-# Conformance suite against OpenSSH 10.3p1. The target works in a folder bind-mounted from here (hostPath) so the suite
-# creates its large fixtures directly; files it creates are world-writable (umask 000) because the server's user changes them.
 conformance() {
     conformance_config="$work/conformance.json"
     o103_port=$(docker port "$prefix-o103" 2201/tcp | head -n 1 | sed 's/.*://')
@@ -292,7 +259,6 @@ JSON
     )
 }
 
-# One value of the configuration file $config: json <key>[.<key>...]
 json() {
     json_key=$1
     python3 -c 'import json, sys
@@ -303,7 +269,6 @@ print(value)' "$config" "$json_key"
 }
 
 if [ -n "${NETVFS_SFTP_INTEROP_CONFIG:-}" ]; then
-    # The servers of an earlier NETVFS_SFTP_SERVERS_ONLY=1 run: they stay.
     config=$(cd "$(dirname "$NETVFS_SFTP_INTEROP_CONFIG")" && pwd)/$(basename "$NETVFS_SFTP_INTEROP_CONFIG")
     work=$(dirname "$config")
     password=$(json password)
@@ -347,7 +312,6 @@ if [ "${NETVFS_SFTP_SERVERS_ONLY:-0}" = 1 ]; then
     exit 0
 fi
 
-# SFTP plugin loads the Rust library of the same build.
 export NETVFS_BACKEND_PATH="$build/lib/netvfs/backends"
 export NETVFS_RS_LIB="$build/lib/netvfs/libnetvfs-rs.so"
 export NETVFS_SFTP_INTEROP_CONFIG="$config"
@@ -359,8 +323,6 @@ if [ -z "${NETVFS_INTEROP_CLI_ONLY:-}" ]; then
     fi
 fi
 if [ $# -eq 0 ]; then
-    # A subshell of its own: "set -e" is ignored inside a function that is
-    # called as a condition, and a failed check must stop the CLI run.
     set +e
     (set -e; cli_check)
     [ $? -eq 0 ] || status=1

@@ -121,7 +121,6 @@ impl Stream {
         self.bytes.extend_from_slice(&value.to_be_bytes());
     }
 
-    /// Qt's 32-bit count. A longer length is cut.
     fn length(&mut self, n: usize) {
         self.u32(u32::try_from(n).unwrap_or(u32::MAX - 1));
     }
@@ -209,8 +208,6 @@ mod tests {
     #[test]
     fn lengths_beyond_32_bits_are_cut() {
         assert_eq!(bytes(|s| s.length(5)), [0, 0, 0, 5]);
-        // u32::MAX would be a null array or string; the cut stops below it. Only where usize holds
-        // 4 GiB.
         if let Ok(n) = usize::try_from(1_u64 << 32) {
             assert_eq!(bytes(|s| s.length(n)), [0xff, 0xff, 0xff, 0xfe]);
         }

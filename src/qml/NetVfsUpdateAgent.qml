@@ -5,17 +5,6 @@ import Sailfish.Accounts 1.0
 import com.jolla.settings.accounts 1.0
 import org.netvfs.accounts 1.0
 
-// Credentials update flow shared by the providers' <p>-update.qml. canCancelUpdate is true; nothing
-// is written until the new values are verified (backups when the account backs up, else files).
-// 1. identify() on the stored settings (no credentials sent).
-// 2. A changed or missing server key is shown next to the stored one; only explicit acceptance
-// replaces the pin.
-// 3. server-identity-changed, or an account without a secret by design (interactive, smb guest;
-// also clears the "not signed in" state a device restore leaves): verify with the stored secret and
-// the accepted pin. auth-failed, credentials missing after a device restore, or a stored secret
-// that no longer works: ask for the secret (SFTP: password, new key or imported key) and verify it.
-// 4. NetVfsAccountSetup.update(): identity, pin, sign-in method, attention keys cleared; then
-// credentialsUpdated() and the end destination.
 AccountCredentialsAgent {
     id: root
 
@@ -94,7 +83,6 @@ AccountCredentialsAgent {
         _probe.identify(_storedParams)
     }
 
-    // A result is only acted on while its busy page is still shown.
     function _onBusyPage() {
         return _busyPage !== null && pageStack.currentPage === _busyPage
     }
@@ -114,13 +102,11 @@ AccountCredentialsAgent {
         _afterIdentity({}, _busyPage)
     }
 
-    // pinOptions: the accepted identity's (host_key), or {} to keep the stored pin.
     function _afterIdentity(pinOptions, page) {
         _busyPage = page
         _pinOptions = pinOptions
         _params = NetVfsHelpers.withOptions(_storedParams, pinOptions)
         if (_attention === "server-identity-changed" || _secretless) {
-            // The secret is probably still valid (or there is none): verify with the accepted pin.
             _usingStoredSecret = true
             _busyPage.showBusy(_verifyText())
             _probe.verifyAccount(root.accountId, pinOptions, _service)
@@ -212,7 +198,6 @@ AccountCredentialsAgent {
         return qsTrId("settings-accounts-netvfs-la-verifying_files")
     }
 
-    // Back to where the input can be changed.
     function _goBack() {
         _probe.cancel()
         if (_keyPage !== null && _authMode === "publickey" && _probe.error === NetVfsProbe.AuthFailed) {

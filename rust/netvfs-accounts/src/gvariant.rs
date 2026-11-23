@@ -13,9 +13,7 @@ use crate::qvariant::Value;
 #[must_use]
 pub fn from_db(type_string: &[u8], text: Option<&[u8]>) -> Value {
     let Some(text) = text else { return Value::Invalid };
-    // g_variant_parse() and g_variant_new_string() refuse invalid UTF-8.
     let Ok(text) = std::str::from_utf8(text) else { return Value::Invalid };
-    // libaccounts-glib takes an unquoted string as is (XML files).
     if type_string == b"s" && !text.starts_with(['\'', '"']) {
         return Value::String(text.to_owned());
     }
@@ -138,7 +136,6 @@ struct Unparsable;
 
 type Parsed<T> = Result<T, Unparsable>;
 
-/// Nesting limit; bounds recursion.
 const MAX_DEPTH: usize = 16;
 
 struct Parser<'a> {
@@ -231,7 +228,6 @@ impl Parser<'_> {
         }
     }
 
-    /// Optional type annotation (`uint32 5`, `@as []`); the type the value must then have.
     fn annotation(&mut self, expected: Option<Kind>) -> Parsed<Option<Kind>> {
         let annotated = match self.peek() {
             Some(b'@') => {
@@ -337,7 +333,6 @@ impl Parser<'_> {
         };
         let magnitude = strtoull(digits)?;
         let negative = negative && magnitude != 0;
-        // u64 and its negation fit i128: range checks are exact.
         let wide = i128::from(magnitude);
         let signed = if negative { wide.checked_neg().ok_or(Unparsable)? } else { wide };
         let value = match kind {
@@ -355,7 +350,6 @@ impl Parser<'_> {
     }
 
     fn array(&mut self, expected: Option<Kind>, depth: usize) -> Parsed<Value> {
-        // Only string arrays convert; an untyped one is `as` if its first item is a string.
         match expected {
             None | Some(Kind::StringArray) => {}
             Some(_) => return Err(Unparsable),
@@ -364,7 +358,6 @@ impl Parser<'_> {
         let mut items = Vec::new();
         if self.peek() == Some(b']') {
             self.advance(1);
-            // An empty array needs an annotation.
             return if expected.is_some() { Ok(Value::StringList(items)) } else { Err(Unparsable) };
         }
         loop {
@@ -423,8 +416,6 @@ fn within<T: TryFrom<i128>>(value: i128) -> Parsed<T> {
     or_unparsable(T::try_from(value))
 }
 
-/// `g_ascii_strtoull(token, &end, 0)` over the whole token: optional sign (`-` negates mod 2^64),
-/// hex after `0x`, octal after `0`, else decimal.
 fn strtoull(token: &str) -> Parsed<u64> {
     let (negate, rest) = match token.strip_prefix('-') {
         Some(rest) => (true, rest),

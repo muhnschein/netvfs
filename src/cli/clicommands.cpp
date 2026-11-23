@@ -46,7 +46,6 @@ bool parseMode(const QString &text, qint32 *out)
     return true;
 }
 
-// A time without zone is UTC (not local).
 bool parseTime(const QString &text, QDateTime *out)
 {
     QDateTime time = QDateTime::fromString(text, Qt::ISODate);
@@ -69,8 +68,6 @@ RenameMode modeOf(const CommandLine &cmd)
     return cmd.has(QStringLiteral("replace")) ? RenameMode::Replace : RenameMode::NoReplace;
 }
 
-// Raw `cat` bytes onto the output stream: the underlying device when there is one (stdout), else
-// Latin-1 text for a string-backed stream (tests).
 class OutputSink final : public QIODevice
 {
 public:
@@ -237,8 +234,6 @@ Result cmdMv(const Context &c)
     return c.backend->rename(c.cmd.positional.at(0), c.cmd.positional.at(1), modeOf(c.cmd));
 }
 
-// Another location for `cp --to-url`: the URL, then --to-option and --to-host-key on top; secret
-// variable defaults to the main one.
 Result targetLocation(const Context &c, Location *target)
 {
     QVariantMap overrides;
@@ -319,7 +314,6 @@ Result cmdTouch(const Context &c)
     QDateTime time = nowSeconds();
     if (c.cmd.values.contains(QStringLiteral("mtime")))
         parseTime(c.cmd.value(QStringLiteral("mtime")), &time);
-    // A missing file is created empty, whatever the server can set on it.
     Entry existing;
     const Result found = c.backend->lstat(path, &existing);
     if (found.error() == Error::NotFound)
@@ -394,7 +388,6 @@ Result cmdCaps(const Context &c)
     return Result::success();
 }
 
-// Folders at the root of a location without a share (server mode).
 Result cmdShares(const Context &c)
 {
     Collector collector;

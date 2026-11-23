@@ -1,16 +1,4 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
-/*
- * One-time password stub for the SFTP interop suite. Asks "Verification code: " (no echo) through the PAM
- * conversation, which OpenSSH turns into a keyboard-interactive round, and accepts one fixed code.
- * Never install outside a test container.
- * Arguments:
- *   code=VALUE    the code that is accepted (required)
- *   wrong=ignore  a wrong answer is PAM_IGNORE instead of PAM_AUTH_ERR, so
- *                 that a following module decides (used where the password
- *                 method runs the same stack, see start-sshd.sh)
- *   first=echo    ask "Token label: " with echo first (answer ignored), so
- *                 the client sees a round with an echoed prompt
- */
 #define PAM_SM_AUTH
 #include <security/pam_appl.h>
 #include <security/pam_modules.h>

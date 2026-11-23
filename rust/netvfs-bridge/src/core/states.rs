@@ -122,8 +122,6 @@ mod tests {
         report.announced(disconnected.clone());
         report.listed(&disconnected, start);
         assert_eq!(report.due(), None);
-        // A session saw "connecting", then the attempt was canceled: the
-        // states are as announced again, but that session must hear of it.
         report.listed(&connecting, start);
         assert_eq!(report.due(), start.checked_add(STATES_DELAY));
         assert!(report.check(disconnected.clone()));

@@ -1,24 +1,17 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! `flock()` and `kill(pid, 0)` for the `QLockFile`-compatible lock.
 
 use std::io;
 use std::os::fd::{AsRawFd, BorrowedFd};
 
-/// `flock(fd, LOCK_EX | LOCK_NB)` as `QLockFile`.
-///
-/// # Errors
-/// `WouldBlock` when another descriptor holds it.
 pub fn lock_exclusive_nonblocking(fd: BorrowedFd<'_>) -> io::Result<()> {
     // SAFETY: flock takes a live descriptor and flags; no pointers.
     let rc = unsafe { libc::flock(fd.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
     if rc == 0 { Ok(()) } else { Err(io::Error::last_os_error()) }
 }
 
-/// Whether `pid` exists: `kill(pid, 0)` fails with `ESRCH` only when not (`EPERM`: exists).
 #[must_use]
 pub fn process_exists(pid: i32) -> bool {
     if pid <= 0 {
-        // 0 and negative pids name process groups.
         return false;
     }
     // SAFETY: signal 0 sends nothing.

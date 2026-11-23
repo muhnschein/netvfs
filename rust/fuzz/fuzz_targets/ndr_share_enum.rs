@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! srvsvc share list from the pipe: fragments reassembled, NetrShareEnum level 1 stub decoded; input also as one stub and as bind_ack. No panic; caps and share-name rules hold.
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;

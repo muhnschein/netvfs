@@ -24,7 +24,6 @@ struct Args {
     consumer: String,
 }
 
-/// `[--listen ADDRESS] <consumer-id>`; `None` for anything else.
 fn parse_args(args: Vec<OsString>) -> Option<Args> {
     let args: Vec<String> = args.into_iter().map(OsString::into_string).collect::<Result<_, _>>().ok()?;
     match args.as_slice() {
@@ -69,7 +68,7 @@ fn main() -> ExitCode {
     let deps = Deps::system(ffi, listen, &env);
     let bridge = std::thread::Builder::new().name(RUNTIME_THREAD.to_owned()).spawn(move || {
         let code = netvfs_bridge::serve(config, deps);
-        ffi.quit(0); // queued: also ends a loop that has not started yet
+        ffi.quit(0);
         code
     });
     let code = match bridge {

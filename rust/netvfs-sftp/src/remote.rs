@@ -21,9 +21,7 @@ pub const MAX_CHUNK: u32 = 256 * 1024;
 pub const FALLBACK_CHUNK: u32 = 32 * 1024;
 /// Requests in flight per transfer or handle.
 pub const WINDOW: usize = 16;
-/// Symlink targets stat'ed per listing.
 const MAX_SYMLINK_RESOLUTIONS: u32 = 512;
-/// Names cached per kind.
 const MAX_CACHED_NAMES: usize = 4096;
 /// Mode of a new folder without `dir_mode`.
 pub const DEFAULT_DIR_MODE: u32 = 0o777;
@@ -86,7 +84,6 @@ pub fn chunk(limit: Option<u64>) -> u32 {
     }
 }
 
-/// Owner and group names by id.
 #[derive(Debug, Default)]
 struct Owners {
     users: HashMap<u32, String>,
@@ -135,20 +132,16 @@ pub fn entry_from(attrs: &Attrs, name: &[u8]) -> Entry {
         entry.uid = Some(u64::from(uid));
         entry.gid = Some(u64::from(gid));
     }
-    // Hidden is never set; dot names are a consumer convention.
     if std::str::from_utf8(name).is_err() {
         entry.flags = entry.flags.union(EntryFlags::NAME_NOT_UTF8);
     }
     entry
 }
 
-/// Whether `f` ends the call by itself: the connection is gone or the call
-/// was canceled, so no follow-up request is worth sending.
 fn fatal(s: &Status) -> bool {
     matches!(s.name, ErrorName::ConnectionLost | ErrorName::Canceled | ErrorName::Timeout)
 }
 
-/// Seconds of SFTP v3 times (`uint32`), from milliseconds.
 fn seconds(ms: i64) -> Option<u32> {
     u32::try_from(ms.checked_div(1000)?).ok()
 }
@@ -252,7 +245,6 @@ pub struct Remote {
     ext: Extensions,
     chunks: Chunks,
     dir_mode: u32,
-    /// Owner names, when `users-groups-by-id@openssh.com` answered.
     owners: Option<Owners>,
 }
 
@@ -381,7 +373,6 @@ impl Remote {
         }
     }
 
-    /// Names the owners of `entries`: one request for the ids the cache does not know yet.
     async fn name_owners(&mut self, entries: &mut [Entry], cancel: &CancelToken) {
         let Some(owners) = &self.owners else {
             return;
@@ -427,7 +418,6 @@ impl Remote {
         }
     }
 
-    /// STAT or LSTAT of `remote`, without owner names.
     async fn stat_remote(&self, remote: &[u8], follow: bool, cancel: &CancelToken) -> Result<Entry, Status> {
         self.client
             .stat(remote, follow, cancel)
@@ -465,7 +455,6 @@ impl Remote {
             Ok(handle) => handle,
             Err(f) => {
                 let status = f.status(&display(&remote));
-                // OpenSSH reports ENOTDIR as "no such file".
                 if !fatal(&status)
                     && let Ok(entry) = self.stat_remote(&remote, true, cancel).await
                     && entry.kind != EntryType::Directory
@@ -480,7 +469,6 @@ impl Remote {
         };
         let result = self.read_entries(&handle, &remote, options, sink, cancel).await;
         if result.is_ok() {
-            // The listing is complete; a failed CLOSE changes nothing.
             drop(self.client.close(&handle, cancel).await);
         } else {
             self.client.close_detached(&handle);
@@ -506,8 +494,6 @@ impl Remote {
             else {
                 return Ok(());
             };
-            // A name that is no entry of this folder is left out; the
-            // rest of the listing stays.
             for name in names.into_iter().filter(|n| is_entry_name(&n.filename)) {
                 let mut entry = entry_from(&name.attrs, &name.filename);
                 if options.resolve_symlink_types && entry.kind == EntryType::Symlink {
@@ -524,8 +510,6 @@ impl Remote {
         }
     }
 
-    /// At most [`MAX_SYMLINK_RESOLUTIONS`] per listing; beyond, and for targets that cannot be stat'ed,
-    /// `TARGET_UNKNOWN`.
     async fn resolve_target(&self, dir: &[u8], entry: &mut Entry, budget: &mut u32, cancel: &CancelToken) {
         let target = if *budget > 0 {
             self.stat_remote(&join(dir, &entry.name), true, cancel).await.ok()
@@ -567,7 +551,6 @@ impl Remote {
             return Ok(());
         };
         let status = f.status(&display(&remote));
-        // OpenSSH reports EEXIST as a plain failure; a concurrent creator is fine.
         if fatal(&status) {
             return Err(status);
         }
@@ -593,7 +576,6 @@ impl Remote {
             return Ok(());
         };
         let status = f.status(&display(&remote));
-        // OpenSSH reports EISDIR as a plain failure.
         if !fatal(&status)
             && let Ok(entry) = self.stat_remote(&remote, false, cancel).await
             && entry.kind == EntryType::Directory
@@ -619,7 +601,6 @@ impl Remote {
         let Ok(entry) = self.stat_remote(&remote, false, cancel).await else {
             return Err(status);
         };
-        // OpenSSH reports ENOTDIR as "no such file" and ENOTEMPTY as a plain failure.
         if entry.kind != EntryType::Directory {
             return Err(Status::new(
                 ErrorName::NotADirectory,
@@ -650,8 +631,6 @@ impl Remote {
         found
     }
 
-    /// `AlreadyExists` when something is at `remote` now, else `failure`
-    /// (OpenSSH reports EEXIST as a plain failure).
     async fn exists_as(&self, remote: &[u8], failure: Status, cancel: &CancelToken) -> Status {
         if fatal(&failure) || self.stat_remote(remote, false, cancel).await.is_err() {
             return failure;
@@ -684,7 +663,6 @@ impl Remote {
         target: &[u8],
         cancel: &CancelToken,
     ) -> Result<(), Status> {
-        // OpenSSH fails a plain RENAME on an existing target, atomically for files.
         let Err(f) = self.client.simple(Simple::Rename(source, target), cancel).await else {
             return Ok(());
         };
@@ -710,7 +688,6 @@ impl Remote {
             if source == target {
                 return Ok(());
             }
-            // A folder is never replaced.
             if entry.kind == EntryType::Directory {
                 return Err(Status::new(
                     ErrorName::AlreadyExists,
@@ -718,8 +695,6 @@ impl Remote {
                 ));
             }
         }
-        // With posix-rename@openssh.com the target is replaced atomically; a plain RENAME does not replace: remove
-        // first.
         if !self.ext.posix_rename && existing.is_some() {
             self.client
                 .simple(Simple::Remove(target), cancel)
@@ -736,7 +711,6 @@ impl Remote {
             self.client.simple(Simple::Rename(source, target), cancel).await
         };
         renamed.map_err(|f| f.status(&display(source)))?;
-        // rename(2) of one hard link onto another of the same file succeeds and keeps both names: remove one.
         if self.ext.posix_rename
             && existing.is_some_and(|e| e.kind == EntryType::File)
             && self.stat_remote(source, false, cancel).await.is_ok()
@@ -889,7 +863,6 @@ impl Remote {
                 return Err(Status::new(ErrorName::AlreadyExists, format!("{} exists", display(&target))));
             }
             Ok(existing) if existing.kind != EntryType::File => {
-                // A link or special file is replaced, not written through.
                 self.client
                     .simple(Simple::Remove(&target), cancel)
                     .await
@@ -915,8 +888,6 @@ impl Remote {
             .open(source, FXF_READ, &Attrs::default(), cancel)
             .await
             .map_err(|f| f.status(&display(source)))?;
-        // No TRUNC: the target may be the source under another name; the
-        // size is set after the copy.
         let create = if mode == RenameMode::NoReplace { FXF_CREAT | FXF_EXCL } else { FXF_CREAT };
         let attrs =
             Attrs { permissions: Some(entry.mode.unwrap_or(DEFAULT_FILE_MODE) & 0o777), ..Attrs::default() };
@@ -947,7 +918,6 @@ impl Remote {
         };
         let status = f.status(&display(target));
         if mode == RenameMode::NoReplace && !fatal(&status) {
-            // The target is ours: no half copy stays behind.
             drop(c.simple(Simple::Remove(target), cancel).await);
         }
         Err(status)

@@ -46,7 +46,6 @@ constexpr std::array<CapabilityName, 21> capabilityNames = { {
     { Capability::ShareEnumeration, "ShareEnumeration" },
     { Capability::ETags, "ETags" },
 } };
-// One name per capability: a leftover size would add a nameless entry.
 static_assert(capabilityNames.size() == static_cast<std::size_t>(Capability::ETags) + 1
                   && capabilityNames.back().capability == Capability::ETags,
               "one name per capability");
@@ -114,7 +113,6 @@ ServerIdentity ServerIdentity::fromPin(const QString &pin)
     return identity;
 }
 
-// Deep copies, so wiping ours never touches the caller's buffer.
 Credentials::Credentials(const QString &user, const QByteArray &secretData)
     : userName(user)
     , secret(secretData.constData(), secretData.size())

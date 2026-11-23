@@ -26,7 +26,6 @@ const PKCS8_ENCRYPTED_BEGIN: &str = "-----BEGIN ENCRYPTED PRIVATE KEY-----";
 const SEC1_BEGIN: &str = "-----BEGIN EC PRIVATE KEY-----";
 const RSA_BEGIN: &str = "-----BEGIN RSA PRIVATE KEY-----";
 const DSA_BEGIN: &str = "-----BEGIN DSA PRIVATE KEY-----";
-/// The OID of DSA (1.2.840.10040.4.1), which PKCS#8 names only inside.
 const DSA_OID: &str = "1.2.840.10040.4.1";
 
 /// Most bcrypt rounds of an encrypted OpenSSH key (`ssh-keygen -a`; 24
@@ -103,7 +102,6 @@ fn too_costly() -> Status {
     )
 }
 
-/// The bcrypt rounds of an encrypted OpenSSH key, within the bound.
 fn check_bcrypt_cost(kdf: &Kdf) -> Result<(), Status> {
     match kdf {
         Kdf::Bcrypt { rounds, .. } if *rounds > MAX_BCRYPT_ROUNDS => Err(too_costly()),
@@ -111,8 +109,6 @@ fn check_bcrypt_cost(kdf: &Kdf) -> Result<(), Status> {
     }
 }
 
-/// The key derivation of an encrypted PKCS#8 key, within the bounds. A
-/// file that does not decode this far is left to the decoder to refuse.
 fn check_pkcs8_cost(text: &str) -> Result<(), Status> {
     let Ok((_label, document)) = pkcs8::SecretDocument::from_pem(text) else {
         return Ok(());
@@ -129,7 +125,6 @@ fn check_pkcs8_cost(text: &str) -> Result<(), Status> {
             let memory = 128u64.saturating_mul(u64::from(p.block_size)).saturating_mul(p.cost_parameter);
             memory <= MAX_SCRYPT_MEMORY && p.parallelization <= MAX_SCRYPT_PARALLELISM
         }
-        // None that the decoder knows: it refuses the key.
         _ => true,
     };
     if within { Ok(()) } else { Err(too_costly()) }
@@ -160,7 +155,6 @@ pub fn check_algorithm(algorithm: &Algorithm) -> Result<(), Status> {
     }
 }
 
-/// The armour of a key file: what its first `-----BEGIN` line says.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Armour {
     OpenSsh,
@@ -169,7 +163,6 @@ enum Armour {
     Sec1,
 }
 
-/// Refusals that the text shows without decoding anything.
 fn armour(text: &str) -> Result<Armour, Status> {
     let trimmed = text.trim_start();
     if trimmed.starts_with("PuTTY-User-Key-File-") {
@@ -190,7 +183,6 @@ fn armour(text: &str) -> Result<Armour, Status> {
     }
 }
 
-/// A public key or certificate line (`<type> AAAA... [comment]`).
 fn public_line_refusal(text: &str) -> Option<Status> {
     let mut fields = text.split_ascii_whitespace();
     let key_type = fields.next()?;
@@ -211,13 +203,10 @@ pub fn read_private_key(file: &[u8], passphrase: &[u8]) -> Result<PrivateKey, St
     if file.len() > MAX_KEY_FILE {
         return Err(not_a_key());
     }
-    // Pasted keys may come with blank lines or spaces around them.
     let text = std::str::from_utf8(file).map_err(|_not_text| not_a_key())?.trim();
     let key = match armour(text)? {
         Armour::OpenSsh => {
-            // Unknown `name@domain` key types decode, and are refused by name below.
             let key = PrivateKey::from_openssh(text).map_err(|_undecodable| unusable())?;
-            // The public half is not encrypted: refused before the passphrase is asked for.
             check_algorithm(&key.algorithm())?;
             if key.is_encrypted() {
                 check_bcrypt_cost(key.kdf())?;
@@ -245,7 +234,6 @@ pub fn read_private_key(file: &[u8], passphrase: &[u8]) -> Result<PrivateKey, St
                 other => decoding_failure(&other),
             })?
         }
-        // russh takes a password as the sign of the encrypted format: never one here.
         Armour::Pkcs8 | Armour::Sec1 => {
             russh::keys::decode_secret_key(text, None).map_err(|e| decoding_failure(&e))?
         }
@@ -254,7 +242,6 @@ pub fn read_private_key(file: &[u8], passphrase: &[u8]) -> Result<PrivateKey, St
     Ok(key)
 }
 
-/// A PKCS#8 or SEC1 key russh could not read.
 fn decoding_failure(e: &russh::keys::Error) -> Status {
     match e {
         russh::keys::Error::UnknownAlgorithm(oid) if oid.to_string() == DSA_OID => dsa_refused(),

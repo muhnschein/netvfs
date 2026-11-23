@@ -37,4 +37,4 @@ int UnixFd::take()
     return fd;
 }
 
-} // namespace NetVfs::BridgeTest
+}

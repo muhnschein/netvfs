@@ -18,8 +18,6 @@ path = "src/lib.rs"
 name = "netvfs-accounts"
 path = "src/main.rs"
 
-# Tests only: applies the confinement in a fresh process and checks what it
-# allows (tests/sandbox.rs). Never built for the package.
 [[bin]]
 name = "netvfs-accounts-probe"
 path = "src/bin/probe.rs"

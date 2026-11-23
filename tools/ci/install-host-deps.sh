@@ -1,8 +1,4 @@
 #!/bin/sh
-# Host packages for building and testing on Ubuntu 24.04 (CI runners, dev boxes), the Rust toolchain pinned by
-# rust/rust-toolchain.toml (clippy, rustfmt, llvm-tools for coverage). libc6-i386 and qemu-user-static are for the
-# cross build (lift-sdk.sh: SDK compilers are i486 binaries; smoke run uses qemu).
-# CI runner: via apt-install.sh. Dev box: plain apt-get, lists untouched.
 set -eu
 here=$(cd "$(dirname "$0")" && pwd)
 if [ "${GITHUB_ACTIONS:-}" = true ]; then
@@ -24,5 +20,4 @@ install \
     clang libclang-rt-dev \
     libc6-i386 qemu-user-static
 cd "$here/../../rust"
-# rustup 1.28 installs the pinned toolchain this way, older ones on `show`.
 rustup toolchain install || rustup show active-toolchain

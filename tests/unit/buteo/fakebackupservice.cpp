@@ -11,7 +11,7 @@ namespace {
 const char Service[] = "org.sailfishos.backup";
 const char ObjectPath[] = "/sailfishbackup";
 const char Interface[] = "org.sailfishos.backup";
-} // namespace
+}
 
 FakeBackupService::FakeBackupService()
     : m_connection(QDBusConnection::connectToBus(QDBusConnection::SessionBus, QStringLiteral("netvfs-fake-backup")))

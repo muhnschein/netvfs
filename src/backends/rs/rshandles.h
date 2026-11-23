@@ -2,8 +2,6 @@
 #ifndef NETVFS_RSHANDLES_H
 #define NETVFS_RSHANDLES_H
 
-// Each handle owns its nvr_read / nvr_write until close, commit or abort, which free it; deleting
-// an open handle closes (read) or aborts (write) it. Delete before the backend.
 #include "backend.h"
 #include "netvfs_rs.h"
 

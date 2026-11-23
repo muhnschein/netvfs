@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! Tests only: a [`Backend`] without C++, recording what workers do with their connections.
 #![allow(clippy::arithmetic_side_effects, clippy::missing_panics_doc, missing_docs)]
 
 use super::TaskContext;

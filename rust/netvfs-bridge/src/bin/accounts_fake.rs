@@ -65,7 +65,6 @@ fn parse_account(fields: &[&str]) -> Option<Account> {
     })
 }
 
-/// Applies one record; `None` if malformed.
 fn apply(accounts: &mut Vec<Account>, line: &str) -> Option<()> {
     let fields: Vec<&str> = line.split('\t').collect();
     let (&kind, rest) = fields.split_first()?;

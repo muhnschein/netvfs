@@ -152,7 +152,6 @@ bool AccessModel::setNewAccounts(const QString &choice)
 bool AccessModel::save()
 {
     const ConsentStore store = m_storePath.isEmpty() ? ConsentStore() : ConsentStore(m_storePath);
-    // Choices of accounts not listed (another app's view, removed accounts) stay as stored.
     AppConsent stored = store.consent(m_consumer.id);
     for (const FilesAccount &account : m_rows)
         stored.accounts.insert(account.id, m_consent.accounts.value(account.id));

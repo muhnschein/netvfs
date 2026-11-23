@@ -1,7 +1,4 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! netvfs-webdav against Apache httpd mod_dav: the container of tests/interop/webdav, which `run.sh` starts and
-//! describes in `NETVFS_INTEROP_WEBDAV_*` (password, ports, work folder with the certificates). Without them every
-//! test passes at once, saying so. Tests run in parallel, each in folders of its own.
 #![allow(
     missing_docs,
     clippy::unwrap_used,
@@ -69,7 +66,6 @@ impl Server {
         }
     }
 
-    /// The run's test CA as the only trusted authority.
     fn anchors(&self) -> Anchors {
         let der = std::fs::read(format!("{}/certs/ca.der", self.work)).expect("the CA certificate");
         let mut store = RootCertStore::empty();
@@ -77,7 +73,6 @@ impl Server {
         Anchors::Custom(Arc::new(store))
     }
 
-    /// The pin of the self-signed server, as its first connection reports it.
     async fn pin(&self) -> String {
         let mut w = Webdav::with_anchors(self.anchors());
         let id = w
@@ -88,7 +83,6 @@ impl Server {
         format!("tls-spki-sha256 {}", data_encoding::BASE64.encode(&id.public_key))
     }
 
-    /// Signed in on the self-signed server, pinned, at `/dav`.
     async fn signed_in(&self) -> Webdav {
         let pin = self.pin().await;
         let mut w = Webdav::with_anchors(self.anchors());
@@ -112,7 +106,6 @@ fn c() -> CancelToken {
     CancelToken::new()
 }
 
-/// A folder name no other test (or earlier run) uses.
 fn unique(prefix: &str) -> String {
     static COUNTER: AtomicU32 = AtomicU32::new(0);
     let nanos =
@@ -196,7 +189,6 @@ async fn a_self_signed_certificate_signs_in_only_when_pinned() {
     assert_eq!((id.kind, id.algorithm.as_str()), (IdentityKind::Tls, "tls-spki-sha256"));
     assert!(id.fingerprint.starts_with("SHA256:"), "{}", id.fingerprint);
 
-    // Another key as the pin: no credentials go out.
     let other = format!("tls-spki-sha256 {}", data_encoding::BASE64.encode(b"another key"));
     let mut w = Webdav::with_anchors(s.anchors());
     w.connect(&Server::params("SELF", "127.0.0.1", "/dav", Some(&other)), &c()).await.unwrap();
@@ -218,7 +210,6 @@ async fn a_certificate_of_a_trusted_authority_needs_no_pin_and_h2_is_not_used() 
     w.make_dir(dir.as_bytes(), true, &c()).await.unwrap();
     assert_eq!(w.stat(dir.as_bytes(), true, &c()).await.unwrap().kind, EntryType::Directory);
     w.remove_dir(dir.as_bytes(), &c()).await.unwrap();
-    // The same server under an address its certificate does not name: a key to confirm.
     let mut w = Webdav::with_anchors(s.anchors());
     let id = w.connect(&Server::params("SIGNED", "127.0.0.1", "/dav", None), &c()).await.unwrap();
     assert_eq!(id.map(|i| i.kind), Some(IdentityKind::Tls));
@@ -279,7 +270,6 @@ async fn files_and_folders_round_trip() {
     assert_eq!(buf[..10], bytes[2_999_990..]);
     handle.close(&c()).await.unwrap();
 
-    // Renames and copies: no replacing unless asked.
     let g = format!("{dir}/g.bin");
     put(&mut w, &g, b"small", Disposition::Truncate).await.unwrap();
     let e = w.rename(g.as_bytes(), f.as_bytes(), RenameMode::NoReplace, &c()).await.unwrap_err();
@@ -299,7 +289,6 @@ async fn files_and_folders_round_trip() {
     );
     assert_eq!(s.on_disk(&format!("{tree}/sub/h.bin")), bytes);
 
-    // Removing: a folder is not a file, a full folder is not removed.
     assert_eq!(w.remove_file(dir.as_bytes(), &c()).await.unwrap_err().name, ErrorName::IsADirectory);
     assert_eq!(w.remove_dir(dir.as_bytes(), &c()).await.unwrap_err().name, ErrorName::DirectoryNotEmpty);
     assert_eq!(w.stat(b"nothing here", true, &c()).await.unwrap_err().name, ErrorName::NotFound);

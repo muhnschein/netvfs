@@ -1,7 +1,4 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! `org.netvfs.Bridge1` interface of the fake. Check order as in the C++ bridge (`session.cpp`):
-//! argument validation (`InvalidArgs`, `InvalidName`), `Hello` first, consent, scripted latency and
-//! failures, then the operation.
 
 use super::DEFAULT_CAPS;
 use super::args::{self, Dict};
@@ -26,9 +23,6 @@ use zbus::names::{InterfaceName, MemberName};
 use zbus::object_server::{DispatchResult2, Interface, SignalEmitter};
 use zbus::zvariant::{OwnedFd, OwnedValue, Value};
 
-/// Wraps the generated interface: a call whose signature differs from the
-/// method table's fails with `InvalidArgs`, as in the real bridge (zbus alone
-/// would answer with its own error name).
 pub(super) struct Checked(Iface);
 
 impl Checked {
@@ -37,8 +31,6 @@ impl Checked {
     }
 }
 
-// `DispatchResult2` is unstable in zbus 5: a zbus bump that changes it breaks this wrapper
-// (test-only).
 #[zbus::export::async_trait::async_trait]
 impl Interface for Checked {
     fn name() -> InterfaceName<'static> {
@@ -125,7 +117,6 @@ impl Iface {
         Self { shared, session }
     }
 
-    /// Checks before the operation; consent and default lane from [`crate::methods::METHODS`].
     async fn begin(&self, method: &str, lane: Option<Lane>, target: &str) -> Result<(), Fail> {
         let info =
             find_method(method).ok_or_else(|| Fail::net(ErrorName::Internal, "Not in the method table"))?;
@@ -149,7 +140,6 @@ impl Iface {
         }
     }
 
-    /// What the app may do in `loc`: `NotFound` for an unknown location, `PermissionDenied` (detail `denied`) for one it may not use.
     fn require_location(&self, loc: &str) -> Result<Level, Fail> {
         self.shared.with(|s| {
             if !s.locations.contains_key(loc) {
@@ -165,7 +155,6 @@ impl Iface {
         })
     }
 
-    /// `op` on `path` in `loc` by the level's rules ([`access::check`]): the verdict, or the refusal.
     fn admit(&self, loc: &str, path: &[u8], op: Op) -> Result<Verdict, Fail> {
         let level = self.require_location(loc)?;
         let own = self.shared.with(|s| s.own(loc, path));
@@ -175,13 +164,10 @@ impl Iface {
         }
     }
 
-    /// Records what a finished `call` (`error`: its failure) made of `path` in `loc`.
     fn after<T>(&self, loc: &str, path: &[u8], call: After, result: &Result<T, Fail>) {
         self.shared.with(|s| s.after_call(loc, path, call, result.as_ref().err().map(Fail::bare)));
     }
 
-    /// A call needing a connection of `loc`'s pool: the location is connected until `Disconnect`; a
-    /// change is told.
     fn reach(&self, loc: &str) -> Result<(), Fail> {
         self.require_location(loc)?;
         self.set_state(loc, location_state::CONNECTED);
@@ -231,7 +217,6 @@ impl Iface {
     }
 }
 
-/// `PermissionDenied` for what `level` does not allow; the level as detail.
 fn refused(level: Level) -> Fail {
     let what = match level {
         Level::Full => "do this",
@@ -243,7 +228,6 @@ fn refused(level: Level) -> Fail {
         .with_detail(Some(level.as_str().to_owned()), None)
 }
 
-/// A copy's destination.
 const fn copy_op(replace: bool) -> Op {
     if replace { Op::Unrestricted } else { Op::Create }
 }
@@ -285,7 +269,6 @@ impl Iface {
         Ok(self.shared.with(|s| s.wire_locations()))
     }
 
-    // A one-element tuple keeps the reply a single struct argument on the wire.
     async fn capabilities(&self, loc: String) -> Result<(WireCapabilities,), Fail> {
         let loc = args::location(&loc)?;
         self.begin("Capabilities", None, &loc).await?;
@@ -312,11 +295,9 @@ impl Iface {
         self.env(&ctxt);
         self.session.with(|s| s.discovering = on);
         if on {
-            // A start signals what is known right away, after the reply, even if nothing yet.
             let shared = Arc::clone(&self.shared);
             tokio::spawn(async move { shared.broadcast_nearby().await });
         } else if !self.shared.any_discovering() {
-            // Discovery halts when the last client stops and forgets what it found.
             self.shared.with(|s| s.nearby.clear());
         }
         Ok(())
@@ -574,7 +555,6 @@ impl Iface {
         let dst = args::path(&dst)?;
         let opts = args::copy_opts(&opts)?;
         self.begin("CopyAcross", None, &src_loc).await?;
-        // Copy jobs connect outside the pools: no state changes.
         self.admit(&src_loc, &src, Op::Read)?;
         self.admit(&dst_loc, &dst, copy_op(opts.replace))?;
         Ok(self.start_job(&ctxt, move |env, job, cancel| {
@@ -710,7 +690,6 @@ impl Iface {
 }
 
 impl Iface {
-    /// `RemoveFile`, `RemoveDir`: an add level refuses another's item, but says `NotFound` for a missing one.
     fn remove(
         &self,
         loc: &str,
@@ -743,7 +722,6 @@ pub(super) fn context(session: &Session) -> Option<SignalEmitter<'static>> {
 }
 
 impl Shared {
-    /// Applies `change` to the user's decision as the bridge does: `ConsentChanged` when `GetConsent` would say otherwise; when any location allows less, every client is disconnected, else `LocationsChanged`.
     pub async fn decide(&self, change: impl FnOnce(&mut State)) {
         let (before, after, narrowed) = self.with(|s| {
             let ids: Vec<String> = s.locations.keys().cloned().collect();

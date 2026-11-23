@@ -35,7 +35,6 @@ pub struct Client {
 struct Shared {
     out: mpsc::UnboundedSender<Vec<u8>>,
     table: Mutex<Table>,
-    /// Tripped when the client ends; stops both tasks.
     stop: CancelToken,
     timeout: Duration,
 }
@@ -45,17 +44,13 @@ struct Table {
     next_id: u32,
     slots: HashMap<u32, Slot>,
     abandoned: usize,
-    /// Why the client ended, once it has.
     ended: Option<Status>,
 }
 
 #[derive(Debug)]
 enum Slot {
     Waiting(oneshot::Sender<Reply>),
-    /// The reply is dropped when it comes; a handle in it is closed.
-    Abandoned {
-        close_handle: bool,
-    },
+    Abandoned { close_handle: bool },
 }
 
 impl Shared {
@@ -63,7 +58,6 @@ impl Shared {
         self.table.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// Fails every waiting request with `reason` (first wins) and stops both tasks.
     fn end(&self, reason: Status) {
         let mut table = self.table();
         if table.ended.is_none() {
@@ -79,7 +73,6 @@ impl Shared {
         self.table().ended.clone().unwrap_or_else(connection_lost)
     }
 
-    /// Queues `packet` under a new id; `slot` is what waits for its reply.
     fn queue(&self, packet: Packet, slot: Slot) -> Result<u32, Status> {
         let mut table = self.table();
         if let Some(reason) = &table.ended {
@@ -110,12 +103,10 @@ impl Shared {
         Ok(id)
     }
 
-    /// Sends `CLOSE` for `handle` without waiting for its reply.
     fn close_detached(&self, handle: &[u8]) {
         drop(self.queue(Packet::request(FXP_CLOSE).string(handle), Slot::Abandoned { close_handle: false }));
     }
 
-    /// The caller of `id` stopped waiting; `rx` is its end of the reply.
     fn abandon(&self, id: u32, close_handle: bool, rx: &mut oneshot::Receiver<Reply>) {
         let mut table = self.table();
         if let Some(slot) = table.slots.get_mut(&id) {
@@ -128,7 +119,6 @@ impl Shared {
             }
             return;
         }
-        // Handed over under the lock: in `rx` now, or the client ended and it never comes.
         let delivered = rx.try_recv().ok();
         drop(table);
         if let (true, Some(Reply::Handle(handle))) = (close_handle, delivered) {
@@ -136,13 +126,11 @@ impl Shared {
         }
     }
 
-    /// Hands a reply to its request.
     fn dispatch(&self, body: &[u8]) -> Result<(), Status> {
         let (id, reply) = decode_reply(body).map_err(malformed)?;
         let mut table = self.table();
         match table.slots.remove(&id) {
             Some(Slot::Waiting(tx)) => {
-                // Under the lock, so a waiter that stops now finds the reply in its receiver (`abandon`).
                 drop(tx.send(reply));
                 Ok(())
             }
@@ -371,8 +359,6 @@ impl Client {
         self.send_as(packet, false)
     }
 
-    /// As [`send`](Self::send) for a request that opens a handle: if it
-    /// is abandoned, the handle its reply brings is closed.
     fn send_as(&self, packet: Packet, close_handle: bool) -> Result<Pending, Failure> {
         let (tx, rx) = oneshot::channel();
         let id = self.shared.queue(packet, Slot::Waiting(tx))?;
@@ -480,7 +466,6 @@ impl Client {
             Simple::Mkdir(path, attrs) => attrs.encode(Packet::request(FXP_MKDIR).string(path)),
             Simple::Rename(from, to) => Packet::request(FXP_RENAME).string(from).string(to),
             Simple::Setstat(path, attrs) => attrs.encode(Packet::request(FXP_SETSTAT).string(path)),
-            // OpenSSH's order (target, then link).
             Simple::Symlink { target, link } => Packet::request(FXP_SYMLINK).string(target).string(link),
         };
         ok(self.call(packet, cancel).await?)

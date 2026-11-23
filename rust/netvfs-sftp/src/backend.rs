@@ -107,7 +107,6 @@ pub fn parse_pin(pin: &str) -> Option<(String, Vec<u8>)> {
     Some(((*algorithm).to_owned(), blob))
 }
 
-/// Connected, not signed in.
 #[derive(Debug)]
 struct Connected {
     session: Session,
@@ -115,7 +114,6 @@ struct Connected {
     mismatch: bool,
 }
 
-/// Signed in, SFTP running.
 #[derive(Debug)]
 struct Ready {
     session: Session,
@@ -137,12 +135,10 @@ pub struct Sftp {
     state: State,
 }
 
-/// `Internal` for a file operation before sign-in.
 fn not_signed_in() -> Status {
     Status::internal("Not signed in")
 }
 
-/// The user to sign in as: the credentials', the account's, else the local user's (as ssh does).
 fn user_name(credentials: &Credentials, settings: &Settings) -> String {
     if !credentials.user.is_empty() {
         return credentials.user.clone();
@@ -153,7 +149,6 @@ fn user_name(credentials: &Credentials, settings: &Settings) -> String {
     std::env::var("USER").or_else(|_e| std::env::var("LOGNAME")).unwrap_or_default()
 }
 
-/// Signs in, starts SFTP and learns what the server offers.
 async fn sign_in(
     session: &mut Session,
     settings: &Settings,
@@ -167,13 +162,10 @@ async fn sign_in(
     Login::new(session, &user, &credentials.secret, prompter, mode, timeout, cancel).run().await?;
     let (reader, channel) = session.open_sftp(timeout, cancel).await?;
     let writer = channel.make_writer();
-    // Runs when the client ends: the channel is always closed.
     let on_end = async move { drop(channel.close().await) };
-    let (client, version) =
-        Client::start(reader, writer, on_end, settings.request_timeout, cancel).await.map_err(|e| {
-            // Subsystem ended before answering: SFTP is not set up for this account (a forced command, say).
-            if e.name == ErrorName::ConnectionLost { sftp_not_enabled() } else { e }
-        })?;
+    let (client, version) = Client::start(reader, writer, on_end, settings.request_timeout, cancel)
+        .await
+        .map_err(|e| if e.name == ErrorName::ConnectionLost { sftp_not_enabled() } else { e })?;
     Remote::new(client, &version, settings.dir_mode, cancel).await
 }
 
@@ -184,7 +176,6 @@ impl Sftp {
         Self::default()
     }
 
-    /// Closes whatever is open.
     async fn close(&mut self) {
         match std::mem::take(&mut self.state) {
             State::Idle => {}
@@ -246,7 +237,6 @@ impl Backend for Sftp {
             }
         };
         let checked = if connected.mismatch {
-            // No credentials go to a server whose key is not the pin.
             Err(Status::new(
                 ErrorName::ServerIdentityChanged,
                 "The server key does not match the saved key; not signing in",
@@ -268,7 +258,6 @@ impl Backend for Sftp {
         };
         let Connected { mut session, settings, .. } = *connected;
         match sign_in(&mut session, &settings, mode, credentials, prompter, cancel).await {
-            // A cancel that comes after the last step finds the next call.
             Ok(remote) => {
                 self.state = State::Ready(Box::new(Ready { session, remote, settings }));
                 Ok(())

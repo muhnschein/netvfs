@@ -249,7 +249,6 @@ void Discovery::Private::sendBrowse(qint64 at) const
         question.type = Dns::TypePtr;
         message.questions.append(question);
     }
-    // Known-answer suppression (RFC 6762 section 7.1).
     const QVector<Dns::Record> known = cache.knownAnswers(at);
     for (const Dns::Record &r : known) {
         message.answers.append(r);

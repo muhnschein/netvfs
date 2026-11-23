@@ -13,8 +13,6 @@ namespace {
 
 constexpr int DefaultConnectTimeoutMs = 15000;
 constexpr int DefaultRequestTimeoutMs = 60000;
-// The local targets give up waiting sooner, so that a broken cancel()
-// fails the FIFO stall cases quickly instead of after a minute.
 constexpr int LocalRequestTimeoutMs = 10000;
 
 NetVfs::ConnectionParams paramsFrom(const QJsonObject &o, const NetVfs::ConnectionParams &base)
@@ -68,8 +66,6 @@ Target targetFrom(const QJsonObject &o)
 
 QVector<Target> defaultTargets(const QString &scratch)
 {
-    // "local": root option, relative paths below it, NativeNoReplace where
-    // the file system has it.
     Target relative;
     relative.name = QStringLiteral("local");
     relative.params.provider = QStringLiteral("local");
@@ -80,8 +76,6 @@ QVector<Target> defaultTargets(const QString &scratch)
     relative.fifoStall = true;
     QDir().mkpath(relative.hostPath);
 
-    // "local-absolute": default root "/", absolute paths, and the
-    // link()+unlink() / stat-check fallback of rename(NoReplace).
     Target absolute;
     absolute.name = QStringLiteral("local-absolute");
     absolute.params.provider = QStringLiteral("local");
@@ -94,7 +88,7 @@ QVector<Target> defaultTargets(const QString &scratch)
     return { relative, absolute };
 }
 
-} // namespace
+}
 
 bool loadTargets(const QString &scratch, QVector<Target> *out, QString *error)
 {
@@ -146,4 +140,4 @@ Heavy heavyMode()
     return Heavy::Cheap;
 }
 
-} // namespace Conformance
+}

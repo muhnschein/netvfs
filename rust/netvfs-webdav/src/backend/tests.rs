@@ -19,7 +19,6 @@ fn spki(cert: &[u8]) -> Vec<u8> {
 }
 
 fn webpki_spki(cert: &[u8]) -> Vec<u8> {
-    // The SPKI is the one P-256 key SEQUENCE inside the certificate.
     let at = cert.windows(4).position(|w| w == [0x30, 0x59, 0x30, 0x13]).unwrap();
     cert[at..at + 91].to_vec()
 }
@@ -56,7 +55,6 @@ async fn server(cert: Cert) -> Fake {
     fake
 }
 
-/// Signed in to a trusted server at `base`.
 async fn signed_in(fake: &Fake, base: &str) -> Webdav {
     let mut w = Webdav::with_anchors(anchors());
     let c = CancelToken::new();
@@ -100,7 +98,6 @@ impl Sink for Out {
     }
 }
 
-/// Progress that cancels once `after` bytes moved.
 struct Moves {
     after: Option<u64>,
     last: (u64, Option<u64>),
@@ -131,8 +128,6 @@ fn file(data: &[u8]) -> Node {
     Node::File(data.to_vec())
 }
 
-// ---- connect and sign in
-
 #[tokio::test]
 async fn a_self_signed_server_reports_its_key_and_hears_no_credentials() {
     let fake = server(Cert::SelfSigned).await;
@@ -153,7 +148,6 @@ async fn a_trusted_server_needs_no_pin_but_a_pinned_account_sees_the_key() {
     let id = w.connect(&params(&fake, &[("host_key", &pin(LEAF))]), &c).await.unwrap().unwrap();
     assert_eq!(id.public_key, spki(LEAF));
     w.authenticate(&creds("alice", "secret"), None, &c).await.unwrap();
-    // With system anchors the test CA is unknown: the key is reported.
     let mut system = Webdav::new();
     assert!(system.connect(&params(&fake, &[]), &c).await.unwrap().is_some());
 }
@@ -167,11 +161,9 @@ async fn a_key_other_than_the_pin_gets_no_credentials() {
     let e = w.authenticate(&creds("alice", "secret"), None, &c).await.unwrap_err();
     assert_eq!(e.name, ErrorName::ServerIdentityChanged);
     assert!(fake.seen().is_empty());
-    // An unreadable pin matches nothing either.
     w.connect(&params(&fake, &[("host_key", "tls-spki-sha256 ***")]), &c).await.unwrap();
     let e = w.authenticate(&creds("alice", "secret"), None, &c).await.unwrap_err();
     assert_eq!(e.name, ErrorName::ServerIdentityChanged);
-    // The pinned key signs in.
     w.connect(&params(&fake, &[("host_key", &pin(SELF))]), &c).await.unwrap();
     w.authenticate(&creds("alice", "secret"), None, &c).await.unwrap();
     assert_eq!(fake.methods(), ["PROPFIND"]);
@@ -186,14 +178,12 @@ async fn sign_in_sends_basic_credentials() {
     let e = w.authenticate(&creds("alice", "wrong"), None, &c).await.unwrap_err();
     assert_eq!(e.name, ErrorName::AuthFailed);
     w.connect(&params(&fake, &[]), &c).await.unwrap();
-    // The account's user name when the credentials name none.
     w.authenticate(&creds("", "secret"), None, &c).await.unwrap();
     let seen = fake.seen();
     let last = seen.last().unwrap();
     assert_eq!(last.headers.get("authorization").unwrap(), AUTH);
     assert_eq!(last.headers.get("depth").unwrap(), "0");
     assert_eq!(last.path, b"/");
-    // No quota on the account's folder: no free space either.
     assert_eq!(
         w.capabilities().names(),
         ["ETags", "NativeNoReplace", "ReadHandles", "ServerCopy", "ServerCopyRecursive"]
@@ -254,7 +244,6 @@ async fn authenticate_needs_a_fresh_connection() {
     let c = CancelToken::new();
     let e = w.authenticate(&creds("alice", "secret"), None, &c).await.unwrap_err();
     assert_eq!(e.name, ErrorName::Internal);
-    // Still signed in.
     w.stat(b"/", false, &c).await.unwrap();
     let mut idle = Webdav::new();
     assert_eq!(idle.authenticate(&creds("a", "b"), None, &c).await.unwrap_err().name, ErrorName::Internal);
@@ -315,8 +304,6 @@ fn settings_from_params() {
     };
     assert_eq!(Settings::of(&dots).unwrap_err().name, ErrorName::InvalidName);
 }
-
-// ---- file operations
 
 #[tokio::test]
 async fn stat_files_folders_and_missing_ones() {
@@ -392,7 +379,6 @@ async fn list_gives_children_in_batches() {
     let mut all = Collect::default();
     w.list(b"/d/", ListOptions::default(), &mut all, &c).await.unwrap();
     assert_eq!(names(&all.0), ["a", "b", "c", "sub"]);
-    // No trailing `/`: Apache refuses one after a file's name.
     assert_eq!(fake.seen().last().unwrap().path, b"/d");
     assert_eq!(fake.seen().last().unwrap().headers.get("depth").unwrap(), "1");
     let mut none = Collect::default();
@@ -456,7 +442,6 @@ async fn hostile_listings_yield_only_children() {
     });
     let mut all = Collect::default();
     w.list(b"/d", ListOptions::default(), &mut all, &CancelToken::new()).await.unwrap();
-    // A full URL's host is not checked: its path is all that counts.
     assert_eq!(names(&all.0), ["ok", "x"]);
 }
 
@@ -546,7 +531,6 @@ async fn rename_modes() {
     assert!(!fake.methods().contains(&"MOVE".to_owned()), "same path: nothing to do");
     w.rename(b"/b", b"/c", RenameMode::Replace, &c).await.unwrap();
     assert_eq!((fake.get("/b"), fake.get("/c")), (None, Some(file(b"a"))));
-    // A target that cannot be looked at is not replaced blindly.
     fake.with(|s| s.forbidden = Some(b"/locked".to_vec()));
     fake.clear_seen();
     let e = w.rename(b"/c", b"/locked", RenameMode::Replace, &c).await.unwrap_err();
@@ -595,7 +579,6 @@ async fn free_space_from_quota() {
     fake.with(|s| s.quota = Some(("-3", "20")));
     assert_eq!(w.space_info(b"/", &c).await.unwrap(), SpaceInfo { free: None, total: None, used: Some(20) });
     fake.with(|s| s.quota = Some(("18446744073709551615", "1")));
-    // Beyond i64: not a number the server can mean; used alone stays.
     assert_eq!(w.space_info(b"/", &c).await.unwrap().free, None);
 }
 
@@ -607,7 +590,6 @@ async fn unresolved_paths_are_explained_by_their_parents() {
     let mut w = signed_in(&fake, "").await;
     let c = CancelToken::new();
     let propfind = || Method::from_bytes(b"PROPFIND").unwrap();
-    // Apache: 400 for a path below a file, 500 for a MOVE into a missing folder.
     fake.with(|s| s.canned.push((propfind(), StatusCode::BAD_REQUEST, vec![], "")));
     assert_eq!(w.stat(b"/f/below", true, &c).await.unwrap_err().name, ErrorName::NotADirectory);
     fake.with(|s| s.canned.extend((0..2).map(|_| (propfind(), StatusCode::BAD_REQUEST, vec![], ""))));
@@ -627,7 +609,6 @@ async fn unresolved_paths_are_explained_by_their_parents() {
         w.rename(b"/f", b"/missing/f", RenameMode::NoReplace, &c).await.unwrap_err().name,
         ErrorName::NotFound
     );
-    // A parent that is there: the server's error stands, also for one at the top.
     for to in [&b"/d/g"[..], b"/g"] {
         fake.with(|s| {
             s.canned.push((
@@ -640,14 +621,12 @@ async fn unresolved_paths_are_explained_by_their_parents() {
         let e = w.rename(b"/f", to, RenameMode::NoReplace, &c).await.unwrap_err();
         assert_eq!((e.name, e.detail.as_str()), (ErrorName::ProtocolError, "HTTP 500 Internal Server Error"));
     }
-    // A parent that cannot be looked at ends the search; the first error stands.
     fake.with(|s| {
         s.canned.push((propfind(), StatusCode::BAD_REQUEST, vec![], ""));
         s.canned.push((propfind(), StatusCode::FORBIDDEN, vec![], ""));
     });
     let e = w.stat(b"/f/a/b", true, &c).await.unwrap_err();
     assert_eq!((e.name, e.detail.as_str()), (ErrorName::ProtocolError, "HTTP 400 Bad Request"));
-    // Other errors are not looked into.
     fake.clear_seen();
     fake.with(|s| s.canned.push((propfind(), StatusCode::FORBIDDEN, vec![], "")));
     assert_eq!(w.stat(b"/f/below", true, &c).await.unwrap_err().name, ErrorName::PermissionDenied);
@@ -664,8 +643,6 @@ async fn names_that_are_not_utf8_are_flagged() {
     assert_eq!((odd.name, odd.flags), (b"caf\xe9".to_vec(), EntryFlags::NAME_NOT_UTF8));
     assert_eq!(w.stat(b"/caf\xc3\xa9", true, &c).await.unwrap_err().name, ErrorName::NotFound);
 }
-
-// ---- transfers
 
 #[tokio::test]
 async fn download_whole_and_ranges() {
@@ -692,7 +669,6 @@ async fn download_whole_and_ranges() {
         .map(|s| s.headers.get("range").map_or_else(|| "-".into(), |r| r.to_str().unwrap().to_owned()))
         .collect();
     assert_eq!(ranges, ["-", "bytes=3-6", "bytes=8-", "bytes=8-12", "bytes=10-"]);
-    // A server without ranges sends it all; the start is skipped.
     fake.with(|s| s.no_ranges = true);
     assert_eq!(get(&mut w, 3, Some(4)).await.unwrap().0, b"3456");
     assert_eq!(get(&mut w, 12, None).await.unwrap().0, b"");
@@ -733,7 +709,6 @@ async fn a_download_stops_when_progress_says_so() {
     let mut p = Moves { after: Some(1), last: (0, None) };
     let e = w.download(b"/f", 0, None, &mut Out::default(), &mut p, &c).await.unwrap_err();
     assert_eq!(e.name, ErrorName::Canceled);
-    // The connection is replaced, not left mid-body.
     let mut out = Out::default();
     w.download(b"/f", 0, None, &mut out, &mut Moves::quiet(), &c).await.unwrap();
     assert_eq!(out.0, big);
@@ -759,7 +734,6 @@ async fn uploads() {
         w.upload(b"/f", &new, &mut Data(b"x".to_vec(), 0, true), &mut Moves::quiet(), &c).await.unwrap_err();
     assert_eq!(e.name, ErrorName::AlreadyExists);
     fake.clear_seen();
-    // Unknown size: chunked.
     w.upload(b"/f", &replace, &mut Data(b"new".to_vec(), 0, false), &mut Moves::quiet(), &c).await.unwrap();
     assert_eq!(fake.get("/f"), Some(file(b"new")));
     let put = fake.seen().into_iter().find(|s| s.method == Method::PUT).unwrap();
@@ -782,12 +756,10 @@ async fn uploads() {
         .await
         .unwrap_err();
     assert_eq!(e.name, ErrorName::Unsupported);
-    // An empty file.
     w.upload(b"/empty", &new, &mut Data(Vec::new(), 0, true), &mut Moves::quiet(), &c).await.unwrap();
     assert_eq!(fake.get("/empty"), Some(file(b"")));
 }
 
-/// A source of `left` zero bytes that notes the largest buffer it is offered.
 struct Zeros {
     left: usize,
     largest: usize,
@@ -883,15 +855,12 @@ async fn read_handles_read_ranges() {
     assert_eq!(h.read(5, &mut buf, &c).await.unwrap(), 4);
     assert_eq!(&buf, b"5678");
     h.read_ahead(0, 10);
-    // Plain calls still work while a handle is open, and after the handle reads.
     w.stat(b"/f", false, &c).await.unwrap();
     assert_eq!(w.open_read(b"/d", &c).await.unwrap_err().name, ErrorName::IsADirectory);
     w.disconnect().await;
     assert_eq!(h.read(0, &mut buf, &c).await.unwrap_err().name, ErrorName::ConnectionLost);
     h.close(&c).await.unwrap();
 }
-
-// ---- connection
 
 #[tokio::test]
 async fn a_server_that_closes_each_connection_is_reopened() {
@@ -923,10 +892,8 @@ async fn a_request_the_server_drops_on_a_reused_connection_is_sent_again() {
     w.stat(b"/f", false, &c).await.unwrap();
     w.stat(b"/f", false, &c).await.unwrap();
     assert_eq!(fake.state.lock().unwrap().connections, before + 2);
-    // Only once: a request dropped on its fresh connection fails.
     fake.with(|s| s.drop_after = Some(0));
     assert_eq!(w.stat(b"/f", false, &c).await.unwrap_err().name, ErrorName::ConnectionLost);
-    // A body that cannot be sent twice is not.
     fake.with(|s| s.drop_after = None);
     w.stat(b"/f", false, &c).await.unwrap();
     fake.with(|s| s.drop_after = Some(1));
@@ -991,7 +958,6 @@ async fn disconnect_ends_the_connection() {
     w.disconnect().await;
     assert_eq!(w.capabilities(), Capabilities::default());
     assert_eq!(w.stat(b"/", false, &c).await.unwrap_err().name, ErrorName::Internal);
-    // Connect again.
     w.connect(&params(&fake, &[]), &c).await.unwrap();
     w.disconnect().await;
     w.disconnect().await;

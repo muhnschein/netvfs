@@ -1,12 +1,4 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! Async counterparts of `NetVfs::Backend`, `ReadHandle` and `WriteHandle` (`src/core/backend.h`),
-//! and the callbacks a call hands to a backend: [`ListSink`], [`Prompter`], [`Source`], [`Sink`],
-//! [`Progress`].
-//! The C ABI (netvfs-backend) runs every call on the caller's thread (`block_on`): callbacks are
-//! plain synchronous calls made by the call's own future, never from a spawned task. Every call
-//! takes the connection's [`CancelToken`]; it ends with `Canceled` soon after the token trips, and
-//! leaves the connection usable or reports `ConnectionLost` later. Methods with a default return
-//! `Unsupported` unless the matching capability is reported.
 
 use crate::cancel::CancelToken;
 use crate::status::Status;
@@ -131,13 +123,10 @@ impl WriteHandle for NoHandle {
     }
 }
 
-/// The future of a [`NoHandle`] method, which no one can call: there is no
-/// `NoHandle` value.
 fn no_future<T>(handle: &NoHandle) -> Ready<T> {
     match *handle {}
 }
 
-/// `Unsupported` for an optional method.
 fn unsupported<T>(what: &str) -> Result<T, Status> {
     Err(Status::unsupported(format!("{what} is not supported")))
 }
@@ -328,7 +317,6 @@ mod tests {
     use crate::status::ErrorName;
     use std::future::ready;
 
-    /// Only what a backend must have; every optional method is the trait's default.
     struct Minimal;
 
     impl Backend for Minimal {

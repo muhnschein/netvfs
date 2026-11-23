@@ -39,7 +39,6 @@ private:
     qint64 m_count = 0;
 };
 
-// The message may name a remote path: debug level only.
 void logRemovalFailure(const char *what, const Result &r)
 {
     qCWarning(lcNetVfsCore) << "Could not remove" << what << errorName(r.error());
@@ -150,7 +149,6 @@ Result checkPolicy(const QString &target, const TransferPolicy &policy)
     return Result::success();
 }
 
-// Resuming needs a partial file of exactly `resumeOffset` bytes; source positioned behind them.
 Result prepareResume(Backend *backend, QIODevice *source, const QString &part, const TransferPolicy &policy)
 {
     Entry existing;
@@ -306,7 +304,6 @@ Result removeStaleParts(Backend *backend, const QString &dir, const QDateTime &n
     if (!r.ok())
         return r;
 
-    // QRegExp: Qt 5.6 has no QRegularExpression wildcard support.
     const QRegExp matcher(pattern, Qt::CaseSensitive, QRegExp::WildcardUnix);
     const QDateTime cutoff = now.addSecs(-maxAgeSecs);
     for (const Entry &entry : entries) {

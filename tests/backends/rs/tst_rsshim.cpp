@@ -1,8 +1,4 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-// Shim of the Rust backends (src/backends/rs) against libnetvfs-rs.so with its mem backend: loading,
-// BackendFactory via libnetvfs-mem.so, conversions, callbacks (sink, prompter, progress, local side of
-// transfers) and what they throw, cancel, one call at a time, panics. Operations are covered by the
-// conformance suite on mem.
 #include "backendloader.h"
 #include "names.h"
 #include "rsbackend.h"
@@ -26,12 +22,11 @@
 using namespace NetVfs;
 
 namespace NetVfs {
-// QCOMPARE(result, Result(Error::X)) compares the error only and prints the whole result on failure.
 bool operator==(const Result &a, const Result &b)
 {
     return a.error() == b.error();
 }
-} // namespace NetVfs
+}
 
 namespace QTest {
 template<>
@@ -39,7 +34,7 @@ char *toString(const NetVfs::Result &result)
 {
     return qstrdup(qPrintable(result.ok() ? QStringLiteral("success") : result.toString()));
 }
-} // namespace QTest
+}
 
 namespace {
 
@@ -270,7 +265,7 @@ Result canceledAfterDelay(Backend *backend, const std::function<Result()> &call,
     return r;
 }
 
-} // namespace
+}
 
 class tst_RsShim : public QObject
 {
@@ -305,7 +300,6 @@ void tst_RsShim::initTestCase()
 
 void tst_RsShim::missingLibrary()
 {
-    // the plugin is there, the library is not.
     qputenv("NETVFS_RS_LIB", "/nonexistent/libnetvfs-rs.so");
     QVERIFY(BackendLoader::isAvailable(QStringLiteral("mem")));
     Result r;
@@ -321,15 +315,12 @@ void tst_RsShim::missingLibrary()
     QCOMPARE(r.message(), QStringLiteral("netvfs Rust backends not installed"));
     QVERIFY(key.privateKey.isEmpty());
 
-    // A library without nvr_get is no better.
     qputenv("NETVFS_RS_LIB", NETVFS_TEST_CORE_LIB);
     backend = newBackend(&r);
     QVERIFY(!backend);
     QCOMPARE(r.message(), QStringLiteral("netvfs Rust backends not installed"));
     QVERIFY2(r.detail().contains(QLatin1String("nvr_get")), qPrintable(r.detail()));
 
-    // The loader looks again, finds it and keeps it (the plugin and this
-    // test each have their copy of the shim).
     qputenv("NETVFS_RS_LIB", NETVFS_TEST_RS_LIB);
     backend.reset(BackendLoader::create(QStringLiteral("mem"), &r));
     QVERIFY2(backend, qPrintable(r.toString()));
@@ -422,8 +413,6 @@ void tst_RsShim::establish()
     QCOMPARE(caps.checksumAlgorithms, QStringList(QStringLiteral("sha256")));
     QCOMPARE(caps.maxNameBytes, qint64(255));
 
-    // The whole error crosses: name, message, detail (panics()) and when
-    // to retry.
     std::unique_ptr<Backend> throttled = newBackend(&r);
     QCOMPARE(throttled->connect(memParams({ { QStringLiteral("throttle"), 1500 } }), nullptr), Result::success());
     r = throttled->authenticate(Credentials(QStringLiteral("tester"), QByteArray()));
@@ -437,7 +426,6 @@ void tst_RsShim::establish()
     QCOMPARE(seen.kind, ServerIdentity::Kind::TlsCertificate);
     QCOMPARE(seen.algorithm, QStringLiteral("tls-spki-sha256"));
 
-    // No identity: an empty one, also where there was one before.
     std::unique_ptr<Backend> plain = newBackend(&r);
     QCOMPARE(plain->connect(memParams(), &seen), Result::success());
     QCOMPARE(seen.kind, ServerIdentity::Kind::None);
@@ -482,8 +470,6 @@ void tst_RsShim::prompts()
     QCOMPARE(backend->authenticate(credentials, &right), Result::success());
     QCOMPARE(right.calls, 1);
 
-    // The domain is an option of the connection and goes with the
-    // credentials.
     QCOMPARE(backend->connect(memParams({ { QStringLiteral("interactive"), QStringLiteral("Code?") },
                                           { QStringLiteral("answer"), QStringLiteral("42") },
                                           { QStringLiteral("domain"), QStringLiteral("WORKGROUP") } }),
@@ -523,7 +509,6 @@ void tst_RsShim::cancelWakesPrompter()
     QVERIFY(waiting.canceled);
     QVERIFY(clock.elapsed() < CancelLimitMs);
 
-    // only while it is asking: afterwards cancel() leaves it alone.
     waiting.canceled = false;
     backend->resetCancel();
     backend->cancel();
@@ -568,13 +553,10 @@ void tst_RsShim::entries()
     QCOMPARE(entry.mode, 0640);
     QCOMPARE(entry.modified, fixedTime());
 
-    // lstat does not follow, stat does; a dangling link is TargetUnknown.
     QCOMPARE(backend->makeSymlink(QStringLiteral("dir/file"), QStringLiteral("link")), Result::success());
     QCOMPARE(backend->lstat(QStringLiteral("link"), &entry), Result::success());
     QCOMPARE(entry.type, EntryType::Symlink);
     QCOMPARE(entry.size, qint64(8));
-    // mem knows only a link's modification time, and no mode: the others
-    // are unknown.
     QVERIFY(entry.modified.isValid());
     QVERIFY(!entry.created.isValid());
     QVERIFY(!entry.accessed.isValid());
@@ -618,8 +600,6 @@ void tst_RsShim::names()
     QCOMPARE(entry.name, utf8);
     QCOMPARE(entry.flags, EntryFlags());
 
-    // A lone surrogate that decode() cannot make has no bytes: InvalidName,
-    // for either path of a call.
     const QString lone = QStringLiteral("bad") + QChar(0xd800);
     QVERIFY(!Names::isEncodable(lone));
     QCOMPARE(backend->stat(lone, &entry), Result(Error::InvalidName));
@@ -754,7 +734,6 @@ void tst_RsShim::readHandles()
     QVERIFY(chunk.isEmpty());
     QCOMPARE(handle->read(5, 5, nullptr), Result::success());
 
-    // Ranges no QByteArray holds are refused here, and `out` is emptied.
     chunk = "stale";
     QCOMPARE(handle->read(0, -1, &chunk).message(), QStringLiteral("Invalid range"));
     QVERIFY(chunk.isEmpty());
@@ -893,7 +872,6 @@ void tst_RsShim::transfers()
     QCOMPARE(backend->download(QStringLiteral("small"), &local, DownloadOptions(), nullptr), Result::success());
     QCOMPARE(local.written, data.left(5000));
 
-    // CreateNew on an existing file and resume through upload().
     QBuffer more;
     more.setData("+");
     more.open(QIODevice::ReadOnly);
@@ -965,7 +943,6 @@ void tst_RsShim::transferFailures()
 
 void tst_RsShim::cancel()
 {
-    // until resetCancel() every call is Canceled.
     std::unique_ptr<Backend> backend = connected();
     QVERIFY(backend);
     backend->cancel();
@@ -975,7 +952,6 @@ void tst_RsShim::cancel()
     backend->resetCancel();
     QCOMPARE(backend->stat(QString(), &entry), Result::success());
 
-    // A call that waits for the server ends within 2 s of cancel().
     std::unique_ptr<Backend> stalled = connected({ { QStringLiteral("stall"), QStringLiteral("true") } });
     QVERIFY(stalled);
     qint64 afterMs = 0;
@@ -984,7 +960,6 @@ void tst_RsShim::cancel()
     QCOMPARE(r, Result(Error::Canceled));
     QVERIFY2(afterMs < CancelLimitMs, qPrintable(QString::number(afterMs)));
 
-    // Even when the backend does not look at the cancel (the cut).
     std::unique_ptr<Backend> deaf = connected({ { QStringLiteral("stall"), QStringLiteral("ignore") } });
     QVERIFY(deaf);
     r = canceledAfterDelay(deaf.get(), [&deaf]() { return deaf->keepAlive(); }, &afterMs);
@@ -994,8 +969,6 @@ void tst_RsShim::cancel()
 
 void tst_RsShim::oneCallAtATime()
 {
-    // a call from inside a callback finds the connection busy; the
-    // capabilities are kept since authenticate, so they still answer.
     std::unique_ptr<Backend> backend = connected();
     QVERIFY(backend);
     QCOMPARE(put(backend.get(), QStringLiteral("a"), "a"), Result::success());
@@ -1006,7 +979,6 @@ void tst_RsShim::oneCallAtATime()
     QCOMPARE(inside.inner.message(), Busy);
     QVERIFY(inside.innerCapabilities.has(Capability::ReadHandles));
 
-    // Another thread meanwhile is refused at once, not queued.
     std::unique_ptr<Backend> stalled = connected({ { QStringLiteral("stall"), QStringLiteral("true") } });
     QVERIFY(stalled);
     QFuture<Result> waiting = QtConcurrent::run([&stalled]() { return stalled->keepAlive(); });
@@ -1041,7 +1013,6 @@ void tst_RsShim::panics()
     QCOMPARE(handle->position(), qint64(-1));
     QCOMPARE(handle->commit(), Result::success());
 
-    // Before authenticate a capabilities call that fails is empty.
     Result made;
     std::unique_ptr<Backend> caps = newBackend(&made);
     QCOMPARE(caps->connect(memParams({ { QStringLiteral("panic"), QStringLiteral("capabilities") } }), nullptr),
@@ -1051,7 +1022,6 @@ void tst_RsShim::panics()
 
 void tst_RsShim::otherThreads()
 {
-    // one thread at a time, not always the one that made the backend.
     Result r;
     std::unique_ptr<Backend> backend = newBackend(&r);
     QVERIFY(backend);

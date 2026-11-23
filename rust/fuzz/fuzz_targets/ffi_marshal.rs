@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! FFI marshalling without C++: params, entries, identities built into C form and read back equal, also after the input is gone; entry strings come back without NUL.
 #![no_main]
 
 use libfuzzer_sys::arbitrary::{Result, Unstructured};

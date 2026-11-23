@@ -15,9 +15,7 @@ use crate::status::NtStatus;
 
 /// OutputBufferLength of QUERY_DIRECTORY: one credit.
 pub const DIR_BUFFER: usize = 65_536;
-/// OutputBufferLength of QUERY_INFO for FileFsFullSizeInformation.
 const FS_INFO_BUFFER: usize = 32;
-/// Largest number of bytes of `SpaceInfo` (C++ `qint64`).
 const MAX_BYTES: u64 = i64::MAX.unsigned_abs();
 
 /// What a CREATE response says about a file.
@@ -48,7 +46,6 @@ impl Info {
     #[must_use]
     pub fn entry(&self, name: Vec<u8>) -> Entry {
         let a = self.attributes;
-        // A reparse point is reported as a link.
         let kind = if a & attributes::REPARSE_POINT != 0 {
             EntryType::Symlink
         } else if a & attributes::DIRECTORY != 0 {
@@ -88,13 +85,11 @@ pub fn dir_entry(d: &DirEntry) -> Entry {
     Info { times: d.times, size: d.size, attributes: d.attributes }.entry(wtf8_from_utf16(&d.name))
 }
 
-/// A CREATE request element.
 fn create(path: &[u16], access: u32, disposition: u32, options: u32, attributes: u32) -> Result<Element> {
     let body = Create { name: path, access, attributes, disposition, options }.encode()?;
     Ok(Element::new(Command::Create, body))
 }
 
-/// An element on the file the chain's CREATE opened.
 fn related(command: Command, body: Vec<u8>) -> Element {
     Element::new(command, body).related()
 }
@@ -103,20 +98,16 @@ fn close_related() -> Element {
     related(Command::Close, close_request(&RELATED_FILE_ID))
 }
 
-/// The status of a chain: the first element that failed (a related
-/// element fails with its CREATE).
 fn chain_ok(responses: &[Response]) -> Result<()> {
     responses.iter().try_for_each(Response::ok)
 }
 
-/// The CREATE response of a chain.
 fn created(responses: &[Response]) -> Result<Created> {
     let first = responses.first().ok_or_else(|| crate::error::protocol("empty compound response"))?;
     first.ok()?;
     Created::decode(&first.msg)
 }
 
-/// A status decided here.
 fn local(name: ErrorName, message: &str) -> Error {
     Error::Local(Status::new(name, message))
 }
@@ -158,7 +149,6 @@ pub async fn make_dir(
     let responses = conn.compound(target, chain, cancel).await?;
     match created(&responses) {
         Err(Error::Status(NtStatus::OBJECT_NAME_COLLISION)) if !exclusive => {
-            // An existing folder is success (also one made concurrently).
             if stat(conn, target, path, cancel).await?.is_dir() {
                 Ok(())
             } else {
@@ -169,7 +159,6 @@ pub async fn make_dir(
     }
 }
 
-/// CREATE for DELETE, delete disposition, CLOSE.
 async fn delete(conn: &Conn, target: Target, path: &[u16], options: u32, cancel: &CancelToken) -> Result<()> {
     let chain = vec![
         create(
@@ -216,7 +205,6 @@ pub async fn remove_dir(conn: &Conn, target: Target, path: &[u16], cancel: &Canc
         }
         other => other?,
     }
-    // A server may accept the delete disposition of a non-empty folder and keep it: it must be gone afterwards.
     match stat(conn, target, path, cancel).await {
         Ok(_) => Err(local(ErrorName::DirectoryNotEmpty, "remove folder: the folder is not empty")),
         Err(Error::Status(NtStatus::OBJECT_NAME_NOT_FOUND | NtStatus::OBJECT_PATH_NOT_FOUND)) => Ok(()),
@@ -352,13 +340,11 @@ pub async fn list(
         }
         Err(e) => return Err(e),
     };
-    // Closed however the listing ends, also when the call is dropped.
     let _open = Opened { conn, target, file_id: dir.file_id };
     let first = responses.into_iter().nth(1).ok_or_else(|| crate::error::protocol("short chain"))?;
     deliver(conn, target, &dir.file_id, first, batch.max(1), sink, cancel).await
 }
 
-/// A handle closed (without waiting) when this goes.
 struct Opened<'a> {
     conn: &'a Conn,
     target: Target,
@@ -371,7 +357,6 @@ impl Drop for Opened<'_> {
     }
 }
 
-/// The QUERY_DIRECTORY rounds after the first.
 async fn deliver(
     conn: &Conn,
     target: Target,
@@ -404,7 +389,6 @@ async fn deliver(
     Ok(())
 }
 
-/// One batch to the sink.
 fn give(sink: &mut dyn ListSink, pending: &mut Vec<Entry>) -> Result<()> {
     let more = sink.entries(pending);
     pending.clear();

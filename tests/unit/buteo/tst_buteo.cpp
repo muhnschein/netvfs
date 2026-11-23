@@ -1,6 +1,4 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-// Buteo backup plugins driven through the Buteo::ClientPlugin API
-// against a fake org.sailfishos.backup service and the in-memory FakeServer.
 #include "accountsession.h"
 #include "accountsfixture.h"
 #include "backupclient.h"
@@ -56,7 +54,6 @@ private:
     const Credentials m_credentials;
 };
 
-// Opens sessions like AccountSession::open(), with a secret chosen by the test.
 struct SessionSource
 {
     Result secretResult;
@@ -76,8 +73,6 @@ struct SessionSource
     }
 };
 
-// Records what a plugin reports (: exactly one of success/error). Copies
-// share the record, so the connections never outlive it.
 struct Outcome
 {
     struct Record
@@ -210,7 +205,7 @@ void captureMessage(QtMsgType type, const QMessageLogContext &context, const QSt
 const std::array<const char *, 3> OperationNames = { { "Backup", "BackupQuery", "BackupRestore" } };
 const std::array<const char *, 4> Providers = { { "sftp", "smb", "webdav", "ftps" } };
 
-} // namespace
+}
 
 class TestButeo : public QObject
 {
@@ -256,8 +251,6 @@ private:
         return client.release();
     }
 
-    // init() + startSync() + wait for the outcome, for runs that need no
-    // interaction with the backup service on the way.
     Outcome run(BackupClient *client)
     {
         Outcome outcome;
@@ -268,7 +261,6 @@ private:
         return outcome;
     }
 
-    // Starts a backup and waits until the archive was requested.
     bool startBackup(BackupClient *client, Outcome *outcome)
     {
         outcome->watch(client);
@@ -313,7 +305,6 @@ private slots:
 
     void cleanup()
     {
-        // Clients of a finished test must not report into the next one.
         qDeleteAll(findChildren<BackupClient *>(QString(), Qt::FindDirectChildrenOnly));
     }
 
@@ -325,8 +316,6 @@ private slots:
         sessions.secret = "secret";
     }
 
-    // generated from one template per kind; only the names and the
-    // sync protocol differ.
     void profiles_data()
     {
         QTest::addColumn<QString>("provider");
@@ -367,8 +356,6 @@ private slots:
         QCOMPARE(clientProfile.type(), QStringLiteral("client"));
     }
 
-    // / 8.1: all plugins from one loader source, unique IIDs, each
-    // creating the shared client for its provider and operation.
     void loaders()
     {
         QSet<QString> iids;
@@ -390,14 +377,12 @@ private slots:
                 QCOMPARE(plugin->property("provider").toString(), QString::fromLatin1(provider));
                 QCOMPARE(plugin->property("operationName").toString(), QString::fromLatin1(operation));
                 QCOMPARE(plugin->getPluginName(), client);
-                QVERIFY(!plugin->init());   // no account id
+                QVERIFY(!plugin->init());
             }
         }
         QCOMPARE(iids.size(), int(Providers.size() * OperationNames.size()));
     }
 
-    // The loaded plugins run on the production path (AccountSession::open,
-    // signond): an account without stored credentials fails as AuthFailed.
     void loadedPluginRealSession()
     {
         const int id = createAccount(QStringLiteral("Backups"), QString(), QStringLiteral("sftp"));
@@ -498,7 +483,6 @@ private slots:
         QVERIFY(startBackup(client, &outcome));
         QCOMPARE(service->createCalls, QStringList() << profileName(Op::Backup, id));
 
-        // Pre-flight finished (and disconnected) before the archive was requested.
         const QStringList before = service->serverLogAtCreate;
         QCOMPARE(before.value(0), QStringLiteral("connect"));
         QCOMPARE(before.value(1), QStringLiteral("authenticate"));
@@ -508,7 +492,7 @@ private slots:
         QCOMPARE(before.last(), QStringLiteral("disconnect"));
 
         QTest::qWait(50);
-        QCOMPARE(outcome.total(), 0);   // no timeout on this wait
+        QCOMPARE(outcome.total(), 0);
         const QString archive = service->lastArchivePath;
         QVERIFY(QFile::exists(archive));
         service->emitBackupStatus(id, QStringLiteral("UploadingBackup"));
@@ -525,8 +509,6 @@ private slots:
         QCOMPARE(serverLog().count(QStringLiteral("connect")), 2);
         QCOMPARE(serverLog().count(QStringLiteral("disconnect")), 2);
         QVERIFY(serverLog().contains(QStringLiteral("upload:") + remote + QStringLiteral(".part")));
-        // backup behaviour unchanged by API v2: private files and
-        // folders, ".part" naming, Replace on commit.
         QVERIFY(serverLog().contains(QStringLiteral("rename:") + remote + QStringLiteral(".part->") + remote
                                      + QStringLiteral(":replace")));
         QCOMPARE(FakeServer::instance()->node(remote).mode, 0600);
@@ -537,7 +519,6 @@ private slots:
         QVERIFY(!QFileInfo::exists(QFileInfo(archive).absolutePath()));
         QCOMPARE(client->getSyncResults().majorCode(), Buteo::SyncResults::SYNC_RESULT_SUCCESS);
         QCOMPARE(client->getSyncResults().minorCode(), Buteo::SyncResults::NO_ERROR);
-        // the session no longer holds the secret.
         QVERIFY(sessions.last);
         QVERIFY(sessions.last->credentials().secret.isEmpty());
         QVERIFY(fixture->value(id, QStringLiteral("netvfs/attention")).toString().isEmpty());
@@ -546,7 +527,6 @@ private slots:
         QCOMPARE(outcome.total(), 1);
     }
 
-    // The status signal may arrive before the reply carrying the path.
     void backupStatusBeforeReply()
     {
         const int id = createAccount();
@@ -558,8 +538,6 @@ private slots:
         QCOMPARE(FakeServer::instance()->node(QStringLiteral("Backups/device-1")).mode, 0700);
     }
 
-    // Signals for other accounts are ignored; a parent directory that still
-    // holds other files is kept.
     void backupIgnoresOtherAccounts()
     {
         const int id = createAccount();
@@ -575,7 +553,7 @@ private slots:
         service->emitBackupStatus(id + 1000, QStringLiteral("UploadingBackup"));
         service->emitBackupStatus(id + 1000, QStringLiteral("Canceled"));
         service->emitBackupError(id + 1000, QStringLiteral("Failed"), QStringLiteral("other"));
-        service->emitRestoreStatus(id, QStringLiteral("Canceled"));   // not a restore
+        service->emitRestoreStatus(id, QStringLiteral("Canceled"));
         QTest::qWait(100);
         QCOMPARE(outcome.total(), 0);
         QVERIFY(!serverLog().join(QLatin1Char(' ')).contains(QStringLiteral("upload:")));
@@ -649,7 +627,6 @@ private slots:
         QVERIFY(outcome.d->message.contains(QStringLiteral("createBackupForSyncProfile")));
     }
 
-    // step 2: a failing pre-flight ends the run before any archive is built.
     void backupPreflightFailures_data()
     {
         QTest::addColumn<QString>("op");
@@ -704,7 +681,6 @@ private slots:
         QVERIFY(service->createCalls.isEmpty());
     }
 
-    // The secret cannot be fetched: the AuthFailed path, without connecting.
     void backupSecretUnavailable()
     {
         sessions.secretResult = Result(Error::AuthFailed, QStringLiteral("no identity"));
@@ -722,7 +698,6 @@ private slots:
         QTest::newRow("unknown") << QString();
     }
 
-    // no authentication; seen key recorded.
     void backupIdentity()
     {
         QFETCH(QString, pin);
@@ -770,8 +745,6 @@ private slots:
         QVERIFY(!QFile::exists(archive));
     }
 
-    // abort cancels the in-flight upload and reports Buteo's code
-    // the plugin thread keeps running its event loop meanwhile.
     void abortDuringUpload()
     {
         const int id = createAccount();
@@ -811,7 +784,6 @@ private slots:
         QCOMPARE(outcome.total(), 1);
     }
 
-    // Abort while waiting for the archive: immediate result, archive removed.
     void abortWhileWaitingForArchive()
     {
         const int id = createAccount();
@@ -819,7 +791,7 @@ private slots:
         Outcome outcome;
         QVERIFY(startBackup(client, &outcome));
         const QString archive = service->lastArchivePath;
-        QTest::qWait(100);   // the reply with the path has arrived
+        QTest::qWait(100);
         client->abortSync();
         QCOMPARE(outcome.d->errors, 1);
         QCOMPARE(outcome.d->code, int(Buteo::SyncResults::ABORTED));
@@ -830,7 +802,6 @@ private slots:
         QVERIFY(!serverLog().join(QLatin1Char(' ')).contains(QStringLiteral("upload:")));
     }
 
-    // Abort before the reply carrying the archive path: the archive is still removed.
     void abortBeforeArchiveReply()
     {
         const int id = createAccount();
@@ -846,7 +817,6 @@ private slots:
         QCOMPARE(outcome.total(), 1);
     }
 
-    // abort racing a completed upload whose result is not yet delivered.
     void abortRacesCompletion()
     {
         const int id = createAccount();
@@ -854,8 +824,6 @@ private slots:
         Outcome outcome;
         QVERIFY(startBackup(client, &outcome));
         service->emitBackupStatus(id, QStringLiteral("UploadingBackup"));
-        // Spin only until the upload starts, then block this thread until the
-        // worker is done so its result is still queued when abort arrives.
         QVERIFY(waitForLog(QStringLiteral("upload:")));
         QElapsedTimer timer;
         timer.start();
@@ -873,7 +841,6 @@ private slots:
         QCOMPARE(outcome.d->code, int(Buteo::SyncResults::ABORTED));
     }
 
-    // Abort racing a successful pre-flight: no archive is requested.
     void abortRacesPreflight()
     {
         const int id = createAccount();
@@ -881,13 +848,11 @@ private slots:
         Outcome outcome;
         outcome.watch(client);
         QVERIFY(client->init());
-        // Hold the server so the pre-flight cannot finish while the run gets there.
         FakeServer::instance()->mutex.lock();
         const bool started = client->startSync();
         QTest::qWait(300);
         FakeServer::instance()->mutex.unlock();
         QVERIFY(started);
-        // Without spinning the event loop, until the worker has disconnected.
         QElapsedTimer timer;
         timer.start();
         while (!serverLog().contains(QStringLiteral("disconnect"))) {
@@ -920,7 +885,6 @@ private slots:
         QTest::qWait(50);
         QCOMPARE(outcome.total(), 1);
 
-        // A second run on the same instance works.
         QVERIFY(client->startSync());
         QElapsedTimer timer;
         timer.start();
@@ -929,7 +893,6 @@ private slots:
         QCOMPARE(outcome.d->successes, 2);
     }
 
-    // uninit() during an upload stops the worker and removes the archive.
     void uninitWhileUploading()
     {
         const int id = createAccount();
@@ -952,7 +915,6 @@ private slots:
         QVERIFY(client->uninit());
     }
 
-    // Abort while the session is still opening.
     void abortWhileOpening()
     {
         BackupClient *client = makeClient(Op::BackupQuery, createAccount());
@@ -1013,8 +975,6 @@ private slots:
         QCOMPARE(serverLog().count(QStringLiteral("disconnect")), 1);
     }
 
-    // every non-folder entry except ".part" files is listed
-    // as in API v1, also symlinks whose target type is unknown and specials.
     void queryListsNonFolders()
     {
         const int id = createAccount();
@@ -1093,7 +1053,6 @@ private slots:
 
     void accountProblems()
     {
-        // No such account.
         Outcome outcome = run(makeClient(Op::BackupQuery, 99999));
         QCOMPARE(outcome.d->code, int(Buteo::SyncResults::INTERNAL_ERROR));
         const int sftp = createAccount(QStringLiteral("Backups"), QString(), QStringLiteral("sftp"));
@@ -1158,7 +1117,7 @@ private slots:
         QVERIFY(waitForLog(QStringLiteral("download:")));
         service->emitRestoreError(id, QStringLiteral("Failed"), QStringLiteral("informational"));
         service->emitRestoreStatus(id + 1000, status);
-        service->emitBackupStatus(id, QStringLiteral("Canceled"));   // not a backup
+        service->emitBackupStatus(id, QStringLiteral("Canceled"));
         QTest::qWait(100);
         QCOMPARE(outcome.total(), 0);
         QElapsedTimer timer;
@@ -1172,7 +1131,6 @@ private slots:
         QVERIFY(!QFile::exists(target + QStringLiteral(".part")));
     }
 
-    // Restore status before the transfer started: no job to cancel.
     void restoreCanceledEarly()
     {
         const int id = createAccount();
@@ -1188,7 +1146,6 @@ private slots:
         QCOMPARE(outcome.total(), 1);
     }
 
-    // the secret never reaches a log, even at debug level.
     void noSecretsLogged()
     {
         sessions.secret = "s3cr3t-Value";
@@ -1301,7 +1258,7 @@ private slots:
         QVERIFY(paths.isEmpty());
         FakeServer::instance()->failOps.insert(QStringLiteral("makeDir"), Result(Error::NoSpace));
         QCOMPARE(BackupSteps::preflight(&backend, QStringLiteral("d")).error(), Error::NoSpace);
-        QCOMPARE(serverLog().count(QStringLiteral("list:d")), 1);   // only the listBackups() above
+        QCOMPARE(serverLog().count(QStringLiteral("list:d")), 1);
     }
 
     void backupServiceDirect()

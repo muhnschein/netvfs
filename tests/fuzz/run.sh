@@ -1,14 +1,5 @@
 #!/bin/sh
 # SPDX-License-Identifier: LGPL-2.1-or-later
-#
-# Builds every tests/fuzz/fuzz_*.cpp as a libFuzzer binary (clang, ASan + UBSan) and runs each for a fixed time.
-# 
-#   tests/fuzz/run.sh <build-dir> [seconds]     (default 60 seconds per harness)
-# 
-# Needs clang++ with libFuzzer runtime (Ubuntu: clang libclang-rt-dev) and Qt5Core dev files. Independent of qmake: each
-# harness is compiled with the core sources it names. Binaries: <build-dir>/fuzz; new corpus entries:
-# <build-dir>/fuzz/work/<name>; crash reproducers: <build-dir>/fuzz/artifacts. FUZZ_ONLY="names url" runs a subset.
-# Non-zero exit if any harness fails to build or crashes.
 set -eu
 
 here=$(cd "$(dirname "$0")" && pwd)
@@ -20,7 +11,6 @@ budget=${2:-60}
 CXX=${CXX:-clang++}
 mkdir -p "$out/work" "$out/artifacts"
 
-# Value of a "// fuzz-<key>: ..." directive in a harness (empty if absent).
 directive() {
     key=$1
     harness=$2
@@ -42,7 +32,6 @@ build() {
     b_includes=""
     for i in $(directive includes "$b_src"); do b_includes="$b_includes -I$root/$i"; done
     b_pkgs=$(qt_modules "$b_src")
-    # shellcheck disable=SC2086
     $CXX -std=gnu++17 -g -O1 -fPIC -fno-omit-frame-pointer \
         -fsanitize=fuzzer,address,undefined -fno-sanitize-recover=undefined \
         -DNETVFS_BUILD_CORE -I"$root/src/core" $b_includes \
@@ -68,7 +57,6 @@ for src in "$here"/fuzz_*.cpp; do
     options="$options -artifact_prefix=$out/artifacts/$name-"
     [ -f "$here/dict/$name.dict" ] && options="$options -dict=$here/dict/$name.dict"
     echo "== $name: fuzzing for ${budget}s"
-    # shellcheck disable=SC2086
     if ! ASAN_OPTIONS=${ASAN_OPTIONS:-detect_leaks=1:abort_on_error=0} \
          UBSAN_OPTIONS=${UBSAN_OPTIONS:-print_stacktrace=1:halt_on_error=1} \
          "$out/$stem" $options "$out/work/$name" "$seeds"; then

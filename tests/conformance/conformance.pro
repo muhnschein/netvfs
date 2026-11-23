@@ -1,5 +1,4 @@
 # SPDX-License-Identifier: LGPL-2.1-or-later
-# tst_conformance: backend conformance suite. Without NETVFS_CONFORMANCE_CONFIG it runs against the local backend in a temp folder as part of "make check"; interop run.sh scripts point it at their containers. Links only libnetvfs and QtTest.
 include(../../common.pri)
 
 TEMPLATE = app
@@ -20,5 +19,4 @@ SOURCES = \
     target.cpp \
     tst_conformance.cpp
 
-# Never install test binaries.
 target.path =

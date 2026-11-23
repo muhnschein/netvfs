@@ -30,8 +30,8 @@
   {
     "name": "local: rename(NoReplace) onto a hard link of the source",
     "file": "src/backends/local/localbackend.cpp",
-    "search": "    if (mode == RenameMode::NoReplace)\n        return alreadyExists(to);\n    // rename(2)",
-    "replace": "    if (mode == RenameMode::NoReplace && false)\n        return alreadyExists(to);\n    // rename(2)",
+    "search": "    if (mode == RenameMode::NoReplace)\n        return alreadyExists(to);",
+    "replace": "    if (mode == RenameMode::NoReplace && false)\n        return alreadyExists(to);",
     "test": "timeout 300 build/tests/conformance/tst_conformance"
   },
   {

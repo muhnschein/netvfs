@@ -1,18 +1,13 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! The fake server's in-memory file tree for one location. Errors use netvfs error names so they
-//! travel as `org.netvfs.Error.<Name>`.
 
 use crate::errors::ErrorName;
 use crate::limits::MAX_PATH;
 use crate::wire::{WireEntry, entry_flags};
 use std::collections::BTreeMap;
 
-/// A tree error: name plus message.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TreeError {
-    /// The error name.
     pub name: ErrorName,
-    /// The message.
     pub message: String,
 }
 
@@ -39,14 +34,12 @@ impl Node {
     }
 }
 
-/// Counts of a removed tree (`JobFinished.extra`).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Counts {
     pub files: i64,
     pub dirs: i64,
 }
 
-/// Normalised path (no empty or `.` components) as bytes; `..` is refused.
 pub fn normalize(raw: &[u8]) -> TResult<Vec<u8>> {
     if raw.len() > MAX_PATH {
         return err(ErrorName::InvalidName, "Path too long");
@@ -86,7 +79,6 @@ fn is_under(path: &[u8], dir: &[u8]) -> bool {
 #[derive(Debug, Clone)]
 pub struct Tree {
     nodes: BTreeMap<Vec<u8>, Node>,
-    /// Fixed timestamp so entries are reproducible.
     pub now_ms: i64,
 }
 
@@ -386,7 +378,6 @@ impl Tree {
         Ok(())
     }
 
-    /// Nodes below `path` (and `path` itself, empty relative path) for copying between locations.
     pub fn export(&self, path: &[u8], recursive: bool) -> TResult<Vec<(Vec<u8>, Node)>> {
         let root = match self.nodes.get(path) {
             Some(n) => n.clone(),
@@ -411,7 +402,6 @@ impl Tree {
         Ok(items)
     }
 
-    /// Places exported nodes at `to`.
     pub fn import(&mut self, to: &[u8], items: Vec<(Vec<u8>, Node)>, replace: bool) -> TResult<()> {
         self.require_parent_dir(to)?;
         if self.nodes.contains_key(to) && !replace {
@@ -428,8 +418,6 @@ impl Tree {
         Ok(())
     }
 
-    /// Entries below `root` in depth-first order (children before their folder
-    /// when `post_order`), as `(full path, entry)`; depth 1 are the children.
     pub fn walk(&self, root: &[u8], max_depth: i64, post_order: bool) -> TResult<Vec<(Vec<u8>, WireEntry)>> {
         match self.nodes.get(root) {
             Some(Node::Dir { .. }) => {}
@@ -482,8 +470,6 @@ impl Tree {
         }
     }
 
-    /// Replaces or extends a file (`Upload`). `at` is where `data` starts; the
-    /// file is truncated to `at` first, so resuming rewrites nothing before it.
     pub fn write_file(&mut self, path: &[u8], at: usize, data: &[u8], mtime_ms: Option<i64>) -> TResult<()> {
         self.require_parent_dir(path)?;
         let mtime = mtime_ms.unwrap_or(self.now_ms);

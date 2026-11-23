@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! The `netvfs-bridge` binary: command line, exit codes, and with the C ABI: serving a client on `--listen unix:path=…` and on a systemd-style socket, then idle exit. Bridges die with their test ([`TestChild`]).
 #![allow(
     missing_docs,
     clippy::unwrap_used,
@@ -34,7 +33,6 @@ fn have_ffi() -> bool {
     !missing
 }
 
-/// Runs `args` for consumer `proc-test` (registered) until it ends: exit code and stderr.
 fn run(args: &[&str], ffi: Option<&Path>) -> (Option<i32>, String) {
     let mut run = BridgeRun::bare(Path::new(BRIDGE), "proc-test");
     run.command.args(args).stdout(Stdio::null()).stderr(Stdio::piped());
@@ -94,7 +92,6 @@ fn not_activated_fails() {
     assert!(stderr.contains("not socket-activated"), "{stderr}");
 }
 
-/// Waits for the bridge to end by itself: exit code and time taken from `since`.
 fn idle_exit(child: &mut TestChild, since: Instant) -> (Option<i32>, Duration) {
     let status = child.wait_timeout(EXIT_WAIT).expect("no idle exit");
     (status.code(), since.elapsed())
@@ -138,7 +135,6 @@ fn exits_when_idle_without_a_client() {
 
 #[test]
 fn exits_cleanly_with_a_session_bus() {
-    // Session-bus connection outlives the core: must be dropped inside the runtime or zbus panics at exit.
     if !have_ffi() {
         return;
     }

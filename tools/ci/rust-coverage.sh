@@ -1,10 +1,5 @@
 #!/bin/sh
 # SPDX-License-Identifier: LGPL-2.1-or-later
-# Rust coverage of `make coverage` as lcov for SonarQube: counters written by the instrumented netvfs-accounts and
-# netvfs-bridge (qmake) while C++ tests ran them, those of libnetvfs-rs.so with the mem backend the shim's tests load
-# (tests/backends/rs/lib), and those of the workspace's own tests (incl. `make check-rust-ffi`), merged with the
-# pinned toolchain's llvm-tools.
-# Usage: rust-coverage.sh <build-coverage dir>; writes <dir>/rust-lcov.info.
 set -eu
 build=$1
 root=$(cd "$(dirname "$0")/../.." && pwd)
@@ -13,8 +8,6 @@ host=$(rustc -vV | sed -n 's/^host: //p')
 tools=$(rustc --print sysroot)/lib/rustlib/$host/bin
 [ -x "$tools/llvm-cov" ] || { echo "rust-coverage.sh: no llvm-cov; rustup component add llvm-tools"; exit 1; }
 
-# Binaries the counters belong to: helper, bridge, test build of libnetvfs-rs.so as qmake built them, workspace test and
-# probe binaries (as `make check-rust` and `make check-rust-ffi` built them: RUST_FEATURES).
 objects="$build/rust-target/release/netvfs-accounts $build/rust-target/release/netvfs-bridge"
 objects="$objects $build/rust-target/rs-test/libnetvfs_rs.so"
 objects="$objects $(RUSTFLAGS="-C instrument-coverage" NETVFS_RUST_COVERAGE_DIR="$build/rust-coverage" \
@@ -31,14 +24,11 @@ for line in sys.stdin:
 
 profiles=$(find "$build/rust-coverage" -name '*.profraw')
 [ -n "$profiles" ] || { echo "rust-coverage.sh: no counters in $build/rust-coverage"; exit 1; }
-# shellcheck disable=SC2086 # one word per file
 "$tools/llvm-profdata" merge -sparse $profiles -o "$build/rust-coverage.profdata"
 first=${objects%% *}
 rest=$(for o in ${objects#* }; do printf -- '-object %s ' "$o"; done)
 ignore='/\.cargo/|/rustc/|/vendor/|/tests/|/build/[^/]*/out/'
-# shellcheck disable=SC2086 # one word per argument
 "$tools/llvm-cov" export -format=lcov -instr-profile="$build/rust-coverage.profdata" \
     -ignore-filename-regex="$ignore" "$first" $rest > "$build/rust-lcov.info"
-# shellcheck disable=SC2086
 "$tools/llvm-cov" report -instr-profile="$build/rust-coverage.profdata" \
     -ignore-filename-regex="$ignore" "$first" $rest | tail -n 1

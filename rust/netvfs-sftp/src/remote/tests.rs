@@ -22,7 +22,6 @@ fn named(name: ErrorName, message: &str) -> (ErrorName, String) {
     (name, message.to_owned())
 }
 
-/// Collects batches; stops after `stop_after` batches when given.
 #[derive(Default)]
 struct Collect {
     batches: Vec<Vec<Entry>>,
@@ -66,7 +65,6 @@ fn version(extensions: &[(&str, &str)]) -> ServerVersion {
     }
 }
 
-/// Waits until the server holds no open handle (CLOSE may be detached).
 async fn no_open_handles(fake: &Fake) {
     for _ in 0..500 {
         if fake.open_handles() == 0 {
@@ -106,7 +104,6 @@ fn extensions_need_their_version() {
 
 #[test]
 fn chunks_follow_the_limits() {
-    // 32 KiB without a limit, at most 256 KiB.
     assert_eq!((FALLBACK_CHUNK, MAX_CHUNK), (32 * 1024, 256 * 1024));
     assert_eq!(chunk(None), FALLBACK_CHUNK);
     assert_eq!(chunk(Some(0)), FALLBACK_CHUNK);
@@ -170,7 +167,6 @@ fn attribute_checks() {
         assert_eq!(err(check_attributes(&Attributes { mtime_ms: Some(ms), ..Attributes::default() })), times);
         assert_eq!(err(check_attributes(&Attributes { atime_ms: Some(ms), ..Attributes::default() })), times);
     }
-    // Less than a second before 1970 rounds to 0.
     check_attributes(&Attributes { mtime_ms: Some(-999), ..Attributes::default() }).unwrap();
 }
 
@@ -251,7 +247,6 @@ async fn a_server_without_a_start_folder_resolves_against_its_own() {
     assert_eq!(remote.home(), b"");
     assert_eq!(remote.resolve(b"").unwrap(), b".");
     assert_eq!(remote.resolve(b"f").unwrap(), b"f");
-    // Ownership is still detected, with `.` for the start folder.
     assert!(remote.capabilities().has(Capability::Ownership));
     assert_eq!(fake.requests(FXP_STAT)[0].strings, [b".".to_vec()]);
     assert_eq!(remote.stat(b"f", true, &cancel()).await.unwrap().size, Some(1));
@@ -265,7 +260,6 @@ async fn owners_are_named_once_per_id() {
     let mut remote = fake.remote().await;
     let a = remote.stat(b"a", true, &cancel()).await.unwrap();
     assert_eq!((a.owner.as_str(), a.group.as_str()), ("alice", "users"));
-    // Known from the start folder: no further request.
     assert_eq!(fake.requests(FXP_EXTENDED).len(), 2);
 
     fake.state().uid = 2000;
@@ -274,12 +268,10 @@ async fn owners_are_named_once_per_id() {
     assert_eq!((b.owner.as_str(), b.group.as_str()), ("bob", "users"));
     let asked = fake.requests(FXP_EXTENDED);
     assert_eq!(asked.len(), 3);
-    // Only the unknown uid; no gid.
     assert_eq!(asked[2].strings, [2000u32.to_be_bytes().to_vec(), Vec::new()]);
     remote.stat(b"a", true, &cancel()).await.unwrap();
     assert_eq!(fake.requests(FXP_EXTENDED).len(), 3);
 
-    // An id without a name stays unnamed, and is not asked for again.
     fake.state().uid = 3000;
     let c = remote.stat(b"a", true, &cancel()).await.unwrap();
     assert_eq!((c.owner.as_str(), c.uid), ("", Some(3000)));
@@ -294,7 +286,6 @@ async fn the_owner_cache_is_bounded() {
     let (last, ids) = ids.split_last().unwrap();
     remember(&mut cache, ids, ids.iter().map(|i| i.to_string().into_bytes()).collect());
     assert_eq!(cache.len(), ids.len());
-    // The one that fills it to the bound joins the others.
     remember(&mut cache, &[*last], vec![last.to_string().into_bytes()]);
     assert_eq!(cache.len(), MAX_CACHED_NAMES);
     assert_eq!(cache[&7], "7");
@@ -314,7 +305,6 @@ async fn no_ownership_when_the_names_cannot_be_had() {
     assert_eq!((a.owner.as_str(), a.uid), ("", Some(1000)));
     assert_eq!(fake.requests(FXP_EXTENDED).len(), 2);
 
-    // A malformed answer counts as none.
     let fake = Fake::new();
     fake.rule(Rule::ext(
         "users-groups-by-id@openssh.com",
@@ -346,7 +336,6 @@ async fn stat_and_lstat() {
     );
     assert_eq!(remote.stat(b"dangling", false, &c).await.unwrap().kind, EntryType::Symlink);
     assert_eq!(err(remote.stat(b"a/../b", true, &c).await).0, ErrorName::InvalidName);
-    // LSTAT alone tells a link.
     assert_eq!(fake.requests(FXP_READLINK), []);
 }
 
@@ -367,8 +356,6 @@ async fn list_in_batches_without_dots() {
         .await
         .unwrap();
     assert_eq!(sink.names(), ["a", "b", "c", "d", "e", "sub"]);
-    // The server sends ".", "..", "a" | "b", "c", "d" | "e", "sub": a
-    // batch never waits for the next reply, and holds at most 2.
     let sizes: Vec<usize> = sink.batches.iter().map(Vec::len).collect();
     assert_eq!(sizes, [1, 2, 1, 2]);
     let sub = &sink.batches[3][1];
@@ -385,7 +372,6 @@ async fn list_in_batches_without_dots() {
     assert_eq!(sink.batches.len(), 6, "batch size 0 counts as 1");
 }
 
-/// A NAME reply of `names`, each with the attributes of a file.
 fn name_reply(names: &[&[u8]]) -> Vec<u8> {
     let attrs = Attrs { size: Some(1), permissions: Some(0o100_644), ..Attrs::default() };
     let mut body = u32::try_from(names.len()).unwrap().to_be_bytes().to_vec();
@@ -399,8 +385,6 @@ fn name_reply(names: &[&[u8]]) -> Vec<u8> {
 
 #[tokio::test]
 async fn list_leaves_out_names_that_are_no_entry_of_the_folder() {
-    // A server that lists paths, NULs and empty names among its entries:
-    // they are dropped, the entries around them stay.
     let fake = Fake::new();
     fake.dir("/home/u/d");
     fake.file("/home/u/d/last", b"");
@@ -425,7 +409,6 @@ async fn list_leaves_out_names_that_are_no_entry_of_the_folder() {
         .list(b"d", ListOptions { batch_size: 2, resolve_symlink_types: false }, &mut sink, &cancel())
         .await
         .unwrap();
-    // The first reply is the rule's; the server's own listing follows.
     assert_eq!(sink.names(), ["first", "...", ".hidden", "last"]);
     let sizes: Vec<usize> = sink.batches.iter().map(Vec::len).collect();
     assert_eq!(sizes, [2, 1, 1]);
@@ -467,7 +450,6 @@ async fn list_resolves_symlink_targets_on_request() {
         [b"/home/u/d/dangling".to_vec(), b"/home/u/d/to-dir".to_vec(), b"/home/u/d/to-file".to_vec()]
     );
 
-    // Without the option nothing is stat'ed.
     let before = fake.requests(FXP_STAT).len();
     let mut sink = Collect::default();
     remote.list(b"d", ListOptions::default(), &mut sink, &cancel()).await.unwrap();
@@ -542,7 +524,6 @@ async fn list_failures() {
         named(ErrorName::PermissionDenied, "/home/u/d: permission denied")
     );
     no_open_handles(&fake).await;
-    // A lost connection is not followed by a STAT.
     fake.rule(Rule::new(FXP_OPENDIR, Action::Hangup));
     let stats = fake.requests(FXP_STAT).len();
     assert_eq!(
@@ -603,7 +584,6 @@ async fn make_dir() {
         err(remote.make_dir(b"no/sub", false, &c).await),
         named(ErrorName::NotFound, "/home/u/no/sub: not found")
     );
-    // A failure that leaves nothing there is reported as it is.
     fake.rule(Rule::new(FXP_MKDIR, Action::Status(FX_FAILURE, "quota")).once());
     assert_eq!(
         err(remote.make_dir(b"other", false, &c).await),
@@ -621,7 +601,6 @@ async fn remove_file() {
     let c = cancel();
     remote.remove_file(b"f", &c).await.unwrap();
     assert_eq!(fake.node("/home/u/f"), None);
-    // A link to a folder is removed, not its target.
     remote.remove_file(b"l", &c).await.unwrap();
     assert_eq!(fake.node("/home/u/l"), None);
     assert!(fake.node("/home/u/d").is_some());
@@ -676,7 +655,6 @@ async fn remove_dir() {
         err(remote.remove_dir(b"empty", &c).await),
         named(ErrorName::NotFound, "/home/u/empty: not found")
     );
-    // Permission denied is not looked into.
     fake.rule(Rule::new(FXP_RMDIR, Action::Status(FX_PERMISSION_DENIED, "no")).once());
     let opened = fake.requests(FXP_OPENDIR).len();
     assert_eq!(
@@ -684,7 +662,6 @@ async fn remove_dir() {
         named(ErrorName::PermissionDenied, "/home/u/full: permission denied")
     );
     assert_eq!(fake.requests(FXP_OPENDIR).len(), opened);
-    // An empty folder that still fails keeps the server's failure.
     fake.dir("/home/u/busy");
     fake.rule(Rule::new(FXP_RMDIR, Action::Status(FX_FAILURE, "Device or resource busy")).once());
     assert_eq!(
@@ -706,7 +683,6 @@ async fn rename_without_replacing() {
         err(remote.rename(b"a", b"b", RenameMode::NoReplace, &c).await),
         named(ErrorName::AlreadyExists, "/home/u/b exists")
     );
-    // NativeNoReplace: RENAME first, the LSTAT only explains its failure.
     assert_eq!(fake.requests(FXP_RENAME).len(), 1);
     assert_eq!(fake.requests(FXP_LSTAT).len(), lstats + 1);
     assert_eq!(fake.data("/home/u/b"), Some(b"B".to_vec()));
@@ -718,7 +694,6 @@ async fn rename_without_replacing() {
         err(remote.rename(b"a", b"d", RenameMode::NoReplace, &c).await),
         named(ErrorName::NotFound, "/home/u/a: not found")
     );
-    // A failure with nothing at the target stays as it is.
     fake.rule(Rule::new(FXP_RENAME, Action::Status(FX_FAILURE, "cross-device")).once());
     assert_eq!(
         err(remote.rename(b"c", b"e", RenameMode::NoReplace, &c).await),
@@ -745,17 +720,14 @@ async fn rename_replacing_with_posix_rename() {
         err(remote.rename(b"b", b"d", RenameMode::Replace, &c).await),
         named(ErrorName::AlreadyExists, "/home/u/d is a folder")
     );
-    // The same path is left alone.
     remote.rename(b"b", b"/home/u/b", RenameMode::Replace, &c).await.unwrap();
     assert_eq!(fake.data("/home/u/b"), Some(b"A".to_vec()));
-    // A new name needs no target.
     remote.rename(b"b", b"n", RenameMode::Replace, &c).await.unwrap();
     assert_eq!(fake.data("/home/u/n"), Some(b"A".to_vec()));
     assert_eq!(
         err(remote.rename(b"b", b"n", RenameMode::Replace, &c).await),
         named(ErrorName::NotFound, "/home/u/b: not found")
     );
-    // A target the server will not show: its answer, nothing renamed.
     fake.rule(Rule::new(FXP_LSTAT, Action::Status(FX_PERMISSION_DENIED, "no")).on("/home/u/x").once());
     assert_eq!(
         err(remote.rename(b"n", b"x", RenameMode::Replace, &c).await),
@@ -770,7 +742,6 @@ async fn rename_replacing_a_hard_link_of_the_same_file_leaves_one_name() {
     let fake = Fake::new();
     fake.file("/home/u/a", b"A");
     fake.file("/home/u/b", b"A");
-    // rename(2) of two links of one file succeeds and changes nothing.
     fake.rule(Rule::ext("posix-rename@openssh.com", Action::Status(FX_OK, "")).once());
     let mut remote = fake.remote().await;
     remote.rename(b"a", b"b", RenameMode::Replace, &cancel()).await.unwrap();
@@ -791,7 +762,6 @@ async fn rename_replacing_without_posix_rename_removes_first() {
     fake.take_log();
     remote.rename(b"b", b"c", RenameMode::Replace, &c).await.unwrap();
     assert_eq!(fake.kinds(), ["LSTAT", "RENAME"]);
-    // A failed REMOVE stops the rename.
     fake.file("/home/u/d", b"D");
     fake.rule(Rule::new(FXP_REMOVE, Action::Status(FX_PERMISSION_DENIED, "no")).once());
     assert_eq!(
@@ -808,14 +778,12 @@ async fn set_attributes() {
     let mut remote = fake.remote().await;
     let c = cancel();
     fake.take_log();
-    // Checked before anything is sent.
     let bad = Attributes { mode: Some(0o170_644), mtime_ms: Some(1000), atime_ms: None };
     assert_eq!(
         err(remote.set_attributes(b"f", &bad, &c).await),
         named(ErrorName::Internal, "Invalid mode 170644")
     );
     assert_eq!(fake.kinds(), Vec::<String>::new());
-    // Nothing to change: the entry must exist.
     remote.set_attributes(b"f", &Attributes::default(), &c).await.unwrap();
     assert_eq!(err(remote.set_attributes(b"g", &Attributes::default(), &c).await).0, ErrorName::NotFound);
     assert_eq!(fake.kinds(), ["STAT", "STAT"]);
@@ -832,7 +800,6 @@ async fn set_attributes() {
     assert_eq!(fake.kinds(), ["SETSTAT"]);
     fake.take_log();
 
-    // One time keeps the other.
     remote
         .set_attributes(b"f", &Attributes { mtime_ms: Some(9_000_999), ..Attributes::default() }, &c)
         .await
@@ -870,7 +837,6 @@ async fn set_times_without_a_known_time_uses_the_other() {
     let fake = Fake::new();
     fake.file("/home/u/f", b"");
     let remote = fake.remote().await;
-    // The server reports no times.
     fake.rule(Rule::new(FXP_STAT, Action::Reply(FXP_ATTRS, vec![0, 0, 0, 0])).once());
     set_times(remote.client(), b"/home/u/f", Some(5000), None, Some(0o600), &cancel()).await.unwrap();
     let sent = fake.requests(FXP_SETSTAT)[0].attrs.unwrap();
@@ -878,7 +844,6 @@ async fn set_times_without_a_known_time_uses_the_other() {
     fake.rule(Rule::new(FXP_STAT, Action::Reply(FXP_ATTRS, vec![0, 0, 0, 0])).once());
     set_times(remote.client(), b"/home/u/f", None, Some(7000), None, &cancel()).await.unwrap();
     assert_eq!(fake.requests(FXP_SETSTAT)[1].attrs.unwrap().times, Some((7, 7)));
-    // Only the mode: no STAT, no times.
     let stats = fake.requests(FXP_STAT).len();
     set_times(remote.client(), b"/home/u/f", None, None, Some(0o644), &cancel()).await.unwrap();
     assert_eq!(fake.requests(FXP_STAT).len(), stats);
@@ -901,7 +866,6 @@ async fn read_link() {
         named(ErrorName::InvalidName, "/home/u/f is not a symbolic link")
     );
     assert_eq!(err(remote.read_link(b"g", &c).await), named(ErrorName::NotFound, "/home/u/g: not found"));
-    // A link the server cannot read keeps its failure.
     fake.rule(Rule::new(FXP_READLINK, Action::Status(FX_BAD_MESSAGE, "odd")).once());
     assert_eq!(err(remote.read_link(b"l", &c).await), named(ErrorName::ProtocolError, "/home/u/l: odd"));
 }
@@ -996,7 +960,6 @@ async fn write_failure_names_a_full_disk() {
     let ext = *remote.extensions();
     let plain =
         Failure::Server(crate::proto::StatusReply { code: FX_FAILURE, message: "Failure".to_owned() });
-    // 500 blocks of 4096 are free.
     let full = write_failure(remote.client(), &ext, b"/home/u/f", &plain, 500 * 4096 + 1, &c).await;
     assert_eq!(
         (full.name, full.message.as_str()),
@@ -1023,7 +986,6 @@ async fn write_failure_names_a_full_disk() {
         ErrorName::ProtocolError
     );
     assert_eq!(fake.requests(FXP_EXTENDED).len(), asked);
-    // statvfs failing keeps the write's failure.
     fake.rule(Rule::ext("statvfs@openssh.com", Action::Status(FX_FAILURE, "no")).once());
     assert_eq!(
         write_failure(remote.client(), &ext, b"/home/u/f", &plain, u64::MAX, &c).await.name,
@@ -1047,7 +1009,6 @@ async fn copy_with_copy_data() {
     let opens = fake.requests(FXP_OPEN);
     assert_eq!(opens[0].pflags, Some(FXF_READ));
     assert_eq!(opens[1].pflags, Some(FXF_WRITE | FXF_CREAT | FXF_EXCL));
-    // The permission bits without set-id bits.
     assert_eq!(opens[1].attrs, Some(Attrs { permissions: Some(0o751), ..Attrs::default() }));
     let copy = fake.requests(FXP_EXTENDED).into_iter().find(|l| l.ext == "copy-data").unwrap();
     assert_eq!(copy.offset, Some(0));
@@ -1058,12 +1019,10 @@ async fn copy_with_copy_data() {
         err(remote.copy(b"src", b"new", false, RenameMode::NoReplace, &c).await),
         named(ErrorName::AlreadyExists, "/home/u/new exists")
     );
-    // Replacing a longer file leaves the source's bytes only.
     remote.copy(b"src", b"longer", false, RenameMode::Replace, &c).await.unwrap();
     assert_eq!(fake.data("/home/u/longer"), Some(b"0123456789".to_vec()));
     assert_eq!(fake.requests(FXP_OPEN)[3].pflags, Some(FXF_WRITE | FXF_CREAT));
     assert!(fake.requests(FXP_OPEN).iter().all(|o| o.pflags.unwrap() & FXF_TRUNC == 0));
-    // Onto itself: no truncation first, so the data stays.
     remote.copy(b"src", b"/home/u/src", false, RenameMode::Replace, &c).await.unwrap();
     assert_eq!(fake.data("/home/u/src"), Some(b"0123456789".to_vec()));
     no_open_handles(&fake).await;
@@ -1141,14 +1100,12 @@ async fn a_failed_copy_leaves_no_half_copy_behind() {
         named(ErrorName::ProtocolError, "/home/u/new: disk")
     );
     assert_eq!(fake.node("/home/u/new"), None);
-    // Replace: the target was there before; it is not removed.
     assert_eq!(
         err(remote.copy(b"f", b"kept", false, RenameMode::Replace, &c).await).0,
         ErrorName::ProtocolError
     );
     assert!(fake.node("/home/u/kept").is_some());
     no_open_handles(&fake).await;
-    // An exclusive open that loses a race names the target.
     fake.state().rules.clear();
     fake.rule(Rule::new(FXP_OPEN, Action::Status(FX_FAILURE, "Failure")).on("/home/u/racy").once());
     fake.file("/home/u/racy", b"R");

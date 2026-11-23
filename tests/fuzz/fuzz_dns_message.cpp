@@ -1,11 +1,4 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-// the DNS message codec behind mDNS discovery. decode() parses
-// datagrams from the local network and must never crash, hang or read out of
-// bounds. What it accepts must survive encode -> decode unchanged, the encoder
-// must be deterministic, and the name helpers must agree with each other.
-//
-// fuzz-sources: src/core/dnsmessage.cpp
-// fuzz-qt: Core Network
 #include "dnsmessage.h"
 
 #include <cstddef>
@@ -60,7 +53,7 @@ void checkRoundTrip(const Dns::Message &message)
 {
     const QByteArray wire = Dns::encode(message);
     if (wire.isEmpty())
-        return;     // input that was compressed more cleverly than the encoder may not fit; nothing to compare
+        return;
     Dns::Message again;
     require(Dns::decode(wire, &again));
     require(sameMessage(message, again));
@@ -84,7 +77,7 @@ void checkNames(const QByteArray &name)
     require(again);
 }
 
-} // namespace
+}
 
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 {

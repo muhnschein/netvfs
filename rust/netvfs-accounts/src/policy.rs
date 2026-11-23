@@ -180,7 +180,6 @@ mod tests {
     fn smb_profiles() {
         assert_eq!(security_profile(&params("sftp", &[])), None);
         assert_eq!(security_profile(&params("smb", &[])).as_deref(), Some("strict"));
-        // No other option selects a profile.
         assert_eq!(
             security_profile(&params("smb", &[("require_encryption", Value::Bool(false))])).as_deref(),
             Some("strict")

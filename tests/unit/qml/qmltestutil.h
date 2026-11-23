@@ -8,9 +8,6 @@
 #include <memory>
 
 namespace NetVfs::Test {
-
-// Installs the engineering English catalogue built by translations/, so that
-// tests compare the user-facing texts (and prove every id has a //% text).
 inline bool installEngineeringEnglish(QObject *parent)
 {
     auto translator = std::make_unique<QTranslator>(parent);
@@ -21,6 +18,6 @@ inline bool installEngineeringEnglish(QObject *parent)
     return installed;
 }
 
-} // namespace NetVfs::Test
+}
 
 #endif

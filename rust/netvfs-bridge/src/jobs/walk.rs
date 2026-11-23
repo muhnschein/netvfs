@@ -154,7 +154,6 @@ mod tests {
         );
         assert_eq!(outcome.result.unwrap_err().name, ErrorName::Canceled);
         assert_eq!(i64::try_from(&outcome.extra["entries"]).unwrap(), 1024);
-        // A failure keeps its name; the rest is not sent.
         let outcome = stream(
             &budget,
             &cancel,
@@ -166,7 +165,6 @@ mod tests {
         );
         assert_eq!(outcome.result.unwrap_err().name, ErrorName::NotFound);
         assert_eq!(i64::try_from(&outcome.extra["entries"]).unwrap(), 0);
-        // Canceled: a walk that ends well still ends Canceled.
         cancel.store(true, Ordering::Release);
         let outcome = stream(&budget, &cancel, |_, _| true, |_| Ok(()));
         assert_eq!(outcome.result.unwrap_err().name, ErrorName::Canceled);

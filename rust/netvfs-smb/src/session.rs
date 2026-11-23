@@ -22,9 +22,7 @@ use crate::negotiate::{Negotiated, Offer, check_response};
 use crate::profile::Profile;
 use crate::status::NtStatus;
 
-/// SESSION_SETUP rounds before giving up (NTLM in SPNEGO needs two).
 const MAX_SETUP_ROUNDS: usize = 4;
-/// Frame room beyond the largest READ or IOCTL output: headers, a compound's other responses, the transform header.
 const FRAME_SLACK: usize = 65_536 + TRANSFORM_HEADER_LEN;
 
 /// A session the server mapped to guest or anonymous.
@@ -97,11 +95,9 @@ pub async fn sign_in(
     }
 }
 
-/// NEGOTIATE: SMB 3.1.1 and nothing else.
 async fn negotiate(conn: &Conn, profile: Profile, cancel: &CancelToken) -> Result<(Negotiated, PreauthHash)> {
     let offer = Offer::new(profile.signs(), CIPHERS.to_vec())?;
     let (resp, sent) = conn.call_raw(Element::new(Command::Negotiate, offer.request()?), cancel).await?;
-    // MS-SMB2 3.3.5.4: no common dialect; server is 2.x, 3.0.x or has 3.1.1 off.
     if resp.status() == NtStatus::NOT_SUPPORTED {
         return Err(policy(NO_SMB311));
     }
@@ -120,7 +116,6 @@ async fn negotiate(conn: &Conn, profile: Profile, cancel: &CancelToken) -> Resul
     Ok((negotiated, preauth))
 }
 
-/// SESSION_SETUP rounds; returns the SessionFlags.
 async fn session_setup(
     conn: &Conn,
     profile: Profile,
@@ -167,7 +162,6 @@ async fn session_setup(
     Err(policy("too many SESSION_SETUP rounds"))
 }
 
-/// The final SESSION_SETUP response: the profile's checks, the keys, the signature.
 fn finish(
     conn: &Conn,
     profile: Profile,
@@ -187,19 +181,16 @@ fn finish(
         conn.establish(None, false);
         return Ok(flags);
     }
-    // Never a guest or anonymous session in place of the account's own; checked first, such a session cannot sign.
     if flags & (session_flags::IS_GUEST | session_flags::IS_NULL) != 0 {
         return Err(policy(GUEST_MAPPED));
     }
     let gss_key = auth.session_key()?;
     let keys = derive_session_keys(&gss_key, hash, cipher, resp.header.session_id)
         .map_err(|e| policy(format!("session keys: {e}")))?;
-    // MS-SMB2 3.3.5.5.3: a 3.1.1 server signs the final response.
     if !resp.header.is_signed() {
         return Err(policy("the final SESSION_SETUP response is not signed"));
     }
     keys.signing.verify(&resp.msg).map_err(|e| policy(format!("the final SESSION_SETUP response: {e}")))?;
-    // SPNEGO accept-completed with the server's mechListMIC (sspi checks it).
     auth.finish(&setup.token)?;
     let encrypt = profile.encrypts() || wants_encryption;
     if encrypt && keys.seal.is_none() {

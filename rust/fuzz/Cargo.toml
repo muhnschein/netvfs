@@ -1,6 +1,4 @@
 # SPDX-License-Identifier: LGPL-2.1-or-later
-# cargo-fuzz targets for untrusted inputs. Outside the workspace: libFuzzer needs nightly, helper builds with SDK 1.75.
-# Run: cargo +nightly fuzz run <target>.
 [package]
 name = "netvfs-accounts-fuzz"
 version = "0.0.0"
@@ -28,7 +26,6 @@ tokio = { version = "1", default-features = false, features = ["io-util", "rt", 
 
 [workspace]
 
-# As in ../Cargo.toml: patched ssh-key and picky-asn1-der.
 [patch.crates-io]
 ssh-key = { path = "../vendor/ssh-key" }
 picky-asn1-der = { path = "../vendor/picky-asn1-der" }

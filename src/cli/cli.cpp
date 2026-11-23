@@ -210,7 +210,6 @@ Result resolveRemotePaths(const Options &options, Prepared *prepared)
     return Result::success();
 }
 
-// Prompter of --prompt: the controlling terminal, or `input` (tests).
 class PromptSetup
 {
 public:
@@ -277,7 +276,6 @@ Result Connector::open(const Location &location, QScopedPointer<Backend> *backen
 Result resolveLocation(Location *location, const QString &url, const QVariantMap &overrides)
 {
     if (!url.isEmpty()) {
-        // A password in the URL is rejected and never stored.
         QString path;
         if (const Result parsed = Url::parse(url, &location->params, &path); !parsed.ok())
             return parsed;

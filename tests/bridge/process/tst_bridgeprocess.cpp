@@ -1,9 +1,4 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-// The netvfs-bridge binary under socket activation:
-// the test plays systemd (a listening socket on fd 3, LISTEN_FDS and
-// LISTEN_PID), talks to the bridge through it from libdbus and expects the
-// idle exit. The bridge lists its accounts through the built netvfs-accounts
-// as it does on the device.
 #include "accountsfixture.h"
 #include "bridgetest.h"
 
@@ -36,10 +31,6 @@ void writeFile(const QString &path, const QByteArray &content)
         f.write(content);
 }
 
-// The helper for the bridge. Under SANITIZE=1 the bridge has the sanitizer
-// runtimes preloaded (bridgeEnvironment()), and the helper would inherit
-// them; LeakSanitizer stops threads with ptrace, which the helper's seccomp
-// filter refuses, so a script in `folder` drops the preload first.
 QString accountsHelper(const QString &folder)
 {
 #ifdef NETVFS_TEST_BRIDGE_PRELOAD
@@ -69,8 +60,6 @@ int listenOn(const QString &path)
     return fd;
 }
 
-// Starts the bridge with `listenFd` as the socket-activated fd 3. LISTEN_PID
-// must be the bridge's own pid: a shell sets it to $$ and execs the bridge.
 pid_t spawnActivated(int listenFd, const QProcessEnvironment &environment, const QByteArray &consumer)
 {
     std::vector<QByteArray> envStore;
@@ -90,7 +79,6 @@ pid_t spawnActivated(int listenFd, const QProcessEnvironment &environment, const
 
     const pid_t pid = ::fork();
     if (pid == 0) {
-        // Only async-signal-safe calls between fork and exec.
         const bool placed = listenFd == 3 ? ::fcntl(3, F_SETFD, 0) == 0 : ::dup2(listenFd, 3) == 3;
         if (!placed)
             ::_exit(126);
@@ -116,7 +104,7 @@ int waitExit(pid_t pid, int timeoutMs)
     return -1;
 }
 
-} // namespace
+}
 
 class tst_BridgeProcess : public QObject
 {
@@ -136,8 +124,6 @@ void tst_BridgeProcess::socketActivation()
               + "\nDataDir=.local/share/proc-test\n");
     writeFile(dir.path() + QStringLiteral("/config/netvfs/bridge.conf"), "[Consent]\nproc-test=full\n");
     QDir().mkpath(dir.path() + QStringLiteral("/home"));
-    // one Files account in a private database, which the bridge reads
-    // through the accounts helper (ACCOUNTS and AG_* are in the environment).
     NetVfs::Test::AccountsFixture accounts({ QStringLiteral("sftp") });
     const int accountId = accounts.createAccount(
         QStringLiteral("sftp"), { { QStringLiteral("netvfs/host"), QStringLiteral("files.example") } });
@@ -156,7 +142,7 @@ void tst_BridgeProcess::socketActivation()
     QVERIFY(listenFd >= 0);
     const pid_t pid = spawnActivated(listenFd, env, "proc-test");
     QVERIFY(pid > 0);
-    ::close(listenFd);   // systemd keeps its copy; ours is not needed any more
+    ::close(listenFd);
 
     {
         TestClient client(QStringLiteral("unix:path=") + socketPath);
@@ -170,7 +156,6 @@ void tst_BridgeProcess::socketActivation()
         QCOMPARE(location.value(3).toMap().value(QStringLiteral("host")).toString(), QStringLiteral("files.example"));
         client.close();
     }
-    // gone after the idle time with no client and no job.
     QCOMPARE(waitExit(pid, 10000), 0);
     QVERIFY(!QFileInfo::exists(dir.path() + QStringLiteral("/home/.local/share/proc-test")));
 }

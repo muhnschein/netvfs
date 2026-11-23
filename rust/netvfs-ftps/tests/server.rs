@@ -1,7 +1,4 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! netvfs-ftps against a real FTPS server: proftpd in the container of tests/interop/ftps, which `run.sh` starts and
-//! describes in `NETVFS_INTEROP_FTPS_*` (port, password). Without them every test passes at once, saying so. The
-//! server's certificate is self-signed: the first connection reports its key, later ones pin it.
 #![allow(
     missing_docs,
     clippy::unwrap_used,
@@ -59,7 +56,6 @@ impl Server {
         }
     }
 
-    /// Signed in, pinned to the key the first connection reports.
     async fn signed_in(&self) -> Ftps {
         let c = CancelToken::new();
         let mut f = Ftps::new();
@@ -158,7 +154,6 @@ async fn files_and_folders_round_trip() {
     let mut part = Out::default();
     f.download(b"/round trip/a b.bin", 1000, Some(500), &mut part, &mut Quiet, &c).await.unwrap();
     assert!(part.0 == body[1000..1500]);
-    // The connection is in step after the cut-off read.
     f.rename(b"/round trip/a b.bin", b"/round trip/inner/c.bin", RenameMode::NoReplace, &c).await.unwrap();
     assert_eq!(f.stat(b"/round trip/a b.bin", true, &c).await.unwrap_err().name, ErrorName::NotFound);
     assert_eq!(f.remove_dir(b"/round trip/inner", &c).await.unwrap_err().name, ErrorName::DirectoryNotEmpty);
@@ -219,7 +214,6 @@ async fn stopped_transfers_leave_the_session_usable() {
     assert_eq!(out.0, body);
 }
 
-/// Cancels the call's token at the first progress, as a user would.
 struct Trip(CancelToken);
 
 impl Progress for Trip {

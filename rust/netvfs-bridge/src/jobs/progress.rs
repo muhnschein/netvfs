@@ -62,7 +62,6 @@ mod tests {
         progress.update_at(t0 + PROGRESS_INTERVAL, 3, 10);
         progress.update_at(t0 + Duration::from_millis(400), 4, 10);
         progress.update_at(t0 + Duration::from_millis(501), 5, -1);
-        // A clock that went back does not report.
         progress.update_at(t0, 6, -1);
         assert!(format!("{progress:?}").starts_with("JobProgress"));
         assert_eq!(seen, [(1, 10), (3, 10), (5, -1)]);

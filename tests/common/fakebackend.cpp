@@ -40,7 +40,7 @@ void sleepChunk(int delayMs)
         QThread::msleep(static_cast<unsigned long>(delayMs));
 }
 
-} // namespace
+}
 
 
 FakeServer *FakeServer::instance()
@@ -457,7 +457,6 @@ Result FakeBackend::authenticate(const Credentials &credentials, AuthPrompter *p
         otp = m_server->otp;
     }
     if (!otp.isEmpty()) {
-        // a second factor, only with a prompter.
         QVector<QByteArray> answers;
         AuthPrompt prompt;
         prompt.text = QStringLiteral("Verification code: ");
@@ -467,8 +466,6 @@ Result FakeBackend::authenticate(const Credentials &credentials, AuthPrompter *p
         for (QByteArray &answer : answers)
             answer.fill('\0');
         if (answered) {
-            // What the prompter handed over: tests check that a reply with
-            // the wrong count never reaches the backend.
             QMutexLocker lock(&m_server->mutex);
             m_server->log << QStringLiteral("answers:%1").arg(answers.size());
         }
@@ -591,7 +588,6 @@ Result FakeBackend::makeDir(const QString &path, bool exclusive)
         return notFound(parent);
     if (!parent.isEmpty() && !m_server->nodes.value(parent).isDir())
         return Result(Error::NotADirectory, QStringLiteral("%1 is not a folder").arg(parent));
-    // Like SFTP: the "dir_mode" option (octal), else the server default.
     bool octal = false;
     const int mode = m_params.option(QStringLiteral("dir_mode")).toInt(&octal, 8);
     m_server->addDir(resolved, octal ? (mode & 07777) : FakeServer::DefaultDirMode);
@@ -718,7 +714,6 @@ Result FakeBackend::setAttributes(const QString &path, const AttributeChanges &c
     Result r = key(path, &k);
     if (r.ok())
         r = begin(QStringLiteral("setAttributes:") + k);
-    // every field is checked before anything changes.
     if (r.ok() && changes.mode >= 0 && !has(Capability::PosixModes))
         r = unsupported("Changing modes");
     if (r.ok() && (changes.modified.isValid() || changes.accessed.isValid()) && !has(Capability::SetModified))
@@ -1131,5 +1126,5 @@ void FakeBackend::disconnect()
     ++m_generation;
 }
 
-} // namespace Test
-} // namespace NetVfs
+}
+}

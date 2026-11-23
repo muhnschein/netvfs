@@ -2,8 +2,6 @@
 #ifndef NETVFS_TEST_WIRECONNECTION_H
 #define NETVFS_TEST_WIRECONNECTION_H
 
-// The moc of Qt 5.6 (Sailfish SDK) cannot parse C++17 nested namespaces; it
-// does not need the headers that have them.
 #ifndef Q_MOC_RUN
 #include "wire.h"
 #endif
@@ -17,17 +15,10 @@ struct DBusConnection;
 
 namespace NetVfs {
 namespace BridgeTest {
-
-// One peer-to-peer D-Bus connection to the bridge (libdbus), driven by the Qt
-// event loop of the thread that created it. Not thread-safe: use it from that
-// thread only.
 class WireConnection : public QObject
 {
     Q_OBJECT
 public:
-    // Every incoming message (method calls, replies, errors, signals) except
-    // org.freedesktop.DBus.Local.Disconnected, which ends the connection
-    // (disconnected()). Return value ignored; libdbus answers Peer.Ping itself.
     using Handler = std::function<void(DBusMessage *message)>;
 
     static WireConnection *connectTo(const QString &address, Result *result, QObject *parent = nullptr);
@@ -42,8 +33,6 @@ public:
     bool canPassUnixFds() const;
 
     quint32 send(MessagePtr message);
-    // Closes the connection without sending anything else; disconnected()
-    // follows from the event loop.
     void close();
 
     struct Integration;
@@ -65,7 +54,7 @@ private:
     bool m_disconnected = false;
 };
 
-} // namespace BridgeTest
-} // namespace NetVfs
+}
+}
 
 #endif

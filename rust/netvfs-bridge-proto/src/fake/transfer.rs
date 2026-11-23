@@ -1,7 +1,4 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! Jobs and listings of the fake: the work behind `List`, `Upload`, `Download`, `CopyAcross`,
-//! `RemoveTree`, `Walk`. Local data moves through the descriptors the client passed, at explicit
-//! offsets for regular files, sequentially for pipes.
 
 use super::args::{CopyOpts, Disposition, TransferOpts, WalkOpts};
 use super::fail::Fail;
@@ -143,7 +140,6 @@ impl Source {
 
 fn io_fail(e: &std::io::Error) -> Fail {
     if e.raw_os_error() == Some(EBADF) {
-        // Descriptor not opened for what the job needs.
         Fail::net(ErrorName::PermissionDenied, "The descriptor does not allow this access")
     } else {
         Fail::net(ErrorName::Internal, &e.to_string())
@@ -250,7 +246,6 @@ async fn upload(
             }
         }
     }
-    // A failed upload leaves what arrived so it can be resumed.
     env.shared.with(|s| s.tree_mut(loc).write_file(path, at, &data, opts.mtime_ms))?;
     outcome.map(|()| bytes_extra(done))
 }

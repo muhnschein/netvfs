@@ -119,7 +119,6 @@ fn listed(objects: &ManagedObjects, path: &OwnedObjectPath, ifaces: &Interfaces)
     let block = ifaces.get(BLOCK)?;
     let (mount_point, locked) = contents(block, ifaces)?;
     let backing = backing(objects, block)?;
-    // UDisks2 marks every device without a drive a system device (`update_hints`): an unlocked one goes by its encrypted device.
     if flag(backing, "HintSystem") || flag(backing, "HintIgnore") || flag(block, "HintIgnore") {
         return None;
     }
@@ -170,7 +169,6 @@ fn drive_of<'a>(objects: &'a ManagedObjects, block: &Properties) -> Option<&'a P
     objects.iter().find(|(p, _)| p.as_str() == drive)?.1.get(DRIVE)
 }
 
-/// USB drives and memory cards of any bus; the eMMC's medium is `flash_mmc` (udev's `80-udisks2.rules`).
 fn kind(drive: &Properties) -> Option<Kind> {
     if text(drive, "ConnectionBus") == "usb" {
         return Some(Kind::Usb);

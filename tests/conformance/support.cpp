@@ -28,7 +28,7 @@ constexpr int ShellTimeoutMs = 120000;
 constexpr quint32 PatternMultiplier = 1103515245U;
 constexpr quint32 PatternIncrement = 12345U;
 constexpr int PatternShift = 16;
-} // namespace
+}
 
 QByteArray pattern(qint64 size, int seed)
 {
@@ -141,7 +141,7 @@ void snapshotInto(Backend *backend, const QString &dir, const QString &prefix, Q
     }
 }
 
-} // namespace
+}
 
 QMap<QString, QString> snapshot(Backend *backend, const QString &dir)
 {
@@ -239,4 +239,4 @@ bool runShell(const QString &command, QString *output)
     return finished && process.exitStatus() == QProcess::NormalExit && process.exitCode() == 0;
 }
 
-} // namespace Conformance
+}

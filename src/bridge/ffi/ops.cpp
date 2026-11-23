@@ -7,9 +7,6 @@
 namespace NetVfs::Ffi {
 
 namespace {
-
-// visit() per entry; listFailed() goes on unless stop_on_list_error (unreadable sub-folders are
-// skipped).
 class WalkAdapter final : public Ops::WalkVisitor
 {
 public:
@@ -37,7 +34,6 @@ Ops::WalkOptions walkOptionsOf(const nvb_walk_opts *opts)
     Ops::WalkOptions options;
     if (!opts)
         return options;
-    // postOrder is a no-op on the wire (leave() is not reported).
     options.postOrder = opts->post_order != 0;
     options.maxDepth = opts->max_depth;
     options.symlinks = opts->follow_symlinks ? Ops::SymlinkPolicy::Follow : Ops::SymlinkPolicy::Never;

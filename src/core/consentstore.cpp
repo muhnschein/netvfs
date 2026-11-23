@@ -27,7 +27,6 @@ bool isIdChar(QChar c)
     return (u >= 'a' && u <= 'z') || (u >= '0' && u <= '9') || u == '-';
 }
 
-// Chars allowed in paths that end up in systemd unit files: no '%', whitespace, quotes, backslash.
 bool isPathChar(QChar c)
 {
     const ushort u = c.unicode();
@@ -107,7 +106,6 @@ bool isChoice(const QString &word)
     return word == QLatin1String("denied") || isAccessLevel(word);
 }
 
-// Positive int written as such ("01", "+1" are not).
 int accountIdOf(const QString &key)
 {
     bool ok = false;
@@ -190,7 +188,6 @@ Result ConsentStore::loadConsumer(const QString &id, ConsumerInfo *out)
     return parseConsumerFile(consumersDir() + QLatin1Char('/') + id + QStringLiteral(".conf"), out);
 }
 
-// Strict [Consumer] reader: QSettings would turn "a, b" into a list.
 Result ConsentStore::parseConsumerFile(const QString &path, ConsumerInfo *out)
 {
     QFile file(path);

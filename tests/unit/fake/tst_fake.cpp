@@ -1,6 +1,4 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-// The in-memory FakeBackend is the reference double for consumers and core
-// helpers, so its v2 semantics are tested here.
 #include "fakebackend.h"
 #include "identity.h"
 #include "names.h"
@@ -21,7 +19,7 @@ char *toString(const NetVfs::Error &error)
 {
     return qstrdup(qPrintable(NetVfs::errorName(error)));
 }
-} // namespace QTest
+}
 
 namespace {
 
@@ -63,7 +61,7 @@ Entry entryNamed(const QVector<Entry> &entries, const QString &name)
     return Entry();
 }
 
-} // namespace
+}
 
 class TestFake : public QObject
 {
@@ -159,7 +157,6 @@ private slots:
         QVERIFY(b->makeSymlink(QStringLiteral("a/b/f"), QStringLiteral("new")).ok());
         QCOMPARE(b->makeSymlink(QStringLiteral("x"), QStringLiteral("new")).error(), Error::AlreadyExists);
         QVERIFY(b->stat(QStringLiteral("new"), &e).ok());
-        // removeFile removes the link, not its target.
         QVERIFY(b->removeFile(QStringLiteral("rel")).ok());
         QVERIFY(server->exists(QStringLiteral("a/b/f")));
     }
@@ -313,7 +310,7 @@ private slots:
         reader.reset(raw);
         b->disconnect();
         QCOMPARE(reader->read(0, 1, &part).error(), Error::ConnectionLost);
-        QCOMPARE(b->keepAlive().error(), Error::Internal);   // not signed in
+        QCOMPARE(b->keepAlive().error(), Error::Internal);
     }
 
     void serverSideWork()
@@ -363,7 +360,7 @@ private slots:
         server->failOps.insert(QStringLiteral("stat"), Result(Error::Timeout));
         Entry e;
         QCOMPARE(b->stat(QStringLiteral("f"), &e).error(), Error::Timeout);
-        QVERIFY(b->stat(QStringLiteral("f"), &e).ok());   // once
+        QVERIFY(b->stat(QStringLiteral("f"), &e).ok());
         b->cancel();
         QCOMPARE(b->stat(QStringLiteral("f"), &e).error(), Error::Canceled);
         b->resetCancel();

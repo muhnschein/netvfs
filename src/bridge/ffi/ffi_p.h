@@ -2,7 +2,6 @@
 #ifndef NETVFS_BRIDGE_FFI_P_H
 #define NETVFS_BRIDGE_FFI_P_H
 
-// Internals of libnetvfs-bridge-ffi.so. Nothing here is exported; the only symbol is nvb_ffi_get.
 #include "netvfs_bridge_ffi.h"
 
 #include "backend.h"
@@ -24,8 +23,6 @@ struct nvb_handle {
     std::unique_ptr<NetVfs::ReadHandle> handle;
 };
 
-// One backend connection. Used from its owner thread only, except `canceled` and Backend::cancel(),
-// which conn_cancel reaches from any thread.
 struct nvb_conn {
     std::unique_ptr<NetVfs::Backend> backend;
     std::atomic<bool> canceled { false };
@@ -34,11 +31,9 @@ struct nvb_conn {
     nvb_conn() = default;
     nvb_conn(const nvb_conn &) = delete;
     nvb_conn &operator=(const nvb_conn &) = delete;
-    // Handles go before their backend; then disconnect().
     ~nvb_conn();
 };
 
-// Answers of one keyboard-interactive prompt. Wiped when replaced and on destruction.
 struct nvb_reply {
     QVector<QByteArray> answers;
 
@@ -50,10 +45,6 @@ struct nvb_reply {
 };
 
 namespace NetVfs::Ffi {
-
-// Nothing thrown crosses the ABI. A table function runs its body through one of these; an exception
-// is logged and becomes Internal (or `fallback`). If even the Internal error cannot be allocated,
-// std::terminate() (the functions are noexcept).
 Result internalResult(const std::exception_ptr &thrown);
 
 template <typename Body>
@@ -87,8 +78,6 @@ void guardedVoid(const Body &body) noexcept
     }
 }
 
-// C side of a transfer or tree operation's progress (nvb_progress and each of its functions may be
-// null).
 class ProgressAdapter final : public Progress, public Ops::TreeProgress
 {
 public:
@@ -104,8 +93,6 @@ private:
 
 Backend *backendOf(const nvb_conn *conn);
 
-// Runs `fn` on the Qt thread (MainQueue of init()); false when there is no application or it is
-// quitting: `fn` never runs then.
 bool postToQt(std::function<void()> fn);
 bool onQtThread();
 

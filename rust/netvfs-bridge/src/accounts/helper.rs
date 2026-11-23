@@ -129,7 +129,6 @@ fn run(program: &Path, arguments: &[String], timeout: Duration) -> Result<Vec<u8
         })?;
     let (sender, answer) = mpsc::channel();
     if let Some(stdout) = child.stdout.take() {
-        // Detached: ends with the pipe's last writer, which may be a process the helper started.
         std::thread::spawn(move || sender.send(read_capped(stdout)).ok());
     }
     let finished = answer.recv_timeout(timeout).ok().and_then(|answer| {
