@@ -264,7 +264,7 @@ class Ownership:
 
 
 def parse_arguments(argv):
-    parser = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
+    parser = argparse.ArgumentParser(description="Checks the %files sections of the RPM spec against an install tree.")
     parser.add_argument("root")
     parser.add_argument("--spec", default=os.path.join(ROOT_DIR, "rpm", "netvfs.spec"))
     parser.add_argument("--map", action="append", default=[], metavar="FROM=TO")

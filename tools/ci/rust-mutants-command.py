@@ -58,7 +58,7 @@ def test(mutant, command, timeout, log):
 
 def main():
     if len(sys.argv) != 3:
-        print(__doc__.strip().splitlines()[-1], file=sys.stderr)
+        print("Usage: rust-mutants-command.py <mutants.json> <command>", file=sys.stderr)
         return 2
     with open(sys.argv[1]) as f:
         mutants = json.load(f)
