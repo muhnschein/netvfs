@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
+// fuzz-sources: src/core/url.cpp src/core/names.cpp src/core/paths.cpp
 #include "names.h"
 #include "paths.h"
 #include "url.h"

@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
+// fuzz-sources: src/core/dnsmessage.cpp
+// fuzz-qt: Core Network
 #include "dnsmessage.h"
 
 #include <cstddef>

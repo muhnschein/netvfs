@@ -93,6 +93,11 @@ class Qml(unittest.TestCase):
 
 
 class Cpp(unittest.TestCase):
+    def test_fuzz_build_directives_kept_in_harnesses_only(self):
+        text = "// fuzz-sources: src/core/url.cpp\n// fuzz-includes: src/backends/local\n// fuzz-qt: Core\n// why\n"
+        self.assertEqual(found("tests/fuzz/fuzz_url.cpp", text), ["// why"])
+        self.assertEqual(found("src/core/url.cpp", text), ["// fuzz-sources: src/core/url.cpp", "// fuzz-includes: src/backends/local", "// fuzz-qt: Core", "// why"])
+
     def test_lupdate_source_text_kept(self):
         text = '//% "Copy"\nreturn qtTrId("netvfs-copy"); // id\n'
         self.assertEqual(found("src/a.cpp", text), ["// id"])

@@ -37,11 +37,14 @@ SAFETY_COMMENT = re.compile(r"(?m)^[ \t]*// SAFETY: [^\n]*\n(?:[ \t]*//(?![/!])[
 RUST_DOC = re.compile(r"(?m)^[ \t]*///(?!/)[^\n]*\n(?:[ \t]*///(?!/)[^\n]*\n)*")
 FIELD = re.compile(r"r?#?[a-z_][a-z0-9_]*\s*:")
 BLOCK_KIND = re.compile(r"\b(trait|enum)\b")
+FUZZ_DIRECTIVE = re.compile(r"^// fuzz-(sources|includes|qt): ")
 PUBLIC_HEADERS = re.compile(r"PUBLIC_HEADERS = \\\n((?:[ \t]+\S+(?: \\)?\n)+)")
 
 
 def allowed(path, text, start, end):
     if base_allowed(path, text, start, end) or in_attribution_header(path, text, start):
+        return True
+    if path.startswith("tests/fuzz/") and FUZZ_DIRECTIVE.match(text[start:end]):
         return True
     lang = language(path)
     if lang == "rust":

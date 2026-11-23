@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
+// fuzz-sources: src/core/names.cpp
 #include "names.h"
 
 #include <cstddef>
