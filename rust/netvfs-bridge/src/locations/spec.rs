@@ -12,6 +12,12 @@ use zbus::zvariant::{OwnedValue, Str, Value};
 /// Why an account needs the user.
 pub use crate::accounts::Attention;
 
+const HOST_KEY_SEEN: &str = "host_key_seen";
+
+fn connecting_options(p: &Params) -> impl Iterator<Item = (&String, &crate::ffi::Value)> {
+    p.options.iter().filter(|(key, _)| key.as_str() != HOST_KEY_SEEN)
+}
+
 /// The id of an account's location.
 #[must_use]
 pub fn account_location_id(account_id: i32) -> String {
@@ -85,7 +91,7 @@ impl LocationSpec {
             && a.host == other.host
             && a.port == other.port
             && a.username == other.username
-            && a.options == other.options
+            && connecting_options(a).eq(connecting_options(other))
     }
 
     /// The `a{sv}` of `ListLocations`.
@@ -211,12 +217,15 @@ mod tests {
         other.connect_timeout_ms = 99;
         other.request_timeout_ms = 99;
         assert!(spec.same_connection(&other));
+        other.options.insert("host_key_seen".into(), Opt::Str("ssh-ed25519 new".into()));
+        assert!(spec.same_connection(&other));
         for change in [
             |p: &mut Params| p.provider = "smb".into(),
             |p: &mut Params| p.host = "H".into(),
             |p: &mut Params| p.port = 23,
             |p: &mut Params| p.username = "bob".into(),
             |p: &mut Params| drop(p.options.insert("share".into(), Opt::Str("x".into()))),
+            |p: &mut Params| drop(p.options.insert("host_key".into(), Opt::Str("ssh-ed25519 new".into()))),
         ] {
             let mut changed = params("h", 22);
             change(&mut changed);

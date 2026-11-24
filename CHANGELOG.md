@@ -8,6 +8,7 @@
 - New icons for the four account types in *Settings › Accounts*: the netvfs mark with the protocol name below.
 - A refused sign-in no longer mentions a key for accounts that have none.
 - An FTPS server that cannot open a data connection right then is reported as a lost connection, not as a server without extended passive mode.
+- When a server's identity changes, apps now show that warning instead of "Cancelled" for the folder they were opening.
 - Breaking: you now choose per app and per account what an app may do: full access, read and add, read only, add only, or not allowed. Tapping an app's request opens the choice in Settings, where every account starts at not allowed; *Settings › Accounts › Apps using network locations* changes it later. An app you allowed before keeps full access. Apps need an update for this bridge, such as the next Lautta.
 - SFTP accounts no longer offer the sign-in "Ask each time (one-time codes)", and servers that ask for a one-time code or a second factor cannot be used for now. Existing such accounts fail to sign in until you switch them to a password or key in Settings.
 - Breaking: apps only reach servers set up as accounts in *Settings › Accounts*. The bridge no longer takes a server address, password or one-time code from an app, and no longer asks an app to trust a server. Apps need an update for this bridge, such as the next Lautta.
