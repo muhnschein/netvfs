@@ -29,9 +29,9 @@ In this order; later step only once earlier ones hold:
 6. Device: CI job "Sailfish OS 5.2 aarch64 RPMs" builds them on every push; run them on test phone (see "Device tests"); give user `netvfs-rpms-aarch64` artifact link of the green run and evidence. Change lautta uses → link lautta RPM too, say install order (netvfs first).
 7. With RPMs: outline briefly what merging this PR risks and how you mitigated it.
 
-PR opens as draft on first push. Mark ready for review only once steps 1–7 hold and their evidence is in PR body.
+PR opens as draft on first push. Mark ready for review only once steps 1–7 hold and their evidence is posted (visual: project thread; text: PR body).
 
-Docs-only change (docs, no code or string change): steps 6–7 skipped; no phone run.
+No phone run when change can't show on phone: docs, CI, build scripts (RPM contents unchanged), tests only. Steps 6–7 skipped; PR says why.
 
 Backend and core code runs in every process that loads a backend (bridge, msyncd via Buteo, `netvfs-cli`, account UI) → cover all it reaches. Behaviour both protocols share → change and test SFTP and SMB.
 
@@ -39,6 +39,7 @@ User tests RPMs on phone; that test judges feel, lag, real servers. Say exactly 
 
 ## Device tests
 
+- QML target tests (`tests/qmltarget`) and OS file lookups (Silica QML, `jolla-settings-accounts`, sailjail profiles): SDK container, never phone.
 - Test phone on the local SFOS test host via the harness's `local/run.sh` (`muhnschein-sfos-harness`, see its `local/README.md`). Its AGENTS.md rules every phone run (baseline, no blind taps, reboot, language, `clean_slate`, privacy); helpers: its README, `scripts/lib.sh`; netvfs specifics: its `apps/netvfs.md`. Test accounts and harness test servers only. Never run fork or others' PR code there: any run can root phone.
 - Phone runs SFOS 5.1 (glibc 2.41: binaries run); packages Require `sailfish-version >= 5.2.0`. Until phone fits: no harness run without user's go for `apps/netvfs.nodeps`, results then hold on 5.1 only; say so.
 - Install: `netvfs`, `netvfs-bridge`, `netvfs-backup` from one CI run, one transaction; lautta on top from its own run.
@@ -47,9 +48,11 @@ User tests RPMs on phone; that test judges feel, lag, real servers. Say exactly 
   - `fixture:NAME`: `clean`, then restore snapshot saved with `fixture_save`.
   - `upgrade:FROM`: release FROM plus fixture, then install build over it. Required when change touches stored data, accounts, consent, known hosts, Buteo profiles or units.
 - Footprint check (`fs_mark`, `footprint`): file touched outside known dirs → add to wipe or fail run. Leftovers taint results.
-- Before/after: same start state, same steps.
+- Before/after: same start state, same steps, one `local/run.sh` run (both builds).
+- Build already passed same steps → cite that run, no rerun.
+- Run stopped on own script mistake → fix from its shots, rerun only failed steps.
 - Change in bridge, backends, units: prove through a consumer (lautta, `netvfs-cli`) against harness SFTP/SMB servers. Accounts UI: Settings → Accounts shots. Backups: Buteo run, then restore.
-- Privacy: user stays muhnschein, nothing more. Harness output leaves the test host only scrubbed, through its `local/publish.sh` (its AGENTS.md "Privacy"). PR evidence only from those files (crops, GIFs, charts made from them OK); never type identifiers in: host names, user names, keys, fingerprints included.
+- Privacy: user stays muhnschein, nothing more. Harness output leaves the test host only scrubbed, through its `local/publish.sh` (its AGENTS.md "Privacy"). Evidence only from those files (crops, GIFs, charts made from them OK); never type identifiers in: host names, user names, keys, fingerprints included.
 - Harness proves function and timing. Feel, lag, real servers stay user's call on device.
 
 ## Local checks
@@ -98,12 +101,12 @@ User tests RPMs on phone; that test judges feel, lag, real servers. Say exactly 
 - Commit and PR titles: Conventional Commits, plain language, say outcome: `fix(bridge): ad-hoc ids are never reused after a restart`. Types `feat` `fix` `perf` `refactor` `test` `docs` `ci` `build` `chore`; scope = part or subsystem (`bridge`, `accounts`, `sftp`, `smb`, `backup`, `core`, `cli`, `rpm`, …). Body says why, plain prose; brief, to the point.
 - PR body: the problem in a sentence or two, then how you fixed it. End with the model and harness that did the work.
 - Final diff: no debug logging, no leftovers.
-- Evidence shown in PR body, not just described:
+- Evidence shown, not just described (visual: files in project thread; text: PR body):
   - UI → before/after device screenshots.
-  - Transitions, feel, lag → before/after GIF (plays inline; mp4 by URL shows as link only). GIF from harness mp4 via `ffmpeg`.
+  - Transitions, feel, lag → before/after GIF or mp4. GIF from harness mp4 via `ffmpeg`.
   - Performance → before/after chart (image), numbers in table beside it.
   - Non-visual proof (tests, mutations, logs, CI times) → text.
-- Evidence on GitHub, never in tree: push to orphan branch `evidence/pr-N`, embed by URL in PR, delete branch after merge.
+- Evidence never on GitHub: no `evidence/` branches, no uploads to PR, no assets in `main` or PR branch.
 - Flaky test → find and fix cause. Never add retries (nextest profile `ci` runs none by design: pass on second try = defect). Never re-run CI until green and call it done. Never skip test or loosen assert. One re-run OK only for infra failure before any test ran (runner lost, apt mirror timeout); say so.
 - Merge only on user's explicit go. Merge commit, not squash/rebase.
 - Before asking for merge go: `main` moved since PR's last green run → merge `main` in, CI green again. Each PR green alone ≠ merge green. GitHub enforces it too ("Require branches to be up to date").
