@@ -99,7 +99,7 @@ cli_round_trip() {
 }
 
 status=0
-if (cd "$here/../../../rust" && cargo test --locked -q -p netvfs-ftps --test server); then
+if (cd "$here/../../../rust" && cargo test --locked -q -p netvfs-ftps --test server -- --test-threads=1); then
     echo "PASS   : rust/netvfs-ftps/tests/server.rs"
 else
     echo "FAIL!  : rust/netvfs-ftps/tests/server.rs"
