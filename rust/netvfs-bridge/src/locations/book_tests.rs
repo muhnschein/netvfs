@@ -118,6 +118,24 @@ fn changed_and_removed_accounts_lose_their_pools() {
 }
 
 #[test]
+fn identity_attention_keeps_the_pool_and_its_work() {
+    let (mock, mut book) = book();
+    book.set_accounts(vec![account(1, "a")]);
+    assert!(book.ensure_pool("account:1", true, available).is_ok());
+    let (tx, rx) = mpsc::channel();
+    mock.hold_establish(true);
+    book.submit("account:1", Lane::Interactive, task(), reporting(&tx, Ok(())));
+    mock.wait_for("establish 1", 1);
+    let mut flagged = account(1, "a");
+    flagged.attention = Attention::ServerIdentityChanged;
+    flagged.params.options.insert("host_key_seen".into(), Value::Str("ssh-ed25519 new".into()));
+    book.set_accounts(vec![flagged]);
+    assert_eq!(pool_ids(&book), ["account:1"]);
+    mock.hold_establish(false);
+    assert_eq!(recv(&rx), Seen::Conn(1));
+}
+
+#[test]
 fn revoking_forgets_everything() {
     let (_mock, mut book) = book();
     book.set_accounts(vec![account(1, "a")]);

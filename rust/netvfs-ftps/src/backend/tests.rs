@@ -642,6 +642,17 @@ async fn refusals_other_than_missing_entries_are_errors() {
     fake.with(|s| s.refuse = Some(("MLSD", b"/gone".to_vec(), "501 No such directory.")));
     let e = f.list(b"/gone", ListOptions::default(), &mut sink, &c).await.unwrap_err();
     assert_eq!(e.name, ErrorName::NotFound);
+    let no_epsv = "The server does not offer extended passive mode (EPSV)";
+    for (reply, name, no) in [
+        ("425 EPSV: Address already in use", ErrorName::ConnectionLost, false),
+        ("500 EPSV not understood", ErrorName::Unsupported, true),
+        ("502 Not implemented", ErrorName::Unsupported, true),
+        ("501 Odd", ErrorName::ProtocolError, false),
+    ] {
+        fake.with(|s| s.refuse = Some(("EPSV", b"/".to_vec(), reply)));
+        let e = f.list(b"/d", ListOptions::default(), &mut sink, &c).await.unwrap_err();
+        assert_eq!((e.name, e.message == no_epsv), (name, no), "{reply}");
+    }
 }
 
 #[tokio::test]
