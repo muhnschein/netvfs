@@ -96,7 +96,6 @@ pub async fn read_frame<R: AsyncRead + Unpin>(stream: &mut R, max: usize) -> Res
     Ok(buf)
 }
 
-/// A socket failure.
 fn lost(e: &std::io::Error) -> Error {
     if e.kind() == std::io::ErrorKind::UnexpectedEof {
         Error::Lost("the server closed the connection".into())
@@ -143,7 +142,6 @@ mod tests {
     #[tokio::test]
     async fn length_above_the_cap_is_refused_before_allocation() {
         let (mut client, mut peer) = pair().await;
-        // 16 MiB - 1 claimed, nothing sent after the header.
         peer.write_all(&[0, 0xff, 0xff, 0xff]).await.unwrap();
         let e = read_frame(&mut client, 1000).await.unwrap_err();
         assert!(matches!(e, Error::Protocol(ref m) if m.contains("16777215")), "{e}");
@@ -169,14 +167,12 @@ mod tests {
 
     #[tokio::test]
     async fn connect_failures() {
-        // A port nothing listens on: bind, learn the port, close.
         let addr = TcpListener::bind("127.0.0.1:0").await.unwrap().local_addr().unwrap();
         let e = connect(&[addr], Duration::from_secs(5)).await.unwrap_err();
         assert!(matches!(e, Error::Unreachable(_)), "{e}");
         let e = connect(&[], Duration::from_secs(5)).await.unwrap_err();
         assert_eq!(e, Error::Unreachable("no address".into()));
         assert_eq!(resolve("127.0.0.1", 445).await.unwrap(), ["127.0.0.1:445".parse().unwrap()]);
-        // RFC 6761: .invalid never resolves.
         let e = resolve("netvfs-test.invalid", 445).await.unwrap_err().status("", crate::error::Phase::Setup);
         assert_eq!(e.name, ErrorName::NetworkUnreachable);
         assert!(e.message.starts_with("Cannot resolve the server name: "), "{e:?}");

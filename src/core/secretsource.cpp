@@ -89,8 +89,6 @@ void SignonSecretSource::noSecret(const Result &lookup, const QString &userName)
 
 Result secretErrorFromSignon(int signonErrorType)
 {
-    // Only an unusable identity or secret is AuthFailed (flags the account); a signond outage is
-    // not.
     switch (signonErrorType) {
     case SignOn::Error::PermissionDenied:
     case SignOn::Error::IdentityNotFound:

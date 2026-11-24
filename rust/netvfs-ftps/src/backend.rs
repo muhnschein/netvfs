@@ -87,7 +87,6 @@ pub struct Ftp {
     login: Login,
 }
 
-/// What signs in a fresh session.
 #[derive(Debug)]
 struct Login {
     target: Target,
@@ -96,11 +95,6 @@ struct Login {
 }
 
 impl Ftp {
-    /// A fresh session when no TLS ticket is left: data connections must resume one, TLS 1.3 uses each once,
-    /// and proftpd issues none on upload connections.
-    ///
-    /// # Errors
-    /// Those of connecting and signing in.
     async fn ensure_ticket(&mut self) -> Result<(), Status> {
         if self.session.tls().tickets() > 0 {
             return Ok(());
@@ -134,7 +128,6 @@ impl Ftp {
         Ok(entry)
     }
 
-    /// Whether `path` exists, with its entry.
     async fn find(&mut self, path: &[u8]) -> Result<Option<Entry>, Status> {
         match self.stat(path).await {
             Ok(e) => Ok(Some(e)),
@@ -143,8 +136,6 @@ impl Ftp {
         }
     }
 
-    /// `e` of an operation on `path`, said better: `NotFound` for a missing parent, `NotADirectory` for a file
-    /// in the path. Servers answer 550 to all of these.
     async fn explain(&mut self, path: &[u8], e: Status) -> Status {
         if e.name != ErrorName::PermissionDenied {
             return e;
@@ -167,7 +158,6 @@ impl Ftp {
         self.ensure_ticket().await?;
         let data = match self.session.data(&line, "Listing the folder").await {
             Ok(d) => d,
-            // 550, or 501 (pyftpdlib) for a missing folder.
             Err(e) if matches!(e.name, ErrorName::PermissionDenied | ErrorName::ProtocolError) => {
                 return Err(match self.find(dir).await {
                     Ok(None) => not_found(),
@@ -294,7 +284,6 @@ impl Ftp {
             }
         };
         if let Some(e) = stopped {
-            // No ABOR: proftpd answers one during STOR with bytes that are no reply. The part sent stays.
             drop(self.session.close_data(data).await);
             drop(self.session.finish("Uploading").await);
             return Err(e);
@@ -351,7 +340,6 @@ impl Ftp {
                 break Some(Some(Status::canceled()));
             }
         };
-        // `Some`: stopped before the end, with the error to return, if any.
         if let Some(e) = stopped {
             self.session.abort(data).await?;
             return e.map_or(Ok(()), Err);
@@ -361,7 +349,6 @@ impl Ftp {
     }
 }
 
-/// Connected, not signed in.
 #[derive(Debug)]
 struct Connected {
     session: Session,
@@ -420,8 +407,6 @@ impl Ftps {
     }
 }
 
-/// Signs in on `session`: `USER`, `PASS`, then protected data, binary type, UTF-8 names, and a check for
-/// `MLST`.
 async fn sign_in(session: &mut Session, user: &str, secret: &[u8]) -> Result<(), Status> {
     if user.is_empty() {
         return Err(Status::new(ErrorName::AuthFailed, "FTP needs a user name"));
@@ -465,7 +450,6 @@ async fn sign_in(session: &mut Session, user: &str, secret: &[u8]) -> Result<(),
         .with_detail(feat.text()));
     }
     if features.iter().any(|f| f == b"UTF8") {
-        // Most servers use UTF-8 anyway; some only after this.
         session.cmd(b"OPTS UTF8 ON").await?;
     }
     Ok(())
@@ -506,7 +490,6 @@ impl Backend for Ftps {
             }
         };
         if connected.mismatch {
-            // No credentials go to a server whose key is not the pin.
             self.state = State::Connected(connected);
             return Err(netvfs_tls::identity_changed());
         }

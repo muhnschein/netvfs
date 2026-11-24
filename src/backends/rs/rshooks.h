@@ -11,10 +11,6 @@ class QIODevice;
 QT_END_NAMESPACE
 
 namespace NetVfs::Rs {
-
-// Callbacks of one table call. Run on the calling thread before the call returns. Nothing they
-// throw crosses into Rust: a throw ends the callback as a refusal (stop, decline, -1) and result()
-// turns the call's result into Internal.
 class Hooks
 {
 public:
@@ -22,7 +18,6 @@ public:
     Hooks(const Hooks &) = delete;
     Hooks &operator=(const Hooks &) = delete;
 
-    // false from `sink` stops the listing.
     nvb_list_sink_fn list(ListSink *sink);
     const nvr_prompter *prompter(AuthPrompter *prompter);
     const nvb_progress *progress(Progress *progress);

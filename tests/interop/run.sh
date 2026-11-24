@@ -1,7 +1,4 @@
 #!/bin/sh
-# Interop suite: containerised servers + per-backend test drivers.
-# Usage: run.sh <build dir>. Each backend contributes tests/interop/<p>/run.sh.
-# Suites run in parallel (own servers each); each log printed whole once all ended.
 set -eu
 here=$(cd "$(dirname "$0")" && pwd)
 build=$1

@@ -1,3 +1,2 @@
-# Resolve for rustc 1.75 (SDK target compiler).
 [resolver]
 incompatible-rust-versions = "fallback"

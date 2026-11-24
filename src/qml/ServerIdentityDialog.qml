@@ -3,15 +3,10 @@ import QtQuick 2.0
 import Sailfish.Silica 1.0
 import org.netvfs.accounts 1.0
 
-// Server identity confirmation: key algorithm (SSH) and full SHA256 fingerprint (monospace); TLS:
-// SHA256 of the certificate's public key, which is what gets pinned. Explicit acceptance required. With storedIdentity set (update flow) stored and newly seen identity are
-// shown together; a changed identity is never accepted silently.
 Dialog {
     id: dialog
 
-    // NetVfsProbe.serverIdentity: { kind, algorithm, fingerprint, pin, pinOptions }
     property var identity: ({})
-    // The pinned identity, for the update flow; empty object on creation
     property var storedIdentity: ({})
 
     readonly property bool changed: storedIdentity !== undefined && storedIdentity.fingerprint !== undefined

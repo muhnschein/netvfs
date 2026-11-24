@@ -1,18 +1,4 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! In-memory backend for tests (feature `testing`), provider `mem`. Connections with the same `store` option
-//! (default `default`) share one tree for the process lifetime. Options steer the C ABI's corner cases:
-//!
-//! | option | effect |
-//! |---|---|
-//! | `store` | the tree to use |
-//! | `secret` | `authenticate` wants this secret, else `AuthFailed` |
-//! | `throttle` | `authenticate` fails with `RateLimited`, retry after this many ms |
-//! | `interactive`, `answer` | `authenticate` asks the prompter this question and wants this answer |
-//! | `identity` | `connect` reports an identity of this algorithm (TLS for `tls-…`, else SSH); its fingerprint is `<user>@<host>:<port> <connect>/<request timeout> ms` |
-//! | `stall` | `true`: every call after `authenticate` waits for cancel; `ignore`: waits for ever, ignoring cancel |
-//! | `panic` | the call of this name (`stat`, `read`, `position`, …) panics |
-//!
-//! The prompt's instruction is `Sign in as <user>`, or `Sign in as <domain>\<user>` with a domain.
 
 mod tree;
 
@@ -61,7 +47,6 @@ impl Session {
         self.tree.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// `ConnectionLost` after `disconnect`.
     fn check(&self) -> Result<(), Status> {
         if self.open.load(Ordering::SeqCst) {
             Ok(())
@@ -70,7 +55,6 @@ impl Session {
         }
     }
 
-    /// `panic` option hook: the C ABI must turn the panic into `Internal`.
     fn hook(&self, call: &str) {
         assert!(self.panic_on.as_deref() != Some(call), "mem: {call} panics on request");
     }

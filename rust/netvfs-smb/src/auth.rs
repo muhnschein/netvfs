@@ -144,15 +144,12 @@ impl fmt::Debug for NtlmSpnego {
     }
 }
 
-/// User name for which sspi skips the SPNEGO mechListMIC check.
 const SSPI_GUEST_USER: &str = "/GUEST";
 
-/// A failure inside sspi: sign-in cannot be trusted.
 fn sspi_err(e: &sspi::Error) -> Error {
     policy(format!("NTLM sign-in failed: {:?}: {}", e.error_type, e.description))
 }
 
-/// Credentials this client refuses to use.
 fn refused(message: String) -> Error {
     Error::Local(Status::new(ErrorName::AuthFailed, message))
 }
@@ -160,7 +157,6 @@ fn refused(message: String) -> Error {
 impl NtlmSpnego {
     const FLAGS: ClientRequestFlags = ClientRequestFlags::MUTUAL_AUTH
         .union(ClientRequestFlags::INTEGRITY)
-        // CONFIDENTIALITY makes sspi request NTLMSSP_NEGOTIATE_KEY_EXCH (random exported session key).
         .union(ClientRequestFlags::CONFIDENTIALITY)
         .union(ClientRequestFlags::ALLOCATE_MEMORY);
 
@@ -168,18 +164,15 @@ impl NtlmSpnego {
         let username = Username::new(user, (!domain.is_empty()).then_some(domain))
             .map_err(|e| refused(format!("the user name is not valid: {e:?}")))?;
         if username.account_name().eq_ignore_ascii_case(SSPI_GUEST_USER) {
-            // sspi 0.23 skips the mechListMIC requirement for this account name (src/negotiate/mod.rs:35, 405-409), also as "DOMAIN\/GUEST".
             return Err(refused(format!("the user name {SSPI_GUEST_USER} is not supported")));
         }
         if password.starts_with(sspi::NTLM_HASH_PREFIX) {
-            // sspi takes the rest of such a password as an NT hash.
             return Err(refused(format!(
                 "passwords starting with {} are not supported",
                 sspi::NTLM_HASH_PREFIX
             )));
         }
         let identity = AuthIdentity { username, password: password.to_owned().into() };
-        // NTLM only: no Kerberos, no PKU2U. No workstation name sent (NtlmConfig::default()).
         let config =
             NegotiateConfig::new(Box::new(NtlmConfig::default()), Some("ntlm".to_owned()), String::new());
         let mut ctx = Negotiate::new_client(config).map_err(|e| sspi_err(&e))?;
@@ -280,7 +273,6 @@ const NEG_ANONYMOUS: u32 = 0x0000_0800;
 const NEG_ALWAYS_SIGN: u32 = 0x0000_8000;
 const NEG_EXTENDED_SESSIONSECURITY: u32 = 0x0008_0000;
 
-/// NEGOTIATE_MESSAGE without domain, workstation or version.
 fn anonymous_negotiate() -> Vec<u8> {
     let flags = NEG_UNICODE | NEG_REQUEST_TARGET | NEG_NTLM | NEG_ALWAYS_SIGN | NEG_EXTENDED_SESSIONSECURITY;
     let mut m = Vec::new();
@@ -291,8 +283,6 @@ fn anonymous_negotiate() -> Vec<u8> {
     m
 }
 
-/// Checks that a token is an NTLMSSP CHALLENGE_MESSAGE (its content is irrelevant for
-/// anonymous: no response is computed from it).
 fn check_challenge(token: &[u8]) -> Result<()> {
     let mut r = Reader::new(token);
     if r.array::<8>().ok().as_ref() != Some(NTLMSSP) || r.u32().ok() != Some(2) {
@@ -301,8 +291,6 @@ fn check_challenge(token: &[u8]) -> Result<()> {
     Ok(())
 }
 
-/// AUTHENTICATE_MESSAGE for anonymous: LmChallengeResponse = Z(1), everything else empty,
-/// NTLMSSP_NEGOTIATE_ANONYMOUS set, no MIC, no session key.
 fn anonymous_authenticate() -> Vec<u8> {
     const PAYLOAD: u32 = 64;
     let flags = NEG_UNICODE | NEG_REQUEST_TARGET | NEG_NTLM | NEG_ANONYMOUS | NEG_EXTENDED_SESSIONSECURITY;
@@ -321,7 +309,6 @@ fn anonymous_authenticate() -> Vec<u8> {
     m.extend_from_slice(&3u32.to_le_bytes());
     m.extend_from_slice(&field(1, PAYLOAD));
     for _ in 0..5 {
-        // NtChallengeResponse, DomainName, UserName, Workstation, EncryptedRandomSessionKey
         m.extend_from_slice(&field(0, PAYLOAD + 1));
     }
     m.extend_from_slice(&flags.to_le_bytes());
@@ -416,7 +403,6 @@ mod tests {
 
     #[test]
     fn a_der_length_of_usize_max_is_refused() {
-        // Fuzz target spnego reproducer (rust/fuzz/seeds/spnego): NegTokenResp with DER length usize::MAX; picky-asn1-der adds the header length (rust/vendor/picky-asn1-der), overflow must be an error, not a panic. Final token takes the same decode.
         let mut token = vec![0xa1, 0x23, 0x61, 0x2b, 0xa2, 0x00, 0x25, 0x88];
         token.resize(108, 0xff);
         let account = Account::User {
@@ -479,7 +465,6 @@ mod tests {
             domain: String::new(),
             password: Zeroizing::new("x".into()),
         };
-        // sspi accepts the handle but fails at the latest when the challenge is processed.
         if let Ok((mut a, _)) = Authenticator::start(&empty, "h") {
             a.step(b"not a token").unwrap_err();
         }

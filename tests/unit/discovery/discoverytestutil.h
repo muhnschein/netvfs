@@ -9,9 +9,6 @@
 #include <QtCore/QString>
 
 namespace NetVfs::Test {
-
-// Builds a packet byte by byte, the way a capture would look: no encoder
-// involved, so the decoder is checked against independently written bytes.
 class Pkt
 {
 public:
@@ -123,6 +120,6 @@ inline Dns::Message announcement(const QByteArray &type, const QByteArray &insta
                      addressRecord(host, ip)});
 }
 
-} // namespace NetVfs::Test
+}
 
 #endif

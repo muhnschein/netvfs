@@ -1,9 +1,4 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-// conn_establish: security ordering inside one call so no caller can authenticate before the
-// identity check passed: connect, identity verdict, credentials, authenticate; any failure after
-// connect disconnects, so nothing else is sent. An account's secret comes from signond, fetched on
-// the Qt thread only after the identity was accepted, and wiped after authenticate. Interactive
-// prompts go to the caller's prompt hook.
 #include "ffi_p.h"
 
 #include "identity.h"
@@ -33,7 +28,7 @@ namespace NetVfs::Ffi {
 namespace {
 
 constexpr int SecretTimeoutMs = 60000;
-constexpr int WaitSliceMs = 50;  // A cancel ends the wait within this.
+constexpr int WaitSliceMs = 50;
 uint32_t identityKind(ServerIdentity::Kind kind)
 {
     switch (kind) {
@@ -47,8 +42,6 @@ uint32_t identityKind(ServerIdentity::Kind kind)
     return NVB_IDENTITY_NONE;
 }
 
-// OpenSSH form "SHA256:" + unpadded base64 of the key blob's digest when the backend left the
-// fingerprint empty.
 QString fingerprintOf(const ServerIdentity &identity)
 {
     if (!identity.fingerprint.isEmpty() || identity.publicKey.isEmpty())
@@ -82,7 +75,6 @@ Result identityVerdict(const nvb_conn *conn, const ServerIdentity &seen, const Q
     }
     if (verdict == NVB_ID_CANCEL || conn->canceled.load())
         return Result(Error::Canceled);
-    // Only an unknown identity may be accepted, never a changed one.
     if (verdict == NVB_ID_ACCEPT_UNKNOWN && check.error() == Error::ServerIdentityUnknown)
         return Result::success();
     return check;
@@ -103,7 +95,6 @@ public:
             items[static_cast<size_t>(i)].echo = prompts.at(i).echo ? 1 : 0;
         }
         nvb_reply reply;
-        // A count that differs from the prompts declines.
         if (const int given = m_hooks->prompt(m_hooks->ctx, arena.bytes(name.toUtf8()),
                                               arena.bytes(instruction.toUtf8()), items.data(), items.size(), &reply);
             !given || m_canceled.load() || m_conn->canceled.load() || reply.answers.size() != prompts.size())
@@ -112,7 +103,6 @@ public:
         return true;
     }
 
-    // The hook watches the caller's own cancel flag; answers arriving after a cancel are dropped.
     void cancel() override { m_canceled.store(true); }
 
 private:
@@ -121,7 +111,6 @@ private:
     std::atomic<bool> m_canceled { false };
 };
 
-// One signond lookup, handed from the Qt thread to the waiting owner thread.
 struct SecretWait {
     std::mutex mutex;
     std::condition_variable cond;
@@ -150,7 +139,6 @@ void startLookup(const std::shared_ptr<SecretWait> &wait, quint32 credentialsId,
         if (wait->abandoned)
             return;
     }
-    // Deleted through deleteLater() when it answers, else with the application.
     auto *source = new SignonSecretSource(QCoreApplication::instance());
     source->setSecretOptional(secretOptional);
     wait->source = source;
@@ -165,7 +153,6 @@ void startLookup(const std::shared_ptr<SecretWait> &wait, quint32 credentialsId,
     source->fetch(credentialsId);
 }
 
-// Owner thread: waits for the lookup, at most 60 s, ending early on cancel.
 Result awaitLookup(const nvb_conn *conn, const std::shared_ptr<SecretWait> &wait, Credentials *out)
 {
     using Clock = std::chrono::steady_clock;
@@ -214,7 +201,6 @@ Result credentialsFor(const nvb_conn *conn, const nvb_secret *secret, Credential
         *out = Credentials(toUtf8String(secret->user), QByteArray());
         return Result::success();
     case NVB_SECRET_BYTES:
-        // fromRawData: Credentials makes the only copy.
         *out = Credentials(toUtf8String(secret->user),
                            QByteArray::fromRawData(reinterpret_cast<const char *>(secret->secret.ptr),
                                                    static_cast<int>(std::min<size_t>(secret->secret.len, INT_MAX))));
@@ -226,7 +212,6 @@ Result credentialsFor(const nvb_conn *conn, const nvb_secret *secret, Credential
     }
 }
 
-// Disconnects on any failure after connect, also a thrown one.
 class DisconnectOnFailure
 {
 public:

@@ -56,7 +56,6 @@ bool isConnectionKey(const QString &key)
     return key == QLatin1String(KeyHost) || key == QLatin1String(KeyPort) || key == QLatin1String(KeyUserName);
 }
 
-// Values compare as strings; switches as "true"/"false".
 QString valueText(const QVariant &value)
 {
     if (value.type() == QVariant::Bool)

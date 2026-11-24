@@ -11,8 +11,6 @@
 
 #include <array>
 
-// Internal. Record cache and resolver state machine behind Discovery. No sockets, timers, clock:
-// every call gets `now` (monotonic ms).
 namespace NetVfs {
 
 struct BrowseType {
@@ -33,22 +31,17 @@ public:
     };
     using Events = QVector<Event>;
 
-    // Bounds on what an untrusted network can make us hold.
     static constexpr int MaxInstances = 256;
     static constexpr int MaxAddressesPerHost = 8;
     static constexpr int MaxTtlSeconds = 7200;
-    // Unanswered after this many queries: service appears with what is known.
     static constexpr int MaxResolveAttempts = 3;
     static constexpr int FirstResolveDelayMs = 1000;
-    // RFC 6762 section 5.2: refresh at 80, 90, 95 percent of TTL.
     static constexpr int RefreshStages = 3;
 
-    // Non-response messages ignored (RFC 6762 section 18.3, 18.11).
     void ingest(const Dns::Message &message, qint64 now, const QDateTime &wall, Events *events);
     void expire(qint64 now, Events *events);
     qint64 nextDeadline() const;
     QVector<Dns::Question> dueQuestions(qint64 now);
-    // Known-answer suppression PTRs: more than half TTL left.
     QVector<Dns::Record> knownAnswers(qint64 now) const;
     QVector<DiscoveredService> services() const;
     void clear();
@@ -67,8 +60,6 @@ private:
         QHostAddress address;
         Lifetime life;
 
-        // Qt 5 QHostAddress has no move ctor; Qt aborts on alloc failure, so moves are noexcept in
-        // effect.
         AddressEntry() = default;
         AddressEntry(const AddressEntry &other) = default;
         AddressEntry &operator=(const AddressEntry &other) = default;

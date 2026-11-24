@@ -2,7 +2,6 @@
 //! Confinement parts applied to a fresh probe process (src/bin/probe.rs), and the helper's own run.
 #![cfg(feature = "probe")]
 #![allow(clippy::unwrap_used)]
-// Setgid copies need ids and file system flags from libc.
 #![allow(unsafe_code)]
 
 use std::path::{Path, PathBuf};
@@ -13,7 +12,6 @@ const HELPER: &str = env!("CARGO_BIN_EXE_netvfs-accounts");
 const NO_LANDLOCK: i32 = 77;
 const NO_SECCOMP: i32 = 99;
 
-/// Writes to the test's stderr, shown when a test fails.
 #[allow(clippy::print_stderr)]
 fn note(text: &str) {
     eprintln!("{text}");
@@ -71,7 +69,6 @@ fn landlock_abi() -> i64 {
 
 #[test]
 fn descriptors() {
-    // Caller's closed stdio becomes /dev/null; other inherited descriptors close.
     let output = Command::new("/bin/sh")
         .args(["-c", "exec \"$0\" descriptors 3 3</dev/null 0<&- 2>&-", PROBE])
         .output()
@@ -81,8 +78,6 @@ fn descriptors() {
 
 #[test]
 fn probe_reports_the_first_failed_check() {
-    // Exit status is the first failed check: here the first (stderr, a pipe not /dev/null, fails
-    // the third too).
     let output =
         Command::new("/bin/sh").args(["-c", "exec \"$0\" descriptors 9 9<&-", PROBE]).output().unwrap();
     assert_eq!(outcome(&output), (1, 4));
@@ -164,7 +159,6 @@ struct User {
     home: String,
 }
 
-/// User `key` (name or uid) as getpwuid_r sees it (also users not in /etc/passwd).
 fn passwd_user(key: &str) -> Option<User> {
     let output = Command::new("getent").args(["passwd", key]).output().unwrap();
     let entry = String::from_utf8(output.stdout).unwrap();
@@ -176,8 +170,6 @@ fn passwd_user(key: &str) -> Option<User> {
     })
 }
 
-/// Arguments of the set-id-environment part for `user`: its home and the XDG_RUNTIME_DIR it gets
-/// when the caller sets none.
 fn set_id_environment_args(user: &User) -> [String; 3] {
     use std::os::unix::fs::MetadataExt;
     let runtime = PathBuf::from(format!("/run/user/{}", user.uid));
@@ -199,8 +191,6 @@ fn set_id_environment() {
 fn set_id_environment_of_another_user() {
     use std::os::unix::fs::PermissionsExt;
     use std::os::unix::process::CommandExt;
-    // As root, set_id_environment says nothing of the real uid (all ids 0); same for another user,
-    // whose home and runtime folder are not root's.
     // SAFETY: geteuid cannot fail.
     if unsafe { libc::geteuid() } != 0 {
         note("skipped: not root; set_id_environment runs as another user already");
@@ -210,7 +200,6 @@ fn set_id_environment_of_another_user() {
         note("skipped: no user nobody");
         return;
     };
-    // Target folder may be private: copy the user can run.
     let dir = TempDir::new("nobody");
     std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
     let searchable =
@@ -241,8 +230,6 @@ fn group_refused() {
     assert_eq!(probe(&["group-refused"]), (0, 3));
 }
 
-/// A gid other than the effective one this process may give a file: any as root, else a
-/// supplementary group.
 fn other_group() -> Option<libc::gid_t> {
     // SAFETY: plain id calls; the buffer holds `count` entries.
     unsafe {
@@ -258,8 +245,6 @@ fn other_group() -> Option<libc::gid_t> {
     }
 }
 
-/// A setgid copy of `binary` with another group; None (test skips) without such a group or if the
-/// file system ignores set-id bits.
 fn set_id_copy(binary: &str, name: &str) -> Option<PathBuf> {
     use std::os::unix::ffi::OsStrExt;
     use std::os::unix::fs::PermissionsExt;
@@ -281,8 +266,6 @@ fn set_id_copy(binary: &str, name: &str) -> Option<PathBuf> {
     Some(copy)
 }
 
-/// Runs a fresh copy. A child forked by another test while the copy was written holds it open for
-/// writing until its exec: ETXTBSY.
 fn run_copy(command: &mut Command) -> std::process::Output {
     for _ in 0..100 {
         match command.output() {
@@ -357,7 +340,6 @@ fn helper_answers_without_a_database() {
     assert_eq!(status, Some(0));
     assert!(answer.starts_with(&header(12)));
 
-    // A file where the folder should be: the setgid hint.
     std::fs::write(dir.path().join("file"), b"").unwrap();
     let (status, answer) = helper(&["list"], &dir.path().join("file/accounts"));
     assert_eq!(status, Some(0));
@@ -377,8 +359,6 @@ fn helper_reports_an_answer_it_cannot_write() {
 
 #[test]
 fn helper_records_attention() {
-    // One listed account: attention is written; the change it cannot announce (no session bus) is
-    // reported on stderr.
     let dir = TempDir::new("attention");
     let db = rusqlite::Connection::open(dir.path().join("accounts.db")).unwrap();
     db.execute_batch(

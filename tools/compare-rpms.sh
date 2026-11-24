@@ -1,17 +1,5 @@
 #!/bin/sh
 # SPDX-License-Identifier: LGPL-2.1-or-later
-# Compares RPMs with a rebuild's (tools/verify-rpm.sh runs it in the SDK
-# image, which has rpm, rpm2cpio and cpio).
-#
-#     compare-rpms.sh <rebuilt dir> <rpm>...
-#
-# Each RPM against the rebuilt one of the same name and architecture, a line
-# each:
-#   VERIFIED    same file, byte for byte
-#   SAME FILES  same files, modes, owners and links inside; packaging differs
-#               (build time, file dates, host, signature)
-#   DIFFERENT   files differ, or the rebuild made no such package
-# Exit, worst of all: 0 VERIFIED, 1 SAME FILES, 2 DIFFERENT, 3 can't compare.
 set -eu
 
 [ $# -ge 2 ] || { echo "usage: $0 <rebuilt dir> <rpm>..." >&2; exit 3; }
@@ -29,8 +17,6 @@ package() {
     file=$1
     rpm -qp --qf '%{NAME}.%{ARCH}' "$file" 2>/dev/null
 }
-# What a package holds: content hash of each file; mode, owner, link target of
-# each entry.
 inside() {
     file=$1 dir=$2
     mkdir "$dir"

@@ -14,7 +14,6 @@ use std::path::{Path, PathBuf};
 
 use netvfs_accounts::sandbox;
 
-/// ASan runs only (`--cfg netvfs_asan`): LeakSanitizer cannot stop the confined probe (no ptrace).
 #[cfg(netvfs_asan)]
 #[unsafe(no_mangle)]
 extern "C" fn __asan_default_options() -> *const std::ffi::c_char {
@@ -23,7 +22,6 @@ extern "C" fn __asan_default_options() -> *const std::ffi::c_char {
 
 const NO_LANDLOCK: i32 = 77;
 const NO_SECCOMP: i32 = 99;
-/// fchmodat2 (Linux 6.6), same number on every architecture.
 const FCHMODAT2: libc::c_long = 452;
 fn setresgid() -> i64 {
     #[cfg(target_arch = "arm")]
@@ -59,7 +57,6 @@ fn report(message: &str) {
     eprintln!("probe: {message}");
 }
 
-/// Stdout count: the test compares it so a part that skips its checks does not pass.
 #[allow(clippy::print_stdout)]
 fn ran(checks: &Checks) {
     println!("ran {}", checks.count);
@@ -125,8 +122,6 @@ fn process_state(check: &mut Checks) {
     }
 }
 
-/// clone(2) with namespace `flags` and CLONE_SIGHAND without CLONE_VM: the kernel refuses (EINVAL)
-/// before making anything, so only the filter's EPERM shows it saw the flags.
 fn clone_refused(flags: libc::c_int) -> i64 {
     // SAFETY: a clone(2) with plain values; a child exits below.
     let result = unsafe {
@@ -185,7 +180,6 @@ fn syscalls(check: &mut Checks, dir: &Path) -> i32 {
             i64::from(libc::open(other.as_ptr(), libc::O_CREAT | libc::O_WRONLY, 0o2755)),
             libc::EPERM,
         );
-        // Without O_CREAT the mode is unused, whatever a raw syscall passes.
         check.check(
             libc::syscall(libc::SYS_openat, libc::AT_FDCWD, file.as_ptr(), libc::O_RDONLY, 0o6755) >= 0,
         );
@@ -193,7 +187,6 @@ fn syscalls(check: &mut Checks, dir: &Path) -> i32 {
             libc::syscall(libc::SYS_openat, libc::AT_FDCWD, file.as_ptr(), libc::O_WRONLY, 0o6755) >= 0,
         );
         check.fails(i64::from(libc::mkdir(folder.as_ptr(), 0o2755)), libc::EPERM);
-        // The *at calls themselves (glibc uses the old ones where they exist).
         check.fails(libc::syscall(libc::SYS_mkdirat, libc::AT_FDCWD, folder.as_ptr(), 0o2755), libc::EPERM);
         check.fails(
             libc::syscall(libc::SYS_mknodat, libc::AT_FDCWD, other.as_ptr(), libc::S_IFREG | 0o4644, 0),
@@ -202,7 +195,6 @@ fn syscalls(check: &mut Checks, dir: &Path) -> i32 {
         check.fails(libc::syscall(FCHMODAT2, libc::AT_FDCWD, file.as_ptr(), 0o2700, 0), libc::EPERM);
         check.fails(i64::from(libc::creat(other.as_ptr(), 0o2755)), libc::EPERM);
         check.check(libc::mkdir(folder.as_ptr(), 0o700) == 0);
-        // O_DIRECTORY is part of O_TMPFILE but alone creates nothing.
         check.check(
             libc::syscall(libc::SYS_openat, libc::AT_FDCWD, folder.as_ptr(), libc::O_DIRECTORY, 0o6755) >= 0,
         );
@@ -218,11 +210,7 @@ fn syscalls(check: &mut Checks, dir: &Path) -> i32 {
     0
 }
 
-/// `allowed`: database folder. `denied`: test-made `secret` file, `empty` folder, `file` and FIFO
-/// `fifo` (writable paths of their own). `bus`: abstract socket the test listens on.
-/// `abstract_bus`: helper with an abstract session bus.
 fn filesystem(check: &mut Checks, allowed: &Path, denied: &Path, bus: &Path, abstract_bus: bool) -> i32 {
-    // With descriptor 0 free, the ruleset is descriptor 0: still one.
     // SAFETY: closing stdin, which the probe does not read.
     unsafe { libc::close(0) };
     let writable = [
@@ -254,8 +242,6 @@ fn filesystem(check: &mut Checks, allowed: &Path, denied: &Path, bus: &Path, abs
         let null = libc::open(c"/dev/null".as_ptr(), libc::O_WRONLY);
         check.check(libc::write(null, b"x".as_ptr().cast(), 1) == 1);
         check.check(libc::open(c"/dev/urandom".as_ptr(), libc::O_RDONLY) >= 0);
-        // Each ABI 1 right is refused beyond them; a device also before the capability check
-        // (EPERM, as non-root).
         check.fails(i64::from(libc::open(secret.as_ptr(), libc::O_RDONLY)), libc::EACCES);
         check.fails(i64::from(libc::open(secret.as_ptr(), libc::O_WRONLY)), libc::EACCES);
         check.fails(i64::from(libc::open(denied.as_ptr(), libc::O_DIRECTORY)), libc::EACCES);
@@ -272,8 +258,6 @@ fn filesystem(check: &mut Checks, allowed: &Path, denied: &Path, bus: &Path, abs
         check.fails(i64::from(libc::mknod(socket.as_ptr(), libc::S_IFSOCK, 0)), libc::EACCES);
         check.fails(i64::from(libc::mkfifo(pipe.as_ptr(), 0o600)), libc::EACCES);
         check.fails(i64::from(libc::symlink(c"secret".as_ptr(), link.as_ptr())), libc::EACCES);
-        // Writable non-folders get a database folder's file rights: FIFO opened without waiting for
-        // a writer, file truncated (ABI 3).
         check.check(libc::open(fifo.as_ptr(), libc::O_NONBLOCK) >= 0);
         check.check(libc::truncate(file.as_ptr(), 0) == 0);
         if restriction.abi >= 4 {
@@ -292,7 +276,6 @@ fn filesystem(check: &mut Checks, allowed: &Path, denied: &Path, bus: &Path, abs
         }
     }
     if restriction.abi >= 6 {
-        // Test's abstract socket is out of reach unless the bus is one.
         let connected = SocketAddr::from_abstract_name(bus.as_os_str().as_bytes())
             .and_then(|address| UnixStream::connect_addr(&address));
         check.check(connected.err().and_then(|e| e.raw_os_error()) == (!abstract_bus).then_some(libc::EPERM));
@@ -300,8 +283,6 @@ fn filesystem(check: &mut Checks, allowed: &Path, denied: &Path, bus: &Path, abs
     0
 }
 
-/// `home`: real uid's passwd home. `runtime`: XDG_RUNTIME_DIR expected when the caller sets none,
-/// empty for none.
 fn set_id_environment(check: &mut Checks, home: &Path, runtime: &Path) {
     // SAFETY: one check per process, one thread.
     unsafe {
@@ -344,7 +325,6 @@ fn set_id_environment(check: &mut Checks, home: &Path, runtime: &Path) {
     check.check(std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from).unwrap_or_default() == runtime);
 }
 
-/// `set_id`: started from a setgid probe copy, so there is a group to drop.
 fn group(check: &mut Checks, set_id: bool) {
     if set_id {
         check.check(sandbox::running_set_id());
@@ -360,8 +340,6 @@ fn group(check: &mut Checks, set_id: bool) {
     }
 }
 
-/// Refused setresgid is reported also when every gid is already the real one: the seccomp filter
-/// fails it with EPERM.
 fn group_refused(check: &mut Checks) {
     let mut filter = sandbox::Filter::default();
     filter.load_number();

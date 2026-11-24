@@ -1,5 +1,4 @@
 # SPDX-License-Identifier: LGPL-2.1-or-later
-# proftpd with mod_tls for the FTPS interop suite. Certificate, password and passive ports come at run time.
 FROM mirror.gcr.io/library/debian:bookworm-slim
 RUN apt-get update \
     && apt-get install -y --no-install-recommends proftpd-core proftpd-mod-crypto openssl \

@@ -171,7 +171,6 @@ fn variant(w: &mut Writer, setting: &NewSetting) {
     }
 }
 
-/// Body of `AccountChanged`, `(uuubbsa(ssua{sv}as))`; helper changes global settings only.
 fn changed_body(change: &Change, (sec, nsec): (u64, u32)) -> Vec<u8> {
     let mut w = Writer::default();
     w.u32(u32::try_from(sec & u64::from(u32::MAX)).unwrap_or(0));
@@ -261,7 +260,7 @@ fn messages(change: &Change, guid: &str, time: (u64, u32)) -> Vec<u8> {
     let mut out = bus_call(1, "Hello", "", &[]);
     let mut name = Writer::default();
     name.string(&format!("{BUS_NAME_PREFIX}{guid}"));
-    name.u32(4); // DBUS_NAME_FLAG_DO_NOT_QUEUE
+    name.u32(4);
     out.extend(bus_call(2, "RequestName", "su", &name.bytes));
     out.extend(message(
         &Header {

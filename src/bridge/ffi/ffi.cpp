@@ -1,6 +1,4 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-// libnetvfs-bridge-ffi.so: table of the C ABI (netvfs_bridge_ffi.h), process and Qt event loop
-// part, helpers.
 #include "ffi_p.h"
 
 #include "backendloader.h"
@@ -65,7 +63,6 @@ struct App {
     bool initialized = false;
     bool quitting = false;
     std::atomic<int32_t> exitCode { 0 };
-    // argc = 1, argv = { app_name } for the life of the app.
     QByteArray name;
     int argc = 1;
     std::array<char *, 2> argv { nullptr, nullptr };
@@ -160,7 +157,6 @@ int32_t providerAvailable(nvb_bytes provider) noexcept
     });
 }
 
-// Url::parse stays in C++.
 nvb_error *urlParse(nvb_bytes url, nvb_url **out) noexcept
 {
     if (out)
@@ -239,8 +235,6 @@ const nvb_ffi Table = {
 };
 
 }
-// The one place that looks into what a table function caught. std::exception gives a message,
-// anything else none.
 Result internalResult(const std::exception_ptr &thrown)
 {
     QString what = QStringLiteral("no exception");
@@ -269,7 +263,6 @@ bool postToQt(std::function<void()> fn)
     std::scoped_lock lock(a.mutex);
     if (!a.queue || a.quitting)
         return false;
-    // postEvent takes ownership of the event.
     QCoreApplication::postEvent(a.queue, std::make_unique<FunctorEvent>(std::move(fn)).release());
     return true;
 }

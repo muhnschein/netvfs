@@ -1,4 +1,3 @@
-# Rust scope of codeql.yml: same paths as codeql-config.yml (keep in step) plus the query test's planted cases. Queries: default suite with our rust/hard-coded-cryptographic-value (rust-queries/).
 disable-default-queries: true
 queries:
   - uses: ./.github/codeql/rust-queries/code-scanning.qls

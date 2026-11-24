@@ -134,7 +134,6 @@ pub fn socket_activated(program: &Path, listener: OwnedFd) -> Command {
     command
 }
 
-/// Private bus config: anyone may own any name and send anything.
 const BUS_CONFIG: &str = r#"<!DOCTYPE busconfig PUBLIC "-//freedesktop//DTD D-Bus Bus Configuration 1.0//EN"
  "http://www.freedesktop.org/standards/dbus/1.0/busconfig.dtd">
 <busconfig>
@@ -173,7 +172,6 @@ impl TestBus {
                 .args(["--nofork", "--print-address=1"])
                 .stdin(Stdio::null())
                 .stdout(Stdio::piped())
-                // It complains when it cannot raise its fd limit.
                 .stderr(Stdio::null()),
         );
         let mut child = match spawned {

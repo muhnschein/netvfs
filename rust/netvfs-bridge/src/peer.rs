@@ -18,7 +18,6 @@ use std::path::{Path, PathBuf};
 
 pub use crate::sys::peer::PeerCredentials;
 
-/// Field 22 of `/proc/<pid>/stat`: `starttime`, clock ticks since boot.
 const START_TIME_FIELD: usize = 22;
 const MAX_PROC_FILE_BYTES: u64 = 4096;
 const COMPARE_CHUNK_BYTES: usize = 64 * 1024;
@@ -151,7 +150,6 @@ impl PeerChecker {
         if (self.env.boot_ticks_now)().is_some_and(|now| before > now) {
             return Err(reused());
         }
-        // Opened, not only stat()ed, inside the start time window: content is compared from the file this process runs.
         let exe = open_with_metadata(&self.proc_path(pid, "exe"));
         if let Some(hook) = &self.env.after_exe_read {
             hook();
@@ -169,7 +167,6 @@ impl PeerChecker {
         if exe_meta.dev() == expected_meta.dev() && exe_meta.ino() == expected_meta.ino() {
             return Ok(());
         }
-        // Sailjail's `--private-bin` runs a copy from a tmpfs: another file, so same bytes are required.
         if exe_meta.len() != expected_meta.len() || !same_content(exe, expected) {
             return Err(refused(format!("peer {pid} runs another executable")));
         }
@@ -202,7 +199,6 @@ fn parse_fdinfo_pid(info: &[u8]) -> Option<i64> {
     text.lines().find_map(|line| line.strip_prefix("Pid:")).and_then(|v| v.trim().parse().ok())
 }
 
-/// `/proc/uptime` as integers: as a double 0.29 * 100 truncates to 28, a tick before a peer's start time, refusing it as a reused pid.
 fn uptime_ticks(uptime: &str, hz: i64) -> Option<i64> {
     let field = uptime.split(' ').next()?;
     let (seconds, fraction) = field.split_once('.').unwrap_or((field, ""));

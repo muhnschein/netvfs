@@ -127,7 +127,6 @@ void stripTrailingSpacesAndDots(QString *name)
         name->chop(1);
 }
 
-// Longest prefix whose UTF-8 encoding fits `maxBytes`, never splitting a code point.
 QString truncateBytes(const QString &text, qint64 maxBytes)
 {
     qint64 used = 0;
@@ -145,7 +144,6 @@ QString truncateBytes(const QString &text, qint64 maxBytes)
     return text.left(end);
 }
 
-// Truncates to `maxBytes`, keeping the extension if it leaves at least one stem byte.
 QString fitBytes(const QString &name, qint64 maxBytes)
 {
     if (maxBytes <= 0 || Names::encode(name).size() <= maxBytes)
@@ -167,7 +165,6 @@ QString stemOf(const QString &name)
     return dot < 0 ? name : name.left(dot);
 }
 
-// Windows treats "CON.txt" like "CON": '_' goes after the stem.
 QString avoidReservedName(const QString &name)
 {
     const QString stem = stemOf(name);

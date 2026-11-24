@@ -3,25 +3,18 @@ import QtQuick 2.0
 import Sailfish.Silica 1.0
 import org.netvfs.accounts 1.0
 
-// Input dialog of the creation flow, rendered from the provider descriptor: connection fields,
-// services (backup only where the provider offers it and settings allow it), sign-in method,
-// secret. credentialsOnly asks only for sign-in method and secret (credentials update flow). Input
-// validated before any connection.
 Dialog {
     id: dialog
 
     property string provider
     property bool credentialsOnly
-    // Preselects the sign-in method ("password", "publickey")
     property string initialAuthMode: "password"
 
-    // { <field key>: value, auth_mode, key_source } (NetVfsProviders.initialValues)
     property var values: ({})
 
     readonly property var descriptor: NetVfsProviders.descriptor(provider)
     readonly property var fields: descriptor["fields"] || []
     readonly property var authModes: descriptor["authModes"] || []
-    // Backup services come with netvfs-backup.
     readonly property bool offersBackup: NetVfsProviders.offersService(provider, "backup")
                                          && NetVfsHelpers.isServiceInstalled(NetVfsHelpers.backupServiceName(provider))
     readonly property bool offersFiles: NetVfsProviders.offersService(provider, "files")
@@ -35,9 +28,7 @@ Dialog {
 
     readonly property var authModeEntry: NetVfsProviders.authMode(provider, values)
     readonly property string authMode: authModeEntry["id"] || "password"
-    // "generate" or "import" (key mode only)
     readonly property string keySource: authModeEntry["source"] === "import" ? "import" : "generate"
-    // "password", "key" or "none"
     readonly property string secretKind: NetVfsProviders.secretKind(provider, values)
     readonly property string password: passwordField.text
     readonly property string backupsPath: NetVfsProviders.serviceValue(provider, values, "backups_path")
@@ -47,8 +38,6 @@ Dialog {
     readonly property bool connectionValid: services.length > 0
                                             && NetVfsProviders.isValid(provider, values, services)
 
-    // Connection parameters for NetVfsProbe and NetVfsAccountSetup; `pinOptions` are the accepted
-    // identity's (serverIdentity.pinOptions), or {}.
     function connectionParams(pinOptions) {
         return NetVfsProviders.makeParams(provider, values, pinOptions)
     }

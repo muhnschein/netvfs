@@ -25,7 +25,6 @@ const INTERFACE: &str = "org.freedesktop.Notifications";
 
 type NotifyArgs = (String, u32, String, String, String, Vec<String>, HashMap<String, OwnedValue>, i32);
 
-/// How the fake answers `Notify`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Answer {
     Id,
@@ -33,7 +32,6 @@ enum Answer {
     NotAnId,
 }
 
-/// Fake service: ids from 7 on, or the replaced one.
 struct Fake {
     conn: Connection,
     calls: mpsc::UnboundedReceiver<Message>,
@@ -317,7 +315,6 @@ async fn no_bus() {
 
 const BRIDGE: &str = env!("CARGO_BIN_EXE_netvfs-bridge");
 
-/// Bridge binary on the private bus with the fake service, consent unknown, client after Hello; `None` without the C ABI or `dbus-daemon`.
 async fn bridge_on_bus() -> Option<(TestBus, Fake, BridgeRun, TestChild, netvfs_bridge_proto::Connection)> {
     if ["NETVFS_BRIDGE_FFI", "NETVFS_BACKEND_PATH"].iter().any(|v| std::env::var_os(v).is_none()) {
         return None;
@@ -333,12 +330,10 @@ async fn bridge_on_bus() -> Option<(TestBus, Fake, BridgeRun, TestChild, netvfs_
     Some((bus, fake, run, child, client))
 }
 
-/// Consent the bridge stored for its consumer.
 fn stored(run: &BridgeRun) -> Consent {
     ConsentStore::new(run.consent_file()).consent(&run.consumer)
 }
 
-/// The next `ConsentChanged`.
 async fn consent_changed(signals: &mut SignalStream) -> String {
     match wait_signal(signals, WAIT, |s| matches!(s, Signal::ConsentChanged(_))).await {
         Some(Signal::ConsentChanged(consent)) => consent,
@@ -346,7 +341,6 @@ async fn consent_changed(signals: &mut SignalStream) -> String {
     }
 }
 
-/// Waits until the bridge logged `text`.
 async fn logged(run: &BridgeRun, text: &str) {
     let end = tokio::time::Instant::now() + WAIT;
     while !run.log().contains(text) {

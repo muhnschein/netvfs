@@ -7,9 +7,6 @@
 #include <memory>
 
 namespace NetVfs::BridgeTest {
-
-// A file descriptor received in a message (D-Bus "h"). The descriptor is
-// owned and closed when the last copy goes away, unless take() moved it out.
 class UnixFd
 {
 public:
@@ -25,7 +22,7 @@ private:
     std::shared_ptr<Owner> m_owner;
 };
 
-} // namespace NetVfs::BridgeTest
+}
 
 Q_DECLARE_METATYPE(NetVfs::BridgeTest::UnixFd)
 

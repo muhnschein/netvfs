@@ -94,7 +94,6 @@ pub unsafe fn items<'a, T>(ptr: *const T, n: usize) -> &'a [T] {
     unsafe { std::slice::from_raw_parts(ptr, n) }
 }
 
-/// UTF-8 text from C++ (`QString::toUtf8`); never fails.
 fn text(bytes: &[u8]) -> String {
     String::from_utf8_lossy(bytes).into_owned()
 }
@@ -108,22 +107,16 @@ pub fn wire_text(bytes: &[u8]) -> String {
     s
 }
 
-/// # Safety
-/// `b` as for [`slice`].
 unsafe fn text_of(b: NvbBytes) -> String {
     // SAFETY: forwarded contract.
     text(unsafe { slice(b) })
 }
 
-/// # Safety
-/// `b` as for [`slice`].
 unsafe fn bytes_of(b: NvbBytes) -> Vec<u8> {
     // SAFETY: forwarded contract.
     unsafe { slice(b) }.to_vec()
 }
 
-/// # Safety
-/// `ptr`/`n` as for [`items`], each item as for [`slice`].
 unsafe fn texts(ptr: *const NvbBytes, n: usize) -> Vec<String> {
     // SAFETY: forwarded contract.
     unsafe { items(ptr, n) }
@@ -295,7 +288,6 @@ pub unsafe fn status(e: &NvbError) -> Status {
     Status { name, message, detail, retry_after_ms: e.retry_after_ms }
 }
 
-/// Owns the bytes and arrays that `nvb_*` structs built for one call point to. Append-only: nothing handed out moves or goes until drop (the inner `Vec`s' heap blocks stay put when the outer `Vec`s grow).
 #[derive(Debug, Default)]
 struct Arena {
     bytes: Vec<Vec<u8>>,
@@ -526,7 +518,6 @@ mod tests {
         let raw = buf.raw();
         assert_eq!(raw.n_options, 7);
         assert_eq!((raw.port, raw.connect_timeout_ms, raw.request_timeout_ms), (2222, 15000, 60000));
-        // SAFETY: the arrays are owned by `buf`.
         let kvs = unsafe { items(raw.options, raw.n_options) };
         let keys: Vec<String> = kvs.iter().map(|kv| text(unsafe { slice(kv.key) })).collect();
         assert_eq!(keys, ["anon", "empty", "list", "n", "off", "raw", "share"]);

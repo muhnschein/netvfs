@@ -153,7 +153,6 @@ impl Store {
                 continue;
             }
             if self.files_service(id, account.provider.as_deref())?.1 {
-                // AgAccountId is 32 bits: id as sqlite3_column_int reads it.
                 ids.push(cut_to_int(id));
             }
         }
@@ -194,7 +193,6 @@ impl Store {
         if params.host.as_deref().is_none_or(str::is_empty) {
             return Err(Outcome::failure(Error::Internal, format!("Account {account_id} has no server")));
         }
-        // Account::credentialsId(): value as int, then unsigned.
         let credentials_id = value_of(&global, keys::CREDENTIALS_ID)
             .and_then(Value::to_int)
             .map_or(0, |v| u32::from_ne_bytes(v.to_ne_bytes()));
@@ -244,7 +242,6 @@ impl Store {
     /// `Internal` when the write fails.
     pub fn write_attention(&mut self, account_id: i32, settings: &[NewSetting]) -> Result<(), Outcome> {
         let id = i64::from(u32::from_ne_bytes(account_id.to_ne_bytes()));
-        // SQLite reason stays out: the bridge shows this message as is.
         if self.db.store_global(id, settings).is_err() {
             return Err(Outcome::failure(Error::Internal, "Cannot write the accounts database"));
         }
@@ -444,7 +441,6 @@ mod tests {
         );
         assert_eq!(store.load(2).unwrap_err(), Outcome::failure(Error::Internal, "Account 2 has no server"));
         assert_eq!(store.load(3).unwrap_err(), Outcome::failure(Error::NotFound, "Account 3 does not exist"));
-        // Negative id is the account's unsigned id; credentials id read as int, then unsigned.
         let unsigned = store.load(-1).unwrap();
         assert_eq!((unsigned.account_id, unsigned.params.port, unsigned.params.username), (-1, 0, None));
         assert_eq!(unsigned.credentials_id, 4_294_967_294);

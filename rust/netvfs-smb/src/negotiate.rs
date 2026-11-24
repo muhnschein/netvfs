@@ -256,7 +256,6 @@ mod tests {
         check(DIALECT_311, &[preauth_context(&[0; 32]), enc(&[2, 4])]).unwrap_err();
     }
 
-    /// `check` of a response with these capabilities and sizes.
     fn check_sizes(capabilities: u32, transact: u32, read: u32, write: u32) -> Result<Negotiated> {
         let mut msg = response(DIALECT_311, &[preauth_context(&[0; 32])]);
         for (at, v) in [(88, capabilities), (92, transact), (96, read), (100, write)] {

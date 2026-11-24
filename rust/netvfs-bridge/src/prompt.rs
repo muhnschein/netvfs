@@ -39,7 +39,6 @@ pub trait ConsentPrompt {
     fn is_shown(&self) -> bool;
 }
 
-/// What the owner sees, and its last request number.
 #[derive(Debug, Default)]
 struct Shared {
     shown: bool,
@@ -151,7 +150,6 @@ impl Actor {
         let summary = format!("{display_name} wants to use your network locations");
         let text = "Tap to choose what it may do on each account";
         let hints = HashMap::from([("category", Value::from("x-nemo.general")), ("urgency", Value::U8(1))]);
-        // A slice: an array would be a structure on the bus.
         let actions: &[&str] = &[DEFAULT, ""];
         let body = (APP_NAME, self.id, "", summary, text, actions, hints, NEVER_EXPIRES);
         let call = bus.call_method(Some(SERVICE), PATH, Some(INTERFACE), "Notify", &body);

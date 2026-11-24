@@ -32,7 +32,6 @@ constexpr unsigned RenameNoReplace = 1U;
 constexpr unsigned RenameInvalidFlag = 1U << 30;
 constexpr mode_t FolderMode = 0777;
 
-// statfs f_type values (linux/magic.h) of file systems whose rename honours RENAME_NOREPLACE.
 constexpr std::array<unsigned long, 9> NoReplaceFileSystems = {
     0xEF53UL,
     0x58465342UL,
@@ -48,7 +47,6 @@ constexpr std::array<unsigned long, 9> NoReplaceFileSystems = {
 long renameat2Call(const QByteArray &from, const QByteArray &to, unsigned flags)
 {
 #ifdef SYS_renameat2
-    // Through syscall(): the target's C library may lack the wrapper.
     return ::syscall(SYS_renameat2, AT_FDCWD, from.constData(), AT_FDCWD, to.constData(), flags);
 #else
     Q_UNUSED(from)
@@ -59,8 +57,6 @@ long renameat2Call(const QByteArray &from, const QByteArray &to, unsigned flags)
 #endif
 }
 
-// renameat2 exists when an invalid flag gives EINVAL, not ENOSYS; flags are checked before any
-// lookup, so nothing is touched.
 bool kernelHasRenameat2()
 {
     return renameat2Call(QByteArrayLiteral("/"), QByteArrayLiteral("/"), RenameInvalidFlag) != 0 && errno == EINVAL;
@@ -122,7 +118,6 @@ void resolveTarget(int dirFd, const QByteArray &path, Entry *entry)
 
 Result renameChecked(const QByteArray &from, const QByteArray &to)
 {
-    // Documented race between this check and rename().
     if (NativeStat existing; statAt(AT_FDCWD, to, false, &existing) == 0)
         return alreadyExists(to);
     return plainRename(from, to);
@@ -130,7 +125,6 @@ Result renameChecked(const QByteArray &from, const QByteArray &to)
 
 Result renameLinked(const QByteArray &from, const QByteArray &to)
 {
-    // link() fails with EEXIST atomically; unlink() then drops the old name.
     if (::link(from.constData(), to.constData()) != 0) {
         const int error = errno;
         if (error == EPERM || error == EOPNOTSUPP || error == EMLINK || error == ENOSYS)
@@ -160,12 +154,10 @@ Result renameSameFile(const QByteArray &from, const QByteArray &to, RenameMode m
 {
     if (from == to)
         return Result::success();
-    // Case-only rename on a case-insensitive file system: one entry.
     if (Names::decode(from).compare(Names::decode(to), Qt::CaseInsensitive) == 0)
         return plainRename(from, to);
     if (mode == RenameMode::NoReplace)
         return alreadyExists(to);
-    // rename(2) leaves both names for hard links; Replace means `from` goes away.
     if (::unlink(from.constData()) != 0)
         return systemFailure(from);
     return Result::success();
@@ -507,7 +499,6 @@ Result LocalBackend::rename(const QString &from, const QString &to, RenameMode m
     else
         r = plainRename(source, target);
     if (r.ok()) {
-        // Durable new name: Transfer's commit is a rename.
         syncFolder(parentOf(target));
         if (parentOf(source) != parentOf(target))
             syncFolder(parentOf(source));
@@ -565,7 +556,6 @@ Result LocalBackend::makeSymlink(const QString &target, const QString &linkPath)
         return r;
     if (target.isEmpty() || target.contains(QChar(0)) || !Names::isEncodable(target))
         return Result(Error::InvalidName, QStringLiteral("Invalid link target"));
-    // Stored verbatim; a relative target is relative to the link's folder.
     if (::symlink(Names::encode(target).constData(), native.constData()) != 0)
         return systemFailure(native);
     return Result::success();

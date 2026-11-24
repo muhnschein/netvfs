@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! Shared state of the fake bridge and of one client session.
 
 use super::tree::Tree;
 use crate::access::{self, After, Level, Own};
@@ -258,9 +257,7 @@ pub struct LocationRec {
 
 pub struct State {
     pub consent: Consent,
-    /// Per location, overriding [`State::consent`]: `None` not allowed.
     pub access: HashMap<String, Option<Level>>,
-    /// What the app added at an add level.
     pub own: HashMap<(String, Vec<u8>), Own>,
     pub consent_requests: u32,
     pub auto_consent: Option<Consent>,
@@ -275,9 +272,7 @@ pub struct State {
     pub job_failures: Vec<JobFailure>,
     pub calls: Vec<CallRecord>,
     pub handoffs: Vec<String>,
-    /// What `GetFeatures` answers.
     pub features: Vec<String>,
-    /// What `ListDrives` lists.
     pub drives: Vec<FakeDrive>,
     pub nearby: Vec<WireNearby>,
     pub sessions: Vec<Arc<Session>>,
@@ -318,9 +313,6 @@ impl Default for State {
 }
 
 impl State {
-    /// Mounts (`mount`) or unmounts `drive`: where it is mounted then, and
-    /// whether that changed; `None` for an unknown drive. A drive is mounted
-    /// below `/run/media/user/`, by label or else by id.
     pub fn mount(&mut self, drive: &str, mount: bool) -> Option<(Vec<u8>, bool)> {
         let d = self.drives.iter_mut().find(|d| d.id == drive)?;
         let wanted = if mount && d.mount_point.is_empty() {
@@ -336,7 +328,6 @@ impl State {
         Some((wanted, changed))
     }
 
-    /// Adds a location; without a `state` in `info` it is disconnected.
     pub fn add_location(&mut self, id: &str, provider: &str, name: &str, mut info: Vec<(String, InfoValue)>) {
         if !info.iter().any(|(k, _)| k == location_state::KEY) {
             info.push((location_state::KEY.to_owned(), InfoValue::Str(location_state::DISCONNECTED.into())));
@@ -348,8 +339,6 @@ impl State {
         self.trees.entry(id.to_owned()).or_default();
     }
 
-    /// Sets the connection state of location `id` (`state`, and
-    /// `stateError` for `failed`); whether that changed anything.
     pub fn set_state(&mut self, id: &str, state: &str, error: Option<&str>) -> bool {
         let Some(rec) = self.locations.get_mut(id) else { return false };
         let value = |key: &str| rec.info.iter().find(|(k, _)| k == key).map(|(_, v)| v.clone());
@@ -397,7 +386,6 @@ impl State {
             .collect()
     }
 
-    /// What the app may do in location `id`; `None` while undecided or not allowed.
     pub fn level(&self, id: &str) -> Option<Level> {
         let default = match self.consent {
             Consent::Unknown => return None,
@@ -407,12 +395,10 @@ impl State {
         self.access.get(id).copied().unwrap_or(default)
     }
 
-    /// Whether `path` in `loc` is the app's.
     pub fn own(&self, loc: &str, path: &[u8]) -> Own {
         self.own.get(&(loc.to_owned(), path.to_vec())).copied().unwrap_or(Own::No)
     }
 
-    /// Records what a finished `call` (`error`: the bare name of its failure) made of `path` in `loc`; nothing at a level that changes anything.
     pub fn after_call(&mut self, loc: &str, path: &[u8], call: After, error: Option<&str>) {
         if self.level(loc).is_none_or(Level::changes) {
             return;
@@ -422,7 +408,6 @@ impl State {
         self.set_own(loc, path, own);
     }
 
-    /// Records `own` for `path` in `loc`.
     pub fn set_own(&mut self, loc: &str, path: &[u8], own: Own) {
         let key = (loc.to_owned(), path.to_vec());
         if own == Own::No {
@@ -432,7 +417,6 @@ impl State {
         }
     }
 
-    /// Takes the first scripted failure matching `method`, if it is due.
     pub fn due_failure(&mut self, method: &str) -> Option<Failure> {
         let f = self
             .failures
@@ -448,7 +432,6 @@ impl State {
         Some(f.clone())
     }
 
-    /// Takes a job failure for `method`.
     pub fn due_job_failure(&mut self, method: &str) -> Option<JobFailure> {
         let f = self.job_failures.iter_mut().find(|f| f.method == method && f.remaining != Some(0))?;
         if let Some(n) = f.remaining.as_mut() {
@@ -458,11 +441,9 @@ impl State {
     }
 }
 
-/// What `Cancel` found.
 #[derive(Debug, PartialEq, Eq)]
 pub enum CancelOutcome {
     Canceled,
-    /// The id was valid once and has finished.
     Finished,
     Unknown,
 }
@@ -520,7 +501,6 @@ impl Session {
         self.with(|s| s.handles.len())
     }
 
-    /// Next id of the shared request and job numbering.
     pub fn next_id(&self) -> u32 {
         self.with(|s| {
             let id = s.next_id;
@@ -559,8 +539,6 @@ impl Session {
         })
     }
 
-    /// The client is gone: its jobs are canceled, handles closed, as in the
-    /// real bridge.
     pub fn shut(&self) {
         self.with(|s| {
             for flag in s.jobs.values() {
@@ -598,7 +576,6 @@ impl Shared {
         self.with(|s| s.sessions.clone())
     }
 
-    /// True while any client looks for servers nearby.
     pub fn any_discovering(&self) -> bool {
         self.sessions_snapshot().iter().any(|s| s.with(|s| s.discovering))
     }

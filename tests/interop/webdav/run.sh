@@ -1,13 +1,5 @@
 #!/bin/sh
 # SPDX-License-Identifier: LGPL-2.1-or-later
-# WebDAV interop suite: an Apache mod_dav container (TLS 1.3 only; certificates made here), the Rust tests
-# rust/netvfs-webdav/tests/apache.rs, one netvfs-cli round trip and the backend conformance suite.
-# Usage: run.sh <build dir>
-#
-# Environment:
-#   NETVFS_WEBDAV_SERVERS_ONLY  1: start the server, run nothing, leave it running; the lines printed that start with
-#                               NETVFS_INTEROP_WEBDAV_ are its settings (for $GITHUB_ENV: cargo-mutants)
-#   NETVFS_INTEROP_WEBDAV_PREFIX  with the other settings of such a run: use that server, leave it running
 set -eu
 
 here=$(cd "$(dirname "$0")" && pwd)
@@ -25,14 +17,12 @@ if [ "$reuse" = 1 ]; then
 else
     prefix="netvfs-webdav-$$"
     work=$(mktemp -d)
-    # A fresh password per run; it exists only in this process tree and the container.
     password=$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')
 fi
 
 cleanup() {
     [ "$keep" = 0 ] || return 0
     docker rm -f "$prefix-apache" >/dev/null 2>&1 || true
-    # Files the server wrote belong to its user.
     docker run --rm -v "$work:/w" "$image" sh -c 'rm -rf /w/dav' >/dev/null 2>&1 || true
     rm -rf "$work"
 }
@@ -44,20 +34,16 @@ port() {
 }
 
 if [ "$reuse" = 0 ]; then
-    # A test CA and its certificate for localhost (system trust through SSL_CERT_FILE), and a self-signed one.
     certs=$work/certs
     mkdir -p "$certs" "$work/dav"
     chmod 777 "$work/dav"
     ec="-newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes"
-    # shellcheck disable=SC2086 # one word per option
     openssl req -x509 $ec -keyout "$certs/ca.key" -out "$certs/ca.crt" -days 2 -subj "/CN=netvfs interop CA" \
         -addext basicConstraints=critical,CA:TRUE -addext keyUsage=critical,keyCertSign 2>/dev/null
-    # shellcheck disable=SC2086
     openssl req $ec -keyout "$certs/signed.key" -out "$certs/signed.csr" -subj "/CN=localhost" 2>/dev/null
     printf 'subjectAltName=DNS:localhost\nextendedKeyUsage=serverAuth\n' > "$certs/signed.ext"
     openssl x509 -req -in "$certs/signed.csr" -CA "$certs/ca.crt" -CAkey "$certs/ca.key" -CAcreateserial \
         -days 2 -extfile "$certs/signed.ext" -out "$certs/signed.crt" 2>/dev/null
-    # shellcheck disable=SC2086
     openssl req -x509 $ec -keyout "$certs/self.key" -out "$certs/self.crt" -days 2 -subj "/CN=localhost" \
         -addext subjectAltName=DNS:localhost 2>/dev/null
     openssl x509 -in "$certs/ca.crt" -outform der -out "$certs/ca.der"
@@ -105,7 +91,6 @@ export NETVFS_RS_LIB="$build/lib/netvfs/libnetvfs-rs.so"
 self=$NETVFS_INTEROP_WEBDAV_SELF
 signed=$NETVFS_INTEROP_WEBDAV_SIGNED
 
-# expect_code <exit code> <command...>: the command must fail with exactly that code.
 expect_code() {
     want=$1
     shift
@@ -121,7 +106,6 @@ expect_code() {
 
 cli_round_trip() {
     cli="$build/bin/netvfs-cli"
-    # Self-signed: unknown (exit 10 + ServerIdentityUnknown) until pinned; the pin is what identify prints.
     expect_code 14 env NETVFS_SECRET="$password" "$cli" --url "davs://alice@127.0.0.1:$self/dav" ls ""
     pin=$("$cli" --url "davs://alice@127.0.0.1:$self/dav" identify | sed -n 2p)
     case "$pin" in "tls-spki-sha256 "*) ;; *) echo "identify printed no TLS pin: $pin" >&2; return 1 ;; esac
@@ -142,11 +126,9 @@ cli_round_trip() {
     dav mv --replace "CLI run/other.bin" "CLI run/cli.bin"
     expect_code 28 dav rmdir "CLI run/tree"
     dav rm -r "CLI run"
-    # A certificate the system trusts needs no pin; https:// is the same as davs://.
     SSL_CERT_FILE="$work/certs/ca.crt" NETVFS_SECRET="$password" "$cli" --url "https://alice@localhost:$signed/dav" \
         ls "" >/dev/null
     [ "$(SSL_CERT_FILE="$work/certs/ca.crt" "$cli" --url "davs://localhost:$signed/dav" identify)" = none ]
-    # Plain HTTP and a password in the URL are refused before anything is sent (exit 10 + SecurityPolicy).
     expect_code 17 "$cli" --url "http://alice@127.0.0.1:$self/dav" ls ""
     expect_code 17 "$cli" --url "davs://alice:pw@127.0.0.1:$self/dav" ls ""
 }
@@ -160,7 +142,6 @@ else
 fi
 rm -rf "$work/dav/CLI run"
 head -c 3000000 /dev/urandom > "$work/cli.bin"
-# A subshell of its own: "set -e" is ignored inside a function that is called as a condition.
 set +e
 (set -e; cli_round_trip)
 cli_status=$?
@@ -172,7 +153,6 @@ else
     status=1
 fi
 
-# Conformance suite against the self-signed server, pinned; its folder is $work/dav on this host too.
 mkdir -p "$work/dav/conformance"
 chmod 777 "$work/dav/conformance"
 pin=$("$build/bin/netvfs-cli" --url "davs://127.0.0.1:$self/dav" identify | sed -n 2p)

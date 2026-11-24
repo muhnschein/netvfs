@@ -9,7 +9,6 @@ use std::collections::HashMap;
 use std::sync::OnceLock;
 use zbus::zvariant::{OwnedValue, Str, Value};
 
-/// Why an account needs the user.
 pub use crate::accounts::Attention;
 
 const HOST_KEY_SEEN: &str = "host_key_seen";

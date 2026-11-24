@@ -30,7 +30,6 @@ QObject *pluginFor(const QString &provider)
         const QString path = QDir(dir).absoluteFilePath(fileName);
         if (!QFileInfo(path).exists())
             continue;
-        // Loader kept loaded on purpose: plugins stay mapped until exit.
         QPluginLoader loader(path);
         QObject *root = loader.instance();
         const BackendFactory *factory = qobject_cast<BackendFactory *>(root);

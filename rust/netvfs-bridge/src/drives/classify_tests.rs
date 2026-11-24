@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-// Listed devices of a phone with SD card, USB stick and eMMC, as UDisks2 describes them.
 
 use super::{BLOCK, BLOCK_DEVICES, DRIVE, ENCRYPTED, FILESYSTEM, Kind, ManagedObjects, drives};
 use crate::drives::sample::{
@@ -83,7 +82,6 @@ fn an_unlocked_card_is_listed_through_its_backing_device() {
 
 #[test]
 fn an_unlocked_device_goes_by_the_hints_of_its_encrypted_device() {
-    // UDisks2 marks the cleartext device a system device: no drive.
     let mut objects = phone();
     objects.insert(device("dm_2d3"), cleartext("mmcblk1p1", "SECRET"));
     assert_eq!(ids(&objects), ["dm_2d3", "mmcblk1p1", "sda1"]);
@@ -158,9 +156,7 @@ fn luks_devices_of_the_emmc_hidden_or_of_other_kinds_are_not_listed() {
     let cases: [(&str, &str, OwnedValue); 4] = [
         (BLOCK, "HintSystem", owned(true)),
         (BLOCK, "HintIgnore", owned(true)),
-        // Only LUKS is listed.
         (BLOCK, "IdType", owned("BitLocker")),
-        // Cleartext device not among the objects still means unlocked.
         (ENCRYPTED, "CleartextDevice", object_path(&format!("{BLOCK_DEVICES}dm_2d9"))),
     ];
     for (iface, name, value) in cases {
@@ -171,7 +167,6 @@ fn luks_devices_of_the_emmc_hidden_or_of_other_kinds_are_not_listed() {
         objects.insert(device("mmcblk1p2"), vault);
         assert_eq!(ids(&objects), ["mmcblk1p1", "sda1"], "{shown}");
     }
-    // Without `Encrypted` UDisks2 cannot unlock it.
     let mut objects = phone();
     let mut vault = luks(CARD, "VAULT");
     vault.remove(ENCRYPTED);
@@ -237,7 +232,6 @@ fn the_wire_entry() {
     assert!(!stick.info.contains_key(drive_info::UUID) && !stick.info.contains_key(drive_info::MODEL));
 }
 
-/// Mirrors fuzz target `udisks_objects`: truncated or flipped answers decode or fail; decoded ones classify.
 #[test]
 fn damaged_answers_fail_or_classify() {
     let ctxt = Context::new_dbus(LE, 0);

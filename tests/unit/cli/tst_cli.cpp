@@ -50,7 +50,7 @@ public:
     bool result = true;
 };
 
-} // namespace
+}
 
 class TestCli : public QObject
 {
@@ -94,7 +94,6 @@ private slots:
         qputenv("NETVFS_BACKEND_PATH",
                 QByteArray(NETVFS_TEST_FAKE_BACKEND_DIR ":" NETVFS_TEST_BACKEND_DIR));
         qputenv("NETVFS_SECRET", "secret");
-        // A zone that is not UTC, so that "no zone means UTC" is observable.
         qputenv("TZ", "Pacific/Auckland");
         ::tzset();
     }
@@ -118,8 +117,8 @@ private slots:
         QCOMPARE(runArgs({ S("--provider"), S("fake"), S("--host"), S("h"), S("--port"), S("65536"), S("identify") }), 2);
         QCOMPARE(run({ S("--option"), S("novalue"), S("identify") }), 2);
         QCOMPARE(run({ S("--frobnicate"), S("1"), S("identify") }), 2);
-        QCOMPARE(runArgs({ S("--provider"), S("fake"), S("identify") }), 2);   // no host
-        QCOMPARE(runArgs({ S("--provider"), S("fake"), S("--host"), S("h") }), 2);   // no command
+        QCOMPARE(runArgs({ S("--provider"), S("fake"), S("identify") }), 2);
+        QCOMPARE(runArgs({ S("--provider"), S("fake"), S("--host"), S("h") }), 2);
         QCOMPARE(runArgs({ S("--provider"), S("nosuch"), S("--host"), S("h"), S("identify") }),
                  code(Error::Unsupported));
     }
@@ -138,10 +137,8 @@ private slots:
 
     void secretNeverFromArgv()
     {
-        // There is no option that takes the secret itself ...
         QCOMPARE(run({ S("--secret"), S("secret"), S("ls"), QString() }), 2);
         QCOMPARE(run({ S("--password"), S("secret"), S("ls"), QString() }), 2);
-        // ... and --secret-env names a variable, it is not the secret.
         QCOMPARE(run({ S("--secret-env"), S("secret"), S("ls"), QString() }), code(Error::AuthFailed));
         qputenv("NETVFS_CLI_TEST_SECRET", "secret");
         QCOMPARE(run({ S("--secret-env"), S("NETVFS_CLI_TEST_SECRET"), S("ls"), QString() }), 0);
@@ -209,7 +206,6 @@ private slots:
         file.write("12345");
         file.close();
         const QString url = S("file://") + dir.path() + S("/sub");
-        // Relative arguments resolve against the URL's folder, absolute ones do not.
         QCOMPARE(runArgs({ S("--url"), url, S("ls"), S("inner") }), 0);
         QCOMPARE(out, S("- 5 f\n"));
         QCOMPARE(runArgs({ S("--url"), url, S("ls"), S("") }), 0);
@@ -235,7 +231,6 @@ private slots:
         FakeServer::instance()->identity = id;
         QCOMPARE(run({ S("identify") }), 0);
         QCOMPARE(out, S("SHA256:fp\n") + id.toPin() + QLatin1Char('\n'));
-        // Pinned: commands run; unpinned: refused before authentication.
         FakeServer::instance()->log.clear();
         QCOMPARE(run({ S("ls"), QString() }), code(Error::ServerIdentityUnknown));
         QVERIFY(err.contains(S("--host-key")));
@@ -378,7 +373,7 @@ private slots:
         QVERIFY(!file.contains(S("nameBytes")));
         QVERIFY(!file.contains(S("targetType")));
         QCOMPARE(folder.value(S("type")).toString(), S("directory"));
-        QVERIFY(folder.value(S("size")).isNull());   // unknown, not -1
+        QVERIFY(folder.value(S("size")).isNull());
         QCOMPARE(link.value(S("type")).toString(), S("symlink"));
         QVERIFY(link.contains(S("targetType")));
         QCOMPARE(bad.value(S("name")).toString(), S("bad") + QString(QChar(0xfffd)) + S("name"));
@@ -408,11 +403,11 @@ private slots:
     void mkdirModes()
     {
         FakeServer *server = FakeServer::instance();
-        QCOMPARE(run({ S("mkdir"), S("a/b") }), code(Error::NotFound));   // no parents without -p
+        QCOMPARE(run({ S("mkdir"), S("a/b") }), code(Error::NotFound));
         QVERIFY(!server->exists(S("a")));
         QCOMPARE(run({ S("mkdir"), S("a") }), 0);
         QCOMPARE(run({ S("mkdir"), S("a") }), 0);
-        QCOMPARE(run({ S("mkdir"), S("--exclusive"), S("a") }), code(Error::AlreadyExists));   // ... unless exclusive
+        QCOMPARE(run({ S("mkdir"), S("--exclusive"), S("a") }), code(Error::AlreadyExists));
         QCOMPARE(run({ S("mkdir"), S("-p"), S("x/y/z") }), 0);
         QVERIFY(server->exists(S("x/y/z")));
         QCOMPARE(run({ S("mkdir"), S("-p"), S("--exclusive"), S("q") }), 2);
@@ -431,7 +426,6 @@ private slots:
         QCOMPARE(run({ S("rmdir"), S("tree/g") }), code(Error::NotADirectory));
         QCOMPARE(run({ S("rm"), S("-r"), S("/") }), code(Error::InvalidName));
         QVERIFY(server->exists(S("tree/g")));
-        // links are removed, never followed.
         QCOMPARE(run({ S("rm"), S("-r"), S("tree") }), 0);
         QVERIFY(!server->exists(S("tree")));
         QVERIFY(server->exists(S("keep/precious")));
@@ -481,7 +475,6 @@ private slots:
         FakeServer *server = FakeServer::instance();
         server->addFile(S("src/f"), "data");
         server->addFile(S("src/sub/g"), "more");
-        // No server-side copy: streamed over a second connection.
         server->capabilities.flags.remove(Capability::ServerCopy);
         QCOMPARE(run({ S("cp"), S("src/f"), S("copy") }), 0);
         QVERIFY(!server->log.contains(S("copy:src/f->copy")));
@@ -490,7 +483,6 @@ private slots:
         QCOMPARE(run({ S("cp"), S("--replace"), S("src/f"), S("copy") }), 0);
         QCOMPARE(run({ S("cp"), S("-r"), S("src"), S("tree") }), 0);
         QCOMPARE(server->fileData(S("tree/sub/g")), QByteArray("more"));
-        // Server copy without ServerCopyRecursive also goes across for -r.
         server->capabilities.flags.insert(Capability::ServerCopy);
         server->capabilities.flags.remove(Capability::ServerCopyRecursive);
         server->log.clear();
@@ -554,7 +546,7 @@ private slots:
         QCOMPARE(Cli::run({ S("--provider"), S("fake"), S("--host"), S("h"), S("--user"), S("user"), S("cat"), S("bin") },
                           o, e),
                  0);
-        QCOMPARE(collected, QByteArray("\x00\xffraw\n", 6));    // raw bytes, no text encoding
+        QCOMPARE(collected, QByteArray("\x00\xffraw\n", 6));
     }
 
     void attributes()
@@ -574,7 +566,6 @@ private slots:
 
         QCOMPARE(run({ S("touch"), S("--mtime"), S("2021-03-04T05:06:07Z"), S("f") }), 0);
         QCOMPARE(server->node(S("f")).modified.toUTC(), utc("2021-03-04T05:06:07Z"));
-        // A time without a zone is UTC.
         QCOMPARE(run({ S("touch"), S("--mtime"), S("2022-03-04T05:06:07"), S("f") }), 0);
         QCOMPARE(server->node(S("f")).modified.toUTC(), utc("2022-03-04T05:06:07Z"));
         QCOMPARE(run({ S("touch"), S("--mtime"), S("yesterday"), S("f") }), 2);
@@ -583,12 +574,10 @@ private slots:
         QVERIFY(server->exists(S("new")));
         QCOMPARE(server->fileData(S("new")), QByteArray());
         QCOMPARE(server->node(S("new")).modified.toUTC(), utc("2019-01-02T03:04:05Z"));
-        // No --mtime: now.
         const QDateTime before = QDateTime::currentDateTimeUtc().addSecs(-2);
         QCOMPARE(run({ S("touch"), S("f") }), 0);
         QVERIFY(server->node(S("f")).modified >= before);
         QCOMPARE(run({ S("touch"), S("nodir/new") }), code(Error::NotFound));
-        // Without SetModified the server says so; nothing is created for it.
         server->capabilities.flags.remove(Capability::SetModified);
         QCOMPARE(run({ S("touch"), S("f") }), code(Error::Unsupported));
     }
@@ -604,7 +593,7 @@ private slots:
         QCOMPARE(run({ S("ln"), S("-s"), S("../x/y"), S("l2") }), 0);
         QCOMPARE(run({ S("readlink"), S("l2") }), 0);
         QCOMPARE(out, S("../x/y\n"));
-        QVERIFY(run({ S("readlink"), S("t") }) != 0);   // not a link
+        QVERIFY(run({ S("readlink"), S("t") }) != 0);
         QCOMPARE(run({ S("ln"), S("t"), S("hard") }), 0);
         QCOMPARE(server->fileData(S("hard")), QByteArray("x"));
         QCOMPARE(run({ S("ln"), S("-s"), S("t"), S("l") }), code(Error::AlreadyExists));
@@ -654,7 +643,6 @@ private slots:
 
     void shares()
     {
-        // Only SMB locations have shares; the CLI lists the root of the location with an empty share.
         QCOMPARE(run({ S("shares") }), 2);
         QCOMPARE(runArgs({ S("shares"), S("extra") }), 2);
         if (!QFileInfo::exists(QStringLiteral(NETVFS_TEST_BACKEND_DIR "/libnetvfs-smb.so")))
@@ -670,7 +658,6 @@ private slots:
         QCOMPARE(runArgs({ S("discover"), S("--seconds"), S("-1") }), 2);
         QCOMPARE(runArgs({ S("discover"), S("--seconds"), S("99999") }), 2);
         QCOMPARE(runArgs({ S("discover"), S("stray") }), 2);
-        // No location needed; without multicast the sockets cannot be opened.
         const int result = runArgs({ S("discover"), S("--seconds"), S("0") });
         QVERIFY2(result == 0 || result == code(Error::NetworkUnreachable), qPrintable(err));
     }
@@ -714,7 +701,6 @@ private slots:
     void promptAuthentication()
     {
         FakeServer::instance()->otp = "123456";
-        // Without --prompt interactive methods are not tried.
         QCOMPARE(run({ S("ls"), QString() }), code(Error::AuthFailed));
         QBuffer input;
         input.setData("123456\n");
@@ -722,7 +708,7 @@ private slots:
         QCOMPARE(runArgs({ S("--provider"), S("fake"), S("--host"), S("h"), S("--user"), S("user"), S("--prompt"),
                            S("ls"), QString() }, &input),
                  0);
-        QVERIFY(err.contains(S("Verification code: ")));   // prompts go to stderr, not stdout
+        QVERIFY(err.contains(S("Verification code: ")));
         QVERIFY(!out.contains(S("Verification")));
         QBuffer wrong;
         wrong.setData("000000\n");
@@ -750,7 +736,6 @@ private slots:
         QVector<QByteArray> answers;
         QVERIFY(prompter.answer(S("name"), S("instruction"), { hidden, visible }, &answers));
         QCOMPARE(answers, QVector<QByteArray>({ "first", "second" }));
-        // Echo is off only around the no-echo prompt, and back on afterwards.
         QCOMPARE(echo.calls, QVector<bool>({ false, true }));
         QVERIFY(shown.startsWith(S("name\ninstruction\nPassword: ")));
         QVERIFY(shown.contains(S("User: ")));
@@ -862,7 +847,6 @@ private slots:
         QCOMPARE(runLocal(root, { S("mv"), S("a3"), S("a") }), code(Error::AlreadyExists));
         QVERIFY(QFileInfo::exists(dir.filePath(S("a3/b/f"))));
 
-        // rm -r removes the link to the outside folder, not what it points to.
         QCOMPARE(runLocal(root, { S("ln"), S("-s"), outside.path(), S("a3/out") }), 0);
         QCOMPARE(runLocal(root, { S("rm"), S("-r"), S("a3") }), 0);
         QVERIFY(!QFileInfo::exists(dir.filePath(S("a3"))));

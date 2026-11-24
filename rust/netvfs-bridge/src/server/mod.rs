@@ -95,7 +95,6 @@ impl EventSink {
     #[must_use]
     pub fn channel(tx: tokio::sync::mpsc::UnboundedSender<Event>) -> Self {
         Self::new(move |event| {
-            // A closed channel means the core has stopped: nothing to do.
             drop(tx.send(event));
         })
     }

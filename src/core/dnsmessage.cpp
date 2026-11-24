@@ -94,8 +94,6 @@ public:
         return true;
     }
 
-    // Pointers must point strictly backwards (chains end); labels add to the capped name length
-    // (cycles through labels end).
     bool name(QByteArray *out, QString *error)
     {
         QByteArray result;
@@ -462,7 +460,6 @@ bool decode(const QByteArray &packet, Message *out, QString *error)
     r.u16(&c.answers);
     r.u16(&c.authority);
     r.u16(&c.additional);
-    // Counts that cannot fit the packet are rejected before allocating.
     if (c.questions + c.records() > MaxRecords)
         return fail(error, "too many records");
     if (c.questions * QuestionMinSize + c.records() * RecordMinSize > r.remaining())

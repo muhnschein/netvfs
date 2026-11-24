@@ -150,7 +150,6 @@ impl Location {
         };
         let folder = match fs::read(folder.join(REDIRECT_FILE)) {
             Ok(contents) => {
-                // g_strstrip, then g_build_path: always below the folder.
                 let target = String::from_utf8_lossy(&contents);
                 folder.join(target.trim().trim_start_matches('/'))
             }
@@ -248,7 +247,6 @@ impl Database {
             if writable { OpenFlags::SQLITE_OPEN_READ_WRITE } else { OpenFlags::SQLITE_OPEN_READ_ONLY };
         let connection = Connection::open_with_flags(path, mode | OpenFlags::SQLITE_OPEN_NO_MUTEX)?;
         connection.busy_timeout(std::time::Duration::from_millis(BUSY_TIMEOUT_MS))?;
-        // Version 0: no tables yet; libaccounts-glib would create them.
         let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
         Ok(Self { connection: (version >= 1).then_some(connection) })
     }
@@ -286,7 +284,6 @@ impl Database {
                     id,
                     display_name: text(row.get_ref(0)?),
                     provider: text(row.get_ref(1)?),
-                    // sqlite3_column_int as gboolean
                     enabled: row.get::<_, Option<i64>>(2)?.is_some_and(|v| cut_to_int(v) != 0),
                 })
             },
@@ -368,7 +365,6 @@ mod tests {
         let e = Environment { accounts: Some("/fixture".into()), ..env("/home/a") };
         assert_eq!(e.location(), Location::Explicit("/fixture".into()));
         assert_eq!(e.database_folders(), vec![PathBuf::from("/fixture")]);
-        // A relative ACCOUNTS is libaccounts' too, but gets no folder.
         let relative = Environment { accounts: Some("rel".into()), ..env("/home/a") };
         assert_eq!(relative.location(), Location::Explicit("rel".into()));
         let e = Environment { xdg_config_home: Some("relative".into()), ..env("/nonexistent/home") };

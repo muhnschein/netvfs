@@ -27,9 +27,9 @@ pub const MAX_TOKEN: usize = 48_000;
 pub fn setup_request(security_mode: u8, token: &[u8]) -> Result<Vec<u8>> {
     let mut w = Writer::new();
     w.u16(25)
-        .u8(0) // Flags: no SMB2_SESSION_FLAG_BINDING
+        .u8(0)
         .u8(security_mode)
-        .u32(0) // Capabilities (DFS not claimed)
+        .u32(0)
         .u32(0)
         .u16(to_u16(HEADER_LEN.saturating_add(24))?)
         .u16(to_u16(token.len())?)

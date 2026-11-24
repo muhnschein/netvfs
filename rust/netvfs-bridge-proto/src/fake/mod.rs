@@ -46,8 +46,6 @@ pub struct FakeBridge {
     _owner: Arc<Owner>,
 }
 
-/// Dropped with the last clone of a [`FakeBridge`]: breaks the cycle served connection -> object
-/// server -> interface -> session -> connection, or every session leaks.
 struct Owner(Arc<Shared>);
 
 impl Drop for Owner {
@@ -428,7 +426,6 @@ impl Drop for Listener {
 pub(crate) mod tests {
     use super::*;
 
-    /// A path below the temporary folder that no other test uses.
     pub(crate) fn temp_path(tag: &str) -> PathBuf {
         use std::sync::atomic::{AtomicU32, Ordering};
         static NEXT: AtomicU32 = AtomicU32::new(0);

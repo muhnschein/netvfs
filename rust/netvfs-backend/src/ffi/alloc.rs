@@ -1,8 +1,4 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! An object returned through an out-pointer is one `calloc`'d block: object plus every byte it points to.
-//! `free` wipes the whole block; a hidden header before the object keeps the size.
-//!
-//! [`pack`] runs its function twice: first pass counts, second writes.
 
 use super::raw::NvbBytes;
 use std::cell::Cell;
@@ -11,7 +7,6 @@ use std::mem::{align_of, size_of};
 use std::ptr;
 use zeroize::Zeroize;
 
-/// Header size; keeps `calloc`'s 16-byte alignment for the object.
 const HEADER: usize = 16;
 
 thread_local! {
@@ -27,7 +22,6 @@ pub fn live_blocks() -> isize {
     LIVE.with(Cell::get)
 }
 
-/// Where [`pack`]'s function puts bytes and lists.
 pub trait Out {
     fn bytes(&mut self, data: &[u8]) -> NvbBytes;
     fn list(&mut self, items: &[&[u8]]) -> *const NvbBytes;
@@ -83,8 +77,6 @@ impl Out for Fill {
     }
 }
 
-/// One block holding what `build` makes; `build` runs twice and must make the same [`Out`] calls. `None` on
-/// overflow or `calloc` failure.
 #[allow(clippy::cast_ptr_alignment, reason = "calloc's blocks are aligned for any type; the offsets keep 8")]
 pub fn pack<T>(build: impl Fn(&mut dyn Out) -> T) -> Option<*mut T> {
     const { assert!(align_of::<T>() <= HEADER && align_of::<NvbBytes>() <= HEADER) };
@@ -114,8 +106,6 @@ pub fn pack<T>(build: impl Fn(&mut dyn Out) -> T) -> Option<*mut T> {
     }
 }
 
-/// # Safety
-/// `p` is an object [`pack`] returned and not yet released.
 #[allow(clippy::cast_ptr_alignment, reason = "the header is at the block's start, which calloc aligned")]
 unsafe fn wipe(p: *mut c_void) -> *mut u8 {
     // SAFETY: header sits right before `p`; block holds `HEADER + size` initialised bytes.
@@ -127,10 +117,6 @@ unsafe fn wipe(p: *mut c_void) -> *mut u8 {
     }
 }
 
-/// Table `free`: wipes and releases a block; NULL is a no-op.
-///
-/// # Safety
-/// `p` is NULL or an object this library returned and not yet released.
 pub unsafe extern "C" fn free(p: *mut c_void) {
     if p.is_null() {
         return;
@@ -218,7 +204,6 @@ mod tests {
     #[test]
     fn sizes_that_overflow_are_refused() {
         let huge = [0u8; 1];
-        // Each call adds one byte; a forged count past usize::MAX must fail.
         let mut count = Count { slots: Some(usize::MAX), bytes: Some(usize::MAX) };
         count.bytes(&huge);
         count.list(&[&huge]);

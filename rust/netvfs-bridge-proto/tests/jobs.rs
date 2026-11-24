@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 //! Jobs and signals of the fake (`Walk`, `CopyAcross`, cancellation, discovery) follow the
 //! contract.
-// Test helpers outside #[test] functions: a failing test is the point.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 #![cfg(feature = "fake")]
 
@@ -98,7 +97,6 @@ async fn copy_across_moves_a_tree_between_locations() {
     assert_eq!(extra["bytes"], 6);
     assert_eq!(fake.file("account:2", b"dst/copy/sub/b").unwrap(), b"56");
 
-    // The destination exists now: refused without `replace`, allowed with it.
     let job =
         conn.proxy().copy_across("account:1", b"src", "account:2", b"dst/copy", &recursive).await.unwrap();
     assert_eq!(finish(&mut signals, job).await.1, "AlreadyExists");
@@ -148,7 +146,6 @@ async fn a_listing_can_be_canceled() {
         }
     }
     assert!(batches < 20, "stopped early after {batches} batches");
-    // A finished request can still be canceled quietly; an unknown id is refused.
     conn.proxy().cancel(req).await.unwrap();
     let e = BridgeError::from(conn.proxy().cancel(999).await.unwrap_err());
     assert_eq!(e.netvfs_name(), Some("NotFound"));
@@ -168,7 +165,6 @@ async fn discovery_results_arrive_as_signals() {
     }
 }
 
-/// The `access` of every listed location, by id.
 async fn levels(conn: &Connection) -> Vec<(String, String)> {
     let locations = conn.proxy().list_locations().await.unwrap();
     locations
@@ -230,7 +226,6 @@ async fn failures_can_start_later_and_repeat() {
     p.get_consent().await.unwrap();
 }
 
-/// Uploads `content` to `path` of account 1 with `opts`: the job's error name, "" on success.
 async fn put(
     conn: &Connection,
     signals: &mut SignalStream,
@@ -258,7 +253,6 @@ fn rand_suffix() -> u64 {
     RandomState::new().hash_one(std::time::SystemTime::now())
 }
 
-/// The detail of a refused call.
 fn detail<T: std::fmt::Debug>(result: zbus::Result<T>) -> Option<String> {
     match BridgeError::from(result.unwrap_err()) {
         BridgeError::Remote { detail, .. } => detail,

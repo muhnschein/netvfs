@@ -17,7 +17,6 @@ use std::collections::VecDeque;
 /// Bytes a read handle has in flight at most.
 pub const MAX_READ_AHEAD: u64 = 4 * 1024 * 1024;
 
-/// `Canceled` when the token or the progress says so.
 fn stopped(cancel: &CancelToken, progress: &mut dyn Progress) -> Result<(), Status> {
     if cancel.is_canceled() || progress.canceled() { Err(Status::canceled()) } else { Ok(()) }
 }
@@ -26,13 +25,11 @@ fn more_than_asked() -> Status {
     Status::new(ErrorName::ProtocolError, "The server sent more data than asked for")
 }
 
-/// What a READ brought: data, or the end of the file.
 fn data_of(reply: Reply, asked: u32) -> Result<Option<Vec<u8>>, Failure> {
     match reply {
         Reply::Data(data) if data.len() > usize::try_from(asked).unwrap_or(usize::MAX) => {
             Err(Failure::Local(more_than_asked()))
         }
-        // An empty DATA is the end as well.
         Reply::Data(data) if data.is_empty() => Ok(None),
         Reply::Data(data) => Ok(Some(data)),
         Reply::Status(s) if s.code == FX_EOF => Ok(None),
@@ -84,7 +81,6 @@ pub async fn open_for_write(
     if options.disposition != Disposition::Resume {
         return Ok(handle);
     }
-    // The remote size must be the offset the caller continues at.
     let checked = match client.fstat(&handle, cancel).await {
         Ok(attrs) => {
             let size = attrs.size.unwrap_or(0);
@@ -128,12 +124,10 @@ pub async fn open_for_read(
             client.close_detached(&handle);
             Err(s)
         }
-        // A server that cannot FSTAT the handle still reads it.
         Err(Failure::Server(_)) => Ok((handle, None)),
     }
 }
 
-/// Fills `buf` from `source`; less only at its end.
 fn read_fully(source: &mut dyn Source, buf: &mut [u8]) -> Result<usize, Status> {
     let mut done = 0;
     while let Some(rest) = buf.get_mut(done..)
@@ -280,7 +274,6 @@ impl Download<'_> {
         let span = Span { start: offset, end, size };
         let result = self.read_all(&handle, remote, span, total, sink, progress, cancel).await;
         if result.is_ok() {
-            // Everything arrived; a failed CLOSE of a read changes nothing.
             drop(self.client.close(&handle, cancel).await);
         } else {
             self.client.close_detached(&handle);
@@ -303,9 +296,6 @@ impl Download<'_> {
         let mut queue: VecDeque<(u64, u32, Pending)> = VecDeque::new();
         let mut next = start;
         let mut done = 0u64;
-        // Requests go out up to the size the file had when it was opened;
-        // beyond, one at a time finds the end, until data shows that the
-        // file grew.
         let mut expected_end = size.map_or(end, |s| s.clamp(start, end));
         loop {
             stopped(cancel, progress)?;
@@ -324,7 +314,6 @@ impl Download<'_> {
                 .await
                 .and_then(|r| data_of(r, len))
                 .map_err(|f| f.status(&display(remote)))?;
-            // The end of the file; the answers still due are dropped.
             let Some(data) = data else {
                 return Ok(());
             };
@@ -337,8 +326,6 @@ impl Download<'_> {
                 expected_end = end;
             }
             if n < u64::from(len) {
-                // A short answer: the rest of its block is asked for before
-                // the requests behind it are taken.
                 let rest = u32::try_from(u64::from(len).saturating_sub(n)).unwrap_or(len);
                 let pending =
                     self.client.read(handle, reached, rest).map_err(|f| f.status(&display(remote)))?;
@@ -348,7 +335,6 @@ impl Download<'_> {
     }
 }
 
-/// The bytes a download asks for, and the size of the file at open.
 #[derive(Debug, Clone, Copy)]
 struct Span {
     start: u64,
@@ -356,7 +342,6 @@ struct Span {
     size: Option<u64>,
 }
 
-/// One request of a read handle on its way.
 #[derive(Debug)]
 struct InFlight {
     offset: u64,
@@ -373,20 +358,13 @@ pub struct SftpRead {
     remote: Vec<u8>,
     size: Option<u64>,
     chunk: u32,
-    /// Requests in flight at most.
     window: usize,
-    /// Contiguous, oldest first, ending at `next`.
     pending: VecDeque<InFlight>,
-    /// Offset of the next request.
     next: u64,
-    /// Received and not handed out: `[buffer_at, +len)`.
     buffer: Vec<u8>,
     buffer_at: u64,
-    /// End of the previous read, for sequential access.
     last_end: u64,
-    /// Automatic read-ahead beyond a sequential read.
     ahead: u64,
-    /// `read_ahead`: requests wanted for `[hint.0, hint.1)`.
     hint: (u64, u64),
 }
 
@@ -422,13 +400,11 @@ impl SftpRead {
         self.buffer_at.saturating_add(len_u64(self.buffer.len()))
     }
 
-    /// Requests for other offsets are dropped (their answers when they come).
     fn restart_at(&mut self, offset: u64) {
         self.pending.clear();
         self.next = offset;
     }
 
-    /// Sends requests up to `until`, at most `window` in flight.
     fn issue(&mut self, until: u64) -> Result<(), Failure> {
         while self.pending.len() < self.window && self.next < until {
             let len = u32::try_from(until.saturating_sub(self.next).min(u64::from(self.chunk)))
@@ -440,8 +416,6 @@ impl SftpRead {
         Ok(())
     }
 
-    /// Sequential reads grow the automatic read-ahead up to the window; a
-    /// jump ends it.
     fn plan(&mut self, offset: u64, end: u64) {
         self.ahead = if offset == self.last_end && offset > 0 {
             self.ahead.saturating_mul(2).max(u64::from(self.chunk)).min(self.span())
@@ -451,7 +425,6 @@ impl SftpRead {
         self.last_end = end;
     }
 
-    /// Copies what the kept data has of `[position, end)` into `out`.
     fn take_buffered(&mut self, position: &mut u64, out: &mut [u8], filled: &mut usize) {
         let buffer_end = self.buffer_end();
         if self.buffer.is_empty() || *position < self.buffer_at || *position >= buffer_end {
@@ -472,8 +445,6 @@ impl SftpRead {
         }
     }
 
-    /// Waits for the oldest request; hands out what fits, keeps the rest.
-    /// `false` at the end of the file.
     async fn receive(
         &mut self,
         position: &mut u64,
@@ -502,11 +473,8 @@ impl SftpRead {
         }
         *filled = filled.saturating_add(used);
         *position = position.saturating_add(len_u64(used));
-        // What did not fit is kept (the kept data was used up before).
         self.buffer = data.get(used..).unwrap_or_default().to_vec();
         self.buffer_at = *position;
-        // A short answer: the rest of its block is asked for before the
-        // requests behind it are taken.
         let n = len_u64(data.len());
         if n < u64::from(len) {
             let at = offset.saturating_add(n);
@@ -541,8 +509,6 @@ impl ReadHandle for SftpRead {
         let mut filled = 0;
         self.plan(position, end);
         self.take_buffered(&mut position, buf, &mut filled);
-        // Requests already on their way for other offsets are dropped (a
-        // read the kept data answered completely leaves them alone).
         if position < end && self.pending.front().is_some_and(|p| p.offset != position) {
             self.restart_at(position);
         }
@@ -551,11 +517,8 @@ impl ReadHandle for SftpRead {
         }
         while position < end {
             cancel.check()?;
-            // A hint that starts by the end of this read carries it on to
-            // the hint's end (one that ends before adds nothing).
             let hinted = self.hint.0 <= end;
             let wanted = end.saturating_add(self.ahead).max(if hinted { self.hint.1 } else { end });
-            // Nothing is read ahead beyond the size the file had at open.
             let known = self.size.map_or(u64::MAX, |s| s.max(end));
             self.issue(wanted.min(end.saturating_add(self.span())).min(known))
                 .map_err(|f| f.status(&display(&self.remote)))?;
@@ -567,11 +530,7 @@ impl ReadHandle for SftpRead {
     }
 
     fn read_ahead(&mut self, offset: u64, bytes: u64) {
-        // A hint: requests go out now when they continue what is asked for
-        // already (or nothing is); otherwise it is ignored. Errors show at
-        // the next read.
         let start = offset;
-        // Nothing is read ahead beyond the size the file had at open.
         let until = start.saturating_add(bytes.min(MAX_READ_AHEAD)).min(self.size.unwrap_or(u64::MAX));
         if self.client.is_ended() || until <= start {
             return;
@@ -613,7 +572,6 @@ pub struct SftpWrite {
     chunk: u32,
     mtime_ms: Option<i64>,
     pending: VecDeque<(u64, Pending)>,
-    /// The first failure; every later call returns it.
     failure: Option<Status>,
 }
 
@@ -652,14 +610,11 @@ impl SftpWrite {
         Ok(())
     }
 
-    /// Waits for the oldest WRITE; a failure sticks.
     async fn settle_oldest(&mut self, cancel: &CancelToken) -> Result<(), Status> {
         let Some((len, pending)) = self.pending.pop_front() else {
             return Ok(());
         };
         if let Err(f) = pending.wait(cancel).await.and_then(ok) {
-            // A canceled wait leaves the fate of that block unknown: the
-            // handle stays failed (resume from the remote size instead).
             let status = write_failure(&self.client, &self.ext, &self.remote, &f, len, cancel).await;
             self.failure = Some(status.clone());
             return Err(status);
@@ -667,7 +622,6 @@ impl SftpWrite {
         Ok(())
     }
 
-    /// Every WRITE acknowledged, then fsync when offered.
     async fn finish(&mut self, cancel: &CancelToken) -> Result<(), Status> {
         self.usable()?;
         while !self.pending.is_empty() {
@@ -722,7 +676,6 @@ impl WriteHandle for SftpWrite {
         if let Err(f) = self.client.close(&self.handle, cancel).await {
             return Err(write_failure(&self.client, &self.ext, &self.remote, &f, 1, cancel).await);
         }
-        // The modification time is applied on commit.
         if let Some(mtime) = self.mtime_ms {
             set_times(&self.client, &self.remote, Some(mtime), None, None, cancel).await?;
         }

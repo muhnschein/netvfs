@@ -55,7 +55,6 @@ pub mod caps {
 
 /// At most this many negotiate contexts are accepted in a response.
 pub const MAX_CONTEXTS: usize = 16;
-/// At most this many dialects are offered.
 const MAX_DIALECTS: usize = 8;
 
 /// One negotiate context.
@@ -92,7 +91,6 @@ impl NegotiateRequest {
             return Err(protocol("dialect count"));
         }
         let mut w = Writer::new();
-        // Fixed part is 36 bytes; dialects follow; contexts start 8-aligned from the header.
         let dialects_end = HEADER_LEN
             .checked_add(36)
             .and_then(|v| v.checked_add(self.dialects.len().checked_mul(2)?))
@@ -111,8 +109,6 @@ impl NegotiateRequest {
             w.u16(*d);
         }
         for c in &self.contexts {
-            // Each context starts 8-aligned relative to the header; the body starts at 64,
-            // which is 8-aligned, so aligning the body is enough.
             w.align8();
             w.u16(c.kind).u16(to_u16(c.data.len())?).u32(0).bytes(&c.data);
         }
@@ -206,7 +202,6 @@ impl NegotiateResponse {
             let mut cr = Reader::new(msg);
             cr.seek(ctx_offset)?;
             for _ in 0..context_count {
-                // Each context starts 8-aligned (the first: checked above).
                 let aligned = cr.pos().checked_next_multiple_of(8).ok_or_else(|| protocol("overflow"))?;
                 cr.seek(aligned)?;
                 let kind = cr.u16()?;
@@ -237,7 +232,6 @@ impl NegotiateResponse {
 pub fn u16_list(data: &[u8]) -> Result<Vec<u16>> {
     let mut r = Reader::new(data);
     let n = usize::from(r.u16()?);
-    // The data length bounds the count before anything is allocated.
     if n > r.remaining() / 2 {
         return Err(protocol("list count beyond the context"));
     }
@@ -294,7 +288,6 @@ pub(crate) mod tests {
         NegotiateRequest { dialects: vec![DIALECT_311; MAX_DIALECTS + 1], ..request() }.encode().unwrap_err();
     }
 
-    /// A response message like Samba's, built from the request contexts.
     pub(crate) fn response(dialect: u16, contexts: &[NegContext]) -> Vec<u8> {
         let mut w = Writer::new();
         let ctx_offset = 64 + 64 + 8;

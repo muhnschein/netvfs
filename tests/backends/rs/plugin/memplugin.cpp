@@ -1,6 +1,4 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-// Root object of libnetvfs-mem.so: provider "mem" of libnetvfs-rs.so through
-// the shim, with its key tools, as a Rust protocol's plugin will be.
 #include "rsbackend.h"
 #include "rskeytools.h"
 
@@ -19,6 +17,6 @@ public:
     Result create(Backend **out) override { return Rs::createBackend(provider(), out); }
 };
 
-} // namespace NetVfs
+}
 
 #include "memplugin.moc"

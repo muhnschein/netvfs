@@ -40,7 +40,7 @@ QVariantMap smbParams(const QString &profile = QString())
     params.insert(QStringLiteral("options"), options);
     return params;
 }
-} // namespace
+}
 
 class TestQmlHelpers : public QObject
 {
@@ -54,7 +54,6 @@ private:
 private slots:
     void initTestCase()
     {
-        // isServiceInstalled() opens an accounts database: a private one.
         QVERIFY(accountsDir.isValid());
         qputenv("ACCOUNTS", accountsDir.path().toLocal8Bit());
         qputenv("AG_SERVICES", accountsDir.path().toLocal8Bit());
@@ -194,7 +193,6 @@ private slots:
         QTest::newRow("trimmed") << "smb" << "  a/b  " << "" << "a/b";
         QTest::newRow("dotdot") << "sftp" << "a/../b" << dots << "";
         QTest::newRow("dot") << "smb" << "./b" << dots << "";
-        // applies to SMB only.
         QTest::newRow("colon sftp") << "sftp" << "a:b" << "" << "a:b";
         QTest::newRow("colon smb") << "smb" << "x/a:b"
                                    << "\"a:b\" cannot be used as a folder name on an SMB server: names must not "
@@ -298,7 +296,7 @@ private slots:
         expected.insert(QStringLiteral("netvfs/sftp/auth_mode"), QStringLiteral("publickey"));
         expected.insert(QStringLiteral("netvfs/sftp/host_key"), QStringLiteral("ssh-ed25519 AAAA"));
         expected.insert(QStringLiteral("netvfs/sftp/public_key"), QStringLiteral("ssh-ed25519 BBBB sailfish-backup"));
-        QCOMPARE(global, expected);   // no host_key_seen, no default_credentials_username yet
+        QCOMPARE(global, expected);
         const QVariantMap values = settings.value(QStringLiteral("services")).toMap();
         QCOMPARE(values.size(), 2);
         QCOMPARE(values.value(QStringLiteral("sftp-backup")).toMap().value(QStringLiteral("backups_path")).toString(),
@@ -309,7 +307,6 @@ private slots:
                  QStringList({ QStringLiteral("sftp-backup"), QStringLiteral("sftp-files") }));
         QCOMPARE(settings.value(QStringLiteral("signInService")).toString(), QStringLiteral("sftp-backup"));
 
-        // Files only: no backup service is touched.
         services.insert(QStringLiteral("backup"), false);
         const QVariantMap filesOnly = helpers.creationSettings(sftpParams(), services);
         QCOMPARE(filesOnly.value(QStringLiteral("enable")).toStringList(), QStringList({ QStringLiteral("sftp-files") }));
@@ -407,7 +404,6 @@ private slots:
         QCOMPARE(identity.value(QStringLiteral("algorithm")).toString(), QStringLiteral("ssh-ed25519"));
         QCOMPARE(identity.value(QStringLiteral("fingerprint")).toString(), NetVfsUi::sha256Fingerprint(blob));
         QCOMPARE(identity.value(QStringLiteral("pin")).toString(), pin);
-        // accepting stores the pin as host_key, nothing else.
         QCOMPARE(identity.value(QStringLiteral("pinOptions")).toMap(), QVariantMap({ { QStringLiteral("host_key"), pin } }));
         QCOMPARE(identity.size(), 5);
         const QString tlsPin = QStringLiteral("tls-spki-sha256 ") + QString::fromLatin1(blob.toBase64());
@@ -519,11 +515,9 @@ private slots:
         QCOMPARE(NetVfsUi::userErrorText(Error::AuthFailed, Activity::KeyFile), QStringLiteral("The passphrase is not correct."));
         QCOMPARE(NetVfsUi::userErrorText(Error::NotFound, Activity::KeyFile),
                  QStringLiteral("The file could not be read as a private key."));
-        // Activities only change the errors they are about.
         QCOMPARE(NetVfsUi::userErrorText(Error::Timeout, Activity::StoredSecret), NetVfsUi::userErrorText(Error::Timeout));
         QCOMPARE(NetVfsUi::userErrorText(Error::NotFound, Activity::InstallKey), NetVfsUi::userErrorText(Error::NotFound));
         QCOMPARE(NetVfsUi::userErrorText(Error::None, Activity::KeyFile), QString());
-        // a Files verify writes nothing, so no backup wording.
         QCOMPARE(NetVfsUi::userErrorText(Error::PermissionDenied, Activity::Browse),
                  QStringLiteral("The server does not allow reading the start folder."));
         QCOMPARE(NetVfsUi::userErrorText(Error::NotFound, Activity::Browse),

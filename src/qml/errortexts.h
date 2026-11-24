@@ -5,9 +5,6 @@
 #include "error.h"
 
 namespace NetVfsUi {
-
-// What the user was doing when the error happened; selects a specific message where the generic one
-// would mislead.
 enum class Activity {
     Connect,
     StoredSecret,

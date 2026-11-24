@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! Key file import never panics; imported key is Ed25519 or ECDSA with well-formed public line and fingerprint; describing never decrypts; secrets round-trip.
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;

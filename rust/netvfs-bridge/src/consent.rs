@@ -16,9 +16,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 use tokio::io::unix::AsyncFd;
 
-/// The `[Consent]` group: `<id>=<word>`, the app has decided; the word is for accounts without their own entry.
 const GROUP: &str = "Consent";
-/// The `[Access]` group: `<id>\<accountId>=<level>`, one account's choice.
 const ACCESS_GROUP: &str = "Access";
 /// How long a write waits for another writer's lock. `QSettings` waits forever; the bridge gives up and fails the write.
 pub const LOCK_TIMEOUT: Duration = Duration::from_secs(10);
@@ -235,7 +233,6 @@ impl ConsentStore {
     }
 }
 
-/// Watcher reacts to these in the folder. A removed folder needs no flag: its watch ends with `IN_IGNORED`.
 const FOLDER_EVENTS: u32 = libc::IN_CLOSE_WRITE
     | libc::IN_MOVED_TO
     | libc::IN_MOVED_FROM
@@ -391,7 +388,6 @@ mod tests {
         assert_eq!(store.consent("Bad"), Consent::unknown());
     }
 
-    /// Unknown words, account ids that are not plain positive numbers and other apps' entries are skipped.
     #[test]
     fn odd_entries() {
         let dir = TempDir::new();
@@ -411,7 +407,6 @@ mod tests {
         assert_eq!(store.consent("lautta"), Consent::all(Choice::Deny));
     }
 
-    /// A file QSettings wrote (other groups, escapes, lists, types): edits keep every other line; Qt reads the result like its own edit of the same file (generate.sh checks).
     #[test]
     fn keeps_other_groups_and_qt_format() {
         let dir = TempDir::new();

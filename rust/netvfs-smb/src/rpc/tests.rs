@@ -7,7 +7,6 @@ use crate::fake::{self, Peer, Req, created_body, pair};
 const FID: FileId = [0x33; 16];
 const IPC: Tree = Tree { id: 9, encrypt: false, share_type: 2 };
 
-/// An NDR string as a server writes it.
 fn string(w: &mut Writer, s: &str) {
     let mut units: Vec<u16> = s.encode_utf16().collect();
     units.push(0);
@@ -21,7 +20,6 @@ fn string(w: &mut Writer, s: &str) {
     }
 }
 
-/// A NetrShareEnum level 1 response stub.
 pub(crate) fn enum_stub(entries: &[(Option<&str>, u32, Option<&str>)], werror: u32) -> Vec<u8> {
     let mut w = Writer::new();
     let n = u32::try_from(entries.len()).unwrap();
@@ -49,7 +47,6 @@ fn pdu(ptype: u8, flags: u8, call_id: u32, body: &[u8]) -> Vec<u8> {
     w.into_vec()
 }
 
-/// Response fragments of `stub`, `per` stub bytes each.
 pub(crate) fn fragments(stub: &[u8], per: usize) -> Vec<u8> {
     let parts: Vec<&[u8]> = stub.chunks(per).collect();
     let last = parts.len().saturating_sub(1);
@@ -72,8 +69,8 @@ pub(crate) fn fragments(stub: &[u8], per: usize) -> Vec<u8> {
 fn bind_ack(result: u16, transfer: &Syntax) -> Vec<u8> {
     let mut w = Writer::new();
     w.u16(4280).u16(4280).u32(0x1234);
-    w.u16(13).bytes(b"\\PIPE\\srvsvc\0"); // secondary address; 16 + 8 + 2 + 13 = 39
-    w.u8(0); // to 40
+    w.u16(13).bytes(b"\\PIPE\\srvsvc\0");
+    w.u8(0);
     w.u8(1).u8(0).u16(0).u16(result).u16(0).bytes(&transfer.0).u32(transfer.1);
     pdu(PTYPE_BIND_ACK, PFC_FIRST_FRAG | PFC_LAST_FRAG, BIND_CALL, &w.into_vec())
 }
@@ -227,14 +224,14 @@ fn malformed_share_lists_are_refused() {
     let too_many = u32::try_from(MAX_SHARES).unwrap() + 1;
     let long = u32::try_from(MAX_STRING_UNITS).unwrap() + 1;
     let cases = [
-        patch(0, 2),         // level
-        patch(4, 2),         // union arm
-        patch(12, too_many), // EntriesRead
-        patch(20, 2),        // max_count differs
-        patch(12, 2),        // EntriesRead differs
-        patch(36, long),     // string max_count
-        patch(40, 1),        // string offset
-        patch(44, 6),        // actual_count above max_count
+        patch(0, 2),
+        patch(4, 2),
+        patch(12, too_many),
+        patch(20, 2),
+        patch(12, 2),
+        patch(36, long),
+        patch(40, 1),
+        patch(44, 6),
     ];
     for (i, bad) in cases.iter().enumerate() {
         assert!(matches!(decode_share_enum(bad), Err(Error::Protocol(_))), "case {i}");
@@ -319,8 +316,6 @@ fn bad_fragments_are_refused() {
 
 #[test]
 fn fragments_with_little_stub_are_capped_in_bytes() {
-    // 144-byte fragments: MAX_READ_TOTAL bytes are 8192 of them, which
-    // carry less than MAX_STUB.
     let fragment = |first: bool| {
         let mut body = Writer::new();
         body.u32(0).u16(0).u8(0).u8(0).bytes(&[0; 120]);
@@ -349,7 +344,6 @@ fn read_body(data: &[u8]) -> Vec<u8> {
     w.into_vec()
 }
 
-/// The input of an IOCTL request.
 fn ioctl_input(req: &Req) -> Vec<u8> {
     assert_eq!(req.command(), Command::Ioctl);
     let b = req.body();
@@ -366,8 +360,6 @@ async fn started() -> (Conn, Peer) {
     (conn, peer)
 }
 
-/// Serves CREATE, bind and the request; the reply is split between the
-/// IOCTL (BUFFER_OVERFLOW) and READs of `per_read` bytes.
 pub(crate) async fn serve(peer: &mut Peer, reply: &[u8], per_read: usize) {
     let create = peer.recv_one().await;
     assert_eq!(create.command(), Command::Create);

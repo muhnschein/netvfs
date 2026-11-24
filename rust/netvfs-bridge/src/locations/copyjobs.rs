@@ -123,8 +123,6 @@ impl<B: Backend> CopyJobs<B> {
         let Some(index) = self.jobs.iter().position(|j| j.id == id) else { return false };
         let mut job = self.jobs.remove(index);
         if let Some(thread) = job.thread.take() {
-            // The thread has sent its last event; a panic aborted the
-            // process already (panic = "abort").
             drop(thread.join());
         }
         let [source_host, destination_host] = &job.hosts;

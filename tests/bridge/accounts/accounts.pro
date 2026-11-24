@@ -1,5 +1,4 @@
 # SPDX-License-Identifier: LGPL-2.1-or-later
-# Built netvfs-accounts against the C++ reference.
 include(../../test.pri)
 TARGET = tst_bridgeaccounts
 QT += dbus

@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! The bridge end to end: the core with the socket front, in-process ([`Fixture`]), against the real `libnetvfs-bridge-ffi.so` and the fake backend, through the protocol crate's client. Without the C ABI (variables of [`testing::VARIABLES`]) every test says it is skipped and passes.
 #![allow(
     missing_docs,
     clippy::unwrap_used,
@@ -82,7 +81,6 @@ fn main() -> ExitCode {
     testing::run_main("netvfs-bridge-server-test", TESTS)
 }
 
-/// What [`error_name`] gives for a failure with `e`.
 #[allow(clippy::unnecessary_wraps, reason = "compared with error_name")]
 fn name(e: ErrorName) -> Option<String> {
     Some(e.dbus_name().to_owned())
@@ -125,7 +123,6 @@ fn hello_and_locations(h: &Harness) {
 const ACCESS_CONF: &str =
     "[OpenAccessRequest]\nService=a.b\nPath=/c\nInterface=a.b\nMethod=showPage\nArguments=s:system/access\n";
 
-/// Decided: account `id` at `choice`, new accounts `new_accounts`.
 fn choices(new_accounts: NewAccounts, accounts: &[(i32, Choice)]) -> Consent {
     Consent { new_accounts: Some(new_accounts), accounts: accounts.iter().copied().collect() }
 }
@@ -134,14 +131,12 @@ fn at(level: Level) -> Consent {
     Consent::all(Choice::Allow(level))
 }
 
-/// `access` of `loc` in `ListLocations`; `None` when not listed.
 async fn access_of(c: &Connection, loc: &str) -> Option<String> {
     let locations = c.proxy().list_locations().await.unwrap();
     let info = &locations.iter().find(|l| l.id == loc)?.info;
     Some(String::try_from(info.get("access").expect("an access").try_clone().unwrap()).unwrap())
 }
 
-/// The error name and detail of a failed call.
 fn refusal<T: std::fmt::Debug>(result: Result<T, zbus::Error>) -> (Option<String>, String) {
     let name = error_name(&result);
     match result.map_err(netvfs_bridge_proto::BridgeError::from) {
@@ -232,7 +227,6 @@ fn new_account_asks_again(h: &Harness) {
         assert!(wait_for(WAIT, || !f.prompt.state().visible).await);
     });
 }
-/// A download of 4 MiB at 50 ms a chunk into a pipe nobody reads.
 async fn slow_download(f: &Fixture, c: &Connection) -> (u32, std::io::PipeReader) {
     f.harness.fake.add_file(b"/big", &vec![b'x'; 4 << 20]);
     f.harness.fake.set_chunk_delay_ms(50);
@@ -287,7 +281,6 @@ fn narrowing_closes_widening_keeps(h: &Harness) {
     });
 }
 
-/// Uploads `content` to `path` with `opts` and waits: the error name, "" on success.
 async fn put(c: &Connection, signals: &mut SignalStream, path: &[u8], content: &[u8], opts: &Opts) -> String {
     let dir = TempDir::new();
     let local = temp_file(&dir, "put", content);
@@ -394,7 +387,6 @@ fn read_add_level(h: &Harness) {
         );
         assert_eq!(refusal(p.remove_tree(ACCOUNT_LOC, b"/docs/new").await), refused);
         assert_eq!(refusal(p.make_hardlink(ACCOUNT_LOC, b"/docs/a.txt", b"/docs/h").await), refused);
-        // A cut upload stays the app's: resumed, then cleaned up.
         fake.fail_op("upload", ErrorName::ConnectionLost);
         assert_eq!(put(&c, &mut signals, b"/docs/.cut.part", b"abc", &no_opts()).await, "ConnectionLost");
         let added = std::fs::read_to_string(f.dir.join("added")).unwrap();
@@ -525,7 +517,6 @@ fn list_streams_batches(h: &Harness) {
     });
 }
 
-/// What one `List` brought, in arrival order.
 #[derive(Debug, PartialEq, Eq)]
 enum Arrived {
     Reply(u32),
@@ -533,7 +524,6 @@ enum Arrived {
     Done(u32),
 }
 
-/// The next message on `stream` that belongs to the `List` call `serial` or to a listing: its reply, a `ListBatch`, a `ListDone`.
 async fn next_arrival(stream: &mut zbus::MessageStream, serial: std::num::NonZeroU32) -> Arrived {
     use futures_lite::StreamExt as _;
     loop {
@@ -563,7 +553,6 @@ async fn next_arrival(stream: &mut zbus::MessageStream, serial: std::num::NonZer
     }
 }
 
-// One writer per session keeps the reply to List ahead of its ListBatch signals and those ahead of ListDone, every time.
 fn zbus_send_ordering(h: &Harness) {
     let f = Fixture::new(h, Consent::all(FULL));
     for i in 0..3 {
@@ -654,7 +643,6 @@ fn idle_exit(h: &Harness) {
     });
 }
 
-/// The next `JobFinished` of `job`: its error name, message and extra.
 async fn finished(
     signals: &mut SignalStream,
     job: u32,
@@ -1105,7 +1093,6 @@ fn account_identity_changed_sets_attention(h: &Harness) {
     });
 }
 
-/// Account sign-in prompts stay inside the bridge: one beyond the stored password fails sign-in.
 fn account_keyboard_interactive_is_not_relayed(h: &Harness) {
     let f = Fixture::new(h, Consent::all(FULL));
     h.fake.set_otp(b"123456");
@@ -1297,7 +1284,6 @@ fn locations_changed(h: &Harness) {
     });
 }
 
-/// `state` and `stateError` of `loc` in `ListLocations`.
 async fn state_of(c: &Connection, loc: &str) -> (String, Option<String>) {
     let locations = c.proxy().list_locations().await.unwrap();
     let info = &locations.iter().find(|l| l.id == loc).expect("listed").info;
@@ -1321,10 +1307,8 @@ fn is_locations_changed(s: &Signal) -> bool {
     matches!(s, Signal::LocationsChanged)
 }
 
-/// A while in which a pending `LocationsChanged` (250 ms after a change) would come.
 const QUIET: Duration = Duration::from_millis(750);
 
-/// The state of the consumer's pool for a location, and `LocationsChanged` when it changes, only then.
 fn connection_states(h: &Harness) {
     let f = Fixture::new(h, Consent::all(FULL));
     block_on(async {
@@ -1377,7 +1361,6 @@ fn connection_states(h: &Harness) {
     });
 }
 
-/// Connections closed when idle leave the location disconnected, and the consumer is told.
 fn connection_states_of_idle_connections(h: &Harness) {
     let setup = Setup { connection_idle: Duration::from_millis(100), ..Setup::default() };
     let f = Fixture::start(h, setup);
@@ -1401,7 +1384,6 @@ fn connection_states_of_idle_connections(h: &Harness) {
     });
 }
 
-/// The discoveries alive on the Qt thread.
 fn live_discoveries(h: &Harness) -> usize {
     let (tx, rx) = std::sync::mpsc::channel();
     assert!(h.ffi.post(move || {

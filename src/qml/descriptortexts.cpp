@@ -1,6 +1,4 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-// Text ids that provider descriptors may use. The //% texts put them into the translation catalogue
-// (lupdate); ProviderDescriptors refuses any other id, so every label is translatable.
 #include "providerdescriptors.h"
 
 #include <QtCore/QtGlobal>
@@ -78,7 +76,6 @@ constexpr std::array<const char *, 33> TextIds = { {
     //% "Encrypted and signed connections are used by default. Change this only if the server cannot do better."
     QT_TRID_NOOP("settings-accounts-netvfs-la-security_profile_description"),
 } };
-// A leftover size would add empty ids after the last one.
 static_assert(TextIds.back() != nullptr, "one entry per text id");
 }
 

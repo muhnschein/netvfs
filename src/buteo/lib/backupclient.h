@@ -20,8 +20,6 @@ namespace NetVfs {
 
 class BackupService;
 
-// Buteo client plugin shared by all providers and operations: the Buteo-facing shell. Each
-// startSync() is carried out by a BackupRun.
 class BackupClient : public Buteo::ClientPlugin
 {
     Q_OBJECT
@@ -31,8 +29,6 @@ public:
     using Operation = BackupOperation;
     using SessionFactory = NetVfs::SessionFactory;
 
-    // `sessionFactory`: how runs open their account session; empty means AccountSession::open().
-    // Tests pass their own.
     BackupClient(const QString &provider, Operation operation, const QString &pluginName,
                  const Buteo::SyncProfile &profile, Buteo::PluginCbInterface *cbInterface,
                  const SessionFactory &sessionFactory = SessionFactory());
@@ -51,7 +47,6 @@ public:
     Buteo::SyncResults getSyncResults() const override;
 
     static Buteo::SyncResults::MinorCode minorCodeFor(Error error);
-    // What abortSync() reports for the status Buteo passes in.
     static Buteo::SyncResults::MinorCode minorCodeForAbort(Sync::SyncStatus status);
 
 public Q_SLOTS:

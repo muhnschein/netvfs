@@ -189,7 +189,6 @@ async fn system_services(ffi: Ffi, helper: PathBuf, link: CoreLink) -> Services 
     Services {
         accounts: Rc::new(HelperDirectory::new(helper)),
         prompt: Box::new(NotificationPrompt::start(bus.clone(), move |e| {
-            // False once the core has stopped: nobody asks any more.
             let _told = answers.prompt(e);
         })),
         nearby: Box::new(FfiNearby::new(ffi, link)),
@@ -358,7 +357,6 @@ impl Session {
 
     fn signal(&self, signal: &OutSignal) {
         if !self.canceled {
-            // False only when the session is closed: nothing to do.
             let _sent = self.outbox.signal(signal);
         }
     }
@@ -372,7 +370,6 @@ impl Launcher for DynLauncher {
     }
 }
 
-/// What a finished call makes of the ownership of `path` in `loc` ([`access::after`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Effect {
     loc: String,
@@ -428,7 +425,6 @@ pub(crate) async fn run(config: Config, deps: Deps) -> ExitCode {
     let (tx, mut rx) = mpsc::unbounded_channel();
     let server_tx = tx.clone();
     let sink = server::EventSink::new(move |event| {
-        // A closed channel: the core has stopped.
         drop(server_tx.send(Event::Server(event)));
     });
     let listener = Listener::new(socket, PeerChecker::new(&config.consumer.executable), sink);
@@ -479,7 +475,6 @@ impl Core {
         let consent = consent_store.consent(&config.consumer.id);
         let state_tx = tx.clone();
         let state_signal = StateSignal::new(move || {
-            // A closed channel: the core has stopped.
             drop(state_tx.send(Event::ConnectionStates));
         });
         let pools = PoolSet::new(Arc::clone(&connector), POOL_PER_HOST).with_signal(state_signal.clone());
@@ -670,7 +665,6 @@ impl Core {
         for op in session.ops.values() {
             op.cancel.store(true, Ordering::Release);
         }
-        // Their replies go nowhere: the session is closed.
         let ops = std::mem::take(&mut session.ops);
         session.public.clear();
         let handles = std::mem::take(&mut session.handles);
@@ -705,7 +699,6 @@ impl Core {
     }
 
     fn report_states(&mut self) {
-        // Whether a change woke the core already does not matter: `ListLocations` may have asked for the look.
         let _woken = self.state_signal.take();
         let states = self.connection_states();
         if self.states.check(states) && self.consent.is_decided() {
@@ -750,7 +743,6 @@ impl Core {
                 let accounts = Rc::clone(&self.accounts);
                 tokio::task::spawn_local(async move {
                     let access = accounts.files(account_id).await.map(Into::into);
-                    // The worker may have stopped waiting.
                     drop(reply.send(access));
                 });
             }
@@ -769,7 +761,6 @@ impl Core {
                     if let Some(effect) = effect {
                         self.on_own(&effect, result.as_ref().err().map(|s| s.name));
                     }
-                    // copy_across reports its own Canceled.
                     self.finish_job(sid, job, JobOutcome { result, extra: HashMap::new() });
                 }
             }
@@ -792,7 +783,6 @@ impl Core {
         self.apply_access();
     }
 
-    /// The level of every account, `None`: not allowed or undecided.
     fn levels(&self) -> BTreeMap<i32, Option<Level>> {
         self.all_accounts.iter().map(|a| (a.account_id, self.level(a.account_id))).collect()
     }
@@ -804,7 +794,6 @@ impl Core {
         }
     }
 
-    /// Hands the book the accounts the consumer may use, at their levels.
     fn apply_access(&mut self) {
         let specs = self
             .all_accounts
@@ -816,7 +805,6 @@ impl Core {
         self.states.announced(states);
     }
 
-    /// Whether the user still has to choose: never decided, or an account waits for a choice.
     fn pending(&self) -> bool {
         !self.consent.is_decided()
             || self.all_accounts.iter().any(|a| self.consent.grant(a.account_id) == Grant::Undecided)
@@ -834,7 +822,6 @@ impl Core {
         }
     }
 
-    /// An account the consumer may not use (not allowed or undecided).
     fn is_hidden_account(&self, loc: &str) -> bool {
         self.all_accounts
             .iter()
@@ -848,7 +835,6 @@ impl Core {
         self.own.set(&effect.loc, &effect.path, after, now);
     }
 
-    /// Whether `path` in `loc` is the consumer's own.
     fn own_state(&self, loc: &str, path: &[u8]) -> Own {
         self.own.own(loc, path, own::now_ms())
     }
@@ -864,7 +850,6 @@ impl Core {
         self.run_request_then(sid, reply, (loc, lane), body, None);
     }
 
-    /// [`Self::run_request`], then `effect` with the result.
     fn run_request_then(
         &mut self,
         sid: SessionId,

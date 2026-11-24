@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! Listing, metadata, namespace operations and read handles.
 
 use super::{Core, Effect, Event, HandleRef, quota};
 use crate::access;
@@ -87,7 +86,6 @@ impl Core {
         session.signal(&OutSignal::ListDone { request, result });
     }
 
-    /// `Stat`; `folders_only`: anything but a folder is refused at that level.
     pub(super) fn on_stat(
         &mut self,
         sid: SessionId,
@@ -162,7 +160,6 @@ impl Core {
         self.run_request(sid, reply, loc.as_str(), lane, move |conn| body(conn).map(|()| Reply::Empty));
     }
 
-    /// [`Self::run_empty`], then `effect` with the result.
     pub(super) fn run_empty_then(
         &mut self,
         sid: SessionId,
@@ -317,7 +314,7 @@ impl Core {
             Ok(())
         });
         self.book.submit_to(&h.loc, h.worker, TaskContext::detached(), work);
-        reply.ok(&Reply::Empty); // a hint: answered at once
+        reply.ok(&Reply::Empty);
     }
 
     pub(super) fn on_close(&mut self, sid: SessionId, reply: ReplyTo, id: u32) {

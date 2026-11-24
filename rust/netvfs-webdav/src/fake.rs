@@ -1,6 +1,4 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! A WebDAV server in memory over TLS 1.3, for tests: enough of RFC 4918 for the backend, plus knobs for the
-//! odd servers (no ranges, no keep-alive, canned answers).
 #![allow(
     clippy::arithmetic_side_effects,
     clippy::format_push_string,
@@ -32,7 +30,6 @@ const LEAF_KEY: &[u8] = include_bytes!("../../netvfs-tls/testdata/leaf.key.der")
 pub const SELF: &[u8] = include_bytes!("../../netvfs-tls/testdata/self.der");
 const SELF_KEY: &[u8] = include_bytes!("../../netvfs-tls/testdata/self.key.der");
 
-/// Last modified of every node: Sun, 06 Nov 1994 08:49:37 GMT.
 pub const MTIME_MS: i64 = 784_111_777_000;
 const MTIME: &str = "Sun, 06 Nov 1994 08:49:37 GMT";
 
@@ -42,7 +39,6 @@ pub enum Node {
     File(Vec<u8>),
 }
 
-/// One request as the server saw it.
 #[derive(Debug, Clone)]
 pub struct Seen {
     pub method: Method,
@@ -52,25 +48,15 @@ pub struct Seen {
 
 #[derive(Debug, Default)]
 pub struct State {
-    /// Decoded paths without trailing `/`; "" is the root.
     pub tree: BTreeMap<Vec<u8>, Node>,
     pub seen: Vec<Seen>,
-    /// `Authorization` every request must carry, if set.
     pub auth: Option<String>,
-    /// Ignore `Range`.
     pub no_ranges: bool,
-    /// Close the connection after each answer.
     pub close: bool,
-    /// Canned answers by method, used once each, in order.
     pub canned: Vec<(Method, StatusCode, Vec<(&'static str, &'static str)>, &'static str)>,
-    /// Quota props on PROPFIND, as text.
     pub quota: Option<(&'static str, &'static str)>,
-    /// Connections accepted.
     pub connections: usize,
-    /// A connection that served this many requests drops the next one unanswered, as a server closing an idle
-    /// connection just when a request arrives.
     pub drop_after: Option<usize>,
-    /// Every request on this path (no trailing `/`) is answered 403.
     pub forbidden: Option<Vec<u8>>,
 }
 
@@ -80,12 +66,9 @@ pub struct Fake {
     pub addr: SocketAddr,
 }
 
-/// The certificate the server presents.
 #[derive(Debug, Clone, Copy)]
 pub enum Cert {
-    /// Signed by the test CA for localhost and 127.0.0.1.
     Trusted,
-    /// Self-signed.
     SelfSigned,
 }
 
@@ -107,13 +90,11 @@ fn config(cert: Cert) -> Arc<ServerConfig> {
     Arc::new(config)
 }
 
-/// TLS for a hand-scripted server.
 pub fn acceptor(cert: Cert) -> TlsAcceptor {
     TlsAcceptor::from(config(cert))
 }
 
 impl Fake {
-    /// A server with an empty root folder.
     pub async fn start(cert: Cert) -> Self {
         let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
         let addr = listener.local_addr().unwrap();
@@ -224,7 +205,6 @@ fn byte_range(headers: &HeaderMap, len: usize) -> Option<Result<(usize, usize), 
 
 async fn handle(state: &Mutex<State>, req: Request<Incoming>) -> Answer {
     let (head, body) = req.into_parts();
-    // A body cut short (the client gave up) changes nothing.
     let Ok(body) = body.collect().await.map(http_body_util::Collected::to_bytes) else {
         return answer(StatusCode::BAD_REQUEST, "");
     };
@@ -346,7 +326,6 @@ fn get(s: &State, k: &[u8], headers: &HeaderMap) -> Answer {
     }
 }
 
-/// MOVE (`remove` the source) or COPY.
 fn transfer(s: &mut State, k: &[u8], remove: bool, headers: &HeaderMap) -> Answer {
     let Some(dest) = headers.get("destination").and_then(|d| href_path(d.as_bytes())) else {
         return answer(StatusCode::BAD_REQUEST, "");

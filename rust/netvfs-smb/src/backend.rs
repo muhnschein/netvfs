@@ -37,16 +37,12 @@ pub const MAX_SHARE_TREES: usize = 4;
 pub const MAX_NAME_BYTES: u64 = 255;
 /// The share of server mode's main tree.
 pub const IPC_SHARE: &str = "IPC$";
-/// Default connect timeout.
 const DEFAULT_CONNECT_TIMEOUT_MS: u64 = 15_000;
-/// Default request timeout.
 const DEFAULT_REQUEST_TIMEOUT_MS: u64 = 60_000;
-/// Times SMB stores, in ms: after 1970-01-01T00:00:01 and before the end of 30828 (FILETIME).
 const TIME_RANGE_MS: std::ops::Range<i64> = 1000..910_692_730_085_000;
 /// Reason for times outside that range.
 pub const TIMES_UNSUPPORTED: &str = "SMB stores times between 1970 and 30828 only";
 
-/// What the root of server mode allows.
 fn root_denied(what: &str) -> Status {
     Status::permission_denied(format!("{what}: the server root holds only the shares"))
 }
@@ -59,7 +55,6 @@ fn established(e: Error, context: &str) -> Status {
     e.status(context, Phase::Established)
 }
 
-/// A refused TREE_CONNECT (share of server mode) is reported like a refused sign-in: statuses and policies with the setup texts, connection failures as they are.
 fn tree_refused(e: Error) -> Status {
     let phase =
         if matches!(e, Error::Status(_) | Error::Policy(_)) { Phase::Setup } else { Phase::Established };
@@ -76,7 +71,6 @@ fn timeout_of(ms: i32, default_ms: u64) -> Duration {
     Duration::from_millis(u64::try_from(ms).ok().filter(|ms| *ms > 0).unwrap_or(default_ms))
 }
 
-/// The TCP port of `port` (0 or less: the default).
 fn port_of(port: i32) -> std::result::Result<u16, Status> {
     if port <= 0 {
         return Ok(transport::DEFAULT_PORT);
@@ -89,7 +83,6 @@ fn port_of(port: i32) -> std::result::Result<u16, Status> {
     })
 }
 
-/// `ConnectionParams::flag(key, fallback)`.
 fn flag_or(params: &Params, key: &str, fallback: bool) -> bool {
     if params.options.contains_key(key) { params.flag(key) } else { fallback }
 }
@@ -119,7 +112,6 @@ pub fn merge_share_names(list: &mut Vec<String>, more: impl IntoIterator<Item = 
     }
 }
 
-/// `work`, or `Canceled` as soon as `cancel` trips.
 async fn or_canceled<T>(cancel: &CancelToken, work: impl Future<Output = Result<T>>) -> Result<T> {
     let mut work = pin!(work);
     let mut canceled = pin!(cancel.canceled());
@@ -135,20 +127,16 @@ async fn or_canceled<T>(cancel: &CancelToken, work: impl Future<Output = Result<
     .await
 }
 
-/// A connected share of server mode.
 #[derive(Debug)]
 struct ShareTree {
     name: String,
-    /// One reference here, one per open file.
     tree: Arc<Tree>,
     last_use: u64,
 }
 
-/// The signed-in state.
 #[derive(Debug)]
 struct SignedIn {
     session: Session,
-    /// The share, or IPC$ in server mode.
     main: Arc<Tree>,
     shares: Vec<ShareTree>,
     clock: u64,
@@ -162,8 +150,6 @@ impl SignedIn {
     }
 }
 
-/// Where a path is: its share (`None`: the server root), the path in the
-/// share and the entry's name.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Place {
     share: Option<String>,
@@ -175,7 +161,6 @@ struct Place {
 #[derive(Debug, Default)]
 pub struct Smb {
     params: Params,
-    /// The address that answered `connect`.
     address: Option<SocketAddr>,
     signed: Option<SignedIn>,
 }
@@ -187,7 +172,6 @@ impl Smb {
         Self::default()
     }
 
-    /// Option `share`: share mode in it; server mode without.
     fn share_option(&self) -> Option<String> {
         self.params.option("share").map(|s| s.trim().to_owned()).filter(|s| !s.is_empty())
     }
@@ -200,7 +184,6 @@ impl Smb {
         self.params.host.trim().to_owned()
     }
 
-    /// The share, the path in it and the name; invalid names are refused first.
     fn split(&self, path: &[u8]) -> std::result::Result<Place, Status> {
         let parts = components(path)?;
         let name = parts.last().map(|p| p.to_vec()).unwrap_or_default();
@@ -223,19 +206,16 @@ impl Smb {
         Ok(s)
     }
 
-    /// [`Self::split`] and the signed-in check.
     fn place(&self, path: &[u8]) -> std::result::Result<Place, Status> {
         let place = self.split(path)?;
         self.signed_in()?;
         Ok(place)
     }
 
-    /// A share itself, or the root, in server mode.
     fn share_level(&self, path: &[u8]) -> bool {
         self.server_mode() && self.split(path).is_ok_and(|p| p.path.is_empty())
     }
 
-    /// The tree of `place` (not the root): the main one, or in server mode that of its share, connected when needed.
     async fn tree(&mut self, place: &Place, cancel: &CancelToken) -> std::result::Result<Arc<Tree>, Status> {
         let host = self.host();
         let server_mode = self.server_mode();
@@ -276,7 +256,6 @@ impl Smb {
         Ok(tree)
     }
 
-    /// The shares the user saved, then what enumeration finds.
     async fn list_root(
         &self,
         options: ListOptions,
@@ -311,12 +290,10 @@ impl Smb {
         Ok(())
     }
 
-    /// On by default in server mode.
     fn enumerates(&self) -> bool {
         self.server_mode() && flag_or(&self.params, "share_enumeration", true)
     }
 
-    /// A file for reading: its handle and size.
     async fn open_file(
         &mut self,
         place: &Place,
@@ -351,7 +328,6 @@ impl Smb {
         options: &WriteOptions,
         cancel: &CancelToken,
     ) -> std::result::Result<SmbWrite, Status> {
-        // No files beside the shares ("/name" is a share, not a file).
         if self.share_level(path) {
             return Err(root_denied("open"));
         }
@@ -411,7 +387,6 @@ impl Smb {
     }
 }
 
-/// CREATE of one file, its handle owned (closed should the call go).
 async fn create_file(conn: &Conn, tree: &Tree, create: &Create<'_>, cancel: &CancelToken) -> Result<Created> {
     let resp =
         conn.call(tree.target(), Element::new(Command::Create, create.encode()?).owning(), cancel).await?;
@@ -441,7 +416,6 @@ impl Backend for Smb {
         let port = port_of(params.port)?;
         let timeout = timeout_of(params.connect_timeout_ms, DEFAULT_CONNECT_TIMEOUT_MS);
         let host = self.host();
-        // Resolve and check that the port answers. Session starts in authenticate(). SMB has no server identity: the password-derived session key signs the server's answers instead.
         let addr = or_canceled(cancel, async {
             let addrs = transport::resolve(&host, port).await?;
             let (stream, addr) = transport::connect(&addrs, timeout).await?;
@@ -463,7 +437,6 @@ impl Backend for Smb {
         let Some(addr) = self.address.filter(|_| self.signed.is_none()) else {
             return Err(Status::internal("authenticate() needs a successful connect()"));
         };
-        // Profile given is enforced; a failure is never retried with a weaker one.
         let profile = Profile::parse(self.params.option("security_profile").as_deref())?;
         let share = self.share_option();
         if share.as_deref().is_some_and(|s| !valid_share_name(s)) {
@@ -535,7 +508,6 @@ impl Backend for Smb {
             Capability::SetModified,
             Capability::SetModifiedOnUpload,
             Capability::SpaceInfo,
-            // SMB clients treat every share as case-insensitive (Windows; Samba default "case sensitive = auto" without POSIX extensions).
             Capability::CaseInsensitive,
             Capability::WindowsNames,
         ]);
@@ -566,7 +538,6 @@ impl Backend for Smb {
     ) -> std::result::Result<Entry, Status> {
         let place = self.place(path)?;
         let Some(share) = place.share.clone() else {
-            // The server root is a folder of shares.
             return Ok(Entry { kind: EntryType::Directory, ..Entry::default() });
         };
         let tree = self.tree(&place, cancel).await?;
@@ -663,7 +634,6 @@ impl Backend for Smb {
         mode: RenameMode,
         cancel: &CancelToken,
     ) -> std::result::Result<(), Status> {
-        // The root and the shares themselves are refused before any share is connected.
         if self.share_level(from) || self.share_level(to) {
             return Err(share_root_denied("rename"));
         }
@@ -678,7 +648,6 @@ impl Backend for Smb {
             return Err(Status::unsupported("rename: SMB cannot move between shares"));
         }
         let s = self.signed_in()?;
-        // Without Replace the server refuses an existing target (NativeNoReplace); with it ReplaceIfExists replaces it in the same request (AtomicReplace).
         let replace = mode == RenameMode::Replace;
         fs::rename(s.conn(), source_tree.target(), &source.path, &target.path, replace, cancel)
             .await
@@ -692,7 +661,6 @@ impl Backend for Smb {
         cancel: &CancelToken,
     ) -> std::result::Result<(), Status> {
         const WHAT: &str = "set attributes";
-        // Every field is checked before anything changes.
         if changes.mode.is_some() {
             return Err(Status::unsupported("SMB has no permission bits"));
         }
@@ -809,7 +777,6 @@ impl Backend for Smb {
                 if progress.canceled() {
                     return Err(Status::canceled());
                 }
-                // Up to 4 MiB on the way while this chunk is stored.
                 reader.read_ahead(at, end.saturating_sub(at));
                 let want = usize::try_from(end.saturating_sub(at)).unwrap_or(usize::MAX).min(chunk);
                 let buf = buffer.get_mut(..want).unwrap_or_default();

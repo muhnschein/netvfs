@@ -1,7 +1,4 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! The C ABI through `netvfs_bridge::ffi`, against the real `libnetvfs-bridge-ffi.so` (`NETVFS_BRIDGE_FFI`) with the fake backend (`NETVFS_BACKEND_PATH`, provider "fake") steered through `libnetvfs-bridge-ffi-fake.so` (`NETVFS_BRIDGE_FFI_FAKE`). `make check-rust-ffi` sets the variables; without them every test says it is skipped and passes, so plain `cargo nextest` needs no C++ build.
-//!
-//! Own harness: `init` must run on the main thread, which then serves the Qt event loop. Speaks enough of libtest's command line for nextest (`--list --format terse`, `<name> --exact`), which runs each test in its own process; `cargo test` runs them all in one.
 #![allow(
     missing_docs,
     clippy::unwrap_used,
@@ -62,7 +59,6 @@ const TESTS: &[(&str, Test)] = &[
     ("results_are_freed", results_are_freed),
 ];
 
-/// A test that runs longer than this hangs: the process says so and ends. The slowest takes about 7 s under ASan, printing backtraces of panics.
 const HANG: Duration = Duration::from_secs(30);
 
 const VARIABLES: [&str; 3] = ["NETVFS_BRIDGE_FFI", fake::PATH_ENV, "NETVFS_BACKEND_PATH"];
@@ -121,7 +117,6 @@ fn main() -> ExitCode {
     if failed == 0 { ExitCode::SUCCESS } else { ExitCode::FAILURE }
 }
 
-/// Ends the process when the test is not done within [`HANG`]; dropping the sender says it is done.
 #[allow(clippy::exit)]
 fn watch(name: &'static str) -> mpsc::Sender<()> {
     let (done, finished) = mpsc::channel::<()>();
@@ -134,7 +129,6 @@ fn watch(name: &'static str) -> mpsc::Sender<()> {
     done
 }
 
-/// Quits the event loop when it goes, also when the work panicked.
 struct QuitOnDrop(Ffi);
 
 impl Drop for QuitOnDrop {
@@ -143,7 +137,6 @@ impl Drop for QuitOnDrop {
     }
 }
 
-/// Waits until the Qt event loop runs a posted function.
 fn wait_for_loop(ffi: Ffi) {
     let (tx, rx) = mpsc::channel();
     loop {
@@ -156,7 +149,6 @@ fn wait_for_loop(ffi: Ffi) {
     rx.recv().unwrap();
 }
 
-/// Runs `work` on another thread while this one runs the Qt event loop.
 fn off_qt_thread<R: Send>(env: &Env, work: impl FnOnce() -> R + Send) -> R {
     let ffi = env.ffi;
     thread::scope(|s| {
@@ -220,7 +212,6 @@ fn pattern(size: usize) -> Vec<u8> {
     (0..size).map(|i| u8::try_from((i * 7 + i / 251) & 0xff).unwrap()).collect()
 }
 
-/// Progress that counts, and stops after `cancel_after` updates.
 #[derive(Default)]
 struct Ticks {
     updates: Vec<(i64, i64)>,
@@ -239,7 +230,6 @@ impl Progress for Ticks {
     }
 }
 
-/// The local side of a transfer: memory, written in short pieces.
 #[derive(Default)]
 struct Memory {
     data: Vec<u8>,
@@ -283,7 +273,6 @@ fn loading(env: &Env) {
     let path = library_path();
     let again = Ffi::load_from(&path).unwrap();
     assert!(again.provider_available("fake"));
-    // The fake's library has no nvb_ffi_get, and a missing one does not load.
     let fake_path = PathBuf::from(std::env::var_os(fake::PATH_ENV).unwrap());
     assert!(
         matches!(Ffi::load_from(&fake_path), Err(LoadError::NoEntry { entry, .. }) if entry == "nvb_ffi_get")
@@ -995,11 +984,9 @@ fn discovery_start_stop(env: &Env) {
     assert_eq!(take_orphan_panics().len(), 0);
 }
 
-/// Heap growth allowed over [`ROUNDS`] calls: far below one leaked block per call.
 const LEAK_LIMIT: usize = 256 * 1024;
 const ROUNDS: usize = 4000;
 
-/// Bytes `malloc` has handed out and not taken back, in all arenas. `None` under ASan, whose allocator glibc's counters do not see (LSan finds leaks there).
 #[allow(unsafe_code)]
 fn heap_in_use() -> Option<usize> {
     // SAFETY: dlsym takes RTLD_DEFAULT and a C string; mallinfo2 has no preconditions.
@@ -1009,7 +996,6 @@ fn heap_in_use() -> Option<usize> {
     }
 }
 
-/// Bytes more in use after `ROUNDS` calls of `f` than before, after a warm-up (caches, arenas, Qt's one-time allocations); `None` when the heap cannot be measured.
 fn heap_growth(mut f: impl FnMut()) -> Option<usize> {
     let before = heap_in_use()?;
     let probe = std::hint::black_box(vec![1u8; 64 * 1024]);

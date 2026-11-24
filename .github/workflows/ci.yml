@@ -5,24 +5,20 @@ on:
       - main
   pull_request:
     types: [opened, synchronize, reopened]
-  # Weekly on main and by hand before a release: every mutation list (tools/ci/mutation-lists.py).
   schedule:
     - cron: "41 2 * * 1"
   workflow_dispatch:
 permissions:
   contents: read
 concurrency:
-  # A merge must not cancel the weekly run.
   group: ci-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 env:
-  # Pinned cargo tools (tools/ci/cargo-tool.sh), cached per version.
   NEXTEST_VERSION: 0.9.148
   MUTANTS_VERSION: 27.1.0
   DENY_VERSION: 0.20.2
   ZIZMOR_VERSION: 1.30.1
 jobs:
-  # Docs-only PR (`*.md` outside vendor/, rust/vendor/): build and test jobs skipped; a job skipped by `if:` passes as a required check (tools/ci/changes.sh).
   changes:
     name: What changed
     runs-on: ubuntu-24.04
@@ -31,10 +27,9 @@ jobs:
       code: ${{ steps.diff.outputs.code }}
       lists: ${{ steps.lists.outputs.lists }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
-          # Merge commit and its base parent.
           fetch-depth: 2
       - id: diff
         run: ./tools/ci/changes.sh >>"$GITHUB_OUTPUT"
@@ -45,13 +40,12 @@ jobs:
         env:
           EVENT: ${{ github.event_name }}
 
-  # CI's own scripts: wrong apt rule deletes the archive, wrong change rule = code PR green without tests, wrong core reader = crash without stack.
   ci-scripts:
     name: CI scripts (selftests)
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
       - run: ./tools/ci/apt-install.sh gdb
@@ -59,6 +53,7 @@ jobs:
       - run: ./tools/ci/changes-selftest.sh
       - run: ./tools/ci/mutation-lists-selftest.sh
       - run: ./tools/ci/core-backtraces-selftest.sh
+      - run: make check-comments
 
   check:
     name: Build and test (host)
@@ -70,20 +65,19 @@ jobs:
       QMAKE_ARGS: NETVFS_WERROR=1
       NEXTEST_PROFILE: ci
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           submodules: recursive
           persist-credentials: false
       - name: Install dependencies
         run: ./tools/ci/install-host-deps.sh
-      # Crates' builds carried between runs: qmake's release build (build/rust-target) and the tests' (rust/target). Saved from main and this branch only; workspace crates always rebuilt.
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0
         with:
           workspaces: |
             rust -> target
             rust -> ../build/rust-target
       - name: Cache cargo-nextest
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
         with:
           path: ~/.cargo/bin/cargo-nextest
           key: cargo-nextest-${{ env.NEXTEST_VERSION }}-ubuntu-24.04
@@ -93,7 +87,6 @@ jobs:
         run: make -j"$(nproc)"
       - name: Packaging checks (file lists, the Rust plugins, the bridge's C ABI)
         run: make check-packaging
-      # Test killed by a signal leaves a core here, read below on failure. Proved each run: a shell that crashes itself must leave one, else step fails.
       - name: Keep the cores of crashed tests
         run: |
           mkdir -p "$RUNNER_TEMP/cores"
@@ -107,12 +100,11 @@ jobs:
         run: ulimit -c unlimited && make check-unit
       - name: Interop tests
         run: ulimit -c unlimited && make check-interop
-      # Crashed test: stacks in the log; core, binary, stacks kept a week.
       - name: Stacks of crashed tests
         if: failure()
         run: ./tools/ci/core-backtraces.sh "$RUNNER_TEMP/cores"
       - if: failure()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: test-cores
           path: ${{ runner.temp }}/cores
@@ -128,14 +120,14 @@ jobs:
     env:
       NEXTEST_PROFILE: ci
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           submodules: recursive
           persist-credentials: false
       - name: Install dependencies
         run: ./tools/ci/install-host-deps.sh
       - name: Cache cargo-nextest
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
         with:
           path: ~/.cargo/bin/cargo-nextest
           key: cargo-nextest-${{ env.NEXTEST_VERSION }}-ubuntu-24.04
@@ -148,14 +140,11 @@ jobs:
         run: make SANITIZE=1 check
 
   mutation:
-    # One job per mutation list: interop-level lists run whole container suites per mutation and would not fit one job's time limit together. Which lists: tools/ci/mutation-lists.py (PR: those its change can affect; push: none; weekly and by hand: all).
     name: Tests bite (${{ matrix.list }})
     needs: changes
     if: needs.changes.outputs.code == 'true' && needs.changes.outputs.lists != '[]'
     runs-on: ubuntu-24.04
-    # bridge list: 41-58 min seen; cap leaves room for slow runners.
     timeout-minutes: 90
-    # Same as tools/mutation-check.py sets: Build step must match, else the first mutant rebuilds all Rust.
     env:
       CARGO_PROFILE_RELEASE_LTO: "off"
       CARGO_PROFILE_RS_RELEASE_LTO: "off"
@@ -166,24 +155,21 @@ jobs:
       matrix:
         list: ${{ fromJSON(needs.changes.outputs.lists) }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           submodules: recursive
           persist-credentials: false
       - name: Install dependencies
         run: ./tools/ci/install-host-deps.sh
-      # Same build in every list: one cache (shared-key), saved by whichever finishes first.
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0
         with:
           workspaces: rust -> ../build/rust-target
           shared-key: mutation
       - name: Build
         run: make -j"$(nproc)"
-      # One set of SFTP interop servers for all mutations of the list (tests/interop/sftp/run.sh uses the servers the variable names).
       - name: Start the SFTP interop servers
         if: matrix.list == 'sftp'
         run: NETVFS_SFTP_SERVERS_ONLY=1 ./tests/interop/sftp/run.sh build | tail -n 1 >> "$GITHUB_ENV"
-      # One set of Samba servers for all mutations of the list (tests/interop/smb/run.sh uses the servers the variables name).
       - name: Start the SMB interop servers
         if: matrix.list == 'smb'
         run: NETVFS_SMB_SERVERS_ONLY=1 ./tests/interop/smb/run.sh build | grep '^NETVFS_INTEROP_SMB_' >> "$GITHUB_ENV"
@@ -193,7 +179,6 @@ jobs:
         run: ./tools/mutation-check.py --build build "tests/mutations/$LIST.json"
 
   rust-mutants:
-    # cargo-mutants on the Rust lines this PR changes: every surviving mutant fails the job. Sharded: a large diff has thousands of mutants, more than one job's time limit.
     name: Tests bite (Rust, changed code, ${{ matrix.shard }}/12)
     needs: changes
     if: github.event_name == 'pull_request' && needs.changes.outputs.code == 'true'
@@ -204,30 +189,28 @@ jobs:
       matrix:
         shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           fetch-depth: 0
           persist-credentials: false
       - name: Install dependencies
         run: ./tools/ci/install-host-deps.sh
       - name: Cache cargo-nextest
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
         with:
           path: ~/.cargo/bin/cargo-nextest
           key: cargo-nextest-${{ env.NEXTEST_VERSION }}-ubuntu-24.04
       - name: Install cargo-nextest
         run: ./tools/ci/cargo-tool.sh cargo-nextest "$NEXTEST_VERSION"
-      # netvfs-bridge's FFI test needs the C++ side (only those libraries).
       - name: Build the FFI's C++ libraries
         run: ./tools/ci/ffi-libs.sh build-ffi
       - name: Cache cargo-mutants
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
         with:
           path: ~/.cargo/bin/cargo-mutants
           key: cargo-mutants-${{ env.MUTANTS_VERSION }}-ubuntu-24.04
       - name: Install cargo-mutants
         run: ./tools/ci/cargo-tool.sh cargo-mutants "$MUTANTS_VERSION"
-      # netvfs-sftp's tests need the SFTP interop servers (rust/netvfs-sftp/tests/openssh.rs): started once for the shard.
       - name: Start the SFTP interop servers
         env:
           BASE_REF: ${{ github.base_ref }}
@@ -235,7 +218,6 @@ jobs:
           if ! git diff --quiet "origin/$BASE_REF...HEAD" -- rust/netvfs-sftp; then
               NETVFS_SFTP_SERVERS_ONLY=1 ./tests/interop/sftp/run.sh build-ffi | tail -n 1 >> "$GITHUB_ENV"
           fi
-      # netvfs-smb's tests need the Samba servers (rust/netvfs-smb/tests/samba.rs): started once for the shard.
       - name: Start the SMB interop servers
         env:
           BASE_REF: ${{ github.base_ref }}
@@ -243,7 +225,6 @@ jobs:
           if ! git diff --quiet "origin/$BASE_REF...HEAD" -- rust/netvfs-smb; then
               NETVFS_SMB_SERVERS_ONLY=1 ./tests/interop/smb/run.sh build-ffi | grep '^NETVFS_INTEROP_SMB_' >> "$GITHUB_ENV"
           fi
-      # netvfs-webdav's tests/apache.rs needs the Apache server: started once for the shard.
       - name: Start the WebDAV interop server
         env:
           BASE_REF: ${{ github.base_ref }}
@@ -256,7 +237,7 @@ jobs:
           BASE_REF: ${{ github.base_ref }}
           SHARD: ${{ matrix.shard }}
         run: ./tools/ci/rust-mutants.sh diff "origin/$BASE_REF" build-ffi "$SHARD/12"
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         if: failure()
         with:
           name: rust-mutants-${{ matrix.shard }}
@@ -264,14 +245,13 @@ jobs:
           if-no-files-found: ignore
 
   windows-smb:
-    # netvfs-smb against Windows's own SMB server: local account and share on the runner over loopback (real SMB 3.1.1). rust/netvfs-smb/tests/windows.rs.
     name: SMB against Windows (M-T11)
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: windows-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
       - name: A local account and a share
@@ -325,7 +305,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
       - name: zizmor
@@ -340,7 +320,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
       - name: Install dependencies
@@ -351,7 +331,7 @@ jobs:
         run: ./tests/fuzz/run.sh build-fuzz 60
       - name: Rust fuzz targets (60 s each, nightly, ASan)
         run: ./tools/ci/rust-fuzz.sh 60
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         if: failure()
         with:
           name: fuzz-reproducers
@@ -365,11 +345,11 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
       - name: Cache cargo-deny
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
         with:
           path: ~/.cargo/bin/cargo-deny
           key: cargo-deny-${{ env.DENY_VERSION }}-ubuntu-24.04
@@ -389,7 +369,7 @@ jobs:
       SDK_IMAGE: mirror.gcr.io/coderus/sailfishos-platform-sdk-aarch64:5.2.0.15@sha256:e5f7596d14502746b308c3dde36f65fc25d7f76c45a01acaed56a1f55b76f592
       TARGET: SailfishOS-5.2.0.15-aarch64
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           submodules: recursive
           persist-credentials: false
@@ -414,15 +394,13 @@ jobs:
         run: ./tools/ci/build-rpm.sh
       - name: Check dependencies and installability on the target
         run: ./tools/ci/check-rpm.sh
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: netvfs-rpms-aarch64
           path: RPMS/*.rpm
           if-no-files-found: error
 
   reproducible:
-    # RPM job's packages rebuilt as doc/VERIFYING.md tells users (tools/verify-rpm.sh): fresh clone, other runner,
-    # path, cargo home, time zone, umask, time. Not byte for byte: red.
     name: RPMs rebuild byte for byte
     needs: rpm
     runs-on: ubuntu-24.04
@@ -431,7 +409,7 @@ jobs:
       contents: read
       actions: read
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
       - name: Cross-build tools (i386 C library for the SDK compiler)
@@ -440,7 +418,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh run download "$GITHUB_RUN_ID" -R "$GITHUB_REPOSITORY" -n netvfs-rpms-aarch64 --dir "$RUNNER_TEMP/rpms"
-      # Clone from this checkout: a pull request's merge commit is on no branch GitHub serves.
       - name: Rebuild and compare
         env:
           TZ: Pacific/Chatham
@@ -449,7 +426,6 @@ jobs:
           CARGO_HOME="$RUNNER_TEMP/cargo" NETVFS_REPO="$GITHUB_WORKSPACE" \
             ./tools/verify-rpm.sh --ref "$GITHUB_SHA" "$RUNNER_TEMP"/rpms/*.rpm
 
-  # Nobody watches a scheduled run: a failure opens an issue (or comments on the open one).
   report:
     name: Report a failed weekly run
     needs: [check, sanitize, mutation, windows-smb, fuzz, rust-supply-chain, rpm, reproducible]

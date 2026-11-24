@@ -103,7 +103,6 @@ pub fn is_host_key_mismatch(e: &russh::Error) -> bool {
     matches!(e, russh::Error::NoCommonAlgo { kind: AlgorithmKind::Key, .. })
 }
 
-/// The pseudo-algorithms of kex lists (RFC 8308 ext-info, strict kex).
 fn is_marker(name: &str) -> bool {
     name.starts_with("ext-info-") || name.starts_with("kex-strict-")
 }
@@ -170,7 +169,6 @@ mod tests {
         for other in ["ssh-dss", "rsa-sha2-512", "sk-ssh-ed25519@openssh.com", "", "SSH-ED25519"] {
             assert_eq!(pinned_algorithm(other), None, "{other}");
         }
-        // Everything but the host keys stays.
         let p = preferred(Some(&Algorithm::Ed25519));
         assert_eq!((p.kex.as_ref(), p.cipher.as_ref(), p.mac.as_ref()), (KEX, CIPHERS, MACS));
         assert_eq!(p.compression.as_ref(), COMPRESSION);

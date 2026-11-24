@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-// Ops::removeTree, Ops::walk, Ops::copyAcross.
 #include "memorybackend.h"
 #include "ops.h"
 
@@ -70,7 +69,6 @@ public:
     bool continueOnListFailure = false;
 };
 
-// Progress for copyAcross; only ever called on the calling thread.
 class CopyProgress : public Progress
 {
 public:
@@ -101,7 +99,7 @@ QString sharedTimestamp()
     return QStringLiteral("2020-01-02T03:04:05Z");
 }
 
-} // namespace
+}
 
 class TstOps : public QObject
 {
@@ -148,7 +146,6 @@ private slots:
         QVERIFY(!be.exists(QStringLiteral("a")));
         QCOMPARE(be.paths(), QStringList({ QStringLiteral("other"), QStringLiteral("other/keep.txt") }));
 
-        // Every folder is removed after everything below it, the root last.
         const QStringList ops = removals(be);
         QCOMPARE(ops.size(), 7);
         for (int i = 0; i < ops.size(); ++i) {
@@ -180,8 +177,6 @@ private slots:
         QVERIFY(withPrefix(be.log, QStringLiteral("list a/link")).isEmpty());
     }
 
-    // A backend whose listing reports a link to a folder as a folder must not
-    // make removeTree enter it: the lstat check catches it.
     void removeTreeDoesNotTrustListedFolderType()
     {
         MemoryBackend be;
@@ -240,10 +235,10 @@ private slots:
         const Result r = removeTree(&be, QStringLiteral("a"), &progress, RemoveTreeOptions(), &counts);
         QCOMPARE(r.error(), Error::PermissionDenied);
         QVERIFY(be.exists(QStringLiteral("a/b/f1")));
-        QVERIFY(be.exists(QStringLiteral("a/b/f2")));    // never reached
+        QVERIFY(be.exists(QStringLiteral("a/b/f2")));
         QVERIFY(be.exists(QStringLiteral("a/c")));
         QCOMPARE(counts.files, qint64(0));
-        QVERIFY(progress.failedPaths.isEmpty());          // only continueOnError reports failures
+        QVERIFY(progress.failedPaths.isEmpty());
     }
 
     void removeTreeContinueOnError()
@@ -267,7 +262,6 @@ private slots:
         QCOMPARE(progress.failedErrors, QVector<Error>({ Error::PermissionDenied }));
         QCOMPARE(be.paths(), QStringList({ QStringLiteral("a"), QStringLiteral("a/b"), QStringLiteral("a/b/f1"),
                                            QStringLiteral("other"), QStringLiteral("other/keep.txt") }));
-        // The folders above the failure were not even attempted.
         QVERIFY(!be.log.contains(QStringLiteral("removeDir a/b")));
         QVERIFY(!be.log.contains(QStringLiteral("removeDir a")));
     }
@@ -377,7 +371,7 @@ private slots:
             QVERIFY(!removals(be).isEmpty());
         }
         {
-            MemoryBackend be;          // capability present, option not set
+            MemoryBackend be;
             makeTree(&be);
             be.caps.flags.insert(Capability::RecursiveDelete);
             QVERIFY(removeTree(&be, QStringLiteral("a")).ok());
@@ -473,7 +467,6 @@ private slots:
             options.maxDepth = 0;
             options.postOrder = true;
             QVERIFY(walk(&be, QStringLiteral("t"), &visitor, options).ok());
-            // Only the root's children; the folder at the limit is not listed.
             QCOMPARE(visitor.events, QStringList({ QStringLiteral("V t/f 0"), QStringLiteral("V t/x 0"),
                                                    QStringLiteral("L t/x 0") }));
             QVERIFY(!be.log.contains(QStringLiteral("list t/x")));
@@ -539,7 +532,7 @@ private slots:
             QCOMPARE(visitor.events.last(), QStringLiteral("L t/x 0"));
         }
         {
-            Recorder visitor;                         // the root itself cannot be listed
+            Recorder visitor;
             QCOMPARE(walk(&be, QStringLiteral("t/x"), &visitor).error(), Error::PermissionDenied);
         }
     }
@@ -598,7 +591,6 @@ private slots:
         QVERIFY(visitor.events.contains(QStringLiteral("V w/file-link 0")));
         QVERIFY(visitor.events.contains(QStringLiteral("V w/dangling 0")));
         QVERIFY(!visitor.events.contains(QStringLiteral("L w/file-link 0")));
-        // ... and "up" (a link back to w) is reported but never entered, in both places.
         QVERIFY(visitor.events.contains(QStringLiteral("V w/real/up 1")));
         QVERIFY(visitor.events.contains(QStringLiteral("V w/ln/up 1")));
         QVERIFY(withPrefix(visitor.events, QStringLiteral("V w/real/up/")).isEmpty());
@@ -680,7 +672,7 @@ private slots:
         QVERIFY(copyAcross(&source, QStringLiteral("src/f"), &destination, QStringLiteral("dst/g"), options,
                            &progress).ok());
         QCOMPARE(destination.fileData(QStringLiteral("dst/g")), data);
-        QCOMPARE(destination.paths(), QStringList({ QStringLiteral("dst"), QStringLiteral("dst/g") }));   // no .part left
+        QCOMPARE(destination.paths(), QStringList({ QStringLiteral("dst"), QStringLiteral("dst/g") }));
         QVERIFY(progress.updates > 0);
         QCOMPARE(progress.lastDone, qint64(data.size()));
         QCOMPARE(progress.lastTotal, qint64(data.size()));
@@ -837,8 +829,6 @@ private slots:
         QVERIFY(destination.paths().isEmpty());
     }
 
-    // 64 MiB through a 64 KiB pipe: the source never runs more than the pipe
-    // (plus one chunk on each side) ahead of the destination.
     void copyAcrossLargeFileStreamsInConstantMemory()
     {
         MemoryBackend source;
@@ -854,7 +844,7 @@ private slots:
         std::atomic<qint64> worstLead { 0 };
         std::thread monitor([&] {
             while (!stop) {
-                const qint64 written = source.bytesWritten;     // sampled first: the lead is never overestimated
+                const qint64 written = source.bytesWritten;
                 const qint64 read = destination.bytesRead;
                 worstLead = qMax(worstLead.load(), written - read);
                 std::this_thread::yield();
@@ -924,7 +914,6 @@ private slots:
         QVERIFY(copyAcross(&source, QStringLiteral("src"), &destination, QStringLiteral("dst/copy"), options).ok());
         QCOMPARE(copyAcross(&source, QStringLiteral("src"), &destination, QStringLiteral("dst/copy"), options).error(),
                  Error::AlreadyExists);
-        // ... even an empty one, before any file is touched.
         destination.addDir(QStringLiteral("dst/empty"));
         QCOMPARE(copyAcross(&source, QStringLiteral("src"), &destination, QStringLiteral("dst/empty"), options).error(),
                  Error::AlreadyExists);

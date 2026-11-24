@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! Sign-in against the scripted server: NEGOTIATE refusals, guest profile's anonymous exchange, NTLM exchange with sspi's own acceptor as the server (final response signed with the real session key), TREE_CONNECT. tests/samba.rs runs the same against Samba.
 
 use std::time::Duration;
 
@@ -13,7 +12,6 @@ use crate::wire::Writer;
 
 const T: Duration = Duration::from_secs(5);
 
-/// The body of a NEGOTIATE response for `dialect` with `cipher` (0: no encryption context).
 fn negotiate_body(dialect: u16, cipher: u16) -> Vec<u8> {
     let mut contexts = vec![preauth_context(&[3; 32]), signing_context()];
     if cipher != 0 {
@@ -42,7 +40,6 @@ async fn answer_negotiate(peer: &mut Peer, cipher: u16) -> Req {
     req
 }
 
-/// The anonymous exchange; the final response has `flags`.
 async fn answer_anonymous(peer: &mut Peer, flags: u16) {
     let req = peer.recv_one().await;
     assert_eq!(req.command(), Command::SessionSetup);
@@ -216,7 +213,6 @@ fn user() -> Account {
     Account::User { user: USER.into(), domain: String::new(), password: PASSWORD.to_owned().into() }
 }
 
-/// The security token of a SESSION_SETUP request.
 fn setup_token(req: &Req) -> Vec<u8> {
     let body = req.body();
     let offset = usize::from(u16::from_le_bytes([body[12], body[13]]));
@@ -224,22 +220,14 @@ fn setup_token(req: &Req) -> Vec<u8> {
     req.msg[offset..][..len].to_vec()
 }
 
-/// How the server sends the final SESSION_SETUP response.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Final {
-    /// Signed with the session's signing key.
     Signed,
-    /// Neither flagged nor signed.
     Unsigned,
-    /// Flagged signed, one signature bit flipped.
     BadSignature,
-    /// Signed, but without the SPNEGO token (no mechListMIC).
     NoToken,
 }
 
-/// NTLM sign-in with `profile` against a server that negotiates `cipher`
-/// (0: none) and ends SESSION_SETUP with session `flags`, sent as `how`. The
-/// server keeps the preauth hash and derives the keys on its side.
 async fn ntlm_session(profile: Profile, cipher: u16, flags: u16, how: Final) -> (Result<Session>, Peer) {
     let (client, mut peer) = pair().await;
     let c = CancelToken::new();
@@ -287,7 +275,6 @@ async fn ntlm_session(profile: Profile, cipher: u16, flags: u16, how: Final) -> 
     (r, peer)
 }
 
-/// One ECHO on `s`, answered as the session's protection requires.
 async fn echo_round_trip(s: &Session, peer: &mut Peer, encrypted: bool) {
     let c = CancelToken::new();
     let (r, ()) = tokio::join!(echo(&s.conn, &c), async {
@@ -305,7 +292,6 @@ async fn echo_round_trip(s: &Session, peer: &mut Peer, encrypted: bool) {
 
 #[tokio::test]
 async fn ntlm_sign_in_signs_or_seals_as_the_profile_says() {
-    // signed: signing only; strict: sealing with either cipher; signed on a session the server marks ENCRYPT_DATA: sealing.
     for (profile, cipher, flags, encrypted) in [
         (Profile::Signed, ciphers::AES128_GCM, 0, false),
         (Profile::Strict, ciphers::AES128_GCM, 0, true),
@@ -327,7 +313,6 @@ async fn ntlm_final_response_refusals() {
         Err(Error::Policy(m)) => m,
         other => panic!("{other:?}"),
     };
-    // A guest or anonymous session for an account.
     for flags in [session_flags::IS_GUEST, session_flags::IS_NULL] {
         let (r, _peer) = ntlm_session(Profile::Signed, ciphers::AES128_GCM, flags, Final::Signed).await;
         assert_eq!(policy_error(r), GUEST_MAPPED);

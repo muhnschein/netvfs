@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! inotify(7): a non-blocking instance, watches, and events.
 
 use std::ffi::CString;
 use std::fs::File;
@@ -10,30 +9,21 @@ use std::path::Path;
 
 use tokio::io::unix::AsyncFd;
 
-/// An inotify instance (`IN_NONBLOCK`, `IN_CLOEXEC`).
 #[derive(Debug)]
 pub struct Inotify {
     file: File,
 }
 
-/// One event: watch, what happened, entry name (empty for the watched object).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Event {
-    /// Watch descriptor.
     pub wd: i32,
-    /// `IN_*` bits.
     pub mask: u32,
-    /// Entry in a watched folder, without NUL padding.
     pub name: Vec<u8>,
 }
 
 const HEADER: usize = 16;
 
 impl Inotify {
-    /// A new instance.
-    ///
-    /// # Errors
-    /// Kernel refuses one (limits, no inotify).
     pub fn new() -> io::Result<Self> {
         // SAFETY: inotify_init1 takes flags, returns a descriptor or -1; no pointers.
         let fd = unsafe { libc::inotify_init1(libc::IN_NONBLOCK | libc::IN_CLOEXEC) };
@@ -45,10 +35,6 @@ impl Inotify {
         Ok(Self { file: File::from(owned) })
     }
 
-    /// Watches `path` for `IN_*` events in `mask`; returns the watch descriptor.
-    ///
-    /// # Errors
-    /// Path has a NUL byte or cannot be watched.
     pub fn add_watch(&self, path: &Path, mask: u32) -> io::Result<i32> {
         let c_path = CString::new(path.as_os_str().as_bytes())
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
@@ -60,20 +46,12 @@ impl Inotify {
         Ok(wd)
     }
 
-    /// Reads pending events.
-    ///
-    /// # Errors
-    /// `WouldBlock` when none, or a read error.
     pub fn read_events(&self) -> io::Result<Vec<Event>> {
         let mut buf = vec![0u8; 16 * 1024];
         let n = (&self.file).read(&mut buf)?;
         Ok(parse_events(buf.get(..n).unwrap_or_default()))
     }
 
-    /// Hands the instance to the current tokio runtime's I/O driver.
-    ///
-    /// # Errors
-    /// Driver cannot register the descriptor.
     pub fn register(self) -> io::Result<AsyncFd<Self>> {
         // SAFETY: instance owns its descriptor (private `file`, never replaced); it stays open and the same until the AsyncFd drops.
         unsafe { AsyncFd::register(self) }.map_err(io::Error::from)
@@ -92,7 +70,6 @@ impl AsFd for Inotify {
     }
 }
 
-/// Events of one `read()`: `struct inotify_event` records (native byte order), each followed by its NUL-padded name. A truncated record ends the list.
 #[must_use]
 pub fn parse_events(mut buf: &[u8]) -> Vec<Event> {
     let mut events = Vec::new();

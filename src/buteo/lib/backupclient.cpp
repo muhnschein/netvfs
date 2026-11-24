@@ -14,7 +14,6 @@
 namespace NetVfs {
 
 namespace {
-// Profile key holding the local restore target.
 const char RestoreFileKey[] = "sfos-backuprestore-file";
 }
 
@@ -58,7 +57,6 @@ bool BackupClient::init()
 
 bool BackupClient::uninit()
 {
-    // Stops a run without a result; its local archive goes with it.
     m_run.reset();
     return true;
 }
@@ -111,7 +109,6 @@ void BackupClient::report(Buteo::SyncResults::MinorCode code, const QString &mes
         emit success(getProfileName(), message);
         return;
     }
-    // The message may name paths: debug output only.
     qCWarning(lcNetVfsButeo) << iProfile.name() << "failed with code" << code;
     qCDebug(lcNetVfsButeo) << message;
     m_results = Buteo::SyncResults(iProfile.lastSuccessfulSyncTime(), Buteo::SyncResults::SYNC_RESULT_FAILED, code);
@@ -120,7 +117,6 @@ void BackupClient::report(Buteo::SyncResults::MinorCode code, const QString &mes
 
 bool BackupClient::cleanUp()
 {
-    // Called after the account was deleted. Backups stay on the server.
     qCDebug(lcNetVfsButeo) << "Account removed; server files are kept";
     return true;
 }
@@ -132,8 +128,6 @@ Buteo::SyncResults BackupClient::getSyncResults() const
 
 void BackupClient::connectivityStateChanged(Sync::ConnectivityType type, bool state)
 {
-    // A LAN server needs no internet connectivity; socket errors and timeouts end a run that really
-    // lost its server.
     qCDebug(lcNetVfsButeo) << "Ignoring connectivity change" << type << state;
 }
 
@@ -145,7 +139,7 @@ Buteo::SyncResults::MinorCode BackupClient::minorCodeFor(Error error)
     case Error::Canceled:
         return Buteo::SyncResults::ABORTED;
     case Error::NetworkUnreachable:
-    case Error::ConnectionLost:  // retryable like an unreachable server
+    case Error::ConnectionLost:
     case Error::TooManyConnections:
     case Error::RateLimited:
     case Error::Timeout:

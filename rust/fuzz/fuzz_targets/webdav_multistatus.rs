@@ -1,6 +1,4 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! WebDAV multistatus body through the PROPFIND parser. No panic; caps hold; every path is absolute, decoded,
-//! without NUL.
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;

@@ -32,7 +32,6 @@ fn connections(fake: &Fake) -> usize {
     fake.state.lock().unwrap().connections
 }
 
-/// Sends `req` and reads its answer to the end.
 async fn round_trip(http: &mut Http, req: Req) -> StatusCode {
     let (head, body) = http.send(req).await.unwrap().into_parts();
     http.discard(body, MAX_ERROR_BODY).await;
@@ -107,15 +106,12 @@ async fn answers_up_to_32_mib_are_read_whole() {
     assert_eq!((e.name, e.detail.as_str()), (ErrorName::ProtocolError, "more than 33554432 bytes"));
 }
 
-/// What a scripted connection does after its answers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Then {
     Close,
-    /// Reads whatever comes until the client closes, then reports the connection's index.
     AwaitClose,
 }
 
-/// A server that answers the requests of its n-th connection with `script[n]`, one answer per request.
 async fn scripted(script: Vec<(Vec<&'static [u8]>, Then)>) -> (SocketAddr, mpsc::UnboundedReceiver<usize>) {
     let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -166,18 +162,15 @@ async fn a_garbled_answer_is_not_sent_again() {
 
 #[tokio::test]
 async fn a_request_that_times_out_closes_its_connection() {
-    // The second request's answer never comes.
     let (addr, mut closed) = scripted(vec![(vec![OK], Then::AwaitClose)]).await;
     let mut http = http_to(addr, Duration::from_millis(100), STALE_AFTER);
     round_trip(&mut http, options()).await;
     let started = http.send(options());
-    // Hang guard only: the answer never comes, so this is the timeout's own wait.
     assert_eq!(started.await.unwrap_err().name, ErrorName::Timeout);
     let seen = tokio::time::timeout(LONG, closed.recv()).await;
     assert_eq!(seen.ok().flatten(), Some(0));
 }
 
-/// hyper's errors for a request on a connection whose other end is gone, from a connection never driven.
 #[tokio::test]
 async fn closed_and_canceled_count_as_dropped_unanswered() {
     let (client, _server) = tokio::io::duplex(64);

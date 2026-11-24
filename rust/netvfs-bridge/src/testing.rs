@@ -288,7 +288,6 @@ impl AccountDirectory for FakeAccounts {
         }
         let params = state.accounts.iter().find(|a| a.account_id == id).map(|a| a.params.clone());
         drop(state);
-        // Credentials id 0 with an optional secret, as the fixture sets up the fake backend (user `user`, empty secret).
         params
             .map(|params| FilesAccess { params, credentials_id: 0, secret_optional: true })
             .ok_or_else(|| Status::new(netvfs_bridge_proto::ErrorName::NotFound, "No such account"))
@@ -773,7 +772,6 @@ impl BridgeRun {
             .env("NETVFS_ACCOUNTS_HELPER", dir.join("no-helper"))
             .env("NETVFS_BRIDGE_IDLE_EXIT_MS", "500")
             .env_remove("DBUS_SESSION_BUS_ADDRESS")
-            // zbus would find the host's session bus there.
             .env_remove("XDG_RUNTIME_DIR")
             .env_remove("NETVFS_FAKE_SEED")
             .stdin(std::process::Stdio::null());

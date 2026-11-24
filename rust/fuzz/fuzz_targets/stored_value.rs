@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! Accounts database setting row (type string, value text) as the helper reads it.
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;

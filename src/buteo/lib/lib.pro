@@ -1,5 +1,4 @@
 # SPDX-License-Identifier: LGPL-2.1-or-later
-# libnetvfs-buteo.a: shared BackupClient and backup operations, linked into each Buteo plugin.
 include(../buteo.pri)
 
 TEMPLATE = lib

@@ -179,7 +179,6 @@ pub fn after(before: Own, call: After, error: Option<ErrorName>) -> Own {
     }
 }
 
-/// Errors after which a create left nothing behind: refused, or failed before writing.
 const fn made_nothing(error: ErrorName) -> bool {
     matches!(
         error,

@@ -352,12 +352,8 @@ impl<B: Backend> Drop for Worker<B> {
     fn drop(&mut self) {
         self.stop();
         if let Some(thread) = self.thread.take() {
-            // A work item that panicked has aborted the process already
-            // (panic = "abort"); nothing to report here.
             drop(thread.join());
         }
-        // Items posted after the thread's last look at the queue: they end
-        // here, never lost.
         let left = std::mem::take(&mut self.shared.lock().queue);
         for item in left {
             drop((item.work)(Turn::failed(canceled())));
@@ -390,8 +386,6 @@ impl<B: Backend> Local<B> {
                 shared.set_phase(Phase::Established);
             }
             Err(status) => {
-                // A canceled attempt says nothing about the server; a stop
-                // cancels the running item too.
                 if status.name != ErrorName::Canceled && !task.canceled() {
                     shared.tracker.failed(status.name);
                 }

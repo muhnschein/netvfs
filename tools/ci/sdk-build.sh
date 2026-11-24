@@ -1,8 +1,5 @@
 #!/bin/bash
 # SPDX-License-Identifier: LGPL-2.1-or-later
-# Runs inside the SDK container: mb2 build of the RPMs. Rust binaries come prebuilt today; once the spec runs cargo
-# again: cargo under scratchbox2 occasionally deadlocks in a forked child before exec (lock held at fork time in the sb2
-# preload), so the build restarts when its log has not grown for 10 minutes. Built steps are kept between attempts.
 set -uo pipefail
 target=$1
 stall_limit=600
@@ -35,7 +32,6 @@ for attempt in 1 2 3 4 5; do
     if [[ "$status" -eq 0 ]]; then
         exit 0
     fi
-    # With -j the failing step has usually scrolled out of the tail.
     echo "== errors in build.log"
     grep -n -E -B 2 -A 4 '(error|Error):|Error [0-9]+$|undefined reference|\*\*\* ' build.log | head -n 150
     [[ "$stalled" = yes ]] || exit "$status"

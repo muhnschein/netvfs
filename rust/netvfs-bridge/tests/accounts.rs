@@ -23,7 +23,6 @@ const TABLE: &str = "# The fake's table\n\n\
                      option\t1\tretries\tu\t3\n\
                      account\t5\tsmb\tNAS\tnas.example\t0\tbob\t/\tauth-failed\n";
 
-/// Directory over the fake helper with its table, via a wrapper script setting `NETVFS_FAKE_ACCOUNTS` (tests run in parallel).
 struct Fixture {
     dir: TempDir,
     table: PathBuf,
@@ -120,7 +119,6 @@ async fn directory_attention() {
     assert!(fixture.dir.path().exists());
 }
 
-/// The fake's answer to `arguments` as a status (`Err`: its text).
 fn fake_status(table: &std::path::Path, arguments: &[&str]) -> Result<(), String> {
     let output =
         std::process::Command::new(FAKE).args(arguments).env("NETVFS_FAKE_ACCOUNTS", table).output().unwrap();

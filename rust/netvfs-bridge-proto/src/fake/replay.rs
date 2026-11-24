@@ -173,8 +173,6 @@ fn type_end(sig: &str) -> Result<usize, String> {
     Err(if depth == 0 { "truncated signature" } else { "unbalanced signature" }.to_owned())
 }
 
-/// The body signature as the message header carries it. zvariant 5 parses `(asasx)` (one struct)
-/// and `asasx` (three arguments) to the same `Signature`, but the contract tells them apart.
 fn wire_signature(msg: &zbus::Message) -> Result<String, String> {
     let bytes = msg.data().bytes();
     let le = match bytes.first() {
@@ -389,8 +387,6 @@ fn body_fields(msg: &zbus::Message) -> Result<(String, Vec<Json>), String> {
     let body = msg.body();
     let s: Structure<'_> = body.deserialize().map_err(|e| e.to_string())?;
     let fields: Vec<Json> = s.fields().iter().map(decode).collect();
-    // zvariant reads a one-struct body as that struct's fields; on the wire it is a single argument
-    // (e.g. `Stat`'s entry).
     let one_struct = sig.starts_with('(') && split_types(&sig).is_ok_and(|t| t.len() == 1);
     let fields = if one_struct { vec![Json::Array(fields)] } else { fields };
     Ok((sig, fields))
@@ -529,7 +525,6 @@ fn check_error_signature(call: &str, name: &str, msg: &zbus::Message) -> Result<
     let fine = if name.starts_with(crate::errors::ERROR_PREFIX) {
         sig == "s" || sig == "sa{sv}"
     } else {
-        // Errors of the D-Bus library carry at most the message.
         sig == "s" || sig.is_empty() || (name == INVALID_ARGS && sig == "sa{sv}")
     };
     if fine { Ok(()) } else { Err(format!("{call}: error {name} carried ({sig})")) }

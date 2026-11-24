@@ -44,8 +44,6 @@ bool isStream(const NativeStat &st)
     return st.type != EntryType::File;
 }
 
-// copy_file_range(2) through syscall(): glibc 2.27..2.29 emulated it in user space without cancel
-// checks.
 long copyRange(int source, int target, qint64 length)
 {
 #ifdef SYS_copy_file_range
@@ -132,8 +130,6 @@ QByteArray temporaryName(const QByteArray &target, int attempt)
 
 Result openForRead(const QByteArray &native, Fd *fd, NativeStat *st)
 {
-    // O_NONBLOCK: opening a FIFO without a writer must not block; reads wait in Waiter. No effect
-    // on regular files.
     Fd file(::open(native.constData(), O_RDONLY | O_CLOEXEC | O_NOCTTY | O_NONBLOCK));
     if (!file.valid())
         return errnoResult(errno, display(native));
@@ -378,8 +374,6 @@ Result LocalWriteHandle::commit()
     const int fd = m_fd.get();
     if (fd < 0)
         return handleClosed();
-    // Data on stable storage before the caller renames it into place. FIFOs and devices have
-    // nothing to flush (EINVAL).
     if (::fsync(fd) != 0 && errno != EINVAL && errno != EROFS) {
         const int error = errno;
         m_fd.reset();

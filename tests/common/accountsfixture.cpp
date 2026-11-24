@@ -18,7 +18,7 @@ void writeFile(const QString &path, const QByteArray &content)
     if (file.open(QIODevice::WriteOnly | QIODevice::Truncate))
         file.write(content);
 }
-} // namespace
+}
 
 AccountsFixture::AccountsFixture(const QStringList &providers)
 {
@@ -112,5 +112,5 @@ QVariant AccountsFixture::value(int accountId, const QString &key, const QString
     return account->value(key);
 }
 
-} // namespace Test
-} // namespace NetVfs
+}
+}

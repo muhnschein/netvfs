@@ -4,8 +4,6 @@
 
 #include <mutex>
 
-// Internal. Mutex of a shared state object; only hands out locks, so fields stay plain data.
-// std::mutex for the TSan reason in boundedpipe.cpp.
 namespace NetVfs {
 
 class StateMutex

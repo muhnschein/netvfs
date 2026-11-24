@@ -10,17 +10,13 @@ using NetVfs::Test::hexBytes;
 using NetVfs::Test::Pkt;
 
 namespace {
-
-// An avahi style answer to a PTR query for _smb._tcp.local: the PTR in the
-// answer section, SRV, TXT and A in the additional section, names compressed
-// against the question name and the instance name. Written byte by byte.
 QByteArray avahiResponse()
 {
     Pkt p;
     p.header(0, 0x8400, 0, 1, 0, 3);
     const int typeName = p.size();
     p.name("_smb._tcp.local");
-    const int localOffset = typeName + 10;               // "local" after two 5 byte labels
+    const int localOffset = typeName + 10;
     p.u16(TypePtr).u16(ClassIn).u32(4500);
     int lengthAt = p.size();
     p.u16(0);
@@ -117,7 +113,7 @@ Message sampleMessage()
     return m;
 }
 
-} // namespace
+}
 
 class TestDnsMessage : public QObject
 {
@@ -259,8 +255,6 @@ private slots:
 
     void rejectsLabelLoopsThroughBackwardPointers()
     {
-        // At 12: label "a", then a pointer back to 12. Every pointer points
-        // backwards, but the name never ends: the 255 byte cap stops it.
         Pkt p;
         p.header(0, 0, 1, 0, 0, 0);
         p.label("a").ptr(12).u16(TypePtr).u16(ClassIn);
@@ -294,7 +288,7 @@ private slots:
         QVERIFY(rejects(questionWith(hexBytes("3f6161"))));
         Pkt p;
         p.header(0, 0, 1, 0, 0, 0);
-        p.label("abc");                                           // no root label, no type/class
+        p.label("abc");
         QVERIFY(rejects(p.bytes()));
     }
 
@@ -316,7 +310,6 @@ private slots:
         overrun.name("x.local").u16(TypeTxt).u16(ClassIn).u32(10).u16(3).raw(hexBytes("056162"));
         overrun.name("y.local").u16(TypeA).u16(ClassIn).u32(10).u16(4).raw(hexBytes("c0000207"));
         QVERIFY(rejects(overrun.bytes()));
-        // trailing garbage after a PTR name inside the record
         QVERIFY(rejects(answerWith(TypePtr, hexBytes("0161000000"))));
         Pkt question;
         question.header(0, 0, 1, 0, 0, 0);
@@ -410,7 +403,7 @@ private slots:
         srv.port = 445;
         m.answers.append(srv);
         const QByteArray wire = encode(m, true);
-        QCOMPARE(wire.right(1), QByteArray(1, '\0'));          // SRV target ends with the root label, not a pointer
+        QCOMPARE(wire.right(1), QByteArray(1, '\0'));
     }
 
     void matchesAHandWrittenEncoding()

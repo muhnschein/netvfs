@@ -103,7 +103,6 @@ impl Nearby {
     }
 }
 
-// On the Qt thread: `!Send`.
 thread_local! {
     static DISCOVERIES: RefCell<HashMap<u64, Discovery>> = RefCell::new(HashMap::new());
 }
@@ -137,7 +136,6 @@ impl NearbySource for FfiNearby {
 impl Drop for FfiNearby {
     fn drop(&mut self) {
         let id = self.id;
-        // Not queued: the application is gone, and its discoveries with it.
         let _queued = self.ffi.post(move || {
             DISCOVERIES.with_borrow_mut(|d| d.remove(&id));
         });
@@ -153,7 +151,6 @@ fn set_running_on_qt_thread(ffi: Ffi, id: u64, link: CoreLink, on: bool) {
                     return;
                 }
                 let found = move |items| {
-                    // False once the core has stopped: nobody to tell.
                     let _told = link.nearby(items);
                 };
                 match Discovery::new(ffi, found) {
@@ -236,7 +233,6 @@ mod tests {
         n.changed(vec![server("a")], t1);
         let t2 = t0.checked_add(Duration::from_millis(100)).unwrap();
         n.changed(vec![server("a"), server("b")], t2);
-        // The first change sets the time; later ones join that report.
         assert_eq!(n.due(), t1.checked_add(NEARBY_DELAY));
         n.set_discovering(SessionId(4), true, t2);
         assert_eq!(n.due(), t1.checked_add(NEARBY_DELAY));

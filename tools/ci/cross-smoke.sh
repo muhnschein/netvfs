@@ -1,11 +1,5 @@
 #!/bin/sh
 # SPDX-License-Identifier: LGPL-2.1-or-later
-# Smoke run of the cross-built Rust binaries under qemu-aarch64-static with the target's glibc and SQLite:
-#   - netvfs-accounts: answers to `list` and `files` on a small accounts.db must match the host build byte for byte
-#     (seccomp does not install under qemu-user; the helper goes on without it);
-#   - netvfs-bridge: a usage error exits 2; for a registered consumer it gets as far as loading its C ABI (needs the
-#     target's Qt, so missing here: exit 1).
-# Usage: cross-smoke.sh <sdk dir> <cross-built netvfs-accounts> [<cross-built netvfs-bridge>]
 set -eu
 sdk=$(cd "$1" && pwd)
 target_helper=$2
@@ -47,9 +41,7 @@ c.commit()
 PY
 
 for request in "list" "files 1" "files 2" "files 3"; do
-    # shellcheck disable=SC2086 # the request is two words
     ACCOUNTS=$work/accounts "$host_helper" $request > "$work/host.out" 2> /dev/null || true
-    # shellcheck disable=SC2086
     ACCOUNTS=$work/accounts qemu-aarch64-static -L "$sdk/sysroot" "$target_helper" $request \
         > "$work/target.out" 2> /dev/null || true
     if ! cmp -s "$work/host.out" "$work/target.out"; then

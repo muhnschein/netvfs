@@ -39,14 +39,10 @@ pub struct Seen {
     pub system_trusted: bool,
 }
 
-/// What later handshakes must present.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Policy {
-    /// Before the first handshake ends: anything, recorded.
     Open,
-    /// This key.
     Key(Vec<u8>),
-    /// Any system-trusted certificate.
     System,
 }
 
@@ -74,7 +70,6 @@ impl Verifier {
     }
 }
 
-/// The SubjectPublicKeyInfo of a DER certificate.
 fn spki_of(cert: &CertificateDer<'_>) -> Result<Vec<u8>, rustls::Error> {
     let parsed = webpki::EndEntityCert::try_from(cert)
         .map_err(|_bad| rustls::Error::InvalidCertificate(CertificateError::BadEncoding))?;
@@ -145,7 +140,6 @@ fn system_roots() -> Arc<RootCertStore> {
     static ROOTS: OnceLock<Arc<RootCertStore>> = OnceLock::new();
     Arc::clone(ROOTS.get_or_init(|| {
         let mut store = RootCertStore::empty();
-        // Unreadable or unparsable entries are skipped; with none left nothing is system trusted.
         store.add_parsable_certificates(rustls_native_certs::load_native_certs().certs);
         Arc::new(store)
     }))
@@ -375,7 +369,6 @@ pub async fn connect_tcp(addrs: &[SocketAddr], timeout: Duration) -> Result<TcpS
         for addr in addrs {
             match TcpStream::connect(addr).await {
                 Ok(stream) => {
-                    // Small requests: no Nagle delay.
                     stream.set_nodelay(true).map_err(|e| unreachable(&e.to_string()))?;
                     return Ok(stream);
                 }
@@ -393,7 +386,6 @@ fn unreachable(why: &str) -> Status {
     Status::new(ErrorName::NetworkUnreachable, "Cannot reach the server").with_detail(why)
 }
 
-/// TLS 1.3 tickets for the one server of a [`Client`], newest used first, at most [`Tickets::MAX`].
 #[derive(Debug, Default)]
 struct Tickets {
     tls13: Mutex<VecDeque<Tls13ClientSessionValue>>,
@@ -408,7 +400,6 @@ impl Tickets {
 }
 
 impl ClientSessionStore for Tickets {
-    // No key exchange hint: one more round trip at most, when the server dislikes the first key share.
     fn set_kx_hint(&self, _server: ServerName<'static>, _group: NamedGroup) {}
 
     fn kx_hint(&self, _server: &ServerName<'_>) -> Option<NamedGroup> {

@@ -2,22 +2,14 @@
 #ifndef NETVFS_TEST_DBUSLOOP_H
 #define NETVFS_TEST_DBUSLOOP_H
 
-/*
- * Glue between libdbus and the Qt event loop. libdbus dictates the signatures
- * of its callbacks (untyped `void *` user data), so they live in C
- * (dbusloop.c); they only turn the user data into the typed NetVfsLoopOwner
- * and call the functions below, which wireconnection.cpp implements.
- */
 #include <dbus/dbus.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-/* The WireConnection whose libdbus object is being driven. */
 struct NetVfsLoopOwner;
 
-/* Implemented in C++ (wireconnection.cpp). */
 dbus_bool_t netvfs_loop_watch_added(DBusWatch *watch, struct NetVfsLoopOwner *owner);
 void netvfs_loop_watch_removed(DBusWatch *watch);
 void netvfs_loop_watch_toggled(DBusWatch *watch);
@@ -28,7 +20,6 @@ DBusHandlerResult netvfs_loop_message(struct NetVfsLoopOwner *owner, DBusConnect
 void netvfs_loop_dispatch_status(struct NetVfsLoopOwner *owner, DBusConnection *connection,
                                  DBusDispatchStatus status);
 
-/* The callbacks for libdbus (dbusloop.c). Their user data is the NetVfsLoopOwner. */
 extern const DBusAddWatchFunction netvfs_loop_add_watch;
 extern const DBusRemoveWatchFunction netvfs_loop_remove_watch;
 extern const DBusWatchToggledFunction netvfs_loop_toggle_watch;

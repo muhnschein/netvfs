@@ -1,8 +1,4 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-// the Url parser. parse() must never crash, a password
-// must never be accepted, and whatever parse() accepts must survive
-// parse -> format -> parse unchanged.
-//
 // fuzz-sources: src/core/url.cpp src/core/names.cpp src/core/paths.cpp
 #include "names.h"
 #include "paths.h"
@@ -37,11 +33,10 @@ void checkStable(const ConnectionParams &first, const QString &firstPath)
     require(Url::format(second, secondPath) == formatted);
 }
 
-} // namespace
+}
 
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 {
-    // Names::decode keeps every byte, including ill-formed UTF-8.
     const QString url = Names::decode(QByteArray(reinterpret_cast<const char *>(data), int(size)));
     ConnectionParams params;
     QString path;

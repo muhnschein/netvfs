@@ -20,9 +20,6 @@
 #endif
 
 namespace {
-
-// Installed into the application while the engine lives (as the platform's account plugins do), so
-// qsTrId() in our pages resolves.
 class EngineTranslator : public QTranslator
 {
     Q_DISABLE_COPY(EngineTranslator)
@@ -65,7 +62,6 @@ public:
     void initializeEngine(QQmlEngine *engine, const char *uri) override
     {
         Q_UNUSED(uri)
-        // Engineering English first, so the locale's translation wins.
         auto engineering = std::make_unique<EngineTranslator>(engine);
         engineering->loadAndInstall(QStringLiteral("netvfs_eng_en"));
         engineering.release();
@@ -81,7 +77,6 @@ public:
         qmlRegisterType<NetVfsUi::SshKeyTool>(uri, 1, 0, "SshKeyTool");
         qmlRegisterType<NetVfsUi::ConsentModel>(uri, 1, 0, "NetVfsConsentModel");
         qmlRegisterType<NetVfsUi::AccessModel>(uri, 1, 0, "NetVfsAccessModel");
-        // Singletons are owned by the engine.
         qmlRegisterSingletonType<NetVfsUi::Helpers>(uri, 1, 0, "NetVfsHelpers", [](QQmlEngine *, QJSEngine *) -> QObject * {
             return std::make_unique<NetVfsUi::Helpers>().release();
         });

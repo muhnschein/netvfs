@@ -104,161 +104,46 @@ impl Default for WalkOpts {
     }
 }
 
-/// One validated call of `org.netvfs.Bridge1`, one variant per method.
 #[derive(Debug)]
-#[allow(missing_docs)] // fields are the method arguments of the same names
+#[allow(missing_docs)]
 pub enum Call {
-    Hello {
-        client: String,
-    },
+    Hello { client: String },
     GetConsent,
     RequestConsent,
     GetFeatures,
     ListLocations,
-    Capabilities {
-        loc: LocId,
-    },
-    Disconnect {
-        loc: LocId,
-    },
-    Discover {
-        on: bool,
-    },
-    /// `batch`.
-    List {
-        loc: LocId,
-        dir: NPath,
-        lane: Lane,
-        batch: u32,
-    },
-    Stat {
-        loc: LocId,
-        path: NPath,
-        follow: bool,
-        lane: Lane,
-    },
-    ReadLink {
-        loc: LocId,
-        path: NPath,
-    },
-    SpaceInfo {
-        loc: LocId,
-        path: NPath,
-    },
-    Checksum {
-        loc: LocId,
-        path: NPath,
-        algorithm: String,
-    },
-    MakeDir {
-        loc: LocId,
-        path: NPath,
-        exclusive: bool,
-    },
-    RemoveFile {
-        loc: LocId,
-        path: NPath,
-    },
-    RemoveDir {
-        loc: LocId,
-        path: NPath,
-    },
-    Rename {
-        loc: LocId,
-        from: NPath,
-        to: NPath,
-        replace: bool,
-    },
-    SetAttributes {
-        loc: LocId,
-        path: NPath,
-        changes: AttributeChanges,
-    },
-    /// `target` verbatim: not normalised, may be relative.
-    MakeSymlink {
-        loc: LocId,
-        target: Vec<u8>,
-        link: NPath,
-    },
-    MakeHardlink {
-        loc: LocId,
-        existing: NPath,
-        link: NPath,
-    },
-    ServerCopy {
-        loc: LocId,
-        from: NPath,
-        to: NPath,
-        opts: CopyOpts,
-    },
-    OpenRead {
-        loc: LocId,
-        path: NPath,
-        lane: Lane,
-    },
-    /// `max`.
-    Read {
-        handle: u32,
-        offset: i64,
-        max: u32,
-    },
-    /// `bytes`.
-    ReadAhead {
-        handle: u32,
-        offset: i64,
-        bytes: i64,
-    },
-    Close {
-        handle: u32,
-    },
-    Upload {
-        loc: LocId,
-        path: NPath,
-        fd: OwnedFd,
-        opts: TransferOpts,
-        lane: Lane,
-    },
-    Download {
-        loc: LocId,
-        path: NPath,
-        fd: OwnedFd,
-        opts: TransferOpts,
-        lane: Lane,
-    },
-    CopyAcross {
-        loc: LocId,
-        path: NPath,
-        dest_loc: LocId,
-        dest_path: NPath,
-        opts: CopyOpts,
-    },
-    RemoveTree {
-        loc: LocId,
-        path: NPath,
-    },
-    Walk {
-        loc: LocId,
-        path: NPath,
-        opts: WalkOpts,
-    },
-    Cancel {
-        id: u32,
-    },
-    OpenAccountSettings {
-        loc: LocId,
-    },
-    AddAccount {
-        provider: String,
-    },
+    Capabilities { loc: LocId },
+    Disconnect { loc: LocId },
+    Discover { on: bool },
+    List { loc: LocId, dir: NPath, lane: Lane, batch: u32 },
+    Stat { loc: LocId, path: NPath, follow: bool, lane: Lane },
+    ReadLink { loc: LocId, path: NPath },
+    SpaceInfo { loc: LocId, path: NPath },
+    Checksum { loc: LocId, path: NPath, algorithm: String },
+    MakeDir { loc: LocId, path: NPath, exclusive: bool },
+    RemoveFile { loc: LocId, path: NPath },
+    RemoveDir { loc: LocId, path: NPath },
+    Rename { loc: LocId, from: NPath, to: NPath, replace: bool },
+    SetAttributes { loc: LocId, path: NPath, changes: AttributeChanges },
+    MakeSymlink { loc: LocId, target: Vec<u8>, link: NPath },
+    MakeHardlink { loc: LocId, existing: NPath, link: NPath },
+    ServerCopy { loc: LocId, from: NPath, to: NPath, opts: CopyOpts },
+    OpenRead { loc: LocId, path: NPath, lane: Lane },
+    Read { handle: u32, offset: i64, max: u32 },
+    ReadAhead { handle: u32, offset: i64, bytes: i64 },
+    Close { handle: u32 },
+    Upload { loc: LocId, path: NPath, fd: OwnedFd, opts: TransferOpts, lane: Lane },
+    Download { loc: LocId, path: NPath, fd: OwnedFd, opts: TransferOpts, lane: Lane },
+    CopyAcross { loc: LocId, path: NPath, dest_loc: LocId, dest_path: NPath, opts: CopyOpts },
+    RemoveTree { loc: LocId, path: NPath },
+    Walk { loc: LocId, path: NPath, opts: WalkOpts },
+    Cancel { id: u32 },
+    OpenAccountSettings { loc: LocId },
+    AddAccount { provider: String },
     OpenStorageSettings,
     ListDrives,
-    /// `drive`.
-    Mount {
-        drive: String,
-    },
-    Unmount {
-        drive: String,
-    },
+    Mount { drive: String },
+    Unmount { drive: String },
 }
 
 impl Call {
@@ -310,7 +195,6 @@ impl Call {
     #[must_use]
     pub fn method(&self) -> &'static MethodInfo {
         let name = self.name();
-        // Every variant names a table method (tested); Hello is the stand-in that never happens.
         find_method(name).unwrap_or(&netvfs_bridge_proto::METHODS[0])
     }
 
@@ -566,7 +450,6 @@ fn read(body: &Body) -> Result<Call, Status> {
 fn read_ahead(body: &Body) -> Result<Call, Status> {
     let (handle, start, bytes): (u32, i64, i64) = deserialize(body)?;
     let offset = offset(start, 2)?;
-    // A hint: capped, not refused.
     let bytes = self::offset(bytes, 3)?.min(MAX_READ_AHEAD);
     Ok(Call::ReadAhead { handle, offset, bytes })
 }
@@ -661,7 +544,6 @@ fn each_option<'a>(
     if opts.len() > DECODE_MAX_ELEMENTS {
         return Err(too_complex());
     }
-    // Contents of the dict's variants: depth 2 for the C++ decoder (array 0, entries and their variants 1).
     for value in opts.values() {
         check_value(value, 2)?;
     }

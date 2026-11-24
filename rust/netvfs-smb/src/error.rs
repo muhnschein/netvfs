@@ -71,12 +71,10 @@ impl From<Status> for Error {
 /// Shorthand.
 pub type Result<T> = std::result::Result<T, Error>;
 
-/// A protocol error.
 pub(crate) fn protocol(msg: impl Into<String>) -> Error {
     Error::Protocol(msg.into())
 }
 
-/// A policy refusal.
 pub(crate) fn policy(msg: impl Into<String>) -> Error {
     Error::Policy(msg.into())
 }
@@ -98,7 +96,6 @@ impl Error {
         match self {
             Self::Status(nt) => {
                 let status = status_for(nt, context);
-                // During sign-in a refusal that is about neither credentials nor share name: server wants something this client lacks.
                 let keeps = matches!(
                     status.name,
                     ErrorName::AuthFailed | ErrorName::NotFound | ErrorName::Timeout | ErrorName::Unsupported

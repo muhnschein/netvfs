@@ -1,6 +1,4 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-// SMB interoperability matrix against the Samba containers run.sh starts ("<prefix>-<server>"); servers in
-// run.sh, configurations in server/conf/.
 #include "backendloader.h"
 #include "identity.h"
 #include "ops.h"
@@ -33,7 +31,7 @@ char *toString(const NetVfs::Error &error)
 {
     return qstrdup(qPrintable(NetVfs::errorName(error)));
 }
-} // namespace QTest
+}
 
 namespace {
 
@@ -101,7 +99,7 @@ std::unique_ptr<Backend> newBackend()
     return std::unique_ptr<Backend>(BackendLoader::create(QStringLiteral("smb")));
 }
 
-} // namespace
+}
 
 class TestInteropSmb : public QObject
 {
@@ -221,11 +219,6 @@ private:
         return establish(backend, p, c);
     }
 
-    // Runs `work` on its own thread (which signs in itself: a connection is
-    // confined to the thread that connects) and calls cancel() from
-    // this thread once `trigger` holds. `work` calls probe.returned() right
-    // after the call that is to be canceled; the result is the time from
-    // cancel() to that point.
     template <typename Work, typename Trigger>
     qint64 cancelDuring(Backend *backend, CancelProbe *probe, Work work, Trigger trigger)
     {
@@ -258,7 +251,6 @@ private:
     QByteArray stopCapture(const QString &server)
     {
         QTest::qWait(1000);
-        // tcpdump flushes and exits on SIGINT; on a loaded host that takes a while.
         exec(server, { QStringLiteral("sh"), QStringLiteral("-c"),
                        QStringLiteral("pkill -INT tcpdump; for i in $(seq 100); do pgrep tcpdump >/dev/null || exit 0; "
                                       "sleep 0.1; done; exit 1") });
@@ -297,9 +289,6 @@ private slots:
         QVERIFY(BackendLoader::isAvailable(QStringLiteral("smb")));
     }
 
-    // strict Samba 4.19.5. Dialect, cipher and signing as
-    // smbstatus reports them (AES-128-GCM, the first cipher offered), and
-    // the smbclient cross-check in both directions.
     void strictServer()
     {
         const auto backend = newBackend();
@@ -376,14 +365,10 @@ private slots:
         qInfo("smbstatus: %s", row.constData());
         QVERIFY2(row.contains("SMB3_11"), row.constData());
         QVERIFY2(row.contains("AES-128-CMAC"), row.constData());
-        // every message is signed because the client requires it; the
-        // server alone (signing not mandatory) would sign only the tree connect.
         QVERIFY2(!row.contains("partial"), row.constData());
         QVERIFY2(!row.contains("GCM") && !row.contains("CCM"), row.constData());
     }
 
-    // with profile signed the client still encrypts where the server
-    // marks the session or the share for it (ENCRYPT_DATA).
     void encryptionOffServerRequires()
     {
         const auto backend = newBackend();
@@ -429,15 +414,11 @@ private slots:
         const auto backend = newBackend();
         const Result r = signIn(backend.get(), params(QStringLiteral("smb2only")), credentials());
         QCOMPARE(r.error(), Error::SecurityPolicy);
-        // refused by the server's negotiate reply (STATUS_NOT_SUPPORTED)
-        // because the client offered SMB 3.1.1 only.
         QVERIFY2(r.message().contains(QLatin1String("0xc00000bb")), qPrintable(r.message()));
         const Result plain = signIn(backend.get(), params(QStringLiteral("smb2only"), false), credentials());
         QCOMPARE(plain.error(), Error::SecurityPolicy);
     }
 
-    // a reply that picks a dialect the client never offered (SMB 2.1
-    // where only 3.1.1 was offered) ends the sign-in.
     void dialectNeverOffered()
     {
         const auto backend = newBackend();
@@ -459,7 +440,6 @@ private slots:
         QVERIFY2(row.contains("SMB3_11") && row.contains("AES-128-GCM"), row.constData());
     }
 
-    // one byte of a signed (or sealed) reply after sign-in is altered.
     void tamperedResponse_data()
     {
         QTest::addColumn<int>("port");
@@ -486,8 +466,6 @@ private slots:
         QCOMPARE(backend->stat(QString(), &entry).error(), Error::ConnectionLost);
     }
 
-    // MS-SMB2 3.2.5.3.1: one byte of the final SESSION_SETUP reply is
-    // altered; its signature (keys of the new session) does not verify.
     void tamperedSessionSetup()
     {
         const auto backend = newBackend();
@@ -496,8 +474,6 @@ private slots:
         QVERIFY2(r.message().contains(QLatin1String("signature")), qPrintable(r.message()));
     }
 
-    // with encryption required nothing readable crosses the wire; the
-    // control run without encryption shows the method finds cleartext.
     void noCleartextOnWire()
     {
         const QByteArray marker("NETVFS-CLEARTEXT-MARKER-4f1d");
@@ -511,8 +487,6 @@ private slots:
         const QByteArray sealed = stopCapture(QStringLiteral("default"));
         if (QTest::currentTestFailed())
             return;
-        // The capture saw the transfer. Not the whole size: with GRO a burst of
-        // pipelined writes can arrive as one packet larger than the snapshot length.
         QVERIFY2(sealed.size() > payload.size() / 2, qPrintable(QString::number(sealed.size())));
         QVERIFY(sealed.contains("\xfdSMB"));
         QVERIFY(!sealed.contains(marker));
@@ -527,7 +501,6 @@ private slots:
         QVERIFY(plain.contains(utf16(folder)));
     }
 
-    // AES-256-GCM is the server's only cipher: the second one offered.
     void aes256GcmOnly()
     {
         const auto backend = newBackend();
@@ -539,8 +512,6 @@ private slots:
         QVERIFY2(row.contains("SMB3_11") && row.contains("AES-256-GCM"), row.constData());
     }
 
-    // ciphers or signing algorithms this client does not offer: AES-CCM
-    // (encryption required or desired), AES-GMAC and HMAC-SHA256 signing.
     void unsupportedAlgorithms_data()
     {
         QTest::addColumn<QString>("server");
@@ -569,7 +540,6 @@ private slots:
         qint64 freeBytes = -1;
         QVERIFY(backend->freeSpace(QString(), &freeBytes).ok());
         QVERIFY2(freeBytes > 15 * 1024 * 1024 && freeBytes <= 16 * 1024 * 1024, qPrintable(QString::number(freeBytes)));
-        // Free space known: refused before transferring.
         QCOMPARE(Transfer::uploadFile(backend.get(), m_big, QStringLiteral("full.tar")).error(), Error::NoSpace);
         QFile file(m_big);
         QVERIFY(file.open(QIODevice::ReadOnly));
@@ -697,7 +667,6 @@ private slots:
         QVERIFY2(clock.elapsed() < 2000 + 3000, qPrintable(QString::number(clock.elapsed())));
     }
 
-    // The server goes away after sign-in, or during it.
     void connectionDropped()
     {
         const auto backend = newBackend();
@@ -711,8 +680,6 @@ private slots:
         QCOMPARE(r.error(), Error::SecurityPolicy);
     }
 
-    // a backups folder with a space and a non-ASCII character
-    // given with a leading '/' that is stripped.
     void nonAsciiFolder()
     {
         const QString dir = QString::fromUtf8("Sailfish OS/Backups f\xc3\xbcr J\xc3\xb6rg");
@@ -725,8 +692,6 @@ private slots:
         QCOMPARE(code, 0);
     }
 
-    // NTLM_USER_FILE never decides which password is used (the client
-    // reads no such file; the account's password is the only one).
     void userFileIgnored()
     {
         QTemporaryDir dir;
@@ -1040,11 +1005,7 @@ private slots:
         QVERIFY(part.isEmpty());
         QVERIFY(handle->read(content.size() + 100, 100, &part).ok());
         QVERIFY(part.isEmpty());
-        // A bad offset and a closed handle are the caller's mistakes, which
-        // the Rust backends' C ABI reports as ProtocolError.
         QCOMPARE(handle->read(-1, 1, &part).error(), Error::ProtocolError);
-        // read-ahead, then reads elsewhere: the queued chunks are not
-        // mistaken for the new position.
         handle->readAhead(0, 3 * 1024 * 1024);
         QVERIFY(handle->read(2 * 1024 * 1024 + 7, 10, &part).ok());
         QCOMPARE(part, content.mid(2 * 1024 * 1024 + 7, 10));
@@ -1112,8 +1073,6 @@ private:
     }
 
 private slots:
-    // servers limited to SMB 2.1 or to SMB 3.0 are
-    // refused by every profile, in share and in server mode.
     void profilesOnOldDialects_data()
     {
         QTest::addColumn<QString>("server");
@@ -1140,9 +1099,6 @@ private slots:
         QVERIFY2(r.message().contains(QLatin1String("0xc00000bb")), qPrintable(r.message()));
     }
 
-    // signed against the strict server still gets SMB 3.1.1 with the
-    // encryption the server requires; a profile netvfs does not know is
-    // refused.
     void weakerProfilesOnStrictServer()
     {
         const auto backend = newBackend();
@@ -1177,9 +1133,6 @@ private slots:
         QVERIFY(!signIn(refused.get(), profiled(QStringLiteral("strict"), QStringLiteral("guest")), Credentials()).ok());
     }
 
-    // "map to guest = Bad User" turns an unknown user into a guest
-    // every profile but guest refuses that session (no silent downgrade),
-    // in share and in server mode (before the share list is asked for).
     void guestMappingRefused_data()
     {
         QTest::addColumn<QString>("profile");
@@ -1297,9 +1250,6 @@ private slots:
         QVERIFY(backend->removeDir(QStringLiteral("/backup/server")).ok());
     }
 
-    // at most four share contexts; the least recently used goes
-    // never one with open handles. Every share is a tree connect of the one
-    // session (one TCP connection), IPC$ included.
     void serverModeContextLimit()
     {
         const QString server = QStringLiteral("strict");
@@ -1318,14 +1268,12 @@ private slots:
         QVERIFY(put(backend.get(), QStringLiteral("/backup/lru.txt"), "backup"));
         QTRY_COMPARE(trees(), 2);
         QCOMPARE(connections(server), 1);
-        // Share names are case-insensitive: no second context for BACKUP.
         QVERIFY(backend->stat(QStringLiteral("/BACKUP/lru.txt"), &entry).ok());
         QTest::qWait(500);
         QCOMPARE(trees(), 2);
         for (const QString &share : shares.mid(1, 3))
             QVERIFY(put(backend.get(), QStringLiteral("/%1/lru.txt").arg(share), share.toUtf8()));
         QTRY_COMPARE(trees(), 5);
-        // Share names are case-insensitive: the same context, and a use.
         QVERIFY(backend->stat(QStringLiteral("/BACKUP/lru.txt"), &entry).ok());
         QVERIFY(backend->stat(QStringLiteral("/readonly/existing.txt"), &entry).ok());
         QTRY_COMPARE(trees(), 5);
@@ -1355,8 +1303,6 @@ private slots:
         QTRY_COMPARE_WITH_TIMEOUT(connections(server), 0, 15000);
     }
 
-    // a cancel() from within the transfer ends it, even when the
-    // rest of the file has already arrived (read-ahead).
     void downloadCancelFromProgress()
     {
         const auto backend = newBackend();
@@ -1378,9 +1324,6 @@ private slots:
         QVERIFY(backend->removeFile(QStringLiteral("cancel-me.bin")).ok());
     }
 
-    // a cancel also ends a read that the data has arrived for. Unlike
-    // downloadCancelFromProgress this does not depend on the server's timing:
-    // the last byte is in a reply that is already in.
     void readCancelAfterArrival()
     {
         const auto backend = newBackend();
@@ -1390,7 +1333,6 @@ private slots:
         ReadHandle *raw = nullptr;
         QVERIFY(backend->openRead(QStringLiteral("arrived.bin"), &raw).ok());
         std::unique_ptr<ReadHandle> handle(raw);
-        // One request for the whole file; all of it but the last byte is read.
         handle->readAhead(0, data.size());
         QByteArray part;
         QVERIFY(handle->read(0, data.size() - 1, &part).ok());
@@ -1415,7 +1357,6 @@ private slots:
         QCOMPARE(backend->list(QStringLiteral("away"), &entries).error(), Error::Unsupported);
     }
 
-    // times through SET_INFO; modes are not SMB's.
     void attributes()
     {
         const auto backend = newBackend();
@@ -1482,8 +1423,6 @@ private slots:
         QVERIFY(backend->removeFile(QStringLiteral("flags.txt")).ok());
     }
 
-    // (hand-over),: Ops::copyAcross runs the source's download
-    // on a worker thread; SMB to local and SMB to SMB (server mode).
     void copyAcrossThreads()
     {
         const auto source = newBackend();
@@ -1522,7 +1461,6 @@ private slots:
         QVERIFY(destination->removeFile(QStringLiteral("/media/across.bin")).ok());
     }
 
-    // resume continues at the remote size, and only there.
     void writeResume()
     {
         const auto backend = newBackend();

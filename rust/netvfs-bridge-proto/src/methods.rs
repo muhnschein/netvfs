@@ -86,9 +86,7 @@ pub const METHODS: [MethodInfo; 37] = [
     method("Hello", "s", "s", Interactive, false),
     method("GetConsent", "", "s", Interactive, false),
     method("RequestConsent", "", "", Interactive, false),
-    // Consumer feature probe; reveals nothing of the user's locations.
     method("GetFeatures", "", "as", Interactive, false),
-    // Without consent returns nothing instead of failing.
     method("ListLocations", "", "a(sssa{sv})", Interactive, false),
     method("Capabilities", "s", "(asasx)", Interactive, true),
     method("Disconnect", "s", "", Interactive, true),
@@ -115,13 +113,10 @@ pub const METHODS: [MethodInfo; 37] = [
     method("CopyAcross", "saysaya{sv}", "u", Bulk, true),
     method("RemoveTree", "say", "u", Bulk, true),
     method("Walk", "saya{sv}", "u", Bulk, true),
-    // Cancel needs no consent.
     method("Cancel", "u", "", Interactive, false),
     method("OpenAccountSettings", "s", "", Interactive, true),
     method("AddAccount", "s", "", Interactive, true),
-    // Shows nothing of the user's locations.
     method("OpenStorageSettings", "", "", Interactive, false),
-    // Shows nothing of the user's locations; polkit lets any process of the user mount.
     method("ListDrives", "", "a(ssaya{sv})", Interactive, false),
     method("Mount", "s", "ay", Interactive, false),
     method("Unmount", "s", "", Interactive, false),
@@ -161,7 +156,6 @@ pub fn find_signal(name: &str) -> Option<&'static str> {
 mod tests {
     use super::*;
 
-    // every method exactly once
     #[test]
     fn method_table_order_and_consent() {
         let expected = [

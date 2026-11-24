@@ -166,8 +166,6 @@ Result Decoder::list(DBusMessageIter *sub, int depth, QVariant *out)
     return Result::success();
 }
 
-// libdbus aborts on strings with NUL characters (a failed check); QString
-// may hold them. U+FFFD stands in.
 QByteArray wireString(const QString &v)
 {
     QString copy = v;
@@ -175,7 +173,7 @@ QByteArray wireString(const QString &v)
     return copy.toUtf8();
 }
 
-} // namespace
+}
 
 Result decodeArguments(DBusMessage *message, QVariantList *out, const DecodeLimits &limits)
 {
@@ -235,7 +233,6 @@ WireWriter::WireWriter(DBusMessage *message)
 
 WireWriter::~WireWriter()
 {
-    // Abandon containers left open so libdbus does not keep a half-built message.
     m_ok = false;
     while (m_stack.size() > 1)
         close();
@@ -404,7 +401,6 @@ WireWriter &WireWriter::variant(const QVariant &v)
     return close();
 }
 
-// A failed open pushes a null level so that open/close pairs stay balanced.
 void WireWriter::open(int type, const char *signature)
 {
     std::unique_ptr<DBusMessageIter> sub;
@@ -446,4 +442,4 @@ WireWriter &WireWriter::close()
     return *this;
 }
 
-} // namespace NetVfs::BridgeTest
+}

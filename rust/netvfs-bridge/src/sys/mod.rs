@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! libc calls (and `unsafe` zbus/tokio constructors), each in a safe wrapper. Only `unsafe` module besides `ffi`.
 #![allow(unsafe_code)]
 
 #[cfg(any(test, feature = "testing"))]
@@ -13,12 +12,10 @@ pub mod peer;
 
 use std::io;
 
-/// `Ok(value)` unless -1, else the OS error.
 fn check(result: libc::c_int) -> io::Result<libc::c_int> {
     if result == -1 { Err(io::Error::last_os_error()) } else { Ok(result) }
 }
 
-/// Reads an `int` socket option.
 fn socket_option_int(
     fd: std::os::fd::BorrowedFd<'_>,
     level: libc::c_int,

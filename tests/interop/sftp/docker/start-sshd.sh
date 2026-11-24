@@ -1,35 +1,5 @@
 #!/bin/sh
 # SPDX-License-Identifier: LGPL-2.1-or-later
-# Container entry point for the SFTP interop servers.
-# Creates the test users and starts one sshd per instance named in
-# $INSTANCES, each on its own port and log file:
-#   default  2201  password and keys; user "twofactor" needs key + password,
-#                  user "nosession" may open no session (MaxSessions 0)
-#   hardened 2202  hardened configuration (OpenSSH 10.x only)
-#   kbdint   2203  keyboard-interactive only, via PAM (distribution sshd)
-#   nosftp   2204  no sftp subsystem
-#   noext    2205  sftp-server behind sftpproxy.py, which hides all extensions
-#   hold     2207  sftp-server behind sftpproxy.py, which holds replies back
-#                  while /tmp/hold exists
-#   legacy   2206  only finite-field Diffie-Hellman with SHA-1
-#   otp      2208  keyboard-interactive through PAM with the one-time
-#                  password stub (pam_netvfs_otp.c, code $TEST_OTP)
-#                  (distribution sshd only); users:
-#                    otp        password, then the code (two rounds)
-#                    keyotp     publickey, then the code (partial success)
-#                    pwotp      password, then the code (partial success)
-#                    twoprompt  an echoed "Token label" round, then the code
-#                  others (alice) sign in with a password
-#   stall    2209  TCP relay to the default instance (sftpproxy.py --relay)
-#                  that forwards nothing while /tmp/stall exists
-#   curve    2210  only the curve25519 key exchange (no post-quantum hybrid)
-# What the client's hardened lists leave out, one list at a time:
-#   dh       2211  only finite-field Diffie-Hellman with SHA-2
-#   cbc      2212  only CBC ciphers
-#   sha1rsa  2213  only the SHA-1 RSA host key signature (ssh-rsa)
-# The password of every password user is $TEST_PASSWORD. /run/netvfs-ready
-# appears when all instances accept connections. User "conf" belongs to the
-# conformance suite; /srv/conformance is its folder when mounted.
 set -eu
 
 : "${TEST_PASSWORD:?}"
@@ -40,9 +10,7 @@ for user in alice carol twofactor conf otp keyotp pwotp twoprompt nosession; do
     echo "$user:$TEST_PASSWORD" | chpasswd
 done
 
-# Chrooted, key-only account of the hardened configuration. Jail is root-owned; the account writes below /data. Its keys live outside the jail.
 id backup >/dev/null 2>&1 || useradd -M -s /usr/sbin/nologin backup
-# Ubuntu already has a system user "backup"; the hardened configuration uses that name.
 usermod -d /data -s /usr/sbin/nologin backup
 usermod -p '*' backup
 mkdir -p /srv/sftpjail/data /etc/ssh/authorized_keys
@@ -51,7 +19,6 @@ chmod 755 /srv/sftpjail
 chown backup:backup /srv/sftpjail/data
 chmod 700 /srv/sftpjail/data
 
-# A small file system for the full-disk case, when the container has one.
 if [ -d /srv/small ]; then
     mkdir -p /srv/small/alice
     chown alice:alice /srv/small/alice
@@ -61,9 +28,6 @@ if [ -d /srv/conformance ]; then
     chown conf /srv/conformance
 fi
 
-# PAM stack of the otp instance: user-specific blocks in front of the distribution's stack (pam_netvfs_otp.c documents the arguments).
-# pwotp also signs in with the password method, which runs the same stack and answers every hidden prompt with the
-# password: a wrong code falls through to pam_unix there.
 if [ "${USE_PAM:-0}" = 1 ] && [ -n "${TEST_OTP:-}" ] && ! grep -q pam_netvfs_otp /etc/pam.d/sshd; then
     {
         echo "# netvfs interop: one-time password stub (start-sshd.sh)"
@@ -82,7 +46,6 @@ if [ "${USE_PAM:-0}" = 1 ] && [ -n "${TEST_OTP:-}" ] && ! grep -q pam_netvfs_otp
     mv /etc/pam.d/sshd.new /etc/pam.d/sshd
 fi
 
-# Key of the reference OpenSSH client inside this container.
 if [ ! -f /setup/client_key ]; then
     "$SSH_KEYGEN" -q -t ed25519 -N '' -C crosscheck -f /setup/client_key
 fi
@@ -111,8 +74,6 @@ EOF
     penalties
 }
 
-# OpenSSH 9.8+ penalises sources with many failed or unauthenticated connections; the suite makes such connections on
-# purpose, all from the Docker gateway address.
 penalties() {
     if [ "${PENALTIES:-0}" = 1 ]; then
         echo "PerSourcePenalties no"

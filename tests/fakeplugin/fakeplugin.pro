@@ -1,5 +1,4 @@
 # SPDX-License-Identifier: LGPL-2.1-or-later
-# libnetvfs-fake.so: backend plugin over the in-memory FakeServer, tests only.
 include(../../common.pri)
 
 TEMPLATE = lib

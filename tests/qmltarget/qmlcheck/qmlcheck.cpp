@@ -1,15 +1,4 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-// Compiles QML documents with the target's QML engine (Qt 5.6): syntax, ES5
-// JavaScript, imports, types and property names are checked against the real
-// Sailfish.Silica, Sailfish.Accounts and Sailfish.Pickers modules, the built
-// org.netvfs.accounts module and stubs of the closed agent types that carry
-// only the members of.
-//
-// With --create each document is also instantiated and every QML warning
-// that names one of the checked files (binding errors such as unknown
-// identifiers) counts as a failure.
-//
-// Usage: qmlcheck [--create] -I <import path>... <file.qml>...
 #include <QtGui/QGuiApplication>
 #include <QtQml/QQmlComponent>
 #include <QtQml/QQmlEngine>
@@ -38,7 +27,6 @@ Options parse(const QStringList &args)
     return options;
 }
 
-// Warnings about our own documents; Silica internals may warn without a window.
 int ownWarnings(const QList<QQmlError> &warnings)
 {
     int count = 0;
@@ -80,7 +68,7 @@ bool check(const Options &options, const QString &file)
     }
     return ownWarnings(warnings) == 0;
 }
-} // namespace
+}
 
 int main(int argc, char **argv)
 {

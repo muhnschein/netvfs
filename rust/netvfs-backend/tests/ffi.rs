@@ -1,6 +1,4 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! C ABI of libnetvfs-rs.so against the `mem` backend, called through the table like the shim does. Each test
-//! uses its own `mem` store.
 #![allow(
     unsafe_code,
     missing_docs,
@@ -919,7 +917,6 @@ fn handles_after_disconnect_and_conn_free() {
     assert_eq!(unsafe { (t().position)(w) }, 0);
     assert_eq!(name(res(unsafe { (t().commit)(w) })), "ConnectionLost");
     assert_eq!(live_objects(), 2);
-    // conn_free frees open handles.
     drop(c);
     assert_no_leaks();
     let c = Conn::open("lost", &[]);
@@ -962,7 +959,6 @@ fn uploads_and_downloads() {
     assert_eq!(name(c.download(b"big", 0, -2, None).0), "ProtocolError");
     assert_eq!(name(c.download(b"missing", 0, -1, None).0), "NotFound");
 
-    // A FIFO source has no size; expected_size gives the total.
     let mut l = Local { data: b"options".to_vec(), sequential: true, ..Local::default() };
     let io_seq = io(&mut l);
     let mut p = Prog::default();
@@ -1058,7 +1054,6 @@ fn cancel_stays_until_reset() {
     c.cancel();
     assert_eq!(name(c.stat(b"f", true)), "Canceled");
     assert_eq!(name(c.keep_alive()), "Canceled");
-    // A refused call runs nothing of the backend, even where it works before returning a future (mem's connect).
     assert_eq!(name(c.connect(&[("store", "elsewhere")])), "Canceled");
     assert_eq!(name(read(r, 0, 4)), "Canceled");
     assert_eq!(name(write(w, b"x")), "Canceled");
@@ -1069,7 +1064,6 @@ fn cancel_stays_until_reset() {
     c.reset();
     c.stat(b"f", true).unwrap();
     assert_eq!(c.get(b"g").unwrap(), b"partial");
-    // cancel() from inside a transfer, then reset.
     c.put(b"big", &pattern(600_000, 3)).unwrap();
     let mut p = Prog { cancel: c.0, ..Prog::default() };
     let (r, got) = c.download(b"big", 0, -1, Some(&mut p));
@@ -1105,7 +1099,6 @@ fn a_call_that_ignores_cancel_is_cut() {
     assert_eq!(name(r), "Canceled");
     assert!(after >= GRACE.checked_sub(Duration::from_millis(50)).unwrap(), "{after:?}");
     assert!(after < CANCEL_LIMIT, "{after:?}");
-    // Calls work again after reset_cancel; conn_free after a cancel is bounded too.
     c.reset();
     c.cancel();
     let started = Instant::now();
@@ -1137,7 +1130,6 @@ fn one_call_at_a_time() {
     let busy = "The connection is busy: one call at a time, none from a callback";
     assert_eq!(results[0].as_ref().unwrap_err().message, busy);
     assert_eq!(results[1].as_ref().unwrap_err().message, busy);
-    // Nested block_on: tokio refuses, comes back as Internal instead of a crash.
     let nested = results[2].as_ref().unwrap_err();
     assert_eq!((nested.name.as_str(), nested.message.as_str()), ("Internal", "The Rust backend failed"));
     assert!(nested.detail.starts_with("panic: "), "{}", nested.detail);
@@ -1191,7 +1183,6 @@ fn panics_become_internal() {
             _ => assert_eq!(name(c.caps()), "Internal"),
         });
         assert_eq!(panics, [format!("mem: {call} panics on request")], "{call}");
-        // conn_free disconnects (panicking again for "disconnect") and frees all the same.
         let panics = panics_in(|| drop(c));
         assert_eq!(panics.len(), usize::from(call == "disconnect"), "{call}");
         assert_no_leaks();
@@ -1214,7 +1205,6 @@ fn panics_become_internal() {
     assert_no_leaks();
 }
 
-/// Runtime threads by name; a new thread names itself once it runs, possibly after the call returned: waits up to 10 s.
 fn runtime_threads() -> Vec<String> {
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {
@@ -1245,7 +1235,6 @@ fn two_named_workers() {
 
 #[test]
 fn a_connection_may_move_between_threads() {
-    // Made here, used and freed on another thread.
     let c = Conn::new();
     let c = std::mem::ManuallyDrop::new(c);
     let moved = SendPtr(c.0);
@@ -1262,7 +1251,6 @@ fn a_connection_may_move_between_threads() {
     .unwrap();
 }
 
-/// `sftp` through the table: a port nobody listens on fails as the backend says, nothing leaks.
 #[test]
 fn sftp_is_a_provider() {
     let closed = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
@@ -1299,7 +1287,6 @@ fn fixture(file: &str) -> Vec<u8> {
     std::fs::read(path).unwrap()
 }
 
-/// A key block as (private key, algorithm, public line, fingerprint); freed.
 fn take_key(key: *mut NvrKey) -> (Vec<u8>, String, String, String) {
     assert!(!key.is_null());
     let k = unsafe { &*key };

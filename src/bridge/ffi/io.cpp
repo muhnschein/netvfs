@@ -1,8 +1,4 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-// Upload and Download: the backend streams through a QIODevice whose local side is the caller's
-// nvb_io. The caller checked the descriptor and does pread/pwrite (regular file) or read/write
-// (FIFO). Random access within the range for regular files, sequential for FIFOs; every failure or
-// cancel is -1.
 #include "ffi_p.h"
 
 #include <QtCore/QIODevice>
@@ -57,8 +53,6 @@ qint64 CallbackDevice::readData(char *data, qint64 maxSize)
     return n;
 }
 
-// FIFOs: one call, may be short. Regular files: until everything is written; a stop after some
-// bytes reports those.
 qint64 CallbackDevice::writeData(const char *data, qint64 maxSize)
 {
     if (!m_io.write)

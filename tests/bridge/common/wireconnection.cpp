@@ -11,15 +11,12 @@
 
 #include <memory>
 
-// What libdbus calls back into: the connection (dispatches its queue, handles
-// its messages). The libdbus callbacks are in dbusloop.c.
 struct NetVfsLoopOwner {
     NetVfsLoopOwner() = default;
     NetVfsLoopOwner(const NetVfsLoopOwner &) = delete;
     NetVfsLoopOwner &operator=(const NetVfsLoopOwner &) = delete;
     virtual ~NetVfsLoopOwner() = default;
 
-    // After every watch activation (the connection schedules a dispatch).
     virtual void afterWatch() = 0;
     virtual DBusHandlerResult message(DBusMessage *message) = 0;
     virtual void dispatchStatus(DBusDispatchStatus status) = 0;
@@ -28,9 +25,6 @@ struct NetVfsLoopOwner {
 namespace NetVfs::BridgeTest {
 
 namespace {
-
-// Read and write notifiers of one DBusWatch. Owned through the watch data;
-// deleted later because removal may happen inside its own activation.
 class WatchNotifier : public QObject
 {
 public:
@@ -118,7 +112,7 @@ bool isLocalDisconnected(DBusMessage *message)
     return dbus_message_is_signal(message, DBUS_INTERFACE_LOCAL, "Disconnected");
 }
 
-} // namespace
+}
 
 
 struct WireConnection::Integration final : NetVfsLoopOwner {
@@ -238,7 +232,6 @@ void WireConnection::scheduleDispatch()
 void WireConnection::dispatch()
 {
     m_dispatchScheduled = false;
-    // Bounded per pass so a flooding peer cannot starve the event loop.
     constexpr int MaxMessagesPerPass = 64;
     for (int i = 0; i < MaxMessagesPerPass; ++i) {
         if (dbus_connection_dispatch(m_connection) != DBUS_DISPATCH_DATA_REMAINS)
@@ -265,12 +258,11 @@ void WireConnection::noteDisconnected()
     emit disconnected();
 }
 
-} // namespace NetVfs::BridgeTest
+}
 
 
 dbus_bool_t netvfs_loop_watch_added(DBusWatch *watch, NetVfsLoopOwner *owner)
 {
-    // Owned through the watch data until the watch is removed.
     auto notifier = std::make_unique<NetVfs::BridgeTest::WatchNotifier>(watch, owner);
     dbus_watch_set_data(watch, notifier.release(), nullptr);
     return TRUE;

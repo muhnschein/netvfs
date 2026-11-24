@@ -1,10 +1,4 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-// The bridge protocol contract, shared with the consumer's
-// fake bridge: the introspection XML in this folder and the golden message
-// sequences (*.json, format in README.md) replayed against the netvfs-bridge
-// binary with the FakeBackend (provider "fake", account "account:1"). The
-// client is libdbus, the bridge zbus: these cases also show
-// that the two agree on authentication, fd passing and error replies.
 #include "bridgetest.h"
 
 #include <QtCore/QDir>
@@ -102,7 +96,7 @@ QJsonArray argsToJson(const QVariantList &args)
     return out;
 }
 
-} // namespace
+}
 
 class tst_Contract : public QObject
 {
@@ -129,7 +123,6 @@ void tst_Contract::introspection()
     QCOMPARE(reply.args.value(0).toString().toUtf8(), readFile(ContractDir + QStringLiteral("/org.netvfs.Bridge1.xml")));
     const TestClient::Message ping = c->waitReply(c->send("Ping", TestClient::Args(), "org.freedesktop.DBus.Peer"));
     QVERIFY(ping.valid && !ping.isError);
-    // Nothing else lives on the connection.
     const TestClient::Message other = c->waitReply(c->send("Introspect", TestClient::Args(),
                                                            "org.freedesktop.DBus.Introspectable", "/org/other"));
     QVERIFY(other.isError);
@@ -151,8 +144,6 @@ void tst_Contract::signalsOfTheXml()
 
 void tst_Contract::unixFdPassing()
 {
-    // Upload and Download take an fd the consumer opened; libdbus
-    // sends it, the bridge's zbus must have negotiated fd passing.
     BridgeProcess f;
     QVERIFY(f.start());
     auto c = f.client();
@@ -199,8 +190,6 @@ void tst_Contract::unixFdPassing()
 
 void tst_Contract::errorDetails()
 {
-    // an error reply carries the message and an a{sv} with
-    // retryAfterMs, as libdbus decodes it.
     BridgeProcess f;
     f.addFile("f.txt", "12345");
     QVERIFY(f.start());

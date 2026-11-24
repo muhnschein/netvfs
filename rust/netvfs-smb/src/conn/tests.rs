@@ -13,8 +13,6 @@ async fn started() -> (Conn, Peer) {
     (Conn::start(client, T), peer)
 }
 
-/// A connection whose session has keys (`cipher`: sealing too) and
-/// `credits` credits.
 async fn established(cipher: Option<Cipher>, encrypt: bool, credits: u32) -> (Conn, Peer) {
     let (conn, mut peer) = started().await;
     let (client, server) = session_keys(cipher);
@@ -101,7 +99,7 @@ async fn requests_and_compressed_frames_end_the_connection() {
     let (r, ()) = tokio::join!(conn.call(Target::SESSION, echo(), &c), async {
         let req = peer.recv_one().await;
         let mut msg = fake::response(&req, NtStatus::SUCCESS, &four(), 1);
-        msg[16] = 0; // no SERVER_TO_REDIR
+        msg[16] = 0;
         peer.send(&[msg], false).await;
     });
     assert!(matches!(r, Err(Error::Protocol(ref m)) if m.contains("sent a request")), "{r:?}");
@@ -143,7 +141,6 @@ async fn signed_requests_need_signed_responses() {
         peer
     });
     r.unwrap().ok().unwrap();
-    // Unsigned: refused, and the connection is gone.
     let (r, ()) = tokio::join!(conn.call(Target::SESSION, echo(), &c), async {
         let req = peer.recv_one().await;
         peer.send(&[error(&req, NtStatus::ACCESS_DENIED, 1)], false).await;
@@ -604,7 +601,6 @@ async fn abort_closes_the_socket_at_once() {
     assert!(read_frame_eof(&mut peer).await);
 }
 
-/// Whether the client closed its end (and sent nothing before).
 async fn read_frame_eof(peer: &mut Peer) -> bool {
     tokio::time::timeout(fake::WAIT, transport::read_frame(&mut peer.stream, 1 << 16))
         .await

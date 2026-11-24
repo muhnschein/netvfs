@@ -20,7 +20,6 @@ thread_local! {
     static DEPTH: Cell<u32> = const { Cell::new(0) };
 }
 
-/// Panics of callbacks no call returns to (posted functions, discovery hooks), oldest first, at most [`MAX_ORPHANS`].
 static ORPHANS: Mutex<Vec<String>> = Mutex::new(Vec::new());
 const MAX_ORPHANS: usize = 16;
 
@@ -69,7 +68,6 @@ pub fn take_orphan_panics() -> Vec<String> {
     std::mem::take(&mut *ORPHANS.lock().unwrap_or_else(std::sync::PoisonError::into_inner))
 }
 
-/// The context of one callback target: what the trampolines reach through `void *ctx`, and the target's first panic.
 #[derive(Debug)]
 pub(super) struct Ctx<T> {
     target: T,
@@ -81,7 +79,6 @@ impl<T> Ctx<T> {
         Self { target, panic: None }
     }
 
-    /// The `void *ctx` for C. Valid while `self` stays where it is and is not otherwise used.
     pub(super) fn as_ctx(&mut self) -> *mut c_void {
         std::ptr::from_mut(self).cast()
     }
@@ -90,7 +87,6 @@ impl<T> Ctx<T> {
         self.panic.take()
     }
 
-    /// `result` of the call that passed this context, unless the target panicked: then `Internal`.
     pub(super) fn finish<R>(mut self, result: Result<R, Status>) -> Result<R, Status> {
         match self.take_panic() {
             Some(text) => Err(panicked(&text)),
@@ -105,10 +101,6 @@ pub fn panicked(text: &str) -> Status {
     Status::internal(format!("callback panicked: {text}"))
 }
 
-/// Runs `f` on the target behind `ctx`, catching a panic. Returns `fallback` when `ctx` is NULL, the target panicked before, or panics now.
-///
-/// # Safety
-/// `ctx` is NULL or the `as_ctx()` of a live `Ctx<T>` that nothing else uses while the callback runs (callbacks run on the calling thread, during the call that passed the context).
 pub(super) unsafe fn enter<T, R>(ctx: *mut c_void, fallback: R, f: impl FnOnce(&mut T) -> R) -> R {
     // SAFETY: NULL or a live, otherwise unused `Ctx<T>` (contract).
     let Some(ctx) = (unsafe { ctx.cast::<Ctx<T>>().as_mut() }) else {
@@ -127,7 +119,6 @@ pub(super) unsafe fn enter<T, R>(ctx: *mut c_void, fallback: R, f: impl FnOnce(&
     }
 }
 
-/// `nvb_list_sink_fn` over `F`: true goes on.
 pub(super) unsafe extern "C" fn list_sink<F: FnMut(&[WireEntry]) -> bool>(
     ctx: *mut c_void,
     entries: *const NvbEntry,
@@ -143,7 +134,6 @@ pub(super) unsafe extern "C" fn list_sink<F: FnMut(&[WireEntry]) -> bool>(
     }
 }
 
-/// `nvb_walk_visit_fn` over `F`: true goes on.
 pub(super) unsafe extern "C" fn walk_visit<F: FnMut(&[u8], WireEntry) -> bool>(
     ctx: *mut c_void,
     path: NvbBytes,
@@ -262,7 +252,6 @@ pub struct Reply<'r> {
 impl Reply<'_> {
     /// Gives the answers, one per prompt; another count declines.
     pub fn set<A: AsRef<[u8]>>(&mut self, answers: &[A]) {
-        // Pointers to the caller's bytes: no copy of a secret on this side.
         let items: Vec<NvbBytes> = answers.iter().map(|a| NvbBytes::of(a.as_ref())).collect();
         // SAFETY: `raw` is the slot of the prompt hook running now (reply_set is allowed there); `items` are borrowed for the call.
         unsafe { (self.ffi.t.reply_set)(self.raw, items.as_ptr(), items.len()) }
@@ -337,7 +326,6 @@ pub(super) unsafe extern "C" fn prompt_hook(
     }
 }
 
-/// The discovery hook: the full current list after each change.
 pub(super) type NearbyHook = Box<dyn FnMut(Vec<WireNearby>)>;
 
 pub(super) unsafe extern "C" fn discovery_changed(ctx: *mut c_void, items: *const NvbNearby, n: usize) {
@@ -349,7 +337,6 @@ pub(super) unsafe extern "C" fn discovery_changed(ctx: *mut c_void, items: *cons
     }
 }
 
-/// A function for the Qt thread.
 pub(super) type Posted = Box<dyn FnOnce() + Send>;
 
 pub(super) unsafe extern "C" fn run_posted(ctx: *mut c_void) {

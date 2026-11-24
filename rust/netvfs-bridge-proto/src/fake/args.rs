@@ -1,6 +1,4 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! Argument validation as the C++ bridge does it (`args.cpp`): malformed call is `InvalidArgs`, bad
-//! path `InvalidName`.
 
 use super::fail::Fail;
 use super::tree::normalize;
@@ -34,7 +32,6 @@ pub fn path(raw: &[u8]) -> Result<Vec<u8>, Fail> {
     Ok(normalize(raw)?)
 }
 
-/// Lane names; empty selects the method's default.
 pub fn lane(given: &str, default: Lane) -> Result<Lane, Fail> {
     Lane::from_hint(given, default).ok_or_else(|| Fail::args("Unknown lane"))
 }
@@ -58,7 +55,6 @@ pub fn read_size(max: u32) -> Result<usize, Fail> {
     usize::try_from(max).map_err(|e| Fail::args(&e.to_string()))
 }
 
-/// A token of `[a-z0-9-]`.
 pub fn token(s: &str, max: usize) -> Result<String, Fail> {
     let ok = !s.is_empty()
         && s.len() <= max
@@ -82,7 +78,6 @@ fn unknown(key: &str) -> Fail {
     Fail::args(&format!("Unknown option \"{key}\""))
 }
 
-/// `SetAttributes.changes`.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct Attributes {
     pub mode: Option<i32>,
@@ -109,7 +104,6 @@ pub fn attributes(changes: &Dict) -> Result<Attributes, Fail> {
     Ok(out)
 }
 
-/// `ServerCopy.opts` (and the tree options of `CopyAcross`).
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct CopyOpts {
     pub recursive: bool,
@@ -136,11 +130,9 @@ pub enum Disposition {
     Resume,
 }
 
-/// `Upload.opts` / `Download.opts`.
 #[derive(Debug, PartialEq, Eq)]
 pub struct TransferOpts {
     pub offset: i64,
-    /// -1: unknown.
     pub size: i64,
     pub lane: Lane,
     pub disposition: Disposition,
@@ -196,7 +188,6 @@ pub fn transfer_opts(opts: &Dict, upload: bool) -> Result<TransferOpts, Fail> {
     Ok(out)
 }
 
-/// `Walk.opts`.
 #[derive(Debug, PartialEq, Eq)]
 pub struct WalkOpts {
     pub max_depth: i64,

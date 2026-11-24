@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! Scripted server for tests: reads each request, writes chosen responses signed or sealed with the server's session keys.
 
 use std::time::Duration;
 
@@ -69,7 +68,6 @@ pub struct Peer {
 }
 
 impl Peer {
-    /// The next frame, raw. A client that sends nothing fails the test within [`WAIT`].
     pub async fn frame(&mut self) -> Vec<u8> {
         tokio::time::timeout(WAIT, read_frame(&mut self.stream, 16 * 1024 * 1024))
             .await
@@ -159,7 +157,6 @@ pub fn interim(req: &Req, async_id: u64, credits: u16) -> Vec<u8> {
     build(&h, &error_body())
 }
 
-/// Chains messages: pads each but the last to 8 bytes and sets NextCommand (before any signing).
 pub fn chain(mut msgs: Vec<Vec<u8>>) -> Vec<Vec<u8>> {
     let n = msgs.len();
     for m in msgs.iter_mut().take(n.saturating_sub(1)) {
@@ -190,7 +187,6 @@ pub fn close_body() -> Vec<u8> {
     b
 }
 
-/// sspi's SPNEGO/NTLM acceptor for one account: server side of the exchange.
 pub struct Acceptor {
     ctx: sspi::Negotiate,
     creds: Option<sspi::CredentialsBuffers>,

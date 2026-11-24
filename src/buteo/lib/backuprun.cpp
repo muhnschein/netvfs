@@ -26,7 +26,6 @@ const char StatusUploading[] = "UploadingBackup";
 const char StatusCanceled[] = "Canceled";
 const char StatusError[] = "Error";
 
-// The archive and its directory, when now empty.
 void removeArchive(const QString &path)
 {
     if (path.isEmpty())
@@ -135,7 +134,6 @@ void BackupRun::onJobFinished()
 {
     if (!m_job || m_job.get() != sender())
         return;
-    // Queued from the worker: the thread has ended, so the job can go now.
     const std::unique_ptr<NetworkJob> job = std::move(m_job);
     job->wait();
     const Result r = job->result();
@@ -173,7 +171,6 @@ void BackupRun::onArchiveRequested(const Result &result, const QString &path)
         return;
     }
     m_archivePath = path;
-    // The status signal may have overtaken the reply.
     if (m_archiveReady)
         startUpload();
 }
@@ -208,7 +205,6 @@ void BackupRun::startUpload()
     m_waitingForArchive = false;
     const QString local = m_archivePath;
     const QString dir = m_remoteDir;
-    // Fresh connection: building the archive can take minutes.
     startJob([local, dir](Backend *backend) { return BackupSteps::uploadArchive(backend, local, dir); },
              [this]() { finish(Result::success()); });
 }
@@ -235,7 +231,6 @@ void BackupRun::onCloudRestoreStatusChanged(int accountId, const QString &status
 
 void BackupRun::onCloudRestoreError(int accountId, const QString &error, const QString &errorString) const
 {
-    // Informational; the status signal ends the run.
     if (accountId == m_spec.accountId)
         qCDebug(lcNetVfsButeo) << "Restore error from the backup service:" << error << errorString;
 }
@@ -245,7 +240,6 @@ void BackupRun::abort()
     if (!m_running || m_aborted)
         return;
     m_aborted = true;
-    // Cancel the in-flight call; the run finishes when the worker returns.
     if (m_job) {
         m_job->cancel();
         return;

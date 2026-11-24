@@ -293,10 +293,6 @@ pub fn build(header: &Header, body: &[u8]) -> Vec<u8> {
     w.into_vec()
 }
 
-/// A reader at a response body whose StructureSize was checked.
-///
-/// # Errors
-/// A short message or another StructureSize.
 pub(crate) fn body_reader<'a>(msg: &'a [u8], structure_size: u16, what: &str) -> Result<Reader<'a>> {
     let mut r = Reader::new(msg);
     r.seek(HEADER_LEN)?;
@@ -314,7 +310,7 @@ pub(crate) fn body_reader<'a>(msg: &'a [u8], structure_size: u16, what: &str) ->
 /// A malformed error body.
 pub fn check_error_response(msg: &[u8]) -> Result<()> {
     let mut r = body_reader(msg, 9, "ERROR")?;
-    r.skip(2)?; // ErrorContextCount, Reserved
+    r.skip(2)?;
     let byte_count = from_u32(r.u32()?)?;
     if byte_count > r.remaining() {
         return Err(protocol("ERROR response ByteCount beyond the message"));

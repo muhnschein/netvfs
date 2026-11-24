@@ -10,8 +10,6 @@
 namespace NetVfs::Rs {
 
 namespace {
-
-// Answers are wiped however the prompt ends.
 struct Answers {
     QVector<QByteArray> items;
 
@@ -121,7 +119,6 @@ int Hooks::progressCanceled(void *ctx) noexcept
     return hooks->guard(1, [hooks]() { return hooks->m_progressSink->canceled() ? 1 : 0; });
 }
 
-// Upload size is what the source holds from its position; a sequential source has none.
 const nvb_io *Hooks::source(QIODevice *device)
 {
     m_device = device;

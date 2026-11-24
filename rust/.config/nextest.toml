@@ -1,7 +1,5 @@
-# CI uses the "ci" profile: no retries, a flaky test fails the build.
 [profile.default]
 slow-timeout = { period = "60s", terminate-after = 5 }
-# Tests mostly wait on sockets, children, timers: 32 at once. Makefile uses one per core under SANITIZE=1.
 test-threads = 32
 
 [profile.ci]

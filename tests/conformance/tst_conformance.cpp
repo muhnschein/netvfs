@@ -1,7 +1,4 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-// Backend conformance suite. Every test function runs once per target (tests/conformance/README.md); a
-// capability a backend reports must pass its tests, an unreported one must answer Unsupported and change
-// nothing.
 #include "backendloader.h"
 #include "identity.h"
 #include "names.h"
@@ -23,12 +20,11 @@ using namespace NetVfs;
 using namespace Conformance;
 
 namespace NetVfs {
-// QCOMPARE(result, Result(Error::X)) compares the error only and prints the whole result on failure.
 bool operator==(const Result &a, const Result &b)
 {
     return a.error() == b.error();
 }
-} // namespace NetVfs
+}
 
 namespace QTest {
 template<>
@@ -36,7 +32,7 @@ char *toString(const NetVfs::Result &result)
 {
     return qstrdup(qPrintable(result.ok() ? QStringLiteral("success") : result.toString()));
 }
-} // namespace QTest
+}
 
 namespace {
 
@@ -65,7 +61,7 @@ QString describe(const Result &r)
     return r.ok() ? QStringLiteral("success") : r.toString();
 }
 
-} // namespace
+}
 
 class TestConformance : public QObject
 {
@@ -127,9 +123,6 @@ private:
     std::unique_ptr<Backend> connectTo(const ConnectionParams &params, Result *result);
     QString p(const QString &name) const { return Paths::join(m_dir, name); }
     QString hostPath(const QString &name) const;
-    // Creates a folder the test also writes into from this host. With a hostPath it is made here, world-
-    // writable: a folder the server creates belongs to the server's user and an unprivileged host user (CI)
-    // could not add files. Without one the backend makes it.
     bool makeFixtureDir(const QString &hostFolder, const QString &backendPath) const;
     bool has(Capability c) const { return m_caps.has(c); }
     void expectUnsupported(Capability c, const std::function<Result()> &call);
@@ -250,7 +243,6 @@ void TestConformance::capabilities()
 
 void TestConformance::cancelBeforeCall()
 {
-    // a cancel() stays in effect until resetCancel().
     m_backend->cancel();
     Entry entry;
     QCOMPARE(m_backend->stat(m_dir, &entry), Result(Error::Canceled));
@@ -313,7 +305,7 @@ void TestConformance::entryFields()
 
     QVector<Entry> entries;
     QCOMPARE(m_backend->list(m_dir, &entries), Result::success());
-    QCOMPARE(entries.size(), 2);   // "." and ".." never appear
+    QCOMPARE(entries.size(), 2);
     const Entry *listedFile = find(entries, QStringLiteral("fields.bin"));
     const Entry *listedDir = find(entries, QStringLiteral("sub"));
     QVERIFY(listedFile && listedDir);
@@ -385,7 +377,6 @@ void TestConformance::listBatches()
     QCOMPARE(m_backend->list(dir, &stopping, options), Result(Error::Canceled));
     QCOMPARE(stopping.batchSizes.size(), 1);
 
-    // cancel() during the listing ends it early.
     RecordingSink canceling;
     canceling.cancelBackend = m_backend.get();
     QCOMPARE(m_backend->list(dir, &canceling, options), Result(Error::Canceled));
@@ -494,8 +485,6 @@ void TestConformance::renameFolders()
     QCOMPARE(m_backend->makeDir(p(QStringLiteral("empty")), true), Result::success());
     QCOMPARE(putFile(m_backend.get(), p(QStringLiteral("file")), "file"), Result::success());
 
-    // replacing a folder is AlreadyExists in both modes, even an
-    // empty one, and whatever the source is.
     for (const RenameMode mode : { RenameMode::NoReplace, RenameMode::Replace }) {
         QCOMPARE(m_backend->rename(p(QStringLiteral("src")), p(QStringLiteral("empty")), mode), Result(Error::AlreadyExists));
         QCOMPARE(m_backend->rename(p(QStringLiteral("file")), p(QStringLiteral("empty")), mode), Result(Error::AlreadyExists));
@@ -516,8 +505,6 @@ void TestConformance::renameFolders()
 void TestConformance::renameCaseOnly()
 {
     QCOMPARE(putFile(m_backend.get(), p(QStringLiteral("CaseOnly.txt")), "case"), Result::success());
-    // A case-only rename is not "replacing an existing entry", also where
-    // the server compares names case-insensitively.
     QCOMPARE(m_backend->rename(p(QStringLiteral("CaseOnly.txt")), p(QStringLiteral("caseonly.txt")),
                                RenameMode::NoReplace), Result::success());
     QCOMPARE(names(m_backend.get(), m_dir), QStringList { QStringLiteral("caseonly.txt") });
@@ -564,7 +551,7 @@ void TestConformance::namesUtf8()
         const Entry *listed = find(entries, name);
         QVERIFY2(listed, qPrintable(name));
         QVERIFY(!listed->flags.testFlag(EntryFlag::NameNotUtf8));
-        QVERIFY(!listed->flags.testFlag(EntryFlag::Hidden));   // dot names are not flagged
+        QVERIFY(!listed->flags.testFlag(EntryFlag::Hidden));
         Entry entry;
         QCOMPARE(m_backend->stat(path, &entry), Result::success());
         QCOMPARE(entry.name, name);
@@ -579,7 +566,6 @@ void TestConformance::namesUtf8()
 
 void TestConformance::namesNormalization()
 {
-    // no NFC/NFD conversion; both spellings are two names.
     const QString nfc = QStringLiteral("é.txt");
     const QString nfd = QStringLiteral("é.txt");
     QCOMPARE(putFile(m_backend.get(), p(nfc), "nfc"), Result::success());
@@ -686,7 +672,6 @@ void TestConformance::setAttributes()
         }
     }
     QCOMPARE(m_backend->stat(file, &before), Result::success());
-    // An invalid field fails the whole call before anything changes.
     AttributeChanges invalid;
     invalid.mode = 0170644;
     invalid.modified = fixedTime().addYears(5);
@@ -742,7 +727,7 @@ void TestConformance::symlinks()
     QCOMPARE(read, data);
     QCOMPARE(m_backend->makeSymlink(QStringLiteral("other"), p(QStringLiteral("link"))), Result(Error::AlreadyExists));
     QVERIFY(!m_backend->readLink(p(QStringLiteral("target.txt")), &target).ok());
-    QCOMPARE(m_backend->removeFile(p(QStringLiteral("link"))), Result::success());   // the link, not the target
+    QCOMPARE(m_backend->removeFile(p(QStringLiteral("link"))), Result::success());
     QCOMPARE(names(m_backend.get(), m_dir), QStringList { QStringLiteral("target.txt") });
 }
 
@@ -851,7 +836,7 @@ void TestConformance::readHandle()
     QByteArray chunk;
     QCOMPARE(handle->read(0, 1000, &chunk), Result::success());
     QCOMPARE(chunk, data.left(1000));
-    QCOMPARE(handle->read(n - 10, 100, &chunk), Result::success());   // short read only at EOF
+    QCOMPARE(handle->read(n - 10, 100, &chunk), Result::success());
     QCOMPARE(chunk, data.right(10));
     QCOMPARE(handle->read(n, 10, &chunk), Result::success());
     QVERIFY(chunk.isEmpty());
@@ -966,7 +951,6 @@ void TestConformance::writeHandle()
     if (has(Capability::PosixModes))
         QCOMPARE(entry.mode, 0600);
 
-    // abort(): closes without commit; whatever was written may remain.
     options.disposition = WriteOptions::Disposition::CreateNew;
     QCOMPARE(m_backend->openWrite(p(QStringLiteral("aborted")), options, &raw), Result::success());
     handle.reset(raw);
@@ -990,7 +974,6 @@ void TestConformance::writeResume()
     WriteOptions options;
     options.disposition = WriteOptions::Disposition::Resume;
     QByteArray read;
-    // Wrong offsets are refused before anything is written.
     for (const qint64 wrong : { qint64(99), qint64(101), qint64(0) }) {
         options.resumeOffset = wrong;
         const Result r = m_backend->openWrite(p(QStringLiteral("part")), options, &raw);
@@ -1108,8 +1091,6 @@ void TestConformance::uploadOptions()
     if (has(Capability::SetModifiedOnUpload))
         QCOMPARE(seconds(entry.modified), seconds(fixedTime()));
 
-    // the default mode is the server's (umask applied); the owner
-    // can always read and write a new file.
     QCOMPARE(putFile(m_backend.get(), p(QStringLiteral("default")), "x", WriteOptions::Disposition::CreateNew), Result::success());
     QCOMPARE(m_backend->stat(p(QStringLiteral("default")), &entry), Result::success());
     if (has(Capability::PosixModes))
@@ -1120,7 +1101,6 @@ void TestConformance::progressCancel()
 {
     const QByteArray data = pattern(4 * MiB, 11);
     QCOMPARE(putFile(m_backend.get(), p(QStringLiteral("data")), data), Result::success());
-    // Progress::canceled() stops a transfer.
     QBuffer sink;
     sink.open(QIODevice::WriteOnly);
     RecordingProgress stop;
@@ -1134,7 +1114,6 @@ void TestConformance::progressCancel()
     stopUp.cancelAfterFirst = true;
     QCOMPARE(m_backend->upload(&source, p(QStringLiteral("up")), UploadOptions(), &stopUp), Result(Error::Canceled));
 
-    // cancel() from within the transfer.
     QBuffer sink2;
     sink2.open(QIODevice::WriteOnly);
     RecordingProgress cancelDown;
@@ -1192,7 +1171,6 @@ void TestConformance::largeSparse()
     if (heavy == Heavy::Skip)
         QSKIP("heavy cases disabled (NETVFS_CONFORMANCE_HEAVY=0)");
     if (!m_target.hostPath.isEmpty()) {
-        // Sparse where the folder is visible on this host: ftruncate().
         QFile file(hostPath(QStringLiteral("large")));
         QVERIFY(file.open(QIODevice::WriteOnly));
         QVERIFY(file.resize(size));
@@ -1244,7 +1222,7 @@ void TestConformance::copy()
     QCOMPARE(read, data);
     QStringList expected { QStringLiteral("copy"), QStringLiteral("dir"), QStringLiteral("existing"),
                            QStringLiteral("source") };
-    QCOMPARE(names(m_backend.get(), m_dir), expected);   // no temporary leftovers
+    QCOMPARE(names(m_backend.get(), m_dir), expected);
 
     if (has(Capability::ServerCopyRecursive)) {
         QCOMPARE(putFile(m_backend.get(), p(QStringLiteral("dir/inner")), "inner"), Result::success());
@@ -1342,7 +1320,7 @@ void TestConformance::unsupportedWithoutSideEffects()
         return m_backend->makeHardlink(p(QStringLiteral("file")), p(QStringLiteral("hard")));
     });
     expectUnsupported(Capability::PosixModes, [&]() {
-        return m_backend->setAttributes(p(QStringLiteral("file")), modeAndTime);   // the time must not change either
+        return m_backend->setAttributes(p(QStringLiteral("file")), modeAndTime);
     });
     expectUnsupported(Capability::SetModified, [&]() { return m_backend->setAttributes(p(QStringLiteral("file")), time); });
     expectUnsupported(Capability::ReadHandles, [&]() {
@@ -1378,7 +1356,6 @@ void TestConformance::unsupportedWithoutSideEffects()
         QByteArray digest;
         return m_backend->checksum(p(QStringLiteral("file")), QStringLiteral("sha256"), &digest);
     });
-    // an algorithm that is not listed is Unsupported as well.
     const QMap<QString, QString> before = snapshot(m_backend.get(), m_dir);
     QByteArray digest;
     QCOMPARE(m_backend->checksum(p(QStringLiteral("file")), QStringLiteral("crc-unlisted"), &digest), Result(Error::Unsupported));
@@ -1447,7 +1424,6 @@ void TestConformance::stallTimeoutFifo()
         QSKIP("no FIFO stall for this target");
     const FifoStall fifo(hostPath(QStringLiteral("stall")));
     QVERIFY(fifo.isOpen());
-    // the request timeout ends a wait nobody cancels.
     ConnectionParams params = m_target.params;
     params.requestTimeoutMs = TimeoutMs;
     Result r;

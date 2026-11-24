@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-// The fake backend's control table (nvb_fake.h).
 #include "nvb_fake.h"
 
 #include "fakebackend.h"
@@ -61,7 +60,6 @@ int32_t exists(nvb_bytes path)
     return server()->exists(keyOf(path)) ? 1 : 0;
 }
 
-// One block: the nvb_blob, then its bytes.
 nvb_blob *fileData(nvb_bytes path)
 {
     QByteArray data;
@@ -163,7 +161,7 @@ const nvb_fake Table = {
     freeBlock,
 };
 
-} // namespace
+}
 
 extern "C" __attribute__((visibility("default"))) const nvb_fake *nvb_fake_get()
 {

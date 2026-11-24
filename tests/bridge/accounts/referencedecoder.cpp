@@ -1,6 +1,4 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-// The C++ bridge's side of the netvfs-accounts protocol: the
-// reference decoder of the golden tests.
 #include "referencedecoder.h"
 
 #include <QtCore/QDataStream>
@@ -39,7 +37,7 @@ Result readHeader(QDataStream &stream)
     return Result(Error(error), message);
 }
 
-} // namespace
+}
 
 Result decodeList(const QByteArray &answer, QVector<AccountLocation> *accounts)
 {
@@ -93,4 +91,4 @@ Result decodeStatus(const QByteArray &answer)
     return r;
 }
 
-} // namespace NetVfs::Test
+}

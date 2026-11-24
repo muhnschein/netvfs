@@ -1,7 +1,4 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-// The C++ netvfs-accounts (the bridge's accountshelper.cpp at b143680), with
-// its name, the account record (now in referencedecoder.h) and the answer
-// header of today: the golden reference of the Rust helper's answers.
 #include "referencehelper.h"
 
 #include "accountstore.h"
@@ -48,9 +45,6 @@ QByteArray failure(const Result &result)
 
 Result databaseUsable(const Accounts::Manager *manager)
 {
-    // libaccounts reports an unreadable database only through lastError()
-    // and then lists nothing. On Sailfish OS only the group `privileged` can
-    // read it, which this helper gets from its setgid bit.
     if (const Accounts::Error error = manager->lastError(); error.type() != Accounts::Error::NoError)
         return Result(Error::PermissionDenied,
                       QStringLiteral("Cannot open the accounts database (libaccounts error %1 %2). "
@@ -101,7 +95,6 @@ QByteArray serveFiles(const AccountStore &store, const QString &id)
     AccountConfig config;
     if (const Result r = loadListed(store, id, &config); !r.ok())
         return failure(r);
-    // refused before the secret is read.
     if (const Result r = checkServicePolicy(config.params, Service::Files); !r.ok())
         return failure(r);
     Answer answer(Result::success());
@@ -121,7 +114,7 @@ QByteArray serveAttention(const AccountStore &store, const QString &id, const QS
     return failure(store.setAttention(config.accountId, Service::Files, attention, pin));
 }
 
-} // namespace
+}
 
 QByteArray referenceServe(Accounts::Manager *manager, const QStringList &arguments)
 {
@@ -139,5 +132,5 @@ QByteArray referenceServe(Accounts::Manager *manager, const QStringList &argumen
                                                              "attention <id> <state> [pin]")));
 }
 
-} // namespace Test
-} // namespace NetVfs
+}
+}

@@ -165,14 +165,12 @@ pub fn is_password_prompt(text: &str) -> bool {
     text.to_lowercase().contains("password")
 }
 
-/// A russh call that did not return: canceled, timed out, or russh's error.
 #[derive(Debug)]
 enum Stopped {
     Bounded(Status),
     Ssh(russh::Error),
 }
 
-/// Runs a russh call under `cancel` and `timeout`.
 async fn guarded<T>(
     call: impl Future<Output = Result<T, russh::Error>>,
     timeout: Duration,
@@ -201,7 +199,6 @@ fn password_text(secret: &[u8]) -> Result<String, Status> {
         .map_err(|_e| Status::new(ErrorName::AuthFailed, "The password is not valid UTF-8 text"))
 }
 
-/// The stored key: Ed25519 or ECDSA in a key secret.
 fn stored_key(secret: &[u8]) -> Result<PrivateKey, Status> {
     let text = keys::decode_key_secret(secret).ok_or_else(unusable_key)?;
     let text = std::str::from_utf8(&text).map_err(|_e| unusable_key())?;
@@ -221,7 +218,6 @@ pub struct Login<'a, 'p> {
     mode: Mode,
     timeout: Duration,
     cancel: &'a CancelToken,
-    /// The stored password answered a round.
     secret_used: bool,
     tried_interactive: bool,
 }
@@ -266,7 +262,6 @@ impl<'a, 'p> Login<'a, 'p> {
     /// `AuthFailed` with the reason; `Canceled`, `Timeout`,
     /// `ConnectionLost`, `ProtocolError`.
     pub async fn run(mut self) -> Result<(), Status> {
-        // Learn the offered methods first.
         let methods = match self.none().await? {
             Outcome::Success => return Ok(()),
             Outcome::Partial(m) | Outcome::Denied(m) => m,
@@ -294,7 +289,6 @@ impl<'a, 'p> Login<'a, 'p> {
         match self.mode {
             Mode::PublicKey => self.public_key(methods).await,
             Mode::Password => self.password(methods).await,
-            // A stored password where the server takes one, else keyboard-interactive, which needs a prompter.
             Mode::Interactive => {
                 if !self.secret.is_empty() && offers(methods, MethodKind::Password) {
                     let password = password_text(self.secret)?;
@@ -332,7 +326,6 @@ impl<'a, 'p> Login<'a, 'p> {
         Ok(Outcome::Denied(methods.into()))
     }
 
-    /// The key comes from the secret only, never from files or an agent.
     async fn public_key(&mut self, methods: &[MethodKind]) -> Result<Outcome, Status> {
         if !offers(methods, MethodKind::PublicKey) {
             return Ok(Outcome::Denied(methods.into()));
@@ -362,8 +355,6 @@ impl<'a, 'p> Login<'a, 'p> {
         self.outcome(result)
     }
 
-    /// russh reports a session that ended while it waited as a failure without methods: that is the end of the
-    /// session, not a refusal.
     fn outcome(&self, result: Result<AuthResult, Stopped>) -> Result<Outcome, Status> {
         let reply = result.map_err(|e| self.call_failure(e))?;
         Ok(match reply {
@@ -392,7 +383,6 @@ impl<'a, 'p> Login<'a, 'p> {
         }
     }
 
-    /// Rounds without prompts are acknowledged, the others go to the prompter.
     async fn keyboard_interactive(&mut self) -> Result<Outcome, Status> {
         self.tried_interactive = true;
         let user = self.user.to_owned();
@@ -433,7 +423,6 @@ impl<'a, 'p> Login<'a, 'p> {
         }
     }
 
-    /// The answers to one round.
     fn round(
         &mut self,
         name: String,
@@ -452,7 +441,6 @@ impl<'a, 'p> Login<'a, 'p> {
         }
     }
 
-    /// Asks the prompter: one UTF-8 answer per prompt, or the round fails.
     fn ask(&mut self, request: &PromptRequest) -> Result<Vec<String>, Status> {
         self.cancel.check()?;
         let Some(prompter) = self.prompter.as_deref_mut() else {
@@ -467,7 +455,6 @@ impl<'a, 'p> Login<'a, 'p> {
         answers.iter().map(|a| String::from_utf8(a.to_vec()).map_err(|_e| interactive_declined())).collect()
     }
 
-    /// A password through the prompter, after a partial success.
     async fn prompted_password(&mut self) -> Result<Outcome, Status> {
         let request = PromptRequest {
             name: String::new(),

@@ -8,7 +8,6 @@ Buteo::ClientPlugin *NetVfsButeoLoader::createClientPlugin(const QString &plugin
                                                            const Buteo::SyncProfile &profile,
                                                            Buteo::PluginCbInterface *cbInterface)
 {
-    // Ownership passes to the Buteo plugin runner.
     return std::make_unique<NetVfs::BackupClient>(QStringLiteral(NETVFS_BUTEO_PROVIDER),
                                                   NetVfs::BackupClient::Operation::NETVFS_BUTEO_OPERATION,
                                                   pluginName, profile, cbInterface)

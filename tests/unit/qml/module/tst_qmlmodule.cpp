@@ -50,7 +50,6 @@ QStringList qmlFiles()
             + filesIn(QStringLiteral("src/bridge/data"), { QStringLiteral("*.qml") });
 }
 
-// Source without // comments, so rules match code only.
 QString codeOf(const QString &path)
 {
     QStringList lines = readFile(path).split(QLatin1Char('\n'));
@@ -69,8 +68,6 @@ QSet<QString> matches(const QString &text, const QRegularExpression &pattern)
     return found;
 }
 
-// Element values of a provider or service file, keyed by path
-// ("service/type", "setting:method", ...); attributes as "element@attr".
 QMap<QString, QString> readXml(const QString &path)
 {
     QMap<QString, QString> values;
@@ -100,7 +97,7 @@ QMap<QString, QString> readXml(const QString &path)
         values.insert(QStringLiteral("error"), xml.errorString());
     return values;
 }
-} // namespace
+}
 
 class TestQmlModule : public QObject
 {
@@ -171,7 +168,6 @@ private slots:
 
     void settingsEntry()
     {
-        // The bridge's tapped notification (handoff.conf) opens the Settings entry this package installs.
         const QJsonArray entries = QJsonDocument::fromJson(
                     readFile(SourceDir + QStringLiteral("/src/bridge/data/netvfs-access.json")).toUtf8())
                 .object().value(QStringLiteral("entries")).toArray();
@@ -179,7 +175,6 @@ private slots:
         const QJsonObject entry = entries.at(0).toObject();
         QCOMPARE(entry.value(QStringLiteral("type")).toString(), QStringLiteral("page"));
         const QString path = entry.value(QStringLiteral("path")).toString();
-        // Child of the Accounts tab, whose view lists accounts, not entries: Settings shows no row for it.
         const QStringList parts = path.split(QLatin1Char('/'));
         QCOMPARE(parts.size(), 2);
         QCOMPARE(parts.at(0), QStringLiteral("accounts"));
@@ -226,7 +221,6 @@ private slots:
 
     void qt56Compatible()
     {
-        // The target runs Qt 5.6: ES5 JavaScript and no QML features from later releases.
         QFETCH(QString, file);
         const QString code = codeOf(file);
         struct Rule {
@@ -257,7 +251,6 @@ private slots:
 
     void platformTypes()
     {
-        // only the closed types and members listed in
         const QSet<QString> closedTypes {
             QStringLiteral("AccountCreationAgent"), QStringLiteral("AccountSettingsAgent"),
             QStringLiteral("AccountCredentialsAgent"), QStringLiteral("AccountBusyPage"),

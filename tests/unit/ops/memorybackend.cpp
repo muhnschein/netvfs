@@ -52,7 +52,7 @@ QString applyTarget(const QString &base, const QString &target)
     return parts.join(QLatin1Char('/'));
 }
 
-} // namespace
+}
 
 MemoryBackend::MemoryBackend()
 {
@@ -157,8 +157,6 @@ Result MemoryBackend::begin(const char *op, const QString &path, QString *key)
     return Result::success();
 }
 
-// Resolves symbolic links in every component, and in the last one when
-// `followLast`. The result may name a missing last component.
 Result MemoryBackend::resolve(const QString &key, bool followLast, QString *out, int hops) const
 {
     const QStringList parts = key.split(QLatin1Char('/'), NETVFS_SKIP_EMPTY_PARTS);

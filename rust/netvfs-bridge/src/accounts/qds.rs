@@ -13,7 +13,6 @@ use std::collections::BTreeMap;
 
 /// More accounts than this is a malformed list.
 pub const MAX_ACCOUNTS: i32 = 10_000;
-/// Deeper nested maps are malformed (Qt has no limit; the helper writes one level).
 const MAX_DEPTH: u32 = 32;
 
 mod type_id {
@@ -53,7 +52,6 @@ pub fn names_encode(units: &[u16]) -> Vec<u8> {
     out
 }
 
-/// Reads a `QDataStream`; `None` is a failed read.
 #[derive(Debug)]
 struct Reader<'a> {
     rest: &'a [u8],
@@ -139,7 +137,6 @@ impl<'a> Reader<'a> {
         })
     }
 
-    /// Read with `insertMulti`, used with `value()`: the last value of a key wins; keys in `QMap` order.
     fn variant_map(&mut self, depth: u32) -> Option<Vec<(String, Value)>> {
         let count = self.u32()?;
         let mut map = BTreeMap::new();
@@ -286,7 +283,6 @@ impl Writer {
     }
 
     fn length(&mut self, n: usize) {
-        // As the helper: a length past 4 GiB is cut to the longest.
         self.u32(u32::try_from(n).unwrap_or(LONGEST_LENGTH));
     }
 
@@ -310,7 +306,6 @@ impl Writer {
 
     /// `QVariantMap`: Qt 5 writes a `QMap` from its last key to its first.
     pub fn variant_map(&mut self, map: &[(String, Value)]) {
-        // A key given twice: the first counts, as in the helper.
         let mut sorted = BTreeMap::new();
         for (key, value) in map {
             sorted.entry(key.encode_utf16().collect::<Vec<_>>()).or_insert(value);

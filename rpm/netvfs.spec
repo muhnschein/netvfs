@@ -1,23 +1,5 @@
 # SPDX-License-Identifier: LGPL-2.1-or-later
-#
-# Packages:
-#
-#   netvfs          libnetvfs, all backends, libnetvfs-rs.so (Rust backends the plugins load), account UI
-#   module, account providers, Files services, netvfs-cli, translations
-#   netvfs-backup   SFTP, SMB, WebDAV and FTPS backups: services, Buteo plugins and profiles
-#   netvfs-bridge   netvfs-bridge and its setgid accounts helper (Rust), for sandboxed consumers, and
-#   libnetvfs-bridge-ffi.so, the C ABI through which the bridge reaches the backends
-#   netvfs-devel    headers, pkg-config
-#
-# Parts nobody installs alone are one package; what stays separate pulls in something the rest does not need
-# (Buteo, a setgid binary) or is for development.
-#
-# Every package requires netvfs of the same build. Library dependencies come from rpm's automatic soname
-# dependencies; tools/ci/check-rpm.sh checks the ones the split relies on, tools/ci/check-files.py that every
-# installed file belongs to exactly one package.
 
-# Reproducible (doc/VERIFYING.md): SOURCE_DATE_EPOCH (build-rpm.sh: commit time) = build time, clamps file dates.
-# Host name fixed: rpm records it.
 %define use_source_date_epoch_as_buildtime 1
 %define clamp_mtime_to_source_date_epoch 1
 %define _buildhost netvfs-build
@@ -36,7 +18,6 @@ BuildRequires: qt5-qttools-linguist
 BuildRequires: sailfish-svg2png
 BuildRequires: pkgconfig(Qt5Core)
 BuildRequires: pkgconfig(Qt5DBus)
-# Discovery in libnetvfs.
 BuildRequires: pkgconfig(Qt5Network)
 BuildRequires: pkgconfig(Qt5Concurrent)
 BuildRequires: pkgconfig(Qt5Qml)
@@ -44,19 +25,13 @@ BuildRequires: pkgconfig(Qt5Quick)
 BuildRequires: pkgconfig(accounts-qt5)
 BuildRequires: pkgconfig(libsignon-qt5)
 BuildRequires: pkgconfig(buteosyncfw5) >= 0.10.0
-# netvfs-bridge and its accounts helper are Rust 1.95, which no SDK target ships: CI cross-builds them and
-# libnetvfs-rs.so with the SDK's compiler and sysroot before this build (tools/ci/cross-build.sh); the spec
-# installs them. Bridge speaks peer-to-peer D-Bus with zbus: no libdbus needed to build.
 
 Requires:   sailfish-version >= 5.2.0
 Requires:   sailfishsilica-qt5
 Requires:   jolla-settings-accounts
 Requires:   sailfish-components-accounts-qt5
-# SSH key import page uses the system file picker; part of the module, so every account UI loads it.
 Requires:   sailfish-components-pickers-qt5
-# WebDAV and FTPS check server certificates against the system's certificate authorities.
 Requires:   ca-certificates
-# Backups come along unless removed.
 Recommends: %{name}-backup = %{version}-%{release}
 
 %description
@@ -91,11 +66,9 @@ Backup: the <provider>-backup services and their Buteo backup plugins and
 profiles. Without this package the accounts only provide files.
 
 %package bridge
-# Separate so only devices with a sandboxed consumer get the setgid accounts helper; nothing requires it.
 Summary:    Network locations for sandboxed apps
 Requires:   %{name} = %{version}-%{release}
 Requires:   systemd
-# Group `privileged` of the setgid accounts helper (as mapplauncherd's boosters).
 Requires(pre): sailfish-setup
 
 %description bridge
@@ -106,7 +79,6 @@ consumers over a socket in their data folder, without handing out secrets.
 %setup -q -n %{name}-%{version}
 
 %build
-# Rust binaries and libnetvfs-rs.so, cross-built by CI into rust/prebuilt.
 %qmake5 -r NETVFS_BUILD_TESTS=0 "VERSION=%{version}" \
     NETVFS_RUST_PREBUILT="$PWD/rust/prebuilt"
 %make_build
@@ -114,24 +86,18 @@ consumers over a socket in their data folder, without handing out secrets.
 %install
 %qmake5_install
 
-# Script bodies, not "-p /sbin/ldconfig": rpm passes the instance count to a -p program and ldconfig takes
-# "1" for a folder and fails.
 %post
 /sbin/ldconfig
 
 %postun
 /sbin/ldconfig
 
-# msyncd picks up new or removed plugins and profiles.
 %post backup
 systemctl-user try-restart msyncd.service || :
 
 %postun backup
 systemctl-user try-restart msyncd.service || :
 
-# The generator turns consumer files into units on daemon-reload; starting the targets again starts the
-# socket and path units they now want. A bridge still running the old binary stops; its socket stays, so the
-# consumer's next connection starts the new one.
 %post bridge
 systemctl-user daemon-reload || :
 systemctl-user start sockets.target paths.target || :
@@ -155,9 +121,7 @@ systemctl-user daemon-reload || :
 %{_libdir}/netvfs/backends/libnetvfs-webdav.so
 %{_libdir}/netvfs/backends/libnetvfs-ftps.so
 %{_libdir}/netvfs/backends/libnetvfs-local.so
-# Rust backends, dlopen'd by their plugins next to the backend folder.
 %{_libdir}/netvfs/libnetvfs-rs.so
-# Bridge package's binaries.
 %dir %{_prefix}/libexec/netvfs
 %dir %{_datadir}/netvfs
 %{_datadir}/netvfs/providers
@@ -241,16 +205,12 @@ systemctl-user daemon-reload || :
 
 %files bridge
 %{_prefix}/libexec/netvfs/netvfs-bridge
-# Backends' C ABI for the Rust netvfs-bridge (dlopen'd next to the backend folder, outside the linker path).
 %{_libdir}/netvfs/libnetvfs-bridge-ffi.so
-# Only group `privileged` can read the accounts database.
 %attr(2755,root,privileged) %{_prefix}/libexec/netvfs/netvfs-accounts
 %{_prefix}/lib/systemd/user-generators/netvfs-bridge-generator
 %dir %{_datadir}/netvfs/consumers
 %{_datadir}/netvfs/consumers/lautta.conf
 %dir %{_datadir}/netvfs/bridge
 %config %{_datadir}/netvfs/bridge/handoff.conf
-# Settings entry the request notification opens.
 %{_datadir}/jolla-settings/entries/netvfs-access.json
 %{_datadir}/jolla-settings/pages/netvfs-access.qml
-

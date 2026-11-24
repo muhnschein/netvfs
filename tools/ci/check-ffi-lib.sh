@@ -1,12 +1,5 @@
 #!/bin/sh
 # SPDX-License-Identifier: LGPL-2.1-or-later
-# Checks libnetvfs-bridge-ffi.so (C ABI of the C++ backends, dlopen'd by netvfs-bridge) from ELF headers:
-#   - exports one symbol, nvb_ffi_get;
-#   - links libnetvfs.so.1, whose BackendLoader finds the backends;
-#   - no GLIBC symbol version above the given one (target glibc is the floor);
-#   - full RELRO, immediate binding, no executable stack;
-#   - netvfs-bridge contains the installed path (compiled-in default, rust/netvfs-bridge/src/ffi/mod.rs).
-# Usage: check-ffi-lib.sh <library> <installed path> <netvfs-bridge> <max glibc version>
 set -eu
 library=$1
 installed=$2

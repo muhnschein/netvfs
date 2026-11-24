@@ -1,24 +1,5 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: LGPL-2.1-or-later
-"""Checks the %files sections of the RPM spec against an install tree:
-every installed file belongs to exactly one package, every
-%files entry matches something, and every netvfs directory is owned by
-exactly one package. rpmbuild only reports unpackaged files; this runs on the
-host build in seconds and also finds files listed in two packages.
-
-The spec is read with the Sailfish OS macro values (%{_libdir} is /usr/lib64
-...). A host install puts libraries elsewhere: --map rewrites install paths
-before the comparison, e.g. --map /usr/lib/x86_64-linux-gnu=/usr/lib64.
-
-Usage:
-  tools/ci/check-files.py [--spec FILE] [--map FROM=TO]... [--with NAME]...
-                          [--without NAME]... [--allow-missing GLOB]...
-                          [--list] ROOT
-ROOT is an install tree (make install INSTALL_ROOT=ROOT). --allow-missing
-names %files entries the host build does not install (fnmatch, matched
-against the entry with its macros expanded). --list prints every package
-with its files.
-"""
 import argparse
 import fnmatch
 import os
@@ -27,7 +8,6 @@ import sys
 
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# rpm macros of the Sailfish OS 5.2 target the spec may use.
 SAILFISH_MACROS = {
     "_prefix": "/usr",
     "_exec_prefix": "/usr",
@@ -51,25 +31,21 @@ SECTIONS = {
     "filetriggerin", "filetriggerun", "transfiletriggerin", "transfiletriggerun",
 }
 
-# Words of %files lines and conditionals that are not macros.
 DIRECTIVES = {
     "dir", "doc", "license", "ghost", "exclude", "defattr", "docdir", "attr", "verify",
     "lang", "caps", "config", "artifact", "missingok", "if", "else", "endif",
 }
 
-# Attributes of a %files line that do not change which path it names.
 ATTRIBUTE = re.compile(r"%(?:attr|verify|lang|caps|config)\([^)]*\)\s*|"
                        r"%(?:config|artifact|missingok)\b\s*")
 MACRO = re.compile(r"%\{([?!]*)([A-Za-z_][A-Za-z0-9_]*)(?:\s+([^}]*))?\}|%([A-Za-z_][A-Za-z0-9_]*)")
 
 
 class SpecError(Exception):
-    """A spec construct this checker does not understand."""
+    pass
 
 
 class Spec:
-    """The %files sections of a spec: {package: [(kind, pattern)]} with kind
-    "file", "dir" (%dir), "ghost" or "exclude"."""
 
     def __init__(self, conditions):
         self.macros = dict(SAILFISH_MACROS)
@@ -206,7 +182,6 @@ class Spec:
 
 
 def expand_braces(pattern):
-    """rpm's {a,b} alternatives in %files entries."""
     match = re.search(r"\{([^{}]*)\}", pattern)
     if not match:
         return [pattern]
@@ -218,7 +193,6 @@ def expand_braces(pattern):
 
 
 class Tree:
-    """The install tree, with paths as they are on the target."""
 
     def __init__(self, root, mappings):
         self.files = set()
@@ -251,7 +225,6 @@ class Tree:
 
 
 class Ownership:
-    """Which packages own each path of the tree."""
 
     def __init__(self, spec, tree, allow_missing):
         self.owners = {}
@@ -291,7 +264,7 @@ class Ownership:
 
 
 def parse_arguments(argv):
-    parser = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
+    parser = argparse.ArgumentParser(description="Checks the %files sections of the RPM spec against an install tree.")
     parser.add_argument("root")
     parser.add_argument("--spec", default=os.path.join(ROOT_DIR, "rpm", "netvfs.spec"))
     parser.add_argument("--map", action="append", default=[], metavar="FROM=TO")

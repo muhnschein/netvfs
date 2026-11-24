@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: LGPL-2.1-or-later
-# Prove core-backtraces.sh turns a test's core into a readable backtrace. Real core of a real binary (gdb writes it, stopped at first instruction), named as ci.yml's `kernel.core_pattern`. Needs gdb: missing = SKIP locally, FAIL in CI.
 set -u
 
 root=$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd)
@@ -20,7 +19,6 @@ cases=0
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 
-# check <why> <command...>: passes when command does.
 check() {
     local why=$1
     shift
@@ -34,7 +32,6 @@ check() {
     return 0
 }
 
-# Own binary, so "gone" can be made true.
 exe="$work/bin/crasher"
 mkdir -p "$work/bin"
 cp "$(command -v sleep)" "$exe"
@@ -62,7 +59,6 @@ check "a core: its stack is kept beside it" grep -q '^#0 ' "$core.txt"
 check "a core: its binary is copied beside it, path read from the name" \
     cmp -s "$exe" "$one/crasher"
 
-# Rerun over kept results: `.txt` and copied binary are not cores.
 out=$("$script" "$one" 2>&1)
 check "rerun: only the core is read" \
     test "$(grep -c '^core-backtraces: core\.' <<<"$out")" -eq 1

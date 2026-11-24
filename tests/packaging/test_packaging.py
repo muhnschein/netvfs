@@ -1,12 +1,5 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: LGPL-2.1-or-later
-"""Tests of the packaging checks: tools/ci/check-files.py
-against small specs and install trees, and tools/ci/check-ffi-lib.sh against
-stand-ins for netvfs-bridge's C ABI and
-tools/ci/check-rs-lib.sh against stand-ins for libnetvfs-rs.so, built here
-(they need cc and readelf). Run from anywhere:
-tests/packaging/test_packaging.py
-"""
 import os
 import shutil
 import subprocess
@@ -172,8 +165,6 @@ FFI_INSTALLED = "/usr/lib64/netvfs/libnetvfs-bridge-ffi.so"
 
 @unittest.skipUnless(shutil.which("cc") and shutil.which("readelf"), "needs cc and readelf")
 class CheckFfiLib(unittest.TestCase):
-    """A library that exports nvb_ffi_get only and links a stand-in for
-    libnetvfs.so.1, and a "bridge" that names its installed path."""
 
     def setUp(self):
         self.work = tempfile.mkdtemp()
@@ -261,8 +252,6 @@ RS_INSTALLED = "/usr/lib64/netvfs/libnetvfs-rs.so"
 
 
 class CheckRsLib(unittest.TestCase):
-    """A library that exports nvr_get only and links only the C runtime, and
-    plugins that name its installed path."""
 
     def setUp(self):
         self.work = tempfile.mkdtemp()

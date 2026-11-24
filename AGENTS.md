@@ -31,7 +31,7 @@ In this order; later step only once earlier ones hold:
 
 PR opens as draft on first push. Mark ready for review only once steps 1–7 hold and their evidence is posted (visual: project thread; text: PR body).
 
-No phone run when change can't show on phone: docs, comments, CI, build scripts (RPM contents unchanged), tests only. Steps 6–7 skipped; PR says why.
+No phone run when change can't show on phone: docs, CI, build scripts (RPM contents unchanged), tests only. Steps 6–7 skipped; PR says why.
 
 Backend and core code runs in every process that loads a backend (bridge, msyncd via Buteo, `netvfs-cli`, account UI) → cover all it reaches. Behaviour both protocols share → change and test SFTP and SMB.
 
@@ -64,10 +64,10 @@ User tests RPMs on phone; that test judges feel, lag, real servers. Say exactly 
 - Iterating → run only what change touches: `cd rust && cargo nextest run -p netvfs-smb`, one C++ test binary from `build/tests`. Before every push: full `make check`. CI runs everything (docs-only PR: no build or test jobs, `tools/ci/changes.sh`).
 - Local failure → rerun on untouched `main` before calling it environment.
 - Gates catch device-only breakage (lockfile cargo 1.95 reads, Qt 5.6 QML, linked libs and GLIBC floor, `%files` lists, `NETVFS_WERROR=1`). Gate red → fix code, never loosen gate.
-- `unsafe` only in modules RUST.md names; every block says why.
+- `unsafe` only in modules RUST.md names; every block has `// SAFETY:` (clippy `undocumented_unsafe_blocks`).
 - No own cryptography: primitives from ring and RustCrypto, RustCrypto in `netvfs-smb`'s `crypto.rs` only (fence). PR touching `crypto.rs` → separate security review pass; PR body lists every change to it.
 - Server and consumer data = hostile: every length checked against its cap before allocating. New decoder → fuzz target (`rust/fuzz`, `tests/fuzz`).
-- Mutant exclusion (`rust/.cargo/mutants.toml`) only with proof it changes no observable behaviour, written beside it. `crypto.rs`: none.
+- Mutant exclusion (`rust/.cargo/mutants.toml`) only with proof it changes no observable behaviour, in commit body and PR. `crypto.rs`: none.
 - Tests wait on signals or conditions, not fixed sleeps or wall-clock asserts (those flake on loaded runners).
 - New dependency must earn its keep: well maintained, widely used, more than someone's pet project, builds at Rust 1.95, `cargo deny` clean (second version only with reason in `rust/deny.toml`). Say why in RUST.md's dependency list. Update with pinned cargo: `cd rust && cargo update -p <crate>`. `russh` pins RustCrypto pre-releases: bump as one unit. `rust/vendor/ssh-key`, `rust/vendor/picky-asn1-der` = patched copies (`README.netvfs.md` in each).
 
@@ -82,8 +82,12 @@ User tests RPMs on phone; that test judges feel, lag, real servers. Say exactly 
 ## Comments and docs
 
 - Caveman-full = drop articles, filler, pleasantries, hedging. Fragments OK, short words. Identifiers, paths, code, errors exact. E.g. "`rust/Cargo.lock` from pinned cargo: resolver v3 prefers crates whose `rust-version` fits 1.95."
-- Code comments, `doc/*.md`, this file: caveman-full. What is true now and why; keep constraints. No changelog, bug report, history, story (git's job): delete comment rather than turn it into history. Existing prose: rewrite what you touch, not more.
-- Default: no comment. One only for constraint, external quirk, invariant code can't show; one line where possible, four max. Applies to new and touched code; trim old long comments when changing that code anyway, no sweep.
+- No code comments, except public API docs. None: no why, no issue reference, no TODO, no commented-out code; in Rust, C++, C, QML, shell, Python, qmake, Makefile, YAML, TOML, XML, spec, Dockerfile, config. Names and tests say what code does. `make check` runs `tools/no_comments.py` (CI: "CI scripts").
+- No workarounds for this rule, no write-ups of code workarounds: no comment archive, no notes or doc file standing in for comments, no comment text hidden in strings or names. Only an absolutely critical fact (code breaks or regresses without it) gets written down: project memory, one short sentence each, nothing more.
+- Public API docs, concise (one line where it fits): Rust doc comments only where `missing_docs` or clippy (`# Errors`, `# Panics`, `# Safety`) demand them; installed headers (`PUBLIC_HEADERS`, `src/core/core.pro`); `org.netvfs.Bridge1.xml`. No doc comment on private items.
+- Kept, because a tool or licence needs them: shebang; SPDX line 1 (line 2 after shebang or `<?xml`); attribution header with `SPDX-FileCopyrightText` (adapted BSD code in `src/buteo/lib`); `//%` lupdate source text; `// fuzz-<key>:` build lines in `tests/fuzz` harnesses (`run.sh` reads them); `// SAFETY:` above `unsafe`; bare `// NOSONAR`. Not checked: `vendor/`, `rust/vendor/`, CodeQL query copy, test data (`testdata/`, `tests/data/`, generator golden and consumers, fixtures, corpora), `doc/`, `art/`, Markdown.
+- Branch from before the ban (lint red after merging `main`): `python3 tools/no_comments.py --fix`, then `cd rust && cargo fmt --all`, clippy.
+- `doc/*.md`, this file: caveman-full. What is true now and why; keep constraints. No changelog, bug report, history, story (git's job). Existing prose: rewrite what you touch, not more.
 - SPDX header on every source file. Change to what `doc/SPEC.md` or `doc/RUST.md` states → update it, same PR; describe what exists, no change notes. Details stay in code and tests.
 - `README.md`, `CHANGELOG.md`, release notes, forum posts: plain prose for users, as short and to the point as possible.
 - User-visible change → line in `CHANGELOG.md` under `## Unreleased` (file or section missing → create it), same PR.

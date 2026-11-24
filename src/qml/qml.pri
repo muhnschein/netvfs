@@ -1,6 +1,4 @@
 # SPDX-License-Identifier: LGPL-2.1-or-later
-# C++ sources of the org.netvfs.accounts QML plugin, shared with its unit tests (compiled directly,
-# no QML engine).
 INCLUDEPATH += $$PWD
 QT *= concurrent
 CONFIG *= link_pkgconfig
@@ -27,7 +25,6 @@ SOURCES += \
     $$PWD/descriptortexts.cpp \
     $$PWD/sshkeytool.cpp
 
-# Module files installed next to the plugin (relative to this directory).
 NETVFS_QML_MODULE_FILES = \
     qmldir \
     NetVfsAccountSetup.qml \

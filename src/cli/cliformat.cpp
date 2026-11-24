@@ -58,8 +58,6 @@ QString typeName(EntryType type)
     return QStringLiteral("unknown");
 }
 
-// rwx triplet for `shift` (6 owner, 3 group, 0 other); `special` is the setuid/setgid/sticky bit
-// that replaces the x column ('s' or 't').
 QString triplet(qint32 mode, int shift, bool special, QChar specialChar)
 {
     const qint32 bits = (mode >> shift) & 07;
@@ -168,7 +166,6 @@ QString isoTime(const QDateTime &time)
 
 QString shortLine(const Entry &entry)
 {
-    // A symlink to a folder shows as "d" (isDir() follows targetType).
     const QChar type = entry.isDir() ? QLatin1Char('d') : typeChar(entry.type);
     return QString(type) + QLatin1Char(' ') + QString::number(entry.size) + QLatin1Char(' ')
         + sanitizeForTerminal(Names::display(entry.name));

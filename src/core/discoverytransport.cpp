@@ -12,7 +12,7 @@ namespace NetVfs {
 
 namespace {
 
-constexpr int MulticastTtl = 255;  // RFC 6762 section 11
+constexpr int MulticastTtl = 255;
 const QHostAddress &group4()
 {
     static const QHostAddress g(QStringLiteral("224.0.0.251"));

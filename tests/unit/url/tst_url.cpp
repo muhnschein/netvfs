@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-// (Url), (Paths::sanitizeFor), (Paths::normalize amendment).
 #include "names.h"
 #include "paths.h"
 #include "url.h"
@@ -22,7 +21,7 @@ QString opt(const ConnectionParams &p, const char *key)
     return p.option(QLatin1String(key));
 }
 
-} // namespace
+}
 
 class TstUrl : public QObject
 {
@@ -39,7 +38,7 @@ private slots:
         QTest::addColumn<QString>("host");
         QTest::addColumn<int>("port");
         QTest::addColumn<QString>("user");
-        QTest::addColumn<QString>("options");     // "key=value;..." in key order
+        QTest::addColumn<QString>("options");
         QTest::addColumn<QString>("path");
 
         QTest::newRow("sftp bare") << "sftp://example.com" << "sftp" << "example.com" << 0 << "" << "" << "";
@@ -84,7 +83,6 @@ private slots:
 
         QTest::newRow("idn unicode") << QString::fromUtf8("sftp://b\xC3\xBC" "cher.example/x") << "sftp"
                                      << QString::fromUtf8("b\xC3\xBC" "cher.example") << 0 << "" << "" << "/x";
-        // QUrl::fromAce decodes labels only below top-level domains that allow IDN.
         QTest::newRow("idn punycode") << "sftp://xn--bcher-kva.de/x" << "sftp"
                                       << QString::fromUtf8("b\xC3\xBC" "cher.de") << 0 << "" << "" << "/x";
         QTest::newRow("punycode below a tld without idn") << "sftp://xn--bcher-kva.example/x" << "sftp"
@@ -157,7 +155,7 @@ private slots:
         QCOMPARE(opt(params, "allow_insecure"), QStringLiteral("true"));
         QVERIFY(!params.options.contains(QStringLiteral("share")));
         QVERIFY(!params.options.contains(QStringLiteral("base_path")));
-        QVERIFY(Url::parse(QStringLiteral("sftp://h"), &params, nullptr).ok());   // path is optional
+        QVERIFY(Url::parse(QStringLiteral("sftp://h"), &params, nullptr).ok());
     }
 
 
@@ -243,17 +241,17 @@ private slots:
         QCOMPARE(r.message(), QStringLiteral("passwords in URLs are not accepted"));
         QVERIFY(!r.toString().contains(QLatin1String("hunter2")));
         QVERIFY(!r.detail().contains(QLatin1String("hunter2")));
-        QVERIFY(params.username.isEmpty());          // never stored
+        QVERIFY(params.username.isEmpty());
         QVERIFY(params.host.isEmpty());
     }
 
     void unsupportedSchemes()
     {
         ConnectionParams params;
-        Result r = Url::parse(QStringLiteral("http://u:p@h/x"), &params, nullptr);   // before the password check
+        Result r = Url::parse(QStringLiteral("http://u:p@h/x"), &params, nullptr);
         QCOMPARE(r.error(), Error::SecurityPolicy);
         QCOMPARE(r.message(), QStringLiteral("WebDAV needs TLS; use davs:// or https://"));
-        r = Url::parse(QStringLiteral("ftp://u:p@h/"), &params, nullptr);   // before the password check
+        r = Url::parse(QStringLiteral("ftp://u:p@h/"), &params, nullptr);
         QCOMPARE(r.error(), Error::SecurityPolicy);
         QCOMPARE(r.message(), QStringLiteral("FTP needs TLS; use ftps://"));
         r = Url::parse(QStringLiteral("gopher://h/"), &params, nullptr);
@@ -284,7 +282,7 @@ private slots:
         smb.provider = QStringLiteral("smb");
         smb.host = QStringLiteral("nas");
         QCOMPARE(Url::format(smb, QString()), QStringLiteral("smb://nas"));
-        QCOMPARE(Url::format(smb, QStringLiteral("/ignored")), QStringLiteral("smb://nas"));   // no share, no path
+        QCOMPARE(Url::format(smb, QStringLiteral("/ignored")), QStringLiteral("smb://nas"));
         smb.options.insert(QStringLiteral("share"), QStringLiteral("My Share"));
         QCOMPARE(Url::format(smb, QString()), QStringLiteral("smb://nas/My%20Share"));
         QCOMPARE(Url::format(smb, QStringLiteral("/dir/f.txt")), QStringLiteral("smb://nas/My%20Share/dir/f.txt"));
@@ -321,7 +319,6 @@ private slots:
         QCOMPARE(Url::format(p, QString::fromUtf8("/\xE2\x82\xAC")), QString::fromUtf8("sftp://b\xC3\xBC" "cher.example/%E2%82%AC"));
     }
 
-    // parse(format(parse(u))) is stable for everything parse accepts.
     void roundTrip_data()
     {
         QTest::addColumn<QString>("url");
@@ -370,8 +367,6 @@ private slots:
         QCOMPARE(Url::toAce(QStringLiteral("192.168.0.1")), QByteArray("192.168.0.1"));
     }
 
-    // Paths::normalize
-
     void normalizeAcceptsLoneSurrogates()
     {
         QString out;
@@ -401,8 +396,6 @@ private slots:
         }
         QVERIFY(Paths::normalize(QStringLiteral("a/..b/c."), &out).ok());
     }
-
-    // Paths::sanitizeFor
 
     void sanitize_data()
     {
@@ -503,7 +496,6 @@ private slots:
                              || (c.isLowSurrogate() && i > 0 && result.at(i - 1).isHighSurrogate()),
                          qPrintable(QString::number(max)));
             }
-            // A one-byte limit cannot hold any of the characters: the fallback name is used.
             if (max >= 4 || result != QLatin1String("_"))
                 QVERIFY(Names::encode(result).size() <= max);
         }

@@ -1,8 +1,5 @@
 #!/bin/sh
 # SPDX-License-Identifier: LGPL-2.1-or-later
-# FTPS interop suite: a proftpd container (explicit TLS 1.3 only, self-signed certificate made here), the Rust tests
-# rust/netvfs-ftps/tests/server.rs, one netvfs-cli round trip and the backend conformance suite.
-# Usage: run.sh <build dir>
 set -eu
 
 here=$(cd "$(dirname "$0")" && pwd)
@@ -10,16 +7,12 @@ build=$(cd "$1" && pwd)
 image=netvfs-ftps-proftpd:1.3.8
 prefix="netvfs-ftps-$$"
 work=$(mktemp -d)
-# A fresh password per run; it exists only in this process tree and the container.
 password=$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')
-# EPSV names a port, so passive ports map 1:1: ten from a range picked per run, below Linux's ephemeral ports
-# (32768 up), which other connections may hold.
 first=$((20000 + $$ % 1200 * 10))
 last=$((first + 9))
 
 cleanup() {
     docker rm -f "$prefix" >/dev/null 2>&1 || true
-    # Files the server wrote belong to its user.
     docker run --rm -v "$work:/w" "$image" sh -c 'rm -rf /w/ftp' >/dev/null 2>&1 || true
     rm -rf "$work"
 }
@@ -55,7 +48,6 @@ export UBSAN_OPTIONS="${UBSAN_OPTIONS:+$UBSAN_OPTIONS:}print_stacktrace=1:halt_o
 export NETVFS_BACKEND_PATH="$build/lib/netvfs/backends"
 export NETVFS_RS_LIB="$build/lib/netvfs/libnetvfs-rs.so"
 
-# expect_code <exit code> <command...>: the command must fail with exactly that code.
 expect_code() {
     want=$1
     shift
@@ -72,7 +64,6 @@ expect_code() {
 cli_round_trip() {
     cli="$build/bin/netvfs-cli"
     url="ftps://alice@127.0.0.1:$port"
-    # Self-signed: unknown (exit 10 + ServerIdentityUnknown) until pinned; the pin is what identify prints.
     expect_code 14 env NETVFS_SECRET="$password" "$cli" --url "$url" ls /
     pin=$("$cli" --url "$url" identify | sed -n 2p)
     case "$pin" in "tls-spki-sha256 "*) ;; *) echo "identify printed no TLS pin: $pin" >&2; return 1 ;; esac
@@ -93,7 +84,6 @@ cli_round_trip() {
     ftps mv --replace "/CLI run/other.bin" "/CLI run/cli.bin"
     expect_code 28 ftps rmdir "/CLI run/tree"
     ftps rm -r "/CLI run"
-    # Plain FTP and a password in the URL are refused before anything is sent (exit 10 + SecurityPolicy).
     expect_code 17 "$cli" --url "ftp://alice@127.0.0.1:$port/" ls /
     expect_code 17 "$cli" --url "ftps://alice:pw@127.0.0.1:$port/" ls /
 }
@@ -107,7 +97,6 @@ else
     status=1
 fi
 head -c 3000000 /dev/urandom > "$work/cli.bin"
-# A subshell of its own: "set -e" is ignored inside a function that is called as a condition.
 set +e
 (set -e; cli_round_trip)
 cli_status=$?
@@ -119,7 +108,6 @@ else
     status=1
 fi
 
-# Conformance suite, pinned; the server's folder is $work/ftp on this host too.
 mkdir -p "$work/ftp/conformance"
 chmod 777 "$work/ftp/conformance"
 pin=$("$build/bin/netvfs-cli" --url "ftps://127.0.0.1:$port" identify | sed -n 2p)

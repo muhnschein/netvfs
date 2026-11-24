@@ -8,8 +8,6 @@ use zbus::zvariant::Fd;
 #[zbus::proxy(
     interface = "org.netvfs.Bridge1",
     default_path = "/org/netvfs/Bridge",
-    // Peer-to-peer connection has no bus to route by name; zbus wants a destination, the bridge
-    // ignores it.
     default_service = "org.netvfs.Bridge",
     gen_blocking = false
 )]

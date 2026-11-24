@@ -1,8 +1,4 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! An SSH server in the test process, for the session, sign-in and
-//! backend tests: russh's server with a scripted sign-in, the `sftp`
-//! subsystem served by [`Fake`], and a [`Proxy`] in front of it that can
-//! stall or cut the connection.
 #![allow(
     clippy::arithmetic_side_effects,
     clippy::indexing_slicing,
@@ -26,8 +22,6 @@ use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
-/// One keyboard-interactive round: what the server asks and the answers
-/// it wants.
 #[derive(Debug, Clone)]
 pub struct Round {
     pub name: &'static str,
@@ -37,18 +31,15 @@ pub struct Round {
 }
 
 impl Round {
-    /// One non-echo prompt.
     pub fn one(prompt: &'static str, answer: &'static str) -> Self {
         Self { name: "", instruction: "", prompts: vec![(prompt, false)], answers: vec![answer] }
     }
 
-    /// No prompt at all (OpenSSH after PAM).
     pub fn empty() -> Self {
         Self { name: "", instruction: "", prompts: Vec::new(), answers: Vec::new() }
     }
 }
 
-/// A method that must succeed.
 #[derive(Debug, Clone)]
 pub enum Step {
     Password(&'static str),
@@ -66,41 +57,26 @@ impl Step {
     }
 }
 
-/// What a session channel's `sftp` request gets.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Subsystem {
-    /// Success, then the fake SFTP server.
     Sftp,
-    /// Failure.
     Refuse,
-    /// Success, then EOF and close (a forced command that exits).
     Exit,
-    /// Success, then data "ab", stderr "err", data "cd", EOF, close.
     Raw,
 }
 
-/// How the server behaves.
 #[derive(Debug, Clone)]
 pub struct Script {
-    /// Named after `none` and after a failure of the first step.
     pub offered: Vec<MethodKind>,
-    /// The methods that must succeed, in order; each but the last is a
-    /// partial success that names the next one.
     pub chain: Vec<Step>,
-    /// `none` succeeds.
     pub open: bool,
     pub subsystem: Subsystem,
-    /// Session channels are refused with this.
     pub refuse_session: Option<ChannelOpenFailure>,
-    /// After this many failed attempts the server disconnects.
     pub max_failures: Option<usize>,
-    /// Once signed in, the server tries to open a channel of every kind
-    /// to the client and logs `probe <kind> refused|accepted`.
     pub probe_channels: bool,
 }
 
 impl Script {
-    /// Password `secret` for anyone.
     pub fn password() -> Self {
         Self {
             offered: vec![MethodKind::PublicKey, MethodKind::Password],
@@ -114,7 +90,6 @@ impl Script {
     }
 }
 
-/// The server's log and SFTP tree.
 #[derive(Debug, Clone)]
 pub struct Server {
     pub addr: SocketAddr,
@@ -124,19 +99,16 @@ pub struct Server {
     pub keys: Vec<PublicKey>,
 }
 
-/// A host key from the fixtures.
 pub fn host_key(file: &str) -> PrivateKey {
     let path = format!("{}/testdata/keys/{file}", env!("CARGO_MANIFEST_DIR"));
     PrivateKey::from_openssh(std::fs::read_to_string(path).unwrap()).unwrap()
 }
 
 impl Server {
-    /// A server with an Ed25519 host key and `script`.
     pub async fn start(script: Script) -> Self {
         Self::with_keys(script, vec![host_key("ed25519-openssh")]).await
     }
 
-    /// A server with `keys` (in the server's order), banner OpenSSH's.
     pub async fn with_keys(script: Script, keys: Vec<PrivateKey>) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
@@ -177,12 +149,10 @@ impl Server {
         server
     }
 
-    /// What the server saw, then cleared.
     pub fn take_log(&self) -> Vec<String> {
         std::mem::take(&mut *self.log.lock().unwrap())
     }
 
-    /// Changes the script.
     pub fn script(&self) -> MutexGuard<'_, Script> {
         self.script.lock().unwrap()
     }
@@ -221,7 +191,6 @@ impl Handler {
         self.script().chain.get(self.stage).cloned()
     }
 
-    /// What a failure names.
     fn offered(&self) -> MethodSet {
         let script = self.script();
         if self.stage == 0 {
@@ -233,7 +202,6 @@ impl Handler {
     fn reject(&mut self) -> Result<Auth, russh::Error> {
         self.failures += 1;
         if self.script().max_failures.is_some_and(|max| self.failures >= max) {
-            // As OpenSSH after MaxAuthTries.
             return Err(russh::Error::Disconnect);
         }
         Ok(Auth::Reject { proceed_with_methods: Some(self.offered()), partial_success: false })
@@ -419,9 +387,6 @@ impl server::Handler for Handler {
     }
 }
 
-/// A TCP relay in front of a server: it can hold everything back
-/// (stall) or close both sides (cut), and counts the client connections
-/// still open.
 #[derive(Debug, Clone)]
 pub struct Proxy {
     pub addr: SocketAddr,
@@ -432,7 +397,6 @@ pub struct Proxy {
 }
 
 impl Proxy {
-    /// A relay to `upstream`.
     pub async fn start(upstream: SocketAddr) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let proxy = Self {
@@ -462,27 +426,22 @@ impl Proxy {
         proxy
     }
 
-    /// Holds back everything from now on.
     pub fn stall(&self, on: bool) {
         self.stalled.store(on, Ordering::SeqCst);
     }
 
-    /// Closes every connection (and refuses to relay any more).
     pub fn cut(&self) {
         self.cut.store(true, Ordering::SeqCst);
     }
 
-    /// Client connections whose client has not closed its side.
     pub fn open_connections(&self) -> usize {
         self.open.load(Ordering::SeqCst)
     }
 
-    /// Client connections made so far.
     pub fn connections(&self) -> usize {
         self.accepted.load(Ordering::SeqCst)
     }
 
-    /// Waits until no client connection is open (up to 5 s).
     pub async fn all_closed(&self) -> bool {
         for _ in 0..500 {
             if self.open_connections() == 0 {
@@ -494,8 +453,6 @@ impl Proxy {
     }
 }
 
-/// Copies `from` to `to`; holds data while stalled; stops when either
-/// side closes or the proxy is cut. Returns when `from` is closed.
 async fn relay(
     mut from: tokio::net::tcp::OwnedReadHalf,
     mut to: tokio::net::tcp::OwnedWriteHalf,

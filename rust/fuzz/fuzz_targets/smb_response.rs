@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! SMB2 response chain through every netvfs-smb response decoder. No panic; caps hold.
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;

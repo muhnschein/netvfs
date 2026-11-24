@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 //! The shared contract: the crate's copy of the introspection XML equals the contract copy, the
 //! method table and signals match the XML, and the golden sequences replay against the fake bridge.
-// Test helpers outside #[test] functions: a failing test is the point.
 #![allow(clippy::unwrap_used, clippy::panic)]
 
 use netvfs_bridge_proto::methods::{ENTRY_SIGNATURE, INTROSPECTION_XML};
@@ -34,7 +33,6 @@ fn members(xml: &str) -> (Vec<Member>, Vec<Member>) {
     }
     let (mut methods, mut signals) = (Vec::new(), Vec::<Member>::new());
     let mut in_bridge = false;
-    // Some(true): inside a method, Some(false): inside a signal.
     let mut current: Option<bool> = None;
     for line in xml.lines().map(str::trim) {
         if line.starts_with("<interface") {
@@ -70,7 +68,6 @@ fn members(xml: &str) -> (Vec<Member>, Vec<Member>) {
     (methods, signals)
 }
 
-// The served XML and the contract copy must not drift.
 #[test]
 fn xml_copy_is_current() {
     let contract = read(&contract_dir().join("org.netvfs.Bridge1.xml"));
@@ -80,7 +77,6 @@ fn xml_copy_is_current() {
     );
 }
 
-// Method table matches the XML, in `args.cpp` order.
 #[test]
 fn method_table_matches_xml() {
     let (xml, _) = members(INTROSPECTION_XML);
@@ -141,7 +137,6 @@ mod fake {
     use super::{contract_dir, members, read};
     use netvfs_bridge_proto::fake::{FakeBridge, replay};
 
-    // Golden sequences against the fake (as lautta runs them).
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn fake_replays() {
         let ran = replay::replay_dir(&contract_dir()).await.unwrap();
@@ -153,7 +148,6 @@ mod fake {
         assert!(ran.len() >= 6, "{ran:?}");
     }
 
-    // The fake's generated introspection has the members of the contract.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn the_fake_serves_the_contract_interface() {
         let fake = FakeBridge::new();
@@ -170,7 +164,6 @@ mod fake {
             .await
             .unwrap();
         let served: String = reply.body().deserialize().unwrap();
-        // zbus orders members its own way.
         let sorted = |xml: &str| {
             let (mut methods, mut signals) = members(xml);
             methods.sort_by(|a, b| a.name.cmp(&b.name));

@@ -1,7 +1,4 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! The error type of the fake's methods: D-Bus errors as the real bridge
-//! sends them (`org.netvfs.Error.<Name>` with message and optional details,
-//! or the standard `InvalidArgs`).
 
 use super::tree::TreeError;
 use crate::errors::{ERROR_PREFIX, ErrorName, INVALID_ARGS};
@@ -12,7 +9,6 @@ use zbus::zvariant::Value;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Fail {
-    /// Full D-Bus error name.
     full: String,
     message: String,
     detail: Option<String>,
@@ -20,13 +16,10 @@ pub struct Fail {
 }
 
 impl Fail {
-    /// `org.netvfs.Error.<name>`.
     pub fn net(name: ErrorName, message: &str) -> Self {
         Self::scripted(name.as_str(), message)
     }
 
-    /// `org.netvfs.Error.<bare>` for a name a test scripted, which need not
-    /// be one this crate knows.
     pub fn scripted(bare: &str, message: &str) -> Self {
         Self {
             full: format!("{ERROR_PREFIX}{bare}"),
@@ -36,7 +29,6 @@ impl Fail {
         }
     }
 
-    /// `org.freedesktop.DBus.Error.InvalidArgs`.
     pub fn args(message: &str) -> Self {
         Self {
             full: INVALID_ARGS.to_owned(),
@@ -52,7 +44,6 @@ impl Fail {
         self
     }
 
-    /// The bare error name, for `ListDone` and `JobFinished`.
     pub fn bare(&self) -> &str {
         self.full.strip_prefix(ERROR_PREFIX).unwrap_or(&self.full)
     }
@@ -61,7 +52,6 @@ impl Fail {
         &self.message
     }
 
-    /// `JobFinished.extra` entries describing this error.
     pub fn extra(&self) -> HashMap<String, Value<'static>> {
         let mut extra = HashMap::new();
         if let Some(d) = &self.detail {

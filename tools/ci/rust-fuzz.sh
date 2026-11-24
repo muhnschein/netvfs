@@ -1,9 +1,5 @@
 #!/bin/sh
 # SPDX-License-Identifier: LGPL-2.1-or-later
-# Runs each cargo-fuzz target of rust/fuzz for a fixed time with nightly (libFuzzer needs it); crashes land in
-# rust/fuzz/artifacts. Committed seeds (rust/fuzz/seeds/<target>: reproducers) run first; new inputs go to
-# rust/fuzz/corpus/<target>.
-# Usage: rust-fuzz.sh <seconds per target>
 set -eu
 seconds=$1
 cd "$(dirname "$0")/../../rust"

@@ -232,7 +232,6 @@ impl<B: Backend> Pool<B> {
 
 impl<B: Backend> Drop for Pool<B> {
     fn drop(&mut self) {
-        // All threads stop at once; dropping each then waits for it.
         for w in &self.workers {
             w.stop();
         }
@@ -359,7 +358,6 @@ impl<B: Backend> PoolSet<B> {
     }
 
     fn submit_at(&mut self, index: usize, lane: Lane, task: TaskContext, work: Work<B>) {
-        // Connections closed by Disconnect free their host slots first.
         self.reap_pool(index);
         self.reap_orphans();
         match self.pick(index, lane) {
@@ -407,15 +405,12 @@ impl<B: Backend> PoolSet<B> {
         if existing.is_some() {
             return Ok(existing);
         }
-        // No connection of this lane and the host is full: borrow another
-        // lane's.
         Ok(self.pools.get(index).and_then(|p| p.least_loaded(lane, true)))
     }
 
     fn evict_idle(&mut self, host: &str, except: usize) -> bool {
         for (i, pool) in self.pools.iter_mut().enumerate() {
             if i != except && pool.host == host && pool.close_one_idle() {
-                // Counted free now: the connection is already being closed.
                 self.hosts.release(host, 1);
                 return true;
             }
@@ -512,7 +507,6 @@ impl<B: Backend> PoolSet<B> {
         let mut pool = self.pools.remove(index);
         pool.stop_all();
         self.orphans.append(&mut pool.retired);
-        // Dropping the pool ends its pending work.
         true
     }
 

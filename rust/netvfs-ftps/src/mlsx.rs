@@ -38,7 +38,6 @@ pub fn time_ms(value: &[u8]) -> Option<i64> {
     if !(1..=12).contains(&mo) || !(1..=31).contains(&d) || h > 23 || mi > 59 || s > 60 {
         return None;
     }
-    // Days from civil (Howard Hinnant's algorithm).
     let yy = if mo <= 2 { y - 1 } else { y };
     let era = yy.div_euclid(400);
     let yoe = yy - era * 400;

@@ -81,7 +81,6 @@ impl UDisks {
         self.0.conn.get_or_init(|| connect(&self.0.bus)).await.as_ref()
     }
 
-    /// `ListDrives`: drives now, remembered as the last listing. First listing starts the watch.
     async fn listing(&self) -> Vec<Drive> {
         let drives = self
             .within(async {
@@ -108,7 +107,6 @@ impl UDisks {
         (self.0.changed)()
     }
 
-    /// Follows UDisks2's signals once, subscribed before the first listing so no later change is missed.
     async fn watch(&self, conn: &Connection) {
         if self.0.watching.replace(true) {
             return;
@@ -132,7 +130,6 @@ impl UDisks {
         });
     }
 
-    /// Mounts or unmounts drive `id` if `ListDrives` lists it now; mount point after a mount.
     async fn act(&self, id: &str, mount: bool) -> Result<Vec<u8>, Status> {
         let conn = self.connection().await.ok_or_else(no_udisks)?;
         let drive = drives(conn)
@@ -144,10 +141,8 @@ impl UDisks {
             return Ok(drive.mount_point);
         }
         if drive.locked {
-            // Settings → Storage unlocks it; the bridge takes no passphrase.
             return Err(Status::new(ErrorName::Unsupported, "The drive is locked"));
         }
-        // As Settings → Storage mounts: no question.
         let options = HashMap::from([("auth.no_user_interaction", Value::from(true))]);
         let path = drive.object_path();
         let member = if mount { "Mount" } else { "Unmount" };

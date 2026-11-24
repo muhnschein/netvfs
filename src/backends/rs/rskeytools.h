@@ -5,9 +5,6 @@
 #include "sshkeys.h"
 
 namespace NetVfs::Rs {
-
-// SshKeyTools over the key functions of libnetvfs-rs.so, for the SFTP plugin's root object. Without
-// the library each call is Internal.
 class RsKeyTools : public SshKeyTools
 {
 public:

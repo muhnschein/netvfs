@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! File calls, checked against the location's level ([`crate::access`]) before they run.
 
 use super::{Core, Effect};
 use crate::access::{self, After, Op, Own, Verdict};
@@ -9,7 +8,6 @@ use crate::server::{Call, NPath, ReplyTo, SessionId};
 use crate::status::Status;
 use netvfs_bridge_proto::{ErrorName, Lane};
 
-/// A call that may go on.
 #[derive(Debug, Clone, Copy)]
 pub(super) struct Admitted {
     pub(super) level: Level,
@@ -17,7 +15,6 @@ pub(super) struct Admitted {
 }
 
 impl Admitted {
-    /// What `after` makes of `path` in `loc`; only add levels keep track.
     fn effect(self, loc: &LocId, path: &NPath, after: After) -> Option<Effect> {
         (!self.level.changes()).then(|| Effect {
             loc: loc.as_str().to_owned(),
@@ -28,7 +25,6 @@ impl Admitted {
 }
 
 impl Core {
-    /// Checks `op` on `path` in `loc`; `None` after refusing the call. A location the consumer cannot see goes on and fails as before.
     pub(super) fn admit(
         &self,
         reply: ReplyTo,
@@ -149,7 +145,6 @@ impl Core {
         }
     }
 
-    /// `RemoveFile`, `RemoveDir`: an item that is not the consumer's own, at an add level, is refused, or `NotFound` when missing.
     fn on_remove(
         &mut self,
         sid: SessionId,

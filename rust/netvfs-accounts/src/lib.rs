@@ -32,7 +32,6 @@ pub fn run() -> u8 {
         return 1;
     }
     let env = db::Environment::from_process();
-    // Set-id: session bus below the runtime folder, never abstract.
     let bus = dbus::session_bus(set_id, &sandbox::runtime_dir());
     let abstract_bus = matches!(bus, Some(dbus::Address::Abstract(_)));
     let _filesystem = sandbox::restrict_filesystem(&env.database_folders(), abstract_bus);

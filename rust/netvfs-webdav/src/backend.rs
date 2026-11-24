@@ -196,7 +196,6 @@ impl Dav {
         dir: &[u8],
         body: &'static str,
     ) -> Result<(Option<Props>, Vec<Entry>), Status> {
-        // No trailing `/` in the request: Apache answers 400 to one after a file's name.
         let target = self.base.resolve(dir, false)?;
         let decoded = self.base.resolve(dir, true)?;
         let answer = propfind(&mut *self.http.lock().await, target, "1", body).await;
@@ -219,7 +218,6 @@ impl Dav {
         Ok((own, entries))
     }
 
-    /// The account's folder with its quota; `NotADirectory` for a file.
     async fn folder(&self) -> Result<Option<Props>, Status> {
         let decoded = self.base.resolve(b"", false)?;
         let found = propfind(&mut *self.http.lock().await, decoded, "0", PROPFIND_QUOTA).await?;
@@ -275,7 +273,6 @@ impl Dav {
         simple(&mut http, Req::new(Method::DELETE, decoded), Op::Other).await.map(drop)
     }
 
-    /// MOVE or COPY `from` to `to`.
     async fn transfer(
         &self,
         method: &'static [u8],
@@ -320,8 +317,6 @@ impl Dav {
         }
     }
 
-    /// `e` of a request on `path`, said better when the server could not resolve the path (`unresolved`): the
-    /// nearest ancestor that answers tells `NotFound` (missing) or `NotADirectory` (a file).
     async fn explain(&self, path: &[u8], e: Status) -> Status {
         if !unresolved(&e) {
             return e;
@@ -364,7 +359,6 @@ impl Dav {
     }
 }
 
-/// Connected, not signed in.
 #[derive(Debug)]
 struct Connected {
     http: Http,
@@ -473,7 +467,6 @@ impl Backend for Webdav {
             }
         };
         if connected.mismatch {
-            // No credentials go to a server whose key is not the pin.
             self.state = State::Connected(connected);
             return Err(netvfs_tls::identity_changed());
         }

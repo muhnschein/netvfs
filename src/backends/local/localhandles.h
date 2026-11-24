@@ -5,8 +5,6 @@
 #include "localbackend.h"
 
 namespace NetVfs::Local {
-
-// Regular files read with pread(); streams (FIFOs, devices) only sequentially.
 class LocalReadHandle : public ReadHandle
 {
 public:
@@ -28,7 +26,6 @@ private:
     qint64 m_streamPosition = 0;
 };
 
-// commit() is fsync + futimens (WriteOptions::modified) + close.
 class LocalWriteHandle : public WriteHandle
 {
 public:

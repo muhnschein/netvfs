@@ -16,11 +16,8 @@ use sspi::{
     SecurityStatus, Sspi, SspiImpl, Username,
 };
 
-/// NTOWFv2("Password", "User", "Domain"), MS-NLMP 4.2.4.1.1.
 const NTOWFV2: [u8; 16] = hex16("0c868a403bfd7a93a3001ef22ef02e3f");
 const SERVER_CHALLENGE: [u8; 8] = [0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef];
-/// NTLMSSP_NEGOTIATE_{KEY_EXCH,56,128,VERSION,TARGET_INFO,EXTENDED_SESSIONSECURITY,
-/// TARGET_TYPE_SERVER,ALWAYS_SIGN,NTLM,SEAL,SIGN,OEM,UNICODE} (MS-NLMP 4.2.4).
 const FLAGS: u32 = 0xE28A_8233;
 const KEY_EXCH: u32 = 0x4000_0000;
 const MIC_OFFSET: usize = 72;
@@ -63,7 +60,6 @@ fn av(id: u16, value: &[u8]) -> Vec<u8> {
     v
 }
 
-/// The 4.2.4.3 CHALLENGE_MESSAGE layout, optionally with an MsvAvTimestamp.
 fn challenge(timestamp: Option<u64>) -> Vec<u8> {
     let name = utf16("Server");
     let mut info = av(2, &utf16("Domain"));
@@ -85,7 +81,7 @@ fn challenge(timestamp: Option<u64>) -> Vec<u8> {
     m.extend_from_slice(&u16::try_from(info.len()).unwrap().to_le_bytes());
     m.extend_from_slice(&u16::try_from(info.len()).unwrap().to_le_bytes());
     m.extend_from_slice(&info_off.to_le_bytes());
-    m.extend_from_slice(&[0x06, 0x00, 0x70, 0x17, 0x00, 0x00, 0x00, 0x0f]); // Version
+    m.extend_from_slice(&[0x06, 0x00, 0x70, 0x17, 0x00, 0x00, 0x00, 0x0f]);
     assert_eq!(m.len(), 56);
     m.extend(name);
     m.extend(info);
@@ -165,13 +161,10 @@ fn av_pairs(mut b: &[u8]) -> Vec<(u16, Vec<u8>)> {
 
 #[test]
 fn published_values_check_the_test_helpers() {
-    // LMv2 with ClientChallenge aa*8: MS-NLMP 4.2.4.2.1.
     let lm = hmac_md5(&NTOWFV2, &[&SERVER_CHALLENGE, &[0xaa; 8]]);
     assert_eq!(lm, hex16("86c35097ac9cec102554764a57cccc19"));
-    // SessionBaseKey = KeyExchangeKey from NTProofStr: MS-NLMP 4.2.4.1.2.
     let kek = hmac_md5(&NTOWFV2, &[&hex16("68cd0ab851e51c96aabc927bebef6a1c")]);
     assert_eq!(kek, hex16("8de40ccadbc14a82f15cb0ad0de95ca3"));
-    // RC4(KeyExchangeKey, RandomSessionKey 55*16): MS-NLMP 4.2.4.2.3.
     let mut k = [0x55u8; 16];
     Rc4::new_from_slice(&kek).unwrap().apply_keystream(&mut k);
     assert_eq!(k, hex16("c5dad2544fc9799094ce1ce90bc9d03e"));
@@ -188,34 +181,26 @@ fn sspi_ntlmv2_matches_ms_nlmp_4_2_4() {
     assert_eq!(field(a, 36), utf16("User"));
     assert!(field(a, 44).is_empty(), "no workstation name is sent");
 
-    // NTLMv2 response: NTProofStr ‖ blob, NTProofStr = HMAC-MD5(NTOWFv2, SC ‖ blob).
     let nt = field(a, 20);
     let (proof, blob) = nt.split_at(16);
     assert_eq!(proof, hmac_md5(&NTOWFV2, &[&SERVER_CHALLENGE, blob]));
     assert_eq!(&blob[..2], &[1, 1]);
     let client_challenge = &blob[16..24];
-    // LMv2 = HMAC-MD5(NTOWFv2, SC ‖ CC) ‖ CC (sent although MS-NLMP 3.1.5.1.2 says SHOULD NOT when the server sends MsvAvTimestamp; here it does not).
     let mut lm = hmac_md5(&NTOWFV2, &[&SERVER_CHALLENGE, client_challenge]).to_vec();
     lm.extend_from_slice(client_challenge);
     assert_eq!(field(a, 12), lm);
 
-    // Exported session key = RC4(KeyExchangeKey, EncryptedRandomSessionKey), and it is what
-    // sspi hands out (the SMB key derivation input).
     let kek = hmac_md5(&NTOWFV2, &[proof]);
     let mut exported: [u8; 16] = field(a, 52).try_into().unwrap();
     Rc4::new_from_slice(&kek).unwrap().apply_keystream(&mut exported);
     assert_eq!(r.exported_key, exported);
     assert_ne!(exported, kek, "a random session key, not the key exchange key");
 
-    // MIC = HMAC-MD5(ExportedSessionKey, NEGOTIATE ‖ CHALLENGE ‖ AUTHENTICATE with MIC zeroed).
     let mut zeroed = a.clone();
     zeroed[MIC_OFFSET..MIC_OFFSET + 16].fill(0);
     let mic = hmac_md5(&exported, &[&r.negotiate, &r.challenge, &zeroed]);
     assert_eq!(&a[MIC_OFFSET..MIC_OFFSET + 16], mic);
 
-    // Target info echoed in the blob: the server's pairs, MsvAvFlags with "MIC present" (0x2),
-    // a timestamp from the clock (none from the server), and NO MsvAvTargetName (SPN) and no
-    // channel bindings although a target name was given.
     let pairs = av_pairs(&blob[28..]);
     let ids: Vec<u16> = pairs.iter().map(|p| p.0).collect();
     assert_eq!(ids, vec![2, 1, 6, 0], "{ids:?}");
@@ -228,6 +213,5 @@ fn sspi_uses_the_servers_timestamp() {
     let r = run_sspi(Some(0x01d0_0000_0000_0000));
     let nt = field(&r.authenticate, 20);
     assert_eq!(&nt[16 + 8..16 + 16], &0x01d0_0000_0000_0000u64.to_le_bytes());
-    // LMv2 is still sent (not Z(24)).
     assert_ne!(field(&r.authenticate, 12), &[0u8; 24][..]);
 }

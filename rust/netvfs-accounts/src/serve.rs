@@ -161,7 +161,6 @@ fn serve_files(store: &Store, id: &str) -> Served {
         Ok(config) => config,
         Err(outcome) => return Served::failure(&outcome),
     };
-    // Refused before the secret is read.
     let policy = check_files_policy(&config.params);
     if !policy.ok() {
         return Served::failure(&policy);
@@ -174,7 +173,6 @@ fn serve_files(store: &Store, id: &str) -> Served {
 }
 
 fn serve_attention(store: &mut Store, id: &str, state: &str, pin: Option<&str>) -> Served {
-    // Records attention; clearing it is the update flow's (Settings).
     let attention = Attention::from_qstring(Some(state));
     if attention == Attention::None {
         return Served::failure(&Outcome::failure(Error::Unsupported, "Unknown attention state"));
@@ -257,8 +255,6 @@ mod tests {
         );
     }
 
-    /// Three listed accounts: 1 usable, 2 refused by policy, 2^32 (id reads as 0); 5 is FTP (no backend) with
-    /// Files enabled, not handed out. Returns its path.
     fn listed_accounts(name: &str) -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(format!("netvfs-accounts-serve-{name}-{}", std::process::id()));
         std::fs::remove_dir_all(&dir).ok();
@@ -317,7 +313,6 @@ mod tests {
         assert_eq!(files("1"), Served::answer(expected.into_bytes()));
         let refused = Outcome::failure(Error::SecurityPolicy, "Unknown SMB security profile \"bogus\"");
         assert_eq!(files("2"), Served::failure(&refused));
-        // 0 is no account id, though a listed account reads as 0.
         let not_found = Served::failure(&Outcome::failure(Error::NotFound, "No such account"));
         assert_eq!(files("0"), not_found);
         assert_eq!(files("3"), not_found);
@@ -330,7 +325,6 @@ mod tests {
     fn list_answers() {
         let path = listed_accounts("list");
         let mut expected = Stream::answer(&Outcome::success());
-        // Account 0 is listed but cannot be loaded: left out.
         expected.i32(2);
         expected.i32(1);
         expected.string(Some("smb"));
@@ -361,7 +355,6 @@ mod tests {
         let served = serve(&args(&["list"]), &env, &NoOwner);
         assert_eq!(served.change, None);
         assert_eq!(served.answer[..4], [0, 0, 0, 8]);
-        // Also before the usage is checked, as the C++ helper did.
         assert_eq!(serve(&args(&["bogus"]), &env, &NoOwner).answer[..4], [0, 0, 0, 8]);
         let missing =
             Environment { accounts: Some("/nonexistent/accounts".into()), ..Environment::default() };

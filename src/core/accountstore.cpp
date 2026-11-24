@@ -42,7 +42,6 @@ Result notFound(int accountId)
     return Result(Error::NotFound, QStringLiteral("Account %1 does not exist").arg(accountId));
 }
 
-// Empty when the service is not installed. Leaves the global service selected.
 QString serviceValue(const Accounts::Manager *manager, Accounts::Account *account, Service service, const char *key,
                      bool *enabled)
 {

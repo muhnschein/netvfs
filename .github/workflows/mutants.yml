@@ -1,5 +1,4 @@
 name: Mutants (full crate)
-# cargo-mutants on all of one crate, by hand before a new crate's PR merges; results in the PR. Every mutant caught or unviable; equivalent ones listed with reason in rust/.cargo/mutants.toml.
 on:
   workflow_dispatch:
     inputs:
@@ -36,37 +35,33 @@ jobs:
       matrix:
         shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
       - name: Install dependencies
         run: ./tools/ci/install-host-deps.sh
       - name: Cache cargo-nextest
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
         with:
           path: ~/.cargo/bin/cargo-nextest
           key: cargo-nextest-${{ env.NEXTEST_VERSION }}-ubuntu-24.04
       - name: Install cargo-nextest
         run: ./tools/ci/cargo-tool.sh cargo-nextest "$NEXTEST_VERSION"
-      # netvfs-bridge's FFI test needs the C++ side (only those libraries).
       - name: Build the FFI's C++ libraries
         run: ./tools/ci/ffi-libs.sh build-ffi
       - name: Cache cargo-mutants
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
         with:
           path: ~/.cargo/bin/cargo-mutants
           key: cargo-mutants-${{ env.MUTANTS_VERSION }}-ubuntu-24.04
       - name: Install cargo-mutants
         run: ./tools/ci/cargo-tool.sh cargo-mutants "$MUTANTS_VERSION"
-      # netvfs-sftp's tests need the SFTP interop servers (rust/netvfs-sftp/tests/openssh.rs): started once for the shard.
       - name: Start the SFTP interop servers
         if: inputs.package == 'netvfs-sftp'
         run: NETVFS_SFTP_SERVERS_ONLY=1 ./tests/interop/sftp/run.sh build-ffi | tail -n 1 >> "$GITHUB_ENV"
-      # netvfs-smb's tests need the Samba servers (rust/netvfs-smb/tests/samba.rs): started once for the shard.
       - name: Start the SMB interop servers
         if: inputs.package == 'netvfs-smb'
         run: NETVFS_SMB_SERVERS_ONLY=1 ./tests/interop/smb/run.sh build-ffi | grep '^NETVFS_INTEROP_SMB_' >> "$GITHUB_ENV"
-      # netvfs-webdav's tests/apache.rs needs the Apache server: started once for the shard.
       - name: Start the WebDAV interop server
         if: inputs.package == 'netvfs-webdav'
         run: NETVFS_WEBDAV_SERVERS_ONLY=1 ./tests/interop/webdav/run.sh build-ffi | grep '^NETVFS_INTEROP_WEBDAV_' >> "$GITHUB_ENV"
@@ -75,7 +70,7 @@ jobs:
           PACKAGE: ${{ inputs.package }}
           SHARD: ${{ matrix.shard }}
         run: ./tools/ci/rust-mutants.sh crate "$PACKAGE" build-ffi "$SHARD/12"
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         if: always()
         with:
           name: mutants-${{ inputs.package }}-${{ matrix.shard }}

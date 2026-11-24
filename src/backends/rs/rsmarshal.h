@@ -2,8 +2,6 @@
 #ifndef NETVFS_RSMARSHAL_H
 #define NETVFS_RSMARSHAL_H
 
-// Conversions between NetVfs types and netvfs_rs.h data. Towards Rust everything is borrowed for
-// the call; what Rust returns is one block each, released with the table's free.
 #include "marshal.h"
 #include "netvfs_rs.h"
 #include "sshkeys.h"
@@ -31,7 +29,6 @@ template <typename T>
 using Block = std::unique_ptr<T, Free>;
 
 nvb_bytes view(const QByteArray &data);
-// Bytes of a path; a name Names::decode() cannot produce has none: InvalidName.
 Result encodePath(const QString &path, QByteArray *out);
 
 Result resultOf(const nvr_table *table, nvb_error *error);

@@ -42,8 +42,6 @@ public:
     void abort() override {}
 };
 
-// Implements only the pure virtual methods, so that the defaults and the
-// non-virtual helpers of Backend can be checked.
 class MinimalBackend : public Backend
 {
 public:
@@ -108,7 +106,7 @@ public:
     void disconnect() override {}
 };
 
-} // namespace
+}
 
 class TestCore : public QObject
 {
@@ -351,7 +349,6 @@ private slots:
         QCOMPARE(spki.toPin(), QStringLiteral("tls-spki-sha256 ") + QString::fromLatin1(QByteArray(91, 't').toBase64()));
         QCOMPARE(spki, tls('t'));
 
-        // The same key bytes under another algorithm are another identity.
         ServerIdentity sameBytes = ssh;
         sameBytes.algorithm = QStringLiteral("ecdsa-sha2-nistp256");
         QVERIFY(sameBytes != ssh);
@@ -391,7 +388,6 @@ private slots:
         QCOMPARE(checkServerIdentity(seen, otherAlgorithm.toPin()).error(), Error::ServerIdentityChanged);
     }
 
-    // /: no authentication request before the identity matches.
     void establishChecksIdentityBeforeAuth()
     {
         FakeServer *server = FakeServer::instance();
@@ -464,7 +460,7 @@ private slots:
         QVERIFY(verifyAccess(&backend, QStringLiteral("Sailfish OS/Backups"), &freeBytes).ok());
         QCOMPARE(freeBytes, server->freeBytes);
         QVERIFY(server->exists(QStringLiteral("Sailfish OS/Backups")));
-        QCOMPARE(server->nodes.size(), 2);   // two directories, no probe left
+        QCOMPARE(server->nodes.size(), 2);
         bool sawProbe = false;
         for (const QString &entry : server->log)
             sawProbe |= entry.startsWith(QStringLiteral("upload:Sailfish OS/Backups/.netvfs-probe-"));
@@ -482,8 +478,6 @@ private slots:
         server->failOps.insert(QStringLiteral("removeFile"), Result(Error::PermissionDenied));
         QCOMPARE(verifyAccess(&backend, QStringLiteral("x")).error(), Error::PermissionDenied);
         server->freeBytes = 10;
-        // Free space is best effort: a failed query leaves it unknown
-        // (Samba with quotas on ZFS drops the connection here).
         server->failOps.insert(QStringLiteral("spaceInfo"), Result(Error::ConnectionLost));
         freeBytes = 0;
         QVERIFY(verifyAccess(&backend, QStringLiteral("x"), &freeBytes).ok());
@@ -548,7 +542,6 @@ private slots:
         QVERIFY(NetVfs::installAuthorizedKey(&backend, line).ok());
         QCOMPARE(server->fileData(QStringLiteral(".ssh/authorized_keys")), QByteArray("no-pty ssh-ed25519 AAAAC3Nza old comment"));
 
-        // Appended after existing keys; missing final newline repaired.
         server->addFile(QStringLiteral(".ssh/authorized_keys"), "ssh-rsa AAAAB3 other");
         QVERIFY(NetVfs::installAuthorizedKey(&backend, line).ok());
         QCOMPARE(server->fileData(QStringLiteral(".ssh/authorized_keys")),
@@ -575,7 +568,6 @@ private slots:
     void loaderRejectsWrongProviderAndNonPlugins()
     {
         QTemporaryDir dir;
-        // A file with the right name that is not a plugin.
         QFile bogus(dir.filePath(QStringLiteral("libnetvfs-bogus.so")));
         QVERIFY(bogus.open(QIODevice::WriteOnly));
         bogus.write("not an ELF file");
@@ -644,7 +636,7 @@ private slots:
         b.listResult = Result(Error::Timeout);
         out = QVector<Entry>({ Entry() });
         QCOMPARE(b.list(QStringLiteral("d"), &out).error(), Error::Timeout);
-        QVERIFY(out.isEmpty());   // no partial listing
+        QVERIFY(out.isEmpty());
         QCOMPARE(b.list(QStringLiteral("d"), nullptr).error(), Error::Timeout);
     }
 
@@ -826,7 +818,6 @@ private slots:
 
     void namesRandomRoundTrip()
     {
-        // A fixed LCG, so failures reproduce (no QRandomGenerator on Qt 5.6).
         quint32 state = 0x2545F491u;
         const auto next = [&state]() {
             state = state * 1664525u + 1013904223u;
@@ -850,7 +841,6 @@ private slots:
 
     void namesForeignSurrogates()
     {
-        // Lone UTF-16 surrogates that decode() never produces (SMB names).
         const QString high = QStringLiteral("a") + QChar(0xD800) + QStringLiteral("b");
         QVERIFY(!Names::isEncodable(high));
         QVERIFY(!Names::hasEscapes(high));
@@ -874,8 +864,6 @@ private slots:
         BlockingPrompter prompter([&asked, &self](const BlockingPrompter::Question &question) {
             asked.append(question);
             QVERIFY(self->waiting());
-            // The answering thread (here: a timer on this one would deadlock,
-            // so answer from a helper thread).
             std::thread([self]() { self->respond({ QByteArray("123456") }); }).detach();
         });
         self = &prompter;
@@ -907,9 +895,7 @@ private slots:
 
     void blockingPrompterCancel()
     {
-        // cancel() from another thread ends a wait nobody answers
-        // and stays in effect until reset().
-        BlockingPrompter prompter([](const BlockingPrompter::Question &) { /* nobody answers */ });
+        BlockingPrompter prompter([](const BlockingPrompter::Question &) {  });
         QElapsedTimer timer;
         timer.start();
         std::thread canceler([&prompter]() {

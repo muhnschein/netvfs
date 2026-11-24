@@ -1,6 +1,5 @@
 #!/bin/sh
 # SPDX-License-Identifier: LGPL-2.1-or-later
-# User alice (password $TEST_PASSWORD, home /srv/ftp), then proftpd in the foreground.
 set -eu
 uid=$(id -u proftpd)
 hash=$(openssl passwd -6 "$TEST_PASSWORD")

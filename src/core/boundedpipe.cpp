@@ -7,9 +7,6 @@
 #include <mutex>
 
 namespace NetVfs {
-
-// Devices keep it alive, so they may outlive the BoundedPipe. std::mutex/condition_variable, not
-// QMutex: ThreadSanitizer cannot see atomics in uninstrumented Qt.
 struct BoundedPipe::State
 {
     using Lock = std::unique_lock<std::mutex>;

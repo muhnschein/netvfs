@@ -31,16 +31,13 @@ pub const TRANSFORM_HEADER_LEN: usize = 52;
 /// ProtocolId of a TRANSFORM_HEADER.
 pub const TRANSFORM_PROTOCOL_ID: [u8; 4] = [0xFD, b'S', b'M', b'B'];
 
-/// Where the 16-byte signature lives in an SMB2 header.
 const SIGNATURE: Range<usize> = 48..64;
-/// TRANSFORM_HEADER layout (MS-SMB2 2.2.41).
 const TH_TAG: Range<usize> = 4..20;
 const TH_NONCE: Range<usize> = 20..32;
 const TH_AAD: Range<usize> = 20..52;
 const TH_SIZE: Range<usize> = 36..40;
 const TH_FLAGS: Range<usize> = 42..44;
 const TH_SESSION: Range<usize> = 44..52;
-/// Flags (3.1.1): "encrypted".
 const TH_FLAG_ENCRYPTED: u16 = 0x0001;
 
 /// A failure in the glue. Every variant means the message must not be used.
@@ -172,7 +169,6 @@ pub struct SessionKeys {
     pub open: Option<OpenKey>,
 }
 
-/// `Session.SessionKey`: first 16 bytes of the GSS key, right-padded with zeros.
 fn session_key(gss_key: &[u8]) -> Zeroizing<[u8; 16]> {
     let mut key = Zeroizing::new([0u8; 16]);
     for (d, s) in key.iter_mut().zip(gss_key) {
@@ -181,7 +177,6 @@ fn session_key(gss_key: &[u8]) -> Zeroizing<[u8; 16]> {
     key
 }
 
-/// GCM key for one direction: AES-128 from `Session.SessionKey` (L = 128), AES-256 from `Session.FullSessionKey` (whole GSS key, L = 256).
 fn gcm_key(gss_key: &[u8], cipher: Cipher, label: &[u8], context: &[u8]) -> Result<GcmKey, CryptoError> {
     Ok(match cipher {
         Cipher::Aes128Gcm => GcmKey::Aes128(kdf::<16>(&session_key(gss_key)[..], label, context)?),
@@ -266,7 +261,6 @@ impl SigningKey {
     }
 }
 
-/// GCM key bytes for one direction.
 enum GcmKey {
     Aes128(Zeroizing<[u8; 16]>),
     Aes256(Zeroizing<[u8; 32]>),
@@ -326,9 +320,7 @@ impl GcmKey {
 pub struct SealKey {
     key: GcmKey,
     session_id: u64,
-    /// Next nonce counter value; the session ends before it wraps.
     counter: u64,
-    /// Random per-session nonce bytes 8..12 (on top of the counter).
     salt: [u8; 4],
 }
 
@@ -379,17 +371,16 @@ impl SealKey {
         self.seal_with_nonce(&nonce, msg)
     }
 
-    /// TRANSFORM_HEADER for a given 12-byte nonce. Private: nonces only come from [`Self::seal`]; known-answer tests call this.
     fn seal_with_nonce(&self, nonce: &[u8; 12], msg: &[u8]) -> Result<Vec<u8>, CryptoError> {
         let size =
             u32::try_from(msg.len()).map_err(|_overflow| CryptoError::Malformed("message too long"))?;
         let mut out = Vec::new();
         out.extend_from_slice(&TRANSFORM_PROTOCOL_ID);
-        out.extend_from_slice(&[0u8; 16]); // Signature: the tag, filled in below
+        out.extend_from_slice(&[0u8; 16]);
         out.extend_from_slice(nonce);
-        out.extend_from_slice(&[0u8; 4]); // the rest of the 16-byte Nonce field
+        out.extend_from_slice(&[0u8; 4]);
         out.extend_from_slice(&size.to_le_bytes());
-        out.extend_from_slice(&[0u8; 2]); // Reserved
+        out.extend_from_slice(&[0u8; 2]);
         out.extend_from_slice(&TH_FLAG_ENCRYPTED.to_le_bytes());
         out.extend_from_slice(&self.session_id.to_le_bytes());
         out.extend_from_slice(msg);
@@ -453,7 +444,6 @@ impl OpenKey {
     }
 }
 
-/// The server's side of a session's keys, for fake servers in tests of other modules.
 #[cfg(test)]
 pub(crate) fn server_side_keys(
     gss_key: &[u8],

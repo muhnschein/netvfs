@@ -91,7 +91,7 @@ bool logHas(const QString &entry)
     QMutexLocker lock(&server->mutex);
     return server->log.contains(entry);
 }
-} // namespace
+}
 
 class TestQmlKeyTool : public QObject
 {
@@ -254,7 +254,6 @@ private slots:
 
     void defaultToolsWithoutPlugin()
     {
-        // No SFTP plugin in the search path: reported, not crashed.
         const QByteArray saved = qgetenv("NETVFS_BACKEND_PATH");
         qputenv("NETVFS_BACKEND_PATH", dir.path().toLocal8Bit());
         SshKeyTool tool;
@@ -330,7 +329,6 @@ private slots:
 
     void installChecksPin()
     {
-        // the password is not sent to a server with another key.
         FakeServer::instance()->identity = serverIdentity();
         SshKeyTool tool(&tools, nullptr);
         makeReady(&tool);

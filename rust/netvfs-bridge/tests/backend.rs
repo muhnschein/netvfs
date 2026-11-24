@@ -1,7 +1,4 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! Workers, pools, connector, copy jobs and job bodies against the real `libnetvfs-bridge-ffi.so` with the fake backend (variables of `tests/ffi.rs`; without them every test says it is skipped and passes).
-//!
-//! Own harness as `tests/ffi.rs`: `init` and the Qt event loop run on the main thread, each test on a thread of its own (workers block, the main thread serves signond).
 #![allow(
     missing_docs,
     clippy::unwrap_used,
@@ -155,7 +152,6 @@ fn wait_for_loop(ffi: Ffi) {
     rx.recv().unwrap();
 }
 
-/// Runs `work` on another thread while this one runs the Qt event loop.
 fn off_qt_thread<R: Send>(env: &Env, work: impl FnOnce(&Env) -> R + Send) -> R {
     let env = *env;
     thread::scope(|s| {
@@ -169,7 +165,6 @@ fn off_qt_thread<R: Send>(env: &Env, work: impl FnOnce(&Env) -> R + Send) -> R {
     })
 }
 
-/// What the core saw from workers.
 #[derive(Debug)]
 enum Seen {
     Fetch(i32),
@@ -178,11 +173,9 @@ enum Seen {
     Warning,
 }
 
-/// Stand-in for the core: answers account fetches and records everything.
 #[derive(Default)]
 struct Core {
     access: Mutex<Option<Result<AccountAccess, Status>>>,
-    /// Fetches left unanswered (the senders stay alive).
     held: Mutex<Vec<Box<dyn std::any::Any + Send>>>,
     seen: Mutex<Vec<Seen>>,
 }
@@ -273,12 +266,10 @@ fn pattern(size: usize) -> Vec<u8> {
     (0..size).map(|i| u8::try_from((i * 7 + i / 251) & 0xff).unwrap()).collect()
 }
 
-/// Account 7 at fake.example, its data with `host_key` (if any) and an optional secret (credentials id 0).
 fn account(rig: &mut Rig, host_key: Option<&str>) -> String {
     accounts(rig, host_key, &[7]).remove(0)
 }
 
-/// Accounts `ids` at fake.example, as [`account`] makes one.
 fn accounts(rig: &mut Rig, host_key: Option<&str>, ids: &[i32]) -> Vec<String> {
     let specs = ids
         .iter()
@@ -310,7 +301,6 @@ fn accounts(rig: &mut Rig, host_key: Option<&str>, ids: &[i32]) -> Vec<String> {
     locs
 }
 
-/// Account 7, whose sign-in the fake backend takes (user `user`, no password).
 fn signed_in(rig: &mut Rig, f: Fake) -> String {
     f.set_credentials("user", b"");
     account(rig, None)
@@ -318,7 +308,6 @@ fn signed_in(rig: &mut Rig, f: Fake) -> String {
 
 type Body<R> = Box<dyn FnOnce(&mut Conn, &mut Handles<Handle>, WorkerId) -> (R, Result<(), Status>) + Send>;
 
-/// Runs `body` on a connection of `loc`; what it gave, or why there was no connection.
 fn on_worker<R: Send + 'static>(
     rig: &mut Rig,
     loc: &str,
@@ -347,7 +336,6 @@ fn wrap<R: Send + 'static>(
     })
 }
 
-/// Waits as the core does, with its maintenance tick: that reaps stopped connections whose threads finished, so work waiting for their host slots gets one.
 #[track_caller]
 fn get<R>(rig: &mut Rig, rx: &mpsc::Receiver<Result<R, Status>>) -> Result<R, Status> {
     let deadline = Instant::now() + Duration::from_secs(20);
@@ -362,7 +350,6 @@ fn get<R>(rig: &mut Rig, rx: &mpsc::Receiver<Result<R, Status>>) -> Result<R, St
     }
 }
 
-/// Establishes a connection of `loc` (an empty item).
 #[track_caller]
 fn connect(rig: &mut Rig, loc: &str) -> Result<(), Status> {
     let rx = on_worker(rig, loc, TaskContext::detached(), Box::new(|_, _, _| ((), Ok(()))));
@@ -491,7 +478,6 @@ fn connections_are_reused_and_dropped(env: &Env) {
     rig.book.disconnect(&id);
     wait_until("disconnected", || f.live_backends() == 0);
     connect(&mut rig, &id).unwrap();
-    // `maintain` also reports reaping the disconnected worker: wait on the backend, not its result.
     wait_until("closed when idle", || {
         rig.book.maintain(Instant::now() + Duration::from_secs(61), Duration::from_mins(1));
         f.live_backends() == 0

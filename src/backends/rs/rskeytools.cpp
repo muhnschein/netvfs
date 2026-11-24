@@ -6,8 +6,6 @@
 namespace NetVfs::Rs {
 
 namespace {
-
-// Private part is wiped twice: by free in Rust and by SshKeyMaterial here.
 template <typename Call>
 Result keyCall(SshKeyMaterial *out, const Call &call)
 {

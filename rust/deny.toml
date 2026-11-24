@@ -1,18 +1,14 @@
 # SPDX-License-Identifier: LGPL-2.1-or-later
-# cargo-deny for crates the helper and bridge link (CI "Rust supply chain").
 
 [graph]
 all-features = true
-# Targets: Sailfish OS aarch64 and x86_64 CI. Leaves out windows-sys, sspi's macOS async-dnssd (bitflags 1), getrandom's UEFI r-efi.
 targets = ["aarch64-unknown-linux-gnu", "x86_64-unknown-linux-gnu"]
 
 [advisories]
 version = 2
 yanked = "deny"
 ignore = [
-    # rsa: Marvin timing side channel, no fix. No RSA private-key operation: netvfs-sftp refuses RSA user keys (only verifies rsa-sha2 host signatures); netvfs-smb uses sspi/picky for NTLM only.
     { id = "RUSTSEC-2023-0071", reason = "no RSA private-key operation: RSA user keys refused, sspi limited to NTLM" },
-    # zvariant, zvariant_derive, zbus_names: unmaintained standalone, folded into zbus 6 (z-galaxy/zbus#2043). Still part of zbus 5; moving to zbus 6 is separate.
     { id = "RUSTSEC-2026-0370", reason = "zvariant is part of zbus 5; zbus 6 folds it in" },
     { id = "RUSTSEC-2026-0371", reason = "zbus_names is part of zbus 5; zbus 6 folds it in" },
     { id = "RUSTSEC-2026-0372", reason = "zvariant_derive is part of zbus 5; zbus 6 folds it in" },
@@ -20,42 +16,27 @@ ignore = [
 
 [licenses]
 version = 2
-# LGPL-2.1-or-later, linked statically into a setgid binary: permissive licences only.
 allow = ["Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "MIT"]
 confidence-threshold = 0.9
-# Exceptions, one crate each.
 exceptions = [
-    # Unicode tables in proc-macro helper (zbus, serde derives via proc-macro2): "(MIT OR Apache-2.0) AND Unicode-3.0". Build-time only; permissive data licence.
     { crate = "unicode-ident", allow = ["Unicode-3.0"] },
-    # ring (russh crypto): "Apache-2.0 AND ISC", ISC from BoringSSL.
     { crate = "ring", allow = ["ISC"] },
-    # untrusted (ring input parser): ISC.
     { crate = "untrusted", allow = ["ISC"] },
-    # rustls-webpki (certificate checks of rustls, WebDAV and FTPS): ISC, from webpki by ring's author.
     { crate = "rustls-webpki", allow = ["ISC"] },
-    # IDNA tables (sspi -> url -> idna -> idna_adapter 1.1, pinned to keep ICU4X out): "(Apache-2.0 OR MIT) AND Unicode-3.0".
     { crate = "idna_mapping", allow = ["Unicode-3.0"] },
-    # unicode-normalization (idna_adapter 1.1) held at 0.1.25 in Cargo.lock: 0.1.26 adds Unicode-3.0.
 ]
 
-# Own crates (publish = false).
 [licenses.private]
 ignore = true
 
 [bans]
 multiple-versions = "deny"
 wildcards = "deny"
-# Path deps between own unpublished crates.
 allow-wildcard-paths = true
-# Allowed duplicates, with reason.
 skip = [
-    # Proc-macro only: enumflags2_derive (zvariant), tracing-attributes (tokio, zbus) lack syn 3 releases; rest of zbus tree on syn 3.
     { crate = "syn@2", reason = "enumflags2_derive and tracing-attributes are still on syn 2" },
-    # russh tree: ring 0.17 on getrandom 0.2, RustCrypto pre-releases (ssh-key, rsa, crypto-bigint) on 0.4.
     { crate = "getrandom@0.2", reason = "ring 0.17 has no release on getrandom 0.3 or later" },
-    # sspi 0.23 (netvfs-smb) uses getrandom 0.3; current RustCrypto on 0.4.
     { crate = "getrandom@0.3", reason = "sspi 0.23 depends on getrandom 0.3 directly" },
-    # sspi crypto-mac 0.11 on generic-array 0.14, russh on 1.x (compat-0_14 links 0.14 too).
     { crate = "generic-array@0.14", reason = "crypto-mac 0.11 (sspi) has no release on generic-array 1" },
 ]
 

@@ -15,8 +15,6 @@
 namespace NetVfs::Ops {
 
 namespace {
-
-// Tree deeper than PATH_MAX allows = hostile or broken server.
 constexpr int MaxTreeDepth = 4096;
 
 bool isFatal(const Result &r)
@@ -32,7 +30,6 @@ void countRemoved(TreeCounts *counts, bool isDir)
         ++counts->files;
 }
 
-// Collects a whole listing; backend not re-entered while a folder is processed.
 class CollectSink : public ListSink
 {
 public:
@@ -47,7 +44,6 @@ private:
     QVector<Entry> *m_out;
 };
 
-// Collapses "." and ".." against `base`; ".." above a relative identity's start is kept literally.
 QString resolveTarget(const QString &base, const QString &target)
 {
     const bool absolute = target.startsWith(QLatin1Char('/'));
@@ -162,7 +158,6 @@ Result Walker::step(const Frame &parent, const Entry &entry)
     bool folder = entry.type == EntryType::Directory;
     if (!folder && entry.type == EntryType::Symlink && m_options.symlinks == SymlinkPolicy::Follow)
         folder = followTarget(path, parent, entry, &identity);
-    // Loop is skipped, not an error: link reported as a leaf.
     if (!folder || m_branch.contains(identity))
         return leaf(path, entry, depth);
 
@@ -210,7 +205,6 @@ Result Walker::run(const QString &root)
         const int index = m_stack.size() - 1;
         if (Frame &top = m_stack[index]; top.next < top.children.size()) {
             const Entry entry = top.children.at(top.next++);
-            // `step` appends to the stack: pass a copy of the parent data.
             Frame parent;
             parent.path = top.path;
             parent.identity = top.identity;
@@ -251,7 +245,6 @@ public:
         Q_UNUSED(depth)
         if (entry.type != EntryType::Directory)
             return removeEntry(path, false);
-        // Never follow a link even if the backend listed it as a folder.
         Entry real;
         if (const Result r = m_backend->lstat(path, &real); !r.ok() || real.type != EntryType::Directory) {
             *descend = false;
@@ -404,24 +397,17 @@ Result removeTree(Backend *backend, const QString &path, TreeProgress *progress,
 }
 
 namespace {
-
-// Source side, worker thread: touches only the pipe, never the caller's Progress.
 class SourceProgress : public Progress
 {
 public:
     explicit SourceProgress(BoundedPipe *pipe) : m_pipe(pipe) {}
-    void update(qint64, qint64) override
-    {
-        // Caller's Progress belongs to calling thread; destination side reports.
-    }
+    void update(qint64, qint64) override {} // NOSONAR
     bool canceled() const override { return !m_pipe->result().ok(); }
 
 private:
     BoundedPipe *m_pipe;
 };
 
-// Destination side, calling thread: forwards to the caller's Progress, turns its cancel into a pipe
-// failure.
 class DestinationProgress : public Progress
 {
 public:
@@ -527,8 +513,6 @@ Result copyFile(const FileJob &job, const CopyAcrossOptions &options, Progress *
         worker.join();
         return pipe.result();
     }
-    // Destination done. A source with data left fails on its next write, so the worker cannot block
-    // here.
     const bool sourceHadFailed = !pipe.result().ok();
     pipe.reader()->close();
     worker.join();
@@ -588,7 +572,6 @@ private:
         return r;
     }
 
-    // Links to files copied as files; links to folders (loops) and dangling links skipped.
     Result copyLinked(const QString &path, const QString &target)
     {
         Entry resolved;

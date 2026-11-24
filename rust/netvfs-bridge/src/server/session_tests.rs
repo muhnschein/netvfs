@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-// Restriction lints that only add noise to tests.
 #![allow(clippy::assertions_on_result_states, clippy::arithmetic_side_effects)]
 
 use super::{Arc, Duration, EventSink, SessionId, StdUnixStream, UnixStream, run};
@@ -240,7 +239,6 @@ async fn flow_control_bounded() {
     let cancel = Arc::new(AtomicBool::new(false));
     let sent = Arc::new(AtomicUsize::new(0));
     let mut finished = producer(Arc::clone(&cancel), Arc::clone(&sent));
-    // Saturated once the budget is spent; a slow machine (qemu) may take long for the first batch.
     let deadline = Instant::now() + Duration::from_mins(1);
     while outbox.flow().in_flight() <= FLOW_LIMIT {
         assert!(Instant::now() < deadline, "{} batches sent", sent.load(Ordering::SeqCst));
@@ -254,8 +252,6 @@ async fn flow_control_bounded() {
     assert!(last * bytes > FLOW_LIMIT, "{last} batches of {bytes} bytes");
     let in_flight = outbox.flow().in_flight();
     assert!(in_flight > FLOW_LIMIT && in_flight <= FLOW_LIMIT + bytes, "{in_flight}");
-    // Resident set is process-wide: needs its own process (nextest gives one; cross-build.sh runs it alone).
-    // Under AddressSanitizer freed memory stays resident in quarantine (rust-sanitize.sh sets the variable); the budget bounds the queue anyway.
     if std::env::var_os("NETVFS_TEST_SANITIZER").is_none() {
         let growth = resident_bytes().saturating_sub(before);
         assert!(growth < 16 << 20, "resident set grew by {growth} bytes");

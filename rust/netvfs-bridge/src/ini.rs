@@ -60,23 +60,17 @@ impl IniValue {
     }
 }
 
-/// One logical line of the file.
 #[derive(Clone, Debug)]
 struct Line {
-    /// First byte (after leading white space).
     start: usize,
-    /// One past the last byte.
     end: usize,
     kind: LineKind,
 }
 
 #[derive(Clone, Debug)]
 enum LineKind {
-    /// `[name]`: the prefix of its keys, `""` for the general section.
     Section(Vec<u16>),
-    /// `key=value`, with the full key (section prefix included).
     Key { key: Vec<u16>, value: IniValue, section: Vec<u16> },
-    /// A line without `=`.
     Other,
 }
 
@@ -286,7 +280,6 @@ struct RawLine {
     equals: Option<usize>,
 }
 
-/// `readIniLine`: the next logical line from `pos` and where the next starts; `None` at the end. The white space skipped before a line and after a comment includes line ends.
 fn read_ini_line(data: &[u8], pos: usize) -> Option<(RawLine, usize)> {
     let skipped = data.get(pos..).unwrap_or_default().iter().take_while(|b| is_space(**b)).count();
     let start = pos.saturating_add(skipped);
@@ -417,7 +410,6 @@ fn section_name(text: &[u8]) -> Vec<u16> {
     prefix
 }
 
-/// `iniUnescapedKey`: `\` is `/`, `%XX` and `%UXXXX` are code units, anything else Latin-1.
 pub(crate) fn unescape_key(key: &[u8], out: &mut Vec<u16>) {
     let mut i = 0;
     while let Some(&ch) = key.get(i) {
@@ -441,7 +433,6 @@ fn percent_escape(text: &[u8]) -> (u16, usize) {
     }
 }
 
-/// `QByteArray::toInt(&ok, 16)` cut to a `QChar`: optional white space and sign, optional `0x`, then hex digits only.
 fn qt_hex(digits: &[u8]) -> Option<u16> {
     let text = digits.get(digits.iter().take_while(|b| is_c_space(**b)).count()..).unwrap_or_default();
     let (negative, text) = match text.split_first() {
@@ -461,7 +452,6 @@ fn hex_digit(d: u8) -> u16 {
     char::from(d).to_digit(16).and_then(|v| u16::try_from(v).ok()).unwrap_or(0)
 }
 
-/// `iniEscapedKey`: `/` as `\`, `[A-Za-z0-9_.-]` as is, `%XX` up to 0xff, `%UXXXX` above (upper-case hex).
 fn escape_key(key: &str, out: &mut Vec<u8>) {
     for unit in key.encode_utf16() {
         match u8::try_from(unit) {
@@ -473,7 +463,6 @@ fn escape_key(key: &str, out: &mut Vec<u8>) {
     }
 }
 
-/// `iniEscapedString` without a codec (or UTF-8 for a file with a BOM): `\` escapes, `\xNN` for control and (without a codec) non-ASCII code units, quotes around a value with `;`, `,` or `=`, or a space at either end.
 fn escape_string(value: &str, utf8: bool, out: &mut Vec<u8>) {
     let start = out.len();
     let mut needs_quotes = false;
@@ -578,7 +567,6 @@ fn string_value(s: Vec<u16>) -> IniValue {
 fn typed_value(s: &[u16], text: &str) -> Option<IniValue> {
     let inner = |open: usize| s.get(open..s.len().saturating_sub(1)).unwrap_or_default();
     if text.starts_with("@ByteArray(") {
-        // QString::toLatin1(): '?' for what Latin-1 cannot hold.
         let bytes = inner(11).iter().map(|u| u8::try_from(*u).unwrap_or(b'?')).collect();
         return Some(IniValue::ByteArray(bytes));
     }

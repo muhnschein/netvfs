@@ -94,7 +94,6 @@ fn settings_from_params() {
     );
     assert_eq!((s.username.as_str(), s.auth_mode.as_deref(), s.pin.as_deref()), ("alice", None, None));
     assert_eq!((s.dir_mode, s.target.pinned_type.as_deref()), (DEFAULT_DIR_MODE, None));
-    // Defaults.
     let p = Params { port: 0, connect_timeout_ms: 0, request_timeout_ms: -5, ..params(addr) };
     let s = Settings::of(&p).unwrap();
     assert_eq!(s.target.port, 22);
@@ -118,7 +117,6 @@ fn settings_from_params() {
         let p = Params { host: host.to_owned(), ..params(addr) };
         assert_eq!(Settings::of(&p), Err(Status::internal("Invalid server name")), "{host}");
     }
-    // Options.
     for (value, mode) in [
         ("750", 0o750),
         ("0700", 0o700),
@@ -142,7 +140,6 @@ fn settings_from_params() {
         (s.pin.as_deref(), s.target.pinned_type.as_deref()),
         (Some("ssh-ed25519 AAAA"), Some("ssh-ed25519"))
     );
-    // A pin that cannot be read narrows nothing but stays a pin.
     let s = Settings::of(&with_option(params(addr), "host_key", "garbage")).unwrap();
     assert_eq!((s.pin.as_deref(), s.target.pinned_type), (Some("garbage"), None));
     let s = Settings::of(&with_option(params(addr), "host_key", "")).unwrap();
@@ -210,7 +207,6 @@ async fn connect_sign_in_and_work() {
         assert!(caps.has(cap), "{cap:?}");
     }
     assert!(!caps.has(Capability::Checksums) && !caps.has(Capability::ServerCopyRecursive));
-    // Relative paths are relative to the start folder.
     assert_eq!(sftp.stat(b"", true, &c()).await.unwrap().kind, EntryType::Directory);
     sftp.make_dir(b"Backups", true, &c()).await.unwrap();
     let options = WriteOptions { disposition: Disposition::CreateNew, ..WriteOptions::default() };
@@ -232,7 +228,6 @@ async fn connect_sign_in_and_work() {
     assert_eq!(sftp.read_link(b"Backups/l", &c()).await.unwrap(), b"c.tar");
     sftp.make_hardlink(b"Backups/c.tar", b"Backups/h", &c()).await.unwrap();
     assert!(sftp.space_info(b"", &c()).await.unwrap().free.is_some());
-    // Handles.
     let mut w = sftp.open_write(b"Backups/d", &options, &c()).await.unwrap();
     w.write(b"handle", &c()).await.unwrap();
     assert_eq!(w.position(), 6);
@@ -249,7 +244,6 @@ async fn connect_sign_in_and_work() {
     sftp.remove_dir(b"Backups", &c()).await.unwrap();
     assert_eq!(server.fake.node("/home/u/Backups"), None);
     sftp.keep_alive(&c()).await.unwrap();
-    // A second sign-in on the same connection is refused, and leaves it be.
     assert_eq!(sftp.authenticate(&password(b"secret"), None, &c()).await, Err(fresh()));
     sftp.keep_alive(&c()).await.unwrap();
     sftp.disconnect().await;
@@ -289,7 +283,6 @@ async fn nothing_works_before_sign_in() {
             ErrorName::Unsupported
         );
     }
-    // Signed in, a tripped token stops every call before it is sent.
     let mut sftp = signed_in(&server).await;
     server.take_log();
     server.fake.take_log();
@@ -304,7 +297,6 @@ async fn nothing_works_before_sign_in() {
 
 #[tokio::test]
 async fn a_changed_key_gets_no_credentials() {
-    // Even a caller that skips the identity check.
     let server = Server::start(Script::password()).await;
     let mut sftp = Sftp::new();
     let p = with_option(
@@ -319,10 +311,8 @@ async fn a_changed_key_gets_no_credentials() {
         "The server key does not match the saved key; not signing in",
     );
     assert_eq!(sftp.authenticate(&password(b"secret"), None, &c()).await, Err(changed.clone()));
-    // Still connected, still refused.
     assert_eq!(sftp.authenticate(&password(b"secret"), None, &c()).await, Err(changed));
     assert_eq!(server.take_log(), Vec::<String>::new());
-    // The right pin signs in.
     let pin = format!("{} {}", seen.algorithm, BASE64.encode(&seen.public_key));
     let mut sftp = Sftp::new();
     sftp.connect(&with_option(params(server.addr), "host_key", &pin), &c()).await.unwrap();
@@ -347,7 +337,6 @@ async fn refusals_before_sign_in_keep_the_connection() {
     canceled.cancel();
     assert_eq!(sftp.authenticate(&password(b"secret"), None, &canceled).await, Err(Status::canceled()));
     assert_eq!(server.take_log(), Vec::<String>::new());
-    // The connection is still there to sign in on.
     sftp.authenticate(&password(b"secret"), None, &c()).await.unwrap();
 }
 
@@ -365,8 +354,6 @@ async fn a_failed_sign_in_closes_the_connection() {
 
 #[tokio::test]
 async fn a_dropped_sign_in_leaves_the_connection_signed_out() {
-    // The C ABI drops a call that misses its cancel: nothing half signed in
-    // may remain.
     let server = Server::start(Script::password()).await;
     let proxy = Proxy::start(server.addr).await;
     let mut sftp = Sftp::new();
@@ -437,7 +424,6 @@ async fn connect_replaces_the_connection() {
     let mut reader = sftp.open_read(b"f", &c()).await.unwrap();
     sftp.connect(&params(server.addr), &c()).await.unwrap();
     assert!(first.all_closed().await);
-    // Handles of the old connection are gone with it.
     let e = reader.read(0, &mut [0; 4], &c()).await.unwrap_err();
     assert_eq!(e, connection_closed());
     assert_eq!(sftp.capabilities(), Capabilities::default());
@@ -461,7 +447,6 @@ async fn disconnect_ends_handles_and_the_connection() {
     assert!(proxy.all_closed().await);
     assert_eq!(w.write(b"x", &c()).await, Err(connection_closed()));
     sftp.disconnect().await;
-    // Connected only: disconnect closes too.
     let proxy = Proxy::start(server.addr).await;
     sftp.connect(&params(proxy.addr), &c()).await.unwrap();
     sftp.disconnect().await;
@@ -492,7 +477,6 @@ async fn keep_alive_sees_a_lost_connection() {
     );
     let e = sftp.stat(b"", true, &c()).await.unwrap_err();
     assert_eq!(e.name, ErrorName::ConnectionLost);
-    // Signed out only by disconnect.
     sftp.disconnect().await;
     assert_eq!(sftp.keep_alive(&c()).await, Err(not_signed_in()));
 }

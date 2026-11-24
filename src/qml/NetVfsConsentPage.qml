@@ -3,15 +3,9 @@ import QtQuick 2.0
 import Sailfish.Silica 1.0
 import org.netvfs.accounts 1.0
 
-// "Apps using network locations": apps registered for netvfs-bridge
-// (/usr/share/netvfs/consumers/<id>.conf); each opens what it may do per account
-// (NetVfsAccessPage). Opened from the pull-down menu of every account's settings page, and as the
-// Settings entry the bridge's notification opens, which shows the request of the first app waiting
-// for the user (`openRequest`).
 Page {
     id: page
 
-    // Consent file; empty: the default (~/.config/netvfs/bridge.conf).
     property alias storePath: consents.storePath
     property bool openRequest
     property bool _requested

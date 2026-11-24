@@ -1,16 +1,5 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: LGPL-2.1-or-later
-"""Checks that the tests bite: applies each mutation from tests/mutations/*.json,
-rebuilds, runs the named test command and expects it to FAIL. Every mutation
-that survives (tests still pass) is reported and makes the run fail.
-
-Mutation file format: a JSON list of objects
-  {"name": ..., "file": <repo path>, "search": <exact text>, "replace": <text>,
-   "test": <shell command run from the repo root, e.g. "build/tests/unit/core/tst_core">}
-`search` must occur exactly once in `file`.
-
-Usage: tools/mutation-check.py [--build DIR] [mutation files...]
-"""
 import argparse
 import glob
 import json
@@ -41,8 +30,6 @@ def main():
 
     env = dict(os.environ)
     env.setdefault("QT_QPA_PLATFORM", "offscreen")
-    # Each mutant rebuilds: release Rust without LTO, 16 codegen units, incremental (~35 s down to ~6 s a mutant); same code,
-    # only slower to run. ci.yml's mutation job sets the same.
     for name, value in FAST_RELEASE.items():
         env.setdefault(name, value)
     survivors = []

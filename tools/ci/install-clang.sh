@@ -1,9 +1,5 @@
 #!/bin/sh
 # SPDX-License-Identifier: LGPL-2.1-or-later
-# Installs clang-<major> and its sanitizer runtimes from apt.llvm.org on the Ubuntu 24.04 runner, for the C++ side of the
-# weekly ASan run: clang of rustc's LLVM major (rust-sanitize.sh). Repository key pinned by fingerprint; suite is the
-# release branch of that major, or development when not released yet.
-# Usage: install-clang.sh <major>
 set -eu
 major=$1
 case "$major" in

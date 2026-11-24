@@ -1,5 +1,4 @@
 # SPDX-License-Identifier: LGPL-2.1-or-later
-# Plain C, libc only: generators run early.
 include(../../../common.pri)
 
 TEMPLATE = app

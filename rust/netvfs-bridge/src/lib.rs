@@ -24,7 +24,6 @@ pub mod peer;
 pub mod prompt;
 pub mod savefile;
 pub mod server;
-/// [`Status`], shared with the backends.
 pub use netvfs_vfs::status;
 mod sys;
 #[cfg(test)]
@@ -49,7 +48,6 @@ pub fn serve(config: Config, deps: Deps) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    // Tasks the core leaves behind (session-bus connection) drop with the LocalSet; zbus spawns its cleanup onto the runtime.
     let _context = runtime.enter();
     let local = tokio::task::LocalSet::new();
     let code = local.block_on(&runtime, core::run(config, deps));

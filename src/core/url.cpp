@@ -35,7 +35,6 @@ constexpr std::array<SchemeInfo, 7> Schemes = {{
     { "file", Kind::Local, 0 },
 }};
 
-// WebDAV only over TLS: plain HTTP gets a clearer refusal than an unknown scheme.
 bool isPlainHttp(const QString &scheme)
 {
     return scheme == QLatin1String("dav") || scheme == QLatin1String("http");
@@ -72,8 +71,6 @@ int hexValue(char c)
     return -1;
 }
 
-// Raw characters taken as lossless UTF-8 bytes (Names::encode), then "%XX" decoded to bytes; bad
-// escape fails.
 bool percentDecode(const QString &text, QByteArray *bytes)
 {
     const QByteArray raw = Names::encode(text);
@@ -158,7 +155,6 @@ bool validIpv6(const QString &host)
     });
 }
 
-// Host kept in Unicode: punycode labels converted (QUrl::fromAce).
 bool parseHostName(const QString &text, QString *host)
 {
     QString decoded;
@@ -253,7 +249,6 @@ Result parsePath(const QString &raw, QString *path)
     QString decoded;
     if (!decodeText(raw, &decoded))
         return invalid("bad escape in the path");
-    // Raw path starts with '/', so result is "/" or "/..." (never empty).
     return Paths::normalize(decoded, path);
 }
 
@@ -264,7 +259,6 @@ QString withLeadingSlash(const QString &path)
     return QLatin1Char('/') + path;
 }
 
-// smb://host/share/dir: first component is the share option.
 void splitShare(const QString &urlPath, QString *share, QString *path)
 {
     const QStringList parts = Paths::components(urlPath);

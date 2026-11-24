@@ -248,11 +248,7 @@ impl OptsBuilder {
     /// building server-side messages and test fixtures.
     #[must_use]
     pub fn build_owned(self) -> HashMap<String, OwnedValue> {
-        self.0
-            .into_iter()
-            // Plain values hold no file descriptors, the only failure.
-            .filter_map(|(k, v)| OwnedValue::try_from(v).ok().map(|o| (k, o)))
-            .collect()
+        self.0.into_iter().filter_map(|(k, v)| OwnedValue::try_from(v).ok().map(|o| (k, o))).collect()
     }
 }
 

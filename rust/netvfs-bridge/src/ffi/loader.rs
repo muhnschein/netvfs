@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! `dlopen` of a function table: opened with `RTLD_NOW | RTLD_LOCAL`, table fetched through its one exported symbol, never closed.
 
 use std::ffi::{CStr, CString, c_void};
 use std::fmt;
@@ -73,7 +72,6 @@ fn entry_point(path: &Path, entry: &CStr) -> Result<*mut c_void, LoadError> {
     Ok(symbol)
 }
 
-/// Loads `path` and asks `entry` (`const T *entry(void)`) for the table. Library is built from this crate's source: the table is this build's `T`.
 pub(super) fn load_table<T>(path: &Path, entry: &CStr) -> Result<&'static T, LoadError> {
     let symbol = entry_point(path, entry)?;
     // SAFETY: entry point has C signature `const T *(void)`.
@@ -102,7 +100,6 @@ mod tests {
         let none = load_table::<u8>(libc, c"sched_yield").unwrap_err();
         assert_eq!(none, LoadError::NoTable { path: libc.to_owned() });
         assert_eq!(none.to_string(), "libc.so.6 returned no table");
-        // getpid read as a non-NULL address, never dereferenced.
         load_table::<()>(libc, c"getpid").unwrap();
     }
 

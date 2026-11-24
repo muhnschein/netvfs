@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 //! Client side of the protocol against the fake: errors with details, malformed calls, ordered
 //! signals, disconnects, secret handling.
-// Test helpers outside #[test] functions: a failing test is the point.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 #![cfg(feature = "fake")]
 
@@ -84,7 +83,6 @@ async fn errors_carry_name_message_detail_and_retry_hint() {
         other => panic!("unexpected {other:?}"),
     }
 
-    // Without details the second argument is absent and the message still reads.
     let e = BridgeError::from(conn.proxy().stat("account:1", b"missing", true, "").await.unwrap_err());
     assert_eq!(e.netvfs_name(), Some("NotFound"));
     match e {
@@ -109,7 +107,6 @@ async fn malformed_calls_are_invalid_args() {
     assert!(invalid(p.read(1, -1, 1).await.unwrap_err()));
     let bad_opts = OptsBuilder::new().str("owner", "root").build();
     assert!(invalid(p.set_attributes("account:1", b"a", &bad_opts).await.unwrap_err()));
-    // A path that climbs out is a name error, not an argument error.
     let e = BridgeError::from(p.stat("account:1", b"a/../b", true, "").await.unwrap_err());
     assert_eq!(e.netvfs_name(), Some("InvalidName"));
 }
@@ -146,7 +143,6 @@ async fn listing_signals_arrive_in_order() {
                 assert_eq!((r, error.as_str()), (req, ""));
                 break;
             }
-            // The listing connected the location: its state is told.
             Signal::LocationsChanged => {}
             other => panic!("unexpected {other:?}"),
         }
@@ -223,7 +219,6 @@ async fn connection_states_follow_use_disconnect_and_the_script() {
     conn.proxy().disconnect("account:1").await.unwrap();
     locations_changed(&mut signals).await;
     assert_eq!(state_of(&conn, "account:1").await, s("disconnected", None));
-    // Scripted: a failure with its error, told once.
     fake.set_state("account:1", "failed", Some("AuthFailed")).await;
     locations_changed(&mut signals).await;
     assert_eq!(state_of(&conn, "account:1").await, s("failed", Some("AuthFailed")));
@@ -245,7 +240,6 @@ async fn features_and_the_storage_handoff_need_no_consent() {
     assert_eq!(conn.proxy().get_features().await.unwrap(), ["storage-settings", "drives"]);
     conn.proxy().open_storage_settings().await.unwrap();
     assert_eq!(fake.handoffs(), ["storage"]);
-    // A bridge without the handoff entry.
     fake.set_features(&[]);
     assert_eq!(conn.proxy().get_features().await.unwrap(), Vec::<String>::new());
     let e = BridgeError::from(conn.proxy().open_storage_settings().await.unwrap_err());

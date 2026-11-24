@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! Shared contract against the `netvfs-bridge` binary with C ABI and fake backend: served introspection equals the contract XML byte for byte; every golden sequence replays on its own bridge. Skipped without the C ABI.
 #![allow(missing_docs, clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::print_stdout)]
 
 use netvfs_bridge::consent::{Choice, Consent};
@@ -15,7 +14,6 @@ const HELPER: &str = env!("CARGO_BIN_EXE_netvfs-accounts-fake");
 const FFI_VARIABLES: [&str; 2] = ["NETVFS_BRIDGE_FFI", "NETVFS_BACKEND_PATH"];
 const CONSUMER: &str = "contract";
 
-/// Whether the C ABI is there; says skipped if not.
 fn have_ffi() -> bool {
     let missing = FFI_VARIABLES.iter().any(|v| std::env::var_os(v).is_none());
     if missing {
@@ -32,7 +30,6 @@ fn runtime() -> tokio::runtime::Runtime {
     tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap()
 }
 
-/// Bridge with the fake accounts helper and `consent`.
 fn bridge(consent: &Consent) -> BridgeRun {
     let mut run = BridgeRun::new(Path::new(BRIDGE), CONSUMER);
     run.with_consent(consent).with_fake_accounts(Path::new(HELPER));
@@ -79,7 +76,6 @@ fn consent_of(seq: &Sequence) -> Consent {
     }
 }
 
-/// Replays `seq` on a bridge of its own.
 async fn replay_on_the_binary(seq: &Sequence) -> Result<(), String> {
     let mut run = BridgeRun::new(Path::new(BRIDGE), CONSUMER);
     let socket = run.socket.clone();

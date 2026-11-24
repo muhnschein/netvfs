@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: LGPL-2.1-or-later
-# Prove mutation-lists.py runs the lists a change can affect. Costly mistake: a list left out although its code or tests changed, so a PR that stops its tests biting goes green. Most cases guard that side.
 set -u
 
 root=$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd)
@@ -9,7 +8,6 @@ all=$("$script" --all)
 
 status=0
 
-# says <want: JSON array or "all"> <why> <file names, one per line>
 says() {
     local want=$1 why=$2 files=$3 got
     [[ "$want" = all ]] && want=${all#lists=}
@@ -53,7 +51,6 @@ says all "an empty list runs all" ""
 says '[]' "docs outside any area run none" $'doc/SPEC.md\nREADME.md'
 says '[]' "the CodeQL workflow runs none" ".github/workflows/codeql.yml"
 
-# event <want> <why> <EVENT>
 event() {
     local want=$1 why=$2 got
     got=$(EVENT=$3 "$script" 2>/dev/null)

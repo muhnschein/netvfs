@@ -1,12 +1,5 @@
 #!/bin/sh
 # SPDX-License-Identifier: LGPL-2.1-or-later
-# Checks libnetvfs-rs.so (Rust backends, dlopen'd by the backend plugins) from ELF headers and the plugins:
-#   - exports one symbol, nvr_get;
-#   - links only the C runtime: libc, libgcc_s, libm, libpthread, libdl, dynamic loader (no Qt, no libnetvfs);
-#   - no GLIBC symbol version above the given one (target glibc is the floor);
-#   - full RELRO, immediate binding, no executable stack;
-#   - each given plugin contains the installed path (shim's compiled-in path, src/backends/rs/rs.pri).
-# Usage: check-rs-lib.sh <library> <max glibc version> <installed path> [<plugin>...]
 set -eu
 library=$1
 max_glibc=$2

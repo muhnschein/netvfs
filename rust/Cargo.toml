@@ -1,12 +1,9 @@
 # SPDX-License-Identifier: LGPL-2.1-or-later
-# Rust parts: netvfs-accounts (setgid accounts helper), netvfs-bridge-proto (org.netvfs.Bridge1), netvfs-bridge, netvfs-vfs (backend interface), netvfs-sftp, netvfs-smb, netvfs-backend (libnetvfs-rs.so: Rust backends behind the C++ plugins).
 [workspace]
 resolver = "3"
 members = ["netvfs-accounts", "netvfs-bridge-proto", "netvfs-bridge", "netvfs-vfs", "netvfs-sftp", "netvfs-smb", "netvfs-tls", "netvfs-webdav", "netvfs-ftps", "netvfs-backend"]
-# Fuzz targets build with their own nightly toolchain. vendor/: patched crates.io crates ([patch.crates-io] below).
 exclude = ["fuzz", "vendor"]
 
-# vendor/ssh-key: ssh-key 0.7.0-rc.11 accepting ECDSA private scalars shorter than the field size. vendor/picky-asn1-der: picky-asn1-der 0.5.7 with a DER length near usize::MAX an error, not an overflow.
 [patch.crates-io]
 ssh-key = { path = "vendor/ssh-key" }
 picky-asn1-der = { path = "vendor/picky-asn1-der" }
@@ -14,16 +11,12 @@ picky-asn1-der = { path = "vendor/picky-asn1-der" }
 [workspace.package]
 version = "1.0.0"
 edition = "2024"
-# rustc that sailfishos/rust ships next (JB#64166). Until an SDK target has it, CI cross-builds with host cargo against the SDK compiler and sysroot (tools/ci/cross-build.sh).
 rust-version = "1.95"
 license = "LGPL-2.1-or-later"
 publish = false
 
-# Lints: clippy `all` and `pedantic` deny, picked nursery/restriction set, panic/overflow restriction lints for shipped code. Tests opt out of the last group (clippy.toml, `allow` on test modules).
 [workspace.lints.rust]
-# Only in modules talking to C (`ffi`, `sys`, helper's `sandbox`), each `#![allow(unsafe_code)]` with SAFETY comments.
 unsafe_code = "deny"
-# Set by tools/ci/rust-sanitize.sh only.
 unexpected_cfgs = { level = "deny", check-cfg = ["cfg(netvfs_asan)"] }
 missing_docs = "deny"
 missing_debug_implementations = "deny"
@@ -38,7 +31,6 @@ pedantic = { level = "deny", priority = -1 }
 module_name_repetitions = "allow"
 doc_markdown = "allow"
 similar_names = "allow"
-# nursery
 significant_drop_in_scrutinee = "deny"
 significant_drop_tightening = "deny"
 redundant_clone = "deny"
@@ -51,7 +43,6 @@ option_if_let_else = "allow"
 debug_assert_with_mut_call = "deny"
 iter_on_single_items = "deny"
 path_buf_push_overwrite = "deny"
-# restriction: no panics, no silent overflow, no stray output
 unwrap_used = "deny"
 expect_used = "deny"
 panic = "deny"
@@ -94,7 +85,6 @@ opt-level = "s"
 debug = false
 strip = "symbols"
 
-# libnetvfs-rs.so: a panic must unwind to the table function that catches it and reports Internal; binaries keep aborting. Cargo sets `panic` per profile, so the library has own profiles: `--profile rs-release -p netvfs-backend`, `rs-test` (`--features testing`) for C++ tests.
 [profile.rs-release]
 inherits = "release"
 panic = "unwind"
@@ -104,7 +94,6 @@ lto = "fat"
 inherits = "dev"
 panic = "unwind"
 
-# Tests start the helper often: fast build over size.
 [profile.dev]
 panic = "abort"
 debug = "line-tables-only"

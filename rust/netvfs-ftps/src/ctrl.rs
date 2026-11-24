@@ -55,7 +55,6 @@ async fn send(w: &mut (impl AsyncWrite + Unpin), line: &[u8]) -> Result<(), Stat
     w.flush().await.map_err(|e| lost(&e.to_string()))
 }
 
-/// The greeting: preliminary 120 replies skipped, then 220.
 async fn greeting(r: &mut (impl AsyncBufRead + Unpin)) -> Result<(), Status> {
     loop {
         let r = reply::read(r).await?;
@@ -74,9 +73,7 @@ pub struct Session {
     tls: Tls,
     peer: IpAddr,
     target: Target,
-    /// Replies the server owes: a call canceled or timed out before reading them. The next command reads them first.
     pending: u32,
-    /// A command line partly sent, a reply partly read, or 421: the connection cannot be used.
     torn: bool,
 }
 
@@ -140,7 +137,6 @@ impl Session {
         if ok.contains(&r.code) { Ok(r) } else { Err(reply::error(&r, what)) }
     }
 
-    /// The next reply owed.
     async fn next(&mut self) -> Result<Reply, Status> {
         if self.torn {
             return Err(lost("an earlier command did not finish"));
@@ -279,7 +275,6 @@ impl Session {
         let shut = async {
             data.shutdown().await.map_err(|e| lost(&e.to_string()))?;
             let mut sink = [0u8; 512];
-            // Some servers close without TLS close: the reply tells whether the file arrived.
             while matches!(data.read(&mut sink).await, Ok(n) if n > 0) {}
             Ok(())
         };

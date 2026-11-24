@@ -66,7 +66,6 @@ fn b(data: &[u8]) -> NvbBytes {
     NvbBytes::of(data)
 }
 
-// SAFETY (for every call below): the fake's functions take any thread and only borrow their arguments for the call.
 impl Fake {
     /// Loads the library named by `NETVFS_BRIDGE_FFI_FAKE`; `None` when the
     /// variable is not set.

@@ -15,8 +15,6 @@
 Q_DECLARE_LOGGING_CATEGORY(lcNetVfsLocal)
 
 namespace NetVfs::Local {
-
-// Unit in which reads, writes, copies and checksums check cancel() and memory is bounded.
 constexpr qint64 ChunkSize = 1 << 20;
 
 class Fd
@@ -69,7 +67,6 @@ struct NativeStat {
     }
 };
 
-// `follow` false: lstat semantics. Returns 0 or an errno value.
 int statAt(int dirFd, const QByteArray &path, bool follow, NativeStat *out);
 int statFd(int fd, NativeStat *out);
 
@@ -94,8 +91,6 @@ private:
     QHash<qint64, QString> m_groups;
 };
 
-// For descriptors that can block (FIFOs, sockets, devices): waits in slices so cancel() is seen
-// within one slice.
 class Waiter
 {
 public:
@@ -110,8 +105,6 @@ private:
     int m_timeoutMs;
 };
 
-// pread() at `offset`, or read() from the current position when `offset` < 0 (streams). `*got` 0 at
-// end of file.
 Result readOnce(int fd, qint64 offset, char *buffer, qint64 length, const Waiter &waiter, qint64 *got);
 Result readFully(int fd, qint64 offset, char *buffer, qint64 length, const Waiter &waiter, qint64 *got);
 Result writeFully(int fd, const char *data, qint64 length, const Waiter &waiter);

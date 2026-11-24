@@ -17,8 +17,6 @@ class AccountSession;
 }
 
 namespace NetVfsUi {
-
-// Outcome of one probe operation, produced on the worker thread.
 struct ProbeOutcome {
     NetVfs::Result result;
     NetVfs::ServerIdentity identity;
@@ -27,21 +25,12 @@ struct ProbeOutcome {
     bool refusedByPolicy = false;
 };
 
-// checkServerIdentity() against the pin in params.options["host_key"].
 NetVfs::Result identityCheckFor(const NetVfs::ServerIdentity &seen, const NetVfs::ConnectionParams &params);
 
-// Phase 1: connect and report the server identity. No credentials sent; the backend is disconnected
-// afterwards.
 ProbeOutcome runIdentify(NetVfs::Backend *backend, const NetVfs::ConnectionParams &params);
-// Phase 2: the configuration is first checked against the service (refused without connecting).
-// Then establish() with the pin in params.options["host_key"] and:
-//   Backup: verifyAccess(): makePath, probe file, free space
-//   Files: verifyBrowseAccess(): stat of the start folder, nothing written
-// auth_mode=interactive needs a person: only connection and identity are checked.
 ProbeOutcome runVerify(NetVfs::Backend *backend, const NetVfs::ConnectionParams &params,
                        const NetVfs::Credentials &credentials, const QString &folder, NetVfs::Service service);
 
-// Asynchronous two-phase connection test for the account UI.
 class NetVfsProbe : public QObject
 {
     Q_OBJECT
@@ -59,7 +48,6 @@ public:
     enum class State { Idle, Identifying, Identified, Verifying, Verified, Failed };
     Q_ENUM(State)
 
-    // Mirrors NetVfs::Error.
     enum class ErrorCode {
         NoError, Canceled, NetworkUnreachable, Timeout, ServerIdentityUnknown, ServerIdentityChanged,
         AuthFailed, SecurityPolicy, PermissionDenied, NotFound, AlreadyExists, NoSpace, Unsupported,
@@ -67,7 +55,6 @@ public:
     };
     Q_ENUM(ErrorCode)
 
-    // Result of comparing the identity seen by identify() with params.options.host_key.
     enum class IdentityStatus { IdentityNotChecked, NoIdentity, IdentityUnknown, IdentityMatches, IdentityChanged };
     Q_ENUM(IdentityStatus)
 
@@ -86,21 +73,14 @@ public:
     IdentityStatus identityStatus() const { return m_identityStatus; }
     qint64 freeBytes() const { return m_freeBytes; }
 
-    // params: { provider, host, port, username, options: {...} } (Helpers::makeParams).
     Q_INVOKABLE void identify(const QVariantMap &params);
-    // credentials: { username, secret }; secret wiped after use. service: "backup" (folder =
-    // backups folder) or "files" (folder = start folder).
     Q_INVOKABLE void verify(const QVariantMap &params, const QVariantMap &credentials,
                             const QString &folder, const QString &service = QStringLiteral("backup"));
-    // Verifies a stored account with its stored secret (read through signond by the core, never
-    // exposed to QML) for `service`. Non-empty `pinOptions` replace the stored pin, for the update
-    // flow after the user accepted a new identity.
     Q_INVOKABLE void verifyAccount(int accountId, const QVariantMap &pinOptions = QVariantMap(),
                                    const QString &service = QStringLiteral("backup"));
     Q_INVOKABLE void cancel();
     Q_INVOKABLE void reset();
 
-    // Tests replace how stored accounts are opened.
     void setSessionFactory(const SessionFactory &factory) { m_sessionFactory = factory; }
 
 Q_SIGNALS:

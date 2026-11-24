@@ -8,7 +8,6 @@ namespace NetVfs {
 namespace {
 void wipeBytes(char *data, size_t count)
 {
-    // Stores through a volatile pointer cannot be elided.
     volatile char *p = data;
     while (count--)
         *p++ = 0;
@@ -22,7 +21,6 @@ void secureWipe(QByteArray &data)
     data.clear();
 }
 
-// QString::fill() lives in QtCore, so the stores cannot be elided here.
 void secureWipe(QString &data)
 {
     if (!data.isEmpty())

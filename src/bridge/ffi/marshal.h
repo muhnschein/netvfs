@@ -2,11 +2,6 @@
 #ifndef NETVFS_BRIDGE_FFI_MARSHAL_H
 #define NETVFS_BRIDGE_FFI_MARSHAL_H
 
-// Conversions between NetVfs types and the flat data of the C ABI. Every conversion towards C is
-// written once, as a template over an "arena" that provides the memory:
-//   HoldArena: objects live as long as the arena; for data handed to a callback.
-//   SizeArena and BlockArena: pack() measures an object with the first and fills ONE malloc'd block
-//     with the second, so the caller releases it with a single free().
 #include "netvfs_bridge_ffi.h"
 
 #include "error.h"
@@ -27,8 +22,6 @@
 #include <vector>
 
 namespace NetVfs::Ffi {
-
-// Arrays and the head object start at this alignment inside a block.
 constexpr size_t BlockAlign = alignof(std::max_align_t);
 
 constexpr size_t alignUp(size_t n)
@@ -59,7 +52,6 @@ private:
     std::vector<std::shared_ptr<void>> m_arrays;
 };
 
-// Measures a block. The arrays it hands out are scratch memory so the filling code runs unchanged.
 class SizeArena
 {
 public:
@@ -90,7 +82,6 @@ class BlockArena
 public:
     BlockArena(char *arrays, char *data) : m_arrays(arrays), m_data(data) {}
 
-    // Never a null pointer, also for empty data (one past the block at most).
     nvb_bytes bytes(const QByteArray &data)
     {
         const auto size = static_cast<size_t>(data.size());
@@ -101,8 +92,6 @@ public:
         return out;
     }
 
-    // Array created in the block by placement array new, whose result points to its first element
-    // (no array cookie: CWG 2382).
     template <typename T>
     T *array(size_t n)
     {
@@ -118,9 +107,6 @@ private:
     char *m_data;
 };
 
-// One malloc'd block holding a T and everything it points to. `fill` is called as fill(arena, T *)
-// twice: to measure, then to fill. Caller releases with free() and runs no destructor, so nothing
-// in it may need one.
 template <typename T, typename Fill>
 T *pack(const Fill &fill)
 {
@@ -140,17 +126,13 @@ T *pack(const Fill &fill)
     return out;
 }
 
-// Copies. Throws std::length_error above the QByteArray limit.
 QByteArray toByteArray(nvb_bytes bytes);
 QString toUtf8String(nvb_bytes bytes);
-// Protocol bytes to a lossless QString (Names::decode).
 QString toPath(nvb_bytes bytes);
-// Unknown value kind is a ProtocolError.
 Result toParams(const nvb_params &in, ConnectionParams *out);
 QDateTime fromMs(int64_t ms);
 
 qint64 toMs(const QDateTime &time);
-// NVB_VALUE_* for a value the ABI can carry, 0 for any other (dates as ISO-8601 UTC strings).
 uint32_t valueKind(const QVariant &value);
 
 template <typename Arena>
@@ -186,8 +168,6 @@ void fillValue(Arena &arena, nvb_value *out, const QVariant &value)
     }
 }
 
-// The values of `map` the ABI can carry, in key order; picked once so the array has exactly one
-// element per written value.
 template <typename Arena>
 const nvb_kv *fillMap(Arena &arena, const QVariantMap &map, size_t *count)
 {
@@ -235,7 +215,6 @@ void fillError(Arena &arena, nvb_error *out, const Result &result)
     out->retry_after_ms = result.retryAfterMs();
 }
 
-// nullptr for success; else one block.
 nvb_error *packError(const Result &result);
 nvb_blob *packBlob(const QByteArray &data);
 nvb_entry *packEntry(const Entry &entry);

@@ -9,29 +9,14 @@
 #include <memory>
 
 namespace NetVfs::Local {
-
-// Shared by the backend and its handles.
 struct Context {
     std::atomic<bool> canceled { false };
-    // disconnect() starts a new generation; older handles are dead and report ConnectionLost.
     quint64 generation = 0;
     int requestTimeoutMs = 0;
 
     Waiter waiter() const { return Waiter(&canceled, requestTimeoutMs); }
 };
 
-// Local file system through POSIX calls. connect() needs no network; identity Kind::None,
-// credentials ignored. Option "root" (default "/") is the base of relative paths.
-// Names are raw bytes; entries from statx() (birth time where available); listings use lstat
-// semantics.
-// rename(NoReplace): renameat2(RENAME_NOREPLACE), else link()+unlink() for files and a stat check
-// for folders. rename(Replace) is rename(2). NativeNoReplace reported when the kernel has renameat2
-// and the root's file system is known to implement it (decided at connect without creating
-// anything). Option "native_noreplace=false" forces the fallback.
-// rename() fsyncs the parent folder(s) so Transfer's commit survives a crash. No privilege
-// escalation.
-// FIFO, socket and device I/O waits with poll() in 100 ms slices so cancel() and the request
-// timeout apply; one syscall blocked by the kernel on a dead device is the exception.
 class LocalBackend : public Backend
 {
 public:

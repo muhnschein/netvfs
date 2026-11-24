@@ -12,18 +12,6 @@
 
 namespace NetVfs {
 namespace Test {
-
-// In-memory server shared by all FakeBackend instances, with fault injection.
-// Implements the whole v2 Backend contract so that consumers and
-// helpers can be tested without a container.
-//
-// Paths are stored normalized without a leading '/'; "" is the root folder,
-// which always exists. Symlink targets are stored verbatim; relative targets
-// resolve against the link's folder, absolute ones against the root.
-// Hard links share their content through a link group (no inodes).
-//
-// Every call appends "<op>:<path>" to `log` (see FakeBackend) and first
-// consults `failOps`: an entry for the op name is returned once.
 class Q_DECL_EXPORT FakeServer
 {
 public:
@@ -34,7 +22,7 @@ public:
         QDateTime accessed;
         qint32 mode = 0644;
         QString target;
-        int linkGroup = 0;              // hard links: nodes with the same group share data
+        int linkGroup = 0;
         bool isDir() const { return type == EntryType::Directory; }
     };
 
@@ -54,7 +42,7 @@ public:
     qint64 freeBytes = 1LL << 40;
     qint64 totalBytes = 1LL << 41;
     Result connectResult;
-    QHash<QString, Result> failOps;     // op name -> result to return (once)
+    QHash<QString, Result> failOps;
     qint64 failUploadAfterBytes = -1;
     int chunkDelayMs = 0;
     bool reportSizeMismatch = false;
@@ -75,11 +63,7 @@ public:
     QStringList children(const QString &dir) const;
 
     void setData(const QString &path, const QByteArray &data);
-    // The key of a backend path (normalised, without a leading '/'); "" for
-    // an invalid path.
     static QString keyFor(const QString &path);
-    // Resolves symlinks in `path` (all components, the last one only with
-    // `followLast`). NotFound for dangling links, ProtocolError for loops.
     Result resolve(const QString &path, bool followLast, QString *resolved) const;
 
     QMutex mutex;
@@ -135,8 +119,6 @@ private:
     class Reader;
     class Writer;
 
-    // Logs `op`, then: Canceled, an injected failure, or "not authenticated".
-    // Called with the server mutex held.
     Result begin(const QString &op, bool needAuth = true);
     bool has(Capability c) const;
     Entry entryFor(const QString &key, const FakeServer::Node &node, bool resolveTarget) const;
@@ -154,7 +136,7 @@ private:
     std::atomic<bool> m_canceled { false };
 };
 
-} // namespace Test
-} // namespace NetVfs
+}
+}
 
 #endif

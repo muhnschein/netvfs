@@ -80,8 +80,6 @@ impl NvbBytes {
     }
 }
 
-/// An object of the other side behind a pointer: neither constructible, nor
-/// `Send`, `Sync` or `Unpin` (the nomicon's pattern).
 macro_rules! opaque {
     ($($(#[$doc:meta])* $name:ident),* $(,)?) => {$(
         $(#[$doc])*

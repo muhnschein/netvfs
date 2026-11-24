@@ -1,29 +1,4 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! Known-answer and bit-flip tests for the crypto glue.
-//!
-//! Vector provenance (constants at the end were generated mechanically, not typed):
-//! - Microsoft Open Specifications blog, "SMB 3.1.1 Pre-authentication integrity in Windows 10"
-//!   <https://learn.microsoft.com/en-us/archive/blogs/openspecification/smb-3-1-1-pre-authentication-integrity-in-windows-10>,
-//!   as transcribed in Dell's pike, `tests/test_smb3_encryption_vector.py`
-//!   <https://raw.githubusercontent.com/dell/pike/master/tests/test_smb3_encryption_vector.py>
-//!   (constants `PIKE_PA_*`).
-//! - Microsoft Open Specifications blog, "SMB 3.1.1 Encryption in Windows 10", Appendix A.1
-//!   (AES-128-GCM) and A.2 (AES-128-CCM; only its keys and its AES-CMAC-signed final
-//!   SESSION_SETUP response are used here)
-//!   <https://learn.microsoft.com/en-us/archive/blogs/openspecification/smb-3-1-1-encryption-in-windows-10>,
-//!   as transcribed in `packages/smb2/test/fixtures/smb3-vectors.ts` of sanjay3290/winlinux
-//!   <https://raw.githubusercontent.com/sanjay3290/winlinux/main/packages/smb2/test/fixtures/smb3-vectors.ts>
-//!   (constants `BLOG_GCM_*`, `BLOG_CCM_*`). The A.1 WRITE vector also appears byte for byte
-//!   in pike and in cryptomator/jsmb `MessageEncryptorTest.java`.
-//! - Microsoft Open Specifications blog, "Encryption in SMB 3.0: A protocol perspective"
-//!   <https://learn.microsoft.com/en-us/archive/blogs/openspecification/encryption-in-smb-3-0-a-protocol-perspective>,
-//!   same transcriptions (constants `BLOG_SMB30_*`): exercises the KDF with other labels.
-//! - Not Microsoft-published, third party: Wireshark's decryption test captures
-//!   `test/captures/smb311-aes-128-gcm.pcap.gz` and `smb311-aes-256-gcm.pcap.gz` with the
-//!   session keys from `test/suite_decryption.py`
-//!   <https://gitlab.com/wireshark/wireshark/-/raw/master/test/suite_decryption.py>
-//!   (constants `WS128_*`, `WS256_*`, one SMB2 message per frame). The only AES-256-GCM
-//!   vector found: no Microsoft publication with one was reachable.
 
 use super::{
     Cipher, CryptoError, GcmKey, LABEL_SIGNING, OpenKey, PreauthHash, SealKey, SigningKey,
@@ -55,7 +30,6 @@ fn contains(hay: &[u8], needle: &[u8]) -> bool {
     hay.windows(needle.len()).any(|w| w == needle)
 }
 
-/// Raw key bytes of a seal key (tests only).
 fn seal_key_bytes(k: &SealKey) -> Vec<u8> {
     match &k.key {
         GcmKey::Aes128(b) => b.to_vec(),
@@ -86,7 +60,6 @@ fn preauth_chain_and_signing_key_match_preauth_blog() {
         (PIKE_PA_NEGOTIATE_RESPONSE, PIKE_PA_EXP_PAE_2),
         (PIKE_PA_SESSION_SETUP_REQUEST, PIKE_PA_EXP_PAE_3),
         (PIKE_PA_SESSION_SETUP_RESPONSE, PIKE_PA_EXP_PAE_4),
-        // pike calls the second SESSION_SETUP *request* "response2" (MessageId 3, no SERVER_TO_REDIR flag): the chain ends with the last request.
         (PIKE_PA_SESSION_SETUP_RESPONSE2, PIKE_PA_EXP_PAE_5),
     ] {
         h.update(&hex(msg));
@@ -132,7 +105,6 @@ fn blog_a1_hash() -> PreauthHash {
     h
 }
 
-/// SessionId of the A.1 session.
 const BLOG_A1_SESSION: u64 = 0x0000_1000_0000_0025;
 
 #[test]
@@ -194,7 +166,6 @@ fn gcm_open_matches_encryption_blog_a1() {
 
 #[test]
 fn kdf_matches_smb30_blog() {
-    // SMB 3.0 uses constant labels and contexts instead of the preauth hash; same KDF, so these pin label/context handling (NUL terminators included).
     let sk = hex(BLOG_SMB30_SESSION_KEY);
     assert_eq!(kdf::<16>(&sk, b"SMB2AESCMAC\0", b"SmbSign\0").unwrap()[..], hex(BLOG_SMB30_SIGNING_KEY)[..]);
     assert_eq!(
@@ -217,7 +188,6 @@ fn capture_hash(frames: [&[&str]; 5]) -> PreauthHash {
 
 #[test]
 fn wireshark_aes128gcm_capture() {
-    // suite_decryption.py: sesid 3900000000400000, seskey e79161de..., s2c b02f5de2..., c2s 7201623a...
     let session = u64::from_le_bytes(arr(&["3900000000400000"]));
     let hash = capture_hash([WS128_FRAME1, WS128_FRAME2, WS128_FRAME3, WS128_FRAME4, WS128_FRAME5]);
     let keys = derive_session_keys(
@@ -229,7 +199,6 @@ fn wireshark_aes128gcm_capture() {
     .unwrap();
     assert_eq!(open_key_bytes(keys.open.as_ref().unwrap()), hex(&["b02f5de25e0562075c3dc329fa2aa396"]));
     assert_eq!(seal_key_bytes(keys.seal.as_ref().unwrap()), hex(&["7201623a31754e6581864581209dd3d2"]));
-    // Final SESSION_SETUP response (frame 6) is AES-CMAC signed: no signing context negotiated, CMAC is the 3.1.1 default.
     keys.signing.verify(&hex(WS128_FRAME6)).unwrap();
     let resp = keys.open.as_ref().unwrap().open(&hex(WS128_FRAME8)).unwrap();
     assert_eq!(&resp[..4], b"\xfeSMB");
@@ -241,7 +210,6 @@ fn wireshark_aes128gcm_capture() {
 
 #[test]
 fn wireshark_aes256gcm_capture() {
-    // suite_decryption.py: sesid 56dc03ab00000000, seskey 6a5004ad... (16 bytes, NTLM); 256-bit keys s2c 46b64f32... and c2s 484c30bf... derive from the full session key with L = 256.
     let session = u64::from_le_bytes(arr(&["56dc03ab00000000"]));
     let hash = capture_hash([WS256_FRAME1, WS256_FRAME2, WS256_FRAME3, WS256_FRAME4, WS256_FRAME5]);
     let keys = derive_session_keys(
@@ -251,7 +219,6 @@ fn wireshark_aes256gcm_capture() {
         session,
     )
     .unwrap();
-    // Wireshark's UAT lists 46b64f32... as "s2c" and 484c30bf... as "c2s" but its suite also passes them swapped (dissector tries both). MS-SMB2 labels give S2C = 484c30bf..., C2S = 46b64f32...; those decrypt the server's and client's frame.
     assert_eq!(
         open_key_bytes(keys.open.as_ref().unwrap()),
         hex(&["484c30bf3e17e322e0d217764d4584a325ec0495519c3f1547e0f996ab76c4c4"])
@@ -268,7 +235,6 @@ fn wireshark_aes256gcm_capture() {
         .unwrap();
     let req = c2s.open(&hex(WS256_FRAME7)).unwrap();
     assert!(contains(&req, &utf16(r"\\172.31.9.163\IPC$")));
-    // Capture negotiated AES-GMAC signing (context 0x0008, algorithm 2), never offered here: frame 6 must NOT verify as AES-CMAC.
     assert_eq!(keys.signing.verify(&hex(WS256_FRAME6)), Err(CryptoError::BadSignature));
 }
 
@@ -313,7 +279,6 @@ fn gcm_any_flipped_bit_fails() {
         let got = open_key_128(key, BLOG_A1_SESSION).open(&flip(&frame, bit));
         let want = match byte {
             0..4 => Err(CryptoError::Malformed("not a transform header")),
-            // tag 4..20, nonce 20..32, unused nonce 32..36, Reserved 40..42, ciphertext
             4..36 | 40..42 | 52.. => Err(CryptoError::Unauthentic),
             36..40 => Err(CryptoError::Malformed("OriginalMessageSize does not match the frame")),
             42..44 => Err(CryptoError::Malformed("flags are not 'encrypted'")),
@@ -325,7 +290,6 @@ fn gcm_any_flipped_bit_fails() {
 
 #[test]
 fn gcm_aad_is_bytes_20_to_52_only_and_checked_by_the_tag() {
-    // With the field checks out of the way, every AAD byte must still be authenticated: re-seal with another session id, open with a key expecting the old id -> WrongSession; matching id -> fine.
     let key = seal_key_128(arr(BLOG_GCM_ENCRYPTION_KEY), BLOG_A1_SESSION + 1);
     let sealed = key.seal_with_nonce(&arr(BLOG_GCM_WRITE_NONCE), &hex(BLOG_GCM_WRITE_PLAIN)).unwrap();
     assert_ne!(sealed[4..20], hex(BLOG_GCM_WRITE_TRANSFORMED)[4..20], "session id is in the AAD");
@@ -365,7 +329,6 @@ fn kdf_inputs_all_matter() {
     for bit in 0..8 * 8 {
         assert_ne!(*kdf::<16>(&sk, b"SMB2AESCMAC\0", &flip(b"SmbSign\0", bit)).unwrap(), *base);
     }
-    // L is part of the input: the 256-bit output does not start with the 128-bit one.
     assert_ne!(kdf::<32>(&sk, b"SMB2AESCMAC\0", b"SmbSign\0").unwrap()[..16], base[..]);
     assert_eq!(kdf::<24>(&sk, b"x", b"y").map(|_| ()), Err(CryptoError::KeyLength));
     assert_eq!(kdf::<16>(&[], b"x", b"y").map(|_| ()), Err(CryptoError::KeyLength));
@@ -559,7 +522,6 @@ fn sign_refuses_short_messages_and_sets_only_the_signature() {
     key.verify(&head).unwrap();
 }
 
-/// pike tests/test_smb3_encryption_vector.py test_pre_auth_integrity: negotiate_request
 const PIKE_PA_NEGOTIATE_REQUEST: &[&str] = &[
     "fe534d4240000100000000000000800000000000000000000100000000000000fffe0000000000000000000000000000",
     "0000000000000000000000000000000024000500000000003f000000ecd86f326276024f9f7752b89bb33f3a70000000",
@@ -567,13 +529,11 @@ const PIKE_PA_NEGOTIATE_REQUEST: &[&str] = &[
     "d05844e0e5a118225c15887f32ff00000200060000000000020002000100",
 ];
 
-/// pike tests/test_smb3_encryption_vector.py test_pre_auth_integrity: exp_pae_1
 const PIKE_PA_EXP_PAE_1: &[&str] = &[
     "dd94efc5321bb618a2e208ba8920d2f422992526947a409b5037de1e0fe8c7362b8c47122594cde0ce26aa9dfc8bcdbd",
     "e0621957672623351a7540f1e54a0426",
 ];
 
-/// pike tests/test_smb3_encryption_vector.py test_pre_auth_integrity: negotiate_response
 const PIKE_PA_NEGOTIATE_RESPONSE: &[&str] = &[
     "fe534d4240000100000000000000010001000000000000000100000000000000fffe0000000000000000000000000000",
     "00000000000000000000000000000000410001001103020039cbcaf329714942bdce5d60f09ab3fb2f00000000008000",
@@ -588,13 +548,11 @@ const PIKE_PA_NEGOTIATE_RESPONSE: &[&str] = &[
     "83ca5b65385a251117beb30712e50000020004000000000001000200",
 ];
 
-/// pike tests/test_smb3_encryption_vector.py test_pre_auth_integrity: exp_pae_2
 const PIKE_PA_EXP_PAE_2: &[&str] = &[
     "324bfa92a4f3a190e466ebea08d9c110dc88bfed758d9846ecc6f541cc1d02ae3c94a79f36011e997e13f841b91b5095",
     "7ad07b19c8e2539c0b23fdae09d2c513",
 ];
 
-/// pike tests/test_smb3_encryption_vector.py test_pre_auth_integrity: session_setup_request
 const PIKE_PA_SESSION_SETUP_REQUEST: &[&str] = &[
     "fe534d4240000100000000000100800000000000000000000200000000000000fffe0000000000000000000000000000",
     "0000000000000000000000000000000019000001010000000000000058004a000000000000000000604806062b060105",
@@ -602,13 +560,11 @@ const PIKE_PA_SESSION_SETUP_REQUEST: &[&str] = &[
     "00000000000000000000060380250000000f",
 ];
 
-/// pike tests/test_smb3_encryption_vector.py test_pre_auth_integrity: exp_pae_3
 const PIKE_PA_EXP_PAE_3: &[&str] = &[
     "ac0b0f2b9986257700365e416d142a6edc96df03594a19e52a15f6bd0d041cd5d432f8ed42c55e33197a50c9ec00f146",
     "2b50c592211b1471a04b56088fdfd5f9",
 ];
 
-/// pike tests/test_smb3_encryption_vector.py test_pre_auth_integrity: session_setup_response
 const PIKE_PA_SESSION_SETUP_RESPONSE: &[&str] = &[
     "fe534d4240000100160000c00100010001000000000000000200000000000000fffe0000000000001900000000100000",
     "00000000000000000000000000000000090000004800b300a181b03081ada0030a0101a10c060a2b0601040182370202",
@@ -618,13 +574,11 @@ const PIKE_PA_SESSION_SETUP_RESPONSE: &[&str] = &[
     "a1f5adcbaed00100000000",
 ];
 
-/// pike tests/test_smb3_encryption_vector.py test_pre_auth_integrity: exp_pae_4
 const PIKE_PA_EXP_PAE_4: &[&str] = &[
     "2729e3440dfddd839e37193f6e8f20c20cefb3469e453a70cd980eec06b8835740a73760085633364c8989895ece81bf",
     "102deeb14d4b7d48afa76901a7a38387",
 ];
 
-/// pike tests/test_smb3_encryption_vector.py test_pre_auth_integrity: session_setup_response2
 const PIKE_PA_SESSION_SETUP_RESPONSE2: &[&str] = &[
     "fe534d4240000100000000000100800000000000000000000300000000000000fffe0000000000001900000000100000",
     "000000000000000000000000000000001900000101000000000000005800cf010000000000000000a18201cb308201c7",
@@ -640,19 +594,15 @@ const PIKE_PA_SESSION_SETUP_RESPONSE2: &[&str] = &[
     "c03a78a31204100100000063775a9a5fd97f0600000000",
 ];
 
-/// pike tests/test_smb3_encryption_vector.py test_pre_auth_integrity: exp_pae_5
 const PIKE_PA_EXP_PAE_5: &[&str] = &[
     "0dd13628cc3ed218ef9df9772d436d0887ab9814bfae63a80aa845f36909db7928622dddad522d9751640a459762c5a9",
     "d6bb084cbb3ce6bdadef5d5bce3c6c01",
 ];
 
-/// pike tests/test_smb3_encryption_vector.py test_pre_auth_integrity: session_key
 const PIKE_PA_SESSION_KEY: &[&str] = &["270e1ba896585eeb7af3472d3b4c75a7"];
 
-/// pike tests/test_smb3_encryption_vector.py test_pre_auth_integrity: exp_signing_key
 const PIKE_PA_EXP_SIGNING_KEY: &[&str] = &["73fe7a9a77bef0bde49c650d8ccb5f76"];
 
-/// winlinux smb3-vectors.ts gcm.negotiateRequest
 const BLOG_GCM_NEGOTIATE_REQUEST: &[&str] = &[
     "fe534d4240000100000000000000010000000000000000000000000000000000fffe0000000000000000000000000000",
     "000000000000000000000000000000002400050001000000660000004f0d7fa009f5b246b2ef62551d7d7c0970000000",
@@ -660,13 +610,11 @@ const BLOG_GCM_NEGOTIATE_REQUEST: &[&str] = &[
     "3514392649fd6f216ed8bf269cd800000200060000000000020002000100",
 ];
 
-/// winlinux smb3-vectors.ts gcm.hashAfterNegotiateRequest
 const BLOG_GCM_HASH_AFTER_NEGOTIATE_REQUEST: &[&str] = &[
     "550442daf311412870ad9e58e602b0312d61328d6b1ac28f22af46d6ea581f23a9bfabe0cc0411976bf3f9da23d34333",
     "52cb48cf00b8659bc1a3695e1b1a52a8",
 ];
 
-/// winlinux smb3-vectors.ts gcm.negotiateResponse
 const BLOG_GCM_NEGOTIATE_RESPONSE: &[&str] = &[
     "fe534d4240000100000000000000010001000000000000000000000000000000fffe0000000000000000000000000000",
     "00000000000000000000000000000000410001001103020039cbcaf329714942bdce5d60f09ab3fb2700000000008000",
@@ -681,13 +629,11 @@ const BLOG_GCM_NEGOTIATE_RESPONSE: &[&str] = &[
     "ec146d99cdb60ae44e5a86127d270000020004000000000001000200",
 ];
 
-/// winlinux smb3-vectors.ts gcm.hashAfterNegotiateResponse
 const BLOG_GCM_HASH_AFTER_NEGOTIATE_RESPONSE: &[&str] = &[
     "abe4da6e875f6fb05033af04dcc38c92888b4e13d1eab7aa05cade142064974cb3eab0782600549ba27207aa213b0d19",
     "0b9950fa36d45be32a888bfee8389b74",
 ];
 
-/// winlinux smb3-vectors.ts gcm.setupRequest1
 const BLOG_GCM_SETUP_REQUEST1: &[&str] = &[
     "fe534d4240000100000000000100800000000000000000000100000000000000fffe0000000000000000000000000000",
     "0000000000000000000000000000000019000001010000000000000058004a000000000000000000604806062b060105",
@@ -695,13 +641,11 @@ const BLOG_GCM_SETUP_REQUEST1: &[&str] = &[
     "00000000000000000000060380250000000f",
 ];
 
-/// winlinux smb3-vectors.ts gcm.hashAfterSetupRequest1
 const BLOG_GCM_HASH_AFTER_SETUP_REQUEST1: &[&str] = &[
     "a5e8ab87e2adb8fa5f4545d20f1fd2019d66ccd0f4dfd1f762f1dfc8dcb15b98d0bd1f1450f6a0afc70f80b353c2d959",
     "217681949cf22df35f31257a281c6a80",
 ];
 
-/// winlinux smb3-vectors.ts gcm.setupResponse1
 const BLOG_GCM_SETUP_RESPONSE1: &[&str] = &[
     "fe534d4240000100160000c00100010001000000000000000100000000000000fffe0000000000002500000000100000",
     "00000000000000000000000000000000090000004800b300a181b03081ada0030a0101a10c060a2b0601040182370202",
@@ -711,13 +655,11 @@ const BLOG_GCM_SETUP_RESPONSE1: &[&str] = &[
     "8d5c6ccdaed00100000000",
 ];
 
-/// winlinux smb3-vectors.ts gcm.hashAfterSetupResponse1
 const BLOG_GCM_HASH_AFTER_SETUP_RESPONSE1: &[&str] = &[
     "9a095455244172898902b0fbdf5fefafd8435bb66a47eb55cb7542732a423f58b12b3ed698bef3878d8a346fd9f5cc88",
     "2da37aaf2a939290e98b935fc72b3944",
 ];
 
-/// winlinux smb3-vectors.ts gcm.setupRequest2
 const BLOG_GCM_SETUP_REQUEST2: &[&str] = &[
     "fe534d4240000100000000000100800000000000000000000200000000000000fffe0000000000002500000000100000",
     "000000000000000000000000000000001900000101000000000000005800cf010000000000000000a18201cb308201c7",
@@ -733,42 +675,33 @@ const BLOG_GCM_SETUP_REQUEST2: &[&str] = &[
     "90bde7a31204100100000067890bd408f5680d00000000",
 ];
 
-/// winlinux smb3-vectors.ts gcm.hashAfterSetupRequest2
 const BLOG_GCM_HASH_AFTER_SETUP_REQUEST2: &[&str] = &[
     "b23f3cbfd69487d9832b79b1594a367cdd950909b774c3a4c412b4fcea9edddba7db256ba2ea30e977f11f9b11324757",
     "8e0e915c6d2a513b8f2fca5707dc8770",
 ];
 
-/// winlinux smb3-vectors.ts gcm.setupResponse2
 const BLOG_GCM_SETUP_RESPONSE2: &[&str] = &[
     "fe534d4240000100000000000100800009000000000000000200000000000000fffe0000000000002500000000100000",
     "6b85a4519a0f3eea35ba946dd3afe6b80900000048001d00a11b3019a0030a0100a3120410010000003932a87523ab66",
     "0100000000",
 ];
 
-/// winlinux smb3-vectors.ts gcm.sessionKey
 const BLOG_GCM_SESSION_KEY: &[&str] = &["419fddf34c1e001909d362ae7fb6af79"];
 
-/// winlinux smb3-vectors.ts gcm.signingKey
 const BLOG_GCM_SIGNING_KEY: &[&str] = &["8765949dfeaee105ce9118b45be988f0"];
 
-/// winlinux smb3-vectors.ts gcm.encryptionKey
 const BLOG_GCM_ENCRYPTION_KEY: &[&str] = &["a2f5e80e5d59103034f32e52f698e5ec"];
 
-/// winlinux smb3-vectors.ts gcm.decryptionKey
 const BLOG_GCM_DECRYPTION_KEY: &[&str] = &["748c50868c90f302962a5c35f5f9a8bf"];
 
-/// winlinux smb3-vectors.ts gcm.writeNonce
 const BLOG_GCM_WRITE_NONCE: &[&str] = &["c7d6822d269caf48904c664c"];
 
-/// winlinux smb3-vectors.ts gcm.writePlain
 const BLOG_GCM_WRITE_PLAIN: &[&str] = &[
     "fe534d4240000100000000000900010008000000000000000500000000000000fffe0000010000002500000000100000",
     "000000000000000000000000000000003100700017000000000000000000000006000000040000000100000004000000",
     "00000000000000007000000000000000536d623320656e6372797074696f6e2074657374696e67",
 ];
 
-/// winlinux smb3-vectors.ts gcm.writeTransformed
 const BLOG_GCM_WRITE_TRANSFORMED: &[&str] = &[
     "fd534d42bd73d97d2bc9001bcafac0fdff5feebcc7d6822d269caf48904c664c00000000870000000000010025000000",
     "001000006ecdd2a7afc7b47763057a041b8fd4daffe990b70c9e09d36c084e02d14ef247f8bde38acf6256f8b1d3b56f",
@@ -776,57 +709,44 @@ const BLOG_GCM_WRITE_TRANSFORMED: &[&str] = &[
     "2620a299f48e29e53d6b61d1c13a19e91af013f00d17e3abc2fc3d36c8c1b6b93973253852dbd442e46ee8",
 ];
 
-/// winlinux smb3-vectors.ts gcm.responseTransformed
 const BLOG_GCM_RESPONSE_TRANSFORMED: &[&str] = &[
     "fd534d42acbe1cb7ed343adf1725ef144d90d4b0e06831dd2e8eb7b40000000000000000500000000000010025000000",
     "0010000026bbbf949983a6c1c796559d0f2c510cb651d1f7b6ac8ded32a2a0b8f2d793a815c6f6b848d69767a215841a",
     "42d400ae6ddb5f0b44173a014973321fdd7950da6179159b82e03c9e18a050ff0ea1c967",
 ];
 
-/// winlinux smb3-vectors.ts gcm.responsePlain
 const BLOG_GCM_RESPONSE_PLAIN: &[&str] = &[
     "fe534d4240000100000000000900010001000000000000000500000000000000fffe0000010000002500000000100000",
     "0000000000000000000000000000000011000000170000000000000000000000",
 ];
 
-/// winlinux smb3-vectors.ts ccm.hashAfterSetupRequest2
 const BLOG_CCM_HASH_AFTER_SETUP_REQUEST2: &[&str] = &[
     "decf98a420718718f22090d3580fcc5e484bd310fa1268210c6e86335a8891e767f5bcd99fa5a7859d665ad07a73ea94",
     "e1bcdb7cfa69a6962a28a244138340b1",
 ];
 
-/// winlinux smb3-vectors.ts ccm.setupResponse2
 const BLOG_CCM_SETUP_RESPONSE2: &[&str] = &[
     "fe534d4240000100000000000100800009000000000000000200000000000000fffe0000000000002100000000100000",
     "3676196aee8ca17e5d50a53642ef2be40900000048001d00a11b3019a0030a0100a3120410010000000f57444342a271",
     "7e00000000",
 ];
 
-/// winlinux smb3-vectors.ts ccm.sessionKey
 const BLOG_CCM_SESSION_KEY: &[&str] = &["07b7f69c1e2581662df6987e88f9e891"];
 
-/// winlinux smb3-vectors.ts ccm.signingKey
 const BLOG_CCM_SIGNING_KEY: &[&str] = &["3dcc82c5795ae27f383242761078c59b"];
 
-/// winlinux smb3-vectors.ts ccm.encryptionKey
 const BLOG_CCM_ENCRYPTION_KEY: &[&str] = &["dfaaa31aae40a2485d47ac4df09fda1d"];
 
-/// winlinux smb3-vectors.ts ccm.decryptionKey
 const BLOG_CCM_DECRYPTION_KEY: &[&str] = &["95c544aef6072680da1ce49a68a97fa6"];
 
-/// winlinux smb3-vectors.ts smb30.sessionKey
 const BLOG_SMB30_SESSION_KEY: &[&str] = &["b4546771b515f766a86735532dd6c4f0"];
 
-/// winlinux smb3-vectors.ts smb30.signingKey
 const BLOG_SMB30_SIGNING_KEY: &[&str] = &["f773cd23c18fd1e08ee510cada7cf852"];
 
-/// winlinux smb3-vectors.ts smb30.encryptionKey
 const BLOG_SMB30_ENCRYPTION_KEY: &[&str] = &["261b72350558f2e9dcf613070383edbf"];
 
-/// winlinux smb3-vectors.ts smb30.decryptionKey
 const BLOG_SMB30_DECRYPTION_KEY: &[&str] = &["8fe2b57ec34d2db5b1a9727f526bbdb5"];
 
-/// Wireshark test/captures/smb311-aes-128-gcm.pcap.gz frame 1 c2s len 216 proto fe534d42 cmd 0
 const WS128_FRAME1: &[&str] = &[
     "fe534d424000000000000000000002000000000000000000000000000000000014010000000000000000000000000000",
     "0000000000000000000000000000000024000100010000007700000072c1bb25b9284fbb9773a3f3e62a299968000000",
@@ -835,7 +755,6 @@ const WS128_FRAME1: &[&str] = &[
     "000110000000000093ad25509cb411e7b42383de968bcd7c",
 ];
 
-/// Wireshark test/captures/smb311-aes-128-gcm.pcap.gz frame 2 s2c len 308 proto fe534d42 cmd 0
 const WS128_FRAME2: &[&str] = &[
     "fe534d424000000000000000000001000100000000000000000000000000000014010000000000000000000000000000",
     "000000000000000000000000000000004100010011030200de1f86b985f81c44a719669ef403e3462700000000008000",
@@ -846,14 +765,12 @@ const WS128_FRAME2: &[&str] = &[
     "9ee06b30a1200000020004000000000001000200",
 ];
 
-/// Wireshark test/captures/smb311-aes-128-gcm.pcap.gz frame 3 c2s len 120 proto fe534d42 cmd 1
 const WS128_FRAME3: &[&str] = &[
     "fe534d424000000000000000010082000000000000000000010000000000000014010000000000000000000000000000",
     "000000000000000000000000000000001900000100000000000000005800200000000000000000004e544c4d53535000",
     "01000000250208e000000000000000000000000000000000",
 ];
 
-/// Wireshark test/captures/smb311-aes-128-gcm.pcap.gz frame 4 s2c len 258 proto fe534d42 cmd 1
 const WS128_FRAME4: &[&str] = &[
     "fe534d4240000000160000c0010001000100000000000000010000000000000014010000000000003900000000400000",
     "00000000000000000000000000000000090000004800ba004e544c4d53535000020000000600060038000000250289e2",
@@ -863,7 +780,6 @@ const WS128_FRAME4: &[&str] = &[
     "740007000800a4515f6ad422d50100000000",
 ];
 
-/// Wireshark test/captures/smb311-aes-128-gcm.pcap.gz frame 5 c2s len 364 proto fe534d42 cmd 1
 const WS128_FRAME5: &[&str] = &[
     "fe534d424000000000000000010082000000000000000000020000000000000014010000000000003900000000400000",
     "000000000000000000000000000000001900000100000000000000005800140100000000000000004e544c4d53535000",
@@ -875,13 +791,11 @@ const WS128_FRAME5: &[&str] = &[
     "7200610074006f00720000005fc141ebb32e18a6a13a7e28eb42b17a",
 ];
 
-/// Wireshark test/captures/smb311-aes-128-gcm.pcap.gz frame 6 s2c len 72 proto fe534d42 cmd 1
 const WS128_FRAME6: &[&str] = &[
     "fe534d424000000000000000010082000900000000000000020000000000000014010000000000003900000000400000",
     "a9ab185bd1a0b06d9cbe3570983d4c0d0900000048000000",
 ];
 
-/// Wireshark test/captures/smb311-aes-128-gcm.pcap.gz frame 7 c2s len 174 proto fd534d42 cmd None
 const WS128_FRAME7: &[&str] = &[
     "fd534d425fffec2923c8e8f7864e6ee1b8ba70d7bcb64ee680149a5d98311914000000007a0000000000010039000000",
     "004000004794151bb1748542d4c79c1923d9986bdef357d821c1fcee19bf5e637dcd46a69208d40c110cd34dc1dfad8e",
@@ -889,14 +803,12 @@ const WS128_FRAME7: &[&str] = &[
     "6092afd93c3279b78ccbb925c7347083b5faae959d2cf777d5e3786eee92",
 ];
 
-/// Wireshark test/captures/smb311-aes-128-gcm.pcap.gz frame 8 s2c len 132 proto fd534d42 cmd None
 const WS128_FRAME8: &[&str] = &[
     "fd534d4285e5483e828897c300416eb199043a1081eb4dc01d20a08e0000000000000000500000000000010039000000",
     "0040000089d1444bab08bf54328851e6ac644da7bdc5c33fd909f5576c2f76d4285ab7711e8e13b6cb983e7f1fac0a79",
     "c36b8c362adf11aebeb4130975fcceebac53df479e36763d4e505451877c1505fbaea5be",
 ];
 
-/// Wireshark test/captures/smb311-aes-256-gcm.pcap.gz frame 1 c2s len 224 proto fe534d42 cmd 0
 const WS256_FRAME1: &[&str] = &[
     "fe534d42400000000000000000001f000000000000000000000000000000000000000000000000000000000000000000",
     "0000000000000000000000000000000024000500030000007f00000054119e6703be1e47b529647c33a9b8f470000000",
@@ -905,7 +817,6 @@ const WS256_FRAME1: &[&str] = &[
     "05001800000000003100370032002e00330031002e0039002e00310036003300",
 ];
 
-/// Wireshark test/captures/smb311-aes-256-gcm.pcap.gz frame 2 s2c len 300 proto fe534d42 cmd 0
 const WS256_FRAME2: &[&str] = &[
     "fe534d424000000000000000000001000100000000000000000000000000000000000000000000000000000000000000",
     "0000000000000000000000000000000041000300110303007562313430342d3136330000000000000d00000000008000",
@@ -916,7 +827,6 @@ const WS256_FRAME2: &[&str] = &[
     "080004000000000001000200",
 ];
 
-/// Wireshark test/captures/smb311-aes-256-gcm.pcap.gz frame 3 c2s len 162 proto fe534d42 cmd 1
 const WS256_FRAME3: &[&str] = &[
     "fe534d424000010000000000010000201000000000000000010000000000000000000000000000000000000000000000",
     "0000000000000000000000000000000019000003010000000000000058004a000000000000000000604806062b060105",
@@ -924,7 +834,6 @@ const WS256_FRAME3: &[&str] = &[
     "00000000000028000000060100000000000f",
 ];
 
-/// Wireshark test/captures/smb311-aes-256-gcm.pcap.gz frame 4 s2c len 325 proto fe534d42 cmd 1
 const WS256_FRAME4: &[&str] = &[
     "fe534d4240000100160000c00100010011000000000000000100000000000000000000000000000056dc03ab00000000",
     "00000000000000000000000000000000090000004800fd00a181fa3081f7a0030a0101a10c060a2b0601040182370202",
@@ -935,7 +844,6 @@ const WS256_FRAME4: &[&str] = &[
     "006f006d002d006c0034002e00620061007300650007000800fc2c43c1dc16d80100000000",
 ];
 
-/// Wireshark test/captures/smb311-aes-256-gcm.pcap.gz frame 5 c2s len 622 proto fe534d42 cmd 1
 const WS256_FRAME5: &[&str] = &[
     "fe534d4240000100000000000100002010000000000000000200000000000000000000000000000056dc03ab00000000",
     "00000000000000000000000000000000190000030100000000000000580016020000000000000000a18202123082020e",
@@ -952,14 +860,12 @@ const WS256_FRAME5: &[&str] = &[
     "4e004f0058003100390087d0e481465d717d0d48c057d7e2ff1da312041001000000a84e78f9eb8852a400000000",
 ];
 
-/// Wireshark test/captures/smb311-aes-256-gcm.pcap.gz frame 6 s2c len 101 proto fe534d42 cmd 1
 const WS256_FRAME6: &[&str] = &[
     "fe534d4240000100000000000100002019000000000000000200000000000000000000000000000056dc03ab00000000",
     "06a6cbeb0a9b20434db9aee0620231740900000048001d00a11b3019a0030a0100a3120410010000005aa3be9e8199f8",
     "a800000000",
 ];
 
-/// Wireshark test/captures/smb311-aes-256-gcm.pcap.gz frame 7 c2s len 162 proto fd534d42 cmd None
 const WS256_FRAME7: &[&str] = &[
     "fd534d4206afa4803a8342df81f91427ceb68f9c01000000000000000a6bb5c2000000006e0000000000010056dc03ab",
     "00000000a5a49fd70fc8fbfde44575a9c8738169a922075839e6e1fc6e4c9acb7fc03f4f300721df38ec3c08e7f92574",
@@ -967,7 +873,6 @@ const WS256_FRAME7: &[&str] = &[
     "1a78716f9f04438431df1caaa4b140c66b30",
 ];
 
-/// Wireshark test/captures/smb311-aes-256-gcm.pcap.gz frame 8 s2c len 132 proto fd534d42 cmd None
 const WS256_FRAME8: &[&str] = &[
     "fd534d42d1a382aa2268d43a30ba59900a8602960100000000000000f37d0b4300000000500000000000010056dc03ab",
     "00000000547a0cfa79eddcd2206741ab1321b2dc8493867735708b03c08da7cdb2d01731373531e6ac10eaec5cc69ad6",

@@ -1,10 +1,5 @@
 #!/bin/sh
 # SPDX-License-Identifier: LGPL-2.1-or-later
-# Checks a Rust binary of netvfs from ELF headers:
-#   - NEEDED is exactly the given list (sorted, space separated);
-#   - no GLIBC symbol version above the given one (target glibc is the floor);
-#   - position independent, full RELRO, immediate binding, no executable stack.
-# Usage: check-linked-libs.sh <binary> "<lib> <lib> ..." <max glibc version>
 set -eu
 binary=$1
 expected=$2

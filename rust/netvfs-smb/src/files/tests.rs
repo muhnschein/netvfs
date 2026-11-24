@@ -24,7 +24,6 @@ fn open_of(conn: &Conn) -> Open {
     Open { conn: conn.clone(), tree: Arc::new(Tree { id: 3, encrypt: false, share_type: 1 }), file_id: FID }
 }
 
-/// The byte at `offset` of the test file.
 fn byte(offset: u64) -> u8 {
     offset.to_le_bytes()[0] ^ 0x5a
 }
@@ -41,7 +40,6 @@ fn le64(b: &[u8]) -> u64 {
     u64::from_le_bytes(b.try_into().unwrap())
 }
 
-/// Offset and length of a READ.
 fn read_of(req: &Req) -> (u64, usize) {
     assert_eq!(req.command(), Command::Read);
     let b = req.body();
@@ -49,7 +47,6 @@ fn read_of(req: &Req) -> (u64, usize) {
     (le64(&b[8..16]), usize::try_from(le32(&b[4..8])).unwrap())
 }
 
-/// Offset and data of a WRITE.
 fn write_of(req: &Req) -> (u64, Vec<u8>) {
     assert_eq!(req.command(), Command::Write);
     let b = req.body();
@@ -70,7 +67,6 @@ fn write_body(count: usize) -> Vec<u8> {
     w.into_vec()
 }
 
-/// The next request that is not a CANCEL, and the CANCELs before it.
 async fn next(peer: &mut Peer) -> (Req, usize) {
     let mut cancels = 0usize;
     loop {
@@ -82,7 +78,6 @@ async fn next(peer: &mut Peer) -> (Req, usize) {
     }
 }
 
-/// Answers a READ from a file of `size` bytes.
 async fn answer_read(peer: &mut Peer, req: &Req, size: u64) {
     let (offset, count) = read_of(req);
     let msg = if offset >= size {
@@ -94,7 +89,6 @@ async fn answer_read(peer: &mut Peer, req: &Req, size: u64) {
     peer.send(&[msg], false).await;
 }
 
-/// Receives `n` READs, then answers them in order.
 async fn serve_reads(peer: &mut Peer, size: u64, n: usize) -> Vec<(u64, usize)> {
     let mut reqs = Vec::new();
     while reqs.len() < n {
@@ -124,7 +118,6 @@ fn chunk_is_the_server_maximum_within_limits() {
     assert_eq!(chunk(8 << 20, false), crate::conn::CREDIT_UNIT);
     assert_eq!(chunk(1000, true), 1000);
     assert_eq!(chunk(MAX_CHUNK, true), MAX_CHUNK);
-    // Never more than 1 MiB.
     assert_eq!(chunk(16 << 20, true), 1 << 20);
     assert_eq!(chunk(0, true), 1);
 }
@@ -465,7 +458,6 @@ async fn a_failed_write_fails_every_later_call() {
     assert_eq!(e.name, ErrorName::NoSpace);
     assert_eq!(h.write(b"x", &c).await.unwrap_err(), e);
     assert_eq!(h.position(), u64::try_from(MAX_IN_FLIGHT).unwrap());
-    // As after a canceled upload: commit still waits for the CLOSE.
     c.cancel();
     let mut commit = pin!(h.commit(&c));
     assert!(!done_now(commit.as_mut()));
@@ -501,7 +493,6 @@ async fn commit_sets_the_modification_time_after_the_close() {
     assert_eq!(r, Ok(()));
 }
 
-/// Whether `f` is done when polled now.
 fn done_now(f: Pin<&mut impl Future>) -> bool {
     let mut cx = Context::from_waker(Waker::noop());
     f.poll(&mut cx).is_ready()
@@ -520,7 +511,6 @@ async fn abort_waits_for_the_close_and_drop_closes_without_flushing() {
     let (close, cancels) = next(&mut peer).await;
     assert_eq!((close.command(), cancels), (Command::Close, 1));
     peer.send(&[fake::error(&first, NtStatus::CANCELLED, 1)], false).await;
-    // Done only once the server closed the file.
     assert!(!done_now(abort.as_mut()));
     peer.send(&[fake::response(&close, NtStatus::SUCCESS, &close_body(), 1)], false).await;
     abort.await;

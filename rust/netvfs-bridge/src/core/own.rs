@@ -110,7 +110,6 @@ impl OwnItems {
         }
     }
 
-    /// Drops expired items and the oldest beyond [`MAX_ITEMS`]; whether any went.
     fn prune(&mut self, now_ms: i64) -> bool {
         let before = self.items.len();
         self.items.retain(|_, item| now_ms.saturating_sub(item.since_ms) < lifetime_ms());

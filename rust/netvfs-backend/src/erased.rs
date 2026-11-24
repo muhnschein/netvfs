@@ -1,8 +1,4 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-//! Backend and handle traits behind `dyn`: the C ABI picks the backend by provider name at run time.
-//!
-//! The backend's method runs on first poll, so a call refused at once (tripped cancel) does no work.
-//! Objects are `Send`, not `Sync`: QML makes backends on the GUI thread, runs them on a pool thread.
 
 use netvfs_vfs::{
     Attributes, Backend, CancelToken, Capabilities, Credentials, Entry, ListOptions, ListSink, Params,

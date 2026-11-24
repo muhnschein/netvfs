@@ -1,6 +1,4 @@
 # SPDX-License-Identifier: LGPL-2.1-or-later
-# OpenSSH built from the upstream portable sources in the build context
-# (openssh-portable/, cloned by run.sh at tag V_10_3_P1).
 FROM mirror.gcr.io/library/ubuntu:24.04 AS build
 RUN apt-get update \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \

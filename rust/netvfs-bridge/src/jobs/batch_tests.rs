@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-// Restriction lints that only add noise to tests.
 #![allow(clippy::assertions_on_result_states, clippy::arithmetic_side_effects)]
 
 use super::{
@@ -17,7 +16,7 @@ fn entry(name: &str) -> WireEntry {
     WireEntry::unknown(name.as_bytes(), 1)
 }
 
-#[allow(clippy::trivially_copy_pass_by_ref)] // the batcher's size function takes a reference
+#[allow(clippy::trivially_copy_pass_by_ref)]
 const fn sized(n: &usize) -> usize {
     *n
 }

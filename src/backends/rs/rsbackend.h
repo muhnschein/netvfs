@@ -2,23 +2,18 @@
 #ifndef NETVFS_RSBACKEND_H
 #define NETVFS_RSBACKEND_H
 
-// Backend over one connection of libnetvfs-rs.so. A plugin's BackendFactory::create() is
-// createBackend() with its provider. Rust takes one call at a time per connection, from any thread.
 #include "backend.h"
 #include "netvfs_rs.h"
 
 #include <mutex>
 
 namespace NetVfs::Rs {
-
-// Internal when libnetvfs-rs.so is missing, Unsupported when it has no such provider.
 Result createBackend(const QString &provider, Backend **out);
 
 class RsBackend final : public Backend
 {
 public:
     RsBackend(const nvr_table *table, nvr_conn *conn) : m_t(table), m_conn(conn) {}
-    // Closes what is left open and disconnects (conn_free).
     ~RsBackend() override;
 
     Result connect(const ConnectionParams &params, ServerIdentity *seen) override;
@@ -70,7 +65,6 @@ private:
     QString m_domain;
     bool m_authenticated = false;
     Capabilities m_capabilities;
-    // Prompter of a running authenticate(), which cancel() wakes.
     std::mutex m_prompterMutex;
     AuthPrompter *m_prompter = nullptr;
 };

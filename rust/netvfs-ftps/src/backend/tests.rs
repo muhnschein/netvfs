@@ -19,7 +19,6 @@ fn anchors() -> Anchors {
 }
 
 fn spki(cert: &[u8]) -> Vec<u8> {
-    // The SPKI is the one P-256 key SEQUENCE inside the certificate.
     let at = cert.windows(4).position(|w| w == [0x30, 0x59, 0x30, 0x13]).unwrap();
     cert[at..at + 91].to_vec()
 }
@@ -34,7 +33,6 @@ fn params(fake: &Fake, options: &[(&str, &str)]) -> Params {
         host: "localhost".into(),
         port: i32::from(fake.addr.port()),
         username: USER.into(),
-        // A reply that never comes fails the test in seconds.
         request_timeout_ms: 5000,
         ..Params::default()
     };
@@ -97,7 +95,6 @@ impl Sink for Out {
     }
 }
 
-/// Progress that cancels once `after` bytes moved.
 struct Moves {
     after: Option<u64>,
     last: (u64, Option<u64>),
@@ -131,8 +128,6 @@ fn file(data: &[u8]) -> Node {
 fn opts(disposition: Disposition) -> WriteOptions {
     WriteOptions { disposition, ..WriteOptions::default() }
 }
-
-// ---- connect and sign in
 
 #[tokio::test]
 async fn a_self_signed_server_reports_its_key_and_hears_no_credentials() {
@@ -179,7 +174,6 @@ async fn sign_in_protects_data_and_asks_for_utf8() {
     let mut f = Ftps::with_anchors(anchors());
     let c = CancelToken::new();
     f.connect(&params(&fake, &[]), &c).await.unwrap();
-    // The account's user name when the credentials name none.
     f.authenticate(&creds("", PASSWORD), None, &c).await.unwrap();
     let seen = fake.with(|s| s.seen.clone());
     let lines: Vec<&[u8]> = seen.iter().map(Vec::as_slice).collect();
@@ -297,8 +291,6 @@ fn settings_from_params() {
     }
 }
 
-// ---- operations
-
 #[tokio::test]
 async fn stat_files_folders_and_missing_ones() {
     let fake = Fake::start(Cert::Trusted).await;
@@ -347,7 +339,6 @@ async fn list_gives_children_in_batches_and_skips_hostile_lines() {
     let mut empty = Collect::default();
     f.list(b"/sub", ListOptions::default(), &mut empty, &c).await.unwrap();
     assert_eq!(names(&empty.0), Vec::<String>::new());
-    // A sink that stops cancels the listing.
     struct Stop;
     impl ListSink for Stop {
         fn entries(&mut self, _: &[Entry]) -> bool {
@@ -460,7 +451,6 @@ async fn refusals_are_explained_by_their_parents() {
     assert_eq!(e.name, ErrorName::NotADirectory);
     let e = ftps.upload(b"/no/n", &o, &mut Data(b"x".to_vec(), 0, 0), &mut p, &c).await.unwrap_err();
     assert_eq!(e.name, ErrorName::NotFound);
-    // The connection stays usable.
     ftps.stat(b"/f", false, &c).await.unwrap();
 }
 
@@ -490,14 +480,12 @@ async fn download_whole_and_ranges() {
     assert_eq!(get(5, Some(0)).await.0, b"");
     assert_eq!(get(599_999, Some(10)).await.0, &body[599_999..]);
     assert!(fake.with(|s| s.seen.iter().any(|l| l == b"REST 1000")));
-    // The connection is in step after a cut-off read.
     f.stat(b"/f", false, &c).await.unwrap();
     let mut out = Out::default();
     let e = f.download(b"/d", 0, None, &mut out, &mut Moves::quiet(), &c).await.unwrap_err();
     assert_eq!(e.name, ErrorName::IsADirectory);
 }
 
-/// Progress that cancels the token once a byte moved: the call's future is dropped mid-transfer.
 struct Drop(CancelToken);
 
 impl Progress for Drop {
@@ -533,7 +521,6 @@ async fn canceled_transfers_leave_the_connection_usable() {
     }
     f.keep_alive(&c).await.unwrap();
     assert_eq!(fake.with(|s| s.connections), 1);
-    // Downloads only: a stopped upload ends with a TLS close.
     assert_eq!(fake.verbs().iter().filter(|v| *v == "ABOR").count(), 3);
 }
 
@@ -618,7 +605,6 @@ async fn odd_sign_ins() {
     let mut f = Ftps::with_anchors(anchors());
     let c = CancelToken::new();
     f.connect(&params(&fake, &[]), &c).await.unwrap();
-    // No password asked.
     f.authenticate(&creds("guest", ""), None, &c).await.unwrap();
     assert!(!fake.verbs().contains(&"PASS".to_owned()));
     f.stat(b"/", false, &c).await.unwrap();
@@ -672,7 +658,6 @@ async fn refusals_other_than_missing_entries_are_errors() {
 #[tokio::test]
 async fn the_parent_is_the_path_up_to_its_last_slash() {
     let fake = Fake::start(Cert::Trusted).await;
-    // "/x/c" alone, without "/x".
     fake.put("/x/c", Node::Dir);
     fake.with(|s| s.forbidden = Some(b"/x/cd".to_vec()));
     let mut f = signed_in(&fake).await;
@@ -708,13 +693,11 @@ async fn downloads_ask_only_for_what_they_need() {
     assert_eq!((r, n, verbs), (Ok(()), 0, vec!["MLST".to_owned()]));
     let (r, n, verbs) = get(5, Some(0)).await;
     assert_eq!((r, n, verbs), (Ok(()), 0, vec!["MLST".to_owned()]));
-    // A short read of a large file stops the transfer.
     let (r, n, verbs) = get(0, Some(1000)).await;
     assert_eq!((r, n), (Ok(()), 1000));
     assert_eq!(verbs, ["MLST", "EPSV", "RETR", "ABOR", "NOOP"]);
     let (r, _, verbs) = get(0, Some(0)).await;
     assert_eq!((r, verbs), (Ok(()), vec!["MLST".to_owned()]), "in step");
-    // A whole read the server reports failed is an error.
     fake.with(|s| s.retr_end = Some("451 Local error"));
     let (r, n, _) = get(0, None).await;
     assert_eq!((r.unwrap_err().name, n), (ErrorName::ProtocolError, 8 << 20));
@@ -774,7 +757,6 @@ async fn a_fresh_session_brings_tickets_when_uploads_used_them_up() {
         .unwrap();
     }
     assert!(fake.get("/d/5") == Some(file(b"x")));
-    // Two tickets per sign-in, none per upload: a fresh session before the 3rd and 5th upload.
     assert_eq!(fake.with(|s| s.connections), 3);
     f.stat(b"/d", false, &c).await.unwrap();
     assert_eq!(fake.with(|s| s.connections), 3, "no data connection, no fresh session");

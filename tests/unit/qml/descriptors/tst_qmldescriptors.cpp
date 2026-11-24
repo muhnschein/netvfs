@@ -1,6 +1,4 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-// provider descriptors (the shipped ones and the validator) and
-// the models behind "Apps using network locations" (apps, levels per account).
 #include "accessmodel.h"
 #include "accountsfixture.h"
 #include "consentmodel.h"
@@ -76,7 +74,7 @@ void writeFile(const QString &path, const QByteArray &content)
     QVERIFY(file.open(QIODevice::WriteOnly | QIODevice::Truncate));
     file.write(content);
 }
-} // namespace
+}
 
 class TestQmlDescriptors : public QObject
 {
@@ -85,7 +83,6 @@ class TestQmlDescriptors : public QObject
 private:
     QTemporaryDir consumersDir;
     QTemporaryDir configDir;
-    // Before the first Accounts::Manager.
     std::unique_ptr<Test::AccountsFixture> accounts;
     int firstAccount = 0;
     int secondAccount = 0;
@@ -109,7 +106,6 @@ private slots:
         QVERIFY(accounts->isValid());
         firstAccount = filesAccount(QStringLiteral("a.example"));
         secondAccount = filesAccount(QStringLiteral("b.example"));
-        // Backups only: not offered to apps.
         QVERIFY(accounts->createAccount(QStringLiteral("sftp"), { { QStringLiteral("netvfs/host"), QStringLiteral("c.example") } }) > 0);
         QVERIFY(firstAccount > 0 && secondAccount > firstAccount);
     }
@@ -149,7 +145,7 @@ private slots:
         QCOMPARE(descriptors.providers(),
                  QStringList({ QStringLiteral("ftps"), QStringLiteral("sftp"), QStringLiteral("smb"),
                                QStringLiteral("webdav") }));
-        QVERIFY(descriptors.descriptor(QStringLiteral("local")).isEmpty());   // not an account provider
+        QVERIFY(descriptors.descriptor(QStringLiteral("local")).isEmpty());
         QVERIFY(descriptors.descriptor(QStringLiteral("../etc")).isEmpty());
         QCOMPARE(ProviderDescriptors::load(QStringLiteral("../sftp"), nullptr).error(), Error::InvalidName);
         QCOMPARE(ProviderDescriptors::load(QStringLiteral("nope"), nullptr).error(), Error::NotFound);
@@ -322,7 +318,7 @@ private slots:
         QCOMPARE(values.value(QStringLiteral("port")).toString(), QStringLiteral("22"));
         QCOMPARE(values.value(QStringLiteral("backups_path")).toString(), QStringLiteral("Sailfish OS/Backups"));
         QCOMPARE(values.value(QStringLiteral("auth_mode")).toString(), QStringLiteral("password"));
-        QVERIFY(!values.contains(QStringLiteral("key_mode_hint")));   // notes carry no value
+        QVERIFY(!values.contains(QStringLiteral("key_mode_hint")));
         QCOMPARE(d.secretKind(p, values), QStringLiteral("password"));
         QVERIFY(!d.isValid(p, values, services(true, true)));
 
@@ -331,7 +327,7 @@ private slots:
         QVERIFY(d.isValid(p, values, services(true, true)));
         values.insert(QStringLiteral("backups_path"), QStringLiteral("a/../b"));
         QVERIFY(!d.isValid(p, values, services(true, true)));
-        QVERIFY(d.isValid(p, values, services(false, true)));   // not shown without backups
+        QVERIFY(d.isValid(p, values, services(false, true)));
         QVERIFY(!d.problem(p, field(d.descriptor(p), QStringLiteral("backups_path")), values,
                            services(true, false)).isEmpty());
         QVERIFY(d.problem(p, field(d.descriptor(p), QStringLiteral("backups_path")), values,
@@ -363,7 +359,6 @@ private slots:
         QCOMPARE(params.option(QStringLiteral("auth_mode")), QStringLiteral("password"));
         QCOMPARE(params.option(QStringLiteral("host_key")), QStringLiteral("ssh-ed25519 AAAA"));
         QCOMPARE(params.options.keys(), QStringList({ QStringLiteral("auth_mode"), QStringLiteral("host_key") }));
-        // Connection keys, notes and service settings are not options.
         for (const QString &key : { QStringLiteral("host"), QStringLiteral("port"), QStringLiteral("username"),
                                     QStringLiteral("key_mode_hint"), QStringLiteral("backups_path"),
                                     QStringLiteral("files_root"), QStringLiteral("key_source") })
@@ -380,7 +375,6 @@ private slots:
         values.insert(QStringLiteral("host"), QStringLiteral("nas"));
         values.insert(QStringLiteral("username"), QStringLiteral("bob"));
         QVERIFY(d.isValid(p, values, services(true, true)));
-        // Server mode: admin shares switch only without a share.
         QVERIFY(d.isVisible(field(d.descriptor(p), QStringLiteral("show_admin_shares")), values, QStringList()));
         values.insert(QStringLiteral("share"), QStringLiteral("a/b"));
         QVERIFY(!d.isValid(p, values, services(false, true)));
@@ -390,7 +384,6 @@ private slots:
                 .options.value(QStringLiteral("show_admin_shares")).isNull());
         QCOMPARE(d.secretKind(p, values), QStringLiteral("password"));
 
-        // Guest: no user, no secret, explicit consent.
         values.insert(QStringLiteral("security_profile"), QStringLiteral("guest"));
         QCOMPARE(d.secretKind(p, values), QStringLiteral("none"));
         QVERIFY(!d.isValid(p, values, services(false, true)));
@@ -402,7 +395,7 @@ private slots:
         const NetVfs::ConnectionParams guest = NetVfsUi::paramsFromVariant(params);
         QVERIFY(guest.username.isEmpty());
         QVERIFY(!guest.options.contains(QStringLiteral("domain")));
-        QVERIFY(!guest.options.contains(QStringLiteral("auth_mode")));   // one auth mode only
+        QVERIFY(!guest.options.contains(QStringLiteral("auth_mode")));
         QCOMPARE(guest.option(QStringLiteral("security_profile")), QStringLiteral("guest"));
         QVERIFY(guest.flag(QStringLiteral("allow_insecure")));
         QVERIFY(!checkServicePolicy(guest, Service::Backup).ok());
@@ -457,7 +450,6 @@ private slots:
         const ConsentStore store(path);
         QVERIFY(!store.consent(QStringLiteral("lautta")).isDecided());
         QVERIFY(QDir().mkpath(QFileInfo(path).absolutePath()));
-        // As the bridge reads it; "granted" from before levels means full.
         writeFile(path,
                   "[Consent]\nlautta=granted\naaa=ask\nbbb=sometimes\n"
                   "[Access]\nlautta\\1=read\nlautta\\07=full\nlautta\\2=bogus\nlautta\\-3=read\nlautta\\x=read\n"
@@ -476,7 +468,6 @@ private slots:
         QVERIFY(!store.consent(QStringLiteral("../x")).isDecided());
         QVERIFY(store.consent(QStringLiteral("../x")).accounts.isEmpty());
 
-        // Replaces what was stored for the app; others stay.
         lautta.newAccounts = QStringLiteral("denied");
         lautta.accounts = { { 2, QStringLiteral("read-add") }, { 0, QStringLiteral("full") }, { 3, QStringLiteral("ask") } };
         QVERIFY(store.setConsent(QStringLiteral("lautta"), lautta));
@@ -489,7 +480,6 @@ private slots:
         QCOMPARE(raw.value(QStringLiteral("Access/lautta/2")).toString(), QStringLiteral("read-add"));
         QVERIFY(!raw.contains(QStringLiteral("Access/lautta/07")));
 
-        // Not decided: no Consent key, so the bridge asks again.
         QVERIFY(store.setConsent(QStringLiteral("lautta"), AppConsent()));
         QSettings after(path, QSettings::IniFormat);
         QVERIFY(!after.contains(QStringLiteral("Consent/lautta")));
@@ -580,7 +570,6 @@ private slots:
         QVERIFY(!model.data(model.index(0), Qt::DecorationRole).isValid());
         QCOMPARE(model.firstPending(), QStringLiteral("lautta"));
 
-        // Changes made elsewhere (the request dialog, the bridge's file) show after reload().
         QVERIFY(ConsentStore(path).setConsent(QStringLiteral("lautta"), decided));
         model.reload();
         QCOMPARE(model.firstPending(), QString());
@@ -625,14 +614,12 @@ private slots:
         QCOMPARE(model.data(model.index(0), role(Role::AccountId)).toInt(), firstAccount);
         QCOMPARE(model.data(model.index(0), role(Role::Name)).toString(), QStringLiteral("alice@a.example"));
         QCOMPARE(model.data(model.index(1), Qt::DisplayRole).toString(), QStringLiteral("alice@b.example"));
-        // Each account starts at "Not allowed".
         QCOMPARE(model.data(model.index(0), role(Role::Choice)).toString(), QStringLiteral("denied"));
         QCOMPARE(model.data(model.index(1), role(Role::Choice)).toString(), QStringLiteral("denied"));
         QVERIFY(!model.data(model.index(2), role(Role::Choice)).isValid());
         QVERIFY(!model.data(model.index(0), Qt::DecorationRole).isValid());
         QVERIFY(!QFile::exists(path));
 
-        // autoSave: each choice is stored at once, and makes the app decided.
         QSignalSpy dataChanged(&model, &QAbstractItemModel::dataChanged);
         QVERIFY(model.setChoice(secondAccount, QStringLiteral("add")));
         QCOMPARE(dataChanged.count(), 1);
@@ -652,13 +639,11 @@ private slots:
         QCOMPARE(ConsentStore(path).consent(QStringLiteral("lautta")).newAccounts, QStringLiteral("read"));
         QVERIFY(!model.setNewAccounts(QStringLiteral("granted")));
         QCOMPARE(model.newAccounts(), QStringLiteral("read"));
-        // Decided, every account chosen: the app's page still lists them all.
         model.reload();
         QVERIFY(model.decided());
         QCOMPARE(model.count(), 2);
         QCOMPARE(model.data(model.index(1), role(Role::Choice)).toString(), QStringLiteral("add"));
 
-        // Request: the full list until decided, then only accounts without a choice.
         NetVfsUi::AccessModel request;
         request.setAutoSave(false);
         request.setStorePath(path);
@@ -672,7 +657,6 @@ private slots:
         QVERIFY(!request.decided());
         QCOMPARE(request.count(), 2);
         QCOMPARE(request.asked(), QStringLiteral("read"));
-        // Not stored before save().
         QVERIFY(request.setChoice(firstAccount, QStringLiteral("full")));
         QVERIFY(request.setNewAccounts(QStringLiteral("denied")));
         QVERIFY(!ConsentStore(path).consent(QStringLiteral("aaa")).isDecided());
@@ -683,7 +667,6 @@ private slots:
         QCOMPARE(stored.accounts, (QMap<int, QString> { { firstAccount, QStringLiteral("full") },
                                                         { secondAccount, QStringLiteral("denied") } }));
 
-        // Decided, one account without a choice: the request shows only it; saving keeps the others.
         stored.newAccounts = QStringLiteral("ask");
         stored.accounts = { { firstAccount, QStringLiteral("full") }, { 77, QStringLiteral("read") } };
         QVERIFY(ConsentStore(path).setConsent(QStringLiteral("aaa"), stored));
@@ -701,7 +684,6 @@ private slots:
                                                         { secondAccount, QStringLiteral("read-add") },
                                                         { 77, QStringLiteral("read") } }));
 
-        // An unknown app: no name, nothing stored.
         NetVfsUi::AccessModel unknown;
         unknown.setStorePath(path);
         unknown.setConsumerId(QStringLiteral("stranger"));
@@ -711,7 +693,6 @@ private slots:
         QVERIFY(!unknown.setChoice(firstAccount, QStringLiteral("read")));
         QVERIFY(!unknown.save());
 
-        // A consent file that cannot be written is reported, and the app stays undecided.
         QTemporaryDir blocked;
         const QString dirAsFile = blocked.filePath(QStringLiteral("file"));
         writeFile(dirAsFile, "x");

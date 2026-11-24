@@ -167,7 +167,6 @@ fn quotas() {
         "HTTP/1.1 200 OK",
     ));
     assert_eq!((r.props.quota_available, r.props.quota_used), (Some(100), Some(23)));
-    // Nextcloud: -3 unlimited.
     let r = one(&response("/", "<d:quota-available-bytes>-3</d:quota-available-bytes>", "HTTP/1.1 200 OK"));
     assert_eq!((r.props.quota_available, r.props.quota_used), (None, None));
 }
@@ -231,7 +230,6 @@ fn caps_hold() {
     let shallow = format!("{}{}", "<x>".repeat(MAX_DEPTH - 1), "</x>".repeat(MAX_DEPTH - 1));
     parse(ms(&shallow).as_bytes()).unwrap();
 
-    // 32 KiB, as doc/SPEC.md says.
     let long = "a".repeat(32 * 1024);
     let r = one(&response("/x", &format!("<d:getcontenttype>{long}</d:getcontenttype>"), "HTTP/1.1 200 OK"));
     assert_eq!(r.props.content_type.len(), 32 * 1024);
