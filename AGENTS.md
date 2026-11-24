@@ -39,7 +39,7 @@ User tests RPMs on phone; that test judges feel, lag, real servers. Say exactly 
 
 ## Device tests
 
-- Test phone via `muhnschein-sfos-harness` workflow `do`. Its AGENTS.md rules every phone run (baseline, no blind taps, reboot, language, `clean_slate`, privacy); helpers: its README, `scripts/lib.sh`; netvfs specifics: its `apps/netvfs.md`. Test accounts and harness test servers only. Never run fork or others' PR code there: any job can root phone.
+- Test phone on the local SFOS test host via the harness's `local/run.sh` (`muhnschein-sfos-harness`, see its `local/README.md`). Its AGENTS.md rules every phone run (baseline, no blind taps, reboot, language, `clean_slate`, privacy); helpers: its README, `scripts/lib.sh`; netvfs specifics: its `apps/netvfs.md`. Test accounts and harness test servers only. Never run fork or others' PR code there: any run can root phone.
 - Phone runs SFOS 5.1 (glibc 2.41: binaries run); packages Require `sailfish-version >= 5.2.0`. Until phone fits: no harness run without user's go for `apps/netvfs.nodeps`, results then hold on 5.1 only; say so.
 - Install: `netvfs`, `netvfs-bridge`, `netvfs-backup` from one CI run, one transaction; lautta on top from its own run.
 - Every run starts from named state; `state.txt` records it plus RPM names and sha256:
@@ -49,7 +49,7 @@ User tests RPMs on phone; that test judges feel, lag, real servers. Say exactly 
 - Footprint check (`fs_mark`, `footprint`): file touched outside known dirs → add to wipe or fail run. Leftovers taint results.
 - Before/after: same start state, same steps.
 - Change in bridge, backends, units: prove through a consumer (lautta, `netvfs-cli`) against harness SFTP/SMB servers. Accounts UI: Settings → Accounts shots. Backups: Buteo run, then restore.
-- Privacy: user stays muhnschein, nothing more. Harness results come scrubbed (its AGENTS.md "Privacy"). PR evidence only from those files (crops, GIFs, charts made from them OK); never type identifiers in: host names, user names, keys, fingerprints included.
+- Privacy: user stays muhnschein, nothing more. Harness output leaves the test host only scrubbed, through its `local/publish.sh` (its AGENTS.md "Privacy"). PR evidence only from those files (crops, GIFs, charts made from them OK); never type identifiers in: host names, user names, keys, fingerprints included.
 - Harness proves function and timing. Feel, lag, real servers stay user's call on device.
 
 ## Local checks
