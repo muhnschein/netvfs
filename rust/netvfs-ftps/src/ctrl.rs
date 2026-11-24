@@ -157,12 +157,16 @@ impl Session {
     /// A data connection for `line` (`MLSD`, `RETR`, `STOR`): `EPSV`, TCP, `line`, its preliminary reply, TLS.
     ///
     /// # Errors
-    /// `Unsupported` without `EPSV`; network and TLS errors; the reply's error of `what`.
+    /// `Unsupported` without `EPSV`; network and TLS errors; the `EPSV` or `line` reply's error of `what`.
     pub async fn data(&mut self, line: &[u8], what: &str) -> Result<Data, Status> {
         let epsv = self.cmd(b"EPSV").await?;
-        if epsv.code != 229 {
-            return Err(Status::unsupported("The server does not offer extended passive mode (EPSV)")
-                .with_detail(epsv.text()));
+        match epsv.code {
+            229 => {}
+            500 | 502 => {
+                return Err(Status::unsupported("The server does not offer extended passive mode (EPSV)")
+                    .with_detail(epsv.text()));
+            }
+            _ => return Err(reply::error(&epsv, what)),
         }
         let port = epsv_port(&epsv)?;
         let tcp =
