@@ -11,7 +11,8 @@ use crate::errors::ErrorName;
 use crate::limits::{MAX_HANDLES, MAX_PATH, RETRY_AFTER_MS};
 use crate::methods::{FEATURE_STORAGE_SETTINGS, Lane, OBJECT_PATH, find_method};
 use crate::wire::{
-    WireCapabilities, WireDrive, WireEntry, WireLocation, WireNearby, WireWalkItem, location_state,
+    WireCapabilities, WireCheckItem, WireCheckResult, WireDrive, WireEntry, WireLocation, WireNearby,
+    WireWalkItem, location_state,
 };
 use sha2::Digest as _;
 use std::collections::HashMap;
@@ -595,6 +596,27 @@ impl Iface {
         }))
     }
 
+    async fn check(
+        &self,
+        loc: String,
+        items: Vec<WireCheckItem>,
+        lane: String,
+        #[zbus(signal_emitter)] ctxt: SignalEmitter<'_>,
+    ) -> Result<u32, Fail> {
+        let loc = args::location(&loc)?;
+        let items = args::check_items(items)?;
+        args::lane(&lane, Lane::Bulk)?;
+        self.begin("Check", None, &loc).await?;
+        let mut folders_only = Vec::with_capacity(items.len());
+        for item in &items {
+            folders_only.push(self.admit(&loc, &item.path, Op::Browse)? == Verdict::FoldersOnly);
+        }
+        self.reach(&loc)?;
+        Ok(self.start_job(&ctxt, move |env, job, cancel| {
+            transfer::run_check(env, job, cancel, loc, (items, folders_only))
+        }))
+    }
+
     async fn cancel(&self, id: u32) -> Result<(), Fail> {
         self.begin("Cancel", None, &id.to_string()).await?;
         match self.session.cancel(id) {
@@ -654,6 +676,19 @@ impl Iface {
         Ok(())
     }
 
+    async fn get_network(&self) -> Result<String, Fail> {
+        self.begin("GetNetwork", None, "").await?;
+        Ok(self.shared.with(|s| s.network.clone()))
+    }
+
+    #[zbus(signal)]
+    pub async fn network_changed(ctxt: &SignalEmitter<'_>, network: String) -> zbus::Result<()>;
+    #[zbus(signal)]
+    pub async fn check_batch(
+        ctxt: &SignalEmitter<'_>,
+        job: u32,
+        results: Vec<WireCheckResult>,
+    ) -> zbus::Result<()>;
     #[zbus(signal)]
     pub async fn consent_changed(ctxt: &SignalEmitter<'_>, consent: String) -> zbus::Result<()>;
     #[zbus(signal)]
@@ -761,6 +796,15 @@ impl Shared {
         for session in self.sessions_snapshot() {
             if let Some(ctx) = context(&session) {
                 Iface::locations_changed(&ctx).await.ok();
+            }
+        }
+    }
+
+    pub async fn broadcast_network(&self) {
+        let network = self.with(|s| s.network.clone());
+        for session in self.sessions_snapshot() {
+            if let Some(ctx) = context(&session) {
+                Iface::network_changed(&ctx, network.clone()).await.ok();
             }
         }
     }

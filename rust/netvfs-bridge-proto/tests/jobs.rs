@@ -8,7 +8,8 @@ use futures_lite::StreamExt as _;
 use netvfs_bridge_proto::fake::FakeBridge;
 use netvfs_bridge_proto::zvariant::Fd;
 use netvfs_bridge_proto::{
-    BridgeError, Connection, Opts, OptsBuilder, Signal, SignalStream, WireNearby, value_i64, value_str,
+    BridgeError, Connection, Opts, OptsBuilder, Signal, SignalStream, WireCheckItem, WireCheckResult,
+    WireNearby, value_i64, value_str,
 };
 use std::collections::HashMap;
 use std::os::fd::AsFd as _;
@@ -81,6 +82,168 @@ async fn walk_streams_the_tree_depth_first() {
     let job = conn.proxy().walk("account:1", b"missing", &OptsBuilder::new().build()).await.unwrap();
     let (_, error, _) = finish(&mut signals, job).await;
     assert_eq!(error, "NotFound");
+}
+
+async fn checked(
+    signals: &mut SignalStream,
+    job: u32,
+) -> (Vec<WireCheckResult>, String, HashMap<String, i64>) {
+    let mut results = Vec::new();
+    loop {
+        match next_signal(signals).await {
+            Signal::CheckBatch { job: j, results: batch } => {
+                assert_eq!(j, job);
+                results.extend(batch);
+            }
+            Signal::JobFinished { job: j, error, extra, .. } => {
+                assert_eq!(j, job);
+                let ints = extra.iter().filter_map(|(k, v)| value_i64(v).map(|n| (k.clone(), n))).collect();
+                return (results, error, ints);
+            }
+            _ => {}
+        }
+    }
+}
+
+fn known(path: &[u8], etag: &[u8], mtime_ms: i64) -> WireCheckItem {
+    WireCheckItem { path: path.to_vec(), etag: etag.to_vec(), mtime_ms }
+}
+
+fn summary(results: &[WireCheckResult]) -> Vec<String> {
+    results
+        .iter()
+        .map(|r| {
+            let names: Vec<String> =
+                r.children.iter().map(|e| String::from_utf8_lossy(&e.name).into_owned()).collect();
+            format!("{} {:?} {} {}", r.index, r.error, r.listed, names.join(","))
+        })
+        .collect()
+}
+
+const T0: i64 = 1_700_000_000_000;
+
+#[tokio::test]
+async fn check_lists_only_folders_whose_date_changed() {
+    let (fake, conn, mut signals) = setup().await;
+    fake.put_file("account:1", b"t/a/1", b"1");
+    fake.put_file("account:1", b"t/b/2", b"2");
+    let p = conn.proxy();
+    let all = [known(b"t/a", b"", -1), known(b"t/gone", b"", -1), known(b"/t/b/", b"", -1)];
+    let job = p.check("account:1", &all, "").await.unwrap();
+    let (results, error, extra) = checked(&mut signals, job).await;
+    assert_eq!(error, "");
+    assert_eq!(summary(&results), ["0 \"\" true 1", "1 \"NotFound\" false ", "2 \"\" true 2"]);
+    assert_eq!((extra["folders"], extra["listed"]), (3, 2));
+    assert_eq!((results[0].entry.name.as_slice(), results[0].entry.mtime_ms), (&b"a"[..], T0));
+
+    let same = [known(b"t/a", b"", T0), known(b"t/b", b"", T0)];
+    let job = p.check("account:1", &same, "").await.unwrap();
+    let (results, _, extra) = checked(&mut signals, job).await;
+    assert_eq!(extra["listed"], 2, "dates as new as the clock are never trusted");
+    assert!(results.iter().all(|r| r.listed));
+
+    fake.set_now_ms("account:1", T0 + 2000);
+    let job = p.check("account:1", &same, "").await.unwrap();
+    let (results, _, extra) = checked(&mut signals, job).await;
+    assert_eq!((extra["folders"], extra["listed"]), (2, 0));
+    assert_eq!(summary(&results), ["0 \"\" false ", "1 \"\" false "]);
+
+    fake.set_mtime("account:1", b"t/b", T0 + 1);
+    let job = p.check("account:1", &same, "bulk").await.unwrap();
+    let (results, _, _) = checked(&mut signals, job).await;
+    assert_eq!(summary(&results), ["0 \"\" false ", "1 \"\" true 2"]);
+    assert_eq!(fake.calls_of("Check").len(), 4);
+}
+
+#[tokio::test]
+async fn deep_etags_change_with_anything_below_a_folder() {
+    let (fake, conn, mut signals) = setup().await;
+    fake.put_file("account:1", b"t/a/deep/1", b"1");
+    fake.put_file("account:1", b"t/b/2", b"2");
+    fake.set_deep_etags("account:1", true);
+    let p = conn.proxy();
+    let job = p.check("account:1", &[known(b"t", b"", -1)], "").await.unwrap();
+    let (results, _, _) = checked(&mut signals, job).await;
+    let top = results[0].entry.etag.clone();
+    assert!(!top.is_empty());
+    let etag_of = |name: &[u8]| results[0].children.iter().find(|e| e.name == name).unwrap().etag.clone();
+    let (a, b) = (etag_of(b"a"), etag_of(b"b"));
+    assert_ne!(a, b);
+
+    let again = [known(b"t", &top, -1), known(b"t/a", &a, -1), known(b"t/b", &b, -1)];
+    let job = p.check("account:1", &again, "").await.unwrap();
+    let (results, _, extra) = checked(&mut signals, job).await;
+    assert_eq!(extra["listed"], 0, "with an etag a fresh date does not matter");
+    assert!(results.iter().all(|r| !r.listed));
+
+    fake.put_file("account:1", b"t/a/deep/new", b"n");
+    let job = p.check("account:1", &again, "").await.unwrap();
+    let (results, _, _) = checked(&mut signals, job).await;
+    let listed: Vec<bool> = results.iter().map(|r| r.listed).collect();
+    assert_eq!(listed, [true, true, false], "the change shows on every folder above it and nowhere else");
+    assert_ne!(results[0].entry.etag, top);
+}
+
+#[tokio::test]
+async fn check_refuses_what_the_bridge_refuses() {
+    let (fake, conn, mut signals) = setup().await;
+    let p = conn.proxy();
+    let invalid =
+        |r: zbus::Result<u32>| matches!(BridgeError::from(r.unwrap_err()), BridgeError::InvalidArgs(_));
+    assert!(invalid(p.check("account:1", &[], "").await));
+    assert!(invalid(p.check("account:1", &vec![known(b"t", b"", -1); 1025], "").await));
+    assert!(invalid(p.check("account:1", &[known(b"t", &[b'e'; 1025], -1)], "").await));
+    assert!(invalid(p.check("account:1", &[known(b"t", b"", i64::MIN)], "").await));
+    assert!(invalid(p.check("account:1", &[known(b"t", b"", -1)], "fast").await));
+    let name = BridgeError::from(p.check("account:1", &[known(b"../t", b"", -1)], "").await.unwrap_err());
+    assert_eq!(name.netvfs_name(), Some("InvalidName"));
+    let gone = BridgeError::from(p.check("account:9", &[known(b"t", b"", -1)], "").await.unwrap_err());
+    assert_eq!(gone.netvfs_name(), Some("NotFound"));
+    let job = p.check("account:1", &vec![known(b"t", &[b'e'; 1024], 0); 1024], "").await.unwrap();
+    assert_eq!(checked(&mut signals, job).await.1, "");
+
+    fake.put_file("account:2", b"in/file", b"f");
+    fake.put_file("account:2", b"in/sub/file", b"f");
+    fake.set_access("account:2", Some(netvfs_bridge_proto::access::Level::Add)).await;
+    let conn = fake.connect().await.unwrap();
+    let mut signals = conn.signals();
+    conn.proxy().hello("test").await.unwrap();
+    let job = conn.proxy().check("account:2", &[known(b"in", b"", -1)], "").await.unwrap();
+    let (results, _, _) = checked(&mut signals, job).await;
+    assert_eq!(summary(&results), ["0 \"\" true sub"], "add access sees folders only");
+}
+
+#[tokio::test]
+async fn a_check_can_be_canceled() {
+    let (fake, conn, mut signals) = setup().await;
+    fake.put_dir("account:1", b"t");
+    fake.set_latency(Duration::from_millis(200));
+    let items = vec![known(b"t", b"", -1); 200];
+    let job = conn.proxy().check("account:1", &items, "").await.unwrap();
+    conn.proxy().cancel(job).await.unwrap();
+    let (results, error, _) = checked(&mut signals, job).await;
+    assert_eq!(error, "Canceled");
+    assert!(results.len() < 200);
+}
+
+#[tokio::test]
+async fn the_network_kind_is_told_when_it_changes() {
+    let fake = FakeBridge::new();
+    fake.set_consent(netvfs_bridge_proto::fake::Consent::Unknown).await;
+    let conn = fake.connect().await.unwrap();
+    let mut signals = conn.signals();
+    conn.proxy().hello("test").await.unwrap();
+    assert_eq!(conn.proxy().get_network().await.unwrap(), "wifi", "needs no consent");
+    fake.set_network("mobile").await;
+    loop {
+        if let Signal::NetworkChanged(kind) = next_signal(&mut signals).await {
+            assert_eq!(kind, "mobile");
+            break;
+        }
+    }
+    assert_eq!(conn.proxy().get_network().await.unwrap(), "mobile");
+    let features = conn.proxy().get_features().await.unwrap();
+    assert_eq!(features, ["storage-settings", "drives", "network", "check"]);
 }
 
 #[tokio::test]

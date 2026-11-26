@@ -273,6 +273,7 @@ pub struct State {
     pub calls: Vec<CallRecord>,
     pub handoffs: Vec<String>,
     pub features: Vec<String>,
+    pub network: String,
     pub drives: Vec<FakeDrive>,
     pub nearby: Vec<WireNearby>,
     pub sessions: Vec<Arc<Session>>,
@@ -302,7 +303,10 @@ impl Default for State {
             features: vec![
                 crate::methods::FEATURE_STORAGE_SETTINGS.to_owned(),
                 crate::methods::FEATURE_DRIVES.to_owned(),
+                crate::methods::FEATURE_NETWORK.to_owned(),
+                crate::methods::FEATURE_CHECK.to_owned(),
             ],
+            network: "wifi".to_owned(),
             drives: Vec::new(),
             nearby: Vec::new(),
             sessions: Vec::new(),

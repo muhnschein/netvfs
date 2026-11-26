@@ -3,11 +3,11 @@
 use super::fail::Fail;
 use super::tree::normalize;
 use crate::limits::{
-    DEFAULT_LIST_BATCH, MAX_ID, MAX_LIST_BATCH, MAX_OFFSET, MAX_READ, MAX_TIME_MS, MAX_WALK_DEPTH,
-    MIN_TIME_MS,
+    DEFAULT_LIST_BATCH, MAX_CHECK_ETAG, MAX_CHECK_ITEMS, MAX_ID, MAX_LIST_BATCH, MAX_OFFSET, MAX_READ,
+    MAX_TIME_MS, MAX_WALK_DEPTH, MIN_TIME_MS,
 };
 use crate::methods::Lane;
-use crate::wire::{value_bool, value_i64, value_str};
+use crate::wire::{WireCheckItem, value_bool, value_i64, value_str};
 use std::collections::HashMap;
 use zbus::zvariant::OwnedValue;
 
@@ -30,6 +30,24 @@ pub fn drive(id: &str) -> Result<String, Fail> {
 
 pub fn path(raw: &[u8]) -> Result<Vec<u8>, Fail> {
     Ok(normalize(raw)?)
+}
+
+pub fn check_items(items: Vec<WireCheckItem>) -> Result<Vec<WireCheckItem>, Fail> {
+    if items.is_empty() || items.len() > MAX_CHECK_ITEMS {
+        return Err(Fail::args(&format!("Check takes 1 to {MAX_CHECK_ITEMS} folders")));
+    }
+    items
+        .into_iter()
+        .map(|item| {
+            if item.etag.len() > MAX_CHECK_ETAG {
+                return Err(Fail::args("Etag too long"));
+            }
+            if item.mtime_ms != -1 && !(MIN_TIME_MS..=MAX_TIME_MS).contains(&item.mtime_ms) {
+                return Err(Fail::args("Modification time out of range"));
+            }
+            Ok(WireCheckItem { path: path(&item.path)?, ..item })
+        })
+        .collect()
 }
 
 pub fn lane(given: &str, default: Lane) -> Result<Lane, Fail> {

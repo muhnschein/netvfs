@@ -6,11 +6,12 @@
 use super::paths::{NPath, normalize};
 use crate::status::Status;
 use netvfs_bridge_proto::limits::{
-    DECODE_MAX_DEPTH, DECODE_MAX_ELEMENTS, DEFAULT_LIST_BATCH, MAX_ID, MAX_LIST_BATCH, MAX_OFFSET, MAX_PATH,
-    MAX_READ, MAX_READ_AHEAD, MAX_SHORT, MAX_TIME_MS, MAX_WALK_DEPTH, MIN_TIME_MS,
+    DECODE_MAX_DEPTH, DECODE_MAX_ELEMENTS, DEFAULT_LIST_BATCH, MAX_CHECK_ETAG, MAX_CHECK_ITEMS, MAX_ID,
+    MAX_LIST_BATCH, MAX_OFFSET, MAX_PATH, MAX_READ, MAX_READ_AHEAD, MAX_SHORT, MAX_TIME_MS, MAX_WALK_DEPTH,
+    MIN_TIME_MS,
 };
 use netvfs_bridge_proto::methods::find_method;
-use netvfs_bridge_proto::{ErrorName, Lane, MethodInfo, drive_info};
+use netvfs_bridge_proto::{ErrorName, Lane, MethodInfo, WireCheckItem, drive_info};
 use std::collections::BTreeMap;
 use std::os::fd::OwnedFd;
 use zbus::Message;
@@ -144,6 +145,19 @@ pub enum Call {
     ListDrives,
     Mount { drive: String },
     Unmount { drive: String },
+    Check { loc: LocId, items: Vec<CheckItem>, lane: Lane },
+    GetNetwork,
+}
+
+/// A folder of `Check` with the version the consumer knows.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CheckItem {
+    /// The folder.
+    pub path: NPath,
+    /// Known etag, empty for none.
+    pub etag: Vec<u8>,
+    /// Known modification time in ms, `None` for none.
+    pub mtime_ms: Option<i64>,
 }
 
 impl Call {
@@ -188,6 +202,8 @@ impl Call {
             Self::ListDrives => "ListDrives",
             Self::Mount { .. } => "Mount",
             Self::Unmount { .. } => "Unmount",
+            Self::Check { .. } => "Check",
+            Self::GetNetwork => "GetNetwork",
         }
     }
 
@@ -206,7 +222,8 @@ impl Call {
             | Self::Stat { lane, .. }
             | Self::OpenRead { lane, .. }
             | Self::Upload { lane, .. }
-            | Self::Download { lane, .. } => *lane,
+            | Self::Download { lane, .. }
+            | Self::Check { lane, .. } => *lane,
             _ => self.method().lane,
         }
     }
@@ -239,7 +256,7 @@ pub fn decode(msg: &Message) -> Result<Call, Status> {
 
 type Decoder = fn(&Body) -> Result<Call, Status>;
 
-const DECODERS: [(&str, Decoder); 37] = [
+const DECODERS: [(&str, Decoder); 39] = [
     ("Hello", hello),
     ("GetConsent", |_| Ok(Call::GetConsent)),
     ("RequestConsent", |_| Ok(Call::RequestConsent)),
@@ -277,6 +294,8 @@ const DECODERS: [(&str, Decoder); 37] = [
     ("ListDrives", |_| Ok(Call::ListDrives)),
     ("Mount", |b| drive_only(b).map(|drive| Call::Mount { drive })),
     ("Unmount", |b| drive_only(b).map(|drive| Call::Unmount { drive })),
+    ("Check", check),
+    ("GetNetwork", |_| Ok(Call::GetNetwork)),
 ];
 
 fn decoder(name: &str) -> Decoder {
@@ -490,6 +509,29 @@ fn walk(body: &Body) -> Result<Call, Status> {
     let mut parsed = WalkOpts::default();
     each_option(&opts, |key, value| walk_option(key, value, &mut parsed))?;
     Ok(Call::Walk { loc, path, opts: parsed })
+}
+
+fn check(body: &Body) -> Result<Call, Status> {
+    let (loc, items, lane): (String, Vec<WireCheckItem>, String) = deserialize(body)?;
+    let loc = location_id(loc)?;
+    if items.is_empty() || items.len() > MAX_CHECK_ITEMS {
+        return Err(Status::invalid_args(format!("Check takes 1 to {MAX_CHECK_ITEMS} folders")));
+    }
+    let items = items
+        .into_iter()
+        .map(|item| {
+            if item.etag.len() > MAX_CHECK_ETAG {
+                return Err(Status::invalid_args("Etag too long"));
+            }
+            let mtime_ms = match item.mtime_ms {
+                -1 => None,
+                ms if (MIN_TIME_MS..=MAX_TIME_MS).contains(&ms) => Some(ms),
+                _ => return Err(Status::invalid_args("Modification time out of range")),
+            };
+            Ok(CheckItem { path: normalize(&item.path)?, etag: item.etag, mtime_ms })
+        })
+        .collect::<Result<Vec<_>, Status>>()?;
+    Ok(Call::Check { loc, items, lane: lane_hint(&lane, Lane::Bulk)? })
 }
 
 fn drive_only(body: &Body) -> Result<String, Status> {

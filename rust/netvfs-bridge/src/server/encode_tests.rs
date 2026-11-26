@@ -8,7 +8,7 @@ use super::{
 };
 use netvfs_bridge_proto::methods::{ENTRY_SIGNATURE, METHODS, SIGNALS, find_signal};
 use netvfs_bridge_proto::{
-    OptsBuilder, entry_flags, entry_kind, value_bytes, value_i64, value_str, value_strings,
+    OptsBuilder, WireCheckResult, entry_flags, entry_kind, value_bytes, value_i64, value_str, value_strings,
 };
 use std::num::NonZeroU32;
 
@@ -206,6 +206,10 @@ fn reply_values() {
     assert_eq!(opened.body().deserialize::<(u32, i64)>().unwrap(), (4, -1));
 }
 
+fn check_result() -> WireCheckResult {
+    WireCheckResult { index: 7, error: String::new(), entry: entry(), listed: true, children: vec![entry()] }
+}
+
 fn all_signals() -> Vec<OutSignal> {
     let nearby =
         WireNearby { name: "n\0".to_owned(), provider: "smb".to_owned(), host: "h".to_owned(), port: 445 };
@@ -219,6 +223,8 @@ fn all_signals() -> Vec<OutSignal> {
         OutSignal::WalkBatch { job: 2, items: vec![WireWalkItem { path: b"a/b".to_vec(), entry: entry() }] },
         OutSignal::JobFinished { job: 2, result: Ok(()), extra: HashMap::new() },
         OutSignal::DrivesChanged,
+        OutSignal::CheckBatch { job: 2, results: vec![check_result()] },
+        OutSignal::NetworkChanged("wifi".to_owned()),
     ]
 }
 
@@ -240,6 +246,18 @@ fn signals_match_the_table() {
 #[test]
 fn signal_values() {
     let decoded = |s: &OutSignal| s.build().unwrap();
+    let network = decoded(&OutSignal::NetworkChanged("mo\0bile".to_owned()));
+    assert_eq!(network.body().deserialize::<(String,)>().unwrap().0, "mo\u{fffd}bile");
+    let (job, results): (u32, Vec<WireCheckResult>) =
+        decoded(&OutSignal::CheckBatch { job: 9, results: vec![check_result()] })
+            .body()
+            .deserialize()
+            .unwrap();
+    assert_eq!((job, results.len()), (9, 1));
+    assert_eq!((results[0].index, results[0].listed), (7, true));
+    assert_eq!(results[0].entry.owner, "o\u{fffd}");
+    assert_eq!(results[0].children[0].owner, "o\u{fffd}");
+    assert_eq!(results[0].children[0].name, entry().name);
     let consent = decoded(&OutSignal::ConsentChanged("de\0nied".to_owned()));
     assert_eq!(consent.body().deserialize::<(String,)>().unwrap().0, "de\u{fffd}nied");
     let done =

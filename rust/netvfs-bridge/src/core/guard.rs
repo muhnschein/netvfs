@@ -3,7 +3,7 @@
 use super::{Core, Effect};
 use crate::access::{self, After, Op, Own, Verdict};
 use crate::consent::Level;
-use crate::server::args::{Disposition, LocId};
+use crate::server::args::{CheckItem, Disposition, LocId};
 use crate::server::{Call, NPath, ReplyTo, SessionId};
 use crate::status::Status;
 use netvfs_bridge_proto::{ErrorName, Lane};
@@ -135,6 +135,7 @@ impl Core {
                 let Some((reply, _)) = self.admit(reply, &loc, &path, Op::Unrestricted) else { return };
                 self.on_remove_tree(sid, reply, (&loc, lane), path);
             }
+            Call::Check { loc, items, lane } => self.on_check_call(sid, reply, &loc, items, lane),
             Call::Walk { loc, path, opts } => {
                 let Some((reply, a)) = self.admit(reply, &loc, &path, Op::Browse) else { return };
                 self.on_walk(sid, reply, (&loc, lane), path, (opts, a.verdict == Verdict::FoldersOnly));
@@ -143,6 +144,30 @@ impl Core {
                 reply.fail(&Status::new(ErrorName::Internal, format!("{} has no handler", other.name())));
             }
         }
+    }
+
+    fn on_check_call(
+        &mut self,
+        sid: SessionId,
+        reply: ReplyTo,
+        loc: &LocId,
+        items: Vec<CheckItem>,
+        lane: Lane,
+    ) {
+        let Some(level) = self.book.find(loc.as_str()).map(|spec| spec.access) else {
+            let only = vec![false; items.len()];
+            return self.on_check(sid, reply, (loc, lane), items, only);
+        };
+        let mut only = Vec::with_capacity(items.len());
+        for item in &items {
+            let own =
+                if level.changes() { Own::No } else { self.own_state(loc.as_str(), item.path.as_bytes()) };
+            match access::check(level, Op::Browse, own) {
+                Verdict::Deny => return reply.fail(&access::refused(level)),
+                verdict => only.push(verdict == Verdict::FoldersOnly),
+            }
+        }
+        self.on_check(sid, reply, (loc, lane), items, only);
     }
 
     fn on_remove(

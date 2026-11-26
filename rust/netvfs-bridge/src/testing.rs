@@ -14,6 +14,7 @@ use crate::drives::{Drive, DriveSource};
 use crate::ffi::Ffi;
 use crate::ffi::fake::{self, Fake};
 use crate::handoff::{HandoffCall, Launcher};
+use crate::network::NetworkSource;
 use crate::prompt::{ConsentPrompt, PromptEvent};
 use crate::server::ListenAddress;
 use crate::status::Status;
@@ -379,6 +380,22 @@ impl Launcher for RecordingLauncher {
     }
 }
 
+/// A [`NetworkSource`] in memory; tests change it through [`Fixture::set_network`].
+#[derive(Debug, Clone)]
+pub struct FakeNetwork(pub Arc<Mutex<String>>);
+
+impl Default for FakeNetwork {
+    fn default() -> Self {
+        Self(Arc::new(Mutex::new("wifi".to_owned())))
+    }
+}
+
+impl NetworkSource for FakeNetwork {
+    fn kind(&self) -> LocalFuture<'_, String> {
+        Box::pin(std::future::ready(lock(&self.0).clone()))
+    }
+}
+
 /// What the fake drives hold and saw.
 #[derive(Debug, Default)]
 pub struct DrivesState {
@@ -503,6 +520,8 @@ pub struct Fixture {
     pub launcher: RecordingLauncher,
     /// The drives (none at the start).
     pub drives: FakeDrives,
+    /// The network (`wifi` at the start).
+    pub network: FakeNetwork,
     link: CoreLink,
     bridge: Option<JoinHandle<ExitCode>>,
 }
@@ -581,17 +600,24 @@ impl Fixture {
         let accounts = FakeAccounts::default();
         accounts.state().accounts.push(FakeAccounts::fake_account(1));
         accounts.state().hang = setup.hang_accounts;
-        let (prompt, nearby, launcher, drives) = (
+        let (prompt, nearby, launcher, drives, network) = (
             FakePrompt::default(),
             FakeNearby::default(),
             RecordingLauncher::default(),
             FakeDrives::default(),
+            FakeNetwork::default(),
         );
         ConsentStore::new(&config.consent_file).set_consent(CONSUMER, &setup.consent).expect("bridge.conf");
         let (ready, linked) = mpsc::channel::<CoreLink>();
         let services: MakeServices = {
-            let (accounts, prompt, nearby, launcher, drives) =
-                (accounts.clone(), prompt.clone(), nearby.clone(), launcher.clone(), drives.clone());
+            let (accounts, prompt, nearby, launcher, drives, network) = (
+                accounts.clone(),
+                prompt.clone(),
+                nearby.clone(),
+                launcher.clone(),
+                drives.clone(),
+                network.clone(),
+            );
             Box::new(move |link| {
                 drop(ready.send(link));
                 Box::pin(async move {
@@ -601,6 +627,7 @@ impl Fixture {
                         nearby: Box::new(nearby),
                         launcher: Box::new(launcher),
                         drives: Rc::new(drives),
+                        network: Rc::new(network),
                     }
                 })
             })
@@ -625,6 +652,7 @@ impl Fixture {
             nearby,
             launcher,
             drives,
+            network,
             link,
             bridge: Some(bridge),
         }
@@ -638,6 +666,12 @@ impl Fixture {
     /// The drives changed (UDisks2's signals).
     pub fn drives_changed(&self) {
         assert!(self.link.drives_changed(), "the core has stopped");
+    }
+
+    /// The network is now `kind` (Connman's signals).
+    pub fn set_network(&self, kind: &str) {
+        kind.clone_into(&mut lock(&self.network.0));
+        assert!(self.link.network_changed(kind.to_owned()), "the core has stopped");
     }
 
     /// Stores `consent` in `bridge.conf`, as the account UI does.

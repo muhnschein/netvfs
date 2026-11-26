@@ -23,9 +23,13 @@ use netvfs_bridge::testing::{
 };
 use netvfs_bridge::testutil::TempDir;
 use netvfs_bridge::{Deps, Services};
-use netvfs_bridge_proto::limits::{MAX_HANDLES, MAX_JOBS, MAX_LIST_BATCH, MAX_REQUESTS, POOL_PER_HOST};
+use netvfs_bridge_proto::limits::{
+    MAX_CHECK_ETAG, MAX_CHECK_ITEMS, MAX_HANDLES, MAX_JOBS, MAX_LIST_BATCH, MAX_REQUESTS, POOL_PER_HOST,
+};
 use netvfs_bridge_proto::zvariant::Fd;
-use netvfs_bridge_proto::{Connection, ErrorName, Opts, OptsBuilder, Signal, SignalStream, value_str};
+use netvfs_bridge_proto::{
+    Connection, ErrorName, Opts, OptsBuilder, Signal, SignalStream, WireCheckItem, WireCheckResult, value_str,
+};
 use std::fs::{File, OpenOptions};
 use std::io::{Read as _, Seek as _, SeekFrom, Write as _};
 use std::os::fd::AsFd as _;
@@ -67,6 +71,9 @@ const TESTS: &[(&str, Test)] = &[
     ("handoff", handoff),
     ("storage_settings", storage_settings),
     ("drives", drives),
+    ("network", network),
+    ("check", check),
+    ("check_limits_and_access", check_limits_and_access),
     ("locations_changed", locations_changed),
     ("connection_states", connection_states),
     ("connection_states_of_idle_connections", connection_states_of_idle_connections),
@@ -1183,7 +1190,7 @@ fn handoff(h: &Harness) {
             name(ErrorName::Unsupported)
         );
         assert_eq!(error_name(&c.proxy().add_account("smb").await), name(ErrorName::Unsupported));
-        assert_eq!(c.proxy().get_features().await.unwrap(), ["drives"]);
+        assert_eq!(c.proxy().get_features().await.unwrap(), ["drives", "network", "check"]);
         assert_eq!(error_name(&c.proxy().open_storage_settings().await), name(ErrorName::Unsupported));
         assert_eq!(f.launcher.calls().len(), 0);
     });
@@ -1204,7 +1211,10 @@ fn storage_settings(h: &Harness) {
             let c = f.client().await;
             assert_eq!(error_name(&c.proxy().get_features().await), name(ErrorName::ProtocolError));
             c.proxy().hello("t").await.unwrap();
-            assert_eq!(c.proxy().get_features().await.unwrap(), ["storage-settings", "drives"]);
+            assert_eq!(
+                c.proxy().get_features().await.unwrap(),
+                ["storage-settings", "drives", "network", "check"]
+            );
             c.proxy().open_storage_settings().await.unwrap();
             let calls = f.launcher.calls();
             assert_eq!(calls.len(), 1, "{consent:?}");
@@ -1255,7 +1265,137 @@ fn drives(h: &Harness) {
         assert!(wait_signal(&mut signals, WAIT, |s| matches!(s, Signal::DrivesChanged)).await.is_some());
         let heard = wait_signal(&mut quiet_signals, Duration::from_millis(200), |_| true).await;
         assert!(heard.is_none(), "{heard:?}");
-        assert_eq!(c.proxy().get_features().await.unwrap(), ["drives"]);
+        assert_eq!(c.proxy().get_features().await.unwrap(), ["drives", "network", "check"]);
+    });
+}
+
+fn network(h: &Harness) {
+    let f = Fixture::new(h, Consent::unknown());
+    block_on(async {
+        let c = f.client().await;
+        assert_eq!(error_name(&c.proxy().get_network().await), name(ErrorName::ProtocolError));
+        c.proxy().hello("t").await.unwrap();
+        let quiet = f.client().await;
+        let mut quiet_signals = quiet.signals();
+        let mut signals = c.signals();
+        assert_eq!(c.proxy().get_network().await.unwrap(), "wifi", "needs no consent");
+        f.set_network("mobile");
+        match wait_signal(&mut signals, WAIT, |s| matches!(s, Signal::NetworkChanged(_))).await {
+            Some(Signal::NetworkChanged(kind)) => assert_eq!(kind, "mobile"),
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(c.proxy().get_network().await.unwrap(), "mobile");
+        let heard = wait_signal(&mut quiet_signals, Duration::from_millis(200), |_| true).await;
+        assert!(heard.is_none(), "{heard:?}");
+        assert_eq!(f.probe().counters().await.unwrap().requests, 0);
+    });
+}
+
+async fn checked(
+    signals: &mut SignalStream,
+    job: u32,
+) -> (Vec<WireCheckResult>, String, std::collections::HashMap<String, zbus::zvariant::OwnedValue>) {
+    let mut results = Vec::new();
+    loop {
+        match wait_signal(signals, WAIT, |s| {
+            matches!(s, Signal::CheckBatch { job: j, .. } | Signal::JobFinished { job: j, .. } if *j == job)
+        })
+        .await
+        {
+            Some(Signal::CheckBatch { results: batch, .. }) => results.extend(batch),
+            Some(Signal::JobFinished { error, extra, .. }) => return (results, error, extra),
+            other => panic!("{other:?}"),
+        }
+    }
+}
+
+fn folder(path: &[u8], etag: &[u8], mtime_ms: i64) -> WireCheckItem {
+    WireCheckItem { path: path.to_vec(), etag: etag.to_vec(), mtime_ms }
+}
+
+fn check(h: &Harness) {
+    let f = Fixture::new(h, Consent::all(FULL));
+    let fake = h.fake;
+    fake.add_file(b"/c/a/1", b"1");
+    fake.add_file(b"/c/a/2", b"22");
+    fake.add_file(b"/c/b/3", b"333");
+    block_on(async {
+        let c = f.hello_client().await;
+        let p = c.proxy();
+        let mut signals = c.signals();
+        let old = OptsBuilder::new().int("mtimeMs", 1_700_000_000_000).build();
+        for dir in [&b"/c/a"[..], b"/c/b"] {
+            p.set_attributes(ACCOUNT_LOC, dir, &old).await.unwrap();
+        }
+        let items = [folder(b"/c/a", b"", -1), folder(b"/c/gone", b"", -1), folder(b"/c/b", b"", -1)];
+        let job = p.check(ACCOUNT_LOC, &items, "").await.unwrap();
+        let (results, error, extra) = checked(&mut signals, job).await;
+        assert_eq!(error, "");
+        assert_eq!((count(&extra, "folders"), count(&extra, "listed")), (3, 2));
+        let seen: Vec<String> = results
+            .iter()
+            .map(|r| {
+                let mut names: Vec<String> =
+                    r.children.iter().map(|e| String::from_utf8_lossy(&e.name).into_owned()).collect();
+                names.sort_unstable();
+                format!("{} {:?} {} {}", r.index, r.error, r.listed, names.join(","))
+            })
+            .collect();
+        assert_eq!(seen, ["0 \"\" true 1,2", "1 \"NotFound\" false ", "2 \"\" true 3"]);
+        assert_eq!(results[0].entry.mtime_ms, 1_700_000_000_000);
+        assert_eq!(results[0].entry.name, b"a");
+
+        let known = [
+            folder(b"/c/a", b"", results[0].entry.mtime_ms),
+            folder(b"/c/b", b"", results[2].entry.mtime_ms - 1),
+        ];
+        let job = p.check(ACCOUNT_LOC, &known, "bulk").await.unwrap();
+        let (results, error, extra) = checked(&mut signals, job).await;
+        assert_eq!(error, "");
+        assert_eq!((count(&extra, "folders"), count(&extra, "listed")), (2, 1));
+        let listed: Vec<(bool, usize)> = results.iter().map(|r| (r.listed, r.children.len())).collect();
+        assert_eq!(listed, [(false, 0), (true, 1)], "only the folder whose date differs is listed");
+        assert_eq!(f.probe().counters().await.unwrap().jobs, 0);
+    });
+}
+
+fn check_limits_and_access(h: &Harness) {
+    let invalid = Some("org.freedesktop.DBus.Error.InvalidArgs".to_owned());
+    let f = Fixture::new(h, Consent::all(FULL));
+    block_on(async {
+        let c = f.hello_client().await;
+        let p = c.proxy();
+        assert_eq!(error_name(&p.check(ACCOUNT_LOC, &[], "").await), invalid);
+        let many = vec![folder(b"/x", b"", -1); MAX_CHECK_ITEMS + 1];
+        assert_eq!(error_name(&p.check(ACCOUNT_LOC, &many, "").await), invalid);
+        let long = [folder(b"/x", &vec![b'e'; MAX_CHECK_ETAG + 1], -1)];
+        assert_eq!(error_name(&p.check(ACCOUNT_LOC, &long, "").await), invalid);
+        assert_eq!(error_name(&p.check(ACCOUNT_LOC, &[folder(b"/x", b"", i64::MIN)], "").await), invalid);
+        assert_eq!(error_name(&p.check(ACCOUNT_LOC, &[folder(b"/x", b"", -1)], "fast").await), invalid);
+        assert_eq!(
+            error_name(&p.check("account:9", &[folder(b"/x", b"", -1)], "").await),
+            name(ErrorName::NotFound)
+        );
+        let full = vec![folder(b"/x", &vec![b'e'; MAX_CHECK_ETAG], 0); 1];
+        assert!(p.check(ACCOUNT_LOC, &full, "").await.is_ok(), "limits are inclusive");
+    });
+    let f = Fixture::new(h, Consent::unknown());
+    block_on(async {
+        let c = f.hello_client().await;
+        let refused = c.proxy().check(ACCOUNT_LOC, &[folder(b"/x", b"", -1)], "").await;
+        assert_eq!(error_name(&refused), name(ErrorName::PermissionDenied), "Check needs consent");
+    });
+    let f = Fixture::new(h, Consent::all(Choice::Allow(Level::Add)));
+    h.fake.add_file(b"/add/file", b"1");
+    h.fake.add_file(b"/add/sub/file", b"1");
+    block_on(async {
+        let c = f.hello_client().await;
+        let mut signals = c.signals();
+        let job = c.proxy().check(ACCOUNT_LOC, &[folder(b"/add", b"", -1)], "").await.unwrap();
+        let (results, error, _) = checked(&mut signals, job).await;
+        assert_eq!(error, "");
+        let names: Vec<&[u8]> = results[0].children.iter().map(|e| e.name.as_slice()).collect();
+        assert_eq!(names, [&b"sub"[..]], "add access sees folders only");
     });
 }
 
@@ -1491,6 +1631,7 @@ fn debug_output(h: &Harness) {
         nearby: Box::new(f.nearby.clone()),
         launcher: Box::new(f.launcher.clone()),
         drives: Rc::new(f.drives.clone()),
+        network: Rc::new(f.network.clone()),
     };
     assert_eq!(format!("{services:?}"), "Services { prompt_shown: false, .. }");
     let deps = Deps {

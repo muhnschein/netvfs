@@ -6,7 +6,9 @@ use crate::prompt::PromptEvent;
 use crate::server::args::LocId;
 use crate::server::{OutSignal, Reply, ReplyTo, SessionId};
 use crate::status::Status;
-use netvfs_bridge_proto::methods::{FEATURE_DRIVES, FEATURE_STORAGE_SETTINGS};
+use netvfs_bridge_proto::methods::{
+    FEATURE_CHECK, FEATURE_DRIVES, FEATURE_NETWORK, FEATURE_STORAGE_SETTINGS,
+};
 use netvfs_bridge_proto::{ErrorName, Lane};
 use std::sync::atomic::Ordering;
 use tokio::time::Instant;
@@ -31,6 +33,8 @@ impl Core {
             features.push(FEATURE_STORAGE_SETTINGS.to_owned());
         }
         features.push(FEATURE_DRIVES.to_owned());
+        features.push(FEATURE_NETWORK.to_owned());
+        features.push(FEATURE_CHECK.to_owned());
         reply.ok(&Reply::Names(features));
     }
 

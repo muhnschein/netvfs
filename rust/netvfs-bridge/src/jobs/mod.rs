@@ -4,6 +4,7 @@
 //! The core submits a body as a [`Work`](crate::locations::worker::Work) item; the body streams `ListBatch` / `WalkBatch` to the session's outbox under its flow budget ([`batch`]), reports progress through a [`progress::JobProgress`] and returns a [`JobOutcome`] for `ListDone` / `JobFinished`, which the core sends.
 
 pub mod batch;
+pub mod check;
 pub mod fd;
 pub mod fdio;
 pub mod progress;

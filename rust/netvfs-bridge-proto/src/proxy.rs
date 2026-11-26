@@ -90,6 +90,8 @@ pub trait Bridge1 {
     fn remove_tree(&self, loc: &str, path: &[u8]) -> zbus::Result<u32>;
     /// `Walk(loc, root, opts)` → job id; entries follow as `WalkBatch`.
     fn walk(&self, loc: &str, root: &[u8], opts: &Opts) -> zbus::Result<u32>;
+    /// `Check(loc, items, lane)` → job id; one `CheckBatch` result per folder follows.
+    fn check(&self, loc: &str, items: &[crate::wire::WireCheckItem], lane: &str) -> zbus::Result<u32>;
     /// `Cancel(id)`: a request or a job.
     fn cancel(&self, id: u32) -> zbus::Result<()>;
 
@@ -106,4 +108,7 @@ pub trait Bridge1 {
     fn mount(&self, drive: &str) -> zbus::Result<Vec<u8>>;
     /// `Unmount(drive)`.
     fn unmount(&self, drive: &str) -> zbus::Result<()>;
+
+    /// `GetNetwork` → `wifi`, `ethernet`, `mobile`, `other`, `none` or `unknown`.
+    fn get_network(&self) -> zbus::Result<String>;
 }

@@ -237,7 +237,10 @@ async fn features_and_the_storage_handoff_need_no_consent() {
     fake.set_consent(netvfs_bridge_proto::fake::Consent::Unknown).await;
     let conn = fake.connect().await.unwrap();
     hello(&conn).await;
-    assert_eq!(conn.proxy().get_features().await.unwrap(), ["storage-settings", "drives"]);
+    assert_eq!(
+        conn.proxy().get_features().await.unwrap(),
+        ["storage-settings", "drives", "network", "check"]
+    );
     conn.proxy().open_storage_settings().await.unwrap();
     assert_eq!(fake.handoffs(), ["storage"]);
     fake.set_features(&[]);

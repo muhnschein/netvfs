@@ -7,7 +7,8 @@ use crate::status::Status;
 use netvfs_bridge_proto::errors::{INVALID_ARGS, UNKNOWN_METHOD};
 use netvfs_bridge_proto::methods::{INTERFACE, OBJECT_PATH};
 use netvfs_bridge_proto::{
-    ErrorName, WireCapabilities, WireDrive, WireEntry, WireLocation, WireNearby, WireWalkItem,
+    ErrorName, WireCapabilities, WireCheckResult, WireDrive, WireEntry, WireLocation, WireNearby,
+    WireWalkItem,
 };
 use std::collections::HashMap;
 use zbus::Message;
@@ -233,6 +234,15 @@ pub enum OutSignal {
         /// Job results (`files`, `dirs`, …).
         extra: HashMap<String, OwnedValue>,
     },
+    /// `ua(us(ayyyxxxxixxssqays)ba(ayyyxxxxixxssqays))`.
+    CheckBatch {
+        /// The job id.
+        job: u32,
+        /// One result per folder.
+        results: Vec<WireCheckResult>,
+    },
+    /// `s`.
+    NetworkChanged(String),
 }
 
 impl OutSignal {
@@ -249,6 +259,8 @@ impl OutSignal {
             Self::JobProgress { .. } => "JobProgress",
             Self::WalkBatch { .. } => "WalkBatch",
             Self::JobFinished { .. } => "JobFinished",
+            Self::CheckBatch { .. } => "CheckBatch",
+            Self::NetworkChanged(_) => "NetworkChanged",
         }
     }
 
@@ -259,7 +271,7 @@ impl OutSignal {
     pub fn build(&self) -> zbus::Result<Message> {
         let signal = Message::signal(OBJECT_PATH, INTERFACE, self.name())?;
         match self {
-            Self::ConsentChanged(s) => signal.build(&(wire_text(s),)),
+            Self::ConsentChanged(s) | Self::NetworkChanged(s) => signal.build(&(wire_text(s),)),
             Self::LocationsChanged | Self::DrivesChanged => signal.build(&()),
             Self::NearbyChanged(items) => signal.build(&(items.iter().map(wire_nearby).collect::<Vec<_>>(),)),
             Self::ListBatch { request, entries } => {
@@ -278,6 +290,9 @@ impl OutSignal {
                 let added = result.as_ref().err().map(status_extra).unwrap_or_default();
                 signal.build(&(*job, name, message, job_extra(extra, &added)))
             }
+            Self::CheckBatch { job, results } => {
+                signal.build(&(*job, results.iter().map(wire_check_result).collect::<Vec<_>>()))
+            }
         }
     }
 }
@@ -288,6 +303,16 @@ fn wire_nearby(n: &WireNearby) -> WireNearby {
         provider: wire_text(&n.provider),
         host: wire_text(&n.host),
         port: n.port,
+    }
+}
+
+fn wire_check_result(r: &WireCheckResult) -> WireCheckResult {
+    WireCheckResult {
+        index: r.index,
+        error: r.error.clone(),
+        entry: wire_entry(&r.entry),
+        listed: r.listed,
+        children: r.children.iter().map(wire_entry).collect(),
     }
 }
 

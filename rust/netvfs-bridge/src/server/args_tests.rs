@@ -2,9 +2,9 @@
 #![allow(clippy::assertions_on_result_states, clippy::arithmetic_side_effects)]
 
 use super::{
-    AttributeChanges, Call, CopyOpts, DECODE_MAX_ELEMENTS, Disposition, ErrorName, Lane, MAX_CALL_BODY,
-    MAX_ID, MAX_OFFSET, MAX_PATH, MAX_READ, MAX_READ_AHEAD, MAX_TIME_MS, MIN_TIME_MS, Message, Status,
-    TransferOpts, Value, WalkOpts, decode, decoder, is_valid_location_id, is_valid_token, lane_hint,
+    AttributeChanges, Call, CheckItem, CopyOpts, DECODE_MAX_ELEMENTS, Disposition, ErrorName, Lane,
+    MAX_CALL_BODY, MAX_ID, MAX_OFFSET, MAX_PATH, MAX_READ, MAX_READ_AHEAD, MAX_TIME_MS, MIN_TIME_MS, Message,
+    Status, TransferOpts, Value, WalkOpts, decode, decoder, is_valid_location_id, is_valid_token, lane_hint,
     location_id,
 };
 use netvfs_bridge_proto::methods::{INTERFACE, METHODS, OBJECT_PATH};
@@ -52,7 +52,9 @@ fn valid_message(name: &str) -> Message {
         | "GetFeatures"
         | "ListLocations"
         | "OpenStorageSettings"
-        | "ListDrives" => message(name, &()),
+        | "ListDrives"
+        | "GetNetwork" => message(name, &()),
+        "Check" => message(name, &(LOC, vec![(p, p, -1i64)], "")),
         "Mount" | "Unmount" => message(name, &("mmcblk1p1",)),
         "Capabilities" | "Disconnect" | "OpenAccountSettings" => message(name, &(LOC,)),
         "Discover" => message(name, &(true,)),
@@ -90,6 +92,45 @@ fn every_method_decodes_to_its_variant() {
         decoder("Frobnicate")(&valid_message("Hello").body()).unwrap_err().name,
         ErrorName::Unsupported
     );
+}
+
+#[test]
+fn check_takes_folders_with_the_version_known() {
+    let p: &[u8] = b"/Docs/";
+    let etag: &[u8] = b"e1";
+    let none: &[u8] = b"";
+    let call = validate("Check", &(LOC, vec![(p, etag, 5i64), (p, none, -1i64)], "interactive")).unwrap();
+    let Call::Check { loc, items, lane } = call else { panic!() };
+    assert_eq!((loc.as_str(), lane), (LOC, Lane::Interactive));
+    assert_eq!(
+        items,
+        [
+            CheckItem { path: super::normalize(b"/Docs").unwrap(), etag: b"e1".to_vec(), mtime_ms: Some(5) },
+            CheckItem { path: super::normalize(b"/Docs").unwrap(), etag: Vec::new(), mtime_ms: None },
+        ]
+    );
+    let lane_of = |lane: &str| validate("Check", &(LOC, vec![(p, none, -1i64)], lane)).map(|c| c.lane());
+    assert_eq!(lane_of("").unwrap(), Lane::Bulk);
+    assert_eq!(lane_of("fast").unwrap_err().message, "Unknown lane");
+    let message_of =
+        |items: Vec<(&[u8], &[u8], i64)>| validate("Check", &(LOC, items, "")).unwrap_err().message;
+    assert_eq!(message_of(Vec::new()), "Check takes 1 to 1024 folders");
+    let item = (p, none, -1i64);
+    assert_eq!(message_of(vec![item; super::MAX_CHECK_ITEMS + 1]), "Check takes 1 to 1024 folders");
+    assert!(validate("Check", &(LOC, vec![(none, none, -1i64); super::MAX_CHECK_ITEMS], "")).is_ok());
+    let long = vec![b'e'; super::MAX_CHECK_ETAG + 1];
+    assert_eq!(message_of(vec![(p, &long[..], -1)]), "Etag too long");
+    assert!(validate("Check", &(LOC, vec![(p, &long[1..], -1i64)], "")).is_ok());
+    assert_eq!(message_of(vec![(p, none, MIN_TIME_MS - 1)]), "Modification time out of range");
+    assert_eq!(message_of(vec![(p, none, MAX_TIME_MS + 1)]), "Modification time out of range");
+    for edge in [MIN_TIME_MS, -2, 0, MAX_TIME_MS] {
+        let Call::Check { items, .. } = validate("Check", &(LOC, vec![(p, none, edge)], "")).unwrap() else {
+            panic!()
+        };
+        assert_eq!(items[0].mtime_ms, Some(edge));
+    }
+    assert_eq!(error("Check", &(LOC, vec![(&b"docs/../etc"[..], none, -1i64)], "")), ErrorName::InvalidName);
+    assert_eq!(error("Check", &("no loc", vec![item], "")), ErrorName::ProtocolError);
 }
 
 #[test]
