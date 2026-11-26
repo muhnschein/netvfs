@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 #![allow(clippy::arithmetic_side_effects)]
 
-use super::{Bus, CALL_TIMEOUT, Connman, MANAGER, MANAGER_INTERFACE, SERVICE};
+use super::{Bus, CALL_TIMEOUT, Connman, DEBOUNCE, MANAGER, MANAGER_INTERFACE, SERVICE};
 use crate::network::NetworkSource;
 use crate::network::classify::{NONE, UNKNOWN};
 use crate::testutil::TestBus;
@@ -55,12 +55,13 @@ impl FakeConnman {
     }
 
     async fn emit(&self) {
-        let path = "/net/connman/service/wifi_a";
-        let body = ("State", Value::from("online"));
-        self.conn
-            .emit_signal(None::<BusName<'_>>, path, "net.connman.Service", "PropertyChanged", &body)
-            .await
-            .unwrap();
+        self.changed("/net/connman/service/wifi_a", "net.connman.Service", "State", Value::from("online"))
+            .await;
+    }
+
+    async fn changed(&self, path: &str, interface: &str, name: &str, value: Value<'_>) {
+        let body = (name, value);
+        self.conn.emit_signal(None::<BusName<'_>>, path, interface, "PropertyChanged", &body).await.unwrap();
     }
 }
 
@@ -146,6 +147,27 @@ fn debug_names_the_bus_and_the_watch() {
         format!("{connman:?}"),
         "Connman { bus: Address(\"unix:path=/x\"), watching: Cell { value: false } }"
     );
+}
+
+#[test]
+fn only_a_change_of_state_asks_connman_again() {
+    let Some(bus) = TestBus::start() else { return };
+    run(async {
+        let fake = FakeConnman::start(&bus, &[WIFI]).await;
+        let told = Rc::default();
+        let connman = client(&bus, CALL_TIMEOUT, &told);
+        assert_eq!(connman.kind().await, "wifi");
+        fake.set(&[MOBILE]);
+        for _ in 0..3 {
+            fake.changed(WIFI.0, "net.connman.Service", "Strength", Value::from(60_u8)).await;
+            fake.changed(MANAGER, MANAGER_INTERFACE, "SessionMode", Value::from(false)).await;
+        }
+        tokio::time::sleep(DEBOUNCE * 3).await;
+        assert_eq!((fake.asked(), told.borrow().len()), (1, 0), "signal strength is no reason to ask");
+        fake.changed(MANAGER, MANAGER_INTERFACE, "State", Value::from("ready")).await;
+        assert!(wait_for(|| told.borrow().len() == 1).await, "the manager's state is");
+        assert_eq!(*told.borrow(), ["mobile"]);
+    });
 }
 
 #[test]

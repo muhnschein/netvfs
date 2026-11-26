@@ -107,7 +107,7 @@ Trust model: bridge acts on netvfs accounts for a consumer, at the level the use
 - `GetFeatures` names extras (`storage-settings`, `drives`, `network`, `check`, `search`) so consumer shows an action only where it works; unknown names ignored.
 - `Check`: ≤ 1024 folders per call, each with etag and modification time consumer knows. Bridge stats each, lists only changed ones: etag differs when folder has one, else time differs or is < 2 s old (racy). One `CheckBatch` result per folder, by index; access level per folder as `List`. For consumers keeping a name index: one D-Bus call per batch, one request per unchanged folder.
 - `Search`: location with capability `Search` only; server matches names below a folder, bridge streams `WalkBatch` with paths below it, ≤ 2000 results. Paths leaving the folder dropped in backend and bridge.
-- `GetNetwork`/`NetworkChanged`: kind of Connman's first connected service that is no VPN (`wifi`, `ethernet`, `mobile`, `other`, `none`; `unknown` without Connman). Sandboxed consumer can't ask Connman (needs `Connman` permission). System bus only on first call; signals debounced 500 ms, told only on change. No consent needed: names no network, no location.
+- `GetNetwork`/`NetworkChanged`: kind of Connman's first connected service that is no VPN (`wifi`, `ethernet`, `mobile`, `other`, `none`; `unknown` without Connman). Sandboxed consumer can't ask Connman (needs `Connman` permission). System bus only on first call; asks Connman again only on a `State` change of a service or the manager (signal strength changes every few seconds: ignored), debounced 500 ms, told only on change. No consent needed: names no network, no location.
 
 ### Accounts helper `netvfs-accounts`
 

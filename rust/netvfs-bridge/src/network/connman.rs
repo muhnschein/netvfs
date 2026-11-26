@@ -22,7 +22,7 @@ pub const MANAGER_INTERFACE: &str = "net.connman.Manager";
 pub const CALL_TIMEOUT: Duration = Duration::from_secs(10);
 /// First signal of a burst to the new answer.
 pub const DEBOUNCE: Duration = Duration::from_millis(500);
-const RULE: &str = "type='signal',sender='net.connman'";
+const RULE: &str = "type='signal',sender='net.connman',member='PropertyChanged',arg0='State'";
 
 /// Connman's network; the core holds one.
 pub struct Connman(Rc<Inner>);
