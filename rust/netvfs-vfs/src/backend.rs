@@ -261,6 +261,19 @@ pub trait Backend {
         let _ = (path, algorithm, cancel);
         async { unsupported("checksum") }
     }
+    /// Entries below `root` whose name holds `text`, as the server matches it, `limit` at most; each entry's
+    /// name is its path below `root`. Needs `Search`.
+    fn search(
+        &mut self,
+        root: &[u8],
+        text: &str,
+        limit: u32,
+        sink: &mut dyn ListSink,
+        cancel: &CancelToken,
+    ) -> impl Future<Output = Result<(), Status>> {
+        let _ = (root, text, limit, sink, cancel);
+        async { unsupported("search") }
+    }
     /// Free, total and used bytes.
     fn space_info(
         &mut self,
@@ -318,6 +331,14 @@ mod tests {
     use std::future::ready;
 
     struct Minimal;
+
+    struct Nothing;
+
+    impl ListSink for Nothing {
+        fn entries(&mut self, _: &[Entry]) -> bool {
+            true
+        }
+    }
 
     impl Backend for Minimal {
         type Read = NoHandle;
@@ -427,6 +448,7 @@ mod tests {
         unsupported_named(b.copy(b"a", b"b", true, RenameMode::Replace, &c).await, "copy");
         unsupported_named(b.checksum(b"f", "sha256", &c).await, "checksum");
         unsupported_named(b.space_info(b"d", &c).await, "spaceInfo");
+        unsupported_named(b.search(b"d", "x", 10, &mut Nothing, &c).await, "search");
         unsupported_named(b.open_read(b"f", &c).await, "openRead");
         unsupported_named(b.open_write(b"f", &WriteOptions::default(), &c).await, "openWrite");
     }

@@ -169,6 +169,10 @@ capabilities! {
     ShareEnumeration,
     /// Entries carry an etag.
     ETags,
+    /// A folder's etag changes with anything below it.
+    DeepETags,
+    /// `search`.
+    Search,
 }
 
 impl Capability {
@@ -477,6 +481,8 @@ mod tests {
                 "WindowsNames",
                 "ShareEnumeration",
                 "ETags",
+                "DeepETags",
+                "Search",
             ]
         );
         for c in Capability::ALL {

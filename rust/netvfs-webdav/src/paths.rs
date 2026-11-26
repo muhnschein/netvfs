@@ -45,6 +45,33 @@ impl Base {
     }
 }
 
+const OWNCLOUD_FILES: &[u8] = b"/remote.php/dav/files/";
+const OWNCLOUD_DAV: &[u8] = b"/remote.php/dav";
+
+impl Base {
+    /// The DAV root of an ownCloud or Nextcloud account folder (`…/remote.php/dav/files/<user>…`), decoded and
+    /// without trailing `/`: where `SEARCH` goes. `None` for any other layout.
+    #[must_use]
+    pub fn dav_root(&self) -> Option<Vec<u8>> {
+        let at = self.0.windows(OWNCLOUD_FILES.len()).position(|w| w == OWNCLOUD_FILES)?;
+        let user = self.0.get(at.checked_add(OWNCLOUD_FILES.len())?..)?;
+        if user.is_empty() {
+            return None;
+        }
+        self.0.get(..at.checked_add(OWNCLOUD_DAV.len())?).map(<[u8]>::to_vec)
+    }
+}
+
+/// The path of `found` (decoded server path) below folder `dir` (decoded, trailing `/`), without trailing `/`:
+/// one or more components, none `.` or `..`. `None` for `dir` itself and for anything outside it.
+#[must_use]
+pub fn below<'a>(dir: &[u8], found: &'a [u8]) -> Option<&'a [u8]> {
+    let rest = found.strip_prefix(dir)?;
+    let path = rest.strip_suffix(b"/").unwrap_or(rest);
+    let fine = |part: &[u8]| !part.is_empty() && part != b"." && part != b"..";
+    (!path.is_empty() && path.split(|b| *b == b'/').all(fine)).then_some(path)
+}
+
 fn check_component(part: &[u8]) -> Result<(), Status> {
     if part == b"." || part == b".." || part.contains(&0) {
         return Err(Status::invalid_name(format!(
@@ -205,6 +232,28 @@ mod tests {
         assert_eq!(child_name(b"/d/", b"/d/sub/"), Some(&b"sub"[..]));
         for other in [&b"/d/"[..], b"/d", b"/d/a/b", b"/e/f", b"/d/./", b"/d/../", b"/d//"] {
             assert_eq!(child_name(b"/d/", other), None, "{}", String::from_utf8_lossy(other));
+        }
+    }
+
+    #[test]
+    fn the_dav_root_of_an_owncloud_folder() {
+        let root = |base: &str| Base::new(base).unwrap().dav_root();
+        assert_eq!(root("/remote.php/dav/files/alice").unwrap(), b"/remote.php/dav");
+        assert_eq!(root("/cloud/remote.php/dav/files/al ice/Docs/x").unwrap(), b"/cloud/remote.php/dav");
+        for other in
+            ["", "/dav", "/remote.php/dav", "/remote.php/dav/files", "/remote.php/webdav", "/files/a"]
+        {
+            assert_eq!(root(other), None, "{other}");
+        }
+    }
+
+    #[test]
+    fn found_paths_lie_below_the_folder() {
+        assert_eq!(below(b"/d/", b"/d/f"), Some(&b"f"[..]));
+        assert_eq!(below(b"/d/", b"/d/a/b/"), Some(&b"a/b"[..]));
+        assert_eq!(below(b"/", b"/x y/z"), Some(&b"x y/z"[..]));
+        for other in [&b"/d/"[..], b"/d", b"/e/f", b"/d/a/../b", b"/d/./a", b"/d//a", b"/d/a//", b"/dd/f"] {
+            assert_eq!(below(b"/d/", other), None, "{}", String::from_utf8_lossy(other));
         }
     }
 

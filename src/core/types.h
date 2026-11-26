@@ -60,7 +60,9 @@ enum class Capability : quint32 {
     SpaceInfo, Checksums,
     CaseInsensitive, WindowsNames,
     ShareEnumeration,
-    ETags
+    ETags,
+    DeepETags,
+    Search
 };
 
 inline uint qHash(Capability c, uint seed = 0) noexcept

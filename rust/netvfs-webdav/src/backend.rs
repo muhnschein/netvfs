@@ -6,7 +6,7 @@
 
 use crate::http::{ALPN, Body, Http, Req, STALE_AFTER, Target};
 use crate::io::{self, WebdavRead};
-use crate::paths::{Base, child_name, encode, last_name, same};
+use crate::paths::{Base, below, child_name, encode, last_name, same};
 use crate::status::{Op, error, unresolved};
 use crate::xml::{self, PROPFIND_ENTRY, PROPFIND_QUOTA, Props, Response};
 use bytes::Bytes;
@@ -36,7 +36,11 @@ pub const MAX_ERROR_BODY: usize = 64 * 1024;
 const DEPTH: HeaderName = HeaderName::from_static("depth");
 const DESTINATION: HeaderName = HeaderName::from_static("destination");
 const OVERWRITE: HeaderName = HeaderName::from_static("overwrite");
+const DASL: HeaderName = HeaderName::from_static("dasl");
+const BASIC_SEARCH: &str = "DAV:basicsearch";
 const MULTI_STATUS: u16 = 207;
+/// Entries per batch `search` hands on.
+pub const SEARCH_BATCH: usize = 256;
 
 /// What `connect` takes from the parameters.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -121,6 +125,10 @@ pub struct Dav {
     pub base: Base,
     /// Whether the account's folder reported a quota at sign-in (`SpaceInfo`).
     pub quota: bool,
+    /// Whether the server is ownCloud or Nextcloud: a folder's etag changes with anything below it (`DeepETags`).
+    pub owncloud: bool,
+    /// The DAV root, when the server offers `SEARCH` with `basicsearch` there (`Search`).
+    pub search_root: Option<Vec<u8>>,
 }
 
 /// PROPFIND `depth` on decoded `path`.
@@ -137,6 +145,14 @@ pub async fn propfind(
         .header(DEPTH, HeaderValue::from_static(depth))
         .header(CONTENT_TYPE, HeaderValue::from_static("application/xml; charset=utf-8"))
         .body(Body::Full(Some(Bytes::from_static(body.as_bytes()))));
+    multistatus(http, req).await
+}
+
+/// Sends `req` and reads the multistatus it is answered with.
+///
+/// # Errors
+/// The answer's error; `ProtocolError` for anything but a multistatus.
+pub async fn multistatus(http: &mut Http, req: Req) -> Result<Vec<Response>, Status> {
     let answer = http.send(req).await?;
     let (head, body) = answer.into_parts();
     if head.status.as_u16() != MULTI_STATUS {
@@ -166,6 +182,14 @@ pub async fn simple(http: &mut Http, req: Req, op: Op) -> Result<StatusCode, Sta
     } else {
         Err(error(head.status, op, &head.headers, SystemTime::now()))
     }
+}
+
+async fn search_offered(http: &mut Http, dav_root: Vec<u8>) -> bool {
+    let Ok(answer) = http.send(Req::new(Method::OPTIONS, dav_root)).await else { return false };
+    let (head, body) = answer.into_parts();
+    http.discard(body, MAX_ERROR_BODY).await;
+    head.status.is_success()
+        && head.headers.get_all(DASL).iter().any(|v| v.to_str().is_ok_and(|v| v.contains(BASIC_SEARCH)))
 }
 
 impl Dav {
@@ -226,6 +250,47 @@ impl Dav {
             return Err(Status::new(ErrorName::NotADirectory, "Not a folder"));
         }
         Ok(own)
+    }
+
+    async fn offers_search(&self) -> Option<Vec<u8>> {
+        let root = self.base.dav_root()?;
+        let target = [root.as_slice(), b"/"].concat();
+        let offered = {
+            let mut http = self.http.lock().await;
+            search_offered(&mut http, target).await
+        };
+        offered.then_some(root)
+    }
+
+    /// The entries below folder `root` whose name holds `text`, `limit` at most, each named by its path below
+    /// `root`.
+    ///
+    /// # Errors
+    /// `Unsupported` without `SEARCH`, and request errors.
+    pub async fn search(&self, root: &[u8], text: &str, limit: u32) -> Result<Vec<Entry>, Status> {
+        let Some(dav_root) = &self.search_root else {
+            return Err(Status::unsupported("The server offers no search"));
+        };
+        let folder = self.base.resolve(root, true)?;
+        let scope = folder.strip_prefix(dav_root.as_slice()).unwrap_or(&folder);
+        let scope = scope.strip_suffix(b"/").unwrap_or(scope);
+        let body = xml::search_body(&encode(scope), text, limit);
+        let req = Req::new(
+            Method::from_bytes(b"SEARCH").map_err(|e| Status::internal(e.to_string()))?,
+            [dav_root.as_slice(), b"/"].concat(),
+        )
+        .header(CONTENT_TYPE, HeaderValue::from_static("text/xml; charset=utf-8"))
+        .body(Body::Full(Some(Bytes::from(body))));
+        let found = {
+            let mut http = self.http.lock().await;
+            multistatus(&mut http, req).await?
+        };
+        let most = usize::try_from(limit).unwrap_or(usize::MAX);
+        Ok(found
+            .iter()
+            .filter_map(|r| below(&folder, &r.path).map(|path| entry(path, &r.props)))
+            .take(most)
+            .collect())
     }
 
     async fn make_dir(&self, path: &[u8], exclusive: bool) -> Result<(), Status> {
@@ -421,8 +486,10 @@ impl Webdav {
     }
 }
 
-const fn capabilities() -> [Capability; 6] {
+const fn capabilities() -> [Capability; 8] {
     [
+        Capability::DeepETags,
+        Capability::Search,
         Capability::ReadHandles,
         Capability::NativeNoReplace,
         Capability::ServerCopy,
@@ -480,11 +547,21 @@ impl Backend for Webdav {
             }
         }
         let Connected { http, settings, .. } = *connected;
-        let mut dav = Dav { http: Arc::new(Mutex::new(http)), base: settings.base, quota: false };
+        let mut dav = Dav {
+            http: Arc::new(Mutex::new(http)),
+            base: settings.base,
+            quota: false,
+            owncloud: false,
+            search_root: None,
+        };
         let probe = cancel.guard(dav.folder()).await;
         match probe {
             Ok(Some(own)) => {
                 dav.quota = own.quota_available.is_some() || own.quota_used.is_some();
+                dav.owncloud = own.owncloud;
+                if dav.owncloud {
+                    dav.search_root = cancel.guard(async { Ok(dav.offers_search().await) }).await?;
+                }
                 self.state = State::Ready(Box::new(dav));
                 Ok(())
             }
@@ -503,6 +580,8 @@ impl Backend for Webdav {
                 flags: capabilities()
                     .into_iter()
                     .filter(|c| dav.quota || *c != Capability::SpaceInfo)
+                    .filter(|c| dav.owncloud || *c != Capability::DeepETags)
+                    .filter(|c| dav.search_root.is_some() || *c != Capability::Search)
                     .collect(),
                 ..Capabilities::default()
             },
@@ -537,6 +616,25 @@ impl Backend for Webdav {
             return Err(Status::new(ErrorName::NotFound, "No such folder"));
         }
         for batch in entries.chunks(options.batch_size.max(1)) {
+            cancel.check()?;
+            if !sink.entries(batch) {
+                return Err(Status::canceled());
+            }
+        }
+        Ok(())
+    }
+
+    async fn search(
+        &mut self,
+        root: &[u8],
+        text: &str,
+        limit: u32,
+        sink: &mut dyn ListSink,
+        cancel: &CancelToken,
+    ) -> Result<(), Status> {
+        let dav = self.dav(cancel)?;
+        let found = cancel.guard(dav.search(root, text, limit)).await?;
+        for batch in found.chunks(SEARCH_BATCH) {
             cancel.check()?;
             if !sink.entries(batch) {
                 return Err(Status::canceled());
