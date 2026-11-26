@@ -214,6 +214,38 @@ async fn check_refuses_what_the_bridge_refuses() {
 }
 
 #[tokio::test]
+async fn search_finds_names_below_a_folder() {
+    let (fake, conn, mut signals) = setup().await;
+    for path in ["docs/Tax/tax-2026.pdf", "docs/other.txt", "taxi.jpg"] {
+        fake.put_file("account:1", path.as_bytes(), b"x");
+    }
+    let p = conn.proxy();
+    let none = OptsBuilder::new().build();
+    let job = p.search("account:1", b"docs", "TAX", &none).await.unwrap();
+    let (paths, error, extra) = finish(&mut signals, job).await;
+    assert_eq!(error, "");
+    let want: Vec<&[u8]> = vec![b"Tax", b"Tax/tax-2026.pdf"];
+    assert_eq!(paths, want, "paths are below the folder asked");
+    assert_eq!(extra["entries"], 2);
+    let job = p.search("account:1", b"", "tax", &OptsBuilder::new().int("limit", 2).build()).await.unwrap();
+    assert_eq!(finish(&mut signals, job).await.2["entries"], 2);
+    let job = p.search("account:1", b"gone", "tax", &none).await.unwrap();
+    assert_eq!(finish(&mut signals, job).await.1, "NotFound");
+
+    let invalid =
+        |r: zbus::Result<u32>| matches!(BridgeError::from(r.unwrap_err()), BridgeError::InvalidArgs(_));
+    assert!(invalid(p.search("account:1", b"", "", &none).await));
+    assert!(invalid(p.search("account:1", b"", &"x".repeat(257), &none).await));
+    assert!(invalid(p.search("account:1", b"", "x", &OptsBuilder::new().int("limit", 0).build()).await));
+    assert!(invalid(p.search("account:1", b"", "x", &OptsBuilder::new().int("limit", 2001).build()).await));
+    assert!(invalid(p.search("account:1", b"", "x", &OptsBuilder::new().int("depth", 1).build()).await));
+
+    fake.set_capabilities("account:1", &["ReadHandles"], &[], 255);
+    let refused = BridgeError::from(p.search("account:1", b"", "tax", &none).await.unwrap_err());
+    assert_eq!(refused.netvfs_name(), Some("Unsupported"), "a location without the Search capability");
+}
+
+#[tokio::test]
 async fn a_check_can_be_canceled() {
     let (fake, conn, mut signals) = setup().await;
     fake.put_dir("account:1", b"t");
@@ -243,7 +275,7 @@ async fn the_network_kind_is_told_when_it_changes() {
     }
     assert_eq!(conn.proxy().get_network().await.unwrap(), "mobile");
     let features = conn.proxy().get_features().await.unwrap();
-    assert_eq!(features, ["storage-settings", "drives", "network", "check"]);
+    assert_eq!(features, ["storage-settings", "drives", "network", "check", "search"]);
 }
 
 #[tokio::test]

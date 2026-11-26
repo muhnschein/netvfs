@@ -26,6 +26,8 @@ pub const MAX_SHORT: usize = 256;
 pub const MAX_ID: usize = 64;
 /// Largest `maxDepth` of `Walk` (-1: unlimited).
 pub const MAX_WALK_DEPTH: i64 = 4096;
+/// Most results of one `Search`, and its `limit` when the consumer gives none or 0.
+pub const MAX_SEARCH_RESULTS: i64 = 2000;
 /// Most folders of one `Check`.
 pub const MAX_CHECK_ITEMS: usize = 1024;
 /// Longest etag of a `Check` item, in bytes.

@@ -197,6 +197,15 @@ pub struct NvrTable {
     pub key_import: unsafe extern "C" fn(NvbBytes, NvbBytes, *mut *mut NvrKey) -> *mut NvbError,
     /// `SshKeyTools::describe(private key)`.
     pub key_describe: unsafe extern "C" fn(NvbBytes, *mut *mut NvrKey) -> *mut NvbError,
+    /// `Backend::search`: root, text, limit, sink; each entry's name is its path below the root.
+    pub search: unsafe extern "C" fn(
+        *mut NvrConn,
+        NvbBytes,
+        NvbBytes,
+        u32,
+        Option<NvbListSinkFn>,
+        *mut c_void,
+    ) -> *mut NvbError,
 }
 
 /// `nvr_get_fn`.
@@ -224,7 +233,8 @@ mod layout {
 
     #[test]
     fn table() {
-        assert_eq!((size_of::<NvrTable>(), align_of::<NvrTable>()), (304, 8));
+        assert_eq!((size_of::<NvrTable>(), align_of::<NvrTable>()), (312, 8));
+        assert_eq!(offset_of!(NvrTable, search), 304);
         assert_eq!((offset_of!(NvrTable, reply_set), offset_of!(NvrTable, conn_new)), (8, 16));
         assert_eq!((offset_of!(NvrTable, connect), offset_of!(NvrTable, keep_alive)), (48, 80));
         assert_eq!((offset_of!(NvrTable, stat), offset_of!(NvrTable, space_info)), (88, 184));

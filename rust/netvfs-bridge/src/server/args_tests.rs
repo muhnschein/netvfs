@@ -55,6 +55,7 @@ fn valid_message(name: &str) -> Message {
         | "ListDrives"
         | "GetNetwork" => message(name, &()),
         "Check" => message(name, &(LOC, vec![(p, p, -1i64)], "")),
+        "Search" => message(name, &(LOC, p, "x", none())),
         "Mount" | "Unmount" => message(name, &("mmcblk1p1",)),
         "Capabilities" | "Disconnect" | "OpenAccountSettings" => message(name, &(LOC,)),
         "Discover" => message(name, &(true,)),
@@ -131,6 +132,29 @@ fn check_takes_folders_with_the_version_known() {
     }
     assert_eq!(error("Check", &(LOC, vec![(&b"docs/../etc"[..], none, -1i64)], "")), ErrorName::InvalidName);
     assert_eq!(error("Check", &("no loc", vec![item], "")), ErrorName::ProtocolError);
+}
+
+#[test]
+fn search_takes_a_text_and_a_limit() {
+    let p: &[u8] = b"/Docs/";
+    let Call::Search { loc, path, text, limit } = validate("Search", &(LOC, p, "tax 2026", none())).unwrap()
+    else {
+        panic!()
+    };
+    assert_eq!((loc.as_str(), path.as_bytes(), text.as_str(), limit), (LOC, &b"/Docs"[..], "tax 2026", 2000));
+    let limited = |n: i64| validate("Search", &(LOC, p, "x", map(&[("limit", Value::from(n))])));
+    assert!(matches!(limited(1).unwrap(), Call::Search { limit: 1, .. }));
+    assert!(matches!(limited(2000).unwrap(), Call::Search { limit: 2000, .. }));
+    assert_eq!(limited(0).unwrap_err().message, "Option \"limit\" is out of range");
+    assert_eq!(limited(2001).unwrap_err().message, "Option \"limit\" is out of range");
+    let message_of = |text: &str| validate("Search", &(LOC, p, text, none())).unwrap_err().message;
+    assert_eq!(message_of(""), "Search needs a text");
+    assert_eq!(message_of(&"x".repeat(257)), "Argument 2 is too long");
+    assert!(validate("Search", &(LOC, p, "x".repeat(256), none())).is_ok());
+    let unknown = validate("Search", &(LOC, p, "x", map(&[("depth", Value::from(1i64))]))).unwrap_err();
+    assert_eq!(unknown.message, "Unknown option \"depth\"");
+    assert_eq!(error("Search", &(LOC, &b"docs/../etc"[..], "x", none())), ErrorName::InvalidName);
+    assert_eq!(validate("Search", &(LOC, p, "x", none())).unwrap().lane(), Lane::Bulk);
 }
 
 #[test]

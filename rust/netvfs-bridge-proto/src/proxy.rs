@@ -111,4 +111,7 @@ pub trait Bridge1 {
 
     /// `GetNetwork` → `wifi`, `ethernet`, `mobile`, `other`, `none` or `unknown`.
     fn get_network(&self) -> zbus::Result<String>;
+
+    /// `Search(loc, root, text, opts)` → job id; what the server finds follows as `WalkBatch`.
+    fn search(&self, loc: &str, root: &[u8], text: &str, opts: &Opts) -> zbus::Result<u32>;
 }

@@ -7,8 +7,8 @@ use super::paths::{NPath, normalize};
 use crate::status::Status;
 use netvfs_bridge_proto::limits::{
     DECODE_MAX_DEPTH, DECODE_MAX_ELEMENTS, DEFAULT_LIST_BATCH, MAX_CHECK_ETAG, MAX_CHECK_ITEMS, MAX_ID,
-    MAX_LIST_BATCH, MAX_OFFSET, MAX_PATH, MAX_READ, MAX_READ_AHEAD, MAX_SHORT, MAX_TIME_MS, MAX_WALK_DEPTH,
-    MIN_TIME_MS,
+    MAX_LIST_BATCH, MAX_OFFSET, MAX_PATH, MAX_READ, MAX_READ_AHEAD, MAX_SEARCH_RESULTS, MAX_SHORT,
+    MAX_TIME_MS, MAX_WALK_DEPTH, MIN_TIME_MS,
 };
 use netvfs_bridge_proto::methods::find_method;
 use netvfs_bridge_proto::{ErrorName, Lane, MethodInfo, WireCheckItem, drive_info};
@@ -147,6 +147,7 @@ pub enum Call {
     Unmount { drive: String },
     Check { loc: LocId, items: Vec<CheckItem>, lane: Lane },
     GetNetwork,
+    Search { loc: LocId, path: NPath, text: String, limit: u32 },
 }
 
 /// A folder of `Check` with the version the consumer knows.
@@ -204,6 +205,7 @@ impl Call {
             Self::Unmount { .. } => "Unmount",
             Self::Check { .. } => "Check",
             Self::GetNetwork => "GetNetwork",
+            Self::Search { .. } => "Search",
         }
     }
 
@@ -256,7 +258,7 @@ pub fn decode(msg: &Message) -> Result<Call, Status> {
 
 type Decoder = fn(&Body) -> Result<Call, Status>;
 
-const DECODERS: [(&str, Decoder); 39] = [
+const DECODERS: [(&str, Decoder); 40] = [
     ("Hello", hello),
     ("GetConsent", |_| Ok(Call::GetConsent)),
     ("RequestConsent", |_| Ok(Call::RequestConsent)),
@@ -296,6 +298,7 @@ const DECODERS: [(&str, Decoder); 39] = [
     ("Unmount", |b| drive_only(b).map(|drive| Call::Unmount { drive })),
     ("Check", check),
     ("GetNetwork", |_| Ok(Call::GetNetwork)),
+    ("Search", search),
 ];
 
 fn decoder(name: &str) -> Decoder {
@@ -532,6 +535,24 @@ fn check(body: &Body) -> Result<Call, Status> {
         })
         .collect::<Result<Vec<_>, Status>>()?;
     Ok(Call::Check { loc, items, lane: lane_hint(&lane, Lane::Bulk)? })
+}
+
+fn search(body: &Body) -> Result<Call, Status> {
+    let (loc, path, text, opts): (String, Vec<u8>, String, Options<'_>) = deserialize(body)?;
+    let (loc, path) = (location_id(loc)?, normalize(&path)?);
+    if text.is_empty() {
+        return Err(Status::invalid_args("Search needs a text"));
+    }
+    let text = short_string(text, 2, MAX_SHORT)?;
+    let mut limit = MAX_SEARCH_RESULTS;
+    each_option(&opts, |key, value| {
+        match key {
+            "limit" => limit = option_int(key, value, 1, MAX_SEARCH_RESULTS)?,
+            _ => return Err(unknown_option(key)),
+        }
+        Ok(())
+    })?;
+    Ok(Call::Search { loc, path, text, limit: u32::try_from(limit).ok().ok_or_else(too_complex)? })
 }
 
 fn drive_only(body: &Body) -> Result<String, Status> {

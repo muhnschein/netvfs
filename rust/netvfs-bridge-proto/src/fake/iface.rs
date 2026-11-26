@@ -676,6 +676,31 @@ impl Iface {
         Ok(())
     }
 
+    async fn search(
+        &self,
+        loc: String,
+        root: Vec<u8>,
+        text: String,
+        opts: Dict,
+        #[zbus(signal_emitter)] ctxt: SignalEmitter<'_>,
+    ) -> Result<u32, Fail> {
+        let loc = args::location(&loc)?;
+        let root = args::path(&root)?;
+        args::search_text(&text)?;
+        let limit = args::search_limit(&opts)?;
+        self.begin("Search", None, &loc).await?;
+        let folders_only = self.admit(&loc, &root, Op::Browse)? == Verdict::FoldersOnly;
+        self.reach(&loc)?;
+        let offered =
+            self.shared.with(|s| s.caps.get(&loc).is_none_or(|c| c.flags.iter().any(|f| f == "Search")));
+        if !offered {
+            return Err(Fail::net(ErrorName::Unsupported, "Search is not supported"));
+        }
+        Ok(self.start_job(&ctxt, move |env, job, cancel| {
+            transfer::run_search(env, job, cancel, (loc, root, folders_only), (text, limit))
+        }))
+    }
+
     async fn get_network(&self) -> Result<String, Fail> {
         self.begin("GetNetwork", None, "").await?;
         Ok(self.shared.with(|s| s.network.clone()))

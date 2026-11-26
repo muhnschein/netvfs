@@ -57,6 +57,7 @@ pub static TABLE: NvrTable = NvrTable {
     key_generate: conn::key_generate,
     key_import: conn::key_import,
     key_describe: conn::key_describe,
+    search: conn::search,
 };
 
 /// `nvr_get`: the table.

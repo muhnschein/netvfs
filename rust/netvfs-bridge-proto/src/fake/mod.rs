@@ -37,6 +37,7 @@ pub const DEFAULT_CAPS: &[&str] = &[
     "ServerCopy",
     "SpaceInfo",
     "Checksums",
+    "Search",
 ];
 
 /// A fake bridge. Cheap to clone; clones share all state.

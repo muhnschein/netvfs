@@ -391,6 +391,12 @@ impl Conn {
         })
     }
 
+    fn search_with(&self, root: &[u8], text: &[u8], limit: u32, lister: &mut Lister) -> Result<(), Fail> {
+        res(unsafe {
+            (t().search)(self.0, b(root), b(text), limit, Some(sink), ptr::from_mut(lister).cast())
+        })
+    }
+
     fn names(&self, dir: &[u8]) -> Vec<Vec<u8>> {
         let mut l = Lister::default();
         self.list_with(dir, 100, false, &mut l).unwrap();
@@ -636,6 +642,7 @@ fn capabilities() {
             "Ownership",
             "PosixModes",
             "ReadHandles",
+            "Search",
             "ServerCopy",
             "ServerCopyRecursive",
             "SetModified",
@@ -684,6 +691,47 @@ fn namespace() {
     c.rmdir(b"d").unwrap();
     assert_eq!(c.names(b""), [b"h".to_vec()]);
     c.keep_alive().unwrap();
+    drop(c);
+    assert_no_leaks();
+}
+
+#[test]
+fn searching() {
+    let c = Conn::open("searching", &[]);
+    c.mkdir(b"docs", true).unwrap();
+    c.mkdir(b"docs/Tax", true).unwrap();
+    c.put(b"docs/Tax/tax-2026.pdf", b"12").unwrap();
+    c.put(b"docs/other.txt", b"").unwrap();
+    c.put(b"taxi.jpg", b"").unwrap();
+    let found = |root: &[u8], text: &[u8], limit: u32| {
+        let mut l = Lister::default();
+        c.search_with(root, text, limit, &mut l).unwrap();
+        let mut names: Vec<String> =
+            l.batches.concat().into_iter().map(|e| String::from_utf8(e.name).unwrap()).collect();
+        names.sort();
+        names
+    };
+    assert_eq!(found(b"", b"tax", 100), ["docs/Tax", "docs/Tax/tax-2026.pdf", "taxi.jpg"]);
+    assert_eq!(found(b"docs", b"TAX", 100), ["Tax", "Tax/tax-2026.pdf"], "paths are below the root asked");
+    assert_eq!(found(b"docs", b"nothing", 100), Vec::<String>::new());
+    assert_eq!(found(b"", b"tax", 2).len(), 2, "the limit holds");
+    let mut l = Lister::default();
+    c.search_with(b"docs", b"2026", 100, &mut l).unwrap();
+    let hit = &l.batches[0][0];
+    assert_eq!((hit.name.as_slice(), hit.size, hit.kind), (&b"Tax/tax-2026.pdf"[..], 2, 1));
+    assert_eq!(l.thread, Some(thread::current().id()));
+    assert_eq!(name(c.search_with(b"gone", b"x", 10, &mut Lister::default())), "NotFound");
+    let nothing = unsafe { (t().search)(c.0, b(b""), b(b"x"), 10, None, ptr::null_mut()) };
+    assert_eq!(name(res(nothing)), "ProtocolError");
+    for i in 0..600 {
+        c.put(format!("hit-{i:03}").as_bytes(), b"").unwrap();
+    }
+    let mut l = Lister::default();
+    c.search_with(b"", b"hit", 1000, &mut l).unwrap();
+    assert_eq!(l.batches.iter().map(Vec::len).collect::<Vec<_>>(), [256, 256, 88]);
+    let mut l = Lister { stop_after: Some(1), ..Lister::default() };
+    assert_eq!(name(c.search_with(b"", b"hit", 1000, &mut l)), "Canceled");
+    assert_eq!(l.batches.len(), 1);
     drop(c);
     assert_no_leaks();
 }

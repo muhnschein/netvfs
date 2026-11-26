@@ -264,6 +264,31 @@ impl Tree {
         self.children(dir)?.iter().map(|(name, id)| self.entry(dir, name, *id, targets)).collect()
     }
 
+    pub fn search(&self, root: &[u8], text: &str, limit: u32) -> Result<Vec<Entry>, Status> {
+        let needle = text.to_lowercase();
+        let most = usize::try_from(limit).unwrap_or(usize::MAX);
+        let mut found = Vec::new();
+        let mut todo = vec![(self.resolve(root, true)?, Vec::new())];
+        while let Some((dir, path)) = todo.pop() {
+            for (name, id) in self.children(dir)? {
+                if found.len() >= most {
+                    return Ok(found);
+                }
+                let below =
+                    if path.is_empty() { name.clone() } else { [path.as_slice(), b"/", name].concat() };
+                if String::from_utf8_lossy(name).to_lowercase().contains(&needle) {
+                    let mut entry = self.entry(dir, name, *id, false)?;
+                    entry.name.clone_from(&below);
+                    found.push(entry);
+                }
+                if matches!(self.node(*id)?.data, Data::Dir(_)) {
+                    todo.push((*id, below));
+                }
+            }
+        }
+        Ok(found)
+    }
+
     pub fn make_dir(&mut self, path: &[u8], exclusive: bool) -> Result<(), Status> {
         let (dir, name) = self.parent_of(path)?;
         if self.child(dir, name)?.is_some() {

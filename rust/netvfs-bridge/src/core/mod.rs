@@ -669,6 +669,10 @@ impl Core {
             Call::Mount { drive } => self.on_drive_call(sid, reply, DriveCall::Mount(drive)),
             Call::Unmount { drive } => self.on_drive_call(sid, reply, DriveCall::Unmount(drive)),
             Call::GetNetwork => self.on_get_network(sid, reply),
+            Call::Check { loc, items, lane } => self.on_check_call(sid, reply, &loc, items, lane),
+            Call::Search { loc, path, text, limit } => {
+                self.on_search_call(sid, reply, (&loc, lane), path, text, limit);
+            }
             call => self.on_file_call(sid, reply, call, lane),
         }
     }

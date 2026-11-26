@@ -9,6 +9,7 @@ pub mod fd;
 pub mod fdio;
 pub mod progress;
 pub mod remove;
+pub mod search;
 pub mod transfer;
 pub mod walk;
 

@@ -4,7 +4,7 @@ use super::fail::Fail;
 use super::tree::normalize;
 use crate::limits::{
     DEFAULT_LIST_BATCH, MAX_CHECK_ETAG, MAX_CHECK_ITEMS, MAX_ID, MAX_LIST_BATCH, MAX_OFFSET, MAX_READ,
-    MAX_TIME_MS, MAX_WALK_DEPTH, MIN_TIME_MS,
+    MAX_SEARCH_RESULTS, MAX_TIME_MS, MAX_WALK_DEPTH, MIN_TIME_MS,
 };
 use crate::methods::Lane;
 use crate::wire::{WireCheckItem, value_bool, value_i64, value_str};
@@ -48,6 +48,27 @@ pub fn check_items(items: Vec<WireCheckItem>) -> Result<Vec<WireCheckItem>, Fail
             Ok(WireCheckItem { path: path(&item.path)?, ..item })
         })
         .collect()
+}
+
+pub fn search_text(text: &str) -> Result<(), Fail> {
+    if text.is_empty() {
+        return Err(Fail::args("Search needs a text"));
+    }
+    if text.encode_utf16().count() > crate::limits::MAX_SHORT {
+        return Err(Fail::args("Argument 2 is too long"));
+    }
+    Ok(())
+}
+
+pub fn search_limit(opts: &Dict) -> Result<usize, Fail> {
+    let mut limit = MAX_SEARCH_RESULTS;
+    for (key, value) in opts {
+        match key.as_str() {
+            "limit" => limit = int_option(key, value, 1, MAX_SEARCH_RESULTS)?,
+            _ => return Err(unknown(key)),
+        }
+    }
+    usize::try_from(limit).map_err(|e| Fail::args(&e.to_string()))
 }
 
 pub fn lane(given: &str, default: Lane) -> Result<Lane, Fail> {

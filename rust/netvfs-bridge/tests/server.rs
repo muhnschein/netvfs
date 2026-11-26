@@ -74,6 +74,7 @@ const TESTS: &[(&str, Test)] = &[
     ("network", network),
     ("check", check),
     ("check_limits_and_access", check_limits_and_access),
+    ("search", search),
     ("locations_changed", locations_changed),
     ("connection_states", connection_states),
     ("connection_states_of_idle_connections", connection_states_of_idle_connections),
@@ -1190,7 +1191,7 @@ fn handoff(h: &Harness) {
             name(ErrorName::Unsupported)
         );
         assert_eq!(error_name(&c.proxy().add_account("smb").await), name(ErrorName::Unsupported));
-        assert_eq!(c.proxy().get_features().await.unwrap(), ["drives", "network", "check"]);
+        assert_eq!(c.proxy().get_features().await.unwrap(), ["drives", "network", "check", "search"]);
         assert_eq!(error_name(&c.proxy().open_storage_settings().await), name(ErrorName::Unsupported));
         assert_eq!(f.launcher.calls().len(), 0);
     });
@@ -1213,7 +1214,7 @@ fn storage_settings(h: &Harness) {
             c.proxy().hello("t").await.unwrap();
             assert_eq!(
                 c.proxy().get_features().await.unwrap(),
-                ["storage-settings", "drives", "network", "check"]
+                ["storage-settings", "drives", "network", "check", "search"]
             );
             c.proxy().open_storage_settings().await.unwrap();
             let calls = f.launcher.calls();
@@ -1265,7 +1266,7 @@ fn drives(h: &Harness) {
         assert!(wait_signal(&mut signals, WAIT, |s| matches!(s, Signal::DrivesChanged)).await.is_some());
         let heard = wait_signal(&mut quiet_signals, Duration::from_millis(200), |_| true).await;
         assert!(heard.is_none(), "{heard:?}");
-        assert_eq!(c.proxy().get_features().await.unwrap(), ["drives", "network", "check"]);
+        assert_eq!(c.proxy().get_features().await.unwrap(), ["drives", "network", "check", "search"]);
     });
 }
 
@@ -1396,6 +1397,79 @@ fn check_limits_and_access(h: &Harness) {
         assert_eq!(error, "");
         let names: Vec<&[u8]> = results[0].children.iter().map(|e| e.name.as_slice()).collect();
         assert_eq!(names, [&b"sub"[..]], "add access sees folders only");
+    });
+}
+
+fn search(h: &Harness) {
+    let f = Fixture::new(h, Consent::all(FULL));
+    let fake = h.fake;
+    fake.add_file(b"/s/Tax/tax-2026.pdf", b"12");
+    fake.add_file(b"/s/other.txt", b"1");
+    fake.add_file(b"/taxi.jpg", b"1");
+    block_on(async {
+        let client = f.hello_client().await;
+        let p = client.proxy();
+        let mut signals = client.signals();
+        let job = p.search(ACCOUNT_LOC, b"/s", "TAX", &no_opts()).await.unwrap();
+        let mut found = Vec::new();
+        let extra = loop {
+            match wait_signal(&mut signals, WAIT, |s| {
+                matches!(s, Signal::WalkBatch { .. } | Signal::JobFinished { .. })
+            })
+            .await
+            {
+                Some(Signal::WalkBatch { job: j, entries }) => {
+                    assert_eq!(j, job);
+                    found.extend(entries.into_iter().map(|e| {
+                        (
+                            String::from_utf8(e.path).unwrap(),
+                            String::from_utf8(e.entry.name).unwrap(),
+                            e.entry.size,
+                        )
+                    }));
+                }
+                Some(Signal::JobFinished { job: j, error, extra, .. }) => {
+                    assert_eq!((j, error.as_str()), (job, ""));
+                    break extra;
+                }
+                other => panic!("{other:?}"),
+            }
+        };
+        assert_eq!(count(&extra, "entries"), 2);
+        assert_eq!(
+            found,
+            [
+                ("Tax".to_owned(), "Tax".to_owned(), -1),
+                ("Tax/tax-2026.pdf".to_owned(), "tax-2026.pdf".to_owned(), 2)
+            ]
+        );
+        let limited = OptsBuilder::new().int("limit", 1).build();
+        let job = p.search(ACCOUNT_LOC, b"/", "tax", &limited).await.unwrap();
+        let (error, _, extra) = finished(&mut signals, job).await;
+        assert_eq!((error.as_str(), count(&extra, "entries")), ("", 1));
+        let job = p.search(ACCOUNT_LOC, b"/gone", "tax", &no_opts()).await.unwrap();
+        assert_eq!(finished(&mut signals, job).await.0, "NotFound");
+        assert_eq!(
+            error_name(&p.search("account:9", b"/s", "x", &no_opts()).await),
+            name(ErrorName::NotFound)
+        );
+        let invalid = Some("org.freedesktop.DBus.Error.InvalidArgs".to_owned());
+        assert_eq!(error_name(&p.search(ACCOUNT_LOC, b"/s", "", &no_opts()).await), invalid);
+        assert_eq!(f.probe().counters().await.unwrap().jobs, 0);
+    });
+    let f = Fixture::new(h, Consent::unknown());
+    block_on(async {
+        let c = f.hello_client().await;
+        let refused = c.proxy().search(ACCOUNT_LOC, b"/s", "x", &no_opts()).await;
+        assert_eq!(error_name(&refused), name(ErrorName::PermissionDenied), "Search needs consent");
+    });
+    let f = Fixture::new(h, at(Level::Add));
+    block_on(async {
+        let c = f.hello_client().await;
+        let mut signals = c.signals();
+        let job = c.proxy().search(ACCOUNT_LOC, b"/s", "tax", &no_opts()).await.unwrap();
+        let (error, _, extra) = finished(&mut signals, job).await;
+        assert_eq!((error.as_str(), count(&extra, "entries")), ("", 1), "add access finds folders only");
     });
 }
 

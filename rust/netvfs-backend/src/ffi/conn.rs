@@ -279,6 +279,23 @@ pub unsafe extern "C" fn list(
     })
 }
 
+pub unsafe extern "C" fn search(
+    c: *mut NvrConn,
+    root: NvbBytes,
+    needle: NvbBytes,
+    limit: u32,
+    sink: Option<NvbListSinkFn>,
+    ctx: *mut std::ffi::c_void,
+) -> *mut NvbError {
+    status(|| {
+        // SAFETY: contract.
+        let (conn, root, needle) = unsafe { (conn(c)?, slice(root), text(needle)) };
+        let mut sink = ListAdapter::new(sink.ok_or_else(|| bad("search sink"))?, ctx);
+        let (mut state, cancel) = conn.enter()?;
+        run(&cancel, state.backend.search(root, &needle, limit, &mut sink, &cancel))
+    })
+}
+
 pub unsafe extern "C" fn make_dir(c: *mut NvrConn, path: NvbBytes, exclusive: i32) -> *mut NvbError {
     status(|| {
         // SAFETY: contract.

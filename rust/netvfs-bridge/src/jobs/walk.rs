@@ -32,7 +32,7 @@ pub fn walk_extra(entries: i64) -> Extra {
     extra
 }
 
-fn stream<E: FnMut(Vec<WireWalkItem>, usize) -> bool>(
+pub(super) fn stream<E: FnMut(Vec<WireWalkItem>, usize) -> bool>(
     budget: &FlowBudget,
     cancel: &AtomicBool,
     mut emit: E,

@@ -161,6 +161,15 @@ pub struct NvbFfi {
     pub discovery_set_running: unsafe extern "C" fn(*mut NvbDiscovery, i32) -> i32,
     /// No hook call after it returns.
     pub discovery_free: unsafe extern "C" fn(*mut NvbDiscovery),
+    /// `Backend::search(root, text, limit)`; each entry's name is its path below the root.
+    pub conn_search: unsafe extern "C" fn(
+        *mut NvbConn,
+        NvbBytes,
+        NvbBytes,
+        u32,
+        Option<NvbListSinkFn>,
+        *mut c_void,
+    ) -> *mut NvbError,
 }
 
 /// `nvb_ffi_get_fn`.
@@ -174,7 +183,8 @@ mod layout {
 
     #[test]
     fn table() {
-        assert_eq!(size_of::<NvbFfi>(), 328);
+        assert_eq!(size_of::<NvbFfi>(), 336);
+        assert_eq!(offset_of!(NvbFfi, conn_search), 328);
         assert_eq!((offset_of!(NvbFfi, init), offset_of!(NvbFfi, free)), (0, 40));
         assert_eq!((offset_of!(NvbFfi, conn_new), offset_of!(NvbFfi, reply_set)), (72, 112));
         assert_eq!((offset_of!(NvbFfi, conn_open_read), offset_of!(NvbFfi, copy_across)), (232, 296));

@@ -452,6 +452,33 @@ impl Conn {
         ctx.finish(self.ffi().check(error))
     }
 
+    /// `Backend::search`: `sink` gets each batch of entries below `root` whose name holds `text`, `limit` at most, each named by its path below `root`; false stops (then `Canceled`).
+    ///
+    /// # Errors
+    /// The backend's failure, `Unsupported` without `Search`; `Internal` when the sink panicked.
+    pub fn search<F: FnMut(&[WireEntry]) -> bool>(
+        &mut self,
+        root: &[u8],
+        text: &str,
+        limit: u32,
+        sink: F,
+    ) -> Result<(), Status> {
+        let conn = self.core.ready()?;
+        let mut ctx = Ctx::new(sink);
+        // SAFETY: owner thread; `root` and `text` borrowed; the sink's context is `ctx`, unused until the call returns.
+        let error = unsafe {
+            (self.ffi().t.conn_search)(
+                conn,
+                NvbBytes::of(root),
+                NvbBytes::of(text.as_bytes()),
+                limit,
+                Some(callback::list_sink::<F>),
+                ctx.as_ctx(),
+            )
+        };
+        ctx.finish(self.ffi().check(error))
+    }
+
     /// `Backend::readLink`: the target, verbatim.
     ///
     /// # Errors

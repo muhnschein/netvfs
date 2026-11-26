@@ -1,0 +1,22 @@
+{
+    "description": "Search: the server looks for names below a folder; what it finds arrives as WalkBatch with paths below that folder",
+    "consent": "full",
+    "files": { "docs/a.txt": "hello", "docs/sub/A.TXT.bak": "x", "pics/c.jpg": "j" },
+    "steps": [
+        { "call": "Hello", "sig": "s", "args": ["contract"], "reply": ["*"] },
+        { "call": "Search", "sig": "saysa{sv}", "args": ["account:1", { "bytes": "docs" }, "a.txt", {}], "reply": ["$job"] },
+        { "signal": "WalkBatch", "args": ["$job", [
+            [{ "bytes": "a.txt" }, [{ "bytes": "a.txt" }, 1, 0, 5, "*", "*", "*", "*", "*", "*", "*", "*", "*", "*", "*"]],
+            [{ "bytes": "sub/A.TXT.bak" }, [{ "bytes": "A.TXT.bak" }, 1, 0, 1, "*", "*", "*", "*", "*", "*", "*", "*", "*", "*", "*"]]
+        ]] },
+        { "signal": "JobFinished", "args": ["$job", "", "", { "entries": 2 }] },
+        { "call": "Search", "sig": "saysa{sv}", "args": ["account:1", { "bytes": "" }, "txt", { "limit": 1 }], "reply": ["$one"] },
+        { "signal": "JobFinished", "args": ["$one", "", "", { "entries": 1 }] },
+        { "call": "Search", "sig": "saysa{sv}", "args": ["account:1", { "bytes": "nope" }, "a", {}], "reply": ["$gone"] },
+        { "signal": "JobFinished", "args": ["$gone", "NotFound", "*", {}] },
+        { "call": "Search", "sig": "saysa{sv}", "args": ["account:1", { "bytes": "docs" }, "", {}],
+          "error": "org.freedesktop.DBus.Error.InvalidArgs" },
+        { "call": "Search", "sig": "saysa{sv}", "args": ["account:1", { "bytes": "docs" }, "a", { "limit": 0 }],
+          "error": "org.freedesktop.DBus.Error.InvalidArgs" }
+    ]
+}

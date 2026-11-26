@@ -305,6 +305,7 @@ impl Default for State {
                 crate::methods::FEATURE_DRIVES.to_owned(),
                 crate::methods::FEATURE_NETWORK.to_owned(),
                 crate::methods::FEATURE_CHECK.to_owned(),
+                crate::methods::FEATURE_SEARCH.to_owned(),
             ],
             network: "wifi".to_owned(),
             drives: Vec::new(),

@@ -389,6 +389,32 @@ async fn walk_batches(
     Ok(extra)
 }
 
+pub(super) async fn run_search(
+    env: Env,
+    job: u32,
+    cancel: Arc<AtomicBool>,
+    (loc, root, folders_only): (String, Vec<u8>, bool),
+    (text, limit): (String, usize),
+) {
+    let needle = text.to_lowercase();
+    let listing =
+        env.shared.with(|s| s.tree_mut(&loc).walk(&root, -1, false)).map_err(Fail::from).map(|mut items| {
+            items.retain(|(_, e)| !folders_only || access::is_folder(e.kind, e.target_kind));
+            items.retain(|(_, e)| String::from_utf8_lossy(&e.name).to_lowercase().contains(&needle));
+            items.truncate(limit);
+            let below = if root.is_empty() { 0 } else { root.len().saturating_add(1) };
+            for (path, _) in &mut items {
+                *path = path.get(below..).unwrap_or_default().to_vec();
+            }
+            items
+        });
+    let result = match listing {
+        Ok(items) => walk_batches(&env, job, &cancel, items).await,
+        Err(f) => Err(f),
+    };
+    env.finish(job, result).await;
+}
+
 fn check_folder(
     tree: &Tree,
     (index, item): (u32, &WireCheckItem),

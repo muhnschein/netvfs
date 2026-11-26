@@ -86,6 +86,11 @@ Result Backend::checksum(const QString &, const QString &, QByteArray *)
     return unsupported("Server-side checksums");
 }
 
+Result Backend::search(const QString &, const QString &, int, ListSink *)
+{
+    return unsupported("Search");
+}
+
 Result Backend::spaceInfo(const QString &, SpaceInfo *)
 {
     return unsupported("Free space information");

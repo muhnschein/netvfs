@@ -107,6 +107,8 @@ nvb_error *connList(nvb_conn *conn, nvb_bytes dir, uint32_t batchSize, nvb_list_
 nvb_error *connReadLink(nvb_conn *conn, nvb_bytes path, nvb_blob **target) noexcept;
 nvb_error *connSpaceInfo(nvb_conn *conn, nvb_bytes path, nvb_space *out) noexcept;
 nvb_error *connChecksum(nvb_conn *conn, nvb_bytes path, nvb_bytes algorithm, nvb_blob **digest) noexcept;
+nvb_error *connSearch(nvb_conn *conn, nvb_bytes root, nvb_bytes text, uint32_t limit, nvb_list_sink_fn sink,
+                      void *ctx) noexcept;
 nvb_error *connMakeDir(nvb_conn *conn, nvb_bytes path, int32_t exclusive) noexcept;
 nvb_error *connRemoveFile(nvb_conn *conn, nvb_bytes path) noexcept;
 nvb_error *connRemoveDir(nvb_conn *conn, nvb_bytes path) noexcept;

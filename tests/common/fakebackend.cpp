@@ -56,7 +56,8 @@ Capabilities FakeServer::fullCapabilities()
                    Capability::SetModified, Capability::SetModifiedOnUpload, Capability::ReadHandles,
                    Capability::EfficientRanges, Capability::WriteResume, Capability::AtomicReplace,
                    Capability::NativeNoReplace, Capability::ServerCopy, Capability::ServerCopyRecursive,
-                   Capability::RecursiveDelete, Capability::SpaceInfo, Capability::Checksums };
+                   Capability::RecursiveDelete, Capability::SpaceInfo, Capability::Checksums,
+                   Capability::Search };
     caps.checksumAlgorithms = QStringList({ QStringLiteral("sha256"), QStringLiteral("md5") });
     caps.maxNameBytes = 255;
     caps.maxReadChunk = ChunkSize;
@@ -1047,6 +1048,50 @@ Result FakeBackend::copy(const QString &from, const QString &to, const CopyOptio
     for (auto it = copies.constBegin(); it != copies.constEnd(); ++it)
         m_server->nodes.insert(it.key(), it.value());
     return r;
+}
+
+Result FakeBackend::search(const QString &root, const QString &text, int limit, ListSink *sink)
+{
+    QVector<Entry> found;
+    {
+        QMutexLocker lock(&m_server->mutex);
+        QString k;
+        Result r = key(root, &k);
+        if (r.ok())
+            r = begin(QStringLiteral("search:") + k);
+        if (r.ok() && !has(Capability::Search))
+            r = unsupported("Search");
+        QString resolved;
+        if (r.ok())
+            r = m_server->resolve(k, true, &resolved);
+        if (!r.ok())
+            return r;
+        if (!resolved.isEmpty() && !m_server->nodes.contains(resolved))
+            return notFound(k);
+        const QString prefix = resolved.isEmpty() ? QString() : resolved + QLatin1Char('/');
+        QStringList paths = m_server->nodes.keys();
+        std::sort(paths.begin(), paths.end());
+        for (const QString &path : qAsConst(paths)) {
+            if (found.size() >= limit)
+                break;
+            if (path.isEmpty() || !path.startsWith(prefix))
+                continue;
+            const QString name = path.mid(path.lastIndexOf(QLatin1Char('/')) + 1);
+            if (!name.contains(text, Qt::CaseInsensitive))
+                continue;
+            Entry entry = entryFor(path, m_server->nodes.value(path), false);
+            entry.name = path.mid(prefix.size());
+            found << entry;
+        }
+    }
+    const int batchSize = 256;
+    for (int start = 0; start < found.size(); start += batchSize) {
+        if (m_canceled)
+            return Result(Error::Canceled);
+        if (!sink->entries(found.mid(start, batchSize)))
+            return Result(Error::Canceled, QStringLiteral("The search was stopped"));
+    }
+    return Result::success();
 }
 
 Result FakeBackend::checksum(const QString &path, const QString &algorithm, QByteArray *digest)

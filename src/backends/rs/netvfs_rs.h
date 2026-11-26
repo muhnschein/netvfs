@@ -89,6 +89,9 @@ typedef struct nvr_table {
     nvb_error *(*key_generate)(nvr_key **out);
     nvb_error *(*key_import)(nvb_bytes file, nvb_bytes passphrase, nvr_key **out);
     nvb_error *(*key_describe)(nvb_bytes private_key, nvr_key **out);
+
+    nvb_error *(*search)(nvr_conn *c, nvb_bytes root, nvb_bytes text, uint32_t limit,
+                         nvb_list_sink_fn sink, void *ctx);
 } nvr_table;
 
 typedef const nvr_table *(*nvr_get_fn)(void);

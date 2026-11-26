@@ -333,6 +333,21 @@
     <signal name="NetworkChanged">
       <arg name="network" type="s"/>
     </signal>
+
+    <!-- Search (feature "search"): the server looks for entries below root
+      whose name holds text, as the server matches it (for WebDAV: any case).
+      Only for locations whose Capabilities name "Search"; others fail with
+      Unsupported. text: 1 to 256 characters. opts: "limit" (most results, 1
+      to 2000; default 2000). Results arrive as WalkBatch, each with its path
+      below root, in the server's order. Ends with JobFinished, extra
+      "entries" (x). -->
+    <method name="Search">
+      <arg name="loc" type="s" direction="in"/>
+      <arg name="root" type="ay" direction="in"/>
+      <arg name="text" type="s" direction="in"/>
+      <arg name="opts" type="a{sv}" direction="in"/>
+      <arg name="job" type="u" direction="out"/>
+    </method>
   </interface>
   <interface name="org.freedesktop.DBus.Introspectable">
     <method name="Introspect">

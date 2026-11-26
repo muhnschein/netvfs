@@ -39,6 +39,14 @@ pub trait DynBackend: Send {
         sink: &'a mut dyn ListSink,
         cancel: &'a CancelToken,
     ) -> Call<'a, Result<(), Status>>;
+    fn search<'a>(
+        &'a mut self,
+        root: &'a [u8],
+        text: &'a str,
+        limit: u32,
+        sink: &'a mut dyn ListSink,
+        cancel: &'a CancelToken,
+    ) -> Call<'a, Result<(), Status>>;
     fn make_dir<'a>(
         &'a mut self,
         path: &'a [u8],
@@ -241,6 +249,17 @@ where
         cancel: &'a CancelToken,
     ) -> Call<'a, Result<(), Status>> {
         Box::pin(async move { Backend::list(self, dir, options, sink, cancel).await })
+    }
+
+    fn search<'a>(
+        &'a mut self,
+        root: &'a [u8],
+        text: &'a str,
+        limit: u32,
+        sink: &'a mut dyn ListSink,
+        cancel: &'a CancelToken,
+    ) -> Call<'a, Result<(), Status>> {
+        Box::pin(async move { Backend::search(self, root, text, limit, sink, cancel).await })
     }
 
     fn make_dir<'a>(

@@ -15,6 +15,7 @@ use std::sync::{Arc, LazyLock, Mutex, MutexGuard, PoisonError};
 use tree::Tree;
 
 const CHUNK: usize = 256 * 1024;
+const SEARCH_BATCH: usize = 256;
 const CHUNK_BYTES: u64 = 256 * 1024;
 const CAPACITY: u64 = 1 << 40;
 
@@ -182,8 +183,8 @@ impl Backend for Mem {
     fn capabilities(&self) -> Capabilities {
         use Capability::{
             AtomicReplace, Checksums, ETags, EfficientRanges, Hardlinks, NativeNoReplace, Ownership,
-            PosixModes, ReadHandles, ServerCopy, ServerCopyRecursive, SetModified, SetModifiedOnUpload,
-            SpaceInfo, Symlinks, WriteResume,
+            PosixModes, ReadHandles, Search, ServerCopy, ServerCopyRecursive, SetModified,
+            SetModifiedOnUpload, SpaceInfo, Symlinks, WriteResume,
         };
         if let Ok(session) = self.session() {
             session.hook("capabilities");
@@ -206,6 +207,7 @@ impl Backend for Mem {
                 SpaceInfo,
                 Checksums,
                 ETags,
+                Search,
             ]
             .into(),
             checksum_algorithms: vec!["sha256".to_owned()],
@@ -238,6 +240,24 @@ impl Backend for Mem {
     ) -> Result<(), Status> {
         let entries = self.enter("list", cancel).await?.tree().list(dir, options.resolve_symlink_types)?;
         for batch in entries.chunks(options.batch_size.max(1)) {
+            cancel.check()?;
+            if !sink.entries(batch) {
+                return Err(Status::canceled());
+            }
+        }
+        Ok(())
+    }
+
+    async fn search(
+        &mut self,
+        root: &[u8],
+        text: &str,
+        limit: u32,
+        sink: &mut dyn ListSink,
+        cancel: &CancelToken,
+    ) -> Result<(), Status> {
+        let found = self.enter("search", cancel).await?.tree().search(root, text, limit)?;
+        for batch in found.chunks(SEARCH_BATCH) {
             cancel.check()?;
             if !sink.entries(batch) {
                 return Err(Status::canceled());

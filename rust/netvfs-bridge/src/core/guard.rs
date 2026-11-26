@@ -135,7 +135,6 @@ impl Core {
                 let Some((reply, _)) = self.admit(reply, &loc, &path, Op::Unrestricted) else { return };
                 self.on_remove_tree(sid, reply, (&loc, lane), path);
             }
-            Call::Check { loc, items, lane } => self.on_check_call(sid, reply, &loc, items, lane),
             Call::Walk { loc, path, opts } => {
                 let Some((reply, a)) = self.admit(reply, &loc, &path, Op::Browse) else { return };
                 self.on_walk(sid, reply, (&loc, lane), path, (opts, a.verdict == Verdict::FoldersOnly));
@@ -146,7 +145,21 @@ impl Core {
         }
     }
 
-    fn on_check_call(
+    pub(super) fn on_search_call(
+        &mut self,
+        sid: SessionId,
+        reply: ReplyTo,
+        (loc, lane): (&LocId, Lane),
+        path: NPath,
+        text: String,
+        limit: u32,
+    ) {
+        let Some((reply, a)) = self.admit(reply, loc, &path, Op::Browse) else { return };
+        let only = a.verdict == Verdict::FoldersOnly;
+        self.on_search(sid, reply, (loc, lane), path, (text, limit, only));
+    }
+
+    pub(super) fn on_check_call(
         &mut self,
         sid: SessionId,
         reply: ReplyTo,

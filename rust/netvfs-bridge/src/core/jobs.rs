@@ -7,6 +7,7 @@ use crate::jobs::check::{check, check_batches};
 use crate::jobs::fd::{FdAccess, check_transfer_fd};
 use crate::jobs::progress::JobProgress;
 use crate::jobs::remove::remove_tree;
+use crate::jobs::search::search;
 use crate::jobs::transfer::{Transfer, transfer};
 use crate::jobs::walk::{walk, walk_batches};
 use crate::locations::connector::Connector;
@@ -156,6 +157,28 @@ impl Core {
             let outbox: Outbox = outbox;
             let what = (path.as_bytes(), &opts, folders_only);
             walk(conn, what, outbox.flow(), cancel, walk_batches(&outbox, job))
+        });
+    }
+
+    pub(super) fn on_search(
+        &mut self,
+        sid: SessionId,
+        reply: ReplyTo,
+        (loc, lane): (&LocId, Lane),
+        path: NPath,
+        (text, limit, folders_only): (String, u32, bool),
+    ) {
+        if let Err(status) = self.pool_for(loc.as_str()) {
+            reply.fail(&status);
+            return;
+        }
+        let Some(outbox) = self.sessions.get(&sid).map(|s| s.outbox.clone()) else { return };
+        let Some(started) = self.start_job(sid, reply) else { return };
+        let job = started.0;
+        self.run_job(sid, (loc, lane), started, move |conn, cancel| {
+            let outbox: Outbox = outbox;
+            let what = (path.as_bytes(), text.as_str(), limit, folders_only);
+            search(conn, what, outbox.flow(), cancel, walk_batches(&outbox, job))
         });
     }
 

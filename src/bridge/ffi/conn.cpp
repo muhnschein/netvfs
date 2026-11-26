@@ -138,6 +138,21 @@ nvb_error *connList(nvb_conn *conn, nvb_bytes dir, uint32_t batchSize, nvb_list_
     });
 }
 
+nvb_error *connSearch(nvb_conn *conn, nvb_bytes root, nvb_bytes text, uint32_t limit, nvb_list_sink_fn sink,
+                      void *ctx) noexcept
+{
+    return guarded([conn, root, text, limit, sink, ctx]() {
+        Backend *backend = backendOf(conn);
+        if (!sink)
+            throw std::invalid_argument("no search sink");
+        SinkAdapter adapter([sink, ctx](const nvb_entry *entries, size_t n) {
+            return sink(ctx, entries, n) != 0;
+        });
+        return backend->search(toPath(root), toUtf8String(text), static_cast<int>(std::min<uint32_t>(limit, INT_MAX)),
+                               &adapter);
+    });
+}
+
 nvb_error *connReadLink(nvb_conn *conn, nvb_bytes path, nvb_blob **target) noexcept
 {
     clearOut(target);
