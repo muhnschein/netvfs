@@ -82,7 +82,7 @@ const fn method(
 use Lane::{Bulk, Interactive, Stream};
 
 /// The methods, in the order of `args.cpp` and of the XML.
-pub const METHODS: [MethodInfo; 37] = [
+pub const METHODS: [MethodInfo; 40] = [
     method("Hello", "s", "s", Interactive, false),
     method("GetConsent", "", "s", Interactive, false),
     method("RequestConsent", "", "", Interactive, false),
@@ -120,10 +120,13 @@ pub const METHODS: [MethodInfo; 37] = [
     method("ListDrives", "", "a(ssaya{sv})", Interactive, false),
     method("Mount", "s", "ay", Interactive, false),
     method("Unmount", "s", "", Interactive, false),
+    method("Check", "sa(ayayx)s", "u", Bulk, true),
+    method("GetNetwork", "", "s", Interactive, false),
+    method("Search", "saysa{sv}", "u", Bulk, true),
 ];
 
 /// The signals as `(name, signature)`, in the order of the XML.
-pub const SIGNALS: [(&str, &str); 9] = [
+pub const SIGNALS: [(&str, &str); 11] = [
     ("ConsentChanged", "s"),
     ("LocationsChanged", ""),
     ("NearbyChanged", "a(sssq)"),
@@ -133,12 +136,20 @@ pub const SIGNALS: [(&str, &str); 9] = [
     ("WalkBatch", "ua(ay(ayyyxxxxixxssqays))"),
     ("JobFinished", "ussa{sv}"),
     ("DrivesChanged", ""),
+    ("CheckBatch", "ua(us(ayyyxxxxixxssqays)ba(ayyyxxxxixxssqays))"),
+    ("NetworkChanged", "s"),
 ];
 
 /// `GetFeatures`: the bridge opens Settings > Storage (`OpenStorageSettings`).
 pub const FEATURE_STORAGE_SETTINGS: &str = "storage-settings";
 /// `GetFeatures`: `ListDrives`, `Mount`, `Unmount` and `DrivesChanged`.
 pub const FEATURE_DRIVES: &str = "drives";
+/// `GetFeatures`: `GetNetwork` and `NetworkChanged`.
+pub const FEATURE_NETWORK: &str = "network";
+/// `GetFeatures`: `Check` and `CheckBatch`.
+pub const FEATURE_CHECK: &str = "check";
+/// `GetFeatures`: `Search`, for locations with the `Search` capability.
+pub const FEATURE_SEARCH: &str = "search";
 
 /// The method called `name`.
 #[must_use]
@@ -196,6 +207,9 @@ mod tests {
             "ListDrives",
             "Mount",
             "Unmount",
+            "Check",
+            "GetNetwork",
+            "Search",
         ];
         let names: Vec<&str> = METHODS.iter().map(|m| m.name).collect();
         assert_eq!(names, expected);
@@ -216,7 +230,8 @@ mod tests {
                 "OpenStorageSettings",
                 "ListDrives",
                 "Mount",
-                "Unmount"
+                "Unmount",
+                "GetNetwork"
             ]
         );
     }
@@ -227,7 +242,17 @@ mod tests {
         assert_eq!(of(Stream), ["OpenRead", "Read", "ReadAhead", "Close"]);
         assert_eq!(
             of(Bulk),
-            ["Checksum", "ServerCopy", "Upload", "Download", "CopyAcross", "RemoveTree", "Walk"]
+            [
+                "Checksum",
+                "ServerCopy",
+                "Upload",
+                "Download",
+                "CopyAcross",
+                "RemoveTree",
+                "Walk",
+                "Check",
+                "Search"
+            ]
         );
     }
 

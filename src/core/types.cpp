@@ -23,7 +23,7 @@ struct CapabilityName {
     const char *name;
 };
 
-constexpr std::array<CapabilityName, 21> capabilityNames = { {
+constexpr std::array<CapabilityName, 23> capabilityNames = { {
     { Capability::Symlinks, "Symlinks" },
     { Capability::Hardlinks, "Hardlinks" },
     { Capability::PosixModes, "PosixModes" },
@@ -45,9 +45,11 @@ constexpr std::array<CapabilityName, 21> capabilityNames = { {
     { Capability::WindowsNames, "WindowsNames" },
     { Capability::ShareEnumeration, "ShareEnumeration" },
     { Capability::ETags, "ETags" },
+    { Capability::DeepETags, "DeepETags" },
+    { Capability::Search, "Search" },
 } };
-static_assert(capabilityNames.size() == static_cast<std::size_t>(Capability::ETags) + 1
-                  && capabilityNames.back().capability == Capability::ETags,
+static_assert(capabilityNames.size() == static_cast<std::size_t>(Capability::Search) + 1
+                  && capabilityNames.back().capability == Capability::Search,
               "one name per capability");
 }
 

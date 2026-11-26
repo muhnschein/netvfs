@@ -196,6 +196,44 @@ pub struct WireWalkItem {
     pub entry: WireEntry,
 }
 
+/// `(ayayx)` of `Check`: a folder with the version the consumer knows.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+pub struct WireCheckItem {
+    /// Path of the folder.
+    pub path: Vec<u8>,
+    /// Etag known for it, empty for none.
+    pub etag: Vec<u8>,
+    /// Modification time known for it in ms, -1 for none.
+    pub mtime_ms: i64,
+}
+
+/// Whether a folder that is `now` differs from the version a `Check` item knows (`etag`, `mtime_ms` with -1 for none): its etag when it has one, else its modification time, which never counts as unchanged within [`crate::limits::CHECK_RACY_MS`] of `now_ms`.
+#[must_use]
+pub fn check_changed(etag: &[u8], mtime_ms: i64, now: &WireEntry, now_ms: i64) -> bool {
+    if !now.etag.is_empty() {
+        return now.etag != etag;
+    }
+    if now.mtime_ms < 0 || now.mtime_ms > now_ms.saturating_sub(crate::limits::CHECK_RACY_MS) {
+        return true;
+    }
+    now.mtime_ms != mtime_ms
+}
+
+/// `(us(ayyyxxxxixxssqays)ba(ayyyxxxxixxssqays))` of `CheckBatch`: one folder of a `Check` job.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+pub struct WireCheckResult {
+    /// Index of the folder among the items of the call.
+    pub index: u32,
+    /// Bare error name, empty on success.
+    pub error: String,
+    /// The folder as it is now.
+    pub entry: WireEntry,
+    /// Whether the folder changed and was listed.
+    pub listed: bool,
+    /// Its entries when listed; a folder's entries may span results with the same index.
+    pub children: Vec<WireEntry>,
+}
+
 /// An `a{sv}` argument built from plain Rust values.
 pub type Opts = HashMap<String, Value<'static>>;
 
@@ -327,6 +365,35 @@ mod tests {
         assert_eq!(WireNearby::SIGNATURE.to_string(), "(sssq)");
         assert_eq!(WireWalkItem::SIGNATURE.to_string(), "(ay(ayyyxxxxixxssqays))");
         assert_eq!(WireDrive::SIGNATURE.to_string(), "(ssaya{sv})");
+        assert_eq!(WireCheckItem::SIGNATURE.to_string(), "(ayayx)");
+        assert_eq!(WireCheckResult::SIGNATURE.to_string(), "(us(ayyyxxxxixxssqays)ba(ayyyxxxxixxssqays))");
+    }
+
+    #[test]
+    fn a_checked_folder_changed_by_its_etag_or_else_its_date() {
+        const NOW: i64 = 1_800_000_000_000;
+        const OLD: i64 = 1_700_000_000_000;
+        let entry = |etag: &[u8], mtime_ms| {
+            let mut e = WireEntry::unknown(b"d", entry_kind::DIRECTORY);
+            e.etag = etag.to_vec();
+            e.mtime_ms = mtime_ms;
+            e
+        };
+        assert!(!check_changed(b"e1", -1, &entry(b"e1", NOW), NOW), "with an etag the date does not matter");
+        assert!(check_changed(b"e1", OLD, &entry(b"e2", OLD), NOW));
+        assert!(check_changed(b"", OLD, &entry(b"e2", OLD), NOW));
+        assert!(!check_changed(b"", OLD, &entry(b"", OLD), NOW));
+        assert!(!check_changed(b"gone", OLD, &entry(b"", OLD), NOW), "a server that lost its etags");
+        assert!(check_changed(b"", OLD, &entry(b"", OLD + 1), NOW));
+        assert!(check_changed(b"", OLD, &entry(b"", OLD - 1), NOW));
+        assert!(check_changed(b"", -1, &entry(b"", OLD), NOW));
+        assert!(check_changed(b"", -1, &entry(b"", -1), NOW), "an unknown date is never unchanged");
+        assert!(!check_changed(b"", 0, &entry(b"", 0), NOW), "the epoch is a date like any other");
+        let racy = NOW - crate::limits::CHECK_RACY_MS + 1;
+        assert!(check_changed(b"", racy, &entry(b"", racy), NOW), "a date under 2 s old");
+        let settled = NOW - crate::limits::CHECK_RACY_MS;
+        assert!(!check_changed(b"", settled, &entry(b"", settled), NOW));
+        assert!(check_changed(b"", i64::MIN + 5, &entry(b"", NOW), i64::MIN + 5), "no overflow at the edge");
     }
 
     #[test]

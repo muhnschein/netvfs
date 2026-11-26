@@ -227,7 +227,7 @@ private slots:
     void capabilityNames()
     {
         const QVector<Capability> all = allCapabilities();
-        QCOMPARE(all.size(), static_cast<int>(Capability::ETags) + 1);
+        QCOMPARE(all.size(), static_cast<int>(Capability::Search) + 1);
         QSet<QString> seen;
         for (const Capability c : all) {
             const QString name = capabilityName(c);
@@ -245,6 +245,8 @@ private slots:
         QVERIFY(!capabilityFromName(QString(), nullptr));
         QCOMPARE(untouched, Capability::Symlinks);
         QVERIFY(capabilityFromName(QStringLiteral("ETags"), nullptr));
+        QCOMPARE(capabilityName(Capability::DeepETags), QStringLiteral("DeepETags"));
+        QCOMPARE(capabilityName(Capability::Search), QStringLiteral("Search"));
 
         Capabilities caps;
         QVERIFY(!caps.has(Capability::SpaceInfo));

@@ -3,6 +3,7 @@
 use crate::errors::ErrorName;
 use crate::limits::MAX_PATH;
 use crate::wire::{WireEntry, entry_flags};
+use sha2::Digest as _;
 use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -80,13 +81,14 @@ fn is_under(path: &[u8], dir: &[u8]) -> bool {
 pub struct Tree {
     nodes: BTreeMap<Vec<u8>, Node>,
     pub now_ms: i64,
+    pub deep_etags: bool,
 }
 
 impl Default for Tree {
     fn default() -> Self {
         let mut nodes = BTreeMap::new();
         nodes.insert(Vec::new(), Node::Dir { mtime_ms: 1_700_000_000_000, mode: 0o755 });
-        Self { nodes, now_ms: 1_700_000_000_000 }
+        Self { nodes, now_ms: 1_700_000_000_000, deep_etags: false }
     }
 }
 
@@ -165,6 +167,9 @@ impl Tree {
             Node::Dir { mtime_ms, mode } => {
                 e.mtime_ms = *mtime_ms;
                 e.mode = *mode;
+                if self.deep_etags {
+                    e.etag = self.deep_etag(path);
+                }
             }
             Node::Link { target } => {
                 e.size = i64::try_from(target.len()).unwrap_or(i64::MAX);
@@ -175,6 +180,23 @@ impl Tree {
             }
         }
         e
+    }
+
+    fn deep_etag(&self, dir: &[u8]) -> Vec<u8> {
+        let mut hash = sha2::Sha256::new();
+        for (path, node) in self.nodes.iter().filter(|(p, _)| is_under(p, dir)) {
+            hash.update(path);
+            hash.update([0, node.kind()]);
+            let (size, mtime_ms) = match node {
+                Node::File { data, mtime_ms, .. } => (data.len(), *mtime_ms),
+                Node::Dir { mtime_ms, .. } => (0, *mtime_ms),
+                Node::Link { target } => (target.len(), 0),
+            };
+            hash.update(size.to_le_bytes());
+            hash.update(mtime_ms.to_le_bytes());
+        }
+        let digest = hash.finalize();
+        digest.iter().take(8).flat_map(|b| format!("{b:02x}").into_bytes()).collect()
     }
 
     pub fn stat(&self, path: &[u8], follow: bool) -> TResult<WireEntry> {

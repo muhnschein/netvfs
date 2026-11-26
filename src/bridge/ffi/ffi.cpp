@@ -232,6 +232,7 @@ const nvb_ffi Table = {
     discoveryNew,
     discoverySetRunning,
     discoveryFree,
+    connSearch,
 };
 
 }

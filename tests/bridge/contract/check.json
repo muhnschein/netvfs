@@ -1,0 +1,30 @@
+{
+    "description": "Check: many folders at once, each listed only when it changed since the version given; GetNetwork names the kind of network",
+    "consent": "full",
+    "files": { "docs/a.txt": "hello", "pics/c.jpg": "j" },
+    "steps": [
+        { "call": "Hello", "sig": "s", "args": ["contract"], "reply": ["*"] },
+        { "call": "SetAttributes", "sig": "saya{sv}", "args": ["account:1", { "bytes": "docs" }, { "mtimeMs": 1000000000000 }],
+          "reply": [] },
+        { "call": "SetAttributes", "sig": "saya{sv}", "args": ["account:1", { "bytes": "pics" }, { "mtimeMs": 1000000000000 }],
+          "reply": [] },
+        { "call": "Check", "sig": "sa(ayayx)s",
+          "args": ["account:1", [[{ "bytes": "docs" }, { "bytes": "" }, 1000000000000],
+                                 [{ "bytes": "pics" }, { "bytes": "" }, 999999999999],
+                                 [{ "bytes": "nope" }, { "bytes": "" }, -1]], ""],
+          "reply": ["$job"] },
+        { "signal": "CheckBatch", "args": ["$job", [
+            [0, "", [{ "bytes": "docs" }, 2, 0, "*", 1000000000000, "*", "*", "*", "*", "*", "*", "*", "*", "*", "*"], false, []],
+            [1, "", [{ "bytes": "pics" }, 2, 0, "*", 1000000000000, "*", "*", "*", "*", "*", "*", "*", "*", "*", "*"], true, [
+                [{ "bytes": "c.jpg" }, 1, 0, 1, "*", "*", "*", "*", "*", "*", "*", "*", "*", "*", "*"]
+            ]],
+            [2, "NotFound", "*", false, []]
+        ]] },
+        { "signal": "JobFinished", "args": ["$job", "", "", { "folders": 3, "listed": 1 }] },
+        { "call": "Check", "sig": "sa(ayayx)s", "args": ["account:1", [], ""],
+          "error": "org.freedesktop.DBus.Error.InvalidArgs" },
+        { "call": "Check", "sig": "sa(ayayx)s", "args": ["account:2", [[{ "bytes": "docs" }, { "bytes": "" }, -1]], ""],
+          "error": "org.netvfs.Error.NotFound" },
+        { "call": "GetNetwork", "sig": "", "args": [], "reply": ["*"] }
+    ]
+}

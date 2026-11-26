@@ -94,6 +94,9 @@ public:
 
     virtual Result copy(const QString &from, const QString &to, const CopyOptions &options);
     virtual Result checksum(const QString &path, const QString &algorithm, QByteArray *digest);
+    // Entries below root whose name holds text, as the server matches it, limit at most; each entry's name is its
+    // path below root. Needs Capability::Search.
+    virtual Result search(const QString &root, const QString &text, int limit, ListSink *sink);
     virtual Result spaceInfo(const QString &dir, SpaceInfo *out);
     virtual Result keepAlive() = 0;
 

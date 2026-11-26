@@ -42,6 +42,7 @@ public:
 
     Result copy(const QString &from, const QString &to, const CopyOptions &options) override;
     Result checksum(const QString &path, const QString &algorithm, QByteArray *digest) override;
+    Result search(const QString &root, const QString &text, int limit, ListSink *sink) override;
     Result spaceInfo(const QString &dir, SpaceInfo *out) override;
     Result keepAlive() override;
 

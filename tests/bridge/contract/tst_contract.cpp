@@ -135,11 +135,14 @@ void tst_Contract::signalsOfTheXml()
 {
     const XmlInterface xml = parseInterface(readFile(ContractDir + QStringLiteral("/org.netvfs.Bridge1.xml")),
                                             QStringLiteral("org.netvfs.Bridge1"));
-    const QStringList expectedSignals = { "ConsentChanged", "DrivesChanged", "JobFinished", "JobProgress",
-                                          "ListBatch", "ListDone", "LocationsChanged", "NearbyChanged",
-                                          "WalkBatch" };
+    const QStringList expectedSignals = { "CheckBatch", "ConsentChanged", "DrivesChanged", "JobFinished",
+                                          "JobProgress", "ListBatch", "ListDone", "LocationsChanged",
+                                          "NearbyChanged", "NetworkChanged", "WalkBatch" };
     QCOMPARE(xml.signalSignatures.keys(), expectedSignals);
     QCOMPARE(xml.signalSignatures.value("ListBatch"), QByteArray("ua(ayyyxxxxixxssqays)"));
+    QCOMPARE(xml.signalSignatures.value("CheckBatch"),
+             QByteArray("ua(us(ayyyxxxxixxssqays)ba(ayyyxxxxixxssqays))"));
+    QCOMPARE(xml.signalSignatures.value("NetworkChanged"), QByteArray("s"));
 }
 
 void tst_Contract::unixFdPassing()

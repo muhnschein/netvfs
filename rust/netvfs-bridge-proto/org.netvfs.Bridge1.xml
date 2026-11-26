@@ -299,6 +299,55 @@
     <method name="Unmount">
       <arg name="drive" type="s" direction="in"/>
     </method>
+
+    <!-- Check (feature "check"): many folders at once, for keeping a
+      copy of their listings fresh. Each item names a folder with the etag
+      ("" for none) and the modification time in ms (-1 for none) the consumer
+      knows. The bridge stats every folder in order and lists it only when it
+      changed: its etag differs when it has one, else its modification time
+      differs or is less than 2 s old. One CheckBatch result per folder, in
+      the order asked: its index among the items, its error ("" on success,
+      else the bare error name, entry and children empty), its entry as it is
+      now, whether it was listed and, if so, its entries; a long listing spans
+      results with the same index. At most 1024 items. Ends with JobFinished,
+      extra "folders" (x, checked) and "listed" (x). -->
+    <method name="Check">
+      <arg name="loc" type="s" direction="in"/>
+      <arg name="items" type="a(ayayx)" direction="in"/>
+      <arg name="lane" type="s" direction="in"/>
+      <arg name="job" type="u" direction="out"/>
+    </method>
+    <signal name="CheckBatch">
+      <arg name="job" type="u"/>
+      <arg name="results" type="a(us(ayyyxxxxixxssqays)ba(ayyyxxxxixxssqays))"/>
+    </signal>
+
+    <!-- Network (feature "network"): the kind of network the phone uses now,
+      from Connman's first connected service that is no VPN: "wifi",
+      "ethernet", "mobile", "other", "none" (no connected service) or
+      "unknown" (Connman cannot be asked). Needs no consent. NetworkChanged: the kind changed; sent once
+      the consumer has asked. -->
+    <method name="GetNetwork">
+      <arg name="network" type="s" direction="out"/>
+    </method>
+    <signal name="NetworkChanged">
+      <arg name="network" type="s"/>
+    </signal>
+
+    <!-- Search (feature "search"): the server looks for entries below root
+      whose name holds text, as the server matches it (for WebDAV: any case).
+      Only for locations whose Capabilities name "Search"; others fail with
+      Unsupported. text: 1 to 256 characters. opts: "limit" (most results, 1
+      to 2000; default 2000). Results arrive as WalkBatch, each with its path
+      below root, in the server's order. Ends with JobFinished, extra
+      "entries" (x). -->
+    <method name="Search">
+      <arg name="loc" type="s" direction="in"/>
+      <arg name="root" type="ay" direction="in"/>
+      <arg name="text" type="s" direction="in"/>
+      <arg name="opts" type="a{sv}" direction="in"/>
+      <arg name="job" type="u" direction="out"/>
+    </method>
   </interface>
   <interface name="org.freedesktop.DBus.Introspectable">
     <method name="Introspect">

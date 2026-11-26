@@ -13,6 +13,15 @@ pub(super) enum DriveCall {
 }
 
 impl Core {
+    pub(super) fn on_get_network(&mut self, sid: SessionId, reply: ReplyTo) {
+        let Some((op, _cancel)) = self.start_request(sid, reply) else { return };
+        let (network, tx) = (Rc::clone(&self.network), self.tx.clone());
+        tokio::task::spawn_local(async move {
+            let kind = network.kind().await;
+            drop(tx.send(Event::Done { sid, op, result: Ok(Reply::Text(kind)) }));
+        });
+    }
+
     pub(super) fn on_drive_call(&mut self, sid: SessionId, reply: ReplyTo, call: DriveCall) {
         let Some((op, _cancel)) = self.start_request(sid, reply) else { return };
         let (drives, tx) = (Rc::clone(&self.drives), self.tx.clone());

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Apps can keep a list of a server's file names fresh with far fewer requests: the bridge checks many folders in one call and lists only those that changed. On Nextcloud and ownCloud a whole unchanged branch is known from one folder's version. For Nextcloud, apps can also let the server search file names. Apps need an update to use this, such as the next Lautta.
+- Apps can ask the bridge whether the phone is on Wi-Fi, mobile data or no network, so they can keep heavy work off mobile data.
 - WebDAV accounts, such as Nextcloud, over HTTPS in *Settings › Accounts* and for apps through the bridge. Connections use TLS 1.3 only. A certificate the phone does not trust can be accepted once by its fingerprint; it is then checked on every connection.
 - FTPS accounts (FTP over TLS) in *Settings › Accounts* and for apps through the bridge. Only explicit TLS 1.3 with protected transfers: plain FTP is refused. Server certificates are trusted as for WebDAV.
 - Backups to WebDAV and FTPS servers in *Settings › Backup*: manual, scheduled and restore, as for SFTP and SMB.

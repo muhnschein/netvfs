@@ -37,6 +37,7 @@ pub const DEFAULT_CAPS: &[&str] = &[
     "ServerCopy",
     "SpaceInfo",
     "Checksums",
+    "Search",
 ];
 
 /// A fake bridge. Cheap to clone; clones share all state.
@@ -371,6 +372,27 @@ impl FakeBridge {
     /// What `GetFeatures` answers; by default every feature.
     pub fn set_features(&self, features: &[&str]) {
         self.shared.with(|s| s.features = features.iter().map(|f| (*f).to_owned()).collect());
+    }
+
+    /// What `GetNetwork` answers (`wifi` at first); tells every client (`NetworkChanged`).
+    pub async fn set_network(&self, kind: &str) {
+        self.shared.with(|s| kind.clone_into(&mut s.network));
+        self.shared.broadcast_network().await;
+    }
+
+    /// The fake's clock for `loc`: new items get this date, and `Check` takes it for now.
+    pub fn set_now_ms(&self, loc: &str, now_ms: i64) {
+        self.shared.with(|s| s.tree_mut(loc).now_ms = now_ms);
+    }
+
+    /// Whether folders of `loc` carry an etag that changes with anything below them, as Nextcloud's do.
+    pub fn set_deep_etags(&self, loc: &str, on: bool) {
+        self.shared.with(|s| s.tree_mut(loc).deep_etags = on);
+    }
+
+    /// Sets the modification time of an item of `loc`.
+    pub fn set_mtime(&self, loc: &str, path: &[u8], mtime_ms: i64) {
+        self.shared.with(|s| drop(s.tree_mut(loc).set_attributes(path, None, Some(mtime_ms))));
     }
 
     /// Replaces the drives `ListDrives` lists and tells every client

@@ -104,7 +104,10 @@ Trust model: bridge acts on netvfs accounts for a consumer, at the level the use
 - Handoff: Settings account page, add-account flow, Settings → Storage, access request, via platform settings D-Bus per `/usr/share/netvfs/bridge/handoff.conf`. Sandboxed app can't: jolla-settings has no URL scheme, `com.jolla.settings.ui` open only to a few platform apps' profiles.
 - Drives: consumer can't reach UDisks2. Bridge lists SD (`flash_sd` medium) and USB block devices with mountable filesystem or locked LUKS, not `HintSystem`/`HintIgnore`; internal eMMC (`flash_mmc`) never. Mount with `auth.no_user_interaction` (UDisks2 picks `/run/media/<user>`); acts only on a drive `ListDrives` lists now. Locked LUKS: `Unsupported`, Settings unlocks; no passphrase through bridge. Polkit on 5.2 allows mount and unmount-others to anyone; eject and power-off need `auth_admin`: not offered. System bus only on first drive call.
 - Location ids opaque: `account:<n>`.
-- `GetFeatures` names extras (`storage-settings`, `drives`) so consumer shows an action only where it works; unknown names ignored.
+- `GetFeatures` names extras (`storage-settings`, `drives`, `network`, `check`, `search`) so consumer shows an action only where it works; unknown names ignored.
+- `Check`: ≤ 1024 folders per call, each with etag and modification time consumer knows. Bridge stats each, lists only changed ones: etag differs when folder has one, else time differs or is < 2 s old (racy). One `CheckBatch` result per folder, by index; access level per folder as `List`. For consumers keeping a name index: one D-Bus call per batch, one request per unchanged folder.
+- `Search`: location with capability `Search` only; server matches names below a folder, bridge streams `WalkBatch` with paths below it, ≤ 2000 results. Paths leaving the folder dropped in backend and bridge.
+- `GetNetwork`/`NetworkChanged`: kind of Connman's first connected service that is no VPN (`wifi`, `ethernet`, `mobile`, `other`, `none`; `unknown` without Connman). Sandboxed consumer can't ask Connman (needs `Connman` permission). System bus only on first call; asks Connman again only on a `State` change of a service or the manager (signal strength changes every few seconds: ignored), debounced 500 ms, told only on change. No consent needed: names no network, no location.
 
 ### Accounts helper `netvfs-accounts`
 
@@ -143,6 +146,8 @@ Any process can start it, so it trusts nothing of caller:
 - Auth: Basic only, over TLS only; 401 → `AuthFailed`. No redirects followed (3xx → `ProtocolError`). Account folder (`base_path`) checked at sign-in: must be a collection; quota there → space info.
 - Caps: multistatus body ≤ 32 MiB, ≤ 200,000 responses, text ≤ 32 KiB, depth ≤ 32, href ≤ 8 KiB; error body ≤ 64 KiB.
 - Backups: `backups_path` below account folder (`base_path`).
+- ownCloud family: sign-in PROPFIND also asks `oc:fileid` (`http://owncloud.org/ns`); answered → capability `DeepETags`: folder etag changes with anything below it (their sync relies on it). Not true for changes made behind the server's back on external storage until the server rescans.
+- Search: capability `Search` only when base path is `…/remote.php/dav/files/<user>…` and `OPTIONS` on `…/remote.php/dav/` answers `DASL` with `DAV:basicsearch` (RFC 5323; one request per sign-in, ownCloud family only). `SEARCH` there: scope = folder, depth infinity, `like` on `displayname` with `%`, `_`, `\` escaped, `nresults` limit. Answer = multistatus, same parser and caps; result kept only if its href lies below the folder asked. Tested against own fake server only: no Nextcloud in CI or on the test host.
 
 ### FTPS
 

@@ -23,15 +23,66 @@ pub const PROPFIND_ENTRY: &str = concat!(
     "</d:prop></d:propfind>"
 );
 
-/// PROPFIND body asking for the quota (RFC 4331).
+/// PROPFIND body asking for the quota (RFC 4331) and ownCloud's file id, which only ownCloud and Nextcloud know.
 pub const PROPFIND_QUOTA: &str = concat!(
     r#"<?xml version="1.0" encoding="utf-8"?>"#,
-    r#"<d:propfind xmlns:d="DAV:"><d:prop>"#,
-    "<d:resourcetype/><d:quota-available-bytes/><d:quota-used-bytes/>",
+    r#"<d:propfind xmlns:d="DAV:" xmlns:oc="http://owncloud.org/ns"><d:prop>"#,
+    "<d:resourcetype/><d:quota-available-bytes/><d:quota-used-bytes/><oc:fileid/>",
     "</d:prop></d:propfind>"
 );
 
+fn escaped(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars() {
+        match c {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&apos;"),
+            c => out.push(c),
+        }
+    }
+    out
+}
+
+/// `text` as a `like` pattern matching names that hold it (RFC 5323 5.13): `%` and `_` are wildcards and `\\`
+/// escapes them.
+#[must_use]
+pub fn like_pattern(text: &str) -> String {
+    let mut out = String::with_capacity(text.len().saturating_add(2));
+    out.push('%');
+    for c in text.chars() {
+        if matches!(c, '%' | '_' | '\\') {
+            out.push('\\');
+        }
+        out.push(c);
+    }
+    out.push('%');
+    out
+}
+
+/// `SEARCH` body (RFC 5323 `basicsearch`): what an entry needs of every resource at any depth below `scope` (a
+/// request path under the DAV root) whose display name holds `text`, `limit` at most.
+#[must_use]
+pub fn search_body(scope: &str, text: &str, limit: u32) -> String {
+    format!(
+        concat!(
+            r#"<?xml version="1.0" encoding="utf-8"?>"#,
+            r#"<d:searchrequest xmlns:d="DAV:"><d:basicsearch><d:select><d:prop>"#,
+            "<d:resourcetype/><d:getcontentlength/><d:getlastmodified/><d:getetag/><d:getcontenttype/>",
+            "</d:prop></d:select><d:from><d:scope><d:href>{}</d:href><d:depth>infinity</d:depth></d:scope></d:from>",
+            "<d:where><d:like><d:prop><d:displayname/></d:prop><d:literal>{}</d:literal></d:like></d:where>",
+            "<d:limit><d:nresults>{}</d:nresults></d:limit></d:basicsearch></d:searchrequest>"
+        ),
+        escaped(scope),
+        escaped(&like_pattern(text)),
+        limit
+    )
+}
+
 const DAV: Namespace<'static> = Namespace("DAV:");
+const OWNCLOUD: Namespace<'static> = Namespace("http://owncloud.org/ns");
 
 /// The properties of one resource the server answered with 2xx.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -50,6 +101,8 @@ pub struct Props {
     pub quota_available: Option<u64>,
     /// `quota-used-bytes`.
     pub quota_used: Option<u64>,
+    /// ownCloud's `fileid` is set: the server is ownCloud or Nextcloud.
+    pub owncloud: bool,
 }
 
 /// One `response`: decoded path and properties.
@@ -77,10 +130,14 @@ enum El {
     ContentType,
     QuotaAvailable,
     QuotaUsed,
+    OwncloudFileId,
     Other,
 }
 
 fn element(ns: &ResolveResult<'_>, local: &str) -> El {
+    if *ns == ResolveResult::Bound(OWNCLOUD) && local == "fileid" {
+        return El::OwncloudFileId;
+    }
     if *ns != ResolveResult::Bound(DAV) {
         return El::Other;
     }
@@ -219,6 +276,7 @@ impl Parser {
             El::ContentType => text.trim().clone_into(&mut p.content_type),
             El::QuotaAvailable => p.quota_available = quota(text),
             El::QuotaUsed => p.quota_used = quota(text),
+            El::OwncloudFileId => p.owncloud = !text.trim().is_empty(),
             _ => {}
         }
     }
@@ -244,6 +302,7 @@ fn merge(into: &mut Props, p: Props) {
     }
     into.quota_available = p.quota_available.or(into.quota_available);
     into.quota_used = p.quota_used.or(into.quota_used);
+    into.owncloud |= p.owncloud;
 }
 
 fn predefined(name: &str) -> Option<&'static str> {

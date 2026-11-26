@@ -172,6 +172,62 @@ fn quotas() {
 }
 
 #[test]
+fn owncloud_servers_are_known_by_their_file_id() {
+    let oc = |inner: &str| {
+        format!(
+            r#"<?xml version="1.0"?><d:multistatus xmlns:d="DAV:" xmlns:oc="http://owncloud.org/ns" xmlns:x="urn:x">{inner}</d:multistatus>"#
+        )
+    };
+    let first = |body: String| parse(body.as_bytes()).unwrap().remove(0).props;
+    assert!(first(oc(&response("/", "<oc:fileid>42</oc:fileid>", "HTTP/1.1 200 OK"))).owncloud);
+    assert!(!first(oc(&response("/", "<oc:fileid/>", "HTTP/1.1 200 OK"))).owncloud, "an empty id");
+    assert!(!first(oc(&response("/", "<oc:fileid> </oc:fileid>", "HTTP/1.1 200 OK"))).owncloud);
+    assert!(!first(oc(&response("/", "<oc:fileid>42</oc:fileid>", "HTTP/1.1 404 Not Found"))).owncloud);
+    assert!(!first(oc(&response("/", "<x:fileid>42</x:fileid>", "HTTP/1.1 200 OK"))).owncloud);
+    assert!(!first(oc(&response("/", "<d:fileid>42</d:fileid>", "HTTP/1.1 200 OK"))).owncloud);
+    assert!(!first(oc(&response("/", "<oc:id>42</oc:id>", "HTTP/1.1 200 OK"))).owncloud);
+    let two = "<d:response><d:href>/</d:href>\
+        <d:propstat><d:prop><d:resourcetype><d:collection/></d:resourcetype></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat>\
+        <d:propstat><d:prop><oc:fileid>7</oc:fileid></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>";
+    let p = first(oc(two));
+    assert!(p.owncloud && p.collection, "props of several propstats add up");
+}
+
+#[test]
+fn search_bodies_scope_escape_and_limit() {
+    let body = search_body("/files/al%20ice/Docs", "a<b>&\"c'", 7);
+    assert!(body.contains("<d:href>/files/al%20ice/Docs</d:href><d:depth>infinity</d:depth>"), "{body}");
+    assert!(body.contains("<d:literal>%a&lt;b&gt;&amp;&quot;c&apos;%</d:literal>"), "{body}");
+    assert!(body.contains("<d:nresults>7</d:nresults>"));
+    assert!(body.contains("<d:like><d:prop><d:displayname/></d:prop>"));
+    assert_eq!(like_pattern("50%_off\\"), "%50\\%\\_off\\\\%");
+    assert_eq!(like_pattern(""), "%%");
+    assert_eq!(like_pattern("ä b"), "%ä b%");
+    let mut reader = NsReader::from_reader(body.as_bytes());
+    let mut names = Vec::new();
+    loop {
+        match reader.read_resolved_event().unwrap() {
+            (ns, Event::Start(e) | Event::Empty(e)) => {
+                assert_eq!(ns, ResolveResult::Bound(DAV));
+                let local = e.local_name();
+                let name: &str = local.as_ref();
+                names.push(name.to_owned());
+            }
+            (_, Event::Eof) => break,
+            _ => {}
+        }
+    }
+    assert_eq!(names[..3], ["searchrequest", "basicsearch", "select"]);
+    for needed in
+        ["resourcetype", "getcontentlength", "getlastmodified", "getetag", "scope", "where", "limit"]
+    {
+        assert!(names.iter().any(|n| n == needed), "{needed}");
+    }
+    let hostile = search_body("/x</d:href><d:href>/files/bob", "y", 1);
+    assert_eq!(hostile.matches("<d:href>").count(), 1, "a scope cannot add elements");
+}
+
+#[test]
 fn status_lines() {
     assert_eq!(status_code("HTTP/1.1 207 Multi-Status"), Some(207));
     assert_eq!(status_code("HTTP/1.1"), None);
@@ -252,7 +308,14 @@ fn request_bodies_are_well_formed_propfinds() {
         loop {
             match reader.read_resolved_event().unwrap() {
                 (ns, Event::Start(e) | Event::Empty(e)) => {
-                    assert_eq!(ns, ResolveResult::Bound(DAV));
+                    let local = e.local_name();
+                    let name: &str = local.as_ref();
+                    if name == "fileid" {
+                        assert_eq!(ns, ResolveResult::Bound(OWNCLOUD));
+                        assert_eq!(body, PROPFIND_QUOTA, "only the sign-in probe asks for it");
+                    } else {
+                        assert_eq!(ns, ResolveResult::Bound(DAV));
+                    }
                     names.push(e.local_name().as_ref().to_owned());
                 }
                 (_, Event::Eof) => break,

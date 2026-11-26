@@ -26,6 +26,14 @@ pub const MAX_SHORT: usize = 256;
 pub const MAX_ID: usize = 64;
 /// Largest `maxDepth` of `Walk` (-1: unlimited).
 pub const MAX_WALK_DEPTH: i64 = 4096;
+/// Most results of one `Search`, and its `limit` when the consumer gives none or 0.
+pub const MAX_SEARCH_RESULTS: i64 = 2000;
+/// Most folders of one `Check`.
+pub const MAX_CHECK_ITEMS: usize = 1024;
+/// Longest etag of a `Check` item, in bytes.
+pub const MAX_CHECK_ETAG: usize = 1024;
+/// Racy window of `Check`: a modification time this recent never counts as unchanged, in ms.
+pub const CHECK_RACY_MS: i64 = 2000;
 /// Earliest time an option may set: 0001-01-01T00:00:00Z, in ms since the epoch.
 pub const MIN_TIME_MS: i64 = -62_135_596_800_000;
 /// Latest time an option may set: 9999-12-31T23:59:59.999Z, in ms since the epoch.

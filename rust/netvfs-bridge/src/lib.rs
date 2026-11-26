@@ -20,6 +20,7 @@ pub mod jobs;
 pub mod locations;
 pub mod lockfile;
 pub mod log;
+pub mod network;
 pub mod peer;
 pub mod prompt;
 pub mod savefile;

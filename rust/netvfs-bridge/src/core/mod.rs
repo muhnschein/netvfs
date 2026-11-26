@@ -30,6 +30,8 @@ use crate::locations::spec::{LocationSpec, account_location_id};
 use crate::locations::state::StateSignal;
 use crate::locations::worker::{Turn, Work, WorkerId};
 use crate::locations::{CancelToken, TaskContext, WorkerEvent, WorkerEvents};
+use crate::network::NetworkSource;
+use crate::network::connman::Connman;
 use crate::peer::PeerChecker;
 use crate::prompt::{ConsentPrompt, NotificationPrompt, PromptEvent};
 use crate::server::{self, Call, ListenAddress, Listener, OutSignal, Outbox, Reply, ReplyTo, SessionId};
@@ -128,6 +130,8 @@ pub struct Services {
     pub launcher: Box<dyn Launcher>,
     /// The memory cards and USB drives.
     pub drives: Rc<dyn DriveSource>,
+    /// The kind of network.
+    pub network: Rc<dyn NetworkSource>,
 }
 
 impl fmt::Debug for Services {
@@ -186,6 +190,7 @@ async fn system_services(ffi: Ffi, helper: PathBuf, link: CoreLink) -> Services 
     });
     let answers = link.clone();
     let drives_changed = link.clone();
+    let network_changed = link.clone();
     Services {
         accounts: Rc::new(HelperDirectory::new(helper)),
         prompt: Box::new(NotificationPrompt::start(bus.clone(), move |e| {
@@ -194,6 +199,7 @@ async fn system_services(ffi: Ffi, helper: PathBuf, link: CoreLink) -> Services 
         nearby: Box::new(FfiNearby::new(ffi, link)),
         launcher: Box::new(SessionBusLauncher::new(bus)),
         drives: Rc::new(UDisks::system(move || drives_changed.drives_changed())),
+        network: Rc::new(Connman::system(move |kind| network_changed.network_changed(kind))),
     }
 }
 
@@ -235,6 +241,7 @@ pub(crate) enum Event {
     Nearby(Vec<WireNearby>),
     ConnectionStates,
     DrivesChanged,
+    NetworkChanged(String),
     Probe(oneshot::Sender<Counters>),
     Shutdown,
 }
@@ -276,6 +283,12 @@ impl CoreLink {
     #[must_use = "false: the core has stopped"]
     pub fn drives_changed(&self) -> bool {
         self.send(Event::DrivesChanged)
+    }
+
+    /// The kind of network changed.
+    #[must_use = "false: the core has stopped"]
+    pub fn network_changed(&self, kind: String) -> bool {
+        self.send(Event::NetworkChanged(kind))
     }
 
     /// Stops serving.
@@ -389,6 +402,7 @@ pub(crate) struct Core {
     all_accounts: Vec<AccountLocation>,
     own: OwnItems,
     drives: Rc<dyn DriveSource>,
+    network: Rc<dyn NetworkSource>,
     handoff: Handoff<DynLauncher>,
     book: LocationBook<Connector>,
     copy_jobs: CopyJobs<Connector>,
@@ -489,6 +503,7 @@ impl Core {
             all_accounts: Vec::new(),
             own: OwnItems::load(&config.added_file, own::now_ms()),
             drives: services.drives,
+            network: services.network,
             handoff: Handoff::new(&config.handoff_config, DynLauncher(services.launcher)),
             book: LocationBook::new(pools),
             copy_jobs: CopyJobs::new(connector, events),
@@ -565,6 +580,7 @@ impl Core {
             Event::Nearby(services) => self.nearby.changed(services, Instant::now()),
             Event::ConnectionStates => self.states.changed(Instant::now()),
             Event::DrivesChanged => self.broadcast(&OutSignal::DrivesChanged),
+            Event::NetworkChanged(kind) => self.broadcast(&OutSignal::NetworkChanged(kind)),
             Event::Probe(tx) => drop(tx.send(self.counters())),
             Event::Shutdown => return Flow::Stop,
         }
@@ -652,6 +668,11 @@ impl Core {
             Call::ListDrives => self.on_drive_call(sid, reply, DriveCall::List),
             Call::Mount { drive } => self.on_drive_call(sid, reply, DriveCall::Mount(drive)),
             Call::Unmount { drive } => self.on_drive_call(sid, reply, DriveCall::Unmount(drive)),
+            Call::GetNetwork => self.on_get_network(sid, reply),
+            Call::Check { loc, items, lane } => self.on_check_call(sid, reply, &loc, items, lane),
+            Call::Search { loc, path, text, limit } => {
+                self.on_search_call(sid, reply, (&loc, lane), path, text, limit);
+            }
             call => self.on_file_call(sid, reply, call, lane),
         }
     }

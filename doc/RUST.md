@@ -19,14 +19,15 @@ Rest is C++.
 | `rust/netvfs-bridge/src/ffi/` | C ABI client: `raw.rs` table, `loader.rs` `dlopen` (`NETVFS_BRIDGE_FFI` for tests), `conn.rs` handles, `callback.rs` trampolines, `marshal.rs`, `discovery.rs` |
 | `rust/netvfs-bridge/src/server/` | socket front: listener, peer check, sessions, inbound limits (2 MiB, 2 fds), dispatch, `args.rs`/`paths.rs` validation, `encode.rs`, `flow.rs` outgoing budget |
 | `rust/netvfs-bridge/src/core/` | task owning state: sessions, consent, quotas, discovery, connection states, drives, method handlers |
-| `rust/netvfs-bridge/src/locations/`, `jobs/` | visible locations, pools and lanes, worker threads owning backend connections; listings, walks, removals, transfers (`fdio.rs`: consumer's fds) |
+| `rust/netvfs-bridge/src/locations/`, `jobs/` | visible locations, pools and lanes, worker threads owning backend connections; listings, walks, folder checks (`check.rs`), searches, removals, transfers (`fdio.rs`: consumer's fds) |
 | `rust/netvfs-bridge/src/accounts/`, `drives/` | helper as bridge runs it; memory cards and USB drives via UDisks2 (`classify.rs` pure, fuzzed) |
+| `rust/netvfs-bridge/src/network/` | kind of network via Connman (`classify.rs` pure, `connman.rs` client) |
 | `rust/netvfs-bridge/src/sys/` | libc calls: socket, peer creds, pidfd, fds, inotify, `flock` |
 | `rust/netvfs-backend/` | `libnetvfs-rs.so`: `ffi/` table, `runtime.rs` tokio runtime and cancel cut, `erased.rs`, `providers.rs`, `mem/` (feature `testing`) |
 | `rust/netvfs-sftp/` | `policy.rs` algorithms, `session.rs`, `auth.rs`, `keys.rs`, `wire.rs`/`proto.rs`/`client.rs` SFTP v3, `remote.rs`, `io.rs`, `backend.rs` |
 | `rust/netvfs-smb/` | `transport`, `msg/` codecs, `negotiate`, `auth` (sspi), `crypto`, `conn`, `session`, `fs`, `files`, `rpc` (srvsvc), `names`, `status`, `profile`, `backend` |
 | `rust/netvfs-tls/` | TLS client for TLS-based backends: rustls with ring, TLS 1.3 only, system CAs, SPKI pins (`tls-spki-sha256`) |
-| `rust/netvfs-webdav/` | `http.rs` connection (hyper), `xml.rs` multistatus parser, `paths.rs`, `status.rs`, `io.rs` transfers, `backend.rs`; `fake.rs` test server |
+| `rust/netvfs-webdav/` | `http.rs` connection (hyper), `xml.rs` multistatus parser and `SEARCH` body, `paths.rs`, `status.rs`, `io.rs` transfers, `backend.rs`; `fake.rs` test server |
 | `rust/netvfs-ftps/` | `ctrl.rs` control and data connections, `reply.rs`, `mlsx.rs` MLSD/MLST facts, `backend.rs`; `fake.rs` test server |
 | `src/bridge/rust/rust.pro`, `src/backends/rs/rs.pro` | qmake targets running cargo |
 | `rust/fuzz/` | cargo-fuzz targets (nightly, outside workspace) |
@@ -98,7 +99,7 @@ Workspace `rust/Cargo.toml`: clippy `all`, `pedantic` deny plus picked nursery a
 - `rust/netvfs-backend/tests/ffi.rs`: table against `mem`, process per test.
 - `tests/bridge/accounts`: helper answers byte for byte vs C++ reference helper (`referencehelper.cpp`), read back by `referencedecoder.cpp`; live libaccounts-qt sees attention write.
 - `tests/bridge/contract` (`tst_contract`), `tests/bridge/process`, `tests/bridge/ffi`, `tests/backends/rs` (`tst_rsshim`, also `SANITIZE=1`), `tests/unit/sftp`: C++ side, `make check-unit`.
-- Interop: `rust/netvfs-sftp/tests/openssh.rs` (OpenSSH 10.3p1, 9.6p1, 8.9p1; `NETVFS_SFTP_INTEROP_CONFIG` from `tests/interop/sftp/run.sh`), `rust/netvfs-smb/tests/samba.rs` (`NETVFS_INTEROP_SMB_*` from `tests/interop/smb/run.sh`), `windows.rs` (CI job "SMB against Windows"), `rust/netvfs-webdav/tests/apache.rs` (Apache httpd mod_dav; `NETVFS_INTEROP_WEBDAV_*` from `tests/interop/webdav/run.sh`), `rust/netvfs-ftps/tests/server.rs` (proftpd 1.3.8 mod_tls; `NETVFS_INTEROP_FTPS_*` from `tests/interop/ftps/run.sh`). Without settings: pass at once, say skipped.
+- Interop: `rust/netvfs-sftp/tests/openssh.rs` (OpenSSH 10.3p1, 9.6p1, 8.9p1; `NETVFS_SFTP_INTEROP_CONFIG` from `tests/interop/sftp/run.sh`), `rust/netvfs-smb/tests/samba.rs` (`NETVFS_INTEROP_SMB_*` from `tests/interop/smb/run.sh`), `windows.rs` (CI job "SMB against Windows"), `rust/netvfs-webdav/tests/apache.rs` (Apache httpd mod_dav; `NETVFS_INTEROP_WEBDAV_*` from `tests/interop/webdav/run.sh`), `nextcloud.rs` (Nextcloud 31.0.14: `DeepETags`, `Search`; `NETVFS_INTEROP_NEXTCLOUD_*` from `tests/interop/nextcloud/run.sh`), `rust/netvfs-ftps/tests/server.rs` (proftpd 1.3.8 mod_tls; `NETVFS_INTEROP_FTPS_*` from `tests/interop/ftps/run.sh`). Without settings: pass at once, say skipped.
 - Mutants: `tools/ci/rust-mutants.sh diff <base> [<ffi-libs dir> [<k>/<n>]]` (PR CI, 12 shards; starts interop servers itself), `crate <package>` (new crate, `mutants.yml`), `interop <package> <base|all> <k>/<n> <command>` (mutant vs custom command). Exclusions with proof: `rust/.cargo/mutants.toml`. Curated lists: `tests/mutations/*.json`.
 - Fuzz: `rust/fuzz`, `./tools/ci/rust-fuzz.sh <seconds>` (nightly); finds stay as seeds in `rust/fuzz/seeds/<target>`.
 - Weekly ASan: `tools/ci/rust-sanitize.sh <nightly> [<ffi-libs dir>]`. rustc's LLVM ASan runtime in test binary; `ffi-libs.sh <dir> --asan` builds C++ libs with clang of rustc's LLVM major (`install-clang.sh`), `-fsanitize=address` only, binaries `--export-dynamic`. Qt uninstrumented; LSan `tools/sanitizer/lsan.supp`.

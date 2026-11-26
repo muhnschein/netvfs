@@ -161,6 +161,39 @@ private slots:
         QVERIFY(server->exists(QStringLiteral("a/b/f")));
     }
 
+    void searchBelowAFolder()
+    {
+        server->addFile(QStringLiteral("docs/Tax/tax-2026.pdf"), QByteArray("12"));
+        server->addFile(QStringLiteral("docs/other.txt"), QByteArray());
+        server->addFile(QStringLiteral("taxi.jpg"), QByteArray());
+        const auto names = [](const Collect &sink) {
+            QStringList out;
+            for (const Entry &e : sink.all)
+                out << e.name;
+            return out;
+        };
+        Collect all;
+        QVERIFY(b->search(QString(), QStringLiteral("tax"), 100, &all).ok());
+        QCOMPARE(names(all), QStringList({ QStringLiteral("docs/Tax"), QStringLiteral("docs/Tax/tax-2026.pdf"),
+                                           QStringLiteral("taxi.jpg") }));
+        Collect below;
+        QVERIFY(b->search(QStringLiteral("docs"), QStringLiteral("TAX"), 100, &below).ok());
+        QCOMPARE(names(below), QStringList({ QStringLiteral("Tax"), QStringLiteral("Tax/tax-2026.pdf") }));
+        QCOMPARE(below.all.at(1).size, 2);
+        QCOMPARE(below.all.at(0).type, EntryType::Directory);
+        Collect two;
+        QVERIFY(b->search(QString(), QStringLiteral("tax"), 2, &two).ok());
+        QCOMPARE(two.all.size(), 2);
+        Collect none;
+        QCOMPARE(b->search(QStringLiteral("gone"), QStringLiteral("x"), 5, &none).error(), Error::NotFound);
+        Collect stopping;
+        stopping.stopAfter = 1;
+        QCOMPARE(b->search(QString(), QStringLiteral("tax"), 100, &stopping).error(), Error::Canceled);
+        server->capabilities.flags.remove(Capability::Search);
+        QCOMPARE(b->search(QString(), QStringLiteral("tax"), 100, &none).error(), Error::Unsupported);
+        QVERIFY(none.all.isEmpty());
+    }
+
     void listingInBatches()
     {
         for (int i = 0; i < 10; ++i)

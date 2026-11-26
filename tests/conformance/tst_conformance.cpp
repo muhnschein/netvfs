@@ -1348,6 +1348,12 @@ void TestConformance::unsupportedWithoutSideEffects()
         return m_backend->copy(p(QStringLiteral("dir")), p(QStringLiteral("dircopy")), recursive);
     });
     expectUnsupported(Capability::RecursiveDelete, [&]() { return m_backend->removeTreeNative(p(QStringLiteral("dir"))); });
+    expectUnsupported(Capability::Search, [&]() {
+        struct Ignore : ListSink {
+            bool entries(const QVector<Entry> &) override { return true; }
+        } sink;
+        return m_backend->search(m_dir, QStringLiteral("file"), 10, &sink);
+    });
     expectUnsupported(Capability::SpaceInfo, [&]() {
         SpaceInfo info;
         return m_backend->spaceInfo(m_dir, &info);

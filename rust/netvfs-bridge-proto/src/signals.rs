@@ -4,7 +4,7 @@
 
 use crate::errors::BridgeError;
 use crate::methods::INTERFACE;
-use crate::wire::{WireEntry, WireNearby, WireWalkItem};
+use crate::wire::{WireCheckResult, WireEntry, WireNearby, WireWalkItem};
 use std::collections::HashMap;
 use zbus::Message;
 use zbus::message::Type as MessageType;
@@ -64,6 +64,15 @@ pub enum Signal {
     },
     /// The drives changed; `ListDrives` has the new list.
     DrivesChanged,
+    /// Folders of a `Check` job.
+    CheckBatch {
+        /// Job id.
+        job: u32,
+        /// One result per folder, in the order asked.
+        results: Vec<WireCheckResult>,
+    },
+    /// The network the phone uses now (`GetNetwork`'s words).
+    NetworkChanged(String),
 }
 
 fn body<T>(msg: &Message) -> Result<T, BridgeError>
@@ -119,6 +128,11 @@ fn decode_member(member: &str, msg: &Message) -> Result<Option<Signal>, BridgeEr
             Signal::JobFinished { job, error, message, extra }
         }
         "DrivesChanged" => Signal::DrivesChanged,
+        "CheckBatch" => {
+            let (job, results) = body::<(u32, Vec<WireCheckResult>)>(msg)?;
+            Signal::CheckBatch { job, results }
+        }
+        "NetworkChanged" => Signal::NetworkChanged(body::<(String,)>(msg)?.0),
         _ => return Ok(None),
     }))
 }
@@ -153,6 +167,24 @@ mod tests {
         assert!(matches!(decode_signal(&locations).unwrap(), Some(Signal::LocationsChanged)));
         let drives = signal(INTERFACE, "DrivesChanged", &());
         assert!(matches!(decode_signal(&drives).unwrap(), Some(Signal::DrivesChanged)));
+        let network = signal(INTERFACE, "NetworkChanged", &("wifi".to_owned(),));
+        match decode_signal(&network).unwrap() {
+            Some(Signal::NetworkChanged(kind)) => assert_eq!(kind, "wifi"),
+            other => panic!("unexpected {other:?}"),
+        }
+        let folder = WireEntry::unknown(b"Docs", entry_kind::DIRECTORY);
+        let result = WireCheckResult {
+            index: 3,
+            error: String::new(),
+            entry: folder,
+            listed: true,
+            children: vec![WireEntry::unknown(b"a", entry_kind::FILE)],
+        };
+        let check = signal(INTERFACE, "CheckBatch", &(4u32, vec![result.clone()]));
+        match decode_signal(&check).unwrap() {
+            Some(Signal::CheckBatch { job, results }) => assert_eq!((job, results), (4, vec![result])),
+            other => panic!("unexpected {other:?}"),
+        }
         let server = WireNearby { name: "NAS".into(), provider: "smb".into(), host: "nas".into(), port: 445 };
         let nearby = signal(INTERFACE, "NearbyChanged", &(vec![server.clone()],));
         match decode_signal(&nearby).unwrap() {

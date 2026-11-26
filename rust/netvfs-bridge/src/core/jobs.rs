@@ -3,16 +3,18 @@
 use super::{Core, Effect, Event, quota};
 use crate::ffi::Conn;
 use crate::jobs::JobOutcome;
+use crate::jobs::check::{check, check_batches};
 use crate::jobs::fd::{FdAccess, check_transfer_fd};
 use crate::jobs::progress::JobProgress;
 use crate::jobs::remove::remove_tree;
+use crate::jobs::search::search;
 use crate::jobs::transfer::{Transfer, transfer};
 use crate::jobs::walk::{walk, walk_batches};
 use crate::locations::connector::Connector;
 use crate::locations::copyjobs::CopyBody;
 use crate::locations::worker::{Turn, Work};
 use crate::locations::{CancelToken, TaskContext};
-use crate::server::args::{CopyOpts, LocId, TransferOpts, WalkOpts};
+use crate::server::args::{CheckItem, CopyOpts, LocId, TransferOpts, WalkOpts};
 use crate::server::{NPath, Outbox, Reply, ReplyTo, SessionId};
 use netvfs_bridge_proto::Lane;
 use std::os::fd::{AsRawFd, OwnedFd};
@@ -155,6 +157,50 @@ impl Core {
             let outbox: Outbox = outbox;
             let what = (path.as_bytes(), &opts, folders_only);
             walk(conn, what, outbox.flow(), cancel, walk_batches(&outbox, job))
+        });
+    }
+
+    pub(super) fn on_search(
+        &mut self,
+        sid: SessionId,
+        reply: ReplyTo,
+        (loc, lane): (&LocId, Lane),
+        path: NPath,
+        (text, limit, folders_only): (String, u32, bool),
+    ) {
+        if let Err(status) = self.pool_for(loc.as_str()) {
+            reply.fail(&status);
+            return;
+        }
+        let Some(outbox) = self.sessions.get(&sid).map(|s| s.outbox.clone()) else { return };
+        let Some(started) = self.start_job(sid, reply) else { return };
+        let job = started.0;
+        self.run_job(sid, (loc, lane), started, move |conn, cancel| {
+            let outbox: Outbox = outbox;
+            let what = (path.as_bytes(), text.as_str(), limit, folders_only);
+            search(conn, what, outbox.flow(), cancel, walk_batches(&outbox, job))
+        });
+    }
+
+    pub(super) fn on_check(
+        &mut self,
+        sid: SessionId,
+        reply: ReplyTo,
+        (loc, lane): (&LocId, Lane),
+        items: Vec<CheckItem>,
+        folders_only: Vec<bool>,
+    ) {
+        if let Err(status) = self.pool_for(loc.as_str()) {
+            reply.fail(&status);
+            return;
+        }
+        let Some(outbox) = self.sessions.get(&sid).map(|s| s.outbox.clone()) else { return };
+        let Some(started) = self.start_job(sid, reply) else { return };
+        let job = started.0;
+        let now_ms = super::own::now_ms();
+        self.run_job(sid, (loc, lane), started, move |conn, cancel| {
+            let outbox: Outbox = outbox;
+            check(conn, (&items, &folders_only, now_ms), outbox.flow(), cancel, check_batches(&outbox, job))
         });
     }
 

@@ -160,6 +160,18 @@ Result RsBackend::list(const QString &dir, ListSink *sink, const ListOptions &op
     }));
 }
 
+Result RsBackend::search(const QString &root, const QString &text, int limit, ListSink *sink)
+{
+    if (!sink)
+        return Result(Error::Internal, QStringLiteral("No search sink"));
+    Hooks hooks(m_t);
+    const nvb_list_sink_fn batch = hooks.list(sink);
+    const QByteArray needle = text.toUtf8();
+    return hooks.result(onPath(root, [this, &needle, limit, batch, &hooks](nvb_bytes p) {
+        return m_t->search(m_conn, p, view(needle), static_cast<uint32_t>(qMax(0, limit)), batch, &hooks);
+    }));
+}
+
 Result RsBackend::makeDir(const QString &path, bool exclusive)
 {
     return onPath(path, [this, exclusive](nvb_bytes p) { return m_t->make_dir(m_conn, p, exclusive ? 1 : 0); });

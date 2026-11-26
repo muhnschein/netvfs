@@ -275,6 +275,9 @@ typedef struct nvb_ffi {
     nvb_discovery *(*discovery_new)(const nvb_discovery_hooks *hooks);
     int32_t (*discovery_set_running)(nvb_discovery *d, int32_t on);
     void (*discovery_free)(nvb_discovery *d);
+
+    nvb_error *(*conn_search)(nvb_conn *conn, nvb_bytes root, nvb_bytes text, uint32_t limit,
+                              nvb_list_sink_fn sink, void *ctx);
 } nvb_ffi;
 
 typedef const nvb_ffi *(*nvb_ffi_get_fn)(void);

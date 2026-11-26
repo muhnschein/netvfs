@@ -58,6 +58,9 @@ pub struct State {
     pub connections: usize,
     pub drop_after: Option<usize>,
     pub forbidden: Option<Vec<u8>>,
+    pub owncloud: bool,
+    pub dasl: Option<&'static str>,
+    pub searches: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -163,12 +166,29 @@ fn parent(path: &[u8]) -> Vec<u8> {
     path.iter().rposition(|b| *b == b'/').map_or_else(Vec::new, |at| path[..at].to_vec())
 }
 
-fn props(path: &[u8], node: &Node, quota: Option<(&str, &str)>) -> String {
+fn deep_etag(s: &State, dir: &[u8]) -> usize {
+    let prefix = [dir, b"/"].concat();
+    s.tree
+        .iter()
+        .filter(|(p, _)| p.starts_with(&prefix))
+        .map(|(p, n)| p.len() * 31 + if let Node::File(data) = n { data.len() * 7 + 1 } else { 0 })
+        .sum()
+}
+
+fn props(s: &State, path: &[u8], node: &Node, quota: Option<(&str, &str)>) -> String {
     let href = encode(&[path, if *node == Node::Dir { b"/" } else { b"" }].concat());
     let href = if href == "//" { "/".to_owned() } else { href };
     let mut p = String::new();
+    if s.owncloud {
+        p.push_str(&format!("<oc:fileid>{}</oc:fileid>", path.len() + 1));
+    }
     match node {
-        Node::Dir => p.push_str("<d:resourcetype><d:collection/></d:resourcetype>"),
+        Node::Dir => {
+            p.push_str("<d:resourcetype><d:collection/></d:resourcetype>");
+            if s.owncloud {
+                p.push_str(&format!("<d:getetag>\"d{}\"</d:getetag>", deep_etag(s, path)));
+            }
+        }
         Node::File(data) => {
             p.push_str("<d:resourcetype/>");
             p.push_str(&format!("<d:getcontentlength>{}</d:getcontentlength>", data.len()));
@@ -182,10 +202,59 @@ fn props(path: &[u8], node: &Node, quota: Option<(&str, &str)>) -> String {
             "<d:quota-available-bytes>{available}</d:quota-available-bytes><d:quota-used-bytes>{used}</d:quota-used-bytes>"
         ));
     }
+    let unknown = if s.owncloud {
+        ""
+    } else {
+        "<d:propstat><d:prop><oc:fileid/></d:prop><d:status>HTTP/1.1 404 Not Found</d:status></d:propstat>"
+    };
     format!(
         "<d:response><d:href>{href}</d:href><d:propstat><d:prop>{p}</d:prop>\
-         <d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>"
+         <d:status>HTTP/1.1 200 OK</d:status></d:propstat>{unknown}</d:response>"
     )
+}
+
+fn multistatus(xml: &str) -> Answer {
+    let body = format!(
+        r#"<?xml version="1.0" encoding="utf-8"?><d:multistatus xmlns:d="DAV:" xmlns:oc="http://owncloud.org/ns">{xml}</d:multistatus>"#
+    );
+    answer(StatusCode::MULTI_STATUS, body)
+}
+
+fn between<'a>(text: &'a str, open: &str, close: &str) -> Option<&'a str> {
+    text.split_once(open)?.1.split_once(close).map(|(inner, _)| inner)
+}
+
+fn search(s: &mut State, k: &[u8], body: &Bytes) -> Answer {
+    let text = String::from_utf8_lossy(body).into_owned();
+    s.searches.push(text.clone());
+    if s.dasl.is_none() {
+        return answer(StatusCode::NOT_IMPLEMENTED, "");
+    }
+    let (Some(scope), Some(like), Some(limit)) = (
+        between(&text, "<d:href>", "</d:href>").and_then(|h| decode(h.as_bytes())),
+        between(&text, "<d:literal>", "</d:literal>"),
+        between(&text, "<d:nresults>", "</d:nresults>").and_then(|n| n.parse::<usize>().ok()),
+    ) else {
+        return answer(StatusCode::BAD_REQUEST, "");
+    };
+    let needle = like.trim_matches('%').replace("&amp;", "&").replace('\\', "").to_lowercase();
+    let prefix = [k, scope.as_slice(), b"/"].concat();
+    let mut xml = String::new();
+    let found: Vec<(Vec<u8>, Node)> = s
+        .tree
+        .iter()
+        .filter(|(p, _)| p.starts_with(&prefix))
+        .filter(|(p, _)| {
+            let name = p.rsplit(|b| *b == b'/').next().unwrap_or_default();
+            String::from_utf8_lossy(name).to_lowercase().contains(&needle)
+        })
+        .take(limit)
+        .map(|(p, n)| (p.clone(), n.clone()))
+        .collect();
+    for (p, n) in &found {
+        xml.push_str(&props(s, p, n, None));
+    }
+    multistatus(&xml)
 }
 
 fn key(path: &[u8]) -> Vec<u8> {
@@ -240,8 +309,12 @@ fn respond(s: &mut State, method: &Method, path: &[u8], headers: &HeaderMap, bod
         "OPTIONS" => {
             let mut out = answer(StatusCode::OK, "");
             out.headers_mut().insert("dav", HeaderValue::from_static("1, 2"));
+            if let Some(dasl) = s.dasl.filter(|_| k.ends_with(b"/remote.php/dav")) {
+                out.headers_mut().insert("dasl", HeaderValue::from_static(dasl));
+            }
             out
         }
+        "SEARCH" => search(s, &k, body),
         "PROPFIND" => propfind(s, &k, headers),
         "MKCOL" => mkcol(s, k),
         "DELETE" => delete(s, &k),
@@ -254,7 +327,7 @@ fn respond(s: &mut State, method: &Method, path: &[u8], headers: &HeaderMap, bod
 
 fn propfind(s: &State, k: &[u8], headers: &HeaderMap) -> Answer {
     let Some(node) = s.tree.get(k).cloned() else { return answer(StatusCode::NOT_FOUND, "") };
-    let mut xml = props(k, &node, s.quota);
+    let mut xml = props(s, k, &node, s.quota);
     if node == Node::Dir && headers.get("depth").is_some_and(|d| d == "1") {
         let prefix = [k, b"/"].concat();
         for (p, n) in &s.tree {
@@ -262,14 +335,11 @@ fn propfind(s: &State, k: &[u8], headers: &HeaderMap) -> Answer {
                 && !rest.is_empty()
                 && !rest.contains(&b'/')
             {
-                xml.push_str(&props(p, n, None));
+                xml.push_str(&props(s, p, n, None));
             }
         }
     }
-    let body = format!(
-        r#"<?xml version="1.0" encoding="utf-8"?><d:multistatus xmlns:d="DAV:">{xml}</d:multistatus>"#
-    );
-    answer(StatusCode::MULTI_STATUS, body)
+    multistatus(&xml)
 }
 
 fn mkcol(s: &mut State, k: Vec<u8>) -> Answer {

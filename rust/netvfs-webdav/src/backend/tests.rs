@@ -194,6 +194,190 @@ async fn sign_in_sends_basic_credentials() {
     assert!(w.capabilities().names().contains(&"SpaceInfo"));
 }
 
+const CLOUD: &str = "/cloud/remote.php/dav/files/alice";
+
+async fn cloud(dasl: Option<&'static str>) -> Fake {
+    let fake = server(Cert::Trusted).await;
+    for dir in ["/cloud", "/cloud/remote.php", "/cloud/remote.php/dav", "/cloud/remote.php/dav/files", CLOUD]
+    {
+        fake.put(dir, Node::Dir);
+    }
+    fake.with(|s| {
+        s.owncloud = true;
+        s.dasl = dasl;
+    });
+    fake
+}
+
+#[tokio::test]
+async fn owncloud_and_nextcloud_folders_have_etags_that_cover_what_is_below() {
+    let fake = cloud(None).await;
+    fake.put(&format!("{CLOUD}/a"), Node::Dir);
+    fake.put(&format!("{CLOUD}/a/deep"), Node::Dir);
+    fake.put(&format!("{CLOUD}/b"), Node::Dir);
+    let mut w = signed_in(&fake, CLOUD).await;
+    let c = CancelToken::new();
+    assert_eq!(
+        w.capabilities().names(),
+        ["DeepETags", "ETags", "NativeNoReplace", "ReadHandles", "ServerCopy", "ServerCopyRecursive"]
+    );
+    let etag = |e: Entry| e.etag;
+    let (root, a, b) = (
+        etag(w.stat(b"", false, &c).await.unwrap()),
+        etag(w.stat(b"a", false, &c).await.unwrap()),
+        etag(w.stat(b"b", false, &c).await.unwrap()),
+    );
+    assert!(!root.is_empty() && !a.is_empty());
+    fake.put(&format!("{CLOUD}/a/deep/new.txt"), file(b"n"));
+    assert_ne!(etag(w.stat(b"", false, &c).await.unwrap()), root);
+    assert_ne!(etag(w.stat(b"a", false, &c).await.unwrap()), a);
+    assert_eq!(etag(w.stat(b"b", false, &c).await.unwrap()), b);
+
+    let plain = server(Cert::Trusted).await;
+    let w = signed_in(&plain, "").await;
+    assert!(!w.capabilities().has(Capability::DeepETags), "a server that does not know oc:fileid");
+    assert!(!w.capabilities().has(Capability::Search));
+    assert_eq!(plain.methods(), Vec::<String>::new());
+}
+
+#[tokio::test]
+async fn search_is_offered_where_the_dav_root_says_so() {
+    for (dasl, base, offered) in [
+        (Some("<DAV:basicsearch>"), CLOUD, true),
+        (Some("<DAV:sql>, <DAV:basicsearch>"), CLOUD, true),
+        (Some("<DAV:sql>"), CLOUD, false),
+        (None, CLOUD, false),
+    ] {
+        let fake = cloud(dasl).await;
+        let mut w = Webdav::with_anchors(anchors());
+        let c = CancelToken::new();
+        w.connect(&params(&fake, &[("base_path", base)]), &c).await.unwrap();
+        w.authenticate(&creds("alice", "secret"), None, &c).await.unwrap();
+        assert_eq!(w.capabilities().has(Capability::Search), offered, "{dasl:?}");
+        let seen = fake.seen();
+        let asked: Vec<(&str, &[u8])> = seen.iter().map(|s| (s.method.as_str(), s.path.as_slice())).collect();
+        assert_eq!(asked, [("PROPFIND", CLOUD.as_bytes()), ("OPTIONS", b"/cloud/remote.php/dav/")]);
+        if !offered {
+            let e = w.search(b"", "x", 10, &mut Collect::default(), &c).await.unwrap_err();
+            assert_eq!(e.name, ErrorName::Unsupported);
+            assert!(fake.state.lock().unwrap().searches.is_empty(), "no request without the offer");
+        }
+    }
+    let fake = server(Cert::Trusted).await;
+    fake.with(|s| s.owncloud = true);
+    let w = signed_in(&fake, "").await;
+    assert!(w.capabilities().has(Capability::DeepETags) && !w.capabilities().has(Capability::Search));
+    assert_eq!(fake.methods(), Vec::<String>::new(), "no question outside the ownCloud layout");
+}
+
+#[tokio::test]
+async fn search_finds_names_below_a_folder() {
+    let fake = cloud(Some("<DAV:basicsearch>")).await;
+    for dir in ["Docs", "Docs/Tax 2026", "Docs/Tax 2026/deep", "Pics"] {
+        fake.put(&format!("{CLOUD}/{dir}"), Node::Dir);
+    }
+    fake.put(&format!("{CLOUD}/Docs/tax-return.pdf"), file(b"12345"));
+    fake.put(&format!("{CLOUD}/Docs/Tax 2026/deep/TAX notes & more.txt"), file(b"1"));
+    fake.put(&format!("{CLOUD}/Docs/other.txt"), file(b"1"));
+    fake.put(&format!("{CLOUD}/Pics/tax.jpg"), file(b"1"));
+    let mut w = signed_in(&fake, CLOUD).await;
+    let c = CancelToken::new();
+    let mut found = Collect::default();
+    w.search(b"/Docs", "tax", 100, &mut found, &c).await.unwrap();
+    assert_eq!(names(&found.0), ["Tax 2026", "Tax 2026/deep/TAX notes & more.txt", "tax-return.pdf"]);
+    let pdf = found.0.iter().find(|e| e.name == b"tax-return.pdf").unwrap();
+    assert_eq!((pdf.kind, pdf.size, pdf.mtime_ms), (EntryType::File, Some(5), Some(MTIME_MS)));
+    assert_eq!(found.0[0].kind, EntryType::Directory);
+    let seen = fake.seen();
+    let last = seen.last().unwrap();
+    assert_eq!((last.method.as_str(), last.path.as_slice()), ("SEARCH", &b"/cloud/remote.php/dav/"[..]));
+    assert!(last.headers.get("content-type").unwrap().to_str().unwrap().starts_with("text/xml"));
+    let body = fake.state.lock().unwrap().searches.last().unwrap().clone();
+    assert!(body.contains("<d:href>/files/alice/Docs</d:href><d:depth>infinity</d:depth>"), "{body}");
+    assert!(body.contains("<d:literal>%tax%</d:literal>") && body.contains("<d:nresults>100</d:nresults>"));
+
+    let mut everywhere = Collect::default();
+    w.search(b"", "TAX", 100, &mut everywhere, &c).await.unwrap();
+    assert_eq!(everywhere.0.len(), 4);
+    assert!(names(&everywhere.0).contains(&"Pics/tax.jpg".to_owned()));
+    let mut two = Collect::default();
+    w.search(b"", "tax", 2, &mut two, &c).await.unwrap();
+    assert_eq!(two.0.len(), 2, "the limit holds");
+    let mut escaped = Collect::default();
+    w.search(b"Docs", "notes & more", 5, &mut escaped, &c).await.unwrap();
+    assert_eq!(names(&escaped.0), ["Tax 2026/deep/TAX notes & more.txt"]);
+    let body = fake.state.lock().unwrap().searches.last().unwrap().clone();
+    assert!(body.contains("<d:literal>%notes &amp; more%</d:literal>"), "{body}");
+    assert_eq!(
+        w.search(b"/a/../b", "x", 5, &mut Collect::default(), &c).await.unwrap_err().name,
+        ErrorName::InvalidName
+    );
+}
+
+#[tokio::test]
+async fn search_results_are_checked_and_handed_on_in_batches() {
+    let fake = cloud(Some("<DAV:basicsearch>")).await;
+    let mut w = signed_in(&fake, CLOUD).await;
+    let c = CancelToken::new();
+    let response = |href: &str| {
+        format!(
+            "<d:response><d:href>{href}</d:href><d:propstat><d:prop><d:resourcetype/></d:prop>\
+             <d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>"
+        )
+    };
+    let hostile = [
+        "/cloud/remote.php/dav/files/alice/Docs/ok.txt",
+        "/cloud/remote.php/dav/files/alice/Docs/",
+        "/cloud/remote.php/dav/files/alice/Docs/../../bob/secret",
+        "/cloud/remote.php/dav/files/bob/x",
+        "/etc/passwd",
+        "https://evil.example/cloud/remote.php/dav/files/alice/Docs/sub/also%20ok",
+    ]
+    .map(response)
+    .concat();
+    let body: &'static str = Box::leak(
+        format!(r#"<?xml version="1.0"?><d:multistatus xmlns:d="DAV:">{hostile}</d:multistatus>"#)
+            .into_boxed_str(),
+    );
+    let search = Method::from_bytes(b"SEARCH").unwrap();
+    fake.with(|s| s.canned.push((search.clone(), StatusCode::MULTI_STATUS, vec![], body)));
+    let mut found = Collect::default();
+    w.search(b"Docs", "ok", 10, &mut found, &c).await.unwrap();
+    assert_eq!(names(&found.0), ["ok.txt", "sub/also ok"], "only what lies below the folder");
+
+    for (code, name) in [
+        (StatusCode::NOT_IMPLEMENTED, ErrorName::Unsupported),
+        (StatusCode::METHOD_NOT_ALLOWED, ErrorName::Unsupported),
+        (StatusCode::BAD_REQUEST, ErrorName::ProtocolError),
+        (StatusCode::OK, ErrorName::ProtocolError),
+    ] {
+        fake.with(|s| s.canned.push((search.clone(), code, vec![], "")));
+        let e = w.search(b"Docs", "ok", 10, &mut Collect::default(), &c).await.unwrap_err();
+        assert_eq!(e.name, name, "{code}");
+    }
+
+    for i in 0..600 {
+        fake.put(&format!("{CLOUD}/hit-{i:03}"), file(b"1"));
+    }
+    struct Batches(Vec<usize>, usize);
+    impl ListSink for Batches {
+        fn entries(&mut self, batch: &[Entry]) -> bool {
+            self.0.push(batch.len());
+            self.0.len() < self.1
+        }
+    }
+    let mut all = Batches(Vec::new(), usize::MAX);
+    w.search(b"", "hit", 1000, &mut all, &c).await.unwrap();
+    assert_eq!(all.0, [SEARCH_BATCH, SEARCH_BATCH, 600 - 2 * SEARCH_BATCH]);
+    let mut stop = Batches(Vec::new(), 1);
+    assert_eq!(w.search(b"", "hit", 1000, &mut stop, &c).await.unwrap_err().name, ErrorName::Canceled);
+    assert_eq!(stop.0.len(), 1);
+    let canceled = CancelToken::new();
+    canceled.cancel();
+    let e = w.search(b"", "hit", 1000, &mut Collect::default(), &canceled).await.unwrap_err();
+    assert_eq!(e.name, ErrorName::Canceled);
+}
+
 #[tokio::test]
 async fn an_open_server_signs_in_without_credentials() {
     let fake = Fake::start(Cert::Trusted).await;

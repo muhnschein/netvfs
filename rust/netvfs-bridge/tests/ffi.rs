@@ -43,6 +43,7 @@ const TESTS: &[(&str, Test)] = &[
     ("establish_phases", establish_phases),
     ("establish_signon_off_qt_thread", establish_signon_off_qt_thread),
     ("list_batches_and_stop", list_batches_and_stop),
+    ("search_finds_and_stops", search_finds_and_stops),
     ("walk_visit_and_stop", walk_visit_and_stop),
     ("remove_tree_counts", remove_tree_counts),
     ("metadata_and_namespace", metadata_and_namespace),
@@ -522,6 +523,39 @@ fn list_batches_and_stop(env: &Env) {
     });
     assert_eq!((name_of(&stopped), calls), (Some(ErrorName::Canceled), 1));
     assert_eq!(name_of(&conn.list(b"/nope", 3, |_| true)), Some(ErrorName::NotFound));
+}
+
+fn search_finds_and_stops(env: &Env) {
+    let f = env.fake;
+    f.add_file(b"/s/Tax/tax-2026.pdf", b"12");
+    f.add_file(b"/s/other.txt", b"1");
+    f.add_file(b"/taxi.jpg", b"1");
+    let mut conn = connected(env);
+    let mut found: Vec<(Vec<u8>, i64)> = Vec::new();
+    conn.search(b"/s", "TAX", 10, |batch| {
+        found.extend(batch.iter().map(|e| (e.name.clone(), e.size)));
+        true
+    })
+    .unwrap();
+    assert_eq!(
+        found,
+        [(b"Tax".to_vec(), -1), (b"Tax/tax-2026.pdf".to_vec(), 2)],
+        "names are paths below the root"
+    );
+    let mut count = 0;
+    conn.search(b"/", "tax", 2, |batch| {
+        count += batch.len();
+        true
+    })
+    .unwrap();
+    assert_eq!(count, 2, "the limit holds");
+    let mut calls = 0;
+    let stopped = conn.search(b"/", "tax", 10, |_| {
+        calls += 1;
+        false
+    });
+    assert_eq!((name_of(&stopped), calls), (Some(ErrorName::Canceled), 1));
+    assert_eq!(name_of(&conn.search(b"/nope", "x", 3, |_| true)), Some(ErrorName::NotFound));
 }
 
 fn walk_visit_and_stop(env: &Env) {
