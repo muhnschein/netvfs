@@ -19,14 +19,15 @@ Rest is C++.
 | `rust/netvfs-bridge/src/ffi/` | C ABI client: `raw.rs` table, `loader.rs` `dlopen` (`NETVFS_BRIDGE_FFI` for tests), `conn.rs` handles, `callback.rs` trampolines, `marshal.rs`, `discovery.rs` |
 | `rust/netvfs-bridge/src/server/` | socket front: listener, peer check, sessions, inbound limits (2 MiB, 2 fds), dispatch, `args.rs`/`paths.rs` validation, `encode.rs`, `flow.rs` outgoing budget |
 | `rust/netvfs-bridge/src/core/` | task owning state: sessions, consent, quotas, discovery, connection states, drives, method handlers |
-| `rust/netvfs-bridge/src/locations/`, `jobs/` | visible locations, pools and lanes, worker threads owning backend connections; listings, walks, removals, transfers (`fdio.rs`: consumer's fds) |
+| `rust/netvfs-bridge/src/locations/`, `jobs/` | visible locations, pools and lanes, worker threads owning backend connections; listings, walks, folder checks (`check.rs`), searches, removals, transfers (`fdio.rs`: consumer's fds) |
 | `rust/netvfs-bridge/src/accounts/`, `drives/` | helper as bridge runs it; memory cards and USB drives via UDisks2 (`classify.rs` pure, fuzzed) |
+| `rust/netvfs-bridge/src/network/` | kind of network via Connman (`classify.rs` pure, `connman.rs` client) |
 | `rust/netvfs-bridge/src/sys/` | libc calls: socket, peer creds, pidfd, fds, inotify, `flock` |
 | `rust/netvfs-backend/` | `libnetvfs-rs.so`: `ffi/` table, `runtime.rs` tokio runtime and cancel cut, `erased.rs`, `providers.rs`, `mem/` (feature `testing`) |
 | `rust/netvfs-sftp/` | `policy.rs` algorithms, `session.rs`, `auth.rs`, `keys.rs`, `wire.rs`/`proto.rs`/`client.rs` SFTP v3, `remote.rs`, `io.rs`, `backend.rs` |
 | `rust/netvfs-smb/` | `transport`, `msg/` codecs, `negotiate`, `auth` (sspi), `crypto`, `conn`, `session`, `fs`, `files`, `rpc` (srvsvc), `names`, `status`, `profile`, `backend` |
 | `rust/netvfs-tls/` | TLS client for TLS-based backends: rustls with ring, TLS 1.3 only, system CAs, SPKI pins (`tls-spki-sha256`) |
-| `rust/netvfs-webdav/` | `http.rs` connection (hyper), `xml.rs` multistatus parser, `paths.rs`, `status.rs`, `io.rs` transfers, `backend.rs`; `fake.rs` test server |
+| `rust/netvfs-webdav/` | `http.rs` connection (hyper), `xml.rs` multistatus parser and `SEARCH` body, `paths.rs`, `status.rs`, `io.rs` transfers, `backend.rs`; `fake.rs` test server |
 | `rust/netvfs-ftps/` | `ctrl.rs` control and data connections, `reply.rs`, `mlsx.rs` MLSD/MLST facts, `backend.rs`; `fake.rs` test server |
 | `src/bridge/rust/rust.pro`, `src/backends/rs/rs.pro` | qmake targets running cargo |
 | `rust/fuzz/` | cargo-fuzz targets (nightly, outside workspace) |

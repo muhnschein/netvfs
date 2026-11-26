@@ -282,6 +282,7 @@ private slots:
     void entries();
     void names();
     void listing();
+    void searching();
     void namespaceCalls();
     void readHandles();
     void writeHandles();
@@ -406,7 +407,8 @@ void tst_RsShim::establish()
              QStringList({ QStringLiteral("AtomicReplace"), QStringLiteral("Checksums"), QStringLiteral("ETags"),
                            QStringLiteral("EfficientRanges"), QStringLiteral("Hardlinks"),
                            QStringLiteral("NativeNoReplace"), QStringLiteral("Ownership"),
-                           QStringLiteral("PosixModes"), QStringLiteral("ReadHandles"), QStringLiteral("ServerCopy"),
+                           QStringLiteral("PosixModes"), QStringLiteral("ReadHandles"), QStringLiteral("Search"),
+                           QStringLiteral("ServerCopy"),
                            QStringLiteral("ServerCopyRecursive"), QStringLiteral("SetModified"),
                            QStringLiteral("SetModifiedOnUpload"), QStringLiteral("SpaceInfo"),
                            QStringLiteral("Symlinks"), QStringLiteral("WriteResume") }));
@@ -606,6 +608,50 @@ void tst_RsShim::names()
     QCOMPARE(backend->rename(lone, QStringLiteral("good"), RenameMode::NoReplace), Result(Error::InvalidName));
     QCOMPARE(backend->rename(utf8, lone, RenameMode::NoReplace), Result(Error::InvalidName));
     QCOMPARE(backend->stat(utf8, &entry), Result::success());
+}
+
+void tst_RsShim::searching()
+{
+    std::unique_ptr<Backend> backend = connected();
+    QVERIFY(backend);
+    QCOMPARE(backend->makeDir(QStringLiteral("docs"), true), Result::success());
+    QCOMPARE(put(backend.get(), QStringLiteral("docs/Tax 2026.pdf"), "12"), Result::success());
+    QCOMPARE(put(backend.get(), QStringLiteral("docs/other.txt"), "1"), Result::success());
+    QCOMPARE(put(backend.get(), QStringLiteral("taxi.jpg"), "1"), Result::success());
+
+    Sink below;
+    QCOMPARE(backend->search(QStringLiteral("docs"), QStringLiteral("TAX"), 10, &below), Result::success());
+    QCOMPARE(below.all.size(), 1);
+    QCOMPARE(below.all.at(0).name, QStringLiteral("Tax 2026.pdf"));
+    QCOMPARE(below.all.at(0).size, 2);
+
+    Sink all;
+    QCOMPARE(backend->search(QString(), QStringLiteral("tax"), 10, &all), Result::success());
+    QStringList names;
+    for (const Entry &entry : all.all)
+        names << entry.name;
+    names.sort();
+    QCOMPARE(names, QStringList({ "docs/Tax 2026.pdf", "taxi.jpg" }));
+
+    Sink one;
+    QCOMPARE(backend->search(QString(), QStringLiteral("tax"), 1, &one), Result::success());
+    QCOMPARE(one.all.size(), 1);
+    Sink none;
+    QCOMPARE(backend->search(QString(), QStringLiteral("tax"), -5, &none), Result::success());
+    QVERIFY(none.all.isEmpty());
+
+    Sink stopping;
+    stopping.stopAfter = 1;
+    QCOMPARE(backend->search(QString(), QStringLiteral("tax"), 10, &stopping), Result(Error::Canceled));
+    QCOMPARE(backend->search(QStringLiteral("gone"), QStringLiteral("tax"), 10, &none), Result(Error::NotFound));
+    const Result noSink = backend->search(QString(), QStringLiteral("tax"), 10, nullptr);
+    QCOMPARE(noSink, Result(Error::Internal));
+    QCOMPARE(noSink.message(), QStringLiteral("No search sink"));
+    Sink throwing;
+    throwing.throwOnBatch = true;
+    const Result r = backend->search(QString(), QStringLiteral("tax"), 10, &throwing);
+    QCOMPARE(r, Result(Error::Internal));
+    QCOMPARE(r.message(), CallbackFailed);
 }
 
 void tst_RsShim::listing()
