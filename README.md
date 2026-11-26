@@ -101,7 +101,7 @@ $ ./tools/ci/install-host-deps.sh
 $ ./tools/ci/cargo-tool.sh cargo-nextest 0.9.148
 
 # Rust checks, C++ unit tests, bridge tests, and interop tests against
-# OpenSSH, Samba, Apache and ProFTPD containers (those need Docker).
+# OpenSSH, Samba, Apache, Nextcloud and ProFTPD containers (those need Docker).
 $ make check
 ```
 
