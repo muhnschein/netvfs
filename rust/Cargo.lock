@@ -1225,7 +1225,7 @@ dependencies = [
 
 [[package]]
 name = "netvfs-accounts"
-version = "1.0.0"
+version = "2.0.0"
 dependencies = [
  "libc",
  "rusqlite",
@@ -1233,7 +1233,7 @@ dependencies = [
 
 [[package]]
 name = "netvfs-backend"
-version = "1.0.0"
+version = "2.0.0"
 dependencies = [
  "libc",
  "netvfs-ftps",
@@ -1248,7 +1248,7 @@ dependencies = [
 
 [[package]]
 name = "netvfs-bridge"
-version = "1.0.0"
+version = "2.0.0"
 dependencies = [
  "futures-lite",
  "libc",
@@ -1261,7 +1261,7 @@ dependencies = [
 
 [[package]]
 name = "netvfs-bridge-proto"
-version = "1.0.0"
+version = "2.0.0"
 dependencies = [
  "futures-lite",
  "netvfs-vfs",
@@ -1274,7 +1274,7 @@ dependencies = [
 
 [[package]]
 name = "netvfs-ftps"
-version = "1.0.0"
+version = "2.0.0"
 dependencies = [
  "data-encoding",
  "netvfs-tls",
@@ -1286,7 +1286,7 @@ dependencies = [
 
 [[package]]
 name = "netvfs-sftp"
-version = "1.0.0"
+version = "2.0.0"
 dependencies = [
  "data-encoding",
  "netvfs-vfs",
@@ -1299,7 +1299,7 @@ dependencies = [
 
 [[package]]
 name = "netvfs-smb"
-version = "1.0.0"
+version = "2.0.0"
 dependencies = [
  "aes",
  "aes-gcm",
@@ -1317,7 +1317,7 @@ dependencies = [
 
 [[package]]
 name = "netvfs-tls"
-version = "1.0.0"
+version = "2.0.0"
 dependencies = [
  "data-encoding",
  "netvfs-vfs",
@@ -1331,7 +1331,7 @@ dependencies = [
 
 [[package]]
 name = "netvfs-vfs"
-version = "1.0.0"
+version = "2.0.0"
 dependencies = [
  "tokio",
  "zeroize",
@@ -1339,7 +1339,7 @@ dependencies = [
 
 [[package]]
 name = "netvfs-webdav"
-version = "1.0.0"
+version = "2.0.0"
 dependencies = [
  "bytes",
  "data-encoding",
