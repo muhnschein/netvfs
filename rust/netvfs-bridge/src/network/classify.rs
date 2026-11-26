@@ -27,14 +27,21 @@ pub fn kind_of(service_type: &str) -> &'static str {
     }
 }
 
-/// The kind of the first connected service (`ready` or `online`), else [`NONE`].
+/// The kind of the first connected service (`ready` or `online`) that is no VPN, since a VPN runs over one of
+/// the others; a VPN alone is `other`; without a connected service [`NONE`].
 #[must_use]
 pub fn network(services: &Services) -> &'static str {
-    services
+    let connected: Vec<String> = services
         .iter()
         .map(|(_, props)| props)
-        .find(|props| matches!(text(props, "State").as_deref(), Some("ready" | "online")))
-        .map_or(NONE, |props| kind_of(&text(props, "Type").unwrap_or_default()))
+        .filter(|props| matches!(text(props, "State").as_deref(), Some("ready" | "online")))
+        .map(|props| text(props, "Type").unwrap_or_default())
+        .collect();
+    connected
+        .iter()
+        .find(|kind| kind.as_str() != "vpn")
+        .or_else(|| connected.first())
+        .map_or(NONE, |kind| kind_of(kind))
 }
 
 #[cfg(test)]
@@ -63,6 +70,21 @@ mod tests {
             service("/net/connman/service/cellular_b", "cellular", "online"),
         ];
         assert_eq!(network(&services), "wifi");
+    }
+
+    #[test]
+    fn a_vpn_is_named_by_the_network_below_it() {
+        let services = vec![
+            service("/net/connman/service/vpn_x", "vpn", "ready"),
+            service("/net/connman/service/cellular_b", "cellular", "online"),
+            service("/net/connman/service/wifi_c", "wifi", "ready"),
+        ];
+        assert_eq!(network(&services), "mobile");
+        let services = vec![
+            service("/net/connman/service/vpn_x", "vpn", "ready"),
+            service("/net/connman/service/wifi_c", "wifi", "idle"),
+        ];
+        assert_eq!(network(&services), "other", "a VPN alone");
     }
 
     #[test]

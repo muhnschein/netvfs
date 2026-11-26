@@ -84,6 +84,8 @@ fn an_etag_decides_when_the_folder_has_one() {
     assert!(!changed(&item("d", "", Some(OLD)), &entry("", OLD), NOW));
     assert!(changed(&item("d", "", Some(OLD)), &entry("", OLD + 1), NOW));
     assert!(changed(&item("d", "", None), &entry("", OLD), NOW));
+    assert!(changed(&item("d", "", None), &entry("", 1), NOW), "no date known is not the date 1");
+    assert!(!changed(&item("d", "", Some(1)), &entry("", 1), NOW));
     assert!(changed(&item("d", "", Some(-1)), &entry("", -1), NOW), "an unknown date is never unchanged");
     let racy = NOW - CHECK_RACY_MS + 1;
     assert!(changed(&item("d", "", Some(racy)), &entry("", racy), NOW), "a date under 2 s old");
@@ -128,6 +130,24 @@ fn a_long_listing_spans_results_and_add_access_sees_folders_only() {
     assert_eq!(results.len(), 1);
     let names: Vec<&[u8]> = results[0].children.iter().map(|e| e.name.as_slice()).collect();
     assert_eq!(names, [&b"sub"[..]]);
+}
+
+#[test]
+fn a_listing_of_large_entries_is_cut_by_bytes() {
+    let mut tree = Tree::default();
+    let kids: Vec<WireEntry> = (0..100)
+        .map(|i| {
+            let mut e = WireEntry::unknown(format!("e{i:03}").as_bytes(), entry_kind::FILE);
+            e.content_type = "t".repeat(8192 - crate::jobs::batch::ENTRY_FIXED_BYTES - 4);
+            e
+        })
+        .collect();
+    assert_eq!(entry_wire_size(&kids[0]), 8192);
+    tree.folders.insert(b"big".to_vec(), (WireEntry::unknown(b"big", entry_kind::DIRECTORY), kids));
+    let (outcome, results) = run(&mut tree, &[item("big", "", None)], false);
+    assert!(outcome.result.is_ok());
+    let sizes: Vec<usize> = results.iter().map(|r| r.children.len()).collect();
+    assert_eq!(sizes, [64, 36], "half a batch of bytes per result, the limit itself included");
 }
 
 #[test]

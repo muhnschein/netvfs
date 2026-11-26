@@ -140,6 +140,15 @@ fn the_kind_follows_connmans_first_connected_service() {
 }
 
 #[test]
+fn debug_names_the_bus_and_the_watch() {
+    let connman = Connman::new(Bus::Address("unix:path=/x".to_owned()), CALL_TIMEOUT, |_| true);
+    assert_eq!(
+        format!("{connman:?}"),
+        "Connman { bus: Address(\"unix:path=/x\"), watching: Cell { value: false } }"
+    );
+}
+
+#[test]
 fn a_burst_of_signals_asks_once() {
     let Some(bus) = TestBus::start() else { return };
     run(async {

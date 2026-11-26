@@ -323,9 +323,9 @@
     </signal>
 
     <!-- Network (feature "network"): the kind of network the phone uses now,
-      from Connman's first connected service: "wifi", "ethernet", "mobile",
-      "other", "none" (no connected service) or "unknown" (Connman cannot be
-      asked). Needs no consent. NetworkChanged: the kind changed; sent once
+      from Connman's first connected service that is no VPN: "wifi",
+      "ethernet", "mobile", "other", "none" (no connected service) or
+      "unknown" (Connman cannot be asked). Needs no consent. NetworkChanged: the kind changed; sent once
       the consumer has asked. -->
     <method name="GetNetwork">
       <arg name="network" type="s" direction="out"/>

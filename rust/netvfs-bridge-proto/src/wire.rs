@@ -388,6 +388,7 @@ mod tests {
         assert!(check_changed(b"", OLD, &entry(b"", OLD - 1), NOW));
         assert!(check_changed(b"", -1, &entry(b"", OLD), NOW));
         assert!(check_changed(b"", -1, &entry(b"", -1), NOW), "an unknown date is never unchanged");
+        assert!(!check_changed(b"", 0, &entry(b"", 0), NOW), "the epoch is a date like any other");
         let racy = NOW - crate::limits::CHECK_RACY_MS + 1;
         assert!(check_changed(b"", racy, &entry(b"", racy), NOW), "a date under 2 s old");
         let settled = NOW - crate::limits::CHECK_RACY_MS;
