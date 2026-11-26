@@ -1,12 +1,17 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 #![allow(clippy::assertions_on_result_states, clippy::arithmetic_side_effects, clippy::indexing_slicing)]
-use super::*;
+use super::{Folders, RESULT_FIXED_BYTES, changed, check, result_wire_size};
+use crate::jobs::JobOutcome;
+use crate::jobs::batch::entry_wire_size;
+use crate::server::FlowBudget;
+use crate::server::args::CheckItem;
 use crate::server::paths::normalize;
-use netvfs_bridge_proto::ErrorName;
+use crate::status::Status;
 use netvfs_bridge_proto::limits::CHECK_RACY_MS;
 use netvfs_bridge_proto::wire::entry_kind;
+use netvfs_bridge_proto::{ErrorName, WireCheckResult, WireEntry};
 use std::collections::HashMap;
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 const NOW: i64 = 1_800_000_000_000;
 const OLD: i64 = 1_700_000_000_000;
