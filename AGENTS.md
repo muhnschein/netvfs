@@ -12,7 +12,7 @@ How to work on netvfs. What it is: `README.md`, `doc/SPEC.md` (platform contract
 
 ## Where the code stands
 
-- Mid Rust rewrite. Rust (`rust/`, `doc/RUST.md`): accounts helper `netvfs-accounts`, `netvfs-bridge`, SFTP and SMB backends in `libnetvfs-rs.so`. Still C++/QML: `libnetvfs` core, local backend, ops, discovery, account UI, Buteo plugins, `netvfs-cli`, plugin shims (`src/backends/rs`), bridge C ABI (`src/bridge/ffi`).
+- Mid Rust rewrite. Rust (`rust/`, `doc/RUST.md`): accounts helper `netvfs-accounts`, `netvfs-bridge`, SFTP, SMB, WebDAV and FTPS backends in `libnetvfs-rs.so`. Still C++/QML: `libnetvfs` core, local backend, ops, discovery, account UI, Buteo plugins, `netvfs-cli`, plugin shims (`src/backends/rs`), bridge C ABI (`src/bridge/ffi`).
 - Moving more C++ to Rust = planned work package, on user's go. No drive-by ports.
 - No backwards compatibility between parts that ship together: change both sides in one PR. No version handshakes, option aliases, transition code.
 - C ABIs (`netvfs_rs.h`, `netvfs_bridge_ffi.h`): `#[repr(C)]` by hand, no bindgen; sizes and offsets pinned by tests.
@@ -33,25 +33,24 @@ PR opens as draft on first push. Mark ready for review only once steps 1–7 hol
 
 No phone run when change can't show on phone: docs, CI, build scripts (RPM contents unchanged), tests only. Steps 6–7 skipped; PR says why.
 
-Backend and core code runs in every process that loads a backend (bridge, msyncd via Buteo, `netvfs-cli`, account UI) → cover all it reaches. Behaviour both protocols share → change and test SFTP and SMB.
+Backend and core code runs in every process that loads a backend (bridge, Buteo plugins in `buteo-oopp-runner`, `netvfs-cli`, account UI) → cover all it reaches. Behaviour backends share → change and test all four: SFTP, SMB, WebDAV, FTPS.
 
-User tests RPMs on phone; that test judges feel, lag, real servers. Say exactly what to check on device. Accounts and backups: create account per auth mode (wrong input: specific message, no account); manual backup, list, restore byte-identical; scheduled backup, screen off; server unreachable or upload cut: no leftover, no file without `.part`; changed host key or password: run fails, account not signed in, update flow fixes; account delete leaves server files.
+User tests RPMs on phone; that test judges feel, lag, real servers. Say exactly what to check on device. Accounts and backups: create account per auth mode (wrong input: specific message, no account); manual backup, list, restore byte-identical; scheduled backup, screen off; server unreachable or upload cut: no leftover, no file without `.part`; changed host key, certificate or password: run fails, account not signed in, update flow fixes; account delete leaves server files. App access: each level allows only what it names; narrowing closes app's connections.
 
 ## Device tests
 
 - QML target tests (`tests/qmltarget`) and OS file lookups (Silica QML, `jolla-settings-accounts`, sailjail profiles): SDK container, never phone.
 - Test phone on the local SFOS test host via the harness's `local/run.sh` (`muhnschein-sfos-harness`, see its `local/README.md`). Its AGENTS.md rules every phone run (baseline, no blind taps, reboot, language, `clean_slate`, privacy); helpers: its README, `scripts/lib.sh`; netvfs specifics: its `apps/netvfs.md`. Test accounts and harness test servers only. Never run fork or others' PR code there: any run can root phone.
-- Phone runs SFOS 5.1 (glibc 2.41: binaries run); packages Require `sailfish-version >= 5.2.0`. Until phone fits: no harness run without user's go for `apps/netvfs.nodeps`, results then hold on 5.1 only; say so.
 - Install: `netvfs`, `netvfs-bridge`, `netvfs-backup` from one CI run, one transaction; lautta on top from its own run.
 - Every run starts from named state; `state.txt` records it plus RPM names and sha256:
-  - `clean`: wipe lautta if present, then netvfs packages, netvfs accounts (providers `sftp`, `smb`), `~/.config/netvfs`, `~/.local/share/netvfs`, `~/.cache/netvfs`; install.
+  - `clean`: wipe lautta if present, then netvfs packages, netvfs accounts (providers `sftp`, `smb`, `webdav`, `ftps`), `~/.config/netvfs`, `~/.local/share/netvfs`, `~/.cache/netvfs`; install.
   - `fixture:NAME`: `clean`, then restore snapshot saved with `fixture_save`.
   - `upgrade:FROM`: release FROM plus fixture, then install build over it. Required when change touches stored data, accounts, consent, known hosts, Buteo profiles or units.
 - Footprint check (`fs_mark`, `footprint`): file touched outside known dirs → add to wipe or fail run. Leftovers taint results.
 - Before/after: same start state, same steps, one `local/run.sh` run (both builds).
 - Build already passed same steps → cite that run, no rerun.
 - Run stopped on own script mistake → fix from its shots, rerun only failed steps.
-- Change in bridge, backends, units: prove through a consumer (lautta, `netvfs-cli`) against harness SFTP/SMB servers. Accounts UI: Settings → Accounts shots. Backups: Buteo run, then restore.
+- Change in bridge, backends, units: prove through a consumer (lautta, `netvfs-cli`) against harness test servers (`nas_up`: SFTP, SMB, WebDAV, FTPS; `nextcloud_up`: Nextcloud). Accounts UI: shots of add-account flow and account pages, never of Accounts list (owner's accounts; harness `apps/netvfs.md`). Backups: Buteo run, then restore.
 - Privacy: user stays muhnschein, nothing more. Harness output leaves the test host only scrubbed, through its `local/publish.sh` (its AGENTS.md "Privacy"). Evidence only from those files (crops, GIFs, charts made from them OK); never type identifiers in: host names, user names, keys, fingerprints included.
 - Harness proves function and timing. Feel, lag, real servers stay user's call on device.
 
@@ -59,8 +58,8 @@ User tests RPMs on phone; that test judges feel, lag, real servers. Say exactly 
 
 - `git submodule update --init --depth 1` before first build (`vendor/host/buteo-syncfw`: host-only Buteo, `make HOST_BUTEO=0` uses system's).
 - Host deps (Ubuntu 24.04): `./tools/ci/install-host-deps.sh`, then `./tools/ci/cargo-tool.sh cargo-nextest 0.9.148`.
-- `make check` = Rust checks, C++ unit tests, bridge tests against built C ABI, interop suite (OpenSSH, Samba containers: docker). CI adds `make check-packaging`, `make SANITIZE=1 check`, target tests under qemu, QML on SDK target (`tests/qmltarget/run-in-sdk.sh`).
-- Rust interop tests without their servers (`NETVFS_SFTP_INTEROP_CONFIG`, `NETVFS_INTEROP_SMB_*`) pass at once, saying skipped. Skipped ≠ passed: say which steps skipped. Missing optional tool = SKIP locally, FAIL in CI.
+- `make check` = Rust checks, C++ unit tests, bridge tests against built C ABI, interop suite (OpenSSH, Samba, Apache WebDAV, ProFTPD, Nextcloud containers: docker). CI adds `make check-packaging`, `make SANITIZE=1 check`, target tests under qemu, QML on SDK target (`tests/qmltarget/run-in-sdk.sh`).
+- Rust interop tests without their servers (`NETVFS_SFTP_INTEROP_CONFIG`, `NETVFS_INTEROP_SMB_*`, `NETVFS_INTEROP_WEBDAV_*`, `NETVFS_INTEROP_NEXTCLOUD_*`, `NETVFS_INTEROP_FTPS_*`) pass at once, saying skipped. Skipped ≠ passed: say which steps skipped. Missing optional tool = SKIP locally, FAIL in CI.
 - Iterating → run only what change touches: `cd rust && cargo nextest run -p netvfs-smb`, one C++ test binary from `build/tests`. Before every push: full `make check`. CI runs everything (docs-only PR: no build or test jobs, `tools/ci/changes.sh`).
 - Local failure → rerun on untouched `main` before calling it environment.
 - Gates catch device-only breakage (lockfile cargo 1.95 reads, Qt 5.6 QML, linked libs and GLIBC floor, `%files` lists, `NETVFS_WERROR=1`). Gate red → fix code, never loosen gate.
@@ -73,7 +72,7 @@ User tests RPMs on phone; that test judges feel, lag, real servers. Say exactly 
 
 ## UI and words
 
-- Account UI (`accounts/ui`, *Settings → Accounts*): Silica stock components, platform account types of `jolla-settings-accounts` (`AccountCreationAgent`, `AccountSettingsAgent`, `AccountCredentialsAgent`, `AccountBusyPage`, `StandardAccountSettingsPullDownMenu`); no `OnlineSync*`, `AccountFactory` (assume HTTP); built like existing pages.
+- Account UI (`accounts/ui`, `src/qml`; *Settings → Accounts*, incl. app access): Silica stock components, platform account types of `jolla-settings-accounts` (`AccountCreationAgent`, `AccountSettingsAgent`, `AccountCredentialsAgent`, `AccountBusyPage`, `StandardAccountSettingsPullDownMenu`); no `OnlineSync*`, `AccountFactory` (assume HTTP); built like existing pages.
 - "Design first" / "no PR yet" → mockup, wait for approval, then code.
 - Every string `qsTrId()` with `//%` engineering English; catalogue generated at build (`translations/translations.pro`).
 - Host QML tests (`tests/unit/qml`) and target load (`tests/qmltarget`, real Silica) don't prove looks: unproven until device test. Say so.
@@ -98,7 +97,7 @@ User tests RPMs on phone; that test judges feel, lag, real servers. Say exactly 
 - One branch, one PR per task. Stacked PR only when asked.
 - Bridge protocol (`org.netvfs.Bridge1`) change → PRs in netvfs and lautta together, lockstep. `tests/bridge/contract/` JSON and XML stay identical to lautta's `tests/bridge-contract/`.
 - Unrelated finding → tell user; separate PR or issue, not this PR.
-- Commit and PR titles: Conventional Commits, plain language, say outcome: `fix(bridge): ad-hoc ids are never reused after a restart`. Types `feat` `fix` `perf` `refactor` `test` `docs` `ci` `build` `chore`; scope = part or subsystem (`bridge`, `accounts`, `sftp`, `smb`, `backup`, `core`, `cli`, `rpm`, …). Body says why, plain prose; brief, to the point.
+- Commit and PR titles: Conventional Commits, plain language, say outcome: `fix(bridge): ad-hoc ids are never reused after a restart`. Types `feat` `fix` `perf` `refactor` `test` `docs` `ci` `build` `chore`; scope = part or subsystem (`bridge`, `accounts`, `sftp`, `smb`, `webdav`, `ftps`, `backup`, `core`, `cli`, `rpm`, …). Body says why, plain prose; brief, to the point.
 - PR body: the problem in a sentence or two, then how you fixed it. End with the model and harness that did the work.
 - Final diff: no debug logging, no leftovers.
 - Evidence shown, not just described (visual: files in project thread; text: PR body):
@@ -109,13 +108,13 @@ User tests RPMs on phone; that test judges feel, lag, real servers. Say exactly 
 - Evidence never on GitHub: no `evidence/` branches, no uploads to PR, no assets in `main` or PR branch.
 - Flaky test → find and fix cause. Never add retries (nextest profile `ci` runs none by design: pass on second try = defect). Never re-run CI until green and call it done. Never skip test or loosen assert. One re-run OK only for infra failure before any test ran (runner lost, apt mirror timeout); say so.
 - Merge only on user's explicit go. Merge commit, not squash/rebase.
-- Before asking for merge go: `main` moved since PR's last green run → merge `main` in, CI green again. Each PR green alone ≠ merge green. GitHub enforces it too ("Require branches to be up to date").
+- Before asking for merge go: `main` moved since PR's last green run → merge `main` in, CI green again. Each PR green alone ≠ merge green.
 
 ## Releases
 
 - Only on user's go. Tag `vX.Y.Z` on main's merge commit; GitHub release carries that commit's CI RPMs (`netvfs-rpms-aarch64`). Version in `rpm/netvfs.spec`, `rust/Cargo.toml`, `sonar-project.properties`. Latest `main` commit green first, Sonar included: check main, not just PR.
 - Strict semver: nothing breaking → minor.
-- Before release: advisories against locked crates resolved (D-2); interop suite re-run after any dependency bump (D-3).
+- Before release: advisories against locked crates resolved; interop suite re-run after any dependency bump.
 - Before release: CI started by hand on release commit (`gh workflow run ci.yml --ref main`), job "RPMs rebuild byte for byte" green.
 
 ## Subagents
