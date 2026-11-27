@@ -3,8 +3,6 @@ on:
   push:
     branches:
       - main
-    tags:
-      - "v*"
   pull_request:
     types: [opened, synchronize, reopened]
   schedule:
@@ -406,7 +404,7 @@ jobs:
   reproducible:
     name: RPMs rebuild byte for byte
     needs: rpm
-    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     permissions:

@@ -49,8 +49,8 @@ clone under `~/.cache/netvfs-verify`, never in your tree: ~5 GB, checks for
 CI checks it for releases: job "RPMs rebuild byte for byte" runs
 `tools/verify-rpm.sh` on the RPM job's packages, on another runner, from a
 fresh clone at another path, with another cargo home, time zone, umask and
-time. It runs on `v*` tags and on a CI run started by hand (Actions → CI →
-Run workflow), not on pull requests, pushes to `main` or the weekly run.
+time. It runs only in a CI run started by hand (Actions → CI → Run workflow;
+release steps require one on the release commit), not on pull requests, pushes to `main` or the weekly run.
 
 ## What it doesn't cover
 
