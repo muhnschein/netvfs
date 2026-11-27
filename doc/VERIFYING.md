@@ -46,10 +46,11 @@ clone under `~/.cache/netvfs-verify`, never in your tree: ~5 GB, checks for
 - Inputs pinned: `rust/Cargo.lock` (crates by checksum), `rust/vendor` in the
   tree.
 
-CI checks it on every push: job "RPMs rebuild byte for byte" runs
+CI checks it for releases: job "RPMs rebuild byte for byte" runs
 `tools/verify-rpm.sh` on the RPM job's packages, on another runner, from a
 fresh clone at another path, with another cargo home, time zone, umask and
-time.
+time. It runs on `v*` tags and on a CI run started by hand (Actions → CI →
+Run workflow), not on pull requests, pushes to `main` or the weekly run.
 
 ## What it doesn't cover
 
