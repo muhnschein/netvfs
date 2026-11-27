@@ -53,6 +53,7 @@ jobs:
       - run: ./tools/ci/changes-selftest.sh
       - run: ./tools/ci/mutation-lists-selftest.sh
       - run: ./tools/ci/core-backtraces-selftest.sh
+      - run: ./tools/ci/verify-rpm-selftest.sh
       - run: make check-comments
 
   check:
