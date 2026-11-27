@@ -21,7 +21,7 @@ use std::task::Poll;
 use std::time::Duration;
 
 use netvfs_vfs::CancelToken;
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::sync::{Notify, mpsc, oneshot};
@@ -46,6 +46,7 @@ const MAX_INTERIM: u8 = 8;
 /// One credit's worth of payload (MS-SMB2 3.1.5.2).
 pub const CREDIT_UNIT: usize = 65_536;
 const CLOSE_WAIT: Duration = Duration::from_millis(500);
+const CLOSE_LINGER: Duration = Duration::from_millis(50);
 /// Why calls fail after `close`.
 pub const CLOSED: &str = "the connection was closed";
 
@@ -192,7 +193,7 @@ struct State {
     encrypt: bool,
     established: bool,
     pending: HashMap<u64, Pending>,
-    tx: Option<mpsc::UnboundedSender<Vec<u8>>>,
+    tx: Option<mpsc::UnboundedSender<Outgoing>>,
     broken: Option<Error>,
     timeout: Duration,
     reader: Option<AbortHandle>,
@@ -338,7 +339,8 @@ impl State {
         let frame = transport::frame(&wire)?;
         self.next_mid = end;
         self.credits = left;
-        let sent = self.tx.as_ref().is_some_and(|tx| tx.send(frame).is_ok());
+        let outgoing = if detached { Outgoing::WithNext(frame) } else { Outgoing::Now(frame) };
+        let sent = self.tx.as_ref().is_some_and(|tx| tx.send(outgoing).is_ok());
         if !sent {
             let error = Error::Lost("the connection is closed".into());
             self.fail(error.clone());
@@ -455,7 +457,7 @@ impl State {
         if let (Some(wire), Some(tx)) = (wire, self.tx.as_ref())
             && let Ok(frame) = transport::frame(&wire)
         {
-            drop(tx.send(frame));
+            drop(tx.send(Outgoing::Now(frame)));
         }
     }
 
@@ -881,12 +883,55 @@ async fn read_loop(shared: Arc<Shared>, mut rd: OwnedReadHalf) {
     shared.break_with(error);
 }
 
-async fn write_loop(shared: Arc<Shared>, mut wr: OwnedWriteHalf, mut rx: mpsc::UnboundedReceiver<Vec<u8>>) {
-    while let Some(frame) = rx.recv().await {
-        if let Err(e) = wr.write_all(&frame).await {
-            shared.break_with(Error::Lost(e.to_string()));
-            return;
+#[derive(Debug)]
+enum Outgoing {
+    Now(Vec<u8>),
+    WithNext(Vec<u8>),
+}
+
+async fn write_frames<W: AsyncWrite + Unpin>(
+    wr: &mut W,
+    rx: &mut mpsc::UnboundedReceiver<Outgoing>,
+) -> std::io::Result<()> {
+    let mut held: Vec<u8> = Vec::new();
+    let mut flush_at = Instant::now();
+    loop {
+        let next = if held.is_empty() {
+            rx.recv().await
+        } else {
+            match tokio::time::timeout_at(flush_at, rx.recv()).await {
+                Ok(next) => next,
+                Err(_elapsed) => {
+                    wr.write_all(&std::mem::take(&mut held)).await?;
+                    continue;
+                }
+            }
+        };
+        match next {
+            Some(Outgoing::WithNext(frame)) => {
+                if held.is_empty() {
+                    flush_at = Instant::now().checked_add(CLOSE_LINGER).unwrap_or_else(Instant::now);
+                }
+                held.extend_from_slice(&frame);
+            }
+            Some(Outgoing::Now(frame)) => {
+                held.extend_from_slice(&frame);
+                wr.write_all(&std::mem::take(&mut held)).await?;
+            }
+            None => {
+                if !held.is_empty() {
+                    wr.write_all(&held).await?;
+                }
+                return Ok(());
+            }
         }
+    }
+}
+
+async fn write_loop(shared: Arc<Shared>, mut wr: OwnedWriteHalf, mut rx: mpsc::UnboundedReceiver<Outgoing>) {
+    if let Err(e) = write_frames(&mut wr, &mut rx).await {
+        shared.break_with(Error::Lost(e.to_string()));
+        return;
     }
     drop(wr.shutdown().await);
 }

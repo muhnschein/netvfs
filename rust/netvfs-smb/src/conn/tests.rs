@@ -615,3 +615,105 @@ async fn a_canceled_token_sends_nothing() {
     assert_eq!(conn.call(Target::SESSION, echo(), &c).await, Err(Error::Canceled));
     assert_eq!(conn.0.lock().next_mid, 0);
 }
+
+#[tokio::test]
+async fn a_detached_close_reaches_the_server_ahead_of_the_next_request_or_alone() {
+    let (conn, mut peer) = started().await;
+    conn.0.lock().credits = 10;
+    let c = CancelToken::new();
+    conn.close_detached(Target::SESSION, &[7; 16]);
+    let (r, ()) = tokio::join!(conn.call(Target::SESSION, echo(), &c), async {
+        assert_eq!(peer.recv_one().await.command(), Command::Close);
+        let req = peer.recv_one().await;
+        assert_eq!(req.command(), Command::Echo);
+        peer.send(&[fake::response(&req, NtStatus::SUCCESS, &four(), 1)], false).await;
+    });
+    r.unwrap().ok().unwrap();
+    conn.close_detached(Target::SESSION, &[8; 16]);
+    assert_eq!(peer.recv_one().await.command(), Command::Close, "with no request after it");
+}
+
+#[tokio::test]
+async fn only_a_detached_close_waits_for_the_frame_after_it() {
+    let (conn, _peer) = started().await;
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    {
+        let mut st = conn.0.lock();
+        st.credits = 10;
+        st.tx = Some(tx);
+    }
+    conn.close_detached(Target::SESSION, &[7; 16]);
+    assert!(matches!(rx.try_recv(), Ok(Outgoing::WithNext(_))));
+    assert!(conn.send_now(Target::SESSION, &[echo()]).unwrap().is_some());
+    assert!(matches!(rx.try_recv(), Ok(Outgoing::Now(_))));
+}
+
+#[derive(Clone, Default)]
+struct Writes(Arc<Mutex<Vec<Vec<u8>>>>);
+
+impl Writes {
+    fn so_far(&self) -> Vec<Vec<u8>> {
+        self.0.lock().unwrap().clone()
+    }
+}
+
+impl AsyncWrite for Writes {
+    fn poll_write(
+        self: Pin<&mut Self>,
+        _: &mut std::task::Context<'_>,
+        buf: &[u8],
+    ) -> Poll<std::io::Result<usize>> {
+        self.0.lock().unwrap().push(buf.to_vec());
+        Poll::Ready(Ok(buf.len()))
+    }
+    fn poll_flush(self: Pin<&mut Self>, _: &mut std::task::Context<'_>) -> Poll<std::io::Result<()>> {
+        Poll::Ready(Ok(()))
+    }
+    fn poll_shutdown(self: Pin<&mut Self>, _: &mut std::task::Context<'_>) -> Poll<std::io::Result<()>> {
+        Poll::Ready(Ok(()))
+    }
+}
+
+fn writer() -> (mpsc::UnboundedSender<Outgoing>, Writes, JoinHandle<std::io::Result<()>>) {
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let writes = Writes::default();
+    let mut wr = writes.clone();
+    let task = tokio::spawn(async move { write_frames(&mut wr, &mut rx).await });
+    (tx, writes, task)
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_close_nobody_waits_for_leaves_in_one_write_with_the_next_request() {
+    let (tx, writes, _task) = writer();
+    tx.send(Outgoing::WithNext(b"close".to_vec())).unwrap();
+    tx.send(Outgoing::Now(b"next".to_vec())).unwrap();
+    tx.send(Outgoing::Now(b"after".to_vec())).unwrap();
+    tokio::time::sleep(Duration::from_millis(1)).await;
+    assert_eq!(
+        writes.so_far(),
+        [b"closenext".to_vec(), b"after".to_vec()],
+        "the held frame first, in the same write"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_held_close_goes_alone_once_no_request_followed() {
+    let (tx, writes, _task) = writer();
+    tx.send(Outgoing::WithNext(b"one".to_vec())).unwrap();
+    tokio::time::sleep(CLOSE_LINGER.saturating_sub(Duration::from_millis(1))).await;
+    assert!(writes.so_far().is_empty(), "held until the linger is over");
+    tx.send(Outgoing::WithNext(b"two".to_vec())).unwrap();
+    tokio::time::sleep(Duration::from_millis(2)).await;
+    assert_eq!(writes.so_far(), [b"onetwo".to_vec()], "a second close does not start the wait again");
+    tokio::time::sleep(CLOSE_LINGER * 4).await;
+    assert_eq!(writes.so_far().len(), 1, "nothing is written twice");
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_held_close_is_written_before_the_connection_ends() {
+    let (tx, writes, task) = writer();
+    tx.send(Outgoing::WithNext(b"close".to_vec())).unwrap();
+    drop(tx);
+    task.await.unwrap().unwrap();
+    assert_eq!(writes.so_far(), [b"close".to_vec()]);
+}

@@ -112,3 +112,4 @@ Workspace `rust/Cargo.toml`: clippy `all`, `pedantic` deny plus picked nursery a
 - Landlock, seccomp via raw syscalls: small, handles Landlock ABI 1–7, no crate in privileged process.
 - Helper's D-Bus: minimal client (`Hello`, `RequestName`, `GetId`, one signal), not zbus (no async runtime in privileged process).
 - Rust backends as one library behind thin C++ plugins: libnetvfs, C++ users and bridge's C ABI keep one backend interface.
+- SMB: CLOSE nobody waits for (`close_detached`: after a listing, a read, a canceled call) held ≤ 50 ms (`CLOSE_LINGER`), written in one write with next request. Two small writes in a row stall ~40 ms behind anything that runs Nagle (SSH tunnel, proxy): measured 44.6 ms against 2.9 ms per round trip. Order on the wire unchanged; next request or connection end flushes it.
