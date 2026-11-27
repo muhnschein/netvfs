@@ -7,7 +7,14 @@ repo=${NETVFS_REPO:-https://github.com/muhnschein/netvfs.git}
 here=$(cd "$(dirname "$0")/.." && pwd)
 
 usage() {
-    sed -n '6,9p' "$0" | sed 's/^# \{0,1\}//' >&2
+    cat >&2 << 'EOF'
+usage: tools/verify-rpm.sh --ref <ref> <rpm>...
+
+  --ref <ref>  commit (full hash), branch or tag the RPMs claim to be
+  <rpm>        packages to check, e.g. a CI artifact or one off a phone
+
+doc/VERIFYING.md says what it needs and what the results mean.
+EOF
     exit 3
 }
 fail() {
