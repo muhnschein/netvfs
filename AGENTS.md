@@ -12,8 +12,7 @@ How to work on netvfs. What it is: `README.md`, `doc/SPEC.md` (platform contract
 
 ## Where the code stands
 
-- Mid Rust rewrite. Rust (`rust/`, `doc/RUST.md`): accounts helper `netvfs-accounts`, `netvfs-bridge`, SFTP, SMB, WebDAV and FTPS backends in `libnetvfs-rs.so`. Still C++/QML: `libnetvfs` core, local backend, ops, discovery, account UI, Buteo plugins, `netvfs-cli`, plugin shims (`src/backends/rs`), bridge C ABI (`src/bridge/ffi`).
-- Moving more C++ to Rust = planned work package, on user's go. No drive-by ports.
+- Mid Rust rewrite: accounts helper, bridge, SFTP, SMB, WebDAV and FTPS backends are Rust (`rust/`, `doc/RUST.md`); rest C++/QML (`doc/SPEC.md` "Roadmap"). More porting = planned work package, on user's go. No drive-by ports.
 - No backwards compatibility between parts that ship together: change both sides in one PR. No version handshakes, option aliases, transition code.
 - C ABIs (`netvfs_rs.h`, `netvfs_bridge_ffi.h`): `#[repr(C)]` by hand, no bindgen; sizes and offsets pinned by tests.
 
@@ -23,7 +22,7 @@ In this order; later step only once earlier ones hold:
 
 1. Change implemented.
 2. Tests added for it (regression test per bug).
-3. Tests proven to bite: each fails with change reverted or mutated. Report how (e.g. "22/22 mutations caught"); name what headless tests can't prove. Rust: `tools/ci/ffi-libs.sh build-ffi && tools/ci/rust-mutants.sh diff origin/main build-ffi` (without FFI libraries bridge's FFI test catches nothing; CI runs same, 12 shards). C++ and cross-language: mutation in `tests/mutations/<list>.json` (`tools/mutation-check.py`). PR CI runs lists whose area PR touches, all weekly (`tools/ci/mutation-lists.py`). New crate → full-crate run (`mutants.yml`, by hand) before merge, results in PR.
+3. Tests proven to bite: each fails with change reverted or mutated. Report how (e.g. "22/22 mutations caught"); name what headless tests can't prove. Rust: `tools/ci/ffi-libs.sh build-ffi && tools/ci/rust-mutants.sh diff origin/main build-ffi` (without FFI libraries bridge's FFI test catches nothing; CI runs same, 12 shards). C++ and cross-language: mutation in `tests/mutations/<list>.json` (`tools/mutation-check.py`); PR CI runs lists of areas PR touches, all weekly. New crate → full-crate run (`mutants.yml`, by hand) before merge, results in PR.
 4. `make check` green locally.
 5. PR CI green: every CI job, SonarQube (quality gate, zero open issues or hotspots: `tools/ci/sonar-issues.py`), CodeQL.
 6. Device: CI job "Sailfish OS 5.2 aarch64 RPMs" builds them on every push; run them on test phone (see "Device tests"); give user `netvfs-rpms-aarch64` artifact link of the green run and evidence. Change lautta uses → link lautta RPM too, say install order (netvfs first).
@@ -33,33 +32,29 @@ PR opens as draft on first push. Mark ready for review only once steps 1–7 hol
 
 No phone run when change can't show on phone: docs, CI, build scripts (RPM contents unchanged), tests only. Steps 6–7 skipped; PR says why.
 
-Backend and core code runs in every process that loads a backend (bridge, Buteo plugins in `buteo-oopp-runner`, `netvfs-cli`, account UI) → cover all it reaches. Behaviour backends share → change and test all four: SFTP, SMB, WebDAV, FTPS.
+Backend and core code runs in every process that loads a backend (bridge, Buteo plugins, `netvfs-cli`, account UI) → cover all it reaches. Behaviour backends share → change and test SFTP, SMB, WebDAV, FTPS.
 
-User tests RPMs on phone; that test judges feel, lag, real servers. Say exactly what to check on device. Accounts and backups: create account per auth mode (wrong input: specific message, no account); manual backup, list, restore byte-identical; scheduled backup, screen off; server unreachable or upload cut: no leftover, no file without `.part`; changed host key, certificate or password: run fails, account not signed in, update flow fixes; account delete leaves server files. App access: each level allows only what it names; narrowing closes app's connections.
+User tests RPMs on phone; that test judges feel, lag, real servers. Say exactly what to check: for accounts and backups `doc/SPEC.md` "Confirm on device" acceptance, per protocol (pinned certificate counts as host key); app access: each level allows only what it names, narrowing closes app's connections.
 
 ## Device tests
 
 - QML target tests (`tests/qmltarget`) and OS file lookups (Silica QML, `jolla-settings-accounts`, sailjail profiles): SDK container, never phone.
-- Test phone on the local SFOS test host via the harness's `local/run.sh` (`muhnschein-sfos-harness`, see its `local/README.md`). Its AGENTS.md rules every phone run (baseline, no blind taps, reboot, language, `clean_slate`, privacy); helpers: its README, `scripts/lib.sh`; netvfs specifics: its `apps/netvfs.md`. Test accounts and harness test servers only. Never run fork or others' PR code there: any run can root phone.
-- Install: `netvfs`, `netvfs-bridge`, `netvfs-backup` from one CI run, one transaction; lautta on top from its own run.
+- Test phone on the local SFOS test host via the harness's `local/run.sh` (`muhnschein-sfos-harness`, `local/README.md`). Its AGENTS.md rules every phone run; netvfs specifics (install, wipe, servers): its `apps/netvfs.md`. Never run fork or others' PR code there: any run can root phone.
 - Every run starts from named state; `state.txt` records it plus RPM names and sha256:
-  - `clean`: wipe lautta if present, then netvfs packages, netvfs accounts (providers `sftp`, `smb`, `webdav`, `ftps`), `~/.config/netvfs`, `~/.local/share/netvfs`, `~/.cache/netvfs`; install.
+  - `clean`: wipe lautta if present, netvfs packages, accounts and data (harness `apps/netvfs.md` "Clean start"); install.
   - `fixture:NAME`: `clean`, then restore snapshot saved with `fixture_save`.
   - `upgrade:FROM`: release FROM plus fixture, then install build over it. Required when change touches stored data, accounts, consent, known hosts, Buteo profiles or units.
 - Footprint check (`fs_mark`, `footprint`): file touched outside known dirs → add to wipe or fail run. Leftovers taint results.
-- Before/after: same start state, same steps, one `local/run.sh` run (both builds).
-- Build already passed same steps → cite that run, no rerun.
-- Run stopped on own script mistake → fix from its shots, rerun only failed steps.
-- Change in bridge, backends, units: prove through a consumer (lautta, `netvfs-cli`) against harness test servers (`nas_up`: SFTP, SMB, WebDAV, FTPS; `nextcloud_up`: Nextcloud). Accounts UI: shots of add-account flow and account pages, never of Accounts list (owner's accounts; harness `apps/netvfs.md`). Backups: Buteo run, then restore.
-- Privacy: user stays muhnschein, nothing more. Harness output leaves the test host only scrubbed, through its `local/publish.sh` (its AGENTS.md "Privacy"). Evidence only from those files (crops, GIFs, charts made from them OK); never type identifiers in: host names, user names, keys, fingerprints included.
-- Harness proves function and timing. Feel, lag, real servers stay user's call on device.
+- Before/after: same start state, same steps, one `local/run.sh` run (both builds). Build already passed same steps → cite that run, no rerun. Run stopped on own script mistake → fix from its shots, rerun only failed steps.
+- Bridge, backends, units: prove through a consumer (lautta, `netvfs-cli`) against harness servers (`nas_up`, `nextcloud_up`). Accounts UI: shots past Accounts list, never of it. Backups: Buteo run, then restore.
+- Privacy: user stays muhnschein, nothing more (harness AGENTS.md "Privacy"). Evidence only from `local/publish.sh` output (crops, GIFs, charts made from it OK); never type identifiers in: host names, user names, keys, fingerprints included.
 
 ## Local checks
 
 - `git submodule update --init --depth 1` before first build (`vendor/host/buteo-syncfw`: host-only Buteo, `make HOST_BUTEO=0` uses system's).
 - Host deps (Ubuntu 24.04): `./tools/ci/install-host-deps.sh`, then `./tools/ci/cargo-tool.sh cargo-nextest 0.9.148`.
-- `make check` = Rust checks, C++ unit tests, bridge tests against built C ABI, interop suite (OpenSSH, Samba, Apache WebDAV, ProFTPD, Nextcloud containers: docker). CI adds `make check-packaging`, `make SANITIZE=1 check`, target tests under qemu, QML on SDK target (`tests/qmltarget/run-in-sdk.sh`).
-- Rust interop tests without their servers (`NETVFS_SFTP_INTEROP_CONFIG`, `NETVFS_INTEROP_SMB_*`, `NETVFS_INTEROP_WEBDAV_*`, `NETVFS_INTEROP_NEXTCLOUD_*`, `NETVFS_INTEROP_FTPS_*`) pass at once, saying skipped. Skipped ≠ passed: say which steps skipped. Missing optional tool = SKIP locally, FAIL in CI.
+- `make check` = Rust checks, C++ unit tests, bridge tests against built C ABI, interop suite (`tests/interop`, server containers: docker). CI adds `make check-packaging`, `make SANITIZE=1 check`, target tests under qemu, QML on SDK target (`tests/qmltarget/run-in-sdk.sh`).
+- Rust interop tests without their server's env (set by `tests/interop/*/run.sh`) pass at once, saying skipped. Skipped ≠ passed: say which steps skipped. Missing optional tool = SKIP locally, FAIL in CI.
 - Iterating → run only what change touches: `cd rust && cargo nextest run -p netvfs-smb`, one C++ test binary from `build/tests`. Before every push: full `make check`. CI runs everything (docs-only PR: no build or test jobs, `tools/ci/changes.sh`).
 - Local failure → rerun on untouched `main` before calling it environment.
 - Gates catch device-only breakage (lockfile cargo 1.95 reads, Qt 5.6 QML, linked libs and GLIBC floor, `%files` lists, `NETVFS_WERROR=1`). Gate red → fix code, never loosen gate.
@@ -67,12 +62,20 @@ User tests RPMs on phone; that test judges feel, lag, real servers. Say exactly 
 - No own cryptography: primitives from ring and RustCrypto, RustCrypto in `netvfs-smb`'s `crypto.rs` only (fence). PR touching `crypto.rs` → separate security review pass; PR body lists every change to it.
 - Server and consumer data = hostile: every length checked against its cap before allocating. New decoder → fuzz target (`rust/fuzz`, `tests/fuzz`).
 - Mutant exclusion (`rust/.cargo/mutants.toml`) only with proof it changes no observable behaviour, in commit body and PR. `crypto.rs`: none.
-- Tests wait on signals or conditions, not fixed sleeps or wall-clock asserts (those flake on loaded runners).
 - New dependency must earn its keep: well maintained, widely used, more than someone's pet project, builds at Rust 1.95, `cargo deny` clean (second version only with reason in `rust/deny.toml`). Say why in RUST.md's dependency list. Update with pinned cargo: `cd rust && cargo update -p <crate>`. `russh` pins RustCrypto pre-releases: bump as one unit. `rust/vendor/ssh-key`, `rust/vendor/picky-asn1-der` = patched copies (`README.netvfs.md` in each).
+
+## New tests
+
+Every added or changed test, before push:
+
+- Honest: fails when behaviour its name claims breaks (step 3 proves it). No assert that cannot fail: tautology, check of own setup, assert in branch or loop that may not run, discarded result, timeout read as answer.
+- Waits on signal or condition only: one the step under test alone makes, and makes once. No sleep, wall-clock assert. Timeout = hang guard: seconds for work of milliseconds. Fixed wait only for "nothing happens"; test name says so.
+- Parallel-safe: passes alone and among 32 others (nextest `test-threads`). Own tempdir; no fixed port or path, shared HOME/XDG, env or cwd change, global state across tests.
+- Runner stalls any thread for hundreds of ms: test still passes. Async or timing-sensitive → `cargo nextest run --stress-count 20 <filter>` on loaded host, or stall injected at race point; say which.
 
 ## UI and words
 
-- Account UI (`accounts/ui`, `src/qml`; *Settings → Accounts*, incl. app access): Silica stock components, platform account types of `jolla-settings-accounts` (`AccountCreationAgent`, `AccountSettingsAgent`, `AccountCredentialsAgent`, `AccountBusyPage`, `StandardAccountSettingsPullDownMenu`); no `OnlineSync*`, `AccountFactory` (assume HTTP); built like existing pages.
+- Account UI (`accounts/ui`, `src/qml`): Silica stock components; of closed platform types only those `doc/SPEC.md` "Backup platform contract" names; built like existing pages.
 - "Design first" / "no PR yet" → mockup, wait for approval, then code.
 - Every string `qsTrId()` with `//%` engineering English; catalogue generated at build (`translations/translations.pro`).
 - Host QML tests (`tests/unit/qml`) and target load (`tests/qmltarget`, real Silica) don't prove looks: unproven until device test. Say so.
@@ -81,15 +84,14 @@ User tests RPMs on phone; that test judges feel, lag, real servers. Say exactly 
 ## Comments and docs
 
 - Caveman-full = drop articles, filler, pleasantries, hedging. Fragments OK, short words. Identifiers, paths, code, errors exact. E.g. "`rust/Cargo.lock` from pinned cargo: resolver v3 prefers crates whose `rust-version` fits 1.95."
-- No code comments, except public API docs. None: no why, no issue reference, no TODO, no commented-out code; in Rust, C++, C, QML, shell, Python, qmake, Makefile, YAML, TOML, XML, spec, Dockerfile, config. Names and tests say what code does. `make check` runs `tools/no_comments.py` (CI: "CI scripts").
-- No workarounds for this rule, no write-ups of code workarounds: no comment archive, no notes or doc file standing in for comments, no comment text hidden in strings or names. Only an absolutely critical fact (code breaks or regresses without it) gets written down: project memory, one short sentence each, nothing more.
+- No code comments, except public API docs: no why, issue reference, TODO, commented-out code; in any source, build or config file. Names and tests say what code does. `make check` runs `tools/no_comments.py`.
+- No workarounds for this rule: no comment archive, no notes or doc file standing in for comments, no comment text hidden in strings or names. Only an absolutely critical fact (code breaks or regresses without it) gets written down: project memory, one short sentence each.
 - Public API docs, concise (one line where it fits): Rust doc comments only where `missing_docs` or clippy (`# Errors`, `# Panics`, `# Safety`) demand them; installed headers (`PUBLIC_HEADERS`, `src/core/core.pro`); `org.netvfs.Bridge1.xml`. No doc comment on private items.
-- Kept, because a tool or licence needs them: shebang; SPDX line 1 (line 2 after shebang or `<?xml`); attribution header with `SPDX-FileCopyrightText` (adapted BSD code in `src/buteo/lib`); `//%` lupdate source text; `// fuzz-<key>:` build lines in `tests/fuzz` harnesses (`run.sh` reads them); `// SAFETY:` above `unsafe`; bare `// NOSONAR`. Not checked: `vendor/`, `rust/vendor/`, CodeQL query copy, test data (`testdata/`, `tests/data/`, generator golden and consumers, fixtures, corpora), `doc/`, `art/`, Markdown.
-- Branch from before the ban (lint red after merging `main`): `python3 tools/no_comments.py --fix`, then `cd rust && cargo fmt --all`, clippy.
-- `doc/*.md`, this file: caveman-full. What is true now and why; keep constraints. No changelog, bug report, history, story (git's job). Existing prose: rewrite what you touch, not more.
-- SPDX header on every source file. Change to what `doc/SPEC.md` or `doc/RUST.md` states → update it, same PR; describe what exists, no change notes. Details stay in code and tests.
-- `README.md`, `CHANGELOG.md`, release notes, forum posts: plain prose for users, as short and to the point as possible.
-- User-visible change → line in `CHANGELOG.md` under `## Unreleased` (file or section missing → create it), same PR.
+- Kept, because a tool or licence needs them: shebang; SPDX line 1 (line 2 after shebang or `<?xml`); attribution header with `SPDX-FileCopyrightText` (adapted BSD code in `src/buteo/lib`); `//%` lupdate source text; `// fuzz-<key>:` build lines in `tests/fuzz` harnesses; `// SAFETY:` above `unsafe`; bare `// NOSONAR`. Lint skips vendored code, CodeQL query copy, test data, `doc/`, `art/`, Markdown (`tools/no_comments.py`).
+- SPDX header on every source file.
+- `doc/*.md`, this file: caveman-full. What is true now and why; keep constraints. No changelog, bug report, history, story (git's job). Existing prose: rewrite what you touch, not more. Change to what `doc/SPEC.md` or `doc/RUST.md` states → update it, same PR. Details stay in code and tests.
+- `README.md`, `CHANGELOG.md`, release notes, forum posts: plain prose for users, short and to the point.
+- User-visible change → line in `CHANGELOG.md` under `## Unreleased` (missing → create it), same PR.
 - No plans, research notes, scratch files in repo.
 
 ## Git and PRs
@@ -97,16 +99,11 @@ User tests RPMs on phone; that test judges feel, lag, real servers. Say exactly 
 - One branch, one PR per task. Stacked PR only when asked.
 - Bridge protocol (`org.netvfs.Bridge1`) change → PRs in netvfs and lautta together, lockstep. `tests/bridge/contract/` JSON and XML stay identical to lautta's `tests/bridge-contract/`.
 - Unrelated finding → tell user; separate PR or issue, not this PR.
-- Commit and PR titles: Conventional Commits, plain language, say outcome: `fix(bridge): ad-hoc ids are never reused after a restart`. Types `feat` `fix` `perf` `refactor` `test` `docs` `ci` `build` `chore`; scope = part or subsystem (`bridge`, `accounts`, `sftp`, `smb`, `webdav`, `ftps`, `backup`, `core`, `cli`, `rpm`, …). Body says why, plain prose; brief, to the point.
+- Commit and PR titles: Conventional Commits, plain language, say outcome: `fix(bridge): ad-hoc ids are never reused after a restart`. Types `feat` `fix` `perf` `refactor` `test` `docs` `ci` `build` `chore`; scope = part or subsystem (`bridge`, `accounts`, `sftp`, `smb`, `webdav`, `ftps`, `backup`, `core`, `cli`, `rpm`, …). Body says why, plain prose, brief.
 - PR body: the problem in a sentence or two, then how you fixed it. End with the model and harness that did the work.
 - Final diff: no debug logging, no leftovers.
-- Evidence shown, not just described (visual: files in project thread; text: PR body):
-  - UI → before/after device screenshots.
-  - Transitions, feel, lag → before/after GIF or mp4. GIF from harness mp4 via `ffmpeg`.
-  - Performance → before/after chart (image), numbers in table beside it.
-  - Non-visual proof (tests, mutations, logs, CI times) → text.
-- Evidence never on GitHub: no `evidence/` branches, no uploads to PR, no assets in `main` or PR branch.
-- Flaky test → find and fix cause. Never add retries (nextest profile `ci` runs none by design: pass on second try = defect). Never re-run CI until green and call it done. Never skip test or loosen assert. One re-run OK only for infra failure before any test ran (runner lost, apt mirror timeout); say so.
+- Evidence shown, not just described: UI → before/after device screenshots; feel, lag, transitions → before/after GIF (from harness mp4 via `ffmpeg`) or mp4; performance → before/after chart plus numbers table; non-visual proof (tests, mutations, logs, CI times) → text. Visual in project thread, text in PR body, never on GitHub: no `evidence/` branches, uploads, assets in any branch.
+- Flaky test → find and fix cause. Never retries (nextest profile `ci` has none: pass on second try = defect), re-running CI until green, skipped test, loosened assert. One re-run only for infra failure before any test ran (runner lost, apt mirror timeout); say so.
 - Merge only on user's explicit go. Merge commit, not squash/rebase.
 - Before asking for merge go: `main` moved since PR's last green run → merge `main` in, CI green again. Each PR green alone ≠ merge green.
 
@@ -114,8 +111,7 @@ User tests RPMs on phone; that test judges feel, lag, real servers. Say exactly 
 
 - Only on user's go. Tag `vX.Y.Z` on main's merge commit; GitHub release carries that commit's CI RPMs (`netvfs-rpms-aarch64`). Version in `rpm/netvfs.spec`, `rust/Cargo.toml`, `sonar-project.properties`. Latest `main` commit green first, Sonar included: check main, not just PR.
 - Strict semver: nothing breaking → minor.
-- Before release: advisories against locked crates resolved; interop suite re-run after any dependency bump.
-- Before release: CI started by hand on release commit (`gh workflow run ci.yml --ref main`), job "RPMs rebuild byte for byte" green.
+- Before release: advisories against locked crates resolved; interop suite re-run after any dependency bump; CI started by hand on release commit (`gh workflow run ci.yml --ref main`), job "RPMs rebuild byte for byte" green.
 
 ## Subagents
 
