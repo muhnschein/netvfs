@@ -9,7 +9,7 @@ ssh-key = { path = "vendor/ssh-key" }
 picky-asn1-der = { path = "vendor/picky-asn1-der" }
 
 [workspace.package]
-version = "1.0.0"
+version = "2.0.0"
 edition = "2024"
 rust-version = "1.95"
 license = "LGPL-2.1-or-later"
