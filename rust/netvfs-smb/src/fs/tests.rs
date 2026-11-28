@@ -115,7 +115,7 @@ async fn stat_is_one_compound_round_trip() {
 
 #[test]
 fn entries_of_attributes() {
-    let info = |a| Info { times: Times::default(), size: 7, attributes: a };
+    let info = |a| Info { times: Times::default(), size: 7, attributes: a, reparse_tag: None };
     let e = info(attributes::DIRECTORY | attributes::HIDDEN | attributes::SYSTEM).entry(b"d".to_vec());
     assert_eq!((e.kind, e.size), (EntryType::Directory, None));
     assert_eq!(e.flags, EntryFlags::HIDDEN.union(EntryFlags::SYSTEM));
@@ -124,10 +124,48 @@ fn entries_of_attributes() {
     assert_eq!((e.kind, e.size), (EntryType::Symlink, Some(7)));
     let e = info(attributes::NORMAL).entry(vec![0xED, 0xA0, 0x80]);
     assert_eq!((e.kind, e.flags), (EntryType::File, EntryFlags::NAME_NOT_UTF8));
-    let big = Info { times: Times::default(), size: u64::MAX, attributes: 0 }.entry(vec![]);
+    let big =
+        Info { times: Times::default(), size: u64::MAX, attributes: 0, reparse_tag: None }.entry(vec![]);
     assert_eq!(big.size, Some(i64::MAX.unsigned_abs()));
-    let d = DirEntry { name: vec![0xD800, u16::from(b'x')], times: Times::default(), size: 1, attributes: 0 };
+    let d = DirEntry {
+        name: vec![0xD800, u16::from(b'x')],
+        times: Times::default(),
+        size: 1,
+        attributes: 0,
+        ea_size: 0,
+    };
     assert_eq!(dir_entry(&d).name, [0xED, 0xA0, 0x80, b'x']);
+}
+
+#[test]
+fn entries_of_reparse_tags() {
+    let listed = |attributes, ea_size| {
+        let e = dir_entry(&DirEntry {
+            name: vec![u16::from(b'e')],
+            times: Times::default(),
+            size: 7,
+            attributes,
+            ea_size,
+        });
+        (e.kind, e.target_kind)
+    };
+    let (link, dir) = (attributes::REPARSE_POINT, attributes::REPARSE_POINT | attributes::DIRECTORY);
+    assert_eq!(listed(dir, reparse::MOUNT_POINT), (EntryType::Symlink, EntryType::Directory));
+    assert_eq!(listed(dir, 0xA000_000C), (EntryType::Symlink, EntryType::Unknown));
+    assert_eq!(listed(link, 0xA000_000C), (EntryType::Symlink, EntryType::Unknown));
+    assert_eq!(listed(link, 0xA000_001D), (EntryType::Symlink, EntryType::Unknown));
+    for special in reparse::SPECIAL_FILES {
+        assert_eq!(listed(link, special), (EntryType::Symlink, EntryType::Unknown), "{special:#x}");
+    }
+    assert_eq!(listed(link, 0x8000_0013), (EntryType::File, EntryType::Unknown));
+    assert_eq!(listed(dir, 0x9000_601A), (EntryType::Directory, EntryType::Unknown));
+    assert_eq!(
+        listed(attributes::DIRECTORY, reparse::MOUNT_POINT),
+        (EntryType::Directory, EntryType::Unknown)
+    );
+    assert_eq!(listed(attributes::NORMAL, 0x8000_0013), (EntryType::File, EntryType::Unknown));
+    let stat = Info { times: Times::default(), size: 7, attributes: dir, reparse_tag: None }.entry(vec![]);
+    assert_eq!((stat.kind, stat.target_kind), (EntryType::Symlink, EntryType::Unknown));
 }
 
 #[tokio::test]

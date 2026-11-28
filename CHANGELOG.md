@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- On SMB servers, junctions to folders open as folders in apps such as Lautta, and files kept by Windows features such as deduplication or OneDrive show as plain files instead of links. Windows symbolic links still show as links that cannot be opened.
+
 ## 2.0.0 - 2026-11-27
 
 - Breaking: you now choose per app and per account what an app may do: full access, read and add, read only, add only, or not allowed. Tapping an app's request opens the choice in Settings, where every account starts at not allowed; *Settings › Accounts › Apps using network locations* changes it later. An app you allowed before keeps full access. Apps need an update for this bridge, such as Lautta 1.1.0.

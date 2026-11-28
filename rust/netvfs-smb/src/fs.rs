@@ -8,7 +8,7 @@ use crate::error::{Error, Result};
 use crate::msg::Command;
 use crate::msg::file::{
     self, Create, Created, DirEntry, FileId, RELATED_FILE_ID, Times, access, attributes, close_request,
-    disposition, ms_of_filetime, options,
+    disposition, ms_of_filetime, options, reparse,
 };
 use crate::names::{is_entry_name, wtf8_from_utf16};
 use crate::status::NtStatus;
@@ -27,13 +27,20 @@ pub struct Info {
     pub size: u64,
     /// FileAttributes.
     pub attributes: u32,
+    /// The reparse tag, where the server said it (directory listings).
+    pub reparse_tag: Option<u32>,
 }
 
 impl Info {
     /// Of a CREATE response.
     #[must_use]
     pub const fn of(created: &Created) -> Self {
-        Self { times: created.times, size: created.end_of_file, attributes: created.attributes }
+        Self {
+            times: created.times,
+            size: created.end_of_file,
+            attributes: created.attributes,
+            reparse_tag: None,
+        }
     }
 
     /// A folder.
@@ -46,13 +53,7 @@ impl Info {
     #[must_use]
     pub fn entry(&self, name: Vec<u8>) -> Entry {
         let a = self.attributes;
-        let kind = if a & attributes::REPARSE_POINT != 0 {
-            EntryType::Symlink
-        } else if a & attributes::DIRECTORY != 0 {
-            EntryType::Directory
-        } else {
-            EntryType::File
-        };
+        let (kind, target_kind) = self.kinds();
         let mut flags = EntryFlags::NONE;
         for (bit, flag) in [
             (attributes::HIDDEN, EntryFlags::HIDDEN),
@@ -74,7 +75,22 @@ impl Info {
             mtime_ms: ms_of_filetime(self.times.last_write),
             atime_ms: ms_of_filetime(self.times.last_access),
             ctime_ms: ms_of_filetime(self.times.creation),
+            target_kind,
             ..Entry::default()
+        }
+    }
+
+    fn kinds(&self) -> (EntryType, EntryType) {
+        let plain = if self.is_dir() { EntryType::Directory } else { EntryType::File };
+        if self.attributes & attributes::REPARSE_POINT == 0 {
+            return (plain, EntryType::Unknown);
+        }
+        match self.reparse_tag {
+            Some(reparse::MOUNT_POINT) => (EntryType::Symlink, EntryType::Directory),
+            Some(tag) if tag & reparse::NAME_SURROGATE == 0 && !reparse::SPECIAL_FILES.contains(&tag) => {
+                (plain, EntryType::Unknown)
+            }
+            _ => (EntryType::Symlink, EntryType::Unknown),
         }
     }
 }
@@ -82,7 +98,8 @@ impl Info {
 /// The entry of a QUERY_DIRECTORY record.
 #[must_use]
 pub fn dir_entry(d: &DirEntry) -> Entry {
-    Info { times: d.times, size: d.size, attributes: d.attributes }.entry(wtf8_from_utf16(&d.name))
+    Info { times: d.times, size: d.size, attributes: d.attributes, reparse_tag: Some(d.ea_size) }
+        .entry(wtf8_from_utf16(&d.name))
 }
 
 fn create(path: &[u16], access: u32, disposition: u32, options: u32, attributes: u32) -> Result<Element> {

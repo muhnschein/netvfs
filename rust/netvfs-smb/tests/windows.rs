@@ -8,6 +8,8 @@
     clippy::print_stderr
 )]
 
+use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::time::Duration;
 
 use netvfs_smb::auth::Account;
@@ -18,8 +20,8 @@ use netvfs_smb::session::{self, Session};
 use netvfs_smb::status::NtStatus;
 use netvfs_smb::transport;
 use netvfs_vfs::{
-    Backend, CancelToken, Credentials, Disposition, Entry, ErrorName, ListOptions, ListSink, Params,
-    Progress, RenameMode, Sink, Source, Status, Value, WriteOptions,
+    Backend, CancelToken, Credentials, Disposition, Entry, EntryType, ErrorName, ListOptions, ListSink,
+    Params, Progress, RenameMode, Sink, Source, Status, Value, WriteOptions,
 };
 use zeroize::Zeroizing;
 
@@ -89,6 +91,23 @@ impl ListSink for Names {
         self.0.extend(batch.iter().map(|e| String::from_utf8(e.name.clone()).unwrap()));
         true
     }
+}
+
+#[derive(Default)]
+struct Kinds(Vec<(String, EntryType, EntryType)>);
+
+impl ListSink for Kinds {
+    fn entries(&mut self, batch: &[Entry]) -> bool {
+        self.0.extend(
+            batch.iter().map(|e| (String::from_utf8(e.name.clone()).unwrap(), e.kind, e.target_kind)),
+        );
+        true
+    }
+}
+
+fn mklink(kind: &str, link: &Path, target: &Path) {
+    let done = Command::new("cmd").arg("/C").arg("mklink").arg(kind).arg(link).arg(target).status().unwrap();
+    assert!(done.success(), "mklink {kind} {}", link.display());
 }
 
 struct Bytes<'a>(&'a [u8]);
@@ -195,4 +214,36 @@ async fn server_mode_lists_the_share() {
     assert!(names.0.iter().any(|n| n.eq_ignore_ascii_case(&windows.share)), "{:?}", names.0);
     assert!(!names.0.iter().any(|n| n.ends_with('$')), "{:?}", names.0);
     smb.disconnect().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn junctions_open_as_folders_and_symlinks_stay_links() {
+    let Some(windows) = Windows::get() else { return };
+    let Some(root) = std::env::var_os("NETVFS_INTEROP_SMB_WINDOWS_ROOT").map(PathBuf::from) else {
+        eprintln!("skipped: NETVFS_INTEROP_SMB_WINDOWS_ROOT not set");
+        return;
+    };
+    let dir = root.join("netvfs-links");
+    std::fs::create_dir_all(dir.join("real")).unwrap();
+    std::fs::write(dir.join("real").join("inner.txt"), b"x").unwrap();
+    mklink("/J", &dir.join("junction"), &dir.join("real"));
+    mklink("/D", &dir.join("dirlink"), &dir.join("real"));
+    let mut smb = windows.backend(&[("share", &windows.share)]).await;
+    let cancel = CancelToken::new();
+    let mut kinds = Kinds::default();
+    smb.list(b"netvfs-links", ListOptions::default(), &mut kinds, &cancel).await.unwrap();
+    kinds.0.sort_by(|a, b| a.0.cmp(&b.0));
+    assert_eq!(
+        kinds.0,
+        [
+            ("dirlink".to_owned(), EntryType::Symlink, EntryType::Unknown),
+            ("junction".to_owned(), EntryType::Symlink, EntryType::Directory),
+            ("real".to_owned(), EntryType::Directory, EntryType::Unknown),
+        ]
+    );
+    let mut inside = Names::default();
+    smb.list(b"netvfs-links/junction", ListOptions::default(), &mut inside, &cancel).await.unwrap();
+    assert_eq!(inside.0, ["inner.txt"]);
+    smb.disconnect().await;
+    std::fs::remove_dir_all(&dir).unwrap();
 }
