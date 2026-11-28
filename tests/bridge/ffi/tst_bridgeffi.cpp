@@ -282,6 +282,7 @@ private slots:
     void establishSignonCancel();
     void establishPhases();
     void listBatchesAndStop();
+    void listResolvesLinkTargets();
     void walkVisitAndStop();
     void removeTreeCounts();
     void metadataAndNamespace();
@@ -755,6 +756,31 @@ void tst_BridgeFfi::listBatchesAndStop()
     ListSink missing;
     QCOMPARE(nameOf(ErrorPtr(t->conn_list(conn.get(), lit("/nope"), 3, ListSink::call, &missing))),
              QStringLiteral("NotFound"));
+}
+
+void tst_BridgeFfi::listResolvesLinkTargets()
+{
+    f->add_dir(lit("/l/real"), -1);
+    f->add_file(lit("/l/file"), lit("x"));
+    f->add_symlink(lit("/l/to-dir"), lit("real"));
+    f->add_symlink(lit("/l/to-file"), lit("file"));
+    f->add_symlink(lit("/l/broken"), lit("gone"));
+    ConnPtr conn = connected();
+    QVERIFY(conn);
+    QMap<QString, QPair<int, int>> seen;
+    const nvb_list_sink_fn collect = [](void *ctx, const nvb_entry *entries, size_t n) -> int {
+        auto *out = static_cast<QMap<QString, QPair<int, int>> *>(ctx);
+        for (size_t i = 0; i < n; ++i)
+            out->insert(QString::fromUtf8(toBytes(entries[i].name)),
+                        qMakePair(int(entries[i].target_type), int(entries[i].flags)));
+        return 1;
+    };
+    QVERIFY(!ErrorPtr(t->conn_list(conn.get(), lit("/l"), 8, collect, &seen)));
+    using NetVfs::EntryType;
+    const int unknown = int(NetVfs::EntryFlag::TargetUnknown);
+    QCOMPARE(seen.value(QStringLiteral("to-dir")), qMakePair(int(EntryType::Directory), 0));
+    QCOMPARE(seen.value(QStringLiteral("to-file")), qMakePair(int(EntryType::File), 0));
+    QCOMPARE(seen.value(QStringLiteral("broken")), qMakePair(int(EntryType::Unknown), unknown));
 }
 
 namespace {

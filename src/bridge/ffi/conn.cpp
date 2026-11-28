@@ -134,6 +134,7 @@ nvb_error *connList(nvb_conn *conn, nvb_bytes dir, uint32_t batchSize, nvb_list_
         });
         ListOptions options;
         options.batchSize = static_cast<int>(std::min<uint32_t>(batchSize, INT_MAX));
+        options.resolveSymlinkTypes = true;
         return backend->list(toPath(dir), &adapter, options);
     });
 }

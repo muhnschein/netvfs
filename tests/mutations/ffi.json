@@ -91,6 +91,13 @@
     "test": "build/tests/bridge/ffi/tst_bridgeffi"
   },
   {
+    "name": "XB-9 List leaves link targets unresolved",
+    "file": "src/bridge/ffi/conn.cpp",
+    "search": "        options.resolveSymlinkTypes = true;\n",
+    "replace": "",
+    "test": "build/tests/bridge/ffi/tst_bridgeffi"
+  },
+  {
     "name": "O4 conn_free does not close open handles",
     "file": "src/bridge/ffi/conn.cpp",
     "search": "        if (handle->handle)\n            handle->handle->close();",
