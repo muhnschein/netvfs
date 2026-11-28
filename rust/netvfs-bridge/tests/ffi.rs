@@ -17,7 +17,7 @@ use netvfs_bridge::ffi::{
     Params, Phase, Progress, PromptRequest, ReadAt, Reply, Secret, TreeCounts, UploadOptions, Value, Verdict,
     WalkOptions, WriteAt, library_path, take_orphan_panics,
 };
-use netvfs_bridge_proto::{ErrorName, WireEntry, entry_kind};
+use netvfs_bridge_proto::{ErrorName, WireEntry, entry_flags, entry_kind};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -43,6 +43,7 @@ const TESTS: &[(&str, Test)] = &[
     ("establish_phases", establish_phases),
     ("establish_signon_off_qt_thread", establish_signon_off_qt_thread),
     ("list_batches_and_stop", list_batches_and_stop),
+    ("list_resolves_link_targets", list_resolves_link_targets),
     ("search_finds_and_stops", search_finds_and_stops),
     ("walk_visit_and_stop", walk_visit_and_stop),
     ("remove_tree_counts", remove_tree_counts),
@@ -523,6 +524,32 @@ fn list_batches_and_stop(env: &Env) {
     });
     assert_eq!((name_of(&stopped), calls), (Some(ErrorName::Canceled), 1));
     assert_eq!(name_of(&conn.list(b"/nope", 3, |_| true)), Some(ErrorName::NotFound));
+}
+
+fn list_resolves_link_targets(env: &Env) {
+    let f = env.fake;
+    f.add_dir(b"/l/real", None);
+    f.add_file(b"/l/file", b"x");
+    f.add_symlink(b"/l/to-dir", b"real");
+    f.add_symlink(b"/l/to-file", b"file");
+    f.add_symlink(b"/l/broken", b"gone");
+    let mut conn = connected(env);
+    let mut seen = Vec::new();
+    conn.list(b"/l", 8, |batch| {
+        seen.extend(batch.iter().map(|e| (e.name.clone(), e.kind, e.target_kind, e.flags)));
+        true
+    })
+    .unwrap();
+    seen.sort();
+    let link = |name: &[u8], target, flags| (name.to_vec(), entry_kind::SYMLINK, target, flags);
+    assert_eq!(
+        seen.into_iter().filter(|e| e.1 == entry_kind::SYMLINK).collect::<Vec<_>>(),
+        [
+            link(b"broken", entry_kind::UNKNOWN, entry_flags::TARGET_UNKNOWN),
+            link(b"to-dir", entry_kind::DIRECTORY, 0),
+            link(b"to-file", entry_kind::FILE, 0),
+        ]
+    );
 }
 
 fn search_finds_and_stops(env: &Env) {
