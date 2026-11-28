@@ -7,5 +7,4 @@ RUN apt-get update \
 COPY proftpd.conf /etc/proftpd/netvfs.conf
 COPY start.sh /usr/local/bin/netvfs-start
 RUN chmod 0755 /usr/local/bin/netvfs-start
-EXPOSE 2121
 CMD ["/usr/local/bin/netvfs-start"]
