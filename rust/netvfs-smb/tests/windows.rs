@@ -223,7 +223,8 @@ async fn junctions_open_as_folders_and_symlinks_stay_links() {
         eprintln!("skipped: NETVFS_INTEROP_SMB_WINDOWS_ROOT not set");
         return;
     };
-    let dir = root.join("netvfs-links");
+    let name = format!("netvfs-links-{}", std::process::id());
+    let dir = root.join(&name);
     std::fs::create_dir_all(dir.join("real")).unwrap();
     std::fs::write(dir.join("real").join("inner.txt"), b"x").unwrap();
     mklink("/J", &dir.join("junction"), &dir.join("real"));
@@ -231,7 +232,7 @@ async fn junctions_open_as_folders_and_symlinks_stay_links() {
     let mut smb = windows.backend(&[("share", &windows.share)]).await;
     let cancel = CancelToken::new();
     let mut kinds = Kinds::default();
-    smb.list(b"netvfs-links", ListOptions::default(), &mut kinds, &cancel).await.unwrap();
+    smb.list(name.as_bytes(), ListOptions::default(), &mut kinds, &cancel).await.unwrap();
     kinds.0.sort_by(|a, b| a.0.cmp(&b.0));
     assert_eq!(
         kinds.0,
@@ -242,7 +243,9 @@ async fn junctions_open_as_folders_and_symlinks_stay_links() {
         ]
     );
     let mut inside = Names::default();
-    smb.list(b"netvfs-links/junction", ListOptions::default(), &mut inside, &cancel).await.unwrap();
+    smb.list(format!("{name}/junction").as_bytes(), ListOptions::default(), &mut inside, &cancel)
+        .await
+        .unwrap();
     assert_eq!(inside.0, ["inner.txt"]);
     smb.disconnect().await;
     std::fs::remove_dir_all(&dir).unwrap();
