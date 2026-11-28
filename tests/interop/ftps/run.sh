@@ -8,8 +8,9 @@ image=netvfs-ftps-proftpd:1.3.8
 prefix="netvfs-ftps-$$"
 work=$(mktemp -d)
 password=$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')
-first=$((20000 + $$ % 1200 * 10))
-last=$((first + 9))
+port=$((20000 + $$ % 1200 * 10))
+first=$((port + 1))
+last=$((port + 9))
 
 cleanup() {
     docker rm -f "$prefix" >/dev/null 2>&1 || true
@@ -27,10 +28,8 @@ openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -keyout "$c
 chmod 644 "$certs"/*
 
 docker build -q -t "$image" "$here/server" >/dev/null
-docker run -d --name "$prefix" -e TEST_PASSWORD="$password" -e PASV_FIRST=$first -e PASV_LAST=$last \
-    -v "$certs:/etc/netvfs:ro" -v "$work/ftp:/srv/ftp" \
-    -p 127.0.0.1::2121 -p "127.0.0.1:$first-$last:$first-$last" "$image" >/dev/null
-port=$(docker port "$prefix" 2121/tcp | head -n 1 | sed 's/.*://')
+docker run -d --name "$prefix" --network host -e TEST_PASSWORD="$password" -e FTP_PORT=$port \
+    -e PASV_FIRST=$first -e PASV_LAST=$last -v "$certs:/etc/netvfs:ro" -v "$work/ftp:/srv/ftp" "$image" >/dev/null
 i=0
 until printf 'QUIT\r\n' | timeout 2 openssl s_client -quiet -starttls ftp -connect "127.0.0.1:$port" >/dev/null 2>&1; do
     i=$((i + 1))
