@@ -4,7 +4,7 @@
 //! Options: `base_path` (the account's folder on the server), `host_key` (pinned TLS key). No credentials go
 //! out before the identity check: `connect` only shakes hands, `authenticate` sends the first request.
 
-use crate::http::{ALPN, Body, Http, Req, STALE_AFTER, Target};
+use crate::http::{ALPN, Body, BodyReader, Http, Req, STALE_AFTER, Target};
 use crate::io::{self, WebdavRead};
 use crate::paths::{Base, below, child_name, encode, last_name, same};
 use crate::status::{Op, error, unresolved};
@@ -28,8 +28,8 @@ pub const DEFAULT_PORT: u16 = 443;
 pub const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 /// Request timeout when the caller gives none.
 pub const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_mins(1);
-/// Largest multistatus read: a folder of some 50 000 entries.
-pub const MAX_MULTISTATUS: usize = 32 * 1024 * 1024;
+/// Largest multistatus read, as it arrives: room for [`xml::MAX_RESPONSES`] of some 600 bytes.
+pub const MAX_MULTISTATUS: usize = 128 * 1024 * 1024;
 /// Largest error page read before the connection is dropped instead.
 pub const MAX_ERROR_BODY: usize = 64 * 1024;
 
@@ -131,6 +131,13 @@ pub struct Dav {
     pub search_root: Option<Vec<u8>>,
 }
 
+fn propfind_req(path: Vec<u8>, depth: &'static str, body: &'static str) -> Result<Req, Status> {
+    Ok(Req::new(Method::from_bytes(b"PROPFIND").map_err(|e| Status::internal(e.to_string()))?, path)
+        .header(DEPTH, HeaderValue::from_static(depth))
+        .header(CONTENT_TYPE, HeaderValue::from_static("application/xml; charset=utf-8"))
+        .body(Body::Full(Some(Bytes::from_static(body.as_bytes())))))
+}
+
 /// PROPFIND `depth` on decoded `path`.
 ///
 /// # Errors
@@ -141,11 +148,7 @@ pub async fn propfind(
     depth: &'static str,
     body: &'static str,
 ) -> Result<Vec<Response>, Status> {
-    let req = Req::new(Method::from_bytes(b"PROPFIND").map_err(|e| Status::internal(e.to_string()))?, path)
-        .header(DEPTH, HeaderValue::from_static(depth))
-        .header(CONTENT_TYPE, HeaderValue::from_static("application/xml; charset=utf-8"))
-        .body(Body::Full(Some(Bytes::from_static(body.as_bytes()))));
-    multistatus(http, req).await
+    multistatus(http, propfind_req(path, depth, body)?).await
 }
 
 /// Sends `req` and reads the multistatus it is answered with.
@@ -153,6 +156,24 @@ pub async fn propfind(
 /// # Errors
 /// The answer's error; `ProtocolError` for anything but a multistatus.
 pub async fn multistatus(http: &mut Http, req: Req) -> Result<Vec<Response>, Status> {
+    let mut all = Vec::new();
+    each_response(http, req, |r| {
+        all.push(r);
+        Ok(())
+    })
+    .await?;
+    Ok(all)
+}
+
+/// Sends `req` and hands each response of the multistatus it is answered with to `on` as it arrives.
+///
+/// # Errors
+/// The answer's error; `ProtocolError` for anything but a multistatus; the first error of `on`.
+pub async fn each_response(
+    http: &mut Http,
+    req: Req,
+    on: impl FnMut(Response) -> Result<(), Status>,
+) -> Result<(), Status> {
     let answer = http.send(req).await?;
     let (head, body) = answer.into_parts();
     if head.status.as_u16() != MULTI_STATUS {
@@ -165,8 +186,9 @@ pub async fn multistatus(http: &mut Http, req: Req) -> Result<Vec<Response>, Sta
         http.discard(body, MAX_ERROR_BODY).await;
         return Err(e);
     }
-    let bytes = http.read_all(body, MAX_MULTISTATUS).await?;
-    xml::parse(&bytes)
+    let mut reader = BodyReader::new(http, body, MAX_MULTISTATUS);
+    let read = xml::read(&mut reader, on).await;
+    reader.finish(read)
 }
 
 /// A request without body whose answer only counts by its status.
@@ -220,26 +242,46 @@ impl Dav {
         dir: &[u8],
         body: &'static str,
     ) -> Result<(Option<Props>, Vec<Entry>), Status> {
+        let mut entries = Vec::new();
+        let own = self
+            .each_entry(dir, body, |e| {
+                entries.push(e);
+                Ok(())
+            })
+            .await?;
+        Ok((own, entries))
+    }
+
+    /// Hands each entry of folder `dir` to `on` as it arrives; the folder's own properties, when the server
+    /// answered with them.
+    ///
+    /// # Errors
+    /// `NotADirectory` for a file, request errors, and the first error of `on`.
+    pub async fn each_entry(
+        &self,
+        dir: &[u8],
+        body: &'static str,
+        mut on: impl FnMut(Entry) -> Result<(), Status>,
+    ) -> Result<Option<Props>, Status> {
         let target = self.base.resolve(dir, false)?;
         let decoded = self.base.resolve(dir, true)?;
-        let answer = propfind(&mut *self.http.lock().await, target, "1", body).await;
-        let found = match answer {
-            Ok(found) => found,
-            Err(e) => return Err(self.explain(dir, e).await),
-        };
         let mut own = None;
-        let mut entries = Vec::new();
-        for r in found {
+        let answer = each_response(&mut *self.http.lock().await, propfind_req(target, "1", body)?, |r| {
             if same(&r.path, &decoded) {
+                if !r.props.collection {
+                    return Err(Status::new(ErrorName::NotADirectory, "Not a folder"));
+                }
                 own = Some(r.props);
             } else if let Some(name) = child_name(&decoded, &r.path) {
-                entries.push(entry(name, &r.props));
+                on(entry(name, &r.props))?;
             }
+            Ok(())
+        })
+        .await;
+        match answer {
+            Ok(()) => Ok(own),
+            Err(e) => Err(self.explain(dir, e).await),
         }
-        if own.as_ref().is_some_and(|p| !p.collection) {
-            return Err(Status::new(ErrorName::NotADirectory, "Not a folder"));
-        }
-        Ok((own, entries))
     }
 
     async fn folder(&self) -> Result<Option<Props>, Status> {
@@ -611,15 +653,27 @@ impl Backend for Webdav {
         cancel: &CancelToken,
     ) -> Result<(), Status> {
         let dav = self.dav(cancel)?;
-        let (own, entries) = cancel.guard(dav.entries(dir, PROPFIND_ENTRY)).await?;
-        if own.is_none() && entries.is_empty() {
-            return Err(Status::new(ErrorName::NotFound, "No such folder"));
-        }
-        for batch in entries.chunks(options.batch_size.max(1)) {
+        let size = options.batch_size.max(1);
+        let mut batch = Vec::with_capacity(size);
+        let mut handed = false;
+        let mut hand_on = |batch: &mut Vec<Entry>| {
             cancel.check()?;
-            if !sink.entries(batch) {
-                return Err(Status::canceled());
-            }
+            handed = true;
+            let more = sink.entries(batch);
+            batch.clear();
+            if more { Ok(()) } else { Err(Status::canceled()) }
+        };
+        let own = cancel
+            .guard(dav.each_entry(dir, PROPFIND_ENTRY, |e| {
+                batch.push(e);
+                if batch.len() < size { Ok(()) } else { hand_on(&mut batch) }
+            }))
+            .await?;
+        if !batch.is_empty() {
+            hand_on(&mut batch)?;
+        }
+        if own.is_none() && !handed {
+            return Err(Status::new(ErrorName::NotFound, "No such folder"));
         }
         Ok(())
     }

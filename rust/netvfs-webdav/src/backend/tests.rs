@@ -588,6 +588,47 @@ async fn list_gives_children_in_batches() {
 }
 
 #[tokio::test]
+async fn entries_reach_the_sink_while_the_answer_is_read() {
+    let fake = server(Cert::Trusted).await;
+    let mut w = signed_in(&fake, "/").await;
+    let r = |href: &str| {
+        format!(
+            "<d:response><d:href>{href}</d:href><d:propstat><d:prop><d:resourcetype/></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>"
+        )
+    };
+    let body = format!(r#"<d:multistatus xmlns:d="DAV:">{}"#, [r("/d/a"), r("/d/b"), r("/d/c")].concat());
+    let body: &'static str = Box::leak(body.into_boxed_str());
+    fake.with(|s| {
+        s.canned.push((Method::from_bytes(b"PROPFIND").unwrap(), StatusCode::MULTI_STATUS, vec![], body));
+    });
+    struct Batches(Vec<Vec<String>>);
+    impl ListSink for Batches {
+        fn entries(&mut self, batch: &[Entry]) -> bool {
+            self.0.push(names(batch));
+            true
+        }
+    }
+    let mut b = Batches(Vec::new());
+    let options = ListOptions { batch_size: 2, resolve_symlink_types: false };
+    let e = w.list(b"/d", options, &mut b, &CancelToken::new()).await.unwrap_err();
+    assert_eq!((e.name, e.detail.as_str()), (ErrorName::ProtocolError, "truncated"));
+    assert_eq!(b.0, [["a", "b"]]);
+}
+
+#[tokio::test]
+async fn children_without_the_folder_itself_still_list() {
+    let fake = server(Cert::Trusted).await;
+    let mut w = signed_in(&fake, "/").await;
+    let body = r#"<d:multistatus xmlns:d="DAV:"><d:response><d:href>/d/a</d:href><d:propstat><d:prop><d:resourcetype/></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response></d:multistatus>"#;
+    fake.with(|s| {
+        s.canned.push((Method::from_bytes(b"PROPFIND").unwrap(), StatusCode::MULTI_STATUS, vec![], body));
+    });
+    let mut all = Collect::default();
+    w.list(b"/d", ListOptions::default(), &mut all, &CancelToken::new()).await.unwrap();
+    assert_eq!(names(&all.0), ["a"]);
+}
+
+#[tokio::test]
 async fn an_empty_folder_lists_nothing() {
     let fake = server(Cert::Trusted).await;
     fake.put("/d", Node::Dir);
@@ -1155,4 +1196,19 @@ async fn unreachable_servers() {
     let mut w = Webdav::with_anchors(anchors());
     let p = Params { host: "127.0.0.1".into(), port: i32::from(port), ..Params::default() };
     assert_eq!(w.connect(&p, &CancelToken::new()).await.unwrap_err().name, ErrorName::NetworkUnreachable);
+}
+
+#[tokio::test]
+async fn a_folder_with_as_many_entries_as_a_listing_holds_lists() {
+    let fake = server(Cert::Trusted).await;
+    fake.put("/d", Node::Dir);
+    let children = xml::MAX_RESPONSES - 1;
+    for n in 0..children {
+        fake.put(&format!("/d/file-{n:06}.txt"), file(b""));
+    }
+    let mut w = signed_in(&fake, "").await;
+    let mut all = Collect::default();
+    w.list(b"/d", ListOptions::default(), &mut all, &CancelToken::new()).await.unwrap();
+    assert_eq!(all.0.len(), children);
+    assert_eq!(all.0.last().unwrap().name, format!("file-{:06}.txt", children - 1).into_bytes());
 }
