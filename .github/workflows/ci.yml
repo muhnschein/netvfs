@@ -274,6 +274,7 @@ jobs:
               'NETVFS_INTEROP_SMB_WINDOWS_USER=netvfs'
               "NETVFS_INTEROP_SMB_WINDOWS_PASSWORD=$password"
               'NETVFS_INTEROP_SMB_WINDOWS_SHARE=netvfs'
+              'NETVFS_INTEROP_SMB_WINDOWS_ROOT=C:\netvfs-share'
           ) | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
       - name: Loopback is real SMB (Windows's own client)
         shell: pwsh

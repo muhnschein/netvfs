@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Links to folders on SFTP servers now open as folders in apps such as Lautta, instead of showing as links that cannot be opened.
+- On SMB servers, junctions to folders open as folders in apps such as Lautta, and files kept by Windows features such as deduplication or OneDrive show as plain files instead of links. Windows symbolic links still show as links that cannot be opened.
 
 ## 2.0.0 - 2026-11-27
 

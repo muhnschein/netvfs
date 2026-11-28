@@ -63,6 +63,16 @@ pub mod attributes {
     pub const REPARSE_POINT: u32 = 0x0000_0400;
 }
 
+/// Reparse tags (MS-FSCC 2.1.2.1).
+pub mod reparse {
+    /// IO_REPARSE_TAG_MOUNT_POINT: a junction, which the server follows.
+    pub const MOUNT_POINT: u32 = 0xA000_0003;
+    /// Bit of tags that name another file.
+    pub const NAME_SURROGATE: u32 = 0x2000_0000;
+    /// Tags of special files (NFS, AF_UNIX, LX_FIFO, LX_CHR, LX_BLK).
+    pub const SPECIAL_FILES: [u32; 5] = [0x8000_0014, 0x8000_0023, 0x8000_0024, 0x8000_0025, 0x8000_0026];
+}
+
 /// FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE.
 pub const SHARE_ALL: u32 = 0x7;
 /// FSCTL_PIPE_TRANSCEIVE (MS-FSCC 2.3.49).
@@ -373,6 +383,8 @@ pub struct DirEntry {
     pub size: u64,
     /// FileAttributes.
     pub attributes: u32,
+    /// EaSize: the reparse tag when `attributes` has REPARSE_POINT.
+    pub ea_size: u32,
 }
 
 /// The entries of a QUERY_DIRECTORY response; `max_out` is the
@@ -416,9 +428,10 @@ pub fn parse_id_both_directory(buf: &[u8]) -> Result<Vec<DirEntry>> {
         if name_len > MAX_NAME_BYTES {
             return Err(protocol("directory entry name too long"));
         }
+        let ea_size = r.u32()?;
         r.seek(FIXED)?;
         let name = units_of(r.bytes(name_len)?).ok_or_else(|| protocol("odd name length"))?;
-        out.push(DirEntry { name, times, size, attributes });
+        out.push(DirEntry { name, times, size, attributes, ea_size });
         if next == 0 {
             return Ok(out);
         }
@@ -543,11 +556,20 @@ mod tests {
     }
 
     pub(crate) fn entry(name: &str, size: u64, attributes: u32, next: u32) -> Vec<u8> {
+        tagged_entry(name, size, (attributes, 0), next)
+    }
+
+    pub(crate) fn tagged_entry(
+        name: &str,
+        size: u64,
+        (attributes, ea_size): (u32, u32),
+        next: u32,
+    ) -> Vec<u8> {
         let n = utf16le(&u(name));
         let mut w = Writer::new();
         w.u32(next).u32(0).u64(1).u64(2).u64(3).u64(4).u64(size).u64(0).u32(attributes);
         w.u32(u32::try_from(n.len()).unwrap());
-        w.u32(0).u8(0).u8(0).bytes(&[0; 24]).u16(0).u64(0).bytes(&n);
+        w.u32(ea_size).u8(0).u8(0).bytes(&[0; 24]).u16(0).u64(0).bytes(&n);
         w.into_vec()
     }
 
@@ -725,6 +747,8 @@ mod tests {
         assert_eq!(got[0].name, u("a.txt"));
         assert_eq!(got[0].times, Times { creation: 1, last_access: 2, last_write: 3, change: 4 });
         assert_eq!((got[1].name.clone(), got[1].size, got[1].attributes), (u("\u{dc}n\u{ef}"), 7, 0x10));
+        let junction = tagged_entry("j", 0, (0x410, reparse::MOUNT_POINT), 0);
+        assert_eq!(parse_id_both_directory(&junction).unwrap()[0].ea_size, reparse::MOUNT_POINT);
 
         parse_id_both_directory(&entry("x", 1, 0, 8)).unwrap_err();
         parse_id_both_directory(&entry("x", 1, 0, 107)).unwrap_err();
