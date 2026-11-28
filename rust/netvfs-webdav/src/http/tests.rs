@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 #![allow(clippy::arithmetic_side_effects, reason = "tests")]
 use super::*;
-use crate::backend::{MAX_ERROR_BODY, MAX_MULTISTATUS};
+use crate::backend::MAX_ERROR_BODY;
 use crate::fake::{CA, Cert, Fake, acceptor};
 use http::StatusCode;
 use netvfs_tls::Anchors;
@@ -92,18 +92,93 @@ async fn error_pages_up_to_64_kib_are_read_to_keep_the_connection() {
     }
 }
 
+const CAP: usize = 1024 * 1024;
+
+async fn read_body(http: &mut Http, cap: usize) -> Result<Vec<u8>, Status> {
+    let (_, body) = http.send(Req::new(Method::GET, b"/".to_vec())).await?.into_parts();
+    let mut reader = BodyReader::new(http, body, cap);
+    let mut out = Vec::new();
+    let read = reader.read_to_end(&mut out).await.map(|_| out).map_err(|e| Status::internal(e.to_string()));
+    reader.finish(read)
+}
+
 #[tokio::test]
-async fn answers_up_to_32_mib_are_read_whole() {
+async fn a_body_up_to_its_cap_is_read_whole_and_keeps_the_connection() {
     let fake = Fake::start(Cert::Trusted).await;
     let mut http = http_to(fake.addr, LONG, STALE_AFTER);
-    let size = 32 * 1024 * 1024;
-    fake.with(|s| s.canned.push((Method::GET, StatusCode::OK, vec![], leak("x".repeat(size)))));
+    round_trip(&mut http, options()).await;
+    fake.with(|s| s.canned.push((Method::GET, StatusCode::OK, vec![], leak("x".repeat(CAP)))));
+    assert_eq!(read_body(&mut http, CAP).await.unwrap().len(), CAP);
+    round_trip(&mut http, options()).await;
+    assert_eq!(connections(&fake), 1);
+}
+
+#[tokio::test]
+async fn a_body_one_byte_over_its_cap_is_too_large_and_drops_the_connection() {
+    let fake = Fake::start(Cert::Trusted).await;
+    let mut http = http_to(fake.addr, LONG, STALE_AFTER);
+    fake.with(|s| s.canned.push((Method::GET, StatusCode::OK, vec![], leak("x".repeat(CAP + 1)))));
+    let e = read_body(&mut http, CAP).await.unwrap_err();
+    assert_eq!((e.name, e.detail.as_str()), (ErrorName::ProtocolError, "more than 1048576 bytes"));
+    round_trip(&mut http, options()).await;
+    assert_eq!(connections(&fake), 2);
+}
+
+#[tokio::test]
+async fn a_body_left_unread_drops_the_connection() {
+    let fake = Fake::start(Cert::Trusted).await;
+    let mut http = http_to(fake.addr, LONG, STALE_AFTER);
+    fake.with(|s| s.canned.push((Method::GET, StatusCode::OK, vec![], "unread")));
     let (_, body) = http.send(Req::new(Method::GET, b"/".to_vec())).await.unwrap().into_parts();
-    assert_eq!(http.read_all(body, MAX_MULTISTATUS).await.unwrap().len(), size);
-    fake.with(|s| s.canned.push((Method::GET, StatusCode::OK, vec![], leak("x".repeat(size + 1)))));
-    let (_, body) = http.send(Req::new(Method::GET, b"/".to_vec())).await.unwrap().into_parts();
-    let e = http.read_all(body, MAX_MULTISTATUS).await.unwrap_err();
-    assert_eq!((e.name, e.detail.as_str()), (ErrorName::ProtocolError, "more than 33554432 bytes"));
+    BodyReader::new(&mut http, body, CAP).finish(Ok(())).unwrap();
+    round_trip(&mut http, options()).await;
+    assert_eq!(connections(&fake), 2);
+}
+
+async fn trickled(parts: &'static [&'static [u8]], gap: Duration, request_timeout: Duration) -> Http {
+    let (client, mut server) = tokio::io::duplex(64 * 1024);
+    let (sender, conn) = http1::handshake::<_, Body>(TokioIo::new(client)).await.unwrap();
+    tokio::spawn(async move { drop(conn.await) });
+    tokio::spawn(async move {
+        let mut head = Vec::new();
+        let mut buf = vec![0u8; 4096];
+        while !head.ends_with(b"\r\n\r\n") {
+            let got = server.read(&mut buf).await.unwrap();
+            head.extend_from_slice(&buf[..got]);
+        }
+        for part in parts {
+            server.write_all(part).await.unwrap();
+            tokio::time::sleep(gap).await;
+        }
+        while server.read(&mut buf).await.is_ok_and(|got| got > 0) {}
+    });
+    let mut http = http_to(SocketAddr::from((Ipv4Addr::LOCALHOST, 9)), request_timeout, STALE_AFTER);
+    http.conn = Some(Conn { sender, busy: false, idle_since: Instant::now() });
+    http
+}
+
+const TRICKLE: &[&[u8]] = &[b"HTTP/1.1 200 OK\r\ncontent-length: 12\r\n\r\nabcd", b"efgh", b"ijkl"];
+
+#[tokio::test(start_paused = true)]
+async fn a_body_whose_every_chunk_comes_in_time_is_read_however_long_it_takes() {
+    let mut http = trickled(TRICKLE, Duration::from_secs(40), Duration::from_mins(1)).await;
+    assert_eq!(read_body(&mut http, CAP).await.unwrap(), b"abcdefghijkl");
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_body_that_stalls_times_out_and_drops_the_connection() {
+    let mut http = trickled(TRICKLE, Duration::from_mins(2), Duration::from_mins(1)).await;
+    assert_eq!(read_body(&mut http, CAP).await.unwrap_err().name, ErrorName::Timeout);
+    assert!(http.conn.is_none());
+}
+
+#[tokio::test]
+async fn a_body_cut_short_is_a_lost_connection() {
+    let (addr, _) =
+        scripted(vec![(vec![b"HTTP/1.1 200 OK\r\ncontent-length: 12\r\n\r\nabcd"], Then::Close)]).await;
+    let mut http = http_to(addr, LONG, STALE_AFTER);
+    assert_eq!(read_body(&mut http, CAP).await.unwrap_err().name, ErrorName::ConnectionLost);
+    assert!(http.conn.is_none());
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

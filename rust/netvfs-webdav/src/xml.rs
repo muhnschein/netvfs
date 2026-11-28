@@ -7,6 +7,7 @@ use netvfs_vfs::{ErrorName, Status};
 use quick_xml::events::Event;
 use quick_xml::name::{Namespace, ResolveResult};
 use quick_xml::reader::NsReader;
+use tokio::io::AsyncBufRead;
 
 /// Responses in one multistatus at most.
 pub const MAX_RESPONSES: usize = 200_000;
@@ -316,6 +317,43 @@ fn predefined(name: &str) -> Option<&'static str> {
     })
 }
 
+impl Parser {
+    fn event(&mut self, ns: &ResolveResult<'_>, event: Event<'_>) -> Result<bool, Status> {
+        match event {
+            Event::Start(e) => {
+                let el = element(ns, e.local_name().as_ref());
+                self.start(el)?;
+            }
+            Event::End(_) => self.end()?,
+            Event::Text(t) => self.push_text(&t.xml10_content())?,
+            Event::CData(t) => self.push_text(&t.into_inner())?,
+            Event::GeneralRef(r) => {
+                let resolved = if r.is_char_ref() {
+                    r.resolve_char_ref()
+                        .map_err(|e| bad(e.to_string()))?
+                        .ok_or_else(|| bad("bad character"))?
+                        .to_string()
+                } else {
+                    predefined(&r.into_inner()).ok_or_else(|| bad("unknown entity"))?.to_owned()
+                };
+                self.push_text(&resolved)?;
+            }
+            Event::DocType(_) => return Err(bad("a document type declaration")),
+            Event::Empty(_) => return Err(bad("unexpanded empty element")),
+            Event::Eof => return Ok(true),
+            Event::Decl(_) | Event::PI(_) | Event::Comment(_) => {}
+        }
+        Ok(false)
+    }
+
+    fn finish(self) -> Result<Vec<Response>, Status> {
+        if !self.stack.is_empty() || !self.root_seen {
+            return Err(bad("truncated"));
+        }
+        Ok(self.out)
+    }
+}
+
 /// The responses of a multistatus body, in order; those with a non-2xx status, without exactly one valid `href`,
 /// are left out.
 ///
@@ -327,35 +365,37 @@ pub fn parse(body: &[u8]) -> Result<Vec<Response>, Status> {
     let mut p = Parser::default();
     loop {
         let (ns, event) = reader.read_resolved_event().map_err(|e| bad(e.to_string()))?;
-        match event {
-            Event::Start(e) => {
-                let el = element(&ns, e.local_name().as_ref());
-                p.start(el)?;
-            }
-            Event::End(_) => p.end()?,
-            Event::Text(t) => p.push_text(&t.xml10_content())?,
-            Event::CData(t) => p.push_text(&t.into_inner())?,
-            Event::GeneralRef(r) => {
-                let resolved = if r.is_char_ref() {
-                    r.resolve_char_ref()
-                        .map_err(|e| bad(e.to_string()))?
-                        .ok_or_else(|| bad("bad character"))?
-                        .to_string()
-                } else {
-                    predefined(&r.into_inner()).ok_or_else(|| bad("unknown entity"))?.to_owned()
-                };
-                p.push_text(&resolved)?;
-            }
-            Event::DocType(_) => return Err(bad("a document type declaration")),
-            Event::Empty(_) => return Err(bad("unexpanded empty element")),
-            Event::Eof => break,
-            Event::Decl(_) | Event::PI(_) | Event::Comment(_) => {}
+        if p.event(&ns, event)? {
+            return p.finish();
         }
     }
-    if !p.stack.is_empty() || !p.root_seen {
-        return Err(bad("truncated"));
+}
+
+/// The responses of [`parse`], each handed to `on` as soon as it is read from `body`; neither is held whole.
+///
+/// # Errors
+/// As [`parse`]; the first error of `on`; a failing `body` is `ProtocolError` too, for the caller to replace with
+/// the cause.
+pub async fn read(
+    body: impl AsyncBufRead + Unpin,
+    mut on: impl FnMut(Response) -> Result<(), Status>,
+) -> Result<(), Status> {
+    let mut reader = NsReader::from_reader(body);
+    reader.config_mut().expand_empty_elements = true;
+    let mut p = Parser::default();
+    let mut buf = Vec::new();
+    loop {
+        buf.clear();
+        let (ns, event) =
+            reader.read_resolved_event_into_async(&mut buf).await.map_err(|e| bad(e.to_string()))?;
+        let eof = p.event(&ns, event)?;
+        for r in p.out.drain(..) {
+            on(r)?;
+        }
+        if eof {
+            return p.finish().map(drop);
+        }
     }
-    Ok(p.out)
 }
 
 #[cfg(test)]

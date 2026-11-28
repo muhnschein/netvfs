@@ -2,7 +2,7 @@
 //! One HTTP/1.1 connection over TLS, reopened when the server closes it. Each reopening is a new TLS
 //! handshake that must pass the identity settled at connect (`netvfs_tls::Client`).
 
-use bytes::Bytes;
+use bytes::{Buf, Bytes};
 use http::header::{AUTHORIZATION, CONTENT_LENGTH, HOST, USER_AGENT};
 use http::{HeaderName, HeaderValue, Method, Request, Response};
 use http_body::{Body as HttpBody, Frame, SizeHint};
@@ -13,9 +13,11 @@ use netvfs_tls::Client as Tls;
 use netvfs_vfs::{ErrorName, Status};
 use std::convert::Infallible;
 use std::pin::Pin;
-use std::task::{Context, Poll};
+use std::task::{Context, Poll, ready};
 use std::time::{Duration, Instant};
+use tokio::io::{AsyncBufRead, AsyncRead, ReadBuf};
 use tokio::sync::mpsc;
+use tokio::time::Sleep;
 
 use crate::paths::encode;
 
@@ -354,24 +356,6 @@ impl Http {
         }
     }
 
-    /// The whole body, at most `cap` bytes, then [`done`](Self::done).
-    ///
-    /// # Errors
-    /// `ProtocolError` above `cap`; what [`chunk`](Self::chunk) gives.
-    pub async fn read_all(&mut self, mut body: Incoming, cap: usize) -> Result<Vec<u8>, Status> {
-        let mut out = Vec::new();
-        while let Some(chunk) = self.chunk(&mut body).await? {
-            if out.len().saturating_add(chunk.len()) > cap {
-                self.conn = None;
-                return Err(Status::new(ErrorName::ProtocolError, "The server's answer is too large")
-                    .with_detail(format!("more than {cap} bytes")));
-            }
-            out.extend_from_slice(&chunk);
-        }
-        self.done();
-        Ok(out)
-    }
-
     /// Reads and drops the body (an error page, say) up to `cap`; drops the connection beyond.
     pub async fn discard(&mut self, mut body: Incoming, cap: usize) {
         let mut seen = 0usize;
@@ -391,6 +375,104 @@ impl Http {
                 Err(_) => return,
             }
         }
+    }
+}
+
+/// An answer body read as it arrives: at most `cap` bytes, each chunk within the request timeout of the last, then
+/// [`Http::done`]. Over `cap`, failed or not read to the end, the connection is dropped.
+#[derive(Debug)]
+pub struct BodyReader<'a> {
+    http: &'a mut Http,
+    body: Incoming,
+    chunk: Bytes,
+    seen: usize,
+    cap: usize,
+    deadline: Pin<Box<Sleep>>,
+    ended: bool,
+    failed: Option<Status>,
+}
+
+impl<'a> BodyReader<'a> {
+    /// Reads `body` of the answer `http` sent.
+    pub fn new(http: &'a mut Http, body: Incoming, cap: usize) -> Self {
+        let deadline = Box::pin(tokio::time::sleep(http.target.request_timeout));
+        Self { http, body, chunk: Bytes::new(), seen: 0, cap, deadline, ended: false, failed: None }
+    }
+
+    /// `result` of reading, unless the body failed first: then why it failed.
+    ///
+    /// # Errors
+    /// `ProtocolError` above `cap`, `Timeout`, `ConnectionLost`; `result`'s error.
+    pub fn finish<T>(self, result: Result<T, Status>) -> Result<T, Status> {
+        if let Some(e) = self.failed {
+            return Err(e);
+        }
+        if !self.ended {
+            self.http.conn = None;
+        }
+        result
+    }
+
+    fn fail(&mut self, e: Status) -> Poll<std::io::Result<&[u8]>> {
+        self.http.conn = None;
+        let io = std::io::Error::other(e.message.clone());
+        self.failed = Some(e);
+        Poll::Ready(Err(io))
+    }
+}
+
+impl AsyncBufRead for BodyReader<'_> {
+    fn poll_fill_buf(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<&[u8]>> {
+        let this = self.get_mut();
+        while this.chunk.is_empty() && !this.ended {
+            match Pin::new(&mut this.body).poll_frame(cx) {
+                Poll::Ready(None) => {
+                    this.ended = true;
+                    this.http.done();
+                }
+                Poll::Ready(Some(Ok(frame))) => {
+                    this.deadline = Box::pin(tokio::time::sleep(this.http.target.request_timeout));
+                    if let Ok(data) = frame.into_data() {
+                        this.seen = this.seen.saturating_add(data.len());
+                        if this.seen > this.cap {
+                            let cap = this.cap;
+                            return this.fail(
+                                Status::new(ErrorName::ProtocolError, "The server's answer is too large")
+                                    .with_detail(format!("more than {cap} bytes")),
+                            );
+                        }
+                        this.chunk = data;
+                    }
+                }
+                Poll::Ready(Some(Err(e))) => return this.fail(lost(e.to_string())),
+                Poll::Pending => {
+                    if this.deadline.as_mut().poll(cx).is_ready() {
+                        return this.fail(timed_out());
+                    }
+                    return Poll::Pending;
+                }
+            }
+        }
+        Poll::Ready(Ok(&this.chunk))
+    }
+
+    fn consume(self: Pin<&mut Self>, amt: usize) {
+        self.get_mut().chunk.advance(amt);
+    }
+}
+
+impl AsyncRead for BodyReader<'_> {
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        let this = self.get_mut();
+        let data = ready!(Pin::new(&mut *this).poll_fill_buf(cx))?;
+        let n = data.len().min(buf.remaining());
+        buf.put_slice(data.get(..n).unwrap_or_default());
+        Pin::new(this).consume(n);
+        Poll::Ready(Ok(()))
     }
 }
 

@@ -46,7 +46,7 @@ Why each is here; new one → line here.
 - `sspi` 0.23 (default features off): NTLMv2 in SPNEGO, incl. RC4 of NTLM key exchange. No Kerberos.
 - `picky-asn1-der` 0.5.7 from `rust/vendor/picky-asn1-der`: one line changed, `checked_add` on raw DER length so near-`usize::MAX` length is `TruncatedData`. `README.netvfs.md` there.
 - `rustls` 0.23 (default features off, `ring`, `std`; TLS 1.2 code not built), `tokio-rustls`, `rustls-webpki` (certificate checks, SPKI): TLS for WebDAV and FTPS. `rustls-native-certs`: system CA store (`/etc/pki`, `SSL_CERT_FILE`). No OpenSSL.
-- `hyper` 1 (`client`, `http1`), `hyper-util` (`tokio`), `http`, `http-body`, `http-body-util`, `bytes`, `httpdate`: WebDAV's HTTP/1.1; no HTTP/2, no redirects followed. `quick-xml` 0.42: multistatus parser (no DTD, own caps).
+- `hyper` 1 (`client`, `http1`), `hyper-util` (`tokio`), `http`, `http-body`, `http-body-util`, `bytes`, `httpdate`: WebDAV's HTTP/1.1; no HTTP/2, no redirects followed. `quick-xml` 0.42 (`async-tokio`): multistatus parser, reads answer as it arrives (no DTD, own caps).
 - `aes`, `aes-gcm`, `cmac`, `hmac`, `sha2`, `getrandom`: SMB 3.1.1 crypto, only in `netvfs-smb`'s `crypto.rs` (fence: `tools/ci/check-crypto-fence.sh`). `md-5`, `rc4`: one test.
 
 Vendored copies: patched via `[patch.crates-io]` in `rust/Cargo.toml` and `rust/fuzz/Cargo.toml`; outside fmt, clippy, tests, mutants, Sonar, coverage. `rust/deny.toml`: second versions of `syn`, `getrandom`, `sha3`, `base64`, `generic-array`, each with reason.
