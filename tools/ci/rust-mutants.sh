@@ -2,7 +2,11 @@
 # SPDX-License-Identifier: LGPL-2.1-or-later
 set -eu
 usage() {
-    sed -n 's/^# rust-mutants\.sh /Usage: rust-mutants.sh /p' "$0" >&2
+    cat >&2 << 'EOF'
+Usage: rust-mutants.sh diff <base revision> [<ffi-libs.sh dir> [<k>/<n>]]
+Usage: rust-mutants.sh crate <package> [<ffi-libs.sh dir> [<k>/<n>]]
+Usage: rust-mutants.sh interop <package> <base revision | all> <k>/<n> <command>
+EOF
     exit 2
 }
 [ $# -ge 2 ] || usage
